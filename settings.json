@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "cleanupPeriodDays": 30,
+  "env": {
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
+  },
+  "attribution": {
+    "commit": "",
+    "pr": ""
+  },
+  "permissions": {
+    "allow": [
+      "Read(**)",
+      "Read(/.claude/**)",
+      "Glob(**)",
+      "Grep(**)",
+      "PowerShell(tsc *)",
+      "PowerShell(eslint *)",
+      "PowerShell(dotnet build*)",
+      "PowerShell(dotnet test*)",
+      "PowerShell(dotnet restore*)",
+      "PowerShell(dotnet run*)",
+      "PowerShell(git status)",
+      "PowerShell(git diff*)",
+      "PowerShell(git log*)",
+      "PowerShell(git branch*)",
+      "PowerShell(npm run *)",
+      "PowerShell(npm test*)",
+      "PowerShell(yarn *)",
+      "PowerShell(pnpm *)",
+      "PowerShell(pytest*)",
+      "PowerShell(winget search*)",
+      "PowerShell(Get-ChildItem *)"
+    ],
+    "deny": [
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./secrets/**)",
+      "Read(./**/*.pem)",
+      "Read(./**/*.key)",
+      "PowerShell(git push --force*)",
+      "PowerShell(Remove-Item -Force*)"
+    ],
+    "ask": [
+      "Write(**)",
+      "Read(./**/appsettings*.json)",
+      "Read(./**/*.pfx)",
+      "Read(./**/connectionstrings*)",
+      "Read(./.git/config)",
+      "PowerShell(curl *)",
+      "PowerShell(Invoke-WebRequest *)",
+      "PowerShell(npx *)",
+      "PowerShell(git commit*)",
+      "PowerShell(git push*)",
+      "PowerShell(Remove-Item *)"
+    ],
+    "defaultMode": "default"
+  },
+  "model": "opus[1m]",
+  "fallbackModel": [
+    "claude-sonnet-4-6",
+    "claude-haiku-4-5"
+  ],
+  "enableWorkflows": false,
+  "defaultShell": "powershell",
+  "statusLine": {
+    "type": "command",
+    "command": "pwsh -NoProfile -NonInteractive -File \"$HOME\\.claude\\statusline.js\""
+  },
+  "enabledPlugins": {
+    "frontend-design@claude-plugins-official": true,
+    "remember@claude-plugins-official": true,
+    "microsoft-docs@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": true
+  },
+  "alwaysThinkingEnabled": true,
+  "effortLevel": "xhigh",
+  "theme": "dark",
+  "autoCompactEnabled": true
+}
