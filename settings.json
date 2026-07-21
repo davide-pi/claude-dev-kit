@@ -5,8 +5,8 @@
     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
   },
   "attribution": {
-    "commit": "",
-    "pr": ""
+    "commit": "Co-Authored-By: Claude AI",
+    "pr": "🤖 Opened with [Claude Code](https://claude.com/claude-code)"
   },
   "permissions": {
     "allow": [

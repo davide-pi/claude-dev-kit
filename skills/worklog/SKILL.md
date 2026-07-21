@@ -120,14 +120,15 @@ Usa gli MCP Azure DevOps **connessi in questa sessione** — riconoscibili dai t
 ```markdown
 | # | Topic | Very small description | Rounded Time | MCP used - Project | Item |
 |---|-------|------------------------|--------------|--------------------|------|
-| 1 | import new markets | Import & mapping of new markets | 1.5h | <mcp-name> - <Project> | Task #105060 (esistente, +1.5h) |
-| 2 | cache fix | Translations cache invalidation fix | 0.5h | <mcp-name> - <Project> | parent US #105025 → **Task DA CREARE** |
+| 1 | import new markets | Import & mapping of new markets | 1.5h | <mcp-name> - <Project> | [Task #105060 — Import & mapping of new betting markets](https://<org>.visualstudio.com/<project>/_workitems/edit/105060) (esistente, +1.5h) |
+| 2 | cache fix | Translations cache invalidation fix | 0.5h | <mcp-name> - <Project> | parent [US #105025 — Localization pipeline](https://<org>.visualstudio.com/<project>/_workitems/edit/105025) → **Task DA CREARE** ("Translations cache invalidation fix") |
 ```
 
 - `MCP used - Project`: nome MCP realmente connesso + progetto (così l'utente sa *quale* Azure DevOps e *quale* progetto).
 - `Item`:
-  - Task esistente → `Task #<id> (esistente, +<delta>h)`; se in `pushed.json` risulta gia' scritto, indica `gia' scritto <X>h → delta <±Y>h`.
-  - Task da creare → `parent #<id> → **Task DA CREARE**`.
+  - Task esistente → `[Task #<id> — <titolo item>](<link>) (esistente, +<delta>h)`; se in `pushed.json` risulta gia' scritto, indica `gia' scritto <X>h → delta <±Y>h`.
+  - Task da creare → `parent [US #<id> — <titolo parent>](<link>) → **Task DA CREARE**` (aggiungi fra virgolette il titolo previsto del nuovo Task).
+  - **Sempre link cliccabile con anche il titolo, mai il solo numero** — sia per il parent che per il Task (esistente o appena creato): il testo del link e' `<Tipo> #<id> — <titolo dell'item>`. Il titolo viene dal campo `System.Title` del work item restituito dall'MCP (per un Task ancora da creare, usa il titolo previsto). Costruisci l'URL da `_links.html.href` del work item restituito dall'MCP, oppure dal pattern `https://<org>.visualstudio.com/<project>/_workitems/edit/<id>` (org/project scoperti a runtime, mai hardcoded).
 - Sotto la tabella elenca, per riga, **PR e commit** che verranno linkati (o "nessuno").
 - Ometti le righe a 0h (non loggate), ma ricordale in una nota.
 
@@ -143,13 +144,15 @@ Alla conferma, esegui le scritture. Distribuisci i topic su **al massimo 4 sub-a
 
 Ogni agent, per i suoi item, applica le **Regole di scrittura** qui sotto e **riporta l'esito** (id item, ore prima/dopo, link creati, stato). **Non** scrive l'audit.
 
-Dopo che gli agent hanno finito, **l'orchestratore (tu)** aggiorna `~/.claude/worklog/pushed.json` **in sequenza** (una scrittura alla volta, niente race), poi stampa un **recap finale** di cosa e' stato scritto.
+Dopo che gli agent hanno finito, **l'orchestratore (tu)** aggiorna `~/.claude/worklog/pushed.json` **in sequenza** (una scrittura alla volta, niente race), poi stampa un **recap finale** di cosa e' stato scritto — ogni item e ogni parent citati nel recap devono essere **link cliccabili con anche il titolo** (`<Tipo> #<id> — <titolo>`), mai il solo numero (vedi regola in Fase 6).
+
+Prima di stampare il recap, **verifica direttamente** (non fidarti solo del report degli agent) rileggendo con `wit_get_work_item`/`wit_get_work_items_batch_by_ids` almeno gli item creati/aggiornati: conferma ore, parent, stato e link PR/commit effettivamente presenti.
 
 ### Regole di scrittura (MCP per-org; valgono anche via REST se un MCP non e' connesso)
 - **CompletedWork e' CUMULATIVO**: leggi il valore attuale del Task (`wit_get_work_item`), poi scrivi `attuale + delta` (`wit_update_work_item`). **Mai** sovrascrivere. Il delta e' quello calcolato in Fase 5 (per un item nuovo, delta = ore intere del topic).
 - **Task nuovi**: creali come **figli** della User Story/parent indicata (ereditano Area/Iteration). Titolo e descrizione **in inglese**.
 - **Assegna a te**: risolvi l'identita' dell'utente a runtime (tool "me"/identity dell'MCP, oppure `git config user.email`) — non hardcodare l'account qui.
-- **Stato**: metti il work item **Closed** se il lavoro e' concluso.
+- **Stato**: non lasciare **mai** un item nuovo (o esistente) in stato **New** — imposta sempre **Active** (lavoro in corso: PR aperta/non ancora mergiata, commit non ancora pushato, o in attesa di validazione dell'utente) oppure **Closed** (lavoro concluso: PR completata/mergiata, o commit gia' diretto su master). Se il work item type di default parte in "New", correggilo esplicitamente con `wit_update_work_item` subito dopo la creazione.
 - **Link PR**: come **ArtifactLink** (`wit_link_work_item_to_pull_request`), non come URL nel testo.
 - **Link commit su master**: se l'MCP espone un tool per linkare un commit (ArtifactLink al commit), usalo; altrimenti aggiungi hash/URL dei commit nella **descrizione** o in un **commento** del work item.
 - Usa i **nomi dei tool realmente esposti** dal server connesso: non inventarli.
