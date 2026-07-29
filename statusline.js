@@ -16,6 +16,11 @@ const R   = esc("0");   // reset
 const DIM = esc("2");   // dim
 const BLD = esc("1");   // bold
 
+// OSC 8 hyperlink: wraps LABEL so it becomes clickable (Ctrl/Cmd-click) in
+// terminals that support it; falls back to plain LABEL when URL is missing. The
+// escape sequences carry zero display width — stripAnsi/truncateAnsi skip them.
+const link = (url, label) => (url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label);
+
 const C = {
   gray:     esc("38;2;140;140;140"),
   yellow:   esc("33"),
@@ -30,7 +35,8 @@ const C = {
   pink:     esc("38;2;220;100;160"),
 };
 
-const stripAnsi = (s) => s.replace(/\x1b\[[0-9;]*m/g, "");
+const stripAnsi = (s) =>
+  s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, "").replace(/\x1b\[[0-9;]*m/g, "");
 
 // ── Terminal width ────────────────────────────────────────────────────────────
 function termWidth() {
@@ -71,11 +77,14 @@ function visibleWidth(s) {
 // sequences (they don't count toward width) and appending an ellipsis + reset so
 // no color leaks past the cut.
 function truncateAnsi(s, maxW) {
-  const ansiRe = /^\x1b\[[0-9;]*m/;
+  const sgrRe = /^\x1b\[[0-9;]*m/;
+  const oscRe = /^\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/;
   let out = "", w = 0, i = 0;
   while (i < s.length) {
-    const m = s.slice(i).match(ansiRe);
-    if (m) { out += m[0]; i += m[0].length; continue; }
+    const sgr = s.slice(i).match(sgrRe);
+    if (sgr) { out += sgr[0]; i += sgr[0].length; continue; }
+    const osc = s.slice(i).match(oscRe);
+    if (osc) { out += osc[0]; i += osc[0].length; continue; }
     const cp    = s.codePointAt(i);
     const chStr = String.fromCodePoint(cp);
     const cw    = cpWidth(cp);
@@ -84,7 +93,8 @@ function truncateAnsi(s, maxW) {
     w   += cw;
     i   += chStr.length;
   }
-  return out + "…" + R;
+  // Close any hyperlink left open by the cut (harmless no-op otherwise), then reset.
+  return out + "\x1b]8;;\x07" + "…" + R;
 }
 
 // ── Git info (fast, skip optional locks) ──────────────────────────────────────
@@ -99,6 +109,7 @@ function gitInfo(cwd) {
 
   const branch = run("rev-parse", "--abbrev-ref", "HEAD");
   if (!branch) return null;
+  const remote = run("remote", "get-url", "origin");
 
   let staged = 0, modified = 0, untracked = 0;
   const out = run("status", "--porcelain");
@@ -111,7 +122,7 @@ function gitInfo(cwd) {
       if (line.startsWith("??")) untracked++;
     }
   }
-  return { branch, staged, modified, untracked };
+  return { branch, remote, staged, modified, untracked };
 }
 
 // ── Segment builders ──────────────────────────────────────────────────────────
@@ -125,17 +136,60 @@ function gitInfo(cwd) {
 //    = nf-dev-vim
 //    = nf-oct-git_pull_request (approximation)
 
+// Convert a Windows/POSIX path to a file:// URI. Ctrl/Cmd-clicking it in a
+// supporting terminal opens the folder (Explorer on Windows). Each segment is
+// percent-encoded; the drive letter's colon is restored afterwards.
+function pathToFileUri(p) {
+  if (!p) return null;
+  let u = p.replace(/\\/g, "/").split("/").map(encodeURIComponent).join("/");
+  u = u.replace(/^([A-Za-z])%3A/i, "$1:");
+  if (!u.startsWith("/")) u = "/" + u;
+  return "file://" + u;
+}
+
+// Derive a browsable web URL (pointing at BRANCH) from a git "origin" remote.
+// Handles Azure DevOps (dev.azure.com and legacy *.visualstudio.com) plus
+// GitHub/GitLab/Bitbucket over HTTPS or SSH. Returns null when unrecognized.
+function remoteWebUrl(remote, branch) {
+  if (!remote) return null;
+  const r  = remote.trim().replace(/\.git$/, "");
+  const br     = encodeURIComponent(branch || "");                       // query-param form (slash -> %2F, for Azure DevOps ?version=GB...)
+  const brPath = (branch || "").split("/").map(encodeURIComponent).join("/"); // path form (keeps literal slashes, for /tree/...)
+  let m;
+  // Azure DevOps over SSH: git@ssh.dev.azure.com:v3/org/project/repo
+  if ((m = r.match(/^git@ssh\.dev\.azure\.com:v3\/([^/]+)\/([^/]+)\/(.+)$/)))
+    return `https://dev.azure.com/${m[1]}/${m[2]}/_git/${encodeURIComponent(m[3])}?version=GB${br}`;
+  // Azure DevOps over HTTPS: https://[org@]dev.azure.com/org/project/_git/repo
+  if ((m = r.match(/^https?:\/\/(?:[^@/]+@)?dev\.azure\.com\/([^/]+)\/([^/]+)\/_git\/(.+)$/)))
+    return `https://dev.azure.com/${m[1]}/${m[2]}/_git/${encodeURIComponent(m[3])}?version=GB${br}`;
+  // Legacy Azure DevOps: https://org.visualstudio.com/<path>/_git/repo
+  if ((m = r.match(/^https?:\/\/([^.]+)\.visualstudio\.com\/(.+)\/_git\/(.+)$/)))
+    return `https://${m[1]}.visualstudio.com/${m[2]}/_git/${encodeURIComponent(m[3])}?version=GB${br}`;
+  // GitHub/GitLab/Bitbucket over SSH: git@host:owner/repo
+  if ((m = r.match(/^git@([^:]+):(.+)$/)))
+    return `https://${m[1]}/${m[2]}/tree/${brPath}`;
+  // ssh://git@host/owner/repo
+  if ((m = r.match(/^ssh:\/\/[^@]+@([^/]+)\/(.+)$/)))
+    return `https://${m[1]}/${m[2]}/tree/${brPath}`;
+  // GitHub/GitLab/Bitbucket over HTTPS
+  if ((m = r.match(/^https?:\/\/(?:[^@/]+@)?(github\.com|gitlab\.com|bitbucket\.org)\/(.+)$/)))
+    return `https://${m[1]}/${m[2]}/tree/${brPath}`;
+  // Fallback: any plain https remote (no branch deep-link)
+  if (/^https?:\/\//.test(r)) return r;
+  return null;
+}
+
 function segFolder(cwd) {
   const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
   const name  = parts.at(-1) || cwd;
-  return `${C.violet}${BLD} ${name}${R}`;
+  return `${C.violet}${BLD} ${link(pathToFileUri(cwd), name)}${R}`;
 }
 
 function segGit(git) {
   if (!git) return "";
   const dirty = git.staged > 0 || git.modified > 0;
   const col   = dirty ? C.yellow : C.lavender;
-  let s = `${col}${BLD} ${git.branch}${R}`;
+  let s = `${col}${BLD} ${link(remoteWebUrl(git.remote, git.branch), git.branch)}${R}`;
   const badges = [];
   if (git.staged    > 0) badges.push(`${C.green}+${git.staged}${R}`);
   if (git.modified  > 0) badges.push(`${C.yellow}~${git.modified}${R}`);
@@ -228,7 +282,7 @@ function segPR(pr) {
   const label = pr.review_state
     ? `#${pr.number} ${pr.review_state.replace(/_/g, " ")}`
     : `#${pr.number}`;
-  return `${DIM}[${R} ${col} ${label}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${col} ${link(pr.url, label)}${R} ${DIM}]${R}`;
 }
 
 // Vim mode indicator (only visible when vim mode is active)
