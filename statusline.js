@@ -9,6 +9,9 @@
 
 "use strict";
 const { execFileSync } = require("node:child_process");
+const fs   = require("node:fs");
+const os   = require("node:os");
+const path = require("node:path");
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const esc = (code) => `\x1b[${code}m`;
@@ -236,18 +239,56 @@ function rateColor(used, epoch, windowSec) {
   return projected <= 80 ? C.green : projected <= 100 ? C.yellow : C.red;
 }
 
-function segRateLimits(rl) {
+// ── Rate-limit cache ────────────────────────────────────────────────────────
+// Claude Code populates `rate_limits` only after the first request of the
+// session registers usage; at cold start the field is absent and the segment
+// would be empty. To keep the 5h/7d readout visible immediately, we persist the
+// last-known snapshot on every render and fall back to it when live data is
+// missing.
+const RL_CACHE = path.join(os.homedir(), ".claude", ".statusline-rate-limits.json");
+
+function saveRateLimitCache(rl) {
+  try {
+    const slim = {};
+    if (rl.five_hour != null) slim.five_hour = { used_percentage: rl.five_hour.used_percentage, resets_at: rl.five_hour.resets_at };
+    if (rl.seven_day != null) slim.seven_day = { used_percentage: rl.seven_day.used_percentage, resets_at: rl.seven_day.resets_at };
+    fs.writeFileSync(RL_CACHE, JSON.stringify(slim));
+  } catch { /* best-effort: cache write failures are non-fatal */ }
+}
+
+// Reconcile a cached snapshot against the current time. resets_at is absolute,
+// so each window is still meaningful across restarts:
+//   • reset still in the future -> same window; keep cached used% + countdown
+//   • reset already elapsed      -> window rolled over; true state is fresh
+//                                   headroom (0% used) with reset time unknown
+function reconcileCached() {
+  let cached;
+  try { cached = JSON.parse(fs.readFileSync(RL_CACHE, "utf8")); } catch { return null; }
+  if (!cached || (cached.five_hour == null && cached.seven_day == null)) return null;
+  const now = Date.now();
+  const fix = (w) => (w == null) ? null
+    : (w.resets_at && w.resets_at * 1000 <= now) ? { used_percentage: 0, resets_at: null } : w;
+  const out = {};
+  if (cached.five_hour != null) out.five_hour = fix(cached.five_hour);
+  if (cached.seven_day != null) out.seven_day = fix(cached.seven_day);
+  return out;
+}
+
+// `stale` marks values sourced from the cache (last-known, not live) with a dim
+// "~" so they aren't mistaken for a fresh reading.
+function segRateLimits(rl, stale) {
   if (!rl) return "";
+  const mark = stale ? `${DIM}~${R}` : "";
   const parts = [];
   if (rl.five_hour != null) {
     const { used_percentage: u, resets_at: r } = rl.five_hour;
     const col = rateColor(u, r, 18000);
-    parts.push(`${DIM}5h${R} ${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
+    parts.push(`${DIM}5h${R} ${mark}${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
   }
   if (rl.seven_day != null) {
     const { used_percentage: u, resets_at: r } = rl.seven_day;
     const col = rateColor(u, r, 604800);
-    parts.push(`${DIM}7d${R} ${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
+    parts.push(`${DIM}7d${R} ${mark}${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
   }
   if (!parts.length) return "";
   return `${DIM}[${R}  ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
@@ -305,11 +346,21 @@ process.stdin.on("end", () => {
 
   const cwd = data.cwd || data.workspace?.current_dir || process.cwd();
 
+  // Live rate-limit data if present (and cache it); otherwise fall back to the
+  // last-known snapshot so the 5h/7d readout stays visible from cold start.
+  let rl = data.rate_limits, rlStale = false;
+  if (rl && (rl.five_hour != null || rl.seven_day != null)) {
+    saveRateLimitCache(rl);
+  } else {
+    rl = reconcileCached();
+    rlStale = rl != null;
+  }
+
   const parts = [
     segFolder(cwd),
     segGit(gitInfo(cwd)),
     segContext(data.context_window?.used_percentage),
-    segRateLimits(data.rate_limits),
+    segRateLimits(rl, rlStale),
     segModel(data.model?.display_name),
     segEffort(data.effort),
     segPR(data.pr),
