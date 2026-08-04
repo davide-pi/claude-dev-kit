@@ -107,9 +107,6 @@ function Test-Environment {
     if (Test-Path -LiteralPath $pwshPath) { Write-Ok 'pwsh 7 at the path settings.json expects' }
     else { Write-Problem "pwsh 7 not at '$pwshPath' — the hooks in settings.json will not fire; fix the path there" }
 
-    if (Get-Command uvx -ErrorAction SilentlyContinue) { Write-Ok 'uvx (serena plugin)' }
-    else { Write-Problem "uvx not found — the serena plugin's MCP server cannot start (winget install astral-sh.uv)" }
-
     if (Get-Command claude -ErrorAction SilentlyContinue) { Write-Ok 'claude CLI' }
     else { Write-Info 'claude CLI not in PATH — register MCP servers from inside Claude Code instead' }
 

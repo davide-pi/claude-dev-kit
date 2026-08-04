@@ -1,7 +1,7 @@
 ---
 name: review-security
 description: Security-focused reviewer for a code change. Reads the change from an attacker's point of view — entry points, trust boundaries, taint paths, authz, secrets — and returns findings only (never posts, edits, or merges). Spawn it alongside `code-reviewer` for high-effort reviews, or alone when the request is explicitly about security. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
-tools: Read, Grep, Glob, Bash, PowerShell, Skill, mcp__plugin_serena_serena__activate_project, mcp__plugin_serena_serena__find_symbol, mcp__plugin_serena_serena__find_referencing_symbols, mcp__plugin_serena_serena__find_implementations, mcp__plugin_serena_serena__find_declaration, mcp__plugin_serena_serena__get_symbols_overview, mcp__plugin_serena_serena__search_for_pattern
+tools: Read, Grep, Glob, Bash, PowerShell, Skill
 model: sonnet
 ---
 
@@ -85,12 +85,14 @@ previously stored by a user), follow it to its sinks:
 
 State where validation/encoding/parameterization happens, or that it does not.
 
-**Follow the data with symbolic search when available.** With the `serena` tools present,
-`activate_project` once, then walk the taint path with `find_referencing_symbols` (who passes this
-value on) and `find_implementations` / `find_declaration` (which concrete sink actually runs behind
-an interface) — a `Grep` for a variable name loses the value the moment it is renamed or wrapped, and
-misses the sink reached through dispatch. Keep `search_for_pattern`/`Grep` for what is not a symbol:
-raw SQL fragments, route templates, header names, config keys.
+**Follow the data by hand, and do not trust one grep.** A `Grep` for a variable name loses the value
+the moment it is renamed, wrapped, or put into a field or DTO, and it never shows the concrete sink
+reached through an interface. So follow the taint hop by hop: grep the name, read the hit, note what
+it is assigned to, grep *that*, and when a call goes through an abstraction, search the
+implementations before concluding the path is safe. A "no path" conclusion drawn from a single search
+is not a conclusion. If a session offers symbolic navigation (a language-server or MCP tool for
+references/implementations), prefer it for symbols and keep `Grep` for raw SQL fragments, route
+templates, header names, and config keys.
 
 ### 3. Authorization and tenancy
 

@@ -121,8 +121,7 @@
     "redis-development@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": true,
-    "modern-web-guidance@claude-plugins-official": true,
-    "serena@claude-plugins-official": true
+    "modern-web-guidance@claude-plugins-official": true
   },
   "language": "Italian",
   "alwaysThinkingEnabled": true,

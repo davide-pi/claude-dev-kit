@@ -1,7 +1,7 @@
 ---
 name: code-reviewer
 description: Analyzes a code diff or pull request and returns findings (does NOT post anything). Use this subagent to run any code review or PR-review analysis so it executes on its own model boundary. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
-tools: Read, Grep, Glob, Bash, PowerShell, Skill, mcp__plugin_serena_serena__activate_project, mcp__plugin_serena_serena__find_symbol, mcp__plugin_serena_serena__find_referencing_symbols, mcp__plugin_serena_serena__find_implementations, mcp__plugin_serena_serena__find_declaration, mcp__plugin_serena_serena__get_symbols_overview, mcp__plugin_serena_serena__search_for_pattern
+tools: Read, Grep, Glob, Bash, PowerShell, Skill
 model: sonnet
 ---
 
@@ -91,14 +91,13 @@ Find every caller of a changed signature and every implementation of a changed i
 (DTO, event payload, schema, config key). Look for callers left on stale assumptions, invariants
 broken at the boundary, and changes that are correct locally but wrong for one of the callers.
 
-**Prefer symbolic search over text search when it is available.** If the `serena` tools are present,
-`activate_project` on the repo once, then use `find_referencing_symbols` for callers,
-`find_implementations` / `find_declaration` for contracts, and `get_symbols_overview` to see a file's
-shape — they follow the language server instead of matching strings, so they find the callers a
-`Grep` for the name misses (aliased imports, generics, interface dispatch) and skip the ones it
-falsely reports (comments, unrelated same-name symbols). Fall back to `Grep` when the tools are
-absent or the language has no server: `Grep` is still the right tool for non-symbol text such as
-config keys, SQL fragments, and route strings.
+`Grep` is what you have for this, so use it knowing where it lies: searching a symbol by name misses
+the callers that rename or wrap it (aliased imports, re-exports, generics, dispatch through an
+interface) and reports ones that are not callers at all (comments, docs, an unrelated symbol with the
+same name). So grep the **name and its aliases**, then confirm each hit by reading it, and for a
+changed interface search the implementations too, not just the direct calls. If a session ever offers
+symbolic navigation (a language-server or MCP tool for references/implementations), prefer it for
+symbols and keep `Grep` for what is not one: config keys, SQL fragments, route strings.
 
 ### D. Language and runtime pitfalls (pick per the languages in the diff)
 
