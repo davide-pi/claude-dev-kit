@@ -55,4 +55,27 @@ history. The migration lands in that project's `Migrations/`.
 Create it with `dotnet ef migrations add`, then edit the generated **migration** file (never the
 snapshot) to add `migrationBuilder.Sql(...)`.
 
-Deeper recipe and context: `docs/technical/playbooks.md#add-an-ef-core-migration`.
+## Remove or redo the last migration
+
+```
+dotnet ef migrations remove --project <Proj> --startup-project <Proj>
+```
+
+Only valid while the migration is **not applied** anywhere shared: it deletes the file and rewinds the
+snapshot. If it is already applied on a database you do not own, add a new migration instead.
+
+## Apply it to a database
+
+```
+dotnet ef database update --project <Proj> --startup-project <Proj>
+```
+
+Targets whatever connection string the design-time factory resolves — check which database that is
+before running it, and read the null-connection-string gotcha above, because the same env var that
+breaks `migrations add` also decides where `database update` writes. To move to a specific migration
+(including rolling back), pass its name; `0` reverts everything. On shared or production databases the
+deployment pipeline owns this step: generate a script instead
+(`dotnet ef migrations script <from> <to> --idempotent --output <file>.sql`) and hand it over.
+
+If this project keeps a deeper playbook (e.g. `docs/technical/playbooks.md`), follow it where it
+disagrees with the defaults above.

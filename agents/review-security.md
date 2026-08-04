@@ -138,8 +138,8 @@ can trigger repeatedly.
 
 | Effort | Adds |
 |--------|------|
-| `low` | Steps 1–2 on the diff only, plus step 4 (secrets/PII). |
-| `medium` (default) | + steps 0, 3, 5, 6, 7 for the new/changed surface. |
+| `low` | Step 0's framework baseline (skipping it is what produces the false positives this agent is most prone to), then steps 1–2 on the diff, plus step 4 (secrets/PII). |
+| `medium` (default) | + the rest of step 0 (conventions) and steps 3, 5, 6, 7 for the new/changed surface. |
 | `high` | + read the sibling handlers to establish the expected guard pattern, and follow taint one hop beyond the diff (into the functions it calls). |
 | `xhigh` | + a short threat model per entry point (who, what they gain, what stops them today), and the trust assumptions of each new external dependency or call. |
 | `max` | + try to falsify every candidate: find the guard that would stop it. Keep only what survives. |

@@ -7,15 +7,19 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
 
 ## Steps (run in order)
 
-1. **Base branch** — this repo's main branch is `master`. Diff against it directly; only run
-   `git remote show origin` if `master` doesn't exist locally.
-2. **Diff** — `git diff master...HEAD`. If empty, stop and say there's nothing to describe.
-3. **Changed files** — `git diff --name-status master...HEAD`.
+1. **Base branch** — resolve it, never assume: `git symbolic-ref --short refs/remotes/origin/HEAD`
+   (strip the `origin/`), falling back to whichever of `main`/`master` exists. Call it `<base>` below.
+2. **Diff** — `git fetch origin <base>` then `git diff origin/<base>...HEAD`, so a stale local base
+   does not drag already-merged commits into the description. If empty, stop and say there's nothing
+   to describe.
+3. **Changed files** — `git diff --name-status origin/<base>...HEAD`.
 4. **Write** the description using the template below.
 5. **(Optional) Publish** — only if the request or `$ARGUMENTS` asks to open/update the PR: use the
-   `azure-devops` MCP (repositories domain) to create or update the PR on the current branch, set this
-   text as its description, and link a provided `AB#<id>` work item. Otherwise just output the text —
-   opening a PR is outward-facing, so never do it unprompted.
+   Azure DevOps MCP server connected **in this session** (identify it from the `mcp__<server>__repo_*`
+   tools that actually exist — never assume a server name, and match tools by capability since that
+   MCP renames them), create or update the PR on the current branch, set this text as its description,
+   and link a provided `AB#<id>` work item. Otherwise just output the text — opening a PR is
+   outward-facing, so never do it unprompted.
 
 ## Writing rules
 
@@ -41,8 +45,9 @@ Bullets grouped by area (feature / fix / refactor / config) when there are more 
 
 ### Testing
 
-How it was verified. This repo has **no automated tests** — describe the manual steps (build,
-Aspire profile, `/health`, exercised path). If not verified, say so plainly.
+How it was verified. If the repo has an automated suite, say what it covers for this change; where it
+has none, describe the manual steps (build, run profile, health endpoint, exercised path). If it was
+not verified, say so plainly — that is more useful than an implied "it works".
 
 ### Breaking changes
 

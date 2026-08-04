@@ -48,7 +48,9 @@ function frontMatter(rel) {
     const m = line.match(/^([a-zA-Z][\w-]*):\s*(.*)$/);
     if (m) {
       currentKey = m[1];
-      fields[currentKey] = m[2].trim();
+      // Drop a block-scalar marker (`>`, `>-`, `|`, `|-`): it is YAML syntax, not part of the value,
+      // and leaving it in made every folded description validate as ">- Branching conventions…".
+      fields[currentKey] = m[2].trim().replace(/^[>|][-+]?\s*$/, '');
     } else if (currentKey && line.trim()) {
       // folded scalar (`description: >-`) or continuation
       fields[currentKey] = `${fields[currentKey]} ${line.trim()}`.trim();
@@ -210,14 +212,16 @@ for (const rel of textFiles) {
   }
 }
 
-// Agents named in prose must exist (a review flow that spawns a missing agent silently degrades).
-for (const rel of textFiles.filter((f) => f.endsWith('.md'))) {
-  const text = read(rel);
-  for (const m of text.matchAll(/\bspawn(?:ing|s)?\s+(?:the\s+)?\*{0,2}`([\w-]+)`/gi)) {
-    if (!agentNames.has(m[1]) && !has(`commands/${m[1]}.md`) && !has(`skills/${m[1]}/SKILL.md`)) {
-      const line = text.slice(0, m.index).split('\n').length;
-      warn(`${rel}:${line}`, `mentions spawning '${m[1]}', which is not an agent/command/skill in this repo`);
-    }
+// An agent nobody spawns is dead weight: nothing in the kit would ever reach it, and a rename that
+// orphaned it would otherwise pass unnoticed. (The previous version of this check looked for a
+// "spawn `x`" phrasing and matched nothing at all in the whole repo — false confidence, removed.)
+const prose = textFiles
+  .filter((f) => f.endsWith('.md') && !f.startsWith('agents/'))
+  .map((f) => read(f))
+  .join('\n');
+for (const name of agentNames) {
+  if (!new RegExp(`\\b${name}\\b`).test(prose)) {
+    warn(`agents/${name}.md`, 'no command, skill or doc ever names this agent — nothing can reach it');
   }
 }
 
@@ -230,9 +234,11 @@ if (has('evals/skill-triggering.md')) {
     ...allFiles.filter((f) => f.endsWith('/SKILL.md')).map((f) => f.split('/')[1]),
     ...allFiles.filter((f) => f.startsWith('commands/')).map((f) => basename(f, '.md')),
   ];
+  // Look for a heading that names the asset, not a mention anywhere in the file: `/commit` appearing
+  // inside another skill's case row used to count as coverage for the commit command.
   for (const name of new Set(named)) {
-    if (!new RegExp(`\\b${name}\\b`).test(evals)) {
-      warn('evals/skill-triggering.md', `no triggering case covers '${name}'`);
+    if (!new RegExp(`^#{2,4} .*\\b${name}\\b`, 'm').test(evals)) {
+      warn('evals/skill-triggering.md', `no triggering case section covers '${name}'`);
     }
   }
 }

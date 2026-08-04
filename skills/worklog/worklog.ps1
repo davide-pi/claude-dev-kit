@@ -23,8 +23,10 @@
 param(
   [string]$From = '',    # '' = oggi | yyyy-MM-dd | 'yesterday'
   [string]$To   = '',    # '' = uguale a From
-  [string]$ProjectsRoot = "$env:USERPROFILE\.claude\projects",
-  [string]$OutDir       = "$env:USERPROFILE\.claude\worklog",
+  # $HOME e' definito anche fuori da Windows: con USERPROFILE lo script non trovava nulla e usciva
+  # con "Nessuna attivita'", indistinguibile da una giornata senza lavoro.
+  [string]$ProjectsRoot = (Join-Path $HOME '.claude/projects'),
+  [string]$OutDir       = (Join-Path $HOME '.claude/worklog'),
   [int]$IdleMinutes     = 15,
   [int]$RetentionDays   = 7,
   [int]$MaxPromptChars  = 400,
@@ -129,7 +131,7 @@ foreach ($file in $files) {
     $cwd = if ($o.cwd) { [string]$o.cwd } else { 'sconosciuto' }
     $branch = if ($o.gitBranch) { [string]$o.gitBranch } else { '(nessun-branch)' }
     if ($o.type -eq 'user') {
-      $raw = if ($o.message.content -is [string]) { $o.message.content } else { '' }
+      $raw = TextOf $o.message.content   # anche i prompt a blocchi (immagini incollate) portano testo
       if ($raw -match '^\s*<(task-notification|local-command|command-name|command-message)' -or
           $raw -match '^\s*\[Request interrupted') { $text = '' } else { $text = Clean $raw }
     } else {

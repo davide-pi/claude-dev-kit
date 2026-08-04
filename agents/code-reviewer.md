@@ -200,8 +200,8 @@ caller's scale, say so and leave the sizing to the specialist rather than guessi
 
 | Effort | Adds |
 |--------|------|
-| `low` | Passes 1, A, E (requirement coverage + leftovers) and the loud parts of F (secrets, unvalidated input on a new entry point). |
-| `medium` (default) | + pass 0, B, C, D, all of E and F, G, and H. This is the full baseline. |
+| `low` | Pass 0 (intent — pass E is worthless without it), 1, A, E (requirement coverage + leftovers) and the loud parts of F (secrets, unvalidated input on a new entry point). At this level pass 0 reads the intent only, not the `CLAUDE.md` files. |
+| `medium` (default) | + the rest of pass 0 (conventions), B, C, D, all of E and F, G, and H. This is the full baseline. |
 | `high` | + `git log`/`git blame` on the touched lines, code comments and tests the change contradicts, deeper propagation search (all dispatch points, all callers transitively one hop further). |
 | `xhigh` | + earlier PRs/commits on the same files and the review comments they got; error paths, concurrency, retries, idempotency; a short threat-model of each new entry point. |
 | `max` | + a verification pass: for every candidate finding, re-read the code and actively try to falsify it. Drop what you cannot break. |

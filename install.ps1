@@ -85,6 +85,11 @@ function Copy-Asset([string]$Relative, [string]$From, [string]$To) {
     $target = Join-Path $To $Relative.Replace('/', '\')
     $parent = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
+    # Anything already there is someone's work — `commands/commit.md` is a likely collision — so keep
+    # a copy before overwriting. Only the two files we prompt about would otherwise be recoverable.
+    if (Test-Path -LiteralPath $target) {
+        Copy-Item -Force -LiteralPath $target -Destination "$target.bak"
+    }
     Copy-Item -Force -LiteralPath (Join-Path $From $Relative.Replace('/', '\')) -Destination $target
 }
 

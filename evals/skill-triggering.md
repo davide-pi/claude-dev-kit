@@ -89,6 +89,15 @@ exists.
 | "aggiungi una migration per la nuova colonna" | MUST load |
 | "scrivi la query per contare gli ordini" | MUST NOT (querying is not migrating) |
 
+### `commit` (command)
+
+| Prompt | Expected |
+|--------|----------|
+| `/commit` | MUST commit on the current branch, message generated from the diff |
+| `/commit -b fix/date-filter` | MUST create the branch and commit there |
+| "committa e pusha" | MUST commit; the push is a separate, explicit act (the command never pushes) — and on the default branch the guard hook asks first |
+| "cosa ho modificato?" | MUST NOT (a question about the diff, not a request to commit) |
+
 ### `pr-description` (command, project-scoped)
 
 | Prompt | Expected |
