@@ -59,7 +59,7 @@ function Write-Section ([string]$m) { Write-Host "`n$m" -ForegroundColor White }
 function Get-KitAssets {
     # Every user-level asset the repo ships, as repo-relative forward-slash paths.
     $patterns = @('CLAUDE.md', 'settings.json', 'statusline.js',
-                  'agents/*.md', 'commands/*.md', 'hooks/*.ps1')
+                  'agents/*.md', 'commands/*.md', 'hooks/*')
     $found = foreach ($p in $patterns) {
         Get-ChildItem -Path (Join-Path $RepoRoot $p) -File -ErrorAction SilentlyContinue
     }

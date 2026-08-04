@@ -66,6 +66,21 @@ try {
         [pscustomobject]@{ Key = 'chromium'; Name = 'Chromium';       DataPath = 'Chromium\User Data';                    Exe = 'chrome.exe'  }
     )
 
+    # --- 2. fast path: un browser con l'estensione e' gia' aperto --------------
+    # Questo hook gira prima di OGNI chiamata claude-in-chrome, e nel caso comune il
+    # browser e' gia' aperto: si parte quindi dal controllo piu' economico (i processi
+    # in esecuzione) e si sonda registro/filesystem solo per quelli, invece di
+    # risolvere install-state ed exe di tutti e cinque i candidati ogni volta.
+    # L'estensione si ricollega da sola; se il bridge non risponde comunque, il
+    # tool MCP produrra' un errore piu' preciso di quanto possa fare l'hook.
+    $running = @($candidates | Where-Object {
+        Get-Process -Name ([System.IO.Path]::GetFileNameWithoutExtension($_.Exe)) -ErrorAction SilentlyContinue
+    })
+    foreach ($c in $running) {
+        if (Test-ExtensionInstalled $c.DataPath) { exit 0 }
+    }
+
+    # --- 3. nessun browser utile aperto: quali sono usabili? -------------------
     # il browser di default passa in testa: non apriamo Chrome se il default va bene
     $defaultKey = Get-DefaultBrowserKey
     if ($defaultKey) {
@@ -90,14 +105,7 @@ try {
         exit 0
     }
 
-    # --- 2. fast path: un browser con l'estensione e' gia' aperto --------------
-    # L'estensione si ricollega da sola; se il bridge non risponde comunque, il
-    # tool MCP produrra' un errore piu' preciso di quanto possa fare l'hook.
-    foreach ($b in $usable) {
-        if (Get-Process -Name $b.Proc -ErrorAction SilentlyContinue) { exit 0 }
-    }
-
-    # --- 3. nessun browser utile aperto: avvia e attendi l'handshake ----------
+    # --- 4. avvia il migliore e attendi l'handshake ---------------------------
     $target = $usable[0]
     Start-Process -FilePath $target.Exe -WindowStyle Minimized | Out-Null
 

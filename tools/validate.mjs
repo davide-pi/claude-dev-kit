@@ -73,10 +73,15 @@ if (settings) {
   for (const group of hookEvents) {
     for (const hook of group.hooks ?? []) {
       const line = [hook.command, ...(hook.args ?? [])].join(' ');
-      // Scripts are referenced as $env:CLAUDE_HOOKS\name.ps1 — they must exist in hooks/.
-      for (const m of line.matchAll(/CLAUDE_HOOKS[\\/]+([\w.-]+\.ps1)/g)) {
-        if (!has(`hooks/${m[1]}`)) {
-          fail('settings.json', `hook references hooks/${m[1]}, which is not in the repo`);
+      // Hook scripts are resolved through CLAUDE_HOOKS (PowerShell `$env:CLAUDE_HOOKS\x.ps1`, or
+      // Node `process.env.CLAUDE_HOOKS + '/x.js'`) — whatever the form, the file must exist.
+      if (line.includes('CLAUDE_HOOKS')) {
+        const scripts = [...line.matchAll(/([\w.-]+\.(?:ps1|js|mjs|cjs))/g)].map((m) => m[1]);
+        if (!scripts.length) fail('settings.json', 'a hook uses CLAUDE_HOOKS but names no script file');
+        for (const script of scripts) {
+          if (!has(`hooks/${script}`)) {
+            fail('settings.json', `hook references hooks/${script}, which is not in the repo`);
+          }
         }
       }
       if (!hook.command) fail('settings.json', `a ${group.matcher ?? '?'} hook has no command`);
@@ -148,11 +153,16 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
 
 // ── 3. Nothing machine-specific or secret ────────────────────────────────────
 const LEAKS = [
-  [/[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!<)[A-Za-z0-9._-]+/g, 'absolute user path'],
-  [/\/(?:home|Users)\/(?!<)[a-z][a-z0-9._-]{2,}/g, 'absolute home path'],
+  // Case-insensitive on purpose: `c:\users\…` must not slip past a capitalised pattern.
+  [/[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!<)[A-Za-z0-9._-]+/gi, 'absolute user path'],
+  [/\/(?:home|Users)\/(?!<)[A-Za-z][A-Za-z0-9._-]{2,}/gi, 'absolute home path'],
   // `git@host` in a clone URL is not an address; neither is anything at example.*
   [/(?<!git)(?<![\w.+-])[\w.+-]+@(?!example\.|ssh\.)[\w-]+\.[a-z]{2,}/gi, 'e-mail address'],
-  [/\b(?:glsa_|ghp_|github_pat_|gho_|xoxb-|xoxp-|sk-[A-Za-z0-9]{16})[A-Za-z0-9_-]{8,}/g, 'token-shaped string'],
+  // Hyphen-segmented provider keys (sk-ant-api03-…, sk-proj-…) are the ones most likely to be
+  // pasted into a Claude Code config repo, so they must match as well as the legacy flat form.
+  [/\b(?:glsa_|ghp_|github_pat_|gho_|ghs_|ghu_|xoxb-|xoxp-|xapp-)[A-Za-z0-9_-]{8,}/g, 'token-shaped string'],
+  [/\bAKIA[0-9A-Z]{16}\b/g, 'AWS access key id'],
+  [/\bsk-(?:ant|proj|live|test)?-?[A-Za-z0-9_-]{20,}/g, 'API-key-shaped string'],
   [/\b(?:Password|Pwd)\s*=\s*(?!<)[^;'"\s]{3,}/gi, 'password in a connection string'],
 ];
 // Allowed: the MIT line, and documented Windows system paths.
