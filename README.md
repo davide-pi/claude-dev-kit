@@ -39,9 +39,9 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 Two entry points, one set of agents, one output contract:
 
 ```
-/code-review  (working diff, chat only)     /pr-review  (Azure DevOps PR, posts questions)
-            \                                          /
-             └──────────► review subagents ◄───────────┘
+/code-review  (working diff, chat only)   /pr-review  (Azure DevOps or GitHub PR, posts questions)
+            \                                        /
+             └─────────► review subagents ◄──────────┘
                    code-reviewer            (always)
                    review-security          (effort >= high, or focus=security)
                    review-performance       (effort >= high, or focus=performance)
@@ -71,7 +71,7 @@ can never be double-counted.
 - A **Nerd Font** in the terminal (CaskaydiaCove NF or compatible) — `statusline.js` draws its badges with Nerd Font glyphs; without one you get replacement boxes.
 - The `.NET`-flavoured agents and `ef-migration` assume the `dotnet` CLI; the commands, `grill-me`, `git-branching`, and `pr-create` are stack-agnostic.
 - `settings.json` and the hook are Windows/PowerShell-oriented (`defaultShell: powershell`); adjust for macOS/Linux.
-- The Azure DevOps skills (`pr-review`, `workitem-create`, `worklog`, `pipeline`) need a connected Azure DevOps MCP server; `claude-in-chrome` skills need the Claude browser extension.
+- `workitem-create` and `worklog` need a connected Azure DevOps MCP server; `pr-review` needs one only for an Azure DevOps PR — on GitHub it uses the `gh` CLI, so an authenticated `gh` is enough. `claude-in-chrome` skills need the Claude browser extension.
 
 ## Installation
 

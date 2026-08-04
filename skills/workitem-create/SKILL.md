@@ -81,8 +81,10 @@ Use the Azure DevOps MCP servers **connected in this session** (tools `mcp__<nam
 - MCPs on **different orgs** with an undeducible choice → **ask which to use**.
 - **The tool names below are examples, not a contract.** This MCP consolidates its surface from time
   to time — `wit_get_work_item` became `wit_work_item`, `wit_create_work_item`/`wit_update_work_item`
-  became `wit_work_item_write`, `wit_my_work_items`/`wit_query_by_wiql` became `wit_query`. So match
-  by **capability** (read an item, write an item, link items, list backlogs, search) against the tools
+  became `wit_work_item_write`, `wit_my_work_items`/`wit_query_by_wiql` became `wit_query`. Several
+  once-separate tools now sit behind one name plus an `action` (`get`, `get_batch`, `get_type`…), so
+  read the schema of the tool you are about to call instead of assuming its shape. Match
+  by **capability** (read an item, read a type, write an item, link items, list backlogs, search) against the tools
   the server really exposes, and if a name below is missing, use the one with the same capability and
   say in chat which you used. Never invent a name, and never abandon a step because its example name
   is gone.
@@ -93,7 +95,7 @@ If not already known from context/user, list projects (`core_list_projects`) and
 ### Types (honest discovery)
 - `wit_backlog` → backlog levels (Epic/Feature/Story…).
 - WIQL → types **actually in use** (WIQL has no `DISTINCT`: sample work items and dedupe the `System.WorkItemType` values).
-- For **each chosen type**, `wit_work_item` to **validate it** and **read its real field set** (needed in Phase 7).
+- For **each chosen type**, read the **type metadata** (`wit_work_item` with `action: get_type` — reading a *type* is not the same capability as reading an *item*) to **validate it** and **read its real field set** (needed in Phase 7).
 - Present the list as "types available/in use" — it may not be exhaustive (process types never used won't surface via WIQL). The complete source would be the REST `_apis/wit/workitemtypes`, which requires an auth token: only offer it if the user wants the exhaustive list.
 - **Type rule:** if a requested type **is not present**, or **was not specified**, **ask the user** and list the ones found.
 
@@ -142,7 +144,7 @@ Ask (or honor what the user already said): **"Do you want to review the full con
 Create the items with a structured body (template below), using **Html** format for `Description` and `Acceptance Criteria` (ADO markdown rendering is inconsistent).
 
 ### Fields: only those supported by the type
-Before creating, you read each type's real field set (`wit_work_item`, Phase 4). **Set only fields that exist on that type**: setting a non-existent field **fails the whole create** (e.g. `Microsoft.VSTS.Common.AcceptanceCriteria` and `Microsoft.VSTS.TCM.ReproSteps` don't exist on every type/process). If a field is missing, fold that content **into the Description**.
+Before creating, you read each type's real field set (the type-metadata read of Phase 4). **Set only fields that exist on that type**: setting a non-existent field **fails the whole create** (e.g. `Microsoft.VSTS.Common.AcceptanceCriteria` and `Microsoft.VSTS.TCM.ReproSteps` don't exist on every type/process). If a field is missing, fold that content **into the Description**.
 
 ### State and assignment
 - **State** `New` unless told otherwise. If the type starts in a different state or the user asks for another, set it explicitly.
@@ -157,7 +159,7 @@ Before creating, you read each type's real field set (`wit_work_item`, Phase 4).
 ### Safeguards
 - **First create in session**: on the very first item on an Azure org never touched in this session, create **one** item, show it, then proceed with the rest.
 - **Mid-batch failure**: report the **ids already created** so a retry does not duplicate.
-- **Verify**: re-read the created items (`wit_work_item` / `wit_work_item`) and confirm type, parent, state, and fields before the summary.
+- **Verify**: re-read the created items (`wit_work_item`, one `action: get` each or a single `action: get_batch`) and confirm type, parent, state, and fields before the summary.
 
 ---
 

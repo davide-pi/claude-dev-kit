@@ -16,6 +16,11 @@
  *      case — a command that is not a commit/push — is one regex, and the worst case is two or
  *      three small file reads.
  *
+ * Detection works per chained command, not on the line as a whole. Scanning the whole line was
+ * both too lax and too eager: `git push --dry-run origin main && git push origin main` looked like
+ * a dry run and was approved, while `git log --grep=commit` looked like a commit and prompted.
+ * `tools/guard-default-branch.test.mjs` pins that behaviour.
+ *
  * It never blocks on its own: at most it escalates to the user (permissionDecision "ask"), and any
  * error lets the command through. Always exits 0.
  *
@@ -43,22 +48,105 @@ function requestConfirmation(reason) {
   process.exit(0);
 }
 
-/** Blank out the values of message-carrying flags, including combined ones (-am, -sm). */
+/**
+ * Blank out the values of message-carrying flags, including combined ones (-am, -sm), so a branch
+ * name inside a commit message is never read as a ref. The short form is capped at a real flag
+ * cluster and may not start mid-word: `-[a-zA-Z]*m` also matched `-upstream`, which then swallowed
+ * the token after `--set-upstream` and could have hidden the ref that follows it.
+ */
 function scrubMessages(command) {
   return command.replace(
-    /(--message|--reuse-message|--file|-F|-[a-zA-Z]*m)(\s*=?\s*)("[^"]*"|'[^']*'|\S+)/g,
+    /(--message|--reuse-message|--file|-F|(?:(?<![-\w])-[a-zA-Z]{0,3}m))(\s*=?\s*)("[^"]*"|'[^']*'|\S+)/g,
     (_, flag, sep) => `${flag}${sep}MSG`,
   );
 }
 
-function hasGitVerb(text, verb) {
-  return new RegExp(`(^|[;&|\`\\s])git\\b[^;&|]*\\b${verb}\\b`).test(text);
+/** git's own options that swallow the next token, so it can never be mistaken for the subcommand. */
+const GIT_VALUE_FLAGS = new Set([
+  '-C', '-c', '--git-dir', '--work-tree', '--namespace', '--exec-path', '--config-env', '--super-prefix',
+]);
+
+/**
+ * Split a command line into one segment per chained command (`a && b`, `a; b`, `a | b`), each a
+ * list of tokens with quotes honored and stripped — so a `;` inside an argument does not start a
+ * new command, and `-c credential.helper='!gh auth git-credential' push` still yields `push`.
+ *
+ * Deliberately not a shell parser: it only has to keep separate commands apart and expose their
+ * tokens. Whatever it gets wrong costs an extra confirmation, never a silent approval.
+ */
+function parseSegments(command) {
+  const segments = [];
+  let tokens = [];
+  let token = '';
+  let quote = null;
+
+  const endToken = () => { if (token) { tokens.push(token); token = ''; } };
+  const endSegment = () => { endToken(); if (tokens.length) { segments.push(tokens); tokens = []; } };
+
+  for (const c of command) {
+    if (quote) {
+      if (c === quote) quote = null;
+      else token += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+    } else if (c === ';' || c === '|' || c === '&' || c === '\n' || c === '\r') {
+      endSegment();
+    } else if (c === ' ' || c === '\t' || c === '`') {
+      // A backtick is PowerShell's escape and bash's command substitution: a token boundary, not a
+      // command boundary — a `git push` inside backticks still pushes.
+      endToken();
+    } else {
+      token += c;
+    }
+  }
+  endSegment();
+  return segments;
 }
 
-/** `git -C <path>` wins over the session cwd. Read from the scrubbed text, never the raw command. */
-function extractDashC(scrubbed) {
-  const m = scrubbed.match(/git\s+(?:-c\s+\S+\s+)*-C\s+(?:"([^"]+)"|'([^']+)'|(\S+))/);
-  return m ? (m[1] || m[2] || m[3]) : null;
+/** `git`, `git.exe`, `/usr/bin/git`, `$(git`, … */
+function isGitToken(token) {
+  return /(?:^|[/\\(])git(?:\.exe)?$/i.test(token.replace(/^\$/, ''));
+}
+
+/**
+ * The git call inside one segment: its subcommand, its `-C` path and its own arguments. Global
+ * options are skipped so the subcommand is read from the position where git itself reads it.
+ */
+function parseGitCall(tokens) {
+  const start = tokens.findIndex(isGitToken);
+  if (start < 0) return null;
+
+  const args = tokens.slice(start + 1);
+  let dashC = null;
+  let subcommand = null;
+  for (let i = 0; i < args.length; i += 1) {
+    if (GIT_VALUE_FLAGS.has(args[i])) {
+      if (args[i] === '-C') dashC = args[i + 1] ?? null;
+      i += 1;
+    } else if (!args[i].startsWith('-')) {
+      subcommand = args[i];
+      break;
+    }
+  }
+  return { subcommand, dashC, args };
+}
+
+/** A dry run changes nothing. `-n` is --dry-run for push, but --no-verify for commit. */
+function isDryRun(call) {
+  return call.args.includes('--dry-run') || (call.subcommand === 'push' && call.args.includes('-n'));
+}
+
+/** Every ref-ish part of a token: `HEAD:main`, `refs/heads/main` and `+main` all yield `main`. */
+function refParts(token) {
+  return token.replace(/^\+/, '').split(':').flatMap((part) => [part, ...part.split('/')]);
+}
+
+/**
+ * `--all` and `--mirror` push every ref without naming any, so no amount of name matching can
+ * prove they stay off the default branch.
+ */
+function pushesEveryRef(call) {
+  return call.args.includes('--all') || call.args.includes('--mirror');
 }
 
 /** Walk up from `start` to the repo root and return its resolved .git directory. */
@@ -127,13 +215,23 @@ try {
   if (typeof command !== 'string' || !command.trim()) approve();
 
   const scan = scrubMessages(command);
+  // Fast path for the overwhelming majority of tool calls: nothing here can be a commit or a push,
+  // so it is one regex and no parsing at all.
+  if (!/\b(?:commit|push)\b/.test(scan)) approve();
 
-  const isCommit = hasGitVerb(scan, 'commit');
-  const isPush = hasGitVerb(scan, 'push');
-  if (!isCommit && !isPush) approve();
-  if (/--dry-run/.test(scan)) approve();
+  // Only the calls that really run a commit/push, dry runs excluded one command at a time.
+  const calls = parseSegments(scan)
+    .map(parseGitCall)
+    .filter((call) => call
+      && (call.subcommand === 'commit' || call.subcommand === 'push')
+      && !isDryRun(call));
+  if (!calls.length) approve();
 
-  const repo = extractDashC(scan) || payload.cwd;
+  const isCommit = calls.some((call) => call.subcommand === 'commit');
+  const pushes = calls.filter((call) => call.subcommand === 'push');
+  const isPush = pushes.length > 0;
+
+  const repo = calls.find((call) => call.dashC)?.dashC || payload.cwd;
   if (!repo || !fs.existsSync(repo)) approve();
 
   const gitDir = findGitDir(repo);
@@ -144,14 +242,19 @@ try {
   if (!current || !fallback) approve();
 
   if (current !== fallback) {
-    // On a working branch the remaining case is `git push origin <default>` from here.
-    // The branch name must be a whole token: `feature/main-cleanup` is not a push to `main`.
-    const target = fallback.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    if (isPush && new RegExp(`(^|[\\s:/'"])${target}($|[\\s'"])`).test(scan)) {
+    // On a working branch the remaining case is a push that reaches the default branch from here.
+    const protectedBranch = 'the protected branch of this repo. The git-branching convention says ' +
+      'only a PR gets there (squash, green CI + 1 review). Confirm?';
+
+    if (pushes.some(pushesEveryRef)) {
       requestConfirmation(
-        `This command pushes to '${fallback}', the protected branch of this repo. The git-branching ` +
-        'convention says only a PR gets there (squash, green CI + 1 review). Confirm?',
+        `This command pushes every ref (--all/--mirror), so it also pushes '${fallback}', ` +
+        protectedBranch,
       );
+    }
+    // The branch name must be a whole ref part: `feature/main-cleanup` is not a push to `main`.
+    if (pushes.some((call) => call.args.some((arg) => refParts(arg).includes(fallback)))) {
+      requestConfirmation(`This command pushes to '${fallback}', ${protectedBranch}`);
     }
     approve();
   }

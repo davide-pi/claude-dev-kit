@@ -24,6 +24,9 @@ jobs:
       - name: Validate assets, references, leaks and docs
         run: node tools/validate.mjs
 
+      - name: Test the hooks
+        run: node --test tools/*.test.mjs
+
       - name: Syntax-check the status line
         run: node --check statusline.js
 

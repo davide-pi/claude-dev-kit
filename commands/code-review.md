@@ -4,8 +4,8 @@ argument-hint: "[scope] [effort] [focus]"
 ---
 
 Review a code change **locally** and report everything **in chat**. Nothing is posted anywhere, no
-file is modified, no commit is created. For reviewing a PR on Azure DevOps (and posting the genuine
-questions on it) use the **`pr-review`** skill instead.
+file is modified, no commit is created. For reviewing a PR on Azure DevOps or GitHub (and posting
+the genuine questions on it) use the **`pr-review`** skill instead.
 
 ## Argument grammar
 
