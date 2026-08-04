@@ -30,6 +30,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `mcp/servers.example.json` | Config template | The user-scoped MCP servers the skills expect (Azure DevOps, Playwright). Not installed by copying — see [MCP servers](#mcp-servers). |
 | `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
 | `install.ps1` | Installer | Idempotent install into `~/.claude`, plus `-Check` (drift + environment report, exit 1 on problems) and `-Pull` (import local edits back into the repo). |
+| `tools/validate.mjs` | Validator | Dependency-free checks run by CI: JSON, front matter, cross-references, machine-specific paths and secrets, documented plugins and env vars. |
 
 ## How the review flow fits together
 
@@ -85,6 +86,16 @@ export CLAUDE_HOOKS="$HOME/.claude/hooks"   # add to your shell profile
 > **Heads-up:** `settings.json` and `CLAUDE.md` replace your existing ones. Merge the parts you want (permissions, model, status line, hooks) rather than overwriting blindly.
 
 Then restart Claude Code: the agents appear to the `Agent` tool, `/commit`, `/pr-description`, `/pr-review`, `/workitem-create`, `/worklog` become available, and the remaining skills trigger from their descriptions.
+
+## Validation
+
+Nothing here compiles, so a broken front matter, a hook pointing at a file that was never committed, or a machine-specific path in a public repo would only surface when Claude Code silently stops loading an asset. `tools/validate.mjs` (no dependencies, Node 18+) closes that gap and runs in CI on every push and PR:
+
+```powershell
+node tools/validate.mjs      # exit 1 on errors, 0 when only warnings remain
+```
+
+It checks that every JSON file parses; that hooks and the status line in `settings.json` reference files that exist in the repo; that agents/commands/skills have the front matter their loader needs (and that `name` matches the file or directory); that trigger-only skills name their own trigger in the description; that no absolute user path, e-mail, token-shaped string, or password-bearing connection string is committed; that cross-references and local markdown links resolve; and that every enabled plugin and every `$env:` variable the kit uses is documented in this README. The workflow additionally syntax-checks `statusline.js` and parses every `.ps1`.
 
 ## Environment variables
 
