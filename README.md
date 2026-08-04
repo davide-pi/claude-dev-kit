@@ -29,6 +29,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `settings.json` | Config | Model + fallbacks, env vars, permission allow/deny/ask rules, the browser hook, PowerShell as default shell, enabled plugins, status line, UI preferences. |
 | `mcp/servers.example.json` | Config template | The user-scoped MCP servers the skills expect (Azure DevOps, Playwright). Not installed by copying — see [MCP servers](#mcp-servers). |
 | `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
+| `install.ps1` | Installer | Idempotent install into `~/.claude`, plus `-Check` (drift + environment report, exit 1 on problems) and `-Pull` (import local edits back into the repo). |
 
 ## How the review flow fits together
 
@@ -61,24 +62,17 @@ implied — so the specialists add depth, not the only coverage of their axis.
 
 ## Installation
 
-Everything (except the MCP servers) lives under Claude Code's config directory. Install **user-wide** by copying into `~/.claude/`, or **per-project** by copying into a repo's `.claude/`.
+Everything (except the MCP servers) lives under Claude Code's config directory. Install **user-wide** into `~/.claude/`, or **per-project** by copying into a repo's `.claude/`.
 
-**User-wide (PowerShell / Windows):**
+**User-wide (PowerShell 7 / Windows) — use the installer:**
 
 ```powershell
-$dst = "$HOME\.claude"
-Copy-Item -Recurse -Force .\agents   $dst
-Copy-Item -Recurse -Force .\commands $dst
-Copy-Item -Recurse -Force .\skills   $dst
-Copy-Item -Recurse -Force .\hooks    $dst
-Copy-Item -Force .\statusline.js     $dst
-# Review these two before overwriting your own:
-Copy-Item -Force .\settings.json     $dst
-Copy-Item -Force .\CLAUDE.md         $dst
-
-# Required by the browser hook in settings.json (user-level, persists across sessions):
-[Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', "$HOME\.claude\hooks", 'User')
+.\install.ps1            # install / update ~/.claude, set CLAUDE_HOOKS, check prerequisites
+.\install.ps1 -Check     # report drift and environment problems, write nothing (exit 1 if any)
+.\install.ps1 -Pull      # bring changes made in ~/.claude back into the repo
 ```
+
+`install.ps1` is idempotent and asks before overwriting `CLAUDE.md` or `settings.json` (`-Force` skips the prompt). It deliberately **skips the project-scoped assets** (the .NET agents, `pr-description`, `ef-migration`, `pipeline`): those carry stack placeholders and belong in a project's own `.claude/`. Beyond copying files it verifies node 18+, git, `pwsh` at the path `settings.json` hardcodes, `uvx`, `CLAUDE_HOOKS`, which enabled plugins are actually installed, and which MCP servers are registered — and `-Check` also reports assets that exist only in `~/.claude`, so the repo never silently falls behind again.
 
 **User-wide (bash / macOS / Linux):**
 
