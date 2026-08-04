@@ -85,6 +85,24 @@
             "statusMessage": "Verifico il browser per l'estensione Claude..."
           }
         ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "& \"$env:CLAUDE_HOOKS\\guard-default-branch.ps1\""
+            ],
+            "timeout": 15,
+            "statusMessage": "Controllo il branch prima di scrivere sulla storia git..."
+          }
+        ]
       }
     ]
   },
