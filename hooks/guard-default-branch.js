@@ -9,10 +9,12 @@
  * Two deliberate design choices, both because this runs before EVERY Bash/PowerShell tool call
  * (the PreToolUse matcher can only filter by tool name, not by command text):
  *
- *   1. Node, not PowerShell — process startup is ~50-70ms instead of ~300ms.
+ *   1. Node, not PowerShell — measured on the author's machine, this whole hook runs in ~150ms,
+ *      where merely starting `pwsh -NoProfile` cost ~370ms before it did anything.
  *   2. No `git` subprocess at all: the current branch and the default branch are read straight out
- *      of the `.git` directory, so the common case (a command that is not a commit/push) costs one
- *      regex, and the worst case costs two or three small file reads.
+ *      of the `.git` directory (three `git` calls used to cost a further ~150-180ms), so the common
+ *      case — a command that is not a commit/push — is one regex, and the worst case is two or
+ *      three small file reads.
  *
  * It never blocks on its own: at most it escalates to the user (permissionDecision "ask"), and any
  * error lets the command through. Always exits 0.
@@ -143,20 +145,22 @@ try {
 
   if (current !== fallback) {
     // On a working branch the remaining case is `git push origin <default>` from here.
-    if (isPush && new RegExp(`\\b${fallback.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\b`).test(scan)) {
+    // The branch name must be a whole token: `feature/main-cleanup` is not a push to `main`.
+    const target = fallback.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    if (isPush && new RegExp(`(^|[\\s:/'"])${target}($|[\\s'"])`).test(scan)) {
       requestConfirmation(
-        `Il comando spinge su '${fallback}', il branch protetto di questo repo. La convenzione ` +
-        'git-branching vuole che ci arrivi solo una PR (squash, CI verde + 1 review). Confermi?',
+        `This command pushes to '${fallback}', the protected branch of this repo. The git-branching ` +
+        'convention says only a PR gets there (squash, green CI + 1 review). Confirm?',
       );
     }
     approve();
   }
 
-  const action = isCommit && isPush ? 'committare e spingere' : isCommit ? 'committare' : 'spingere';
+  const action = isCommit && isPush ? 'commit and push' : isCommit ? 'commit' : 'push';
   requestConfirmation(
-    `Sei su '${current}', il branch di default del repo. La convenzione git-branching vieta di ` +
-    `${action} direttamente qui: la strada e' un branch feature/* o fix/* e una PR verso ` +
-    `'${fallback}'. Confermi di voler procedere comunque?`,
+    `You are on '${current}', this repo's default branch. The git-branching convention forbids ` +
+    `a direct ${action} here: the way in is a feature/* or fix/* branch and a PR into ` +
+    `'${fallback}'. Confirm anyway?`,
   );
 } catch {
   // A bug in the hook must never get in the way of the work.

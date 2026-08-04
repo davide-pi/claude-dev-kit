@@ -68,6 +68,7 @@ can never be double-counted.
 - **Claude Code** (CLI, desktop, or IDE extension).
 - **Node.js 18+** and **git** in `PATH` — for `statusline.js`, the `guard-default-branch` hook, `tools/validate.mjs`, and the `npx`-based MCP servers.
 - **PowerShell 7** (`pwsh`) at `C:\Program Files\PowerShell\7\pwsh.exe` — used by the browser hook and the `worklog` scripts.
+- A **Nerd Font** in the terminal (CaskaydiaCove NF or compatible) — `statusline.js` draws its badges with Nerd Font glyphs; without one you get replacement boxes.
 - The `.NET`-flavoured agents and `ef-migration` assume the `dotnet` CLI; the commands, `grill-me`, `git-branching`, and `pr-create` are stack-agnostic.
 - `settings.json` and the hook are Windows/PowerShell-oriented (`defaultShell: powershell`); adjust for macOS/Linux.
 - The Azure DevOps skills (`pr-review`, `workitem-create`, `worklog`, `pipeline`) need a connected Azure DevOps MCP server; `claude-in-chrome` skills need the Claude browser extension.
@@ -94,13 +95,13 @@ cp settings.json CLAUDE.md ~/.claude/   # review first — this overwrites your 
 export CLAUDE_HOOKS="$HOME/.claude/hooks"   # add to your shell profile
 ```
 
-> **Heads-up:** `settings.json` and `CLAUDE.md` replace your existing ones. Merge the parts you want (permissions, model, status line, hooks) rather than overwriting blindly.
+> **Heads-up:** `settings.json` and `CLAUDE.md` replace your existing ones. Merge the parts you want (permissions, model, status line, hooks) rather than overwriting blindly. Two settings are personal choices you probably want to review first: `"language": "Italian"` (Claude answers the author in Italian) and `"model"` / `"effortLevel"` / `"alwaysThinkingEnabled"`, which pick a capability *and* a cost profile. The hooks talk to you in English; `skills/worklog` is deliberately Italian-facing, since its tables are read by the author.
 
-Then restart Claude Code: the agents appear to the `Agent` tool, `/commit`, `/pr-description`, `/pr-review`, `/workitem-create`, `/worklog` become available, and the remaining skills trigger from their descriptions.
+Then restart Claude Code: the agents appear to the `Agent` tool, `/commit`, `/code-review`, `/pr-review`, `/workitem-create`, `/worklog` become available, and the remaining skills trigger from their descriptions. (`/pr-description` is **not** among them — it is project-scoped, so copy it into a repo's `.claude/` when you want it.)
 
 ## Validation
 
-Nothing here compiles, so a broken front matter, a hook pointing at a file that was never committed, or a machine-specific path in a public repo would only surface when Claude Code silently stops loading an asset. `tools/validate.mjs` (no dependencies, Node 18+) closes that gap and runs in CI on every push and PR:
+Nothing here compiles, so a broken front matter, a hook pointing at a file that was never committed, or a machine-specific path in a public repo would only surface when Claude Code silently stops loading an asset. `tools/validate.mjs` (no dependencies, Node 18+) closes that gap and runs in CI on every pull request and on pushes to `main`:
 
 ```powershell
 node tools/validate.mjs      # exit 1 on errors, 0 when only warnings remain

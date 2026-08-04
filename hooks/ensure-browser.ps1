@@ -101,7 +101,7 @@ try {
     }
 
     if ($usable.Count -eq 0) {
-        Write-HookMessage "Nessun browser con l'estensione Claude ($ExtensionId) installata. Installala nel browser che usi, poi riprova."
+        Write-HookMessage "No browser has the Claude extension ($ExtensionId) installed. Install it in the browser you use, then try again."
         exit 0
     }
 
@@ -119,14 +119,14 @@ try {
     if ($up) {
         # l'handshake dell'estensione parte subito dopo l'avvio del processo
         Start-Sleep -Seconds 3
-        Write-HookMessage ("{0} non era aperto: avviato per l'estensione Claude." -f $target.Name)
+        Write-HookMessage ("{0} was not running: started it for the Claude extension." -f $target.Name)
     } else {
-        Write-HookMessage ("Avvio di {0} non confermato entro {1}s: la chiamata potrebbe fallire." -f $target.Name, $GraceSeconds)
+        Write-HookMessage ("Could not confirm {0} started within {1}s: the call may fail." -f $target.Name, $GraceSeconds)
     }
     exit 0
 }
 catch {
     # un bug nell'hook non deve mai impedire la chiamata al tool
-    Write-HookMessage ("Hook ensure-browser non riuscito: {0}" -f $_.Exception.Message)
+    Write-HookMessage ("ensure-browser hook failed: {0}" -f $_.Exception.Message)
     exit 0
 }
