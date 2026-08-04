@@ -18,6 +18,14 @@ identical on both:
 - `github.com` → **GitHub**, via the `gh` CLI.
 - anything else → say so and stop; review in chat only, post nothing.
 
+> **Azure DevOps tool names below are examples, not a contract.** That MCP consolidates its surface
+> from time to time — `repo_create_pull_request_thread` became `repo_pull_request_thread_write`,
+> `repo_get_repo_by_name_or_id` became `repo_repository`, `wit_get_work_item` became `wit_work_item`.
+> Match by **capability** (read a PR, write a PR thread, read a work item) against the tools the
+> connected server actually exposes; if a name here is gone, use the one with the same capability and
+> say in chat which you used. Never invent a name, and never skip a step because its example name
+> changed. The `gh` commands, by contrast, are stable enough to take literally.
+
 ## Golden rules (non-negotiable)
 
 1. **A PR comment is a question, not an explanation.** Post a thread only when it needs an
@@ -40,7 +48,7 @@ identical on both:
 1. **Resolve the target PR.** The argument may be a PR id, a branch name, or empty; empty means
    the open PR whose source branch is the current one. If none exists, report it and stop (create
    the PR first, or let the user name one).
-   - **Azure DevOps** — `repo_list_pull_requests_by_repo_or_project`, filter status Active and
+   - **Azure DevOps** — `repo_pull_request`, filter status Active and
      match `sourceRefName`.
    - **GitHub** — `gh pr view --json number,title,body,headRefName,baseRefName,headRefOid,url` for
      the current branch, or `gh pr list --head <branch> --state open --json number,title` / `gh pr
@@ -54,7 +62,7 @@ identical on both:
      its name: look at which `mcp__<server>__repo_*` tools actually exist. If two servers point at
      the same org they are equivalent → use the first. If no connected server matches the org, say
      so and ask the user which one to use. Get the repository GUID with
-     `repo_get_repo_by_name_or_id(project, repo)`; use the GUID as `repositoryId` for all subsequent
+     `repo_repository(project, repo)`; use the GUID as `repositoryId` for all subsequent
      calls (and pass `project`).
    - **GitHub** — `{owner}/{repo}` from the remote (or `gh repo view --json nameWithOwner`). Check
      `gh auth status` first: without a working `gh` login nothing can be posted, so say so and fall
@@ -72,7 +80,7 @@ identical on both:
 4. **Generate findings (fan-out by effort).** Every agent gets the same package: the diff/scope, the
    target branch, the effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), and **the
    intent of the change** — the PR title and description, plus the text of whatever the PR is
-   implementing (Azure DevOps: the linked work items via `wit_get_work_item`; GitHub: the linked
+   implementing (Azure DevOps: the linked work items via `wit_work_item`; GitHub: the linked
    issues, e.g. `gh pr view <n> --json closingIssuesReferences` or the `Fixes #<n>` references in the
    body, then `gh issue view <n> --json title,body`), and the branch's commit messages when that text
    is thin. The intent is what the completeness pass compares the diff against — never omit it; if
@@ -120,7 +128,7 @@ identical on both:
    question — short and answerable. Include a ` ```suggestion ` block only when it fully fixes the
    issue. Anchor from the finding's `anchor` field.
 
-   - **Azure DevOps** — one thread per question with `repo_create_pull_request_thread`, status
+   - **Azure DevOps** — one thread per question with `repo_pull_request_thread_write`, status
      **Active** (it awaits an answer):
      - `filePath` = repo-relative path with leading `/` (the `anchor` path, plus the slash);
      - `rightFileStartLine`/`rightFileStartOffset` (1-based) and `rightFileEndLine`/`rightFileEndOffset`
@@ -162,11 +170,11 @@ identical on both:
 **Azure DevOps**
 
 - **No delete via MCP.** The MCP can create threads and set status
-  (`repo_update_pull_request_thread`) but cannot delete. To retract a posted comment, set it
+  (`repo_pull_request_thread_write`) but cannot delete. To retract a posted comment, set it
   `Closed`/`WontFix` and tell the user it must be deleted from the web UI (or via REST) if they
   want it gone.
-- Reply to an existing thread with `repo_reply_to_comment`; resolve with
-  `repo_update_pull_request_thread` (`Fixed`/`Closed`/`ByDesign`).
+- Reply to an existing thread with `repo_pull_request_thread_write`; resolve with
+  `repo_pull_request_thread_write` (`Fixed`/`Closed`/`ByDesign`).
 
 **GitHub**
 
