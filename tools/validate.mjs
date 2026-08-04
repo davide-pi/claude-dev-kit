@@ -171,7 +171,6 @@ const LEAKS = [
 const LEAK_ALLOW = [
   /Davide Piccinini/,                                   // the LICENSE holder, on purpose
   /C:\\Program Files\\PowerShell/,                      // documented system path
-  /%USERPROFILE%\\\.local\\bin/,                        // documented in the README
   /C:\\Users\\<[^>]+>/,                                 // explicit placeholder
 ];
 for (const rel of textFiles) {

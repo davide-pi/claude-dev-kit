@@ -2,7 +2,9 @@
 .claude/settings.local.json
 .claude/**/*.local.json
 .remember/
-worklog/
+# Anchored: the runtime output lives at the config root (`~/.claude/worklog/`), and unanchored it
+# would also swallow anything new under the tracked `skills/worklog/`.
+/worklog/
 
 # Backups / editor / OS noise
 *.bak
