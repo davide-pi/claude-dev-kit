@@ -54,9 +54,13 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
    each hunk — bugs in unchanged lines of a touched function are in scope.
 
 4. **Generate findings.** Spawn the **`code-reviewer`** subagent (Agent tool) at the requested
-   effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), passing it the diff/scope
-   and the target branch. It carries its own review methodology and returns findings only — it
-   never posts. **Pick its model** per the "Review agents — model selection" convention in the
+   effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), passing it the diff/scope,
+   the target branch, **and the intent of the change**: the PR title and description, the title and
+   description of the linked work items (from the PR object, then `wit_get_work_item`), and the
+   branch's commit messages when that text is thin. The intent is what the subagent's completeness
+   pass compares the diff against — never omit it; if there genuinely is none, say so when spawning
+   so the gap is visible in its report. It carries its own review methodology — defects,
+   regressions, security, clean code, completeness — and returns findings only: it never posts. **Pick its model** per the "Review agents — model selection" convention in the
    global CLAUDE.md: default → omit `model` (agent runs on Sonnet); "advanced" → pass the current
    session model explicitly; "agent {model}" → pass that exact model. If the subagent is
    unavailable, apply its method inline (see `agents/code-reviewer.md`: per-hunk scan including the
@@ -69,6 +73,10 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
    - **POST to PR** — it is a real question/doubt needing an answer or decision, e.g.:
      - "Is X intended, or should it be Y?" / "Was dropping guard Z deliberate?"
      - a correctness concern whose resolution depends on info only the author/another agent has;
+     - a **CONFIRMED `security`, `regression`, or `completeness`** finding — it does not stay in
+       chat, but phrase it as the question the author has to answer ("This path builds the query by
+       concatenation — is the input validated upstream?", "`Status.Archived` isn't handled in
+       `Map()` — intentional?"), never as a lecture;
      - (rare) a critical/cryptic point where a short "why?" must be confirmed.
    - **REPORT in chat only** — everything else: explanations, confirmations, low-severity
      notes, cleanups you can just describe, findings you already resolved yourself.
