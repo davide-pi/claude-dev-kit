@@ -12,11 +12,14 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `agents/investigator.md` | Subagent | Read-only code locator: turns a symptom into the exact `file:line` of the handler that owns it. |
 | `agents/tech-doc-keeper.md` | Subagent | Maintains **code-derived** docs (`docs/technical/` + `CLAUDE.md`) — verifies, updates, creates, and removes docs against the source. |
 | `agents/wiki-keeper.md` | Subagent | Maintains **experience-derived** docs (`docs/wiki/`) — known issues, operational procedures, and fundamentals. |
+| `agents/review-security.md` | Subagent | Security specialist: works from the exposed surface inward (entry points, trust boundaries, taint source→sink, authz/IDOR, secrets, crypto, abuse) instead of hunk by hunk. Same output contract as `code-reviewer`, so results merge. |
+| `agents/review-performance.md` | Subagent | Performance specialist: reasons about cost (complexity, N+1 and per-item I/O, allocations, blocking, caching, queries/indexes). Every finding must state a cost and the scale at which it bites — no cost, no finding. |
+| `commands/code-review.md` | Slash command | `/code-review [scope] [effort] [focus]` — review the **working diff** locally and report in chat; fans out to the specialists from `high` upward. Never posts, edits, or commits. |
 | `commands/commit.md` | Slash command | `/commit` — create a git commit with a generated message on the current, an existing, or a new branch. Commit only, never pushes. |
 | `commands/pr-description.md` | Slash command | `/pr-description` — generate a structured PR description from the branch diff (Azure DevOps `AB#<id>` linking). |
 | `skills/git-branching/SKILL.md` | Skill | Branching conventions for GitHub projects: protected `main`, `feature/*` + `fix/*` prefixes, kebab-case names, squash-merge flow. |
 | `skills/pr-create/SKILL.md` | Skill | PR title/description conventions on GitHub (English, imperative, targets `main`). |
-| `skills/pr-review/SKILL.md` | Skill | `/pr-review` — review an Azure DevOps PR and post **only genuine questions** as inline threads (English, tagged `[Claude AI Review]`); everything else stays in chat. Delegates the analysis to `code-reviewer`. |
+| `skills/pr-review/SKILL.md` | Skill | `/pr-review [target] [effort] [focus]` — review an Azure DevOps PR and post **only genuine questions** as inline threads (English, tagged `[Claude AI Review]`, scoped tag per specialist); everything else stays in chat. Delegates to `code-reviewer`, fanning out to the security and performance specialists from `high` upward. |
 | `skills/workitem-create/SKILL.md` | Skill | `/workitem-create` — turn a description (and images) into complete Azure DevOps work items, after a Q&A pass and two confirmation tables. |
 | `skills/worklog/SKILL.md` (+ `worklog.ps1`, `round.ps1`) | Skill | `/worklog` — reconstruct what was done in a period from Claude Code transcripts, estimate time per topic, then log the hours on the right Azure DevOps work items. |
 | `skills/pipeline/SKILL.md` | Skill | CI/CD authoring conventions for Azure DevOps YAML pipelines/templates, `GitVersion.yml`, and GitHub Actions workflows. |
@@ -26,6 +29,25 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `settings.json` | Config | Model + fallbacks, env vars, permission allow/deny/ask rules, the browser hook, PowerShell as default shell, enabled plugins, status line, UI preferences. |
 | `mcp/servers.example.json` | Config template | The user-scoped MCP servers the skills expect (Azure DevOps, Playwright). Not installed by copying — see [MCP servers](#mcp-servers). |
 | `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
+
+## How the review flow fits together
+
+Two entry points, one set of agents, one output contract:
+
+```
+/code-review  (working diff, chat only)     /pr-review  (Azure DevOps PR, posts questions)
+            \                                          /
+             └──────────► review subagents ◄───────────┘
+                   code-reviewer            (always)
+                   review-security          (effort >= high, or focus=security)
+                   review-performance       (effort >= high, or focus=performance)
+```
+
+`low`/`medium` runs the generalist alone; from `high` the specialists are spawned in parallel and
+their findings merged (same finding format, deduped by anchor, re-sorted by severity). A `focus`
+argument narrows the run to a single axis. The generalist alone already covers defects, regressions,
+security basics, clean code, and **completeness** — whether the change did everything its intent
+implied — so the specialists add depth, not the only coverage of their axis.
 
 ## Requirements
 

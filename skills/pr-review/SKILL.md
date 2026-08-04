@@ -1,6 +1,6 @@
 ---
 name: pr-review
-description: Review a pull request on Azure DevOps and post ONLY genuine questions/doubts as inline comments (English, tagged [Claude AI Review]); everything else is reported to the user in chat, never on the PR. Use when the user wants a PR reviewed and/or commented. Trigger: /pr-review [target] [effort].
+description: Review a pull request on Azure DevOps and post ONLY genuine questions/doubts as inline comments (English, tagged [Claude AI Review]); everything else is reported to the user in chat, never on the PR. Use when the user wants a PR reviewed and/or commented. Trigger: /pr-review [target] [effort] [focus].
 ---
 
 # /pr-review — Review a PR, post only the questions
@@ -53,19 +53,35 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
    changes (`git diff HEAD`) if the review runs before a commit. Read the enclosing function of
    each hunk — bugs in unchanged lines of a touched function are in scope.
 
-4. **Generate findings.** Spawn the **`code-reviewer`** subagent (Agent tool) at the requested
-   effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), passing it the diff/scope,
-   the target branch, **and the intent of the change**: the PR title and description, the title and
-   description of the linked work items (from the PR object, then `wit_get_work_item`), and the
-   branch's commit messages when that text is thin. The intent is what the subagent's completeness
-   pass compares the diff against — never omit it; if there genuinely is none, say so when spawning
-   so the gap is visible in its report. It carries its own review methodology — defects,
-   regressions, security, clean code, completeness — and returns findings only: it never posts. **Pick its model** per the "Review agents — model selection" convention in the
-   global CLAUDE.md: default → omit `model` (agent runs on Sonnet); "advanced" → pass the current
-   session model explicitly; "agent {model}" → pass that exact model. If the subagent is
-   unavailable, apply its method inline (see `agents/code-reviewer.md`: per-hunk scan including the
-   enclosing function, removed-guard audit, cross-file caller/callee check, language pitfalls, plus
-   reuse/simplification/efficiency/altitude cleanups).
+4. **Generate findings (fan-out by effort).** Every agent gets the same package: the diff/scope, the
+   target branch, the effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), and **the
+   intent of the change** — the PR title and description, the title and description of the linked
+   work items (from the PR object, then `wit_get_work_item`), and the branch's commit messages when
+   that text is thin. The intent is what the completeness pass compares the diff against — never
+   omit it; if there genuinely is none, say so when spawning so the gap shows up in the report.
+   Every agent returns findings only: none of them ever posts.
+
+   - `low` / `medium` → the generalist **`code-reviewer`** alone (defects, regressions, security
+     basics, clean code, completeness).
+   - `high` / `xhigh` / `max` → spawn **in parallel, in a single message**: `code-reviewer`,
+     **`review-security`** (attacker's view: exposed surface, taint, authz, secrets) and
+     **`review-performance`** (cost: complexity, per-item I/O, allocations, caching, queries).
+   - `[focus]` given (`security` | `performance` | anything else, e.g. `completeness`) → spawn only
+     the matching specialist, or the generalist told to concentrate on that axis when no specialist
+     covers it. A focus overrides the effort-based fan-out.
+
+   **Pick each agent's model** per the "Review agents — model selection" convention in the global
+   CLAUDE.md: default → omit `model` (agents run on Sonnet); "advanced" → pass the current session
+   model explicitly; "agent {model}" → pass that exact model.
+
+   **Merge before triage:** drop a specialist finding the generalist already reported at the same
+   anchor for the same defect (keep the more specific category and the higher-confidence verdict,
+   union the questions); keep both when they describe different failures at the same line; re-sort
+   everything by severity across agents. Track **which agent produced each surviving finding** — it
+   drives the Attribution tag below.
+
+   If a subagent is unavailable, apply its method inline (`agents/code-reviewer.md`,
+   `agents/review-security.md`, `agents/review-performance.md`) and say in chat that it ran inline.
 
 5. **Triage every finding into exactly one bucket.** The subagent's `for the author` field is the
    default signal (`yes` → PR candidate, `no` → chat); override it only with a stated reason, and a
@@ -96,12 +112,13 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
 
 ## Attribution
 
-- Default tag: `[Claude AI Review]`.
-- If the finding came from a **distinctly-scoped reviewer** — a subagent spawned with a
-  specific focus (e.g. security, performance) or a review run explicitly under such a persona —
-  tag `[Claude AI Review - <scope>]` (e.g. `[Claude AI Review - security]`). No preset list:
-  the scope name mirrors the agent/persona actually used. Default flow (general review on the
-  main thread) always uses the plain tag.
+- Default tag: `[Claude AI Review]` — used for everything the generalist `code-reviewer` found.
+- Findings produced by a **distinctly-scoped reviewer** carry its scope:
+  `review-security` → `[Claude AI Review - security]`, `review-performance` →
+  `[Claude AI Review - performance]`. No preset list beyond that: the scope name mirrors the
+  agent/persona actually used, so a future specialist tags itself the same way.
+- After a merge, the tag follows the finding that survived. If both a specialist and the generalist
+  independently found the same defect, use the specialist's tag — it carries more context.
 
 ## Notes
 
