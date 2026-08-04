@@ -13,5 +13,6 @@ Choose the subagent's model from how I phrase the request:
   (the family shown in your system prompt's "You are powered by …" line: opus | sonnet | haiku | fable).
 - **"agent {model}"** (e.g. "agent opus", "agent haiku", "agent sonnet", "agent fable") → pass that
   exact model.
-Best-effort for direct `/code-review`: that skill loads inline into the main thread, so honor this by
-delegating its analysis to the `code-reviewer` subagent rather than reviewing inline.
+Best-effort when a `/code-review`-style skill or command is available: it loads inline into the main
+thread, so honor this convention by delegating its analysis to the `code-reviewer` subagent rather
+than reviewing inline. The subagent is self-contained — it does not need that skill to be installed.

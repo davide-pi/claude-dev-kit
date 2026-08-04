@@ -7,7 +7,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | Path | Type | Purpose |
 |------|------|---------|
 | `CLAUDE.md` | User instructions | Machine preferences + the **review-agent model-selection** convention (every review runs in the `code-reviewer` subagent). Install as `~/.claude/CLAUDE.md`. |
-| `agents/code-reviewer.md` | Subagent | Analysis-only reviewer: returns findings for a diff/PR, never posts, edits, or merges. Runs on Sonnet unless the caller overrides the model. |
+| `agents/code-reviewer.md` | Subagent | Analysis-only reviewer: self-contained method (per-hunk scan, removed-guard audit, cross-file callers, `low`→`max` effort ladder, false-positive filter) returning ranked findings with a confidence verdict and a ready-to-post question. Never posts, edits, or merges. Sonnet unless the caller overrides. |
 | `agents/flow-tracer.md` | Subagent | Read-only cross-service flow tracer over a RabbitMQ/EasyNetQ bus (RPC + Pub/Sub + Sagas). Returns an ordered hop map with `file:line`. |
 | `agents/investigator.md` | Subagent | Read-only code locator: turns a symptom into the exact `file:line` of the handler that owns it. |
 | `agents/tech-doc-keeper.md` | Subagent | Maintains **code-derived** docs (`docs/technical/` + `CLAUDE.md`) — verifies, updates, creates, and removes docs against the source. |

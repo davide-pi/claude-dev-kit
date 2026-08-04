@@ -53,17 +53,19 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
    changes (`git diff HEAD`) if the review runs before a commit. Read the enclosing function of
    each hunk — bugs in unchanged lines of a touched function are in scope.
 
-4. **Generate findings.** Spawn the **`code-reviewer`** subagent (Agent tool) to do the analysis
-   at the requested effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), passing
-   it the diff/scope and target branch. It reuses the repo's `/code-review` engine **without
-   `--comment`/`--fix`** and returns findings only — it never posts. **Pick its model** per the
-   "Review agents — model selection" convention in the global CLAUDE.md: default → omit `model`
-   (agent runs on Sonnet); "advanced" → pass the current session model explicitly; "agent {model}"
-   → pass that exact model. If the subagent is unavailable, apply the `/code-review` methodology
-   inline (per-hunk scan, removed-guard audit, cross-file caller/callee check, language pitfalls,
-   plus reuse/simplification/efficiency/altitude cleanups).
+4. **Generate findings.** Spawn the **`code-reviewer`** subagent (Agent tool) at the requested
+   effort (default: medium; `[effort]` arg = low|medium|high|xhigh|max), passing it the diff/scope
+   and the target branch. It carries its own review methodology and returns findings only — it
+   never posts. **Pick its model** per the "Review agents — model selection" convention in the
+   global CLAUDE.md: default → omit `model` (agent runs on Sonnet); "advanced" → pass the current
+   session model explicitly; "agent {model}" → pass that exact model. If the subagent is
+   unavailable, apply its method inline (see `agents/code-reviewer.md`: per-hunk scan including the
+   enclosing function, removed-guard audit, cross-file caller/callee check, language pitfalls, plus
+   reuse/simplification/efficiency/altitude cleanups).
 
-5. **Triage every finding into exactly one bucket:**
+5. **Triage every finding into exactly one bucket.** The subagent's `for the author` field is the
+   default signal (`yes` → PR candidate, `no` → chat); override it only with a stated reason, and a
+   `PLAUSIBLE` verdict is itself a hint that the point is a question, not a statement.
    - **POST to PR** — it is a real question/doubt needing an answer or decision, e.g.:
      - "Is X intended, or should it be Y?" / "Was dropping guard Z deliberate?"
      - a correctness concern whose resolution depends on info only the author/another agent has;
@@ -74,7 +76,7 @@ Platform: **Azure DevOps** (this skill does not post to GitHub yet).
 
 6. **Post the PR bucket** as inline threads, in **English**, status **Active** (it awaits an
    answer). Use `repo_create_pull_request_thread` with:
-   - `filePath` = repo-relative path with leading `/`;
+   - `filePath` = repo-relative path with leading `/` (the finding's `anchor` path, plus the slash);
    - `rightFileStartLine`/`rightFileStartOffset` (1-based) and `rightFileEndLine`/`rightFileEndOffset`
      to anchor the line (a 1-char span, e.g. start offset 1 / end offset 2, is fine);
    - `content` starting with the tag, then the question. Keep it short and answerable.
