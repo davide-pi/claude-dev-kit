@@ -13,7 +13,7 @@ with your findings.
 
 The review is **language- and stack-agnostic**: derive the rules from the code in front of you
 (and the repo's own conventions), never from a stack you assume. It covers, on every run:
-**defects · regressions · security · clean code · completeness of the change**.
+**defects · regressions · security · clean code · completeness of the change · obvious cost**.
 
 ## What you get
 
@@ -44,8 +44,8 @@ explicitly — the completeness pass is only as good as the intent you had.
 ## Method
 
 Apply the passes up to the depth the effort level allows (see the table). Passes A–D are about
-**what the code does wrong**; E is about **what the change forgot**; F–G about **security** and
-**clean code**.
+**what the code does wrong**; E is about **what the change forgot**; F, G and H about **security**,
+**clean code** and **obvious cost**.
 
 ### 0. Intent and conventions
 
@@ -175,12 +175,28 @@ Report these as `clean-code`, separate from correctness — they are quality, no
 - Obvious waste in a hot path (work inside a loop that is loop-invariant, per-item I/O, repeated
   expensive lookup).
 
+### H. Obvious cost (baseline, not a performance review)
+
+Depth on performance belongs to `review-performance`, which the caller spawns from `high` upward. Your
+job at this level is only what is visible without sizing anything:
+
+- a query, HTTP call, cache lookup, or file read **per item** inside a loop (the N+1 shape), including
+  a lazily-loaded relation touched in a loop;
+- a nested loop over two collections that both grow with the input;
+- a linear scan inside a loop where a keyed lookup already exists;
+- a whole file, response, or collection buffered in memory to use one element or just to count;
+- a cache or collection that grows with no bound, eviction, or expiry.
+
+Report these as `performance` and keep the same discipline as the specialist: **state the cost** (order
+of growth, or number of round-trips per request/item). If deciding whether it matters needs the
+caller's scale, say so and leave the sizing to the specialist rather than guessing.
+
 ### Effort → depth
 
 | Effort | Adds |
 |--------|------|
 | `low` | Passes 1, A, E (requirement coverage + leftovers) and the loud parts of F (secrets, unvalidated input on a new entry point). |
-| `medium` (default) | + pass 0, B, C, D, all of E and F, and G. This is the full baseline. |
+| `medium` (default) | + pass 0, B, C, D, all of E and F, G, and H. This is the full baseline. |
 | `high` | + `git log`/`git blame` on the touched lines, code comments and tests the change contradicts, deeper propagation search (all dispatch points, all callers transitively one hop further). |
 | `xhigh` | + earlier PRs/commits on the same files and the review comments they got; error paths, concurrency, retries, idempotency; a short threat-model of each new entry point. |
 | `max` | + a verification pass: for every candidate finding, re-read the code and actively try to falsify it. Drop what you cannot break. |

@@ -40,12 +40,24 @@ try {
     if ([string]::IsNullOrWhiteSpace($command)) { Approve }
 
     # --- 1. e' un comando che scrive sulla storia? ------------------------------
-    $isCommit = $command -match '(^|[;&|`\s])git\b[^;&|]*\bcommit\b'
-    $isPush   = $command -match '(^|[;&|`\s])git\b[^;&|]*\bpush\b'
+    # Il messaggio di commit va escluso dalla scansione: `git commit -m "revert the push on main"`
+    # non e' un push, e non riguarda 'main'. Si azzerano quindi i valori dei flag di messaggio
+    # (anche combinati: -am, -sm) prima di cercare i verbi e il nome del branch.
+    $scan = [regex]::Replace(
+        $command,
+        '(?<flag>--message|--reuse-message|--file|-F|-[a-zA-Z]*m)\s*=?\s*("[^"]*"|''[^'']*''|\S+)',
+        '${flag} MSG')
+
+    function Test-GitVerb([string]$Text, [string]$Verb) {
+        return $Text -match ('(^|[;&|`\s])git\b[^;&|]*\b' + $Verb + '\b')
+    }
+
+    $isCommit = Test-GitVerb $scan 'commit'
+    $isPush   = Test-GitVerb $scan 'push'
     if (-not ($isCommit -or $isPush)) { Approve }
 
     # un dry-run non cambia niente
-    if ($command -match '--dry-run') { Approve }
+    if ($scan -match '--dry-run') { Approve }
 
     # --- 2. in quale repo? -----------------------------------------------------
     # `git -C <path>` vince sul cwd della sessione.
@@ -73,7 +85,7 @@ try {
 
     if ($current -ne $default) {
         # Su un branch di lavoro: resta il caso `git push origin <default>` fatto da qui.
-        if ($isPush -and $command -match "\b$([regex]::Escape($default))\b") {
+        if ($isPush -and $scan -match "\b$([regex]::Escape($default))\b") {
             Request-Confirmation "Il comando spinge su '$default', il branch protetto di questo repo. La convenzione git-branching vuole che ci arrivi solo una PR (squash, CI verde + 1 review). Confermi?"
         }
         Approve

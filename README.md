@@ -26,6 +26,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `skills/ef-migration/SKILL.md` | Skill | Manage EF Core migrations via `dotnet ef` for SQL Server DbContexts, with design-time gotchas and an add-migration recipe. |
 | `skills/grill-me/SKILL.md` | Skill | Interview / red-team a plan or design, walking every decision branch, then output a Decision Summary. |
 | `hooks/ensure-browser.ps1` | Hook | `PreToolUse` for `mcp__claude-in-chrome__*`: makes sure a browser carrying the Claude extension is running (prefers the default browser) and waits for the handshake. Never blocks the tool call. |
+| `hooks/guard-default-branch.ps1` | Hook | `PreToolUse` for `Bash`/`PowerShell`: asks for confirmation when a `git commit`/`push` would land on the repo's default branch (or a push targets it from elsewhere), which the `git-branching` convention forbids. Honours `git -C`, ignores `--dry-run` and commit-message text, and always exits 0. |
 | `settings.json` | Config | Model + fallbacks, env vars, permission allow/deny/ask rules, the browser hook, PowerShell as default shell, enabled plugins, status line, UI preferences. |
 | `mcp/servers.example.json` | Config template | The user-scoped MCP servers the skills expect (Azure DevOps, Playwright). Not installed by copying — see [MCP servers](#mcp-servers). |
 | `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
@@ -48,9 +49,14 @@ Two entry points, one set of agents, one output contract:
 
 `low`/`medium` runs the generalist alone; from `high` the specialists are spawned in parallel and
 their findings merged (same finding format, deduped by anchor, re-sorted by severity). A `focus`
-argument narrows the run to a single axis. The generalist alone already covers defects, regressions,
-security basics, clean code, and **completeness** — whether the change did everything its intent
-implied — so the specialists add depth, not the only coverage of their axis.
+argument narrows the run to a single axis.
+
+The generalist carries a baseline on every axis — defects, regressions, security (secrets, unvalidated
+input, missing authz), clean code, **completeness** (whether the change did everything its intent
+implied), and **obvious cost** (N+1 shapes, nested loops over input-sized collections, unbounded
+caches) — so no axis is left uncovered at `low`/`medium`. What the specialists add is depth the
+baseline deliberately skips: a threat model per entry point, and cost sized against the real call
+sites.
 
 Claude Code's own **`/security-review`** skill is deliberately left outside this flow: it runs inline
 in the main thread and does not use the shared finding format. Treat it as an independent second
@@ -111,7 +117,7 @@ Two kinds: the ones **you must create on the machine**, and the ones `settings.j
 
 | Variable | Value | Why |
 |----------|-------|-----|
-| `CLAUDE_HOOKS` | `%USERPROFILE%\.claude\hooks` | The `PreToolUse` hook in `settings.json` invokes `$env:CLAUDE_HOOKS\ensure-browser.ps1`. **Without it the hook fails silently** (it exits 0 by design, so the only symptom is that no browser gets started). Set it at **User** level, not just in the current shell. |
+| `CLAUDE_HOOKS` | `%USERPROFILE%\.claude\hooks` | Both `PreToolUse` hooks in `settings.json` are invoked as `$env:CLAUDE_HOOKS\<script>.ps1` — `ensure-browser.ps1` and `guard-default-branch.ps1`. **Without it they fail silently** (both exit 0 by design, so the only symptoms are that no browser gets started and that commits on the protected branch stop being questioned). Set it at **User** level, not just in the current shell — `install.ps1` does it for you. |
 
 ### Optional / scenario-specific
 

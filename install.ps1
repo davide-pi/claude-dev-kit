@@ -59,10 +59,13 @@ function Write-Section ([string]$m) { Write-Host "`n$m" -ForegroundColor White }
 function Get-KitAssets {
     # Every user-level asset the repo ships, as repo-relative forward-slash paths.
     $patterns = @('CLAUDE.md', 'settings.json', 'statusline.js',
-                  'agents/*.md', 'commands/*.md', 'hooks/*.ps1', 'skills/*/*')
+                  'agents/*.md', 'commands/*.md', 'hooks/*.ps1')
     $found = foreach ($p in $patterns) {
         Get-ChildItem -Path (Join-Path $RepoRoot $p) -File -ErrorAction SilentlyContinue
     }
+    # Skills are directories with their own layout: recurse, so a helper in a sub-directory
+    # is an asset too instead of silently not existing.
+    $found += Get-ChildItem -Path (Join-Path $RepoRoot 'skills') -File -Recurse -ErrorAction SilentlyContinue
     $found |
         ForEach-Object { $_.FullName.Substring($RepoRoot.Length + 1).Replace('\', '/') } |
         Where-Object { $_ -notin $ProjectScoped -and $_ -notin $RepoOnly } |
@@ -221,6 +224,14 @@ function Test-InstalledOnlyAssets {
         foreach ($d in Get-ChildItem $skills -Directory) {
             if (-not (Test-Path -LiteralPath (Join-Path $RepoRoot "skills\$($d.Name)"))) {
                 $found = $true; Write-Problem "skills/$($d.Name) exists only in ~/.claude — add it to the repo or delete it"
+                continue
+            }
+            # The directory is tracked, but a file added inside it would otherwise go unnoticed.
+            foreach ($f in Get-ChildItem $d.FullName -File -Recurse) {
+                $rel = "skills/$($d.Name)/" + $f.FullName.Substring($d.FullName.Length + 1).Replace('\', '/')
+                if ($rel -notin $known) {
+                    $found = $true; Write-Problem "$rel exists only in ~/.claude — add it to the repo or delete it"
+                }
             }
         }
     }
