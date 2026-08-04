@@ -211,6 +211,22 @@ for (const rel of textFiles.filter((f) => f.endsWith('.md'))) {
   }
 }
 
+// ── 4b. Every skill and command has triggering cases ─────────────────────────
+// Descriptions are the only thing that decides whether a skill fires, so an untested one is an
+// untested trigger. A warning, not an error: adding the asset should not be blocked by it.
+if (has('evals/skill-triggering.md')) {
+  const evals = read('evals/skill-triggering.md');
+  const named = [
+    ...allFiles.filter((f) => f.endsWith('/SKILL.md')).map((f) => f.split('/')[1]),
+    ...allFiles.filter((f) => f.startsWith('commands/')).map((f) => basename(f, '.md')),
+  ];
+  for (const name of new Set(named)) {
+    if (!new RegExp(`\\b${name}\\b`).test(evals)) {
+      warn('evals/skill-triggering.md', `no triggering case covers '${name}'`);
+    }
+  }
+}
+
 // ── 5. Environment variables the kit needs are documented ────────────────────
 const SYSTEM_VARS = new Set(['USERPROFILE', 'LOCALAPPDATA', 'HOME', 'TEMP', 'TMP', 'PATH', 'APPDATA', 'COMPUTERNAME', 'CLAUDE_PROJECT_DIR']);
 const readme = read('README.md');

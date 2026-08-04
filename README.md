@@ -31,6 +31,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
 | `install.ps1` | Installer | Idempotent install into `~/.claude`, plus `-Check` (drift + environment report, exit 1 on problems) and `-Pull` (import local edits back into the repo). |
 | `tools/validate.mjs` | Validator | Dependency-free checks run by CI: JSON, front matter, cross-references, machine-specific paths and secrets, documented plugins and env vars. |
+| `evals/skill-triggering.md` | Evals | Behavioural cases for skill/command triggering (`MUST` load vs `MUST NOT`), for spot-checks or `skill-creator` runs. CI warns when an asset has no case. |
 
 ## How the review flow fits together
 
@@ -50,6 +51,11 @@ their findings merged (same finding format, deduped by anchor, re-sorted by seve
 argument narrows the run to a single axis. The generalist alone already covers defects, regressions,
 security basics, clean code, and **completeness** — whether the change did everything its intent
 implied — so the specialists add depth, not the only coverage of their axis.
+
+Claude Code's own **`/security-review`** skill is deliberately left outside this flow: it runs inline
+in the main thread and does not use the shared finding format. Treat it as an independent second
+opinion to run by name, not as a step of the review — `review-security` never invokes it, so findings
+can never be double-counted.
 
 ## Requirements
 

@@ -18,3 +18,7 @@ merge their findings. The model rule below applies to **every** review subagent:
 A `/code-review`-style command loads inline into the main thread, so honor this convention by
 delegating its analysis to the review subagents rather than reviewing inline. They are
 self-contained — they do not need any review skill to be installed.
+A request phrased as "security review" or "performance review" is still a review: it goes through
+`review-security` / `review-performance`, not inline. The built-in `/security-review` skill is a
+separate second opinion — run it only when I ask for it **by name**, and keep its output separate
+since it does not use the subagents' finding format.
