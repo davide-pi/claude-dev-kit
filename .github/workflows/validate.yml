@@ -1,0 +1,45 @@
+name: validate
+
+# The kit is configuration: nothing compiles, so a broken front matter or a machine-specific
+# path only shows up when Claude Code silently stops loading an asset. This is the guardrail.
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Validate assets, references, leaks and docs
+        run: node tools/validate.mjs
+
+      - name: Syntax-check the status line
+        run: node --check statusline.js
+
+      - name: Parse every PowerShell script
+        shell: pwsh
+        run: |
+          $failed = $false
+          foreach ($file in Get-ChildItem -Recurse -Filter *.ps1) {
+              $parseErrors = $null
+              [System.Management.Automation.Language.Parser]::ParseFile(
+                  $file.FullName, [ref]$null, [ref]$parseErrors) | Out-Null
+              foreach ($e in $parseErrors) {
+                  $failed = $true
+                  $rel = [System.IO.Path]::GetRelativePath($PWD, $file.FullName)
+                  Write-Host "::error file=$rel,line=$($e.Extent.StartLineNumber)::$($e.Message)"
+              }
+          }
+          if ($failed) { exit 1 }
+          Write-Host "all PowerShell scripts parse"

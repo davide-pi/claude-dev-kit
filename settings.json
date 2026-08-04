@@ -18,7 +18,6 @@
   "permissions": {
     "allow": [
       "Read(**)",
-      "Read(/.claude/**)",
       "Grep(**)",
       "PowerShell(tsc *)",
       "PowerShell(eslint *)",
@@ -36,28 +35,61 @@
       "PowerShell(pnpm *)",
       "PowerShell(pytest*)",
       "PowerShell(winget search*)",
-      "PowerShell(Get-ChildItem *)"
+      "PowerShell(Get-ChildItem *)",
+      "Bash(tsc *)",
+      "Bash(eslint *)",
+      "Bash(dotnet build*)",
+      "Bash(dotnet test*)",
+      "Bash(dotnet restore*)",
+      "Bash(dotnet run*)",
+      "Bash(git status)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git branch*)",
+      "Bash(npm run *)",
+      "Bash(npm test*)",
+      "Bash(yarn *)",
+      "Bash(pnpm *)",
+      "Bash(pytest*)",
+      "Bash(ls *)"
     ],
     "deny": [
-      "Read(./.env)",
-      "Read(./.env.*)",
-      "Read(./secrets/**)",
-      "Read(./**/*.pem)",
-      "Read(./**/*.key)",
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.config/gh/**)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
+      "Edit(~/.ssh/**)",
+      "Edit(~/.aws/**)",
       "PowerShell(git push --force*)",
-      "PowerShell(Remove-Item -Force*)"
+      "PowerShell(Remove-Item -Force*)",
+      "Bash(git push --force*)",
+      "Bash(rm -rf *)"
     ],
     "ask": [
-      "Read(./**/appsettings*.json)",
-      "Read(./**/*.pfx)",
-      "Read(./**/connectionstrings*)",
-      "Read(./.git/config)",
+      "Read(**/appsettings*.json)",
+      "Read(**/*.pfx)",
+      "Read(**/connectionstrings*)",
+      "Read(**/.git/config)",
       "PowerShell(curl *)",
       "PowerShell(Invoke-WebRequest *)",
       "PowerShell(npx *)",
       "PowerShell(git commit*)",
       "PowerShell(git push*)",
-      "PowerShell(Remove-Item *)"
+      "PowerShell(Remove-Item *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(npx *)",
+      "Bash(git commit*)",
+      "Bash(git push*)",
+      "Bash(rm *)"
     ],
     "defaultMode": "default"
   },
@@ -66,9 +98,6 @@
     "claude-sonnet-4-6",
     "claude-haiku-4-5"
   ],
-  "worktree": {
-    "baseRef": "fresh"
-  },
   "hooks": {
     "PreToolUse": [
       {
@@ -85,23 +114,46 @@
               "& \"$env:CLAUDE_HOOKS\\ensure-browser.ps1\""
             ],
             "timeout": 30,
-            "statusMessage": "Verifico il browser per l'estensione Claude..."
+            "statusMessage": "Checking the browser for the Claude extension..."
+          }
+        ]
+      },
+      {
+        "matcher": "Bash|PowerShell",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/guard-default-branch.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Checking the branch before writing git history..."
           }
         ]
       }
     ]
   },
+  "worktree": {
+    "baseRef": "fresh"
+  },
   "enableWorkflows": false,
   "defaultShell": "powershell",
   "statusLine": {
     "type": "command",
-    "command": "node \"$HOME\\.claude\\statusline.js\""
+    "command": "node \"$HOME/.claude/statusline.js\""
   },
   "enabledPlugins": {
     "frontend-design@claude-plugins-official": true,
     "remember@claude-plugins-official": true,
     "microsoft-docs@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true,
+    "chrome-devtools-mcp@claude-plugins-official": true,
+    "redis-development@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "modern-web-guidance@claude-plugins-official": true
   },
   "language": "Italian",
   "alwaysThinkingEnabled": true,

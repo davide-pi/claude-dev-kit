@@ -45,7 +45,7 @@ Se e' ambiguo (es. "settimana" senza sapere quale) **chiedi** prima di procedere
 ## FASE 2 — Estrai l'attivita' (engine)
 
 ```
-pwsh -NoProfile -File "C:\Users\DavidePiccinini\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd|vuoto>" -To "<yyyy-MM-dd|vuoto>"
+pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd|vuoto>" -To "<yyyy-MM-dd|vuoto>"
 ```
 
 - Lo **stdout** da' le metriche autorevoli (progetto → branch, minuti attivi, fascia, prompt). Usale così come sono.
@@ -67,7 +67,7 @@ Poi **leggi il digest grezzo** (path in stdout, tipo `~/.claude/worklog/_raw/<pe
    - Tempo **interno/non fatturabile** → `internal`.
 4. **Arrotonda + accorpa** passando *tutti* i topic in un'unica invocazione (formato `minuti|descrizione-breve-in-inglese|ruolo`):
    ```
-   pwsh -NoProfile -File "C:\Users\DavidePiccinini\.claude\skills\worklog\round.ps1" "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
+   pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
    ```
    L'helper spalma i `donor` sui `main`, porta i `keep` a min 0.5h, lascia gli `internal` a se', e stampa il totale loggabile.
 
@@ -103,9 +103,15 @@ Obiettivo: per ogni topic **loggabile** (Rounded > 0) trovare dove segnare le or
 Usa gli MCP Azure DevOps **connessi in questa sessione** — riconoscibili dai tool `mcp__<nome>__wit_*`, `..._search_*`, `..._repo_*`, `..._core_*`. Non assumere i nomi: guarda quali tool esistono davvero.
 - Possono essercene **piu' di uno**. Se **due MCP puntano allo stesso Azure DevOps** (stesso org) sono equivalenti → **usa il primo** che trovi.
 - Se un topic potrebbe stare su org diversi e non e' deducibile → **chiedi** all'utente su quale.
+- **I nomi dei tool citati sotto sono esempi, non un contratto.** Questo MCP accorpa la sua superficie
+  di tanto in tanto: `wit_get_work_item` e' diventato `wit_work_item`, `wit_update_work_item` e'
+  diventato `wit_work_item_write`, `wit_my_work_items`/`wit_query_by_wiql` sono diventati `wit_query`.
+  Abbina quindi per **capability** (leggere un item, scriverlo, collegarlo, cercare) fra i tool
+  realmente esposti; se un nome citato non esiste piu', usa quello con la stessa capability e **dillo
+  in chat**. Mai inventare un nome, mai saltare un passo perche' il nome d'esempio e' cambiato.
 
 ### Per ogni topic
-1. **Trova il work item**: cerca fra i tuoi work item / per branch / per keyword del topic (`wit_my_work_items`, `wit_get_work_item`, `search_*`) sull'MCP/progetto pertinente. Determina:
+1. **Trova il work item**: cerca fra i tuoi work item / per branch / per keyword del topic (`wit_query`, `wit_work_item`, `search_*`) sull'MCP/progetto pertinente. Determina:
    - un **Task esistente** dove aggiungere le ore, **oppure**
    - la **User Story / parent** sotto cui **creare** un nuovo Task (le ore si loggano sui Task, non sulle US).
 2. **PR e commit da linkare** (best-effort, poi conferma):
@@ -146,14 +152,14 @@ Ogni agent, per i suoi item, applica le **Regole di scrittura** qui sotto e **ri
 
 Dopo che gli agent hanno finito, **l'orchestratore (tu)** aggiorna `~/.claude/worklog/pushed.json` **in sequenza** (una scrittura alla volta, niente race), poi stampa un **recap finale** di cosa e' stato scritto — ogni item e ogni parent citati nel recap devono essere **link cliccabili con anche il titolo** (`<Tipo> #<id> — <titolo>`), mai il solo numero (vedi regola in Fase 6).
 
-Prima di stampare il recap, **verifica direttamente** (non fidarti solo del report degli agent) rileggendo con `wit_get_work_item`/`wit_get_work_items_batch_by_ids` almeno gli item creati/aggiornati: conferma ore, parent, stato e link PR/commit effettivamente presenti.
+Prima di stampare il recap, **verifica direttamente** (non fidarti solo del report degli agent) rileggendo con `wit_work_item`/`wit_work_item` almeno gli item creati/aggiornati: conferma ore, parent, stato e link PR/commit effettivamente presenti.
 
 ### Regole di scrittura (MCP per-org; valgono anche via REST se un MCP non e' connesso)
-- **CompletedWork e' CUMULATIVO**: leggi il valore attuale del Task (`wit_get_work_item`), poi scrivi `attuale + delta` (`wit_update_work_item`). **Mai** sovrascrivere. Il delta e' quello calcolato in Fase 5 (per un item nuovo, delta = ore intere del topic).
+- **CompletedWork e' CUMULATIVO**: leggi il valore attuale del Task (`wit_work_item`), poi scrivi `attuale + delta` (`wit_work_item_write`). **Mai** sovrascrivere. Il delta e' quello calcolato in Fase 5 (per un item nuovo, delta = ore intere del topic).
 - **Task nuovi**: creali come **figli** della User Story/parent indicata (ereditano Area/Iteration). Titolo e descrizione **in inglese**.
 - **Assegna a te**: risolvi l'identita' dell'utente a runtime (tool "me"/identity dell'MCP, oppure `git config user.email`) — non hardcodare l'account qui.
-- **Stato**: non lasciare **mai** un item nuovo (o esistente) in stato **New** — imposta sempre **Active** (lavoro in corso: PR aperta/non ancora mergiata, commit non ancora pushato, o in attesa di validazione dell'utente) oppure **Closed** (lavoro concluso: PR completata/mergiata, o commit gia' diretto su master). Se il work item type di default parte in "New", correggilo esplicitamente con `wit_update_work_item` subito dopo la creazione.
-- **Link PR**: come **ArtifactLink** (`wit_link_work_item_to_pull_request`), non come URL nel testo.
+- **Stato**: non lasciare **mai** un item nuovo (o esistente) in stato **New** — imposta sempre **Active** (lavoro in corso: PR aperta/non ancora mergiata, commit non ancora pushato, o in attesa di validazione dell'utente) oppure **Closed** (lavoro concluso: PR completata/mergiata, o commit gia' diretto su master). Se il work item type di default parte in "New", correggilo esplicitamente con `wit_work_item_write` subito dopo la creazione.
+- **Link PR**: come **ArtifactLink** (`wit_work_item_link_write`), non come URL nel testo.
 - **Link commit su master**: se l'MCP espone un tool per linkare un commit (ArtifactLink al commit), usalo; altrimenti aggiungi hash/URL dei commit nella **descrizione** o in un **commento** del work item.
 - Usa i **nomi dei tool realmente esposti** dal server connesso: non inventarli.
 
