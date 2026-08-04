@@ -32,6 +32,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 - **Claude Code** (CLI, desktop, or IDE extension).
 - **Node.js 18+** and **git** in `PATH` — for `statusline.js` and the `npx`-based MCP servers.
 - **PowerShell 7** (`pwsh`) at `C:\Program Files\PowerShell\7\pwsh.exe` — used by the browser hook and the `worklog` scripts.
+- **[uv](https://docs.astral.sh/uv/)** (`uv`/`uvx` in `PATH`) — only for the `serena` plugin, whose MCP server is launched with `uvx`.
 - The `.NET`-flavoured agents and `ef-migration` assume the `dotnet` CLI; the commands, `grill-me`, `git-branching`, and `pr-create` are stack-agnostic.
 - `settings.json` and the hook are Windows/PowerShell-oriented (`defaultShell: powershell`); adjust for macOS/Linux.
 - The Azure DevOps skills (`pr-review`, `workitem-create`, `worklog`, `pipeline`) need a connected Azure DevOps MCP server; `claude-in-chrome` skills need the Claude browser extension.
@@ -125,7 +126,10 @@ Add one Azure DevOps entry per organization. The Azure DevOps skills discover th
 /plugin install typescript-lsp
 /plugin install superpowers
 /plugin install modern-web-guidance
+/plugin install serena
 ```
+
+`serena` ships its own MCP server started through `uvx`, so it additionally needs **[uv](https://docs.astral.sh/uv/)** on the machine (`winget install astral-sh.uv`) with `uv`/`uvx` reachable from `PATH` — on Windows that means `%USERPROFILE%\.local\bin`. Without it the plugin loads but its tools never come up.
 
 Other useful ones from the same marketplace, installed per need: `code-review`, `csharp-lsp`.
 
