@@ -113,6 +113,13 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
   else if (fm.description.length < 40) warn(rel, 'description is very short; agent selection depends on it');
   if (fm.model && !AGENT_MODELS.includes(fm.model)) fail(rel, `model '${fm.model}' is not one of ${AGENT_MODELS.join(', ')}`);
   if (fm.tools !== undefined && fm.tools.trim() === '') fail(rel, '`tools` is present but empty — the agent would have no tools');
+
+  // A whitelisted MCP tool only exists if its plugin is enabled — otherwise the agent silently
+  // loses that capability (Claude Code names plugin tools mcp__plugin_<plugin>_<server>__<tool>).
+  const enabled = Object.keys(settings?.enabledPlugins ?? {}).map((p) => p.split('@')[0]);
+  for (const m of (fm.tools ?? '').matchAll(/mcp__plugin_([\w-]+?)_([\w-]+)__([\w]+)/g)) {
+    if (!enabled.includes(m[1])) fail(rel, `declares tool from plugin '${m[1]}', which is not enabled in settings.json`);
+  }
 }
 
 for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith('.md'))) {

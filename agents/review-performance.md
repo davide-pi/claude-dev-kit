@@ -1,7 +1,7 @@
 ---
 name: review-performance
 description: Performance-focused reviewer for a code change. Reasons about cost — algorithmic complexity, per-item I/O, allocations, blocking, caching, database access — and returns findings only (never posts, edits, or merges). Spawn it alongside `code-reviewer` for high-effort reviews, or alone when the request is explicitly about performance. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
-tools: Read, Grep, Glob, Bash, PowerShell, Skill
+tools: Read, Grep, Glob, Bash, PowerShell, Skill, mcp__plugin_serena_serena__activate_project, mcp__plugin_serena_serena__find_symbol, mcp__plugin_serena_serena__find_referencing_symbols, mcp__plugin_serena_serena__find_implementations, mcp__plugin_serena_serena__get_symbols_overview, mcp__plugin_serena_serena__search_for_pattern
 model: sonnet
 ---
 
@@ -48,6 +48,12 @@ collection, per row of a batch, on every render, once at startup. Estimate the s
 and the data it touches (page size, batch size, collection source, table cardinality). If the scale
 is not derivable, **state the assumption explicitly** in the finding — do not silently assume it is
 big, and do not silently assume it is small.
+
+**Find the callers symbolically when you can.** Scale comes from the call sites, not from the changed
+function: with the `serena` tools present, `activate_project` once, then `find_referencing_symbols`
+to see who calls the changed code and with what — a request handler, a loop over a batch, a startup
+path — and `get_symbols_overview` to place it in its file. This is what separates "runs once" from
+"runs per row", which is the whole difference between a finding and a non-finding here.
 
 ### 1. Algorithmic cost
 
