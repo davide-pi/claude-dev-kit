@@ -45,7 +45,7 @@ Se e' ambiguo (es. "settimana" senza sapere quale) **chiedi** prima di procedere
 ## FASE 2 — Estrai l'attivita' (engine)
 
 ```
-pwsh -NoProfile -File "C:\Users\DavidePiccinini\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd|vuoto>" -To "<yyyy-MM-dd|vuoto>"
+pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd|vuoto>" -To "<yyyy-MM-dd|vuoto>"
 ```
 
 - Lo **stdout** da' le metriche autorevoli (progetto → branch, minuti attivi, fascia, prompt). Usale così come sono.
@@ -67,7 +67,7 @@ Poi **leggi il digest grezzo** (path in stdout, tipo `~/.claude/worklog/_raw/<pe
    - Tempo **interno/non fatturabile** → `internal`.
 4. **Arrotonda + accorpa** passando *tutti* i topic in un'unica invocazione (formato `minuti|descrizione-breve-in-inglese|ruolo`):
    ```
-   pwsh -NoProfile -File "C:\Users\DavidePiccinini\.claude\skills\worklog\round.ps1" "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
+   pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
    ```
    L'helper spalma i `donor` sui `main`, porta i `keep` a min 0.5h, lascia gli `internal` a se', e stampa il totale loggabile.
 

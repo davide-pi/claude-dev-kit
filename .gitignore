@@ -1,0 +1,13 @@
+# Machine-local Claude Code state — never commit (paths, session content, credentials)
+.claude/settings.local.json
+.claude/**/*.local.json
+.remember/
+worklog/
+
+# Backups / editor / OS noise
+*.bak
+*.bkp
+*.bak.*
+*~
+Thumbs.db
+.DS_Store

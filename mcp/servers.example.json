@@ -1,0 +1,29 @@
+{
+  "//": "Template for the user-scoped MCP servers this kit expects. These live in ~/.claude.json (NOT in ~/.claude/), so they are not installed by copying files — register them with `claude mcp add` (see README) or merge this block into the `mcpServers` object of ~/.claude.json. Replace every <placeholder>.",
+  "mcpServers": {
+    "azdo-<org-alias>": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@azure-devops/mcp",
+        "<your-azure-devops-org>",
+        "-d",
+        "core",
+        "repositories",
+        "work-items",
+        "pipelines",
+        "search"
+      ]
+    },
+    "playwright": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@playwright/mcp@latest",
+        "--headless"
+      ],
+      "env": {}
+    }
+  }
+}

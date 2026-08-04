@@ -66,9 +66,6 @@
     "claude-sonnet-4-6",
     "claude-haiku-4-5"
   ],
-  "worktree": {
-    "baseRef": "fresh"
-  },
   "hooks": {
     "PreToolUse": [
       {
@@ -91,6 +88,9 @@
       }
     ]
   },
+  "worktree": {
+    "baseRef": "fresh"
+  },
   "enableWorkflows": false,
   "defaultShell": "powershell",
   "statusLine": {
@@ -101,7 +101,12 @@
     "frontend-design@claude-plugins-official": true,
     "remember@claude-plugins-official": true,
     "microsoft-docs@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true
+    "skill-creator@claude-plugins-official": true,
+    "chrome-devtools-mcp@claude-plugins-official": true,
+    "redis-development@claude-plugins-official": true,
+    "typescript-lsp@claude-plugins-official": true,
+    "superpowers@claude-plugins-official": true,
+    "modern-web-guidance@claude-plugins-official": true
   },
   "language": "Italian",
   "alwaysThinkingEnabled": true,
