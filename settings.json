@@ -2,7 +2,14 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 30,
   "env": {
-    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1"
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50",
+    "CLAUDE_CODE_DEBUG_LOG_LEVEL": "warn",
+    "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
+    "CLAUDE_CODE_DISABLE_MOUSE": "0",
+    "CLAUDE_CODE_DISABLE_MOUSE_CLICKS": "1",
+    "CLAUDE_CODE_DISABLE_NOTIFICATION_PRESENCE_CHECK": "1",
+    "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1",
+    "FORCE_HYPERLINK": "1"
   },
   "attribution": {
     "commit": "Co-Authored-By: Claude AI",
@@ -59,6 +66,31 @@
     "claude-sonnet-4-6",
     "claude-haiku-4-5"
   ],
+  "worktree": {
+    "baseRef": "fresh"
+  },
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "mcp__claude-in-chrome__.*",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "& \"$env:CLAUDE_HOOKS\\ensure-browser.ps1\""
+            ],
+            "timeout": 30,
+            "statusMessage": "Verifico il browser per l'estensione Claude..."
+          }
+        ]
+      }
+    ]
+  },
   "enableWorkflows": false,
   "defaultShell": "powershell",
   "statusLine": {
@@ -71,8 +103,12 @@
     "microsoft-docs@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true
   },
+  "language": "Italian",
   "alwaysThinkingEnabled": true,
   "effortLevel": "xhigh",
   "theme": "dark",
-  "autoCompactEnabled": true
+  "editorMode": "normal",
+  "preferredNotifChannel": "auto",
+  "autoCompactEnabled": true,
+  "remoteControlAtStartup": false
 }
