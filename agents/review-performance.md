@@ -153,6 +153,17 @@ severity here means cost × frequency, not elegance:
 
 - **CONFIRMED** = you traced the loop and the per-item work in the code; **PLAUSIBLE** = the cost
   depends on a scale you could not derive — state the assumption and what would settle it.
+- Then an **index table** — one row per finding above, same order, same numbers — so the caller can
+  merge by anchor and build its own summary table without re-reading the blocks:
+
+  | # | Category | Location | Cost | Verdict | Author? |
+  |---|----------|----------|------|---------|---------|
+  | 1 | performance | `src/Core/OrderSync.cs:73` | 1 query per order, N = page size (50) | CONFIRMED | no |
+
+  `Location` is the `anchor` (add ` (left)` for a pre-change line), `Cost` is one short line
+  (~80 chars, no wrapping) carrying the number — order of growth or round-trips, never just "slow" —
+  and `Author?` is the `for the author` flag.
 - Close with `Verdict: N performance findings (X confirmed, Y plausible)` plus a one-line **hot-path
   summary**: which changed code runs per request/message/item, and the assumed scale.
-- Nothing wrong? Say exactly that, name the hot paths you checked and the scale you assumed.
+- Nothing wrong? Say exactly that, name the hot paths you checked and the scale you assumed — no
+  findings means no index table.

@@ -52,21 +52,31 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    keep both when they describe different failures at the same line; sort by severity across agents.
 
 5. **Report in chat** (user's language for the prose; keep code, identifiers, and suggested diffs
-   verbatim), in this order:
+   verbatim), in this order — the **summary table comes last**, so it is what is still on screen
+   when the report ends and the reader scrolls up only for the rows worth the detail:
 
-   - **Summary table** — one row per finding: `#`, severity-ordered, `category`, `file:line`,
-     one-line defect, `CONFIRMED`/`PLAUSIBLE`.
-   - **Findings** — one block each: what breaks, the concrete failure scenario, the evidence
-     (`file:line`), and the minimal fix. Group the `clean-code` items separately, after the
-     correctness ones.
+   - **Findings** — one block each, numbered `1.`, `2.`, … in severity order: what breaks, the
+     concrete failure scenario, the evidence (`file:line`), and the minimal fix. Group the
+     `clean-code` items separately, after the correctness ones, keeping the same numbering.
    - **Completeness** — the intent points checked, which are covered, which are not.
-   - **Verdict** — `N findings (X confirmed, Y plausible) · security: N · completeness: N`, plus
-     which agents ran at which effort.
-   - Nothing found → say exactly that, and list what was verified.
+   - **Summary table** — the **last block** of the report, one row per finding, same numbers and
+     same order as the blocks above (so the row order *is* the severity order):
 
-6. **Offer, do not act.** End with the one or two fixes worth applying and ask whether to apply
-   them. Apply nothing until the user says so; if they do, that is a normal edit — this command
-   itself never writes.
+     | # | Category | Location | Finding | Verdict |
+     |---|----------|----------|---------|---------|
+     | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED |
+     | 2 | clean-code | `src/Core/Mapper.cs:88` | duplicates `MapAddress`, drifts from it | CONFIRMED |
+
+     Every finding gets a row, `clean-code` and minor ones included (last). Keep the `Finding` cell
+     to one short line (~80 chars, no wrapping): it is a pointer to the block above, not a summary
+     of it.
+   - **Verdict** — one line right under the table: `N findings (X confirmed, Y plausible) ·
+     security: N · completeness: N`, plus which agents ran at which effort.
+   - Nothing found → say exactly that, list what was verified, and skip the table.
+
+6. **Offer, do not act.** Close with **one short line** — the one or two fixes worth applying — and
+   ask whether to apply them. Keep it to that line so the table stays on screen. Apply nothing until
+   the user says so; if they do, that is a normal edit — this command itself never writes.
 
 ## Guardrails
 

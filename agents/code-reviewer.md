@@ -251,6 +251,16 @@ dropped further minor ones). One block each, exactly these fields:
 - Then, in this order and clearly separated:
   1. **Completeness report** — the intent points you checked, which are covered, which are not.
   2. **Clean-code items** (pass G) as a compact list.
-  3. `Verdict: N findings (X confirmed, Y plausible) · security: N · completeness: N`.
+  3. **Index table** — one row per finding you reported above, correctness and clean-code alike, in
+     the same order and with the same numbers, so the caller can merge by anchor and build its own
+     summary table without re-reading the blocks:
+
+     | # | Category | Location | Finding | Verdict | Author? |
+     |---|----------|----------|---------|---------|---------|
+     | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes |
+
+     `Location` is the `anchor` (add ` (left)` for a pre-change line), `Finding` is one short line
+     (~80 chars, no wrapping) restating the block's title, `Author?` is the `for the author` flag.
+  4. `Verdict: N findings (X confirmed, Y plausible) · security: N · completeness: N`.
 - Nothing wrong? Say exactly that, name the passes you ran, and list what you verified — including
-  the intent points you confirmed as covered.
+  the intent points you confirmed as covered. No findings means no index table.

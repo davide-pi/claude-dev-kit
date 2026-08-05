@@ -6,7 +6,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 
 | Path | Type | Purpose |
 |------|------|---------|
-| `CLAUDE.md` | User instructions | Machine preferences + the **review-agent model-selection** convention (every review runs in the `code-reviewer` subagent). Install as `~/.claude/CLAUDE.md`. |
+| `CLAUDE.md` | User instructions | Machine preferences + the **review-agent model-selection** convention (every review runs in the `code-reviewer` subagent) + the **review-output** rule (every review report ends with a summary table). Install as `~/.claude/CLAUDE.md`. |
 | `agents/code-reviewer.md` | Subagent | Analysis-only, stack-agnostic reviewer covering **defects, regressions, security, clean code, and completeness of the change** (what the intent asked for but the diff never did), with a `low`→`max` effort ladder and a false-positive filter. Returns ranked findings with a `CONFIRMED`/`PLAUSIBLE` verdict, an anchor, and a ready-to-post question. Never posts, edits, or merges. Sonnet unless the caller overrides. |
 | `agents/flow-tracer.md` | Subagent | Read-only cross-service flow tracer over a RabbitMQ/EasyNetQ bus (RPC + Pub/Sub + Sagas). Returns an ordered hop map with `file:line`. |
 | `agents/investigator.md` | Subagent | Read-only code locator: turns a symptom into the exact `file:line` of the handler that owns it. |
@@ -57,6 +57,13 @@ implied), and **obvious cost** (N+1 shapes, nested loops over input-sized collec
 caches) — so no axis is left uncovered at `low`/`medium`. What the specialists add is depth the
 baseline deliberately skips: a threat model per entry point, and cost sized against the real call
 sites.
+
+Every report — both entry points, however many agents ran — **ends with a summary table**: one row per
+finding (`#`, category, `file:line`, the one-line defect, `CONFIRMED`/`PLAUSIBLE`, plus `Posted` on a
+PR review), in the same order and with the same numbers as the detail blocks above it. Last, not
+first, so it is the part still on screen when the report ends: read the table, then scroll up to the
+rows worth the detail. Each subagent returns the same rows as an index table, which is what the main
+thread merges by anchor. The rule lives in `CLAUDE.md`, so an ad-hoc "review this" follows it too.
 
 Claude Code's own **`/security-review`** skill is deliberately left outside this flow: it runs inline
 in the main thread and does not use the shared finding format. Treat it as an independent second

@@ -171,6 +171,16 @@ one block each:
 
 - **CONFIRMED** = you traced source → sink and found no guard; **PLAUSIBLE** = it depends on
   something you cannot see (a caller, a gateway, runtime config) — say what would settle it.
+- Then an **index table** — one row per finding above, same order, same numbers — so the caller can
+  merge by anchor and build its own summary table without re-reading the blocks:
+
+  | # | Category | Location | Finding | Verdict | Author? |
+  |---|----------|----------|---------|---------|---------|
+  | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes |
+
+  `Location` is the `anchor` (add ` (left)` for a pre-change line), `Finding` is one short line
+  (~80 chars, no wrapping) restating the block's title, `Author?` is the `for the author` flag.
 - Close with `Verdict: N security findings (X confirmed, Y plausible)` plus a one-line **surface
   summary**: the entry points this change adds or widens, and for each whether it is guarded.
-- Nothing wrong? Say exactly that, list the surface you mapped and the guards you verified.
+- Nothing wrong? Say exactly that, list the surface you mapped and the guards you verified — no
+  findings means no index table.

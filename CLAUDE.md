@@ -22,3 +22,18 @@ A request phrased as "security review" or "performance review" is still a review
 `review-security` / `review-performance`, not inline. The built-in `/security-review` skill is a
 separate second opinion — run it only when I ask for it **by name**, and keep its output separate
 since it does not use the subagents' finding format.
+# Review output — the summary table goes last
+Applies to the chat report of **any** review (`/code-review`, `/pr-review`, the built-in `/review`
+and `/security-review`, an ad-hoc "review this", a merged multi-agent run): the report **ends** with
+a compact summary table, one row per finding, placed **after** all the detail. That is how I read a
+review — the table first, then I scroll up only to the rows I care about — so a table at the top, or
+buried in the middle, defeats the purpose.
+- Rows keep the findings' numbers and their order, so the row order **is** the severity order and
+  `#3` in the table is the block titled `3.` above it.
+- Minimum columns: `#`, category, `file:line`, a one-line statement of the finding (~80 chars, no
+  wrapping), and the `CONFIRMED`/`PLAUSIBLE` verdict. Add a `Posted` column whenever some findings
+  went onto a PR, so I can see at a glance what the author already sees.
+- Every reported finding gets a row — `clean-code` and low-severity ones included, last.
+- After the table: at most the one-line verdict and one short question about what to fix next.
+  Nothing longer, or the table scrolls off screen.
+- No findings → no table; say what was verified instead.

@@ -151,9 +151,30 @@ identical on both:
        file-level comment (`subject_type: file`, no `line`) rather than dropping the question.
      - Report `gh` failures to the user instead of silently continuing.
 
-7. **Report to the user in chat** (their language is fine): the full finding list, which ones
-   were posted (with thread ids on Azure DevOps, the review URL on GitHub) and which were kept in
-   chat and why. If nothing was posted, say so explicitly.
+7. **Report to the user in chat** (their language is fine), in this order — the **summary table
+   comes last**, so it is what is still on screen when the report ends and the reader scrolls up
+   only for the rows worth the detail:
+
+   - **Findings** — the full list, one block each, numbered `1.`, `2.`, … in severity order: what
+     breaks, the concrete failure scenario, the evidence (`file:line`), the minimal fix, and the
+     agent that found it. `clean-code` items grouped after the correctness ones, same numbering.
+   - **Posted vs chat** — which findings became threads (thread ids on Azure DevOps, the review URL
+     on GitHub) and, for each one kept in chat, why. If nothing was posted, say so explicitly.
+   - **Summary table** — the **last block** of the report, one row per finding, same numbers and
+     same order as the blocks above (so the row order *is* the severity order):
+
+     | # | Category | Location | Finding | Verdict | Posted |
+     |---|----------|----------|---------|---------|--------|
+     | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes — thread 118 |
+     | 2 | clean-code | `src/Core/Mapper.cs:88` | duplicates `MapAddress`, drifts from it | CONFIRMED | no — chat only |
+
+     Every finding gets a row, `clean-code` and minor ones included (last). Keep the `Finding` cell
+     to one short line (~80 chars, no wrapping): it is a pointer to the block above, not a summary
+     of it. `Posted` carries the thread id / comment link when the finding went onto the PR.
+   - **Verdict** — one line right under the table: `N findings (X posted, Y chat-only) · security: N
+     · completeness: N`, plus which agents ran at which effort. Nothing after it, or the table
+     scrolls off screen.
+   - No findings at all → say exactly that, list what was verified, and skip the table.
 
 ## Attribution
 
