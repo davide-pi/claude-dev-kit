@@ -192,3 +192,30 @@ exists.
 | "questa skill è troppo lunga, come la spezzo?" | MUST load |
 | "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
 | "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
+
+### `typescript`
+
+| Prompt | Expected |
+|--------|----------|
+| "questa risposta API ha campi nullable, come la tipizzo senza usare `any`?" | MUST load |
+| "conviene una union discriminata o tre classi?" | MUST load |
+| "aggiungi un indice sulla tabella Orders" | MUST NOT (no types involved) |
+| "questo `.cs` non compila" | MUST NOT (wrong language) |
+
+### `angular`
+
+| Prompt | Expected |
+|--------|----------|
+| "questo componente non si aggiorna dopo l'update dello store, e qui ci sono ancora gli NgModule" | MUST load |
+| "conviene passare a signal in questa feature?" | MUST load |
+| "come centro verticalmente questa card?" | MUST NOT (CSS and visual design belong to the plugins) |
+| "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to chrome-devtools-mcp) |
+
+### `react`
+
+| Prompt | Expected |
+|--------|----------|
+| "il componente rifà la fetch in loop e lo stato del filtro è duplicato in tre punti" | MUST load |
+| "mi serve una libreria di state management qui?" | MUST load |
+| "misura l'LCP di questa pagina" | MUST NOT (belongs to chrome-devtools-mcp) |
+| "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
