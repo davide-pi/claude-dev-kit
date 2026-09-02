@@ -271,7 +271,7 @@ for (const name of referencedVars) {
 // exempt — and the exemption list is the to-do list, not a permanent amnesty.
 const PRE_V2_SKILLS = new Set([
   'git-branching', 'grill-me', 'pr-create', 'pr-review', 'workitem-create',
-  'worklog', 'ef-migration', 'pipeline', 'items-qa',
+  'worklog', 'pipeline', 'items-qa',
 ]);
 const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
 // wc -l semantics: a trailing newline is a terminator, not an empty final line.

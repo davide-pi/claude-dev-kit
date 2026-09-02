@@ -27,8 +27,8 @@ in one solution. Both run locally through docker compose.
 - Table or index bloat, autovacuum not keeping up, disk growing without rows growing.
 - Needing a client at all — `psql` is **not** installed; every recipe goes through docker.
 
-Not for: SQL Server itself (`sql-server`), EF modelling and migration mechanics (`ef-core`,
-`ef-migration`), writing the compose stack (`docker-dev-env`), Redis as a cache (`redis-dotnet`).
+Not for: SQL Server itself (`sql-server`), EF modelling and migration mechanics (`ef-core`),
+writing the compose stack (`docker-dev-env`), Redis as a cache (`redis-dotnet`).
 Server-release-specific syntax: read `SELECT version()` first and confirm with the official docs.
 
 ## Decide

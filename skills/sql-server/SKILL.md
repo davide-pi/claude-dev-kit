@@ -21,7 +21,7 @@ description: >-
 - Inspecting an unfamiliar database: schema, row counts, what is running, what is blocked.
 - Working in the pure T-SQL codebase, where stored procedures *are* the application.
 
-Not for: EF Core modelling and LINQ translation (`ef-core`), migration mechanics (`ef-migration`),
+Not for: EF Core modelling, LINQ translation and migration mechanics (`ef-core`),
 Postgres (`postgres`), starting the container (`docker-dev-env`), client-side latency
 (`dotnet-diagnostics`). For syntax or feature availability that depends on the engine release, read
 `SELECT @@VERSION` and the database compatibility level in `sys.databases`, then confirm with the

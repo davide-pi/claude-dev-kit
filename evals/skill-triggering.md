@@ -82,12 +82,6 @@ exists.
 | "modifica il docker-compose per aggiungere redis" | MUST NOT (compose is not a CI/CD pipeline) |
 | "questo YAML di Kubernetes è corretto?" | MUST NOT (manifest, not pipeline) |
 
-### `ef-migration` — EF Core migrations
-
-| Prompt | Expected |
-|--------|----------|
-| "aggiungi una migration per la nuova colonna" | MUST load |
-| "scrivi la query per contare gli ordini" | MUST NOT (querying is not migrating) |
 
 ### `commit` (command)
 
