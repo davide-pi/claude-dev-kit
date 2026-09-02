@@ -174,8 +174,16 @@ const LEAK_ALLOW = [
   /Davide Piccinini/,                                   // the LICENSE holder, on purpose
   /C:\\Program Files\\PowerShell/,                      // documented system path
   /C:\\Users\\<[^>]+>/,                                 // explicit placeholder
+  // A password that is a *reference* to a secret, or an obvious stand-in, is the correct way to
+  // write an example — flagging it would push authors towards vaguer, less useful examples.
+  /(?:Password|Pwd)\s*=\s*(?:\$env:|\$\{|%[A-Za-z_]+%|\$\()/i,
+  /(?:Password|Pwd)\s*=\s*(?:changeme|change-me|placeholder|your[-_]?password|secret|xxx+|\*+)\b/i,
 ];
+// A file whose job is to detect credentials has to carry specimens of them. Only these two, and
+// only because the specimens are the test surface — never widen this to a directory.
+const LEAK_EXEMPT = new Set(['hooks/secret-scan.js', 'tools/secret-scan.test.mjs']);
 for (const rel of textFiles) {
+  if (LEAK_EXEMPT.has(rel)) continue;
   const text = read(rel);
   for (const [pattern, label] of LEAKS) {
     for (const m of text.matchAll(pattern)) {

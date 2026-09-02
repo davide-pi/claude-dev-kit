@@ -291,3 +291,72 @@ exists.
 | "questo consumer riprocessa lo stesso messaggio due volte" | MUST load |
 | "aggiungi il servizio rabbitmq al docker compose" | MUST NOT (belongs to docker-dev-env) |
 | "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
+
+## Command cases
+
+Commands are invoked by name, so the risk is different from a skill's: the failure mode is the
+model *acting* on a phrasing the command does not own, or reaching for a skill when a command would
+have done it in one shot.
+
+### `/ship`
+
+| Prompt | Expected |
+|--------|----------|
+| "committa, pusha e apri la PR collegata al 4821" | MUST invoke |
+| "fai il merge della PR 210" | MUST NOT (ship stops before the merge, by design) |
+
+### `/status`
+
+| Prompt | Expected |
+|--------|----------|
+| "cosa ho in ballo adesso?" | MUST invoke |
+| "che stato ha il work item 4821?" | MUST NOT (one item belongs to /item) |
+
+### `/item`
+
+| Prompt | Expected |
+|--------|----------|
+| "fammi vedere i criteri di accettazione del 4821" | MUST invoke |
+| "crea un bug per il crash del login" | MUST NOT (creation belongs to workitem-create) |
+
+### `/migrate`
+
+| Prompt | Expected |
+|--------|----------|
+| "aggiungi una migration per la colonna ShippedAt" | MUST invoke |
+| "perché questa query EF fa N+1?" | MUST NOT (belongs to ef-core) |
+
+### `/fix-ci`
+
+| Prompt | Expected |
+|--------|----------|
+| "la build su feature/orders è rossa, perché?" | MUST invoke |
+| "questo test fallisce in locale" | MUST NOT (belongs to debug-systematic) |
+
+### `/db`
+
+| Prompt | Expected |
+|--------|----------|
+| "quante righe ha Orders con Status = 3?" | MUST invoke |
+| "come indicizzo questa tabella?" | MUST NOT (belongs to sql-server) |
+
+### `/logs`
+
+| Prompt | Expected |
+|--------|----------|
+| "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke |
+| "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
+
+### `/queue`
+
+| Prompt | Expected |
+|--------|----------|
+| "quanti messaggi ci sono nella dead-letter?" | MUST invoke |
+| "come progetto il dead-letter exchange?" | MUST NOT (belongs to rabbitmq) |
+
+### `/spike`
+
+| Prompt | Expected |
+|--------|----------|
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST invoke |
+| "implementa il nuovo endpoint di export" | MUST NOT (real work: dev-loop routes it) |
