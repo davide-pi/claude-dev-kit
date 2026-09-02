@@ -53,3 +53,20 @@ and drop the shapes you do not have.
 - `<workspaces-root>\<github-root>\**` → GitHub only, no Azure DevOps: no work items and no hour
   logging there — hours go on a dedicated per-project sheet next to the repo.
 - Any other workspace → not mapped. Ask before assuming an org or a project.
+# Routing and the CLI rule
+The kit is four levels: `dev-loop` routes, skills carry knowledge, agents explore, commands act, and
+hooks stop the irreversible. Two rules decide which one you use:
+- **Start at `dev-loop`** for anything substantive — it classifies the request and names the asset
+  that owns it. Once the work is routed, do not re-enter it on every turn.
+- **CLI before MCP, always.** Azure DevOps goes through `az devops` / `az boards` / `az repos` /
+  `az pipelines`; GitHub through `gh`. The Azure DevOps MCP servers are the **fallback** for what the
+  CLI genuinely cannot do — try the CLI first every time, and say so when you fall back. The
+  `azdo-cli` skill owns the mechanics; nothing else restates them.
+# How to write for me
+80/20: the 20% of the text has to carry 80% of the knowledge. This is not a style preference — I do
+many things at once and reading time is my bottleneck, so a long answer that "covers everything"
+costs me more than it gives.
+- Tables and decision trees instead of paragraphs; numbered rules instead of narrative.
+- No preamble, no restating what I just said, no summary of what you are about to do.
+- Depth goes in a reference file loaded on demand, never inline "just in case".
+- Applies to everything: chat answers, skills, PR and commit messages, work items, review reports.
