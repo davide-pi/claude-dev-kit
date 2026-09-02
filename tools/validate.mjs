@@ -165,7 +165,9 @@ const LEAKS = [
   [/\b(?:glsa_|ghp_|github_pat_|gho_|ghs_|ghu_|xoxb-|xoxp-|xapp-)[A-Za-z0-9_-]{8,}/g, 'token-shaped string'],
   [/\bAKIA[0-9A-Z]{16}\b/g, 'AWS access key id'],
   [/\bsk-(?:ant|proj|live|test)?-?[A-Za-z0-9_-]{20,}/g, 'API-key-shaped string'],
-  [/\b(?:Password|Pwd)\s*=\s*(?!<)[^;'"\s]{3,}/gi, 'password in a connection string'],
+  // `|` excluded from the value: a search pattern hunting for leaked secrets reads
+  // `Password=|Pwd=|Secret`, and a real password value never starts with an alternation.
+  [/\b(?:Password|Pwd)\s*=\s*(?!<)[^;'"\s|]{3,}/gi, 'password in a connection string'],
 ];
 // Allowed: the MIT line, and documented Windows system paths.
 const LEAK_ALLOW = [

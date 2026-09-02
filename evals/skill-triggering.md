@@ -219,3 +219,39 @@ exists.
 | "mi serve una libreria di state management qui?" | MUST load |
 | "misura l'LCP di questa pagina" | MUST NOT (belongs to chrome-devtools-mcp) |
 | "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
+
+### `dotnet-backend`
+
+| Prompt | Expected |
+|--------|----------|
+| "questo service è registrato singleton ma inietta il DbContext, cosa cambio?" | MUST load |
+| "meglio un controller o un endpoint minimal per questa risorsa?" | MUST load |
+| "aggiungi un indice sulla colonna Status" | MUST NOT (belongs to sql-server) |
+| "il componente React rifà la fetch" | MUST NOT (wrong stack) |
+
+### `dotnet-testing`
+
+| Prompt | Expected |
+|--------|----------|
+| "aggiungi i test a OrderService, il repo non ne ha nessuno" | MUST load |
+| "questo test tocca il database vero o lo fingo?" | MUST load |
+| "il test in CI fallisce con timeout, guarda il log della build" | MUST NOT (a red pipeline routes to the CI command) |
+| "quali test vale la pena scrivere per questo mapper?" | MUST NOT (strategy belongs to test-strategy) |
+
+### `dotnet-diagnostics`
+
+| Prompt | Expected |
+|--------|----------|
+| "il pod va al 100% di CPU in produzione, come capisco cosa fa?" | MUST load |
+| "questo endpoint è lento ma non so dove perde tempo" | MUST load |
+| "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the DevTools plugin) |
+| "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
+
+### `ef-core`
+
+| Prompt | Expected |
+|--------|----------|
+| "ho aggiunto la property Email all'entità Customer, allinea il database" | MUST load |
+| "questa query carica 500 righe per ogni ordine" | MUST load |
+| "scrivi la stored procedure per il report mensile" | MUST NOT (raw T-SQL belongs to sql-server) |
+| "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to postgres) |
