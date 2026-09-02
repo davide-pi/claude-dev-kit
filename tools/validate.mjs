@@ -267,12 +267,10 @@ for (const name of referencedVars) {
 // ── 6. The v2 asset contract ─────────────────────────────────────────────────
 // The design spec under docs/specs/ sets three rules that nothing else can catch: hard line caps
 // (a skill needing more text needs a reference file, not a longer SKILL.md), a fixed body
-// skeleton, and no version numbers in an asset's prose. Every skill that predates the contract is
-// exempt — and the exemption list is the to-do list, not a permanent amnesty.
-const PRE_V2_SKILLS = new Set([
-  'git-branching', 'grill-me', 'pr-create', 'pr-review', 'workitem-create',
-  'worklog', 'pipeline', 'items-qa',
-]);
+// skeleton, and no version numbers in an asset's prose. One skill is exempt: grill-me is fourteen
+// lines of interview instruction, and the skeleton would only pad it. Everything else conforms —
+// keep this list at one entry.
+const PRE_V2_SKILLS = new Set(['grill-me']);
 const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
 // wc -l semantics: a trailing newline is a terminator, not an empty final line.
 const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;

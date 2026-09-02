@@ -372,3 +372,30 @@ have done it in one shot.
 | "questo epic è implementabile così com'è?" | MUST load |
 | "il filtro date restituisce righe sbagliate, sistemalo" | MUST NOT (a reproducible symptom goes to debug-systematic) |
 | "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
+
+### `branch-flow`
+
+| Prompt | Expected |
+|--------|----------|
+| "come chiamo il branch per questa fix?" | MUST load |
+| "il lavoro è finito, come lo porto su main?" | MUST load |
+| "voglio lavorare su questa cosa senza toccare il working tree corrente" | MUST load (the worktree half) |
+| "scrivi il messaggio di commit" | MUST NOT (belongs to /commit) |
+
+### `docker-dev-env`
+
+| Prompt | Expected |
+|--------|----------|
+| "il container di sql server non parte, si riavvia in loop" | MUST load |
+| "mi serve un postgres locale per provare questa cosa" | MUST load |
+| "questa query postgres è lenta, leggi l'EXPLAIN" | MUST NOT (belongs to postgres) |
+| "deploya in staging" | MUST NOT (local environments only) |
+
+### `items-qa` — explicit trigger only
+
+| Prompt | Expected |
+|--------|----------|
+| `/items-qa 101 102 https://test.example mobile` | MUST load |
+| `/items-qa` | MUST load |
+| "controlla se questo componente rispetta gli AC" | MUST NOT (no explicit trigger: it drives a real browser and posts a comment) |
+| "apri il sito e fai uno screenshot" | MUST NOT (browser use is not a work-item verdict) |

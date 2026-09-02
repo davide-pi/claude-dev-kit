@@ -124,8 +124,7 @@ The Azure DevOps MCP server stays the documented fallback for what `az devops in
    time → `$(var)` inside a step, `$[ ]` in a job or stage condition.
 2. A secret is blank inside a script → secrets are deliberately not injected into the environment →
    map it explicitly through that step's `env:` block.
-3. A variable group's values never appear → the pipeline was never authorized for the group → grant
-   it once in the UI; no YAML change can fix this.
+3. A variable group's values never appear → the pipeline is not authorized for it → grant it in the UI.
 4. Template `parameters` used as if they were variables → they are compile-time and typed → use them
    for structure (conditional insertion, loops), variables for values.
 5. The pipeline stops triggering after a path-filter change → `include` and `exclude` interact, and
@@ -140,16 +139,11 @@ The Azure DevOps MCP server stays the documented fallback for what `az devops in
    without a comment naming the reason.
 10. It builds locally and fails on the agent → the agent image ships different tooling → install the
     SDK the repository needs explicitly, and pin third-party extensions to an immutable version.
-11. A publish-test-results step produces nothing → that tree has no automated tests → do not report
-    on tests that do not exist; add the tests first (`test-strategy`).
+11. A test-results step publishes nothing → that tree has no tests → add tests first (`test-strategy`).
 
 ## References
 
-- `references/templates.md` — extends against includes, typed parameters, loops, conditional
-  insertion, and keeping one template callable from several pipelines.
-- `references/versioning.md` — semantic versioning from the config file: branch rules, the build
-  number, carrying the version into packages and artifacts, and why it drifted.
-- `references/caching-and-artifacts.md` — cache keys and restore keys, what must never depend on a
-  cache, artifact naming, and passing output between stages.
-- `references/diagnosis.md` — a failed run from the CLI end to end: timeline, logs, pool and agent
-  problems, and reproducing a step locally.
+- `references/templates.md` — extends vs includes, typed parameters, loops, conditional insertion.
+- `references/versioning.md` — the version config, branch rules, build number, version handover.
+- `references/caching-and-artifacts.md` — cache keys, what must not depend on a cache, artifacts.
+- `references/diagnosis.md` — a failed run from the CLI: timeline, logs, pool problems, local repro.
