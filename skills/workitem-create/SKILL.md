@@ -1,210 +1,115 @@
 ---
 name: workitem-create
-description: Create one or more Azure DevOps work items from a user-provided description and images. Asks questions (targeted Q&A escalating to grilling) to produce items that are complete and clear for both humans and AIs, then shows Table 1 (type/title), discovers MCP+project+types+parent, shows Table 2 with parent link, and on confirmation creates the items (English, New and unassigned) returning a summary with links. Explicit trigger: only when the user types /workitem-create.
+description: >-
+  Create one or more Azure DevOps work items from a description and images, complete enough for a
+  human or an AI to implement without asking anything back. Runs a targeted Q&A that escalates to
+  grilling, then two confirmation tables (type/title, then type/title/parent), then creates the
+  items through the Azure DevOps CLI in English, state New and unassigned. Project, work item types
+  and parent are discovered at runtime — nothing is hardcoded. Explicit trigger: only when the user
+  types /workitem-create.
 ---
 
-# /workitem-create — Create Azure DevOps work items from a description + images
+# workitem-create — a description becomes real work items
 
-From a user description (and images), draft **one or more work items**, validate them through two tables with confirmation loops, and on confirmation **create them on Azure DevOps**.
+## When
 
-**Everything is in English**: this skill and all its output — chat, tables, questions, and the work items themselves.
-Items must be clear and well structured for both a **human** and an **AI** that will implement them.
-No org/project/MCP/type name is hardcoded: all are discovered **at runtime**.
+- The user types `/workitem-create`, with or without a description and pasted images.
+- A piece of work has to become one item, or a small hierarchy of items, on a board.
+- An existing parent (Epic, Feature, Story) has to receive new children.
 
----
+Not for: logging hours on an existing item (`worklog`), reading or analysing an item already on the
+board, testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth and verbs
+(`azdo-cli`). Never fires without the explicit trigger.
 
-## Concepts
+## Decide
 
-- **English everywhere.** All chat, tables, questions, and every item title/description/criteria written to Azure are in English.
-- **Runtime discovery.** MCP servers, projects, and types are never assumed: read them from the tools actually connected and from the chosen project.
-- **Images = context + placeholder only.** The MCP **cannot** upload attachments. Images are for you, to understand and write the item; in the body you leave a **numbered placeholder** where each image belongs, and at the end you produce a **"attach manually" checklist**. The user attaches them from the UI.
-- **Flexible hierarchy.** Default: sibling items under an existing parent. On request: **multi-level hierarchies** (e.g. Feature → Story → Task) created in the same run, with the root linked to an existing parent.
-- **State and assignment.** Items are created in state **New** and **unassigned**, unless the user explicitly says otherwise.
-- **Multi-gate confirmation.** Table 1, Table 2, and (if requested) the content preview are gates: proceed only on explicit confirmation.
-- **No throwaway items.** Never create "test" items on the real board. The skill is validated by reading this file; at runtime the first-create caution (Phase 7) applies.
+### 1. Non-negotiables
 
----
+| Rule | Detail |
+| --- | --- |
+| English everywhere | chat, questions, tables, and every title, description and criterion written to the board |
+| Nothing hardcoded | project, work item types, fields and parent are **discovered at runtime**, every run |
+| New and unassigned | unless the user explicitly asks otherwise |
+| Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
+| Never a throwaway | no "test" item on a real board, ever |
+| Complete for an implementer | a human or an agent must be able to start from the item alone |
 
-## PHASE 1 — Process the request (intake)
+### 2. The five gates, in order
 
-Input: `/workitem-create` + a free-form description (optional) + images pasted into chat.
+| Gate | What happens | Detail |
+| --- | --- | --- |
+| 1. Intake | read the text **and** the images; number them `IMAGE 1..n` with a caption; summarise in 2-4 lines what was understood | — |
+| 2. Q&A | targeted batched questions, escalating to grilling when the work is ambiguous | `questions.md` |
+| 3. Table 1 | the split into items: `#`, type (provisional), title — confirm, edit, reprint until approved | `tables.md` |
+| 4. Discovery | project, the types that really exist, their real field sets, the parent | below |
+| 5. Table 2 | the same rows plus the resolved parent link — confirm, then optionally preview the full bodies, then create | `tables.md`, `item-content.md` |
 
-1. Read the text **and** the images carefully.
-2. Assign each image a **numbered ID** (`IMAGE 1`, `IMAGE 2`, …) and a **caption** of what it shows. You will use these IDs as placeholders in the items and in the final checklist.
-3. Summarize in 2-4 lines what you understood: objective, context, expected output, and which preliminary items you foresee. **This is not Table 1 yet.**
-4. Note what the user already specified (number of items, types, project, parent): it will be validated later.
+Never merge two gates into one message, and never move past one without explicit approval.
 
----
+### 3. Discovery — CLI first, MCP where the CLI has no verb
 
-## PHASE 2 — Questions (hybrid: targeted Q&A → grilling)
+The Azure DevOps CLI is the **first move** for everything in gate 4 and for the creation itself.
+Configuration, auth, org/project resolution, WIQL and the boards verbs all belong to `azdo-cli` —
+call it, do not re-derive it here.
 
-Goal: gather everything needed for complete items, with no remaining doubts.
+| Needed | Source |
+| --- | --- |
+| which project | the workspace-to-project mapping in the user instructions, else list the org's projects via the CLI, else ask |
+| which work item types exist, and their real field set | CLI: the process/work-item-type metadata for that project |
+| which types are actually **in use** | CLI: a WIQL sample, deduped on the type field (WIQL has no `DISTINCT`) |
+| candidate parents | CLI: WIQL by area, title keyword or recent activity; propose the best, let the user confirm or give an id/URL |
+| free-text or cross-project search, attachments, item comments | **MCP fallback** — the CLI has no verb for these |
 
-- **Default — targeted Q&A (batched).** Group the questions: use `AskUserQuestion` for discrete choices (type if uncertain, how many items, hierarchy yes/no, priority, state/assignment if different from defaults); open questions in chat for details. Aim for few iterations.
-- **Escalation — grilling.** If the work is complex or ambiguous, or the user asks for it, switch to the **`grill-me`** style on the open points: one question at a time, walk every branch of the decision tree, resolve dependencies between decisions. You may invoke the `grill-me` skill or apply its method.
-- **If an answer is derivable** from the images or context, **derive it** instead of asking.
+If a requested type does not exist, or none was specified, **ask** and list what was found. Types
+never used in the project may not surface from WIQL — say the list is "in use", not exhaustive.
 
-Cover at least: value/objective, **precise scope of each item**, acceptance criteria, technical constraints and implementation hints, dependencies between items, what is **out of scope**, references (related items/PRs/docs), and **where each image belongs**.
+### 4. Hierarchy
 
-Do not move to the draft until every material doubt is resolved.
+Default: sibling items under one existing parent. On request: a multi-level tree (Feature → Story →
+Task) created in the same run, where only the **root** hangs off an existing parent and every other
+link points at an item created in this run. Create parents before children, sequentially.
 
----
+## Do
 
-## PHASE 3 — Draft items + Table 1 + confirmation loop
-
-1. Define the split into **1+ items**. For each: type (provisional, validated in Phase 4) and a concise, specific **title**.
-2. If it is a multi-level hierarchy, represent the nesting.
-3. Print **Table 1 only**:
-
-```markdown
-| # | Type       | Title |
-|---|------------|-------|
-| 1 | Feature    | Multi-tenant billing dashboard |
-| 2 | User Story | ↳ Show per-tenant invoice list |
-| 3 | Task       | ↳↳ Add invoices API endpoint |
+```powershell
+git remote get-url origin        # which repo, hence which project the work belongs to
+git config user.email            # only if the user asks for the items to be assigned to them
 ```
 
-- `#` numbers the rows (the user can say "change item 2").
-- For hierarchies, indent child titles with `↳` (one `↳` per level).
+Everything else is Azure DevOps: project listing, type and field metadata, WIQL parent search, the
+creates, the parent links and the read-back verification all run through the CLI as documented in
+`azdo-cli`, with the MCP fallback above where no verb exists. Per-call rules — which fields are
+safe to set on which type, HTML bodies, creation order, first-create caution, mid-batch failure
+reporting and the read-back — are in `item-content.md`.
 
-4. Ask: **"Do you want to change anything (number of items, types, titles, split, hierarchy)?"**
-   - If changed → apply, reprint Table 1, ask again. Repeat until approved.
-   - Only after explicit approval → Phase 4.
+Report the result as the final table plus the manual-attachment checklist (`tables.md`).
 
----
+## Traps
 
-## PHASE 4 — Azure DevOps discovery (MCP, project, types, parent)
+1. The whole create fails on one field → a field that does not exist on that type was set (acceptance
+   criteria and repro steps do not exist on every type or process) → read the type's field set first
+   and fold unsupported content into the description.
+2. The description renders as raw markup on the board → the field was written as markdown → write
+   description and criteria as HTML; board markdown rendering is inconsistent.
+3. Children land with no parent → the link was left for a second pass that failed → create parent
+   first and link in the same call where the CLI allows it, then verify by reading the item back.
+4. A retry duplicates items → a mid-batch failure reported no ids → always report the ids already
+   created before stopping.
+5. Items are created in the wrong project → the project was inferred from the conversation, not the
+   path → resolve it from the workspace mapping or ask; state the project in Table 2.
+6. Images silently disappear → the CLI cannot upload attachments → leave numbered placeholders in
+   the body and end with the manual-attachment checklist; use the MCP attachment capability only if
+   the connected server actually exposes one.
+7. An item is created in state New but the type starts elsewhere → the process defines its own
+   initial state → set the state explicitly after the create when it differs.
+8. Questions keep coming after Table 1 is approved → the Q&A gate was left open → resolve every
+   material doubt in gate 2; after that, only discovery facts change the tables.
 
-### MCP
-Use the Azure DevOps MCP servers **connected in this session** (tools `mcp__<name>__wit_*`, `..._core_*`, `..._search_*`). Do not assume names: look at what actually exists.
-- Multiple MCPs pointing to the **same org** are equivalent → use the first.
-- MCPs on **different orgs** with an undeducible choice → **ask which to use**.
-- **The tool names below are examples, not a contract.** This MCP consolidates its surface from time
-  to time — `wit_get_work_item` became `wit_work_item`, `wit_create_work_item`/`wit_update_work_item`
-  became `wit_work_item_write`, `wit_my_work_items`/`wit_query_by_wiql` became `wit_query`. Several
-  once-separate tools now sit behind one name plus an `action` (`get`, `get_batch`, `get_type`…), so
-  read the schema of the tool you are about to call instead of assuming its shape. Match
-  by **capability** (read an item, read a type, write an item, link items, list backlogs, search) against the tools
-  the server really exposes, and if a name below is missing, use the one with the same capability and
-  say in chat which you used. Never invent a name, and never abandon a step because its example name
-  is gone.
+## References
 
-### Project
-If not already known from context/user, list projects (`core_list_projects`) and **ask which one to create in**. Normally a run targets a single project.
-
-### Types (honest discovery)
-- `wit_backlog` → backlog levels (Epic/Feature/Story…).
-- WIQL → types **actually in use** (WIQL has no `DISTINCT`: sample work items and dedupe the `System.WorkItemType` values).
-- For **each chosen type**, read the **type metadata** (`wit_work_item` with `action: get_type` — reading a *type* is not the same capability as reading an *item*) to **validate it** and **read its real field set** (needed in Phase 7).
-- Present the list as "types available/in use" — it may not be exhaustive (process types never used won't surface via WIQL). The complete source would be the REST `_apis/wit/workitemtypes`, which requires an auth token: only offer it if the user wants the exhaustive list.
-- **Type rule:** if a requested type **is not present**, or **was not specified**, **ask the user** and list the ones found.
-
-### Parent
-For each **root** item that must sit under an existing parent:
-- Search candidates (`search_workitem`, `wit_query`, `wit_query` by keyword/area) and **propose** the most relevant.
-- The user confirms/corrects, provides an **id or URL**, or says "no parent".
-- In a multi-level hierarchy only the **root** has an existing parent; new children hang off items created in this same run.
-
----
-
-## PHASE 5 — Table 2 (with parent link) + confirmation loop
-
-```markdown
-| # | Type       | Title | Parent |
-|---|------------|-------|--------|
-| 1 | Feature    | Multi-tenant billing dashboard | [Epic #4210](https://<org>.visualstudio.com/<project>/_workitems/edit/4210) |
-| 2 | User Story | ↳ Show per-tenant invoice list | → #1 (new, created in this run) |
-| 3 | Task       | ↳↳ Add invoices API endpoint   | → #2 (new, created in this run) |
-```
-
-- `Type`: the one **validated** in Phase 4.
-- `Parent`:
-  - **existing** parent → **clickable link** `[Type #id](url)`;
-  - child of a **new** item → `→ #<row> (new, created in this run)`;
-  - no parent → `—`.
-  - Build the URL from the item's `_links.html.href`, or from the pattern `https://<org>.visualstudio.com/<project>/_workitems/edit/<id>` (org/project discovered at runtime, never hardcoded). **Always a link, never just the number.**
-- Below the table, state the chosen **MCP and project**.
-
-Then **ask** for changes (different parent, MCP/project, type, hierarchy, titles).
-- If changed → redo the needed part of Phase 4, reprint Table 2, ask again. Repeat until confirmed.
-- Only on explicit confirmation → Phase 6.
-
----
-
-## PHASE 6 — Detailed content preview (optional)
-
-Ask (or honor what the user already said): **"Do you want to review the full content of each item before I create them, or should I create them directly?"**
-- **Yes** → show, for each item, the **full body** (template below), including the numbered image placeholders. Apply corrections, reprint, then confirm.
-- **No** → proceed to Phase 7.
-
----
-
-## PHASE 7 — Create on Azure DevOps
-
-Create the items with a structured body (template below), using **Html** format for `Description` and `Acceptance Criteria` (ADO markdown rendering is inconsistent).
-
-### Fields: only those supported by the type
-Before creating, you read each type's real field set (the type-metadata read of Phase 4). **Set only fields that exist on that type**: setting a non-existent field **fails the whole create** (e.g. `Microsoft.VSTS.Common.AcceptanceCriteria` and `Microsoft.VSTS.TCM.ReproSteps` don't exist on every type/process). If a field is missing, fold that content **into the Description**.
-
-### State and assignment
-- **State** `New` unless told otherwise. If the type starts in a different state or the user asks for another, set it explicitly.
-- **Assignee**: none, unless explicitly requested. If "to me", resolve identity at runtime (MCP identity tool or `git config user.email`).
-
-### Order and parent (sequential, parent before children)
-- Item **with a parent** (existing or created earlier in this run) → `wit_work_item_write(parentId, workItemType, items:[{title, description (Html)}])` (links atomically), then `wit_work_item_write` for the extra supported fields (Acceptance Criteria, Tags, State/Assignee if different from defaults).
-- **Root** item **with no parent** → `wit_work_item_write(workItemType, fields:[...])` with all supported fields in one call.
-- **Root** item **under an existing parent** → prefer the atomic `wit_work_item_write(parentId=<existing>, …)`; alternatively `wit_work_item_write` + `wit_work_item_link_write(updates:[{id:<new>, linkToId:<parent>, type:"parent"}])`.
-- **Parallelism**: **sequential by default**. Only if the batch is large and there are **independent subtrees** may you parallelize them (≤4 agents), keeping parent-before-children within each subtree.
-
-### Safeguards
-- **First create in session**: on the very first item on an Azure org never touched in this session, create **one** item, show it, then proceed with the rest.
-- **Mid-batch failure**: report the **ids already created** so a retry does not duplicate.
-- **Verify**: re-read the created items (`wit_work_item`, one `action: get` each or a single `action: get_batch`) and confirm type, parent, state, and fields before the summary.
-
----
-
-## PHASE 8 — Final summary
-
-Print the **final table**:
-
-```markdown
-| # | Type       | Title (link) |
-|---|------------|--------------|
-| 1 | Feature    | [Multi-tenant billing dashboard](https://<org>.visualstudio.com/<project>/_workitems/edit/4711) |
-| 2 | User Story | ↳ [Show per-tenant invoice list](https://<org>.visualstudio.com/<project>/_workitems/edit/4712) |
-```
-
-- Title = **clickable link** to the created item. Indent children (`↳`) to show the hierarchy.
-
-Then the **images-to-attach-manually checklist** (one row per item that contains placeholders):
-
-```
-Images to attach manually:
-- [Item #4712](url): IMAGE 1 (login error screenshot), IMAGE 2 (expected layout)
-```
-
----
-
-## Item body template (English, Html)
-
-Adapt the sections to the type (Task leaner; Bug uses Repro/Expected/Actual). Base:
-
-- **Context / Background** — why, current situation.
-- **Objective** — expected outcome.
-- **Scope / What to do** — scope and concrete steps.
-- **Acceptance Criteria** — verifiable checklist (dedicated field if the type supports it, otherwise inside Description).
-- **Technical notes / Implementation hints** — guidance for the dev/AI: files, APIs, constraints, edge cases.
-- **Out of scope** — what NOT to do.
-- **References** — related items/PRs/docs (links).
-- **Images** — numbered placeholders, e.g. `> 📎 IMAGE 1 — <caption> (attach manually)`.
-
-For a **Bug** add/use: **Repro steps**, **Expected result**, **Actual result** (in addition to Context/References/Images).
-
----
-
-## Style
-- Everything in English: chat, tables, questions, and item titles/descriptions/criteria.
-- Links always clickable, never just the number (parent and created items).
-- Never invent types, fields, or tools: use those actually exposed/existing on the project and connected MCP.
-- Every gate (Table 1, Table 2, preview) requires explicit confirmation before proceeding.
-- Number the images and list them in the final checklist: the user attaches them manually.
+- `questions.md` — what the Q&A must cover, how to batch it, when to escalate to grilling, and what
+  to derive from the images instead of asking.
+- `tables.md` — the exact shape of Table 1, Table 2, the final summary and the attachment checklist,
+  with the link and hierarchy formats and the confirmation loops.
+- `item-content.md` — the item body template per type, field mapping and HTML, creation order and
+  parent linking, safeguards and the read-back verification.
