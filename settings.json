@@ -238,6 +238,67 @@
             ],
             "timeout": 15,
             "statusMessage": "Checking the branch before writing git history..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/guard-destructive.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Checking for an action with no undo..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/secret-scan.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Scanning the change for credentials..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "& \"$env:CLAUDE_HOOKS\\format-on-edit.ps1\""
+            ],
+            "timeout": 30,
+            "statusMessage": "Formatting the file just written..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/session-brief.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Reading the repository state..."
           }
         ]
       }
@@ -260,7 +321,7 @@
     "chrome-devtools-mcp@claude-plugins-official": true,
     "redis-development@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
     "modern-web-guidance@claude-plugins-official": true
   },
   "language": "Italian",
