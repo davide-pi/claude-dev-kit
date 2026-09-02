@@ -156,3 +156,39 @@ exists.
 | "conviene spezzare questo lavoro su più agent?" | MUST load |
 | "applica le tre migration in ordine" | MUST NOT (sequential by construction) |
 | "chiedi al code-reviewer di guardare il diff" | MUST NOT (a single known subagent, no fan-out to design) |
+
+### `debug-systematic`
+
+| Prompt | Expected |
+|--------|----------|
+| "l'API va in timeout solo in produzione, non capisco perché" | MUST load |
+| "questo test passa in locale e fallisce in pipeline" | MUST load |
+| "aggiungi un endpoint per esportare gli ordini in CSV" | MUST NOT (a new feature, not a defect) |
+| "spiegami come funziona il garbage collector" | MUST NOT (knowledge question, nothing to diagnose) |
+
+### `review-feedback`
+
+| Prompt | Expected |
+|--------|----------|
+| "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load |
+| "prima di far girare la review, cosa gli passo?" | MUST load |
+| "/pr-review 4312" | MUST NOT (running and posting the review belongs to pr-review) |
+| "commenta questa funzione" | MUST NOT (writing comments in code, not receiving feedback) |
+
+### `test-strategy`
+
+| Prompt | Expected |
+|--------|----------|
+| "questo servizio non ha nessun test, da dove inizio?" | MUST load |
+| "vale la pena testare questo mapper?" | MUST load |
+| "il test X fallisce, sistemalo" | MUST NOT (a failure routes to debug-systematic) |
+| "come si scrive una fixture xUnit?" | MUST NOT (mechanics belong to dotnet-testing) |
+
+### `skill-forge`
+
+| Prompt | Expected |
+|--------|----------|
+| "voglio aggiungere una skill al kit per i deploy" | MUST load |
+| "questa skill è troppo lunga, come la spezzo?" | MUST load |
+| "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
+| "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
