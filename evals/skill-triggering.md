@@ -255,3 +255,39 @@ exists.
 | "questa query carica 500 righe per ogni ordine" | MUST load |
 | "scrivi la stored procedure per il report mensile" | MUST NOT (raw T-SQL belongs to sql-server) |
 | "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to postgres) |
+
+### `sql-server`
+
+| Prompt | Expected |
+|--------|----------|
+| "questa stored procedure va in timeout solo per alcuni clienti, perché?" | MUST load |
+| "che indice serve a questa query?" | MUST load |
+| "aggiungi una migration EF per la colonna Email" | MUST NOT (belongs to ef-core) |
+| "questa query sul database di cache è lenta" | MUST NOT (the cache database is Postgres) |
+
+### `postgres`
+
+| Prompt | Expected |
+|--------|----------|
+| "questa query sul database di cache è lenta, guarda l'EXPLAIN" | MUST load |
+| "porto questa tabella da SQL Server, cosa cambia?" | MUST load |
+| "come leggo un execution plan di SQL Server?" | MUST NOT (the other engine) |
+| "aggiungi il servizio postgres al compose" | MUST NOT (belongs to docker-dev-env) |
+
+### `redis-dotnet`
+
+| Prompt | Expected |
+|--------|----------|
+| "il servizio va in RedisTimeoutException sotto carico" | MUST load |
+| "dove creo il ConnectionMultiplexer?" | MUST load |
+| "che struttura dati Redis uso per una leaderboard?" | MUST NOT (data modelling belongs to the Redis plugin) |
+| "configura le ACL sull'istanza" | MUST NOT (belongs to the Redis plugin) |
+
+### `rabbitmq`
+
+| Prompt | Expected |
+|--------|----------|
+| "questa coda cresce e i messaggi finiscono nell'error queue" | MUST load |
+| "questo consumer riprocessa lo stesso messaggio due volte" | MUST load |
+| "aggiungi il servizio rabbitmq al docker compose" | MUST NOT (belongs to docker-dev-env) |
+| "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
