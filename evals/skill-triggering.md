@@ -120,3 +120,39 @@ exists.
    negative, add the words a user actually says.
 3. Re-run the affected cases, then `node tools/validate.mjs` (the description limits are enforced
    there), and note in the PR which case changed behaviour.
+
+### `dev-loop` — the router
+
+| Prompt | Expected |
+|--------|----------|
+| "vorrei aggiungere l'export CSV degli ordini, come procediamo?" | MUST load |
+| "questo va rifatto o si aggiusta?" | MUST load (classification is the whole question) |
+| "qual è la differenza tra `IEnumerable` e `IQueryable`?" | MUST NOT (a knowledge question routes nothing) |
+| "/commit" | MUST NOT (the decision is already made; the command owns it) |
+
+### `plan-work`
+
+| Prompt | Expected |
+|--------|----------|
+| "prima di scrivere codice buttiamo giù i passi per il nuovo modulo di import" | MUST load |
+| "spezza questo lavoro in task che posso seguire" | MUST load |
+| "rinomina questa variabile in `orderTotal`" | MUST NOT (single-file change: a plan is pure overhead) |
+| "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
+
+### `done-check`
+
+| Prompt | Expected |
+|--------|----------|
+| "ho finito, confermi che è tutto a posto prima del commit?" | MUST load |
+| "questa feature è pronta per la PR?" | MUST load |
+| "fai una review del diff e dimmi se ci sono bug" | MUST NOT (defect hunting is the review axis, not the completion gate) |
+| "i test passano?" | MUST NOT (run them and answer; no gate to apply) |
+
+### `delegate-agents`
+
+| Prompt | Expected |
+|--------|----------|
+| "scrivi i test per queste otto classi, in parallelo" | MUST load |
+| "conviene spezzare questo lavoro su più agent?" | MUST load |
+| "applica le tre migration in ordine" | MUST NOT (sequential by construction) |
+| "chiedi al code-reviewer di guardare il diff" | MUST NOT (a single known subagent, no fan-out to design) |
