@@ -37,3 +37,19 @@ buried in the middle, defeats the purpose.
 - After the table: at most the one-line verdict and one short question about what to fix next.
   Nothing longer, or the table scrolls off screen.
 - No findings → no table; say what was verified instead.
+# Workspaces → ALM platform, org, project
+Maps a working directory to the platform, organization and project the work belongs to. Use it
+whenever something has to land in the right place — hours (`/worklog`), work items
+(`/workitem-create`), PRs (`/pr-review`) — instead of asking. Match on the **root** of the path:
+the mapping holds for every subfolder and repository below it. The bullets below are a **template**
+— replace the placeholders with your own roots, orgs and projects, one bullet per workspace root,
+and drop the shapes you do not have.
+- `<workspaces-root>\<product-root>\**` → Azure DevOps, org `<org-a>`, project `<Project>` — one
+  single project shared by every repo under that root.
+- `<workspaces-root>\<clients-root>\**` → Azure DevOps, org `<org-b>`; the project is **per
+  subfolder** and named after it (`<clients-root>\acme` → project `Acme`). Folders are lowercase
+  while the projects keep their own casing, so resolve the exact name at runtime by listing the
+  org's projects and matching case-insensitively; ask if none matches.
+- `<workspaces-root>\<github-root>\**` → GitHub only, no Azure DevOps: no work items and no hour
+  logging there — hours go on a dedicated per-project sheet next to the repo.
+- Any other workspace → not mapped. Ask before assuming an org or a project.

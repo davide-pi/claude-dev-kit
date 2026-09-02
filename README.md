@@ -29,7 +29,7 @@ A personal [Claude Code](https://docs.claude.com/en/docs/claude-code) toolkit: r
 | `hooks/guard-default-branch.js` | Hook | `PreToolUse` for `Bash`/`PowerShell`: asks for confirmation when a `git commit`/`push` would land on the repo's default branch (or a push targets it from elsewhere), which the `git-branching` convention forbids. Honours `git -C`, ignores `--dry-run` and commit-message text, and always exits 0. Node rather than PowerShell, and it reads `.git` directly instead of shelling out to `git`, because it runs before **every** shell tool call — ~150 ms instead of ~500 ms. |
 | `settings.json` | Config | Model + fallbacks, env vars, permission allow/deny/ask rules, the browser hook, PowerShell as default shell, enabled plugins, status line, UI preferences. |
 | `mcp/servers.example.json` | Config template | The user-scoped MCP servers the skills expect (Azure DevOps, Playwright). Not installed by copying — see [MCP servers](#mcp-servers). |
-| `statusline.js` | Status line | Node.js status line: folder · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. |
+| `statusline.js` | Status line | Node.js status line: folder — or, inside a linked git worktree, the worktree itself under a tree icon — · git branch + dirty badges · context bar · rate limits · model · effort · PR badge · vim mode. Folder/worktree names and the branch are hyperlinks; Nerd Font glyphs are declared as explicit `\uXXXX` escapes in a single `ICONS` table instead of pasted literals. |
 | `install.ps1` | Installer | Idempotent install into `~/.claude`, plus `-Check` (drift + environment report, exit 1 on problems) and `-Pull` (import local edits back into the repo). |
 | `tools/validate.mjs` | Validator | Dependency-free checks run by CI: JSON, front matter, cross-references, machine-specific paths and secrets, documented plugins and env vars. |
 | `evals/skill-triggering.md` | Evals | Behavioural cases for skill/command triggering (`MUST` load vs `MUST NOT`), for spot-checks or `skill-creator` runs. CI warns when an asset has no case. |
@@ -180,11 +180,12 @@ Note that a plugin shipping its own MCP server may need extra tooling on the mac
 
 ## Adapting to your project
 
-The agents and the `ef-migration` skill use **placeholders** where a real project name or path would go — replace them with yours:
+The agents, the `ef-migration` skill and the *Workspaces → ALM platform, org, project* section of `CLAUDE.md` use **placeholders** where a real project name or path would go — replace them with yours:
 
 - `<App>` — your solution/namespace prefix (e.g. `<App>.<Domain>.<Layer>`).
 - `<Name>DbContext` / `<Context>` — your EF Core DbContext(s) and their projects.
 - `docs/technical/` and `docs/wiki/` — the doc layout the keeper agents expect; create these (or point the agents at your own structure).
+- `<workspaces-root>` / `<product-root>` / `<clients-root>` / `<github-root>` and `<org-a>` / `<org-b>` / `<Project>` — the workspace roots you check out into and the Azure DevOps orgs and projects they belong to. That mapping is what lets `/worklog`, `/workitem-create` and `/pr-review` pick the right target from the current path instead of asking every time; keep one bullet per root and delete the shapes you do not have.
 
 The messaging conventions (`RequestAsync`/`RespondAsync`, `PublishAsync`/`SubscribeAsync`, `*.Service` / `*.Business` / `*.ServiceContract` / `*.Events`) assume EasyNetQ on RabbitMQ — swap them for your stack's patterns if different.
 
