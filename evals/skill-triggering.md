@@ -360,3 +360,21 @@ have done it in one shot.
 |--------|----------|
 | "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST invoke |
 | "implementa il nuovo endpoint di export" | MUST NOT (real work: dev-loop routes it) |
+
+### `azdo-cli`
+
+| Prompt | Expected |
+|--------|----------|
+| "leggi il work item 4711 con i suoi criteri di accettazione" | MUST load |
+| "quali stati ha il tipo Bug in questo progetto?" | MUST load |
+| "apri una issue su GitHub per questo bug" | MUST NOT (other platform: gh) |
+| "questa query WIQL è lenta" | MUST NOT (not a thing: WIQL is not tuned here) |
+
+### `workitem-analyze`
+
+| Prompt | Expected |
+|--------|----------|
+| "prendi in carico la story 4711, da dove parto?" | MUST load |
+| "questo epic è implementabile così com'è?" | MUST load |
+| "il filtro date restituisce righe sbagliate, sistemalo" | MUST NOT (a reproducible symptom goes to debug-systematic) |
+| "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
