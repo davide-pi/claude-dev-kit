@@ -137,7 +137,7 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith
 
 // Skills whose contract is "explicit trigger only": the description must say so, or the
 // model will fire them on its own.
-const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review'];
+const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review', 'items-qa'];
 for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
   const fm = frontMatter(rel);
   const dir = rel.split('/')[1];
@@ -252,6 +252,94 @@ for (const rel of textFiles.filter((f) => f.endsWith('.ps1') || f === 'settings.
 for (const name of referencedVars) {
   if (SYSTEM_VARS.has(name)) continue;
   if (!readme.includes(name)) fail('README.md', `environment variable ${name} is used by the kit but not documented`);
+}
+
+// ── 6. The v2 asset contract ─────────────────────────────────────────────────
+// The design spec under docs/specs/ sets three rules that nothing else can catch: hard line caps
+// (a skill needing more text needs a reference file, not a longer SKILL.md), a fixed body
+// skeleton, and no version numbers in an asset's prose. Every skill that predates the contract is
+// exempt — and the exemption list is the to-do list, not a permanent amnesty.
+const PRE_V2_SKILLS = new Set([
+  'git-branching', 'grill-me', 'pr-create', 'pr-review', 'workitem-create',
+  'worklog', 'ef-migration', 'pipeline', 'items-qa',
+]);
+const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
+// wc -l semantics: a trailing newline is a terminator, not an empty final line.
+const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;
+
+const LINE_CAPS = [
+  [(f) => f.endsWith('/SKILL.md'), 150, 'SKILL.md'],
+  [(f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f), 200, 'reference file'],
+  [(f) => f.startsWith('commands/') && f.endsWith('.md'), 100, 'command'],
+];
+for (const rel of allFiles.filter((f) => f.endsWith('.md'))) {
+  for (const [matches, cap, kind] of LINE_CAPS) {
+    if (!matches(rel)) continue;
+    const lines = lineCount(rel);
+    if (lines <= cap) continue;
+    const msg = `${lines} lines against the ${cap}-line cap for a ${kind}`;
+    if (isPreV2(rel)) warn(rel, `${msg} — predates the contract, scheduled for the split`);
+    else fail(rel, `${msg}. Move the depth into references/, do not delete substance`);
+  }
+}
+
+// The skeleton is what lets several authors produce assets that read as one kit.
+const REQUIRED_SECTIONS = ['When', 'Decide', 'Do', 'Traps'];
+for (const rel of allFiles.filter((f) => f.endsWith('/SKILL.md'))) {
+  if (isPreV2(rel)) continue;
+  const text = read(rel);
+  for (const section of REQUIRED_SECTIONS) {
+    if (!new RegExp(`^##\\s+${section}\\b`, 'm').test(text)) {
+      fail(rel, `has no '## ${section}' section — the body skeleton is fixed`);
+    }
+  }
+  // "When" without its exclusions is half a trigger: it says what fires the skill and never what
+  // does not, which is how a skill ends up answering questions it has no business answering.
+  if (!/Not for:/.test(text)) warn(rel, "the 'When' section states no 'Not for:' exclusions");
+}
+
+// A reference file the SKILL.md never names can never be opened: it is tokens nobody reads.
+for (const rel of allFiles.filter((f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f))) {
+  const [, skill, , file] = rel.split('/');
+  const skillFile = `skills/${skill}/SKILL.md`;
+  if (!has(skillFile)) { fail(rel, `has no ${skillFile} to be reached from`); continue; }
+  if (!read(skillFile).includes(file)) fail(rel, `${skillFile} never names it — nothing can open it`);
+}
+
+// A version number in an asset rots on a schedule nobody can keep up with. State how to detect
+// the version instead (project file, manifest) or route to the docs plugin. Deliberate exceptions
+// carry `<!-- version-ok: reason -->` on the same line.
+const VERSIONED_TECH = [
+  '\\.NET', 'Angular', 'AngularJS', 'React', 'Node', 'TypeScript', 'EF Core', 'Entity Framework',
+  'Redis', 'RabbitMQ', 'PostgreSQL', 'Postgres', 'SQL Server', 'xUnit', 'NUnit', 'MSTest', 'Vite',
+  'Tailwind', 'RxJS', 'NgRx', 'Aspire', 'Serilog', 'Polly', 'MediatR', 'Npgsql', 'EasyNetQ',
+  'StackExchange\\.Redis', 'Vitest', 'Jest', 'Karma', 'Testcontainers', 'OpenTelemetry',
+];
+const VERSION_PATTERNS = [
+  [new RegExp(`\\b(?:${VERSIONED_TECH.join('|')})\\s+v?\\d+(?:\\.\\d+)*\\b`, 'gi'), 'a pinned version'],
+  [/\bv\d+\.\d+(?:\.\d+)?\b/g, 'a version-shaped token'],
+  [/\b\d+\.\d+\.\d+\b/g, 'a semantic version'],
+];
+for (const rel of allFiles.filter((f) => f.endsWith('.md') && (f.startsWith('skills/') || f.startsWith('commands/')))) {
+  if (isPreV2(rel)) continue;
+  const text = read(rel);
+  const lines = text.split('\n');
+  for (const [pattern, label] of VERSION_PATTERNS) {
+    for (const m of text.matchAll(pattern)) {
+      const lineNo = text.slice(0, m.index).split('\n').length;
+      if (/<!--\s*version-ok:/.test(lines[lineNo - 1] ?? '')) continue;
+      fail(`${rel}:${lineNo}`, `${label} (${m[0]}) — say how to detect the version instead`);
+    }
+  }
+}
+
+// A command acts. What it must never do is the part that keeps it safe to run without reading it
+// first, so every command declares its limits — as a `## Guardrails` section (the house style) or,
+// for a short command, a single `**Never**` line.
+for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith('.md'))) {
+  if (!/(?:^|\n)\s*(?:#{2,4}\s+Guardrails\b|\*\*Never\*\*|Never:|#{2,4}\s+Never\b)/i.test(read(rel))) {
+    fail(rel, 'declares no limits — add a `## Guardrails` section or a `**Never**` line');
+  }
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────

@@ -52,3 +52,9 @@ not verified, say so plainly — that is more useful than an implied "it works".
 ### Breaking changes
 
 Migration steps. **Omit entirely if none.**
+
+## Guardrails
+
+- Generate text only: never create, update, or merge the PR itself, never push, never commit.
+- Never invent verification. If the change was not exercised, the Testing section says exactly that.
+- Never restate the diff line by line — the reviewer can read it; describe intent and consequence.
