@@ -5,8 +5,10 @@ description: >-
   human or an AI to implement without asking anything back. Runs a targeted Q&A that escalates to
   grilling, then two confirmation tables (type/title, then type/title/parent), then creates the
   items in Italian through the Azure DevOps CLI, state New and unassigned. Item wording and
-  acceptance criteria follow user-story-standard. Project, work item types and parent are discovered
-  at runtime — nothing is hardcoded. Explicit trigger: only when the user types /workitem-create.
+  acceptance criteria follow user-story-standard, which classifies by role. Project, parent and the
+  work item type that fills each role are discovered at runtime through azdo-cli — no type name is
+  ever hardcoded or defaulted, and a role the project has no type for is a question, not a
+  substitution. Explicit trigger: only when the user types /workitem-create.
 ---
 
 # workitem-create — a description becomes real work items
@@ -15,11 +17,11 @@ description: >-
 
 - The user types `/workitem-create`, with or without a description and pasted images.
 - A piece of work has to become one item, or a small hierarchy of items, on a board.
-- An existing parent (Epic, Feature, Story) has to receive new children.
+- An existing parent — a grouping item, or a backlog item that needs units of time — takes children.
 
 Not for: logging hours on an existing item (`worklog`), reading or analysing an item already on the
-board, testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth and verbs
-(`azdo-cli`). Never fires without the explicit trigger.
+board, testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth, verbs and
+the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 
 ## Decide
 
@@ -28,11 +30,11 @@ board, testing an implemented item (`items-qa`), or Azure DevOps CLI configurati
 | Rule | Detail |
 | --- | --- |
 | Italian on the board | every title, description and criterion written to the board; chat, questions and tables follow the user |
-| Nothing hardcoded | project, work item types, fields and parent are **discovered at runtime**, every run |
+| Nothing hardcoded | project, parent, fields and the type filling each role are **discovered at runtime**, every run |
 | New and unassigned | unless the user explicitly asks otherwise |
 | Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
 | Never a throwaway | no "test" item on a real board, ever |
-| Content is not ours | type classification, wording and acceptance criteria come from `user-story-standard`; this skill owns the mechanism |
+| Content is not ours | role classification, wording and acceptance criteria come from `user-story-standard`; this skill owns the mechanism |
 
 ### 2. The five gates, in order
 
@@ -40,8 +42,8 @@ board, testing an implemented item (`items-qa`), or Azure DevOps CLI configurati
 | --- | --- | --- |
 | 1. Intake | read the text **and** the images; number them `IMAGE 1..n` with a caption; summarise in 2-4 lines what was understood | — |
 | 2. Q&A | targeted batched questions, escalating to grilling when the work is ambiguous | `questions.md` |
-| 3. Table 1 | the split into items: `#`, type (provisional), title — confirm, edit, reprint until approved | `tables.md` |
-| 4. Discovery | project, the types that really exist, their real field sets, the parent | below |
+| 3. Table 1 | the split into items: `#`, role (provisional), title — confirm, edit, reprint until approved | `tables.md` |
+| 4. Discovery | project, which real type fills each role, their field sets, the parent | below |
 | 5. Table 2 | the same rows plus the resolved parent link — confirm, then optionally preview the full bodies, then create | `tables.md`, `user-story-standard` |
 
 Never merge two gates into one message, and never move past one without explicit approval.
@@ -52,22 +54,29 @@ The Azure DevOps CLI is the **first move** for everything in gate 4 and for the 
 Configuration, auth, org/project resolution, WIQL and the boards verbs all belong to `azdo-cli` —
 call it, do not re-derive it here.
 
+Table 1 carries **roles**, not type names. Gate 4 turns each role into the type that project really
+has; `azdo-cli` owns the role-to-type mapping and the discovery calls.
+
 | Needed | Source |
 | --- | --- |
 | which project | the workspace-to-project mapping in the user instructions, else list the org's projects via the CLI, else ask |
-| which work item types exist, and their real field set | CLI: the process/work-item-type metadata for that project |
+| which types exist, and their real field set | CLI: the process/work-item-type metadata for that project |
+| which type fills a role here | the mapping in `azdo-cli`, matched against the types just discovered |
 | which types are actually **in use** | CLI: a WIQL sample, deduped on the type field (WIQL has no `DISTINCT`) |
 | candidate parents | CLI: WIQL by area, title keyword or recent activity; propose the best, let the user confirm or give an id/URL |
 | free-text or cross-project search, attachments, item comments | **MCP fallback** — the CLI has no verb for these |
 
-If a requested type does not exist, or none was specified, **ask** and list what was found. Types
-never used in the project may not surface from WIQL — say the list is "in use", not exhaustive.
+**No type name is a default.** If the project has no type for a role — a technical activity on a
+process that has none, an analysis item on a process without one — **ask** which type to use and
+list the types found. Never substitute the nearest-looking one, never carry a name over from another
+project. Types never used may not surface from WIQL — say the list is "in use", not exhaustive.
 
 ### 4. Hierarchy
 
-Default: sibling items under one existing parent. On request: a multi-level tree (Feature → Story →
-Task) created in the same run, where only the **root** hangs off an existing parent and every other
-link points at an item created in this run. Create parents before children, sequentially.
+Default: sibling items under one existing parent. On request: a multi-level tree — grouping item →
+backlog item → unit of time, in the types that project resolved — created in the same run, where
+only the **root** hangs off an existing parent and every other link points at an item created in
+this run. Create parents before children, sequentially.
 
 ## Do
 
@@ -102,7 +111,9 @@ Report the result as the final table plus the manual-attachment checklist (`tabl
    the connected server actually exposes one.
 7. An item is created in state New but the type starts elsewhere → the process defines its own
    initial state → set the state explicitly after the create when it differs.
-8. Questions keep coming after Table 1 is approved → the Q&A gate was left open → resolve every
+8. A type name from the last project is reused → it was remembered instead of discovered → resolve
+   the role against this project's types every run, and ask when no type fills it.
+9. Questions keep coming after Table 1 is approved → the Q&A gate was left open → resolve every
    material doubt in gate 2; after that, only discovery facts change the tables.
 
 ## References

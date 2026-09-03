@@ -52,10 +52,15 @@ passes. The signalling is one-shot, on the initial proposal.
 
 ### Per-platform criteria, inside the same item
 
-For a **User Story (PBI)**, when the product has both a desktop and a mobile version **and the
+For a **User Story** — the role a Product Backlog Item fills, whatever a given project's process
+calls it — when the product has both a desktop and a mobile version **and the
 required behaviour differs between them**, do not write generic criteria that hold "in theory" for
 both: differentiate them explicitly **inside the same work item**. Never create separate items per
-platform. Not applicable to a Bug.
+platform.
+
+Not applicable to a Bug, which describes a malfunction already observed on a specific platform. And
+never assume desktop and mobile behave identically: that assumption is the most common source of
+criteria that look fine and turn out ambiguous in test.
 
 Put the platform in brackets right after the label:
 

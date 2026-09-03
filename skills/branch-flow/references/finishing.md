@@ -39,6 +39,11 @@ imparato"* — with the branch names, the git commands and the platform verbs le
 
 Never merge to "keep the work safe". A push already keeps it safe; merging publishes it.
 
+Every route through a PR carries one precondition: the PR links at least one work item and that item
+is the **parent backlog item** — a User Story or PBI, a Bug, an Impediment, a TECH activity — never a
+Task, so if nothing is linkable, ask which item the work belongs to (or `workitem-create`) before the
+push, because `pr-create` will not open an unlinked PR.
+
 ## 3. Merging, per platform
 
 Both platforms: **squash** (one commit per PR, linear history) and **delete the source branch**

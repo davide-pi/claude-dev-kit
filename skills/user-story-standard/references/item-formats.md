@@ -1,7 +1,9 @@
 # The four item formats
 
-One shape per type. The shape is the standard: it is copied straight into the board, so consistency
-matters more than elegance. Item text is Italian; this guidance is English.
+One shape per role. The four headings below are the **roles** the company classifies by, not Azure
+DevOps type names: which type each one is created as is resolved per project through `azdo-cli`. The
+shape is the standard: it is copied straight into the board, so consistency matters more than
+elegance. Item text is Italian; this guidance is English.
 
 ## User Story
 
@@ -61,6 +63,9 @@ riga, senza ricaricare la pagina.
 
 For a doubtful situation to be analysed or explained **before** an expected behaviour or a fix can
 be defined. No acceptance criteria: a single free Description.
+
+Typical signal: whoever reports it is asking "is this a bug, or is someone going to explain it to
+me?" and does not already know the answer.
 
 | Part | Content |
 | --- | --- |

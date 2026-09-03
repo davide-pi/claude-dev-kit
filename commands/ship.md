@@ -23,8 +23,9 @@ state names — are written as-is and never translated. The step 8 report is Ita
 
 Parse "$ARGUMENTS"; order does not matter, all parts optional.
 
-- **`<number>`** (bare digits) → the work item / issue to link. Absent → infer from the current
-  branch name, else from the commit subject, else ship without a link and say so.
+- **`<number>`** (bare digits) → the id to start from; step 6 resolves it to the item actually
+  linked. Absent → infer the candidates from the branch name, then from the commit subjects, then
+  from what the session was working on.
 - **`-b <branch>`** → create this branch instead of deriving a name.
 - **`-t <branch>`** → PR target; default the repo's default branch.
 - **`--draft`** → open the PR as a draft.
@@ -51,8 +52,17 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
 5. **Push** — `git push -u origin <branch>`. A rejected push means the remote moved: report and
    stop; do not force.
 
-6. **Pull request** — title and body **in Italian** per `pr-create`: one imperative title line
+6. **Work item — the precondition** — a PR always carries at least one item, and it is the **parent
+   backlog item** (User Story or PBI, Bug, Impediment, TECH activity; on GitHub, the issue), never a
+   **Task**, which only carries hours. For every candidate id read its **type**; a `Task` is replaced
+   by its parent, then de-duplicate — types, parents and org/project resolution via `azdo-cli`.
+   Nothing resolvable → **stop and ask** which item this change belongs to, or route to
+   `workitem-create`. Several parents → link them all, and if they sit under different Features say
+   the branch may want splitting.
+
+7. **Pull request** — title and body **in Italian** per `pr-create`: one imperative title line
    with no trailing period; body = what changed and why, from `git log <base>..HEAD` and the diff.
+   The `<id>` below is the parent item resolved in step 6.
 
    Azure DevOps:
    ```powershell
@@ -65,21 +75,20 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
    ```
    Long bodies go through `--body-file` on GitHub and repeated `--description` values on Azure
    DevOps (each value becomes a new line) — never a shell heredoc, which breaks across the two
-   shells.
+   shells. On GitHub the link is `Closes #<n>` in the body. Verify every link came back in the
+   create output — an item missing from it is not linked: add it with
+   `az repos pr work-item add --id <pr-id> --work-items <id>` and read the result again.
 
-7. **Link the work item** — Azure DevOps: `--work-items` in step 6, or afterwards
-   `az repos pr work-item add --id <pr-id> --work-items <id>`. GitHub: reference `Closes #<n>` in
-   the body. Verify the link came back in the create output; if it did not, say so rather than
-   assuming.
-
-8. **Report** — one block, in Italian: branch, commit hash, PR id and URL, the linked item, the target branch,
-   and one line on what still gates the merge (checks running, reviewers required).
+8. **Report** — one block, in Italian: branch, commit hash, PR id and URL, **which item was linked**
+   — saying it is the parent when the id given was a Task — the target branch, and one line on what
+   still gates the merge (checks running, reviewers required).
 
 ## Guardrails
 
 - **Never merge, complete or abandon.** No `gh pr merge`, no `az repos pr update --status
   completed`, no `--auto-complete`, no `--bypass-policy`. The command ends at an open PR.
 - **Never commit on the default branch** — step 3 branches instead, always.
+- **Never open a PR with no work item linked** — step 6 stops and asks instead.
 - Never `git push --force` / `--force-with-lease`, never `git rebase`, never amend an existing
   commit, never `--no-verify`.
 - Do not transition the work item's state and do not assign reviewers unless the user asked in this

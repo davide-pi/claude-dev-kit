@@ -95,3 +95,21 @@ Never hardcode an Azure DevOps organization or project, and **never trust the `a
 default** — it may still point at the previous session's client, which is how work lands in the
 wrong customer's board. Resolve both from the **current working directory** through the workspace
 mapping above, pass them explicitly on every command, and ask when the path is not mapped.
+# Every pull request carries its parent work item
+A PR always links at least one work item, and it is the **parent backlog item** — the User Story or
+PBI, the Bug, the Impediment, the TECH activity — never a Task. Tasks exist to carry hours (that is
+`worklog`'s business), and a PR pointing at a Task says nothing about what was delivered.
+- Resolve it: collect the ids the branch touches, read each one's **type**, and when it is a Task
+  take its parent instead. Link them all when there are several — and if they sit under different
+  Features, say so: the branch is probably doing two things.
+- Nothing to link → **stop and ask**, or create the item first. Never open an unlinked PR.
+- On Azure DevOps use the real PR-to-work-item link, not the item URL pasted in the body: only the
+  real link makes the item follow the PR and transition when it completes.
+# Work item types are per-project — speak in roles
+Type names depend on the project's process template, so never hardcode one. Speak in **roles** —
+backlog item, defect, question to analyse, technical activity, unit of time, grouping — and resolve
+the real name at runtime; `azdo-cli` owns the mapping and the query. My shorthand: a Product Backlog
+Item **is** the User Story role, and what I call a Bug **is** the Issue role where the template names
+it that way. The trap that makes the query mandatory rather than polite: in the Agile template
+`Issue` is the *analysis* item, in Basic it is the *backlog item* — same name, opposite meaning. When
+a project has no type for a role, ask; do not substitute the nearest one.

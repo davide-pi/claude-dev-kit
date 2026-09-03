@@ -2,8 +2,9 @@
 name: workitem-analyze
 description: >-
   Turns an Azure DevOps work item or epic into an attack plan before any code is written: read the
-  item with its description, acceptance criteria, attachments, discussion, linked items and parent;
-  separate what the item actually specifies from what is being assumed; locate the code it touches;
+  item with its description, acceptance criteria, attachments, discussion, linked items and
+  parent; recognise which role its work item type plays instead of expecting a name, custom types
+  included; separate what the item actually specifies from what is being assumed; locate the code;
   list the unknowns as explicit questions; and judge whether the item is implementable as written.
   Produces a short plan saying what changes where, what is out of scope, and which questions must be
   answered first. Use when a work item or epic has been picked up and implementation has not started,
@@ -16,7 +17,7 @@ description: >-
 **Language.** This skill's instructions are English; everything it hands the owner — the attack plan
 file, the verdict line, the questions and the chat report — is **Italian**. Markers stay as written,
 in the Italian plan too: the **S** / **D** / **A** tags, the verdict keywords, `[BLOCKING]` /
-`[non-blocking]`, `file:line`, and Azure DevOps field and type names.
+`[non-blocking]`, `file:line`, and Azure DevOps field, type and role names.
 
 ## When
 
@@ -41,7 +42,8 @@ plan once the item is understood (`plan-work`), reviewing the finished change (`
 | Acceptance criteria | done or not done | how, and where |
 | Attachments and images | the expected UI, the real error, the payload shape | whether they are current |
 | Discussion | decisions taken after the item was written — often contradicting the description | which comment won |
-| Parent (feature, epic) | why this exists, and the scope boundary above it | this item's own scope |
+| The work item type | which **role** the item plays, hence what its body should even contain | the role of a type you do not recognise |
+| The parent above it | why this exists, and the scope boundary above it | this item's own scope |
 | Children and related items | what is already carved out, and what someone else owns | ordering, unless stated |
 | Linked PRs and commits | prior attempts, and the shape a previous author chose | why it stalled |
 | State, area, iteration, tags | whether this is even live work | anything technical |
@@ -49,6 +51,12 @@ plan once the item is understood (`plan-work`), reviewing the finished change (`
 The discussion is the source most often skipped and most often decisive: a later comment routinely
 overrides the description without anyone editing it. When the two disagree, the newer statement
 wins and the plan says so explicitly.
+
+**Recognise the role, never expect a type name.** The type on the item is whatever the project's
+process calls it, custom types included, so map it to its role — backlog item, defect, analysis,
+technical activity, grouping, unit of time — through `azdo-cli`. A type you cannot map is a
+**question for the owner, not a guess**: an analysis item read as a defect gets a fix plan for a
+behaviour nobody has agreed yet.
 
 ### 2. Tag every statement you are about to write down
 
@@ -59,8 +67,7 @@ wins and the plan says so explicitly.
 | **A** — assumed | you are filling a gap | an open question, no exceptions |
 
 The failure mode of this whole skill is an **A** carried into the plan without a question attached.
-Anything that cannot be tagged is an A, not an S — including the plausible reading of a vague
-sentence.
+Anything untaggable is an A, not an S — the plausible reading of a vague sentence included.
 
 ### 3. Implementability verdict — the gate
 
@@ -68,10 +75,10 @@ sentence.
 | --- | --- | --- |
 | Criteria are testable, touchpoints located, no A on a behaviour | **implementable** | attack plan → the domain skill → `done-check` |
 | Implementable, but three or more files need a new interface between them, or a new module, integration or schema change | **needs a plan** | the attack plan, then `plan-work` |
-| Several independent deliverables in one item, or an epic with no children to work on | **needs splitting** | the split proposal, then `workitem-create` |
+| Several independent deliverables in one item, or a grouping item with no children to work on | **needs splitting** | the split proposal, then `workitem-create` |
 | An A blocks a behaviour: an external contract, an undecided rule, an undefined edge case | **blocked** | questions first; do not open an editor |
-| No acceptance criteria, or criteria nobody can verify | **not ready** | propose criteria, get them confirmed, then re-verdict |
-| The item is a symptom report with no reproduction | **not this skill** | `debug-systematic` first, re-analyse after |
+| No acceptance criteria on a role that must have them, or criteria nobody can verify | **not ready** | propose criteria, get them confirmed, then re-verdict |
+| A defect with no reproduction, or a type whose role you could not map | **not this skill** | `debug-systematic` first, or ask which role the type plays |
 
 State the verdict in one line before the plan. A plan without a verdict invites someone to start
 coding past a blocking question.
@@ -80,19 +87,16 @@ coding past a blocking question.
 
 Do not search from the main thread. Spawn `investigator` with the item's own words turned into a
 symptom or a feature phrase — an endpoint name, a message, a screen, an entity — because the agent
-searches code and the item id means nothing to it. For anything crossing services or a message bus,
-`flow-tracer` returns the ordered hop map instead. Both are read-only and return `file:line`, which
-is what the **D** tag needs. Run them in parallel when the item has two independent touchpoints.
-
-The point of delegating is that locating the code costs a lot of reading and yields three lines; the
-main context keeps the three lines.
+searches code and the item id means nothing to it. Anything crossing services or a message bus goes
+to `flow-tracer`, which returns the ordered hop map. Both are read-only and return `file:line`, what
+the **D** tag needs; run them in parallel on two independent touchpoints (`context-gathering.md`).
 
 ### 5. A question is worth asking only if the answer changes what gets built
 
 Order the questions by that, not by how uncertain they feel. A question whose either answer produces
-the same code is noise; make the decision yourself, tag it **A**, and note it in the plan. Then, for
-each real question, offer the option you would pick — a question with a proposed answer gets
-answered, an open one gets postponed. `references/unknowns-and-questions.md` has the shapes.
+the same code is noise: decide it yourself, tag it **A**, note it in the plan. For each real
+question offer the option you would pick — a proposed answer gets answered, an open question gets
+postponed. `references/unknowns-and-questions.md` has the shapes.
 
 ## Do
 
@@ -110,14 +114,12 @@ az boards query -p <project> -o table --wiql `
 az repos pr show --id <pr> --query "{title:title, status:status, src:sourceRefName}" -o jsonc
 ```
 
-The discussion has no read verb in the CLI — reading it is one of the documented gaps, so take the
-fallback route in `azdo-cli` for that one step and keep the rest on the CLI. Never analyse an item
-without its discussion because reading it was inconvenient.
+The discussion has no read verb in the CLI, so take the fallback route in `azdo-cli` for that one
+step and keep the rest on the CLI. Never skip it because reading it was inconvenient.
 
 Then spawn `investigator` for the touchpoints, and write the attack plan from
-`references/attack-plan-template.md`. Nothing in this skill writes to Azure DevOps: it never creates
-an item, never changes a state, never posts a comment. Proposing a split is a proposal —
-`workitem-create` does the creating, after confirmation.
+`references/attack-plan-template.md`. Nothing here writes to Azure DevOps: no item created, no state
+changed, no comment posted. A split is a proposal — `workitem-create` creates, after confirmation.
 
 ## Traps
 
@@ -125,8 +127,8 @@ an item, never changes a state, never posts a comment. Proposing a split is a pr
    is a guess; the verdict line costs a minute and catches it.
 2. The plan contradicts a decision already taken → the discussion was never read → read it first,
    and when it contradicts the description, the newer statement wins and the plan says so.
-3. An epic gets a file-level plan → an epic was treated as an item → an epic gets a split proposal,
-   never an implementation plan; route to `workitem-create`.
+3. A grouping item gets a file-level plan → its role was never established → a grouping item gets a
+   split proposal, never an implementation plan; route to `workitem-create`.
 4. The plan lists twelve files → the search was done in the main thread and everything found looked
    relevant → `investigator` returns the touchpoints; a touchpoint is where behaviour changes, not
    every file that mentions the noun.
@@ -142,7 +144,7 @@ an item, never changes a state, never posts a comment. Proposing a split is a pr
 ## References
 
 - `references/context-gathering.md` — the read pass in order: which field, which relation and which
-  link answers what, and what to extract from an attachment or a linked PR.
+  link answers what, how to read the type as a role, and why locating code is delegated.
 - `references/unknowns-and-questions.md` — turning a gap into a question worth someone's time, the
   implementability rubric in detail, and the split test for an oversized item.
 - `references/attack-plan-template.md` — the output: the shape, the length, and a worked example.

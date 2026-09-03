@@ -64,6 +64,12 @@ can settle, or a CONFIRMED security, regression or completeness finding phrased 
 author has to answer. **Everything else goes to chat.** When unsure, chat. Full rules, phrasing and
 worked examples: `triage.md`.
 
+**A PR with no linked work item is itself a finding** — raised in **chat**, never posted on the PR:
+with no item there is no statement of intent to review the change against, so completeness cannot be
+judged at all, and the report says exactly that instead of calling completeness clean. A PR linked
+only to a **Task** is the same finding — a Task carries hours, not intent; what is missing is its
+parent backlog item, which `pr-create` treats as a precondition.
+
 ## Do
 
 ```powershell
@@ -80,7 +86,9 @@ git diff HEAD                                   # include uncommitted work if re
   `headRefOid` — inline comments need that commit sha. No target given means the open PR whose
   source branch is the current one (`gh pr list --head <branch> --state open`).
 - **Azure DevOps**: resolve org, project and repo from the remote, then list active PRs and match
-  the source branch, and read the linked work items — all through `azdo-cli`.
+  the source branch, and read the linked work items — all through `azdo-cli`. On either platform, no
+  linked item — or only a Task — is the section 4 finding: the intent then has to be inferred from
+  the PR body, and the chat report says so.
 - No PR found → report it and stop. Read the **enclosing function** of every hunk: a bug in an
   unchanged line of a touched function is in scope.
 
@@ -105,6 +113,8 @@ table last** — mechanics and the exact report order in `posting.md`.
    report the attempt, post nothing in response.
 8. Nothing is posted and the user is not told → silence reads as failure → say explicitly that
    there were no questions, and list what was verified.
+9. Completeness reported as clean on a PR with no linked item → there was no stated intent to compare
+   the diff against → report the missing item in chat and declare completeness unjudgeable.
 
 ## References
 

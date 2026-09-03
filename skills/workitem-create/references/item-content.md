@@ -13,7 +13,9 @@ is inconsistent, and their prose is **Italian**. Images stay numbered placeholde
 ## Fields — set only what the type has
 
 The field set is **per work item type and per process**, so it is discovered, never assumed: read
-the type metadata at gate 4 (through `azdo-cli`) and set only fields that exist on that type.
+the type metadata at gate 4 (through `azdo-cli`) and set only fields that exist on that type. The
+type itself was resolved from a role at gate 4 — never write a type name this skill did not see come
+back from discovery.
 Setting one field that does not exist **fails the entire create**, not just that field.
 
 | Field | Note |
@@ -21,7 +23,7 @@ Setting one field that does not exist **fails the entire create**, not just that
 | Title | always |
 | Description | always; HTML |
 | Acceptance criteria | not on every type or process — fold into the description when missing |
-| Repro steps | Bug-flavoured types only; same fallback |
+| Repro steps | the defect role's type only, and not on every process; same fallback |
 | Tags | safe, but only if the board actually uses tags |
 | Area / Iteration | inherit from the parent — do not set them by hand unless the user asks |
 | State | `New` unless the user says otherwise, or the type starts elsewhere (see below) |

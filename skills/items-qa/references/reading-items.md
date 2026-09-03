@@ -40,8 +40,20 @@ so it leads here. `az boards` remains available for the id-and-title level.
 
 ## Reading the item
 
-Get the item with its fields expanded. What matters: the title, the work item type, the Description
-and the Acceptance Criteria. Both of the last two are HTML and both can embed images:
+Get the item with its fields expanded. What matters: the title, the work item type — and the
+**role** that type plays — and then the fields that role carries. Map the type through `azdo-cli`,
+never by the look of its name: the same literal name means the backlog item on one process template
+and the analysis item on another, and a project may well use a custom type. A type you cannot map is
+a question for the user, not a guess about which fields to grade.
+
+| Role | Where the requirement lives |
+| --- | --- |
+| backlog item | Description plus Acceptance Criteria — the normal case |
+| defect | the current-behaviour and expected-behaviour fields; the expected one **is** the requirement, and it may have no Description or Acceptance Criteria at all |
+| analysis, technical activity | no testable requirement — say so and stop rather than inventing criteria |
+| grouping, unit of time | not a testable item; ask which child item was meant |
+
+The requirement fields are HTML and can embed images:
 
 ```html
 <img src="https://dev.azure.com/{org}/{projectGuid}/_apis/wit/attachments/{guid}?fileName=image.png">

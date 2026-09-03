@@ -54,17 +54,25 @@ git log --oneline "origin/$base..HEAD"      # the intent, commit by commit
 git diff --stat "origin/$base...HEAD"       # where the weight actually is
 ```
 
-Read the linked work item or issue too: the body should answer the item, and any gap between what
+Read the linked parent item or issue too: the body should answer the item, and any gap between what
 the item asked and what the branch does belongs in the body as an explicit note. On Azure DevOps
 the item text comes through `azdo-cli`; on GitHub, `gh issue view <n> --json title,body`.
 
 ## Linking
 
-- **Azure DevOps** — attach the work item to the PR as a real link (`azdo-cli`). Policies and the
+The PR carries at least one work item, and that item is the **parent backlog item** — a User Story
+or Product Backlog Item, a Bug, an Impediment, a TECH activity; on GitHub, the issue. A **Task** is
+never linked: it exists to carry hours (`worklog` owns them), not to state what was delivered. An id
+read off the branch name or a commit message is a candidate, not the answer — read its type first,
+and if it is a Task link its parent instead (`azdo-cli`). Nothing resolvable means the PR does not
+get opened: ask which item the change belongs to, or create it (`workitem-create`).
+
+- **Azure DevOps** — attach the parent item to the PR as a real link (`azdo-cli`). Policies and the
   item's own state transition depend on that link; a URL in the body drives nothing.
 - **GitHub** — `Fixes #<n>` or `Closes #<n>` in the body closes the issue on merge. Use `Refs #<n>`
   when the PR advances an issue without closing it.
-- Multiple items: one link each. Reference other PRs by number rather than describing them.
+- Multiple parents: one link each, and if they sit under different Features say so in the body — the
+  branch is probably doing two things. Reference other PRs by number rather than describing them.
 
 ## The trailer
 

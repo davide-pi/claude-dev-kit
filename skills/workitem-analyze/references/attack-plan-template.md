@@ -79,7 +79,7 @@ commits to the sprint, and code belongs after the verdict.
 # 4711 Esportazione elenco fatture in CSV — piano di attacco
 
 **Verdetto:** implementable
-**Tipo / stato / iterazione:** Product Backlog Item · New · Sprint 42
+**Tipo / stato / iterazione:** <tipo come lo scrive il progetto> · New · Sprint 42
 **Padre:** 4690 Gestione fatture
 
 ## Cosa chiede l'item

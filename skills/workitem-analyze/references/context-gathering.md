@@ -8,7 +8,7 @@ extract.
 
 | # | Source | Command | Take from it |
 | - | --- | --- | --- |
-| 1 | The item itself | `az boards work-item show --id <id> --expand all` | type, state, title, description, acceptance criteria, area, iteration, tags, assignee |
+| 1 | The item itself | `az boards work-item show --id <id> --expand all` | type — and therefore role — plus state, title, description, acceptance criteria, area, iteration, tags, assignee |
 | 2 | The relation graph | the same call, `--expand relations` | parent, children, related items, attachments, linked commits and PRs |
 | 3 | The discussion | the `invoke` route in `azdo-cli`, or the MCP read | decisions taken after the item was written |
 | 4 | The parent | `show` on the parent id | the scope boundary above, and the business reason |
@@ -24,11 +24,11 @@ wrong noun.
 
 | Field | Question it answers | Failure mode |
 | --- | --- | --- |
-| `System.WorkItemType` | is this an epic, a feature, a story, a bug, a task? | an epic analysed as a story gets a plan it cannot carry |
+| `System.WorkItemType` | which **role** does this play — grouping, backlog item, defect, analysis, technical activity, unit of time? Map the name through `azdo-cli`, custom types included, and **ask** when it maps to none | a grouping item analysed as a backlog item gets a plan it cannot carry; an analysis item read as a defect gets a fix for a behaviour nobody agreed |
 | `System.State` | is this live work at all? | analysing something closed or removed |
 | `System.Title` | the team's vocabulary for the thing | the title as a specification — it never is |
 | `System.Description` | intent, background, sometimes the design | treating a sketch in it as agreed |
-| `Microsoft.VSTS.Common.AcceptanceCriteria` | done or not done | the field does not exist on every type; the criteria may be inside the description |
+| `Microsoft.VSTS.Common.AcceptanceCriteria` | done or not done | the field does not exist on every type, and some roles never carry criteria at all; they may be inside the description |
 | `System.AreaPath` | which component, therefore which repository | assuming the area maps one-to-one to a repo |
 | `System.IterationPath` | the time budget implied | — |
 | `System.Tags` | a convention the team encodes here (a platform, a release, a gate) | ignoring a tag that changes the flow |
@@ -97,3 +97,9 @@ launched in parallel, not one agent given two jobs.
 What comes back is the **D** evidence. Anything the agent could not find is an unknown — an
 absence found by an agent is a real finding, and often the most important one: the item assumes code
 that does not exist yet.
+
+## Why locating the code is delegated
+
+Locating the code costs a lot of reading and yields three lines. Spawning `investigator` or
+`flow-tracer` keeps the reading out of the main context and brings back only those three lines,
+which is exactly what the **D** tag needs.

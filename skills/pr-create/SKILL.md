@@ -1,11 +1,12 @@
 ---
 name: pr-create
 description: >-
-  Open a pull request on Azure DevOps or GitHub, with an Italian title and description and the work
-  item or issue linked. Use when creating a PR, when writing a PR title or body, or when a finished
-  branch has to be turned into a reviewable change. Covers platform detection from the remote,
-  targeting the protected default branch, the imperative Italian title rule, the body a reviewer
-  actually needs, linking the work item, draft versus ready, and re-pushing an open PR.
+  Open a pull request on Azure DevOps or GitHub, with an Italian title and description and at least
+  one work item linked — always the parent backlog item, never a Task. Use when creating a PR, when
+  writing a PR title or body, or when a finished branch has to be turned into a reviewable change.
+  Covers platform detection from the remote, targeting the protected default branch, the imperative
+  Italian title rule, the body a reviewer actually needs, resolving a Task id to its parent item,
+  the refusal to open an unlinked PR, draft versus ready, and re-pushing an open PR.
 ---
 
 # pr-create — turn a pushed branch into a reviewable PR
@@ -46,13 +47,34 @@ Regardless of the language of the conversation:
 Derive both from the change, not from the branch name: `git log --oneline origin/<base>..HEAD` and
 `git diff --stat origin/<base>...HEAD`. Body shape and the trailer are in `description.md`.
 
-### 3. Linking the work
+### 3. Linking the work — a precondition, not a step
+
+**A pull request always carries at least one work item, and that item is the parent backlog item —
+never a Task.** No linked parent item, no PR.
+
+- **Linked**: the item the work belongs to — a User Story or Product Backlog Item, a Bug, an
+  Impediment, a TECH activity. On GitHub, the issue.
+- **Never linked**: a **Task**. It exists to carry hours, `worklog` owns them, and a PR pointing at
+  a Task tells a reviewer nothing about what was delivered.
+
+Resolve it in this order, before the PR is created:
+
+1. Collect the candidate work item ids the branch touches — from the branch name, from the commit
+   messages on the branch, and from what the session was working on.
+2. For each id, read its **type**.
+3. Type is `Task` → read its parent and use that instead; a Task id is never the one linked.
+4. De-duplicate what is left, and link **all** of it.
+5. Nothing left → **stop and ask** which item this change belongs to, or route to
+   `workitem-create` if the item does not exist yet. Never open a PR with no item attached.
+
+The verbs, the auth and the org/project resolution behind steps 2 and 3 all belong to `azdo-cli`.
+Several parents → link them all, and if they sit under **different Features** say so: it is a signal
+the branch is doing two things and may want splitting. Say it, do not refuse.
 
 | Platform | Link | Effect |
 | --- | --- | --- |
-| Azure DevOps | attach the work item to the PR (`azdo-cli`) | the item follows the PR and transitions on completion |
+| Azure DevOps | attach the parent item to the PR (`azdo-cli`) | the item follows the PR and transitions on completion |
 | GitHub | `Fixes #<n>` / `Closes #<n>` in the body | the issue closes on merge |
-| Neither exists | say so in the body in one line | nothing silently implied |
 
 On Azure DevOps prefer the real PR-to-work-item link over pasting the item URL in the body: only
 the link drives policy and item state.
@@ -108,6 +130,10 @@ no new PR, and no force-push unless the user asks.
    an open PR on this branch first, then push.
 7. The description reads like a changelog of commits → it was generated from `git log` verbatim →
    describe the change, not its history.
+8. A **Task** ends up linked to the PR → the first id found on the branch was linked without reading
+   its type → read the type, walk to the parent, link that.
+9. A PR is opened with no item attached → nobody stopped to ask → an unlinked PR is not a valid
+   outcome: ask which item the change belongs to, or create it (`workitem-create`).
 
 ## References
 

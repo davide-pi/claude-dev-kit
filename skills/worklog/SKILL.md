@@ -83,6 +83,8 @@ La regola che separa i due casi e' l'**attribuibilita' del topic a un item di pr
 
 Un topic `internal` (tooling, non fatturabile) **non** e' gestione: resta riga a se' e non si logga.
 In dubbio → **chiedi**; mai spalmare ore di gestione su un item di prodotto per far tornare i conti.
+I Task che qui si creano o si aggiornano servono **solo al tempo**: una pull request non linka mai un
+Task, ma l'item padre (`pr-create`).
 
 ## Do
 

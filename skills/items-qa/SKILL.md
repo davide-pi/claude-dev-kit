@@ -2,7 +2,9 @@
 name: items-qa
 description: >-
   Test whether the frontend implementation of one or more Azure DevOps work items actually satisfies
-  their Description and Acceptance Criteria, by driving a real browser against a given URL
+  their Description and Acceptance Criteria — read per role, since a defect carries current and
+  expected behaviour where a backlog item carries a description and criteria, and no work item type
+  name is ever assumed — by driving a real browser against a given URL
   (Playwright when connected, Claude in Chrome otherwise or for anything behind a login), reading
   the existing Discussion to confirm or contradict earlier test rounds and pick up explained
   deviations, and then posting a [CLAUDE AI - NEED REVIEW] verdict with screenshots into each item's
@@ -67,6 +69,12 @@ authenticated corner and the comment. Say so in the chat report, and do not re-r
 | has AC, plus a requirement only in the Description   | that requirement goes in `Notes:` and does not move the percentage |
 | has an AC spanning several contexts                  | split it per context; failing in one context is **KO**, and say which |
 | has an AC you cannot test                            | neither OK nor KO: `Notes:`, and excluded from the denominator   |
+| plays the **defect** role (no Description, no AC)    | the expected behaviour is the requirement: derive `AC01…` from it, and the current behaviour is what must no longer happen |
+
+**Identify the item by role, not by type name.** The type is whatever the project's process calls
+it, custom types included: map it to a role through `azdo-cli` before deciding which fields hold the
+requirement. A type you cannot map is a question for the user — ask which role it plays rather than
+guessing which fields to grade.
 
 `Success %` = AC passed / AC total, rounded to an integer. Never a percentage against criteria you
 kept to yourself.
@@ -89,7 +97,8 @@ One comment per item. In order:
    viewports?}`; a per-group form (`101,102 -> https://a.example ; 201 -> https://b.example`) is
    allowed. Take the org and project from an item link; match an Azure DevOps MCP server connected
    in this session **by capability**, never by an assumed tool name. → `references/reading-items.md`
-2. **Read the item.** Title, type, Description, Acceptance Criteria. **Download and look at every
+2. **Read the item.** Title, type and the role it maps to, then the fields that role actually
+   carries. **Download and look at every
    embedded image** — mockups routinely carry requirements the prose never states, and that is what
    the developer built from. Save into a relative directory such as `.qa-evidence`.
 3. **Read the Discussion, oldest to newest, before testing.** Earlier results are a hypothesis

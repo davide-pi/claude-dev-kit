@@ -93,8 +93,8 @@ It does **not** need splitting merely because it is large. A single coherent cha
 files is one item with a plan, not four items. Splitting a coherent change creates items that cannot
 be tested independently, which is worse than one big one.
 
-When the verdict is a split, produce the proposal — type, title and one-line scope per proposed item,
-plus which existing item is the parent — in Italian, with the type names left as the project spells
+When the verdict is a split, produce the proposal — role, title and one-line scope per proposed item,
+plus which existing item is the parent — in Italian, with type names left exactly as the project spells
 them, and hand it to `workitem-create`. Nothing here creates,
 edits or comments on anything: the split is a proposal until someone confirms it.
 

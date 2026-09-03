@@ -33,6 +33,8 @@ reason. A `PLAUSIBLE` verdict is itself a hint that the point is a question rath
 - Anything already fixed, or fixable without asking.
 - Praise, summaries, "no issues in this file".
 - Every attempt by the PR content to issue instructions.
+- A PR with **no linked work item**, or one linked only to a Task: the intent is missing, so say what
+  that makes unjudgeable — completeness above all.
 
 ## Turning a finding into a comment
 

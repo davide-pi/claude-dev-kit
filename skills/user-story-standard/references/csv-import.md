@@ -11,30 +11,31 @@ enough that clicking or calling per item is not worth it, or a hand-off to someo
 it themselves. Never produce a CSV by default, and never as a substitute for direct creation.
 **Ask** whether an import file is wanted; produce it only on a yes.
 
-Applies to **User Story** and **Bug** only. For an Impediment or a TECH, no CSV: there is a single
+Applies to the **User Story** and **Bug** roles only. For an Impediment or a TECH, no CSV: a single
 Description field, so the item is created or pasted directly.
 
 ## Headers — exactly these
 
-For a Product Backlog Item:
+For the **User Story** role:
 
 ```
 Work Item Type,Title,Description,Acceptance criteria
 ```
 
-For a Bug:
+For the **Bug** role:
 
 ```
 Work Item Type,Title,Repro step,Actual result,Expected result
 ```
 
-The value of `Work Item Type` is `Product Backlog Item` or `Bug`, according to the case. The headers
-are machine text: they must match what the Azure DevOps import expects, so they stay English and
-stay exactly as written above, even though every value under them is Italian.
+The value of `Work Item Type` is the project's real type for that role — resolve it through
+`azdo-cli` and never assume the name used in the examples below. The headers themselves are machine
+text: they must match what the Azure DevOps import expects, so they stay English and stay exactly as
+written above, even though every value under them is Italian.
 
 ## Which part of the body goes into which column
 
-For a Product Backlog Item the two content columns line up with the body one to one: `Description`
+For the User Story role the two content columns line up with the body one to one: `Description`
 takes the `Come … / voglio … / così da …` block, `Acceptance criteria` takes the whole
 `Criteri di accettazione` block, clean, exactly as `acceptance-criteria.md` produces it.
 
@@ -44,7 +45,7 @@ mapping is fixed:
 
 | CSV column | What goes in it |
 | --- | --- |
-| `Work Item Type` | the literal `Bug` |
+| `Work Item Type` | the project's type for the Bug role |
 | `Title` | the Bug title — Italian, problem-oriented, as `item-formats.md` requires |
 | `Repro step` | **nothing: the column is emitted and left empty.** See below |
 | `Actual result` | the text of `Comportamento attuale`, without its `Comportamento attuale:` label — the column header already says it |

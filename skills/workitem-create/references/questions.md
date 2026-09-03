@@ -37,7 +37,8 @@ wrong inference gets corrected instead of silently baked into an item.
 Ask as a discrete choice, not open prose, when the answer set is small and known:
 
 - **How many items** — one, or a split (and if a split, the shape).
-- **Type** — when uncertain, offer only types discovery confirmed exist.
+- **Role** — which of `user-story-standard`'s four the point is; the type comes later, at gate 4,
+  and only from types discovery confirmed exist.
 - **Hierarchy** — flat siblings under one parent, or a multi-level tree.
 - **Priority / severity** — only if the board actually uses those fields.
 - **State and assignment** — only when the user hints at something other than New and unassigned.
