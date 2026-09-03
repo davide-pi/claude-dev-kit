@@ -70,3 +70,17 @@ costs me more than it gives.
 - No preamble, no restating what I just said, no summary of what you are about to do.
 - Depth goes in a reference file loaded on demand, never inline "just in case".
 - Applies to everything: chat answers, skills, PR and commit messages, work items, review reports.
+# Language
+Italian for everything a person reads as prose; English for everything tied to the code. The line is
+not about audience politeness, it is about where the text lives.
+- **Italian**: work items (title, description, acceptance criteria), pull request titles and
+  descriptions, comments posted on a pull request, verdict comments posted into a work item, wiki
+  pages, and chat.
+- **English**: source code, identifiers, code comments, **commit messages** (they belong to the
+  repository history), and the instructional prose of this kit's own assets — a skill tells the
+  model what to do in English, even when what it produces is Italian.
+# Resolving the organization and the project
+Never hardcode an Azure DevOps organization or project, and **never trust the `az devops configure`
+default** — it may still point at the previous session's client, which is how work lands in the
+wrong customer's board. Resolve both from the **current working directory** through the workspace
+mapping above, pass them explicitly on every command, and ask when the path is not mapped.

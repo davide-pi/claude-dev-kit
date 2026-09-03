@@ -341,6 +341,30 @@ for (const rel of allFiles.filter((f) => f.endsWith('.md') && (f.startsWith('ski
   }
 }
 
+// An Azure DevOps organization or project name identifies a client, and this repository is public,
+// so every URL and every explicit --org value must carry a placeholder instead. Checked apart from
+// the leak rules because the shape is specific: a host segment that is not a placeholder.
+const ORG_PATTERNS = [
+  [/dev\.azure\.com\/(?![<{%]|your-)([A-Za-z0-9._-]{2,})/g, 'an Azure DevOps organization name'],
+  [/\b(?![<{])([A-Za-z][A-Za-z0-9-]{1,})\.visualstudio\.com/g, 'an Azure DevOps organization name'],
+];
+// Words that are stand-ins rather than customers: a comment documenting the URL shape writes `org`
+// without angle brackets, and Microsoft's own examples use contoso and fabrikam.
+const PLACEHOLDER_ORGS = new Set([
+  'org', 'orgname', 'organization', 'myorg', 'yourorg', 'example', 'placeholder',
+  'contoso', 'fabrikam', 'tenant',
+]);
+for (const rel of textFiles) {
+  const text = read(rel);
+  for (const [pattern, label] of ORG_PATTERNS) {
+    for (const m of text.matchAll(pattern)) {
+      if (PLACEHOLDER_ORGS.has(m[1].toLowerCase())) continue;
+      const line = text.slice(0, m.index).split('\n').length;
+      fail(`${rel}:${line}`, `${label} (${m[1]}) — use a placeholder such as <org>`);
+    }
+  }
+}
+
 // A command acts. What it must never do is the part that keeps it safe to run without reading it
 // first, so every command declares its limits — as a `## Guardrails` section (the house style) or,
 // for a short command, a single `**Never**` line.
