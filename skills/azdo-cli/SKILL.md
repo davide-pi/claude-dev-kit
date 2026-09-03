@@ -2,28 +2,27 @@
 name: azdo-cli
 description: >-
   Azure DevOps from the command line and the foundation every other Azure DevOps asset calls:
-  configuring the default organization and project, signing in — including an organization backed by
-  a different Entra tenant — WIQL queries, reading, creating, updating, commenting and linking work
-  items, discovering the work item types and states a project really has, listing and reading pull
-  requests, creating one, setting reviewers and completing it, listing pipeline definitions and runs
-  and queueing one. Use whenever an Azure DevOps board, repository, pull request or pipeline has to
-  be read or changed from a shell, when an `az devops` call fails on authentication or returns "not
-  found", or when deciding whether a capability genuinely needs the MCP fallback. The CLI is always
-  the first move; the MCP servers are the documented fallback.
+  resolving the organization and project instead of trusting a default, signing in — including an
+  organization on a different Entra tenant — WIQL queries, reading, creating, updating, commenting
+  and linking work items, discovering the fields, types and states a project really has, attaching
+  files and inlining images, reading and writing wiki pages, pull requests from listing to
+  completion, and pipeline definitions, runs and queueing. Use whenever an Azure DevOps board,
+  repository, pull request, wiki or pipeline has to be read or changed from a shell, when an
+  `az devops` call fails on authentication or returns "not found", or when deciding whether a
+  capability genuinely needs the MCP fallback. The CLI is the first move; MCP is the fallback.
 ---
 
 # azdo-cli — Azure DevOps through `az`, with the MCP servers as the documented fallback
 
 ## When
 
-- Anything on an Azure DevOps board, repository, pull request or pipeline has to be read or written
-  from a shell.
+- An Azure DevOps board, repository, pull request, wiki or pipeline has to be read or written from
+  a shell — or the organization and project the work belongs to have to be resolved first.
 - Another asset needs the exact verb and flags: `workitem-create`, `workitem-analyze`, `pr-review`,
   `pr-create`, `branch-flow`, `worklog`, `/ship`, `/status`, `/item`, `/fix-ci`.
-- An `az devops`, `az boards`, `az repos` or `az pipelines` call fails on authentication, or reports
-  a project or repository it should be able to see.
-- A capability might not exist in the CLI and the fallback decision has to be made honestly.
-- A flag is about to be guessed from memory.
+- A call fails on authentication, or cannot see a project or repository it should.
+- A capability might not exist in the CLI and the fallback decision has to be made honestly, or a
+  flag or a field reference name is about to be guessed from memory.
 
 Not for: GitHub, which is `gh` (`branch-flow`, `pr-create`); authoring pipeline YAML (`pipeline`);
 deciding *what* a work item should say (`workitem-create`) or how to attack one
@@ -31,117 +30,121 @@ deciding *what* a work item should say (`workitem-create`) or how to attack one
 
 ## Decide
 
-### 1. Which surface owns the call
+### 1. The organization and the project outrank every other rule here
+
+**Never hardcode an organization or a project, and never trust the configured default.** The
+`az devops configure` defaults may still point at the previous session's client, which is how work
+lands in the wrong customer's project. Resolve both from the **current working directory**, through
+the workspace-to-platform mapping the user keeps in their `CLAUDE.md`, and pass them explicitly with
+`--org` and `-p` on every command. If the path is not mapped, **ask** — never guess, and never let
+`--detect` or the machine default fill the hole.
+
+`-p` is not a filter, either: **`az boards query --project` does not scope reliably** — it has been
+observed returning work items of other projects. Every WIQL therefore repeats the scope itself,
+`WHERE [System.TeamProject] = '<project>'`, in addition to `-p`.
+
+### 2. Which surface owns the call
 
 | Task | Group | Catalogue |
 | --- | --- | --- |
-| Organization level: projects, wikis, users, raw REST | `az devops` | `references/auth-and-config.md` |
+| Organization level: projects, users, raw REST | `az devops` | `references/auth-and-config.md` |
 | Work items, queries, areas, iterations | `az boards` | `references/boards-catalogue.md` |
+| Work item fields, attachments, inline images | `az boards` + REST | `references/workitem-content.md` |
+| Wiki: page tree, read, create, update | `az devops wiki` + REST | `references/wiki-rest.md` |
 | Repositories, pull requests, refs, branch policies | `az repos` | `references/repos-and-prs.md` |
 | Pipeline definitions, runs, variables, releases | `az pipelines` | `references/pipelines-catalogue.md` |
 
-`az devops invoke` is the raw REST escape hatch inside the CLI. It is still the CLI: reach for it
-**before** an MCP tool, not after.
+`az devops invoke` is the raw REST escape hatch inside the CLI — still the CLI, so reach for it
+**before** an MCP tool. So is a REST call bearing the token of the current `az login`:
+`az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798` — the fixed Azure
+DevOps resource id, identical in every organization, no PAT.
 
-### 2. CLI first — and the gaps are known, not guessed
+### 3. CLI first — and the gaps are known, not guessed
 
-Every one of these was checked against the command groups' own `--help`. There is no verb for them.
+No verb exists for these — checked against each group's own `--help`.
 
-| Capability | In the CLI | Route |
-| --- | --- | --- |
-| A project's work item types, their states and their field set | no | `az devops invoke` (`wit`), or WIQL-sample the values in use → MCP for the type's field set |
-| Read a work item's discussion | no — `--discussion` only *writes* one | `az devops invoke` (`wit`) → MCP work-item read |
-| Attach a file to a work item | no | MCP attachment tool |
-| Pull request comment threads: read, create, reply, inline anchor | no | MCP PR-thread tools |
-| A pipeline run's step logs | no — `runs show` returns links only | `az devops invoke` (`build`) → MCP build-log tool |
-| Full-text search over code, wiki or work items | no | MCP search tools |
-| Read a file's content at a ref without cloning | no | `git show <ref>:<path>` → MCP repo-file tool |
-| Backlog levels and board columns | no | MCP backlog tool |
+| No verb for | Nearest route still inside the CLI |
+| --- | --- |
+| A type's states and field set; a work item's discussion (`--discussion` only *writes*) | `az devops invoke --area wit`, or WIQL-sample the values in use |
+| A pipeline run's step logs (`runs show` returns links only) | `az devops invoke --area build` |
+| PR comment threads; full-text search; backlog levels and board columns | none — these are the genuine MCP cases |
 
-**How to tell you have hit a real gap** — two cheap signals, both before falling back:
+**Two things that are no longer gaps**, because that token reaches them — do not fall back:
+attachments (POST the bytes, then PATCH an `AttachedFile` relation — but on a Bug inline the image
+in the field instead: `references/workitem-content.md`), and wiki page writes plus the page tree (the
+write verbs corrupt accents and there is no `list` verb: `references/wiki-rest.md`).
+**A real gap needs both signals**: `--help` lists no verb (a missing *flag* usually means the wrong
+verb), and `az devops invoke` would need a route you cannot verify.
 
-1. The group's `--help` lists no verb for it. A *missing verb* is a gap; a *missing flag* usually
-   means the verb is the wrong one.
-2. `az devops invoke` would need an area, resource or route you cannot verify. An unverifiable
-   route is a gap, not a thing to guess at.
-
-Anything else is not a gap. `references/mcp-fallback.md` holds the discipline and what to say when
-you use it.
-
-### 3. Verify before typing
+### 4. Verify before typing
 
 | Question | Answer it with |
 | --- | --- |
 | Does this verb exist? | `az <group> --help` — read `Commands:` and `Subgroups:` |
-| Does this flag exist, and is it required? | `az <group> <verb> --help` |
-| What values does the flag accept? | the same help — enums are printed as `Allowed values:` |
+| Does this flag exist, is it required, what values does it take? | `az <group> <verb> --help` — enums print as `Allowed values:` |
 | What does the response actually contain? | run the read verb once with `-o json`, then add `--query` |
+| Does this type have that field? | never assume — `references/workitem-content.md`, section 1 |
 
-Never write a flag you have not seen in a `--help` output in this session. The extension
-consolidates its surface over time, so memory is not evidence.
+Never write a flag, or a field reference name, you have not seen in output this session.
 
-### 4. Authentication triage
+### 5. Authentication triage
 
 | Symptom | Cause | Fix |
 | --- | --- | --- |
 | `az devops` prompts, or "before you can run..." | no credential for that organization | `az login`, or `az devops login --org <url>` with a PAT |
-| Signed in, yet the organization is invisible | the organization is backed by a **different Entra tenant** than the current sign-in | sign in again naming the tenant: `az login --tenant <tenant-domain> --allow-no-subscriptions` |
-| Works for one organization, fails for another | two organizations, two tenants, one credential | one sign-in (or one PAT) **per tenant**; see `references/auth-and-config.md` |
-| "not found" on a project or repository that exists | the default `project`/`organization` points elsewhere, or the PAT lacks that scope | `az devops configure --list`, then override with `--org` / `-p` |
-| A read works and the write is refused | PAT scope, or branch/board permission | check the scope before blaming the command |
+| Signed in, yet the organization is invisible, or one organization works and the next does not | the organization is backed by a **different Entra tenant** than the current sign-in | sign in naming the tenant: `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in or PAT **per tenant** |
+| "not found" on a project or repository that exists | the org/project passed (or defaulted) points elsewhere, or the PAT lacks that scope | re-resolve per decision 1, then pass `--org` / `-p` explicitly |
+| A read works and the matching write is refused | PAT scope, or branch/board permission — PATs are per organization **and** per scope | check the scope before blaming the command |
 
 ## Do
 
 ```powershell
-# Defaults, so every later command can omit --org and -p. They live in the az config directory
-# (%USERPROFILE%\.azure), not in the repo, so they are per-machine, not per-project.
-az devops configure --defaults organization=https://dev.azure.com/<org> project=<project>
-az devops configure --list                      # what is set right now
-az devops configure --defaults project=''       # clear one
+$org = 'https://dev.azure.com/<org>'; $proj = '<project>'   # resolved from the path — decision 1
+az account show --query "{user:user.name, tenant:tenantId}" -o jsonc   # who and which tenant
+az devops configure --list        # inspect the machine default; never rely on it
 
-# Who am I, on which tenant. Do this first when anything smells like permissions.
-az account show --query "{user:user.name, tenant:tenantId}" -o jsonc
-az devops user show --user <upn> --query "{name:user.displayName, access:accessLevel.licenseDisplayName}" -o jsonc
+# Reads, most useful first. The scope lives in the WIQL, not only in -p.
+$w = "SELECT [System.Id],[System.Title],[System.State] FROM WorkItems WHERE [System.TeamProject] = '$proj' AND [System.Id] = <id>"
+az boards query --org $org -p $proj --wiql $w -o table
+az boards work-item show --org $org --id <id> --expand all -o jsonc
+az repos pr show --org $org --id <pr> --query "{title:title,status:status,tgt:targetRefName}" -o jsonc
 
-# Per-command override always beats the default; --detect infers the org from the git remote.
-az repos pr list --org https://dev.azure.com/<other-org> -p <other-project> -o table
-az boards work-item show --id <id> --detect true
-
-# Read paths, in order of how often they are the answer.
-az boards query --wiql "SELECT [System.Id],[System.Title],[System.State] FROM WorkItems WHERE [System.Id] = <id>" -o table
-az boards work-item show --id <id> --expand all -o jsonc
-az repos pr show --id <pr> --query "{title:title,status:status,src:sourceRefName,tgt:targetRefName}" -o jsonc
-az pipelines runs list --top 5 --result failed -o table
+# The bearer for the REST steps with no verb: attachments, inline images, wiki writes.
+$token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv
 ```
 
 ## Traps
 
-1. Command works in one repository, fails in the next → the defaults are machine-wide while the
-   project is not → pass `-p` explicitly in anything scripted, or `--detect true`.
-2. `az devops login` succeeds and boards still 401 → the PAT is scoped to the wrong organization or
-   lacks the work-item scope → PATs are per organization and per scope; check both.
-3. An organization stays invisible after a clean `az login` → its Entra tenant differs from the
-   default one → `az login --tenant <tenant-domain> --allow-no-subscriptions`, and keep the tenants'
-   credentials apart.
-4. A WIQL query returns nothing that a saved query returns → `az boards query` supports **flat**
-   queries only → rewrite the tree or one-hop query flat, or query the link table separately.
-5. A create fails whole because of one field → the field does not exist on that work item type →
-   discover the type's fields first; fold unsupported content into the description.
-6. `--fields` silently ignored → `show` takes a **comma-separated** list while `create`/`update`
-   take **space-separated** `field=value` pairs → they are different flags with the same name.
-7. Reaching for an MCP tool because a flag was not found → the verb was wrong, not missing → re-read
-   `Commands:` for the group before declaring a gap.
-8. A PR completes by accident → `--status completed` on `update` merges immediately → completing,
-   abandoning and `--bypass-policy` are irreversible; confirm before running them.
+1. A query returns items nobody recognises → `--project` did not scope it → repeat
+   `[System.TeamProject] = '<project>'` inside the WIQL, every time.
+2. Works in one repository, fails in the next → machine-wide defaults → pass `--org` / `-p` always.
+3. An organization stays invisible after a clean `az login` → its Entra tenant differs → `az login
+   --tenant <tenant-domain> --allow-no-subscriptions`.
+4. A WIQL query returns nothing a saved query returns → `az boards query` is **flat**-only → rewrite
+   it flat, or query the link table separately.
+5. A created item looks empty on the board → the text went into a field the form does not show, and
+   a Bug has no Description field at all → discover the type's real fields first.
+6. An image on a Bug goes unnoticed → an `AttachedFile` relation only shows in the Attachments tab →
+   inline the `<img>` into the field's existing HTML instead.
+7. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
+   system codepage → write over REST with `charset=utf-8`, then read the page back.
+8. `--fields` ignored → `show` wants a **comma-separated** list, `create`/`update` **space-separated**
+   `field=value` pairs → different flags, same name.
+9. Reaching for MCP because a flag was not found → the verb was wrong → re-read `Commands:` first.
+10. A PR completes by accident → `--status completed` on `update` merges at once; that, abandoning
+    and `--bypass-policy` are irreversible → confirm first.
 
 ## References
 
-- `references/auth-and-config.md` — sign-in, PAT versus Entra, multi-tenant organizations, where the
-  configuration lives, per-command overrides. Read it on any auth or "not found" failure.
-- `references/boards-catalogue.md` — WIQL, read, create, update, state, comment, parent/child links,
-  attachments, and discovering the types and states a project really has.
-- `references/repos-and-prs.md` — repositories, PR list/read/create/update, reviewers, votes,
-  completion, and the thread gap.
-- `references/pipelines-catalogue.md` — definitions, runs, queueing, and getting a failed run's logs.
-- `references/mcp-fallback.md` — the gap list with its MCP counterpart, and the discipline for using
-  it. Read it only once the CLI has actually been tried.
+- `references/auth-and-config.md` — sign-in, PAT versus Entra, multi-tenant organizations,
+  precedence, `az devops invoke`. Read it on any auth or "not found" failure.
+- `references/boards-catalogue.md` — WIQL and its scoping rule, read, create, update, state,
+  comment, links, and discovering the types and states a project really has.
+- `references/workitem-content.md` — a type's real field reference names, the Bug form's three
+  fields, attaching and inlining an image over REST. Read it before writing any field.
+- `references/wiki-rest.md` — the page tree, reading a page, writing one over REST with the eTag
+  discipline. Read it before any wiki write.
+- `references/repos-and-prs.md` — repositories, PRs, reviewers, votes, completion, reading a file at
+  a ref, the thread gap.
+- `references/pipelines-catalogue.md` — definitions, runs, queueing, a failed run's logs.
+- `references/mcp-fallback.md` — the gap list, its MCP counterpart, the discipline. Read it last.

@@ -8,12 +8,18 @@ Angular, React**, with **Azure DevOps** as the ALM platform and GitHub alongside
 *technique*, anonymous on *identity*: the patterns, libraries and commands are real, while
 organization and project names, machine paths and addresses are placeholders.
 
+**Two languages, split by where the text lives.** Every asset here is written in English — it
+addresses the model, and this repository is public — and so is everything tied to the code: source,
+identifiers, comments, commit messages. What an asset makes a *person* read is Italian: work items,
+pull request titles and bodies, review comments, wiki pages. A skill is written in English and says
+"produce Italian". Swap that second half for your own language and nothing else changes.
+
 ## Five levels
 
 | Level | What it solves | Assets |
 |---|---|---|
 | **Routing** | which asset owns this task | `dev-loop`, plus the rules in `CLAUDE.md` |
-| **Knowledge** | not re-deciding what was decided once | 30 skills, 102 reference files |
+| **Knowledge** | not re-deciding what was decided once | 33 skills, 114 reference files |
 | **Exploration** | finding context without burning the main context window | 8 subagents |
 | **Execution** | running a known sequence in one shot | 12 slash commands |
 | **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
@@ -76,7 +82,10 @@ few capabilities the CLI genuinely lacks.
 |---|---|
 | `skills/azdo-cli/SKILL.md` | The foundation everything else calls: configuration and defaults, auth including an organization on another tenant, WIQL, the boards, repos, PR and pipeline verbs, `az devops invoke` as the REST escape hatch, and the fallback rules. |
 | `skills/workitem-analyze/SKILL.md` | An item or epic becomes an attack plan before any code: specified against assumed, where the code is, and the questions that must be answered first. Read-only. |
-| `skills/workitem-create/SKILL.md` | `/workitem-create` — a description and images become work items after a Q&A pass and two confirmation tables. English, New and unassigned. |
+| `skills/user-story-standard/SKILL.md` | The company standard for **what an item says**: classifying a request as a User Story, Bug, Impediment or TECH, the exact body shape of each, and acceptance criteria in the mandatory `Dato che / Quando / Allora` form — plus the four coverage families behind them, and the rule that the criteria are never written together with the story, because what looks like one story usually contains three. |
+| `skills/workitem-create/SKILL.md` | `/workitem-create` — a description and images become work items after a Q&A pass and two confirmation tables. Owns the **mechanism**; the content follows `user-story-standard`. |
+| `skills/backlog-integration/SKILL.md` | `/backlog-integration` — turns a client meeting into real items on an existing board: pick the Epic and Feature that scope the session, take one point at a time, build a cart, then create everything in bulk with parents and assignees. Writes no hours. |
+| `skills/project-wiki-standard/SKILL.md` | `/project-wiki-standard` — the canonical structure of an Azure DevOps project wiki and the zero-duplication rule that keeps it usable: one place per fact, an answered question **migrates** to the page that owns it and is deleted, and constraints stay separate from the decisions taken in response. |
 | `skills/worklog/SKILL.md` | `/worklog` — reconstructs what was done in a period from the session transcripts, estimates time per topic, then logs the hours on the right work items. Italian by design. |
 | `skills/pr-review/SKILL.md` | `/pr-review [target] [effort] [focus]` — reviews a PR and posts **only genuine questions**; everything else stays in chat. Delegates to `code-reviewer`, fanning out to the specialists from `high`. |
 | `skills/pr-create/SKILL.md` | Opening a PR on either platform: English imperative title, reviewer-sized body, protected-branch target read from the remote, work item linked. |

@@ -13,12 +13,12 @@ question and it goes on the PR.
 
 | Case | Shape |
 | --- | --- |
-| Intent | "Is `X` intended here, or should it be `Y`?" |
-| Dropped guard | "The null check on `<param>` is gone in this path — deliberate?" |
-| CONFIRMED security | "This path concatenates the route id into the SQL text — is the input validated upstream?" |
-| CONFIRMED regression | "`<Caller>` still passes the old shape — was it updated elsewhere?" |
-| CONFIRMED completeness | "`Status.Archived` isn't handled in `Map()` — intentional?" |
-| Critical and cryptic | a short "why?" where the code cannot be understood without the answer |
+| Intent | "`X` è intenzionale qui, o dovrebbe essere `Y`?" |
+| Dropped guard | "Il null check su `<param>` non c'è più in questo path — è voluto?" |
+| CONFIRMED security | "Questo path concatena l'id di route nel testo SQL — l'input è validato a monte?" |
+| CONFIRMED regression | "`<Caller>` passa ancora la vecchia forma — è stato aggiornato altrove?" |
+| CONFIRMED completeness | "`Status.Archived` non è gestito in `Map()` — intenzionale?" |
+| Critical and cryptic | a short "perché?" where the code cannot be understood without the answer |
 
 A CONFIRMED security, regression or completeness finding does **not** stay in chat — but it is
 phrased as the question the author must answer, never as a lecture. The subagent's *for the author*
@@ -45,12 +45,13 @@ reason. A `PLAUSIBLE` verdict is itself a hint that the point is a question rath
 5. **No hedging stack** ("maybe possibly consider perhaps") and no apologising. A question is not a
    confrontation.
 6. **Start with the tag**, then the question.
+7. **Write the question in Italian** — the author reads it. The tag itself never changes.
 
-Bad: *"This method is O(n²) because the inner loop re-queries per item, which will not scale as the
-tenant count grows; consider batching."* — a lecture with no ask.
+Bad: *"Questo metodo è O(n²) perché il loop interno ri-interroga per ogni elemento e non scalerà al
+crescere dei tenant; valuta un batch."* — a lecture with no ask.
 
-Good: *"[Claude AI Review - performance] `GetTotals()` queries once per invoice inside the loop — is
-the tenant count bounded here, or should this be one batched query?"*
+Good: *"[Claude AI Review - performance] `GetTotals()` interroga una volta per fattura dentro il
+loop — il numero di tenant è limitato qui, o serve una singola query in batch?"*
 
 ## Second passes
 

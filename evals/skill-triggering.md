@@ -399,3 +399,31 @@ have done it in one shot.
 | `/items-qa` | MUST load |
 | "controlla se questo componente rispetta gli AC" | MUST NOT (no explicit trigger: it drives a real browser and posts a comment) |
 | "apri il sito e fai uno screenshot" | MUST NOT (browser use is not a work-item verdict) |
+
+## Cases for the standards ported from the PM's own skills
+
+### `user-story-standard`
+
+| Prompt | Expected |
+|--------|----------|
+| "mi serve una story per l'esportazione del report mensile in PDF" | MUST load |
+| "scrivimi i criteri di accettazione di questo item" | MUST load |
+| "il filtro data mostra righe fuori range, ma non so se è un bug" | MUST load (the Impediment branch is exactly this) |
+| "crea questi tre item su Azure DevOps sotto la Feature 1234" | MUST NOT (putting items on the board is workitem-create) |
+| "traduci questa user story in inglese" | MUST NOT (a translation, not the standard) |
+
+### `backlog-integration` — explicit trigger only
+
+| Prompt | Expected |
+|--------|----------|
+| `/backlog-integration` | MUST load |
+| "crea un PBI per questa descrizione" | MUST NOT (one item, not a meeting-driven session: workitem-create) |
+| "abbiamo fatto una riunione, ti racconto i punti" | MUST NOT without the trigger (it writes to a real board) |
+
+### `project-wiki-standard` — explicit trigger only
+
+| Prompt | Expected |
+|--------|----------|
+| `/project-wiki-standard` | MUST load |
+| "aggiorna la documentazione di architettura del repo" | MUST NOT (a repository docs tree is doc-keeper) |
+| "scrivi la pagina Vincoli sulla wiki" | MUST NOT without the trigger (it writes to a real wiki) |

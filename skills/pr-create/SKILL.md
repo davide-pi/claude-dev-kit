@@ -1,10 +1,10 @@
 ---
 name: pr-create
 description: >-
-  Open a pull request on Azure DevOps or GitHub, with an English title and description and the work
+  Open a pull request on Azure DevOps or GitHub, with an Italian title and description and the work
   item or issue linked. Use when creating a PR, when writing a PR title or body, or when a finished
   branch has to be turned into a reviewable change. Covers platform detection from the remote,
-  targeting the protected default branch, the imperative English title rule, the body a reviewer
+  targeting the protected default branch, the imperative Italian title rule, the body a reviewer
   actually needs, linking the work item, draft versus ready, and re-pushing an open PR.
 ---
 
@@ -33,13 +33,13 @@ The PR **always targets the protected default branch** read from the remote, nev
 name: `git symbolic-ref --short refs/remotes/origin/HEAD`. Target another branch only when the user
 names it (a stacked PR, a release branch).
 
-### 2. Title and description — always English
+### 2. Title and description — always Italian
 
 Regardless of the language of the conversation:
 
 | Part | Rule |
 | --- | --- |
-| Title | one line, **imperative**, specific, no trailing period — `Add per-tenant invoice export` |
+| Title | one line, **imperative**, specific, no trailing period — `Aggiungi export fatture per tenant` |
 | Body | what changed and why, as a few bullets; only what a reviewer needs |
 | Never | a filled-in template with empty sections, a commit-by-commit dump, or a diff restated in prose |
 
@@ -102,8 +102,8 @@ no new PR, and no force-push unless the user asks.
 3. "No commits between …" → the branch was never pushed → push with `--set-upstream` first.
 4. The work item stays Active after the merge → the item was pasted as a URL, not linked → attach
    it as a real PR link.
-5. An Italian title or body reaches the PR → the chat language leaked → title and body are English,
-   always; the chat summary can stay in the user's language.
+5. An English title or body reaches the PR → the code's language leaked into the prose → title and
+   body are Italian, always; the chat summary can stay in the user's language.
 6. A second PR appears for the same branch → a new `create` was run instead of pushing → check for
    an open PR on this branch first, then push.
 7. The description reads like a changelog of commits → it was generated from `git log` verbatim →

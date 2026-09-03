@@ -4,9 +4,9 @@ description: >-
   Create one or more Azure DevOps work items from a description and images, complete enough for a
   human or an AI to implement without asking anything back. Runs a targeted Q&A that escalates to
   grilling, then two confirmation tables (type/title, then type/title/parent), then creates the
-  items through the Azure DevOps CLI in English, state New and unassigned. Project, work item types
-  and parent are discovered at runtime — nothing is hardcoded. Explicit trigger: only when the user
-  types /workitem-create.
+  items in Italian through the Azure DevOps CLI, state New and unassigned. Item wording and
+  acceptance criteria follow user-story-standard. Project, work item types and parent are discovered
+  at runtime — nothing is hardcoded. Explicit trigger: only when the user types /workitem-create.
 ---
 
 # workitem-create — a description becomes real work items
@@ -27,12 +27,12 @@ board, testing an implemented item (`items-qa`), or Azure DevOps CLI configurati
 
 | Rule | Detail |
 | --- | --- |
-| English everywhere | chat, questions, tables, and every title, description and criterion written to the board |
+| Italian on the board | every title, description and criterion written to the board; chat, questions and tables follow the user |
 | Nothing hardcoded | project, work item types, fields and parent are **discovered at runtime**, every run |
 | New and unassigned | unless the user explicitly asks otherwise |
 | Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
 | Never a throwaway | no "test" item on a real board, ever |
-| Complete for an implementer | a human or an agent must be able to start from the item alone |
+| Content is not ours | type classification, wording and acceptance criteria come from `user-story-standard`; this skill owns the mechanism |
 
 ### 2. The five gates, in order
 
@@ -42,7 +42,7 @@ board, testing an implemented item (`items-qa`), or Azure DevOps CLI configurati
 | 2. Q&A | targeted batched questions, escalating to grilling when the work is ambiguous | `questions.md` |
 | 3. Table 1 | the split into items: `#`, type (provisional), title — confirm, edit, reprint until approved | `tables.md` |
 | 4. Discovery | project, the types that really exist, their real field sets, the parent | below |
-| 5. Table 2 | the same rows plus the resolved parent link — confirm, then optionally preview the full bodies, then create | `tables.md`, `item-content.md` |
+| 5. Table 2 | the same rows plus the resolved parent link — confirm, then optionally preview the full bodies, then create | `tables.md`, `user-story-standard` |
 
 Never merge two gates into one message, and never move past one without explicit approval.
 
@@ -111,5 +111,4 @@ Report the result as the final table plus the manual-attachment checklist (`tabl
   to derive from the images instead of asking.
 - `tables.md` — the exact shape of Table 1, Table 2, the final summary and the attachment checklist,
   with the link and hierarchy formats and the confirmation loops.
-- `item-content.md` — the item body template per type, field mapping and HTML, creation order and
-  parent linking, safeguards and the read-back verification.
+- `item-content.md` — fields and HTML, creation order and parent linking, safeguards, read-back.

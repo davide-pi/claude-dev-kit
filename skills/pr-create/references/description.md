@@ -1,8 +1,8 @@
 # PR title and description
 
-Everything on this page is written in **English**, whatever language the conversation is in. The
-title and body are read by reviewers, by the platform's search, and by whoever bisects this change
-in a year.
+The title and body are written in **Italian**, whatever language the conversation is in: they are
+read by the team, by the platform's search, and by whoever looks this change up in a year. Commit
+messages are the exception and stay English — they belong to the repository's history.
 
 ## The title
 
@@ -10,26 +10,26 @@ One imperative line, specific to this change, no trailing period.
 
 | Bad | Why | Better |
 | --- | --- | --- |
-| `Fixes` | says nothing | `Fix invoice total rounding on multi-currency orders` |
-| `Update files` | describes the mechanics | `Move tenant resolution into middleware` |
-| `feature/billing-export` | the branch name | `Add per-tenant invoice export` |
-| `Added the new endpoint.` | past tense, trailing period | `Add invoices API endpoint` |
+| `Correzioni` | says nothing | `Correggi l'arrotondamento del totale fattura su ordini multivaluta` |
+| `Aggiorna file` | describes the mechanics | `Sposta la risoluzione del tenant nel middleware` |
+| `feature/billing-export` | the branch name | `Aggiungi export fatture per tenant` |
+| `Aggiunto il nuovo endpoint.` | past tense, trailing period | `Aggiungi endpoint API fatture` |
 
-If the branch is a single logical change, the squashed commit subject and the PR title are the same
-sentence. Write it once.
+If the branch is a single logical change, the PR title and the squashed commit subject say the same
+thing in two languages — Italian here, English in the commit (`commit`).
 
 ## The body
 
 Short but complete. A reviewer should know, before reading the diff, **what changed** and **why**.
 
 ```markdown
-- Adds `InvoiceExportService` and the `/api/tenants/{id}/invoices/export` endpoint.
-- Extracts tenant resolution out of the controllers into middleware — three controllers were
-  repeating it and one of them got it wrong for the impersonation case.
-- Migration `20260902_AddInvoiceExportLog` adds one table; no existing column changes.
+- Aggiunge `InvoiceExportService` e l'endpoint `/api/tenants/{id}/invoices/export`.
+- Sposta la risoluzione del tenant dai controller al middleware — tre controller la ripetevano e
+  uno sbagliava il caso di impersonation.
+- La migration `20260902_AddInvoiceExportLog` aggiunge una tabella; nessuna colonna esistente cambia.
 
-Notes for the reviewer:
-- The export runs synchronously for now; the queue path is out of scope (item #<id>).
+Note per il reviewer:
+- Per ora l'export è sincrono; il percorso a coda è fuori scope (item #<id>).
 
 Fixes #<n>
 ```

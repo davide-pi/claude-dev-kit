@@ -19,6 +19,9 @@ Solo per i topic **loggabili** (arrotondato > 0). Per ognuno:
 
    Le ore si registrano sui **Task**, non sulle User Story. Se il topic e' chiaramente parte di una
    US che non ha un Task adatto, il Task va creato.
+
+   Se il topic e' di **gestione progetto** — non attribuibile a nessun item di prodotto — la
+   destinazione non si cerca: e' la struttura fissa della commessa, in `ore-gestione.md`.
 3. **Ore attualmente sul Task.** Leggi il campo del lavoro completato: serve per calcolare il delta,
    perche' la scrittura e' cumulativa.
 4. **PR e commit da linkare** (best-effort, poi confermati in Tabella 2):

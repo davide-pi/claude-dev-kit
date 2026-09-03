@@ -16,8 +16,8 @@ confirmation gate, because `[CLAUDE AI - NEED REVIEW]` says the result has not y
 whoever asked for the test. That freedom holds only while every KO is backed by something actually
 observed on the running site.
 
-**Language.** Follow the item: an Italian item gets Italian prose, an English item gets English.
-Only the template labels (`Site:`, `Success %:`, `AC OK:`, `AC KO:`) stay in English — they are the
+**Language.** The comment is written in **Italian**, whatever language the item itself is in. Only
+the template labels (`Site:`, `Success %:`, `AC OK:`, `AC KO:`) stay in English — they are the
 format, not the content. The chat report follows the user.
 
 ## When

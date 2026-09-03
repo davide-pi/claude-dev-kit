@@ -25,31 +25,33 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
 
 - Reference concrete file / class / method names — no vague summaries.
 - No marketing language (seamlessly, robust, powerful, enhance).
-- Bullets in Changes; prose only in Summary and Motivation. One idea per bullet.
+- Bullets in Modifiche; prose only in Sintesi and Motivazione. One idea per bullet.
+- Write the description in **Italian** — the team reads it. Identifiers, file names, `AB#<id>` and
+  the section headings keep the form given below.
 - Omit any section with nothing meaningful to say.
 - This repo uses Azure DevOps PRs — link a work item as `AB#<id>` only if one is provided; don't invent one.
 
 ## Output template
 
-### Summary
+### Sintesi
 
 One or two sentences: what this PR does, not how.
 
-### Motivation
+### Motivazione
 
 Why this was needed — bug, requirement, or tech debt.
 
-### Changes
+### Modifiche
 
 Bullets grouped by area (feature / fix / refactor / config) when there are more than ~5 items.
 
-### Testing
+### Test
 
 How it was verified. If the repo has an automated suite, say what it covers for this change; where it
 has none, describe the manual steps (build, run profile, health endpoint, exercised path). If it was
 not verified, say so plainly — that is more useful than an implied "it works".
 
-### Breaking changes
+### Breaking change
 
 Migration steps. **Omit entirely if none.**
 

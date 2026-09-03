@@ -24,7 +24,7 @@ wrong inference gets corrected instead of silently baked into an item.
 | Value | why this work exists, and for whom |
 | Scope per item | exactly what each item does — the boundary between items, not just the sum |
 | Out of scope | what must **not** be done, so the implementer does not expand the work |
-| Acceptance criteria | how a reviewer proves it is done, as verifiable statements |
+| Acceptance criteria | how a reviewer proves it is done — their shape is `user-story-standard`'s |
 | Technical constraints | files, APIs, patterns, versions to respect, data shapes, performance limits |
 | Implementation hints | what the implementer would otherwise spend an hour discovering |
 | Dependencies | order between the items, and blockers outside them |

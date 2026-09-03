@@ -5,7 +5,10 @@ description: >-
   il tempo per topic, e — dopo conferma — registra le ore sui work item Azure DevOps giusti via CLI
   (MCP solo come fallback). Due tabelle riassuntive con loop di conferma/modifica, arrotondamento
   nearest-0.5h senza cap, accorpamento dei micro-topic per ruolo e audit idempotente per non
-  riscrivere ore gia' registrate. Trigger esplicito: solo quando l'utente scrive /worklog.
+  riscrivere ore gia' registrate. Due casi distinti: ore di sviluppo sui Task degli item lavorati e
+  ore di gestione progetto nella struttura fissa Feature/PBI "Gestione progetto" della commessa, con
+  un solo Task per sessione. E' l'unico asset del kit che scrive ore. Trigger esplicito: solo quando
+  l'utente scrive /worklog.
 ---
 
 # worklog — cosa ho fatto, e le ore su Azure DevOps
@@ -16,10 +19,13 @@ description: >-
 - Serve sapere cosa e' stato fatto in un giorno o in un range, con il tempo per topic.
 - Le ore di un periodo vanno registrate sui work item giusti.
 - Un periodo gia' registrato va ri-elaborato: si applica solo il **delta**.
+- Va rendicontato tempo di **gestione progetto** (incontri e call cliente, analisi e grooming del
+  backlog, stime, coordinamento) che non sta su nessun item di prodotto.
 
-Not for: creare work item nuovi da zero (`workitem-create`), leggere o analizzare un item,
-recensire una PR (`pr-review`), o la configurazione/auth/verbi della CLI Azure DevOps (`azdo-cli`).
-Non parte mai senza il trigger esplicito.
+Not for: creare work item nuovi da zero (`workitem-create`) o da un incontro cliente
+(`backlog-integration`), leggere o analizzare un item, recensire una PR (`pr-review`), o la
+configurazione/auth/verbi della CLI Azure DevOps (`azdo-cli`). Non parte mai senza il trigger
+esplicito.
 
 ## Decide
 
@@ -63,6 +69,20 @@ chiamala, non riscriverla qui.
 
 Se un topic potrebbe stare su org diverse e non e' deducibile → **chiedi** su quale. Nel recap dichiara
 sempre progetto e interfaccia usata (CLI o fallback MCP).
+
+### 4. Due casi: ore di sviluppo e ore di gestione
+
+Le ore si scrivono **solo qui**: nessun altro asset del kit le registra —
+`backlog-integration` chiude la sua sessione rimandando a `/worklog`, non scrivendole.
+La regola che separa i due casi e' l'**attribuibilita' del topic a un item di prodotto**:
+
+| Caso | Quando | Dove finiscono le ore |
+| --- | --- | --- |
+| **Sviluppo** | il topic e' lavoro sul prodotto: ha un branch, commit, una PR o un work item che lo copre | sul **Task** dell'item lavorato — Fasi 5-7, `scrittura.md` |
+| **Gestione progetto** | il topic non e' attribuibile a nessun item di prodotto: incontri e call cliente, analisi e grooming del backlog, stime, coordinamento, sessioni `/backlog-integration` | struttura fissa per commessa: Feature `Gestione progetto` → PBI `Gestione progetto - <titolo Epic>` → **un solo Task per sessione**, in `Done` — `ore-gestione.md` |
+
+Un topic `internal` (tooling, non fatturabile) **non** e' gestione: resta riga a se' e non si logga.
+In dubbio → **chiedi**; mai spalmare ore di gestione su un item di prodotto per far tornare i conti.
 
 ## Do
 
@@ -110,6 +130,8 @@ I commit su master pertinenti al topic, per il link della Fase 5.
    l'audit lo scrive solo l'orchestratore, in sequenza.
 8. Il recap dice cose che sulla board non ci sono → si e' creduto al report degli agent → rileggi gli
    item scritti prima di stampare il recap.
+9. Nasce un secondo Task ore di gestione per lo stesso giorno → ri-run del periodo con creazione
+   invece di delta → cerca la voce d'audit e il Task con lo stesso prefisso data, poi somma il delta.
 
 ## References
 
@@ -119,3 +141,5 @@ I commit su master pertinenti al topic, per il link della Fase 5.
   conferma/modifica e recap finale.
 - `scrittura.md` — discovery per topic, regole di scrittura su Azure, parallelismo, idempotenza e
   contenuto dell'audit.
+- `ore-gestione.md` — il caso gestione progetto: struttura fissa Feature/PBI della commessa, ricerca
+  per prefisso, Task ore per sessione, assegnatario a runtime, stato Done e idempotenza.

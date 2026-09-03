@@ -9,16 +9,20 @@ verb, the row says so instead of inventing a flag.
 **flat** queries only — a tree or one-hop query fails, so express the relationship as a flat filter
 or query the sides separately.
 
+**`--project` / `-p` does not scope the query reliably.** It has been observed returning work items
+belonging to other projects, so the flag alone is not a filter — it is a hint. Every WIQL repeats
+the scope in its own `WHERE`, as a literal project name, **in addition to** `-p`:
+
 ```powershell
-$wiql = @'
+$wiql = @"
 SELECT [System.Id], [System.WorkItemType], [System.Title], [System.State], [System.AssignedTo]
 FROM WorkItems
-WHERE [System.TeamProject] = @project
+WHERE [System.TeamProject] = '<project>'
   AND [System.AssignedTo] = @me
   AND [System.State] NOT IN ('Closed', 'Removed')
 ORDER BY [System.ChangedDate] DESC
-'@
-az boards query --wiql $wiql -p <project> -o table
+"@
+az boards query --org <org-url> -p <project> --wiql $wiql -o table
 
 az boards query --id <query-guid> -o table                    # a saved query, by id
 az boards query --path 'Shared Queries/Current Sprint' -o table
@@ -35,9 +39,11 @@ Useful WIQL shapes, all flat:
 | One type only | `[System.WorkItemType] = 'Bug'` |
 | Free text in the title | `[System.Title] CONTAINS 'invoice'` |
 
-`@me`, `@project`, `@today` and `@currentIteration` are macros the service resolves — prefer them
-over hardcoding an identity or a date. There is no `DISTINCT` in WIQL: to learn which values are in
-use, select the column and dedupe on the client.
+`@me`, `@today` and `@currentIteration` are macros the service resolves — prefer them over
+hardcoding an identity or a date. `@project` is the exception: it resolves from the same request
+context that already fails to scope, so write the project name out for `[System.TeamProject]`.
+There is no `DISTINCT` in WIQL: to learn which values are in use, select the column and dedupe on
+the client.
 
 ## Reading one work item
 
@@ -85,12 +91,15 @@ az boards work-item update --id <id> --state '<state>' --title '<title>' `
 | `--reason` | both | must be a reason valid for the target state |
 | `--area`, `--iteration` | both | full classification paths, backslash-separated |
 
-Two rules the CLI will not warn you about:
+Three rules the CLI will not warn you about:
 
 1. **Set only fields the type has.** One unknown field reference fails the whole call, so
    `Microsoft.VSTS.Common.AcceptanceCriteria` and `Microsoft.VSTS.TCM.ReproSteps` are not safe
-   defaults. Discover the type's fields first; fold unsupported content into the description.
-2. **`--description` is rendered per the field's format.** A description field configured as HTML
+   defaults. Discover the type's fields first — `workitem-content.md`, section 1.
+2. **A field the form does not show is a silent loss**, not an error: the call succeeds and the item
+   looks empty on the board. A Bug is the case that bites, because on a Scrum form it has no
+   Description field at all — `workitem-content.md`, section 2.
+3. **`--description` is rendered per the field's format.** A description field configured as HTML
    renders HTML and ignores markdown; write the markup the field expects.
 
 `az boards work-item delete --id <id>` moves an item to the recycle bin, `--destroy` erases it
@@ -136,7 +145,7 @@ There is no `az boards work-item type` verb. Three honest routes, cheapest first
 
 ```powershell
 # 1. Which types and states are actually in use — WIQL plus client-side dedupe.
-$w = 'SELECT [System.Id],[System.WorkItemType],[System.State] FROM WorkItems WHERE [System.TeamProject] = @project'
+$w = "SELECT [System.Id],[System.WorkItemType],[System.State] FROM WorkItems WHERE [System.TeamProject] = '<project>'"
 $items = az boards query --wiql $w -p <project> -o json | ConvertFrom-Json
 $items.fields.'System.WorkItemType' | Sort-Object -Unique
 $items | Group-Object { $_.fields.'System.WorkItemType' } |
@@ -166,9 +175,10 @@ az boards iteration project list -p <project> --depth 3 -o jsonc
 az boards iteration team list --team '<team>' -p <project> -o table
 ```
 
-## Attaching a file — a genuine gap
+## Attaching a file — no verb, but not a gap
 
-`az boards` has no attachment verb. Uploading needs the two-step REST dance (upload the bytes, then
-add an `AttachedFile` relation pointing at the returned URL), which `az devops invoke` can do with
-`--http-method POST --in-file`, or the MCP attachment tool can do in one call. Prefer MCP here: the
-relation half is easy to get wrong and a half-done attachment is visible on the board.
+`az boards` has no attachment verb, and it does not need one: the bearer token of the current
+`az login` reaches the REST endpoint directly, with no PAT and no MCP tool. Two steps — POST the
+bytes to the attachments endpoint, then PATCH an `AttachedFile` relation onto the item. On a Bug the
+image belongs **inline in the field** rather than as a relation. Both recipes, with the fixed Azure
+DevOps resource id the token is requested for, are in `workitem-content.md`, sections 3 and 4.

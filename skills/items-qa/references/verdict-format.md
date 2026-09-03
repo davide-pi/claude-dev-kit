@@ -30,7 +30,7 @@ Notes:
 - {accepted deviation: what differs from the AC, who explained it and why}
 ```
 
-The labels stay in English — they are the format. The prose inside follows the item's language.
+The labels stay in English — they are the format. The prose inside them is **Italian**.
 
 ## The rules attached to each field
 
@@ -71,10 +71,10 @@ The explanation is what makes the report actionable:
 
 ```
 - AC03
-  On desktop the flag in the header is not clickable: it is an <a href=""> with no handler,
-  the cursor turns to pointer but the click opens nothing and triggers no navigation
-  (verified with a window marker surviving the click). The country cannot be changed from
-  the desktop header. On mobile it works: the indicator opens the menu with "Change country".
+  Su desktop la bandiera nell'header non è cliccabile: è un <a href=""> senza handler,
+  il cursore diventa pointer ma il click non apre nulla e non innesca navigazione
+  (verificato con un marker su window che sopravvive al click). Il paese non si può
+  cambiare dall'header desktop. Su mobile funziona: l'indicatore apre il menu "Change country".
 ```
 
 Four things make it good, and a KO missing any of them is weaker: **what was done**, **what the AC

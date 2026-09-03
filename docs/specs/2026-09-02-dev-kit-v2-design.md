@@ -37,8 +37,13 @@ A kit made only of skills covers one multiplier out of three. v1 was that kit; v
    better instrument, and say so.
 6. **No duplication of installed plugins.** See section 6. An asset that overlaps a plugin routes to
    it in one line instead of restating it.
-7. **English everywhere**, except `worklog`, which stays Italian by design — its tables are read by
-   one person.
+7. **Two languages, split by where the text lives** (revised 2026-09-03). An asset's own
+   instructional prose is **English** — it addresses the model, and this repository is public — and
+   so is everything tied to the code: source, identifiers, code comments, commit messages. What an
+   asset makes a person read is **Italian**: work items, pull request titles and descriptions,
+   comments posted on a pull request, verdicts written into a work item, wiki pages, chat. So a
+   skill is written in English and says "produce Italian". `worklog` is written in Italian
+   throughout, by design — its tables are read by one person.
 8. **Say what an asset never does.** Every asset that could write, post or delete states its limits.
 
 ## 3. Asset contract

@@ -17,7 +17,7 @@ Whatever carries the call, one thread per question, and the payload always needs
 | right-file start line / offset | 1-based, from the finding's anchor; a one-character span is fine |
 | right-file end line / offset | the end of that span |
 | status | **Active** — the thread is waiting for an answer |
-| content | the tagged question |
+| content | the tagged question, written in Italian |
 
 Also true here:
 

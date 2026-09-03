@@ -38,7 +38,6 @@ Only when all three fail is it a gap.
 | --- | --- | --- |
 | A project's work item types, their states and their fields | no verb; reachable through `invoke` on the `wit` area | MCP work-item type read — it also returns the field set a create must respect |
 | Read a work item's discussion | `--discussion` writes only; no read verb | MCP work-item read with comments |
-| Attach a file to a work item | no verb; the REST path is a two-step upload plus relation | MCP attachment tool — one call, no half-done attachment |
 | PR comment threads: read, post, reply, inline anchor, resolve | no verb anywhere under `az repos pr` | MCP PR-thread tools — they model the file, line range and iteration an inline thread needs |
 | A pipeline run's step logs | no verb; reachable through `invoke` on the `build` area | MCP build-log tool |
 | Full-text search over code, wiki or work items | no verb, and no stable REST surface worth driving by hand | MCP search tools |
@@ -48,6 +47,14 @@ Only when all three fail is it a gap.
 
 Everything not in this table has a CLI path. If you believe you found a new gap, add the evidence —
 which group's help you read and which verb was absent — before treating it as one.
+
+Two capabilities that look like gaps and are **not**, because the CLI's own credential reaches them
+over REST — do not fall back for either:
+
+| Looks like a gap | Actually | Where |
+| --- | --- | --- |
+| Attaching a file or an image to a work item | no verb, but two REST calls with the token of the current `az login` — no PAT | `workitem-content.md` |
+| Wiki page writes, and listing a wiki's page tree | the write verbs exist but corrupt accents, and there is no `list` verb; REST does both | `wiki-rest.md` |
 
 ## Using the fallback well
 

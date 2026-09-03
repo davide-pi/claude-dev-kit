@@ -2,7 +2,7 @@
 
 Three printed artefacts: Table 1 (the split), Table 2 (the split plus the resolved target), and the
 final summary. Each of the first two is a **gate**: print, ask, apply changes, reprint, ask again —
-and move on only on explicit approval. All of it in English.
+and move on only on explicit approval. The titles they print are the items' real ones: Italian.
 
 ## Table 1 — the split
 
@@ -11,9 +11,9 @@ Printed at gate 3, before any Azure DevOps call. Nothing but this table.
 ```markdown
 | # | Type       | Title |
 |---|------------|-------|
-| 1 | Feature    | Multi-tenant billing dashboard |
-| 2 | User Story | ↳ Show per-tenant invoice list |
-| 3 | Task       | ↳↳ Add invoices API endpoint |
+| 1 | Feature    | Dashboard di fatturazione multi-tenant |
+| 2 | User Story | ↳ Mostra l'elenco fatture per tenant |
+| 3 | Task       | ↳↳ Aggiungi endpoint API fatture |
 ```
 
 - `#` numbers the rows so the user can say "change item 2".
@@ -31,9 +31,9 @@ Printed at gate 5, after discovery.
 ```markdown
 | # | Type       | Title | Parent |
 |---|------------|-------|--------|
-| 1 | Feature    | Multi-tenant billing dashboard | [Epic #4210 — Billing platform](https://<org-host>/<project>/_workitems/edit/4210) |
-| 2 | User Story | ↳ Show per-tenant invoice list  | → #1 (new, created in this run) |
-| 3 | Task       | ↳↳ Add invoices API endpoint   | → #2 (new, created in this run) |
+| 1 | Feature    | Dashboard di fatturazione multi-tenant | [Epic #4210 — Piattaforma di fatturazione](https://<org-host>/<project>/_workitems/edit/4210) |
+| 2 | User Story | ↳ Mostra l'elenco fatture per tenant  | → #1 (new, created in this run) |
+| 3 | Task       | ↳↳ Aggiungi endpoint API fatture     | → #2 (new, created in this run) |
 ```
 
 - `Type` is the one **validated** against the project's real types.
@@ -62,8 +62,8 @@ including the numbered image placeholders, apply corrections, reprint, then conf
 ```markdown
 | # | Type       | Title (link) |
 |---|------------|--------------|
-| 1 | Feature    | [Multi-tenant billing dashboard](https://<org-host>/<project>/_workitems/edit/4711) |
-| 2 | User Story | ↳ [Show per-tenant invoice list](https://<org-host>/<project>/_workitems/edit/4712) |
+| 1 | Feature    | [Dashboard di fatturazione multi-tenant](https://<org-host>/<project>/_workitems/edit/4711) |
+| 2 | User Story | ↳ [Mostra l'elenco fatture per tenant](https://<org-host>/<project>/_workitems/edit/4712) |
 ```
 
 Titles are clickable links to the created items; children stay indented so the hierarchy is visible
@@ -71,7 +71,7 @@ at a glance. Then the attachment checklist, one row per item that carries placeh
 
 ```markdown
 Images to attach manually:
-- [Task #4712 — Show per-tenant invoice list](<url>): IMAGE 1 (login error screenshot), IMAGE 2 (expected layout)
+- [Task #4712 — Mostra l'elenco fatture per tenant](<url>): IMAGE 1 (login error screenshot), IMAGE 2 (expected layout)
 ```
 
 Close with one line: how many items were created, in which project, and anything that did **not**

@@ -1,25 +1,14 @@
-# Item content, fields and the create pass
+# Item fields and the create pass
 
-## Body template
+## The body itself belongs to `user-story-standard`
 
-English, written as **HTML** for the long fields — board markdown rendering is inconsistent, HTML is
-not. Adapt the sections to the type: a Task is leaner, a Bug leads with reproduction.
+What an item **says** — its type classification, the wording of title and description, and the shape
+of the acceptance criteria — is `user-story-standard`'s business, not this skill's. Read it before
+writing a body; this page covers only how that body reaches the board.
 
-| Section | Content |
-| --- | --- |
-| Context / Background | why this exists, and the current situation |
-| Objective | the outcome, in one or two sentences |
-| Scope / What to do | the concrete boundary and the steps inside it |
-| Acceptance Criteria | a verifiable checklist — its own field when the type has one, otherwise inside the description |
-| Technical notes | files, APIs, patterns, constraints, edge cases: what saves the implementer an hour |
-| Out of scope | what must not be done |
-| References | related items, PRs, docs — as links |
-| Images | numbered placeholders, e.g. `📎 IMAGE 1 — <caption> (attach manually)` |
-
-A **Bug** adds, or replaces Scope with: **Repro steps**, **Expected result**, **Actual result**.
-
-Write for two readers at once: a human who needs the why, and an agent that needs the exact
-boundary. Vague verbs ("improve", "handle", "manage") are a sign the Q&A pass stopped early.
+Two constraints stay here: the long fields are written as **HTML**, because board markdown rendering
+is inconsistent, and their prose is **Italian**. Images stay numbered placeholders
+(`📎 IMAGE 1 — <caption> (attach manually)`) wherever the standard puts content.
 
 ## Fields — set only what the type has
 
