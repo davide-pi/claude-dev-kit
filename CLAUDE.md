@@ -114,3 +114,17 @@ role is always `Bug`** — `Issue` is never a defect. The trap that makes the qu
 than polite: in the Agile template `Issue` is the *analysis* item, in Basic it is the *backlog item*
 — same name, opposite meaning, and neither of them is the defect. When a project has no type for a
 role, ask; do not substitute the nearest one.
+# Search and read without triggering a prompt
+A permission rule is prefix-matched against the **whole command string**, so `cd <path> && grep …`
+starts with `cd` and can never match a `Bash(grep *)` rule — no rule anyone adds will ever cover it.
+Every command in that shape goes to the classifier instead, and a recursive read whose scope cannot
+be resolved statically ends in a question. Across 50 sessions more than 500 commands had that shape:
+it is the single largest source of interruptions.
+- **Search with the Grep tool**, passing `path` and `glob`. Never `cd X && grep`.
+- **Read with the Read tool**, using `offset`/`limit` for a slice instead of `sed -n` on a path
+  reached by `cd`.
+- When the shell genuinely is the right instrument, **put the directory in the command** —
+  `grep -rn "x" <abs-path> --include=*.ts`, `git -C <path> log` — so the command starts with the
+  program and a rule can match it.
+- This outranks the general preference for the shell: the shell stops being the cheaper tool the
+  moment it needs a prompt.
