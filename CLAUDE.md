@@ -108,8 +108,9 @@ PBI, the Bug, the Impediment, the TECH activity — never a Task. Tasks exist to
 # Work item types are per-project — speak in roles
 Type names depend on the project's process template, so never hardcode one. Speak in **roles** —
 backlog item, defect, question to analyse, technical activity, unit of time, grouping — and resolve
-the real name at runtime; `azdo-cli` owns the mapping and the query. My shorthand: a Product Backlog
-Item **is** the User Story role, and what I call a Bug **is** the Issue role where the template names
-it that way. The trap that makes the query mandatory rather than polite: in the Agile template
-`Issue` is the *analysis* item, in Basic it is the *backlog item* — same name, opposite meaning. When
-a project has no type for a role, ask; do not substitute the nearest one.
+the real name at runtime; `azdo-cli` owns the mapping and the query. The one equivalence worth
+knowing: `Product Backlog Item` and `User Story` are the same role under two templates. The **defect
+role is always `Bug`** — `Issue` is never a defect. The trap that makes the query mandatory rather
+than polite: in the Agile template `Issue` is the *analysis* item, in Basic it is the *backlog item*
+— same name, opposite meaning, and neither of them is the defect. When a project has no type for a
+role, ask; do not substitute the nearest one.

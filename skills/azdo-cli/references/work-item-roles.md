@@ -44,7 +44,7 @@ work-item-type read (`mcp-fallback.md`).
 | Role | Scrum | Agile | Basic | CMMI |
 | --- | --- | --- | --- | --- |
 | **Backlog item** — a new capability or change | `Product Backlog Item` | `User Story` | `Issue` | `Requirement` |
-| **Defect** — something that misbehaves | `Bug` | `Bug` | (`Issue`) | `Bug` |
+| **Defect** — something that misbehaves | `Bug` | `Bug` | — | `Bug` |
 | **Analysis** — a question to analyse before a fix can be defined | `Impediment` | `Issue` | — | `Issue` |
 | **Technical activity** — invisible to the end user | often a custom type such as `Tech` | often a custom type | — | `Change Request` |
 | **Time** — carries hours, never linked to a PR | `Task` | `Task` | `Task` | `Task` |
@@ -52,10 +52,11 @@ work-item-type read (`mcp-fallback.md`).
 
 How to read the awkward cells:
 
-- **Basic has no defect type of its own.** A malfunction is filed as `Issue`, the same type as a
-  backlog item; the distinction lives in the title, the tags or a field, not in the type.
-- **Basic has no analysis type and no technical-activity type.** Those roles have no home there —
-  section 4 says what to do instead of improvising one.
+- **The defect role is always `Bug`,** wherever it exists. `Issue` is never the defect type — that
+  pairing does not exist in any template, and assuming it files a malfunction as something else
+  entirely.
+- **Basic has no defect type at all,** and no analysis type and no technical-activity type either.
+  Those roles have no home there: section 4 says to ask, not to file a defect as the backlog type.
 - **The technical-activity role is usually a custom type.** `Tech` is the name this kit's own
   conventions expect, but a custom type exists only where somebody created it, and nothing
   guarantees the spelling. It is the role most likely to be absent.
@@ -64,7 +65,7 @@ How to read the awkward cells:
 
 ## 3. `Issue` is why the query is not optional
 
-One name, two roles, and no error either way:
+One name, two roles — and neither of them is the defect:
 
 | Template | What `Issue` means there |
 | --- | --- |
