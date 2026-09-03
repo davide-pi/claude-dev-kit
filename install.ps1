@@ -367,7 +367,15 @@ function Sync-Assets {
         }
 
         if (($rel -in $sensitive) -and $homeHash -and -not $Force) {
-            $answer = Read-Host "  $rel already exists and differs. Overwrite? [y/N]"
+            # A non-interactive host — CI, an agent, a scheduled run — throws on Read-Host rather
+            # than returning nothing, which used to abort the whole install half way through. The
+            # safe answer for a hand-maintained file is No, so keep it, say so, and carry on.
+            try {
+                $answer = Read-Host "  $rel already exists and differs. Overwrite? [y/N]"
+            } catch {
+                Write-Info "$rel differs, and this host cannot prompt — kept as is (pass -Force to overwrite)"
+                continue
+            }
             if ($answer -notmatch '^(y|yes)$') { Write-Info "$rel kept as is"; continue }
         }
         Copy-Asset $rel $RepoRoot $ClaudeHome
