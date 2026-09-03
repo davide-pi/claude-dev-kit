@@ -17,7 +17,8 @@ directory, tracks it, and cleans it up on the way out, so nothing is left dangli
 | Editor-side worktree | the IDE's own worktree command | the git commands below |
 
 Check for the native path before shelling out: it is not always available, and the plain git
-command is a complete fallback, never a downgrade in correctness. Say which one was used.
+command is a complete fallback, never a downgrade in correctness. Say which one was used — in
+Italian, with the directory and branch names left as they are.
 
 ## The git fallback
 

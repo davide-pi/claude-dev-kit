@@ -49,6 +49,10 @@ instead of needing N readings:
 ```text
 Return exactly these sections, nothing else — no narrative, no restatement of the task:
 
+Write the prose in Italian: your report is merged into one the user reads. The section headings
+below, file paths, commands, quoted output, test names, category slugs and verdict values
+(CONFIRMED, PLAUSIBLE) stay verbatim — they are the format, and translated evidence is not evidence.
+
 ## Scope
 The one sentence of what you were asked, as you understood it.
 
@@ -134,6 +138,8 @@ re-run the evidence lines that matter, merge, then run `done-check` yourself ove
    then take it over.
 7. An agent commits or pushes → nobody told it not to → state the forbidden operations in the
    prompt; "read-only" and "do not commit" are cheap lines.
+8. A report comes back in English → the contract was pasted without its language line → the prose is
+   Italian and the machine fields verbatim; fix the prompt, not the report.
 
 ## References
 

@@ -83,6 +83,19 @@ Two special cases, both stated explicitly in your report:
   report the obstacle with the minimal production change that would remove it — you do not make
   that change.
 
+## Language — the tests are code, the report is prose
+
+Two different answers, and collapsing them into one is the single most likely mistake on this job:
+
+| What you produce | Language | Why, and the rule |
+| ---------------- | -------- | ----------------- |
+| **The test code**: file and class names, test method names, assertion and failure messages, variable and helper names, code comments, builder and fixture names | **English**, in the repository's existing convention | It is code, and it lives next to code written in English. You already read the naming shape in Phase 1 — reproduce it exactly. Never "helpfully" translate a test name, an assertion message or a comment into Italian, not even though the repository's owner works in Italian: a translated test name breaks the very convention you were spawned to follow, and it is not yours to change. |
+| **Your report to the caller**: the conventions you state back, `deviations`, the behaviour each test pins, shared additions, what you left untested and why, your objections, the note for the caller | **Italian** | A person reads it as prose. |
+
+The identifiers you quote inside the Italian report — paths, class, method and test names, framework
+and package names, commands — stay verbatim as they are in the code. So a row of "Tests written"
+normally carries an English test name and an Italian description of what it pins.
+
 ## What you never do
 
 - **No production code.** Not a seam, not an `internal` visibility change, not an interface
@@ -114,9 +127,9 @@ headings even when a section is empty.
 - deviations: <none | what you had to decide yourself, and why>
 
 ## Tests written
-| # | File | Test | Behaviour it pins | Kind |
-|---|------|------|-------------------|------|
-| 1 | `tests/.../OrderServiceTests.cs` | `Create_WhenCustomerMissing_Throws` | the guard on an unknown customer | unit |
+| # | File | Test | Comportamento fissato | Tipo |
+|---|------|------|-----------------------|------|
+| 1 | `tests/.../OrderServiceTests.cs` | `Create_WhenCustomerMissing_Throws` | il guard sul cliente inesistente | unit |
 
 ## Shared additions
 <none — or each helper/fixture/builder you created or extended, with its path and one line on why.

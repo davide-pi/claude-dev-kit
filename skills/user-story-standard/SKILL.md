@@ -93,7 +93,8 @@ common source of criteria that look fine and turn out ambiguous in test.
 The item content this skill produces is **Italian**, because that is the company standard: the
 shapes, the field labels, the `Dato che / Quando / Allora` keywords, the section title
 `Criteri di accettazione` and every example. The skill's own prose — headings, rules, explanations
-addressed to the model — is **English**, like every other asset in this kit.
+addressed to the model — is **English**, and so is machine text: the work item type names and the
+CSV headers in `csv-import.md`. The mixture is the standard, not drift — do not "fix" either side.
 
 ## Do
 
@@ -103,9 +104,8 @@ addressed to the model — is **English**, like every other asset in this kit.
 3. Deliver it and stop. For a User Story or a Bug, ask whether to proceed with the criteria; for an
    Impediment or a TECH, ask for confirmation and offer nothing more.
 4. Only on confirmation, write the `Criteri di accettazione` block (`acceptance-criteria.md`), using
-   the four coverage families as a mental grid and labelling per platform where the behaviour
-   differs. On the **first** proposal only, if a pertinent family has no criteria, add one note in
-   chat, outside the block to paste.
+   the four coverage families as a grid and labelling per platform where behaviour differs. On the
+   **first** proposal only, a pertinent family with no criteria gets one note in chat, outside it.
 5. Hand the block over clean and paste-ready. Getting it onto the board is `workitem-create`'s job.
 
 ```powershell
@@ -145,5 +145,5 @@ Set-Clipboard -Value (Get-Content .\item-body.txt -Raw)
 - `acceptance-criteria.md` — the criteria rules: the four coverage families, the one-shot signalling
   of an uncovered family, `Scenario N` and `AC01` structure, per-platform labelling, the
   `Dato che / Quando / Allora` format and full examples. Open it once criteria are confirmed.
-- `csv-import.md` — the secondary path: the CSV bulk-import file, its exact headers per type and its
-  quoting rules. Open it only when someone genuinely asks for an import file.
+- `csv-import.md` — the secondary path: the CSV bulk-import file, its exact headers per type, the
+  Bug body-to-column mapping, and its quoting rules. Open it only on a genuine request for a file.

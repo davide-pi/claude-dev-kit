@@ -11,6 +11,10 @@ description: >-
 
 # debug-systematic — evidence before the fix
 
+**Language.** The hypothesis, the phase-3 mechanism sentence and the conclusion are written in
+**Italian** — the user reads them. Commands, counter names, plan operators, exception and type
+names, and log lines are quoted **verbatim**: a translated log line is no longer evidence.
+
 ## When
 
 - A bug, exception, wrong result, hang or crash whose cause is not proven.
@@ -32,7 +36,7 @@ happen (`workitem-analyze`).
 |---|-------|--------------------------------------------|
 | 1 | Reproduce | A command or a click-path that fails on demand, and the failing output captured verbatim |
 | 2 | Isolate | The smallest input and narrowest layer that still fails; everything else ruled out by test, not by opinion |
-| 3 | Explain | One causal sentence — "the value is null **because** the factory rewrites it, **so** the mapper throws". Mechanism, not correlation |
+| 3 | Explain | One causal sentence, in Italian — "il valore è null **perché** la factory lo riscrive, **quindi** il mapper lancia `NullReferenceException`". Mechanism, not correlation |
 | 4 | Fix and prove | The fix targets the mechanism; the phase-1 repro now passes; a regression test locks it (`test-strategy`) |
 
 **The rule: no edit to production code before phase 3 exists in writing.** A change made during

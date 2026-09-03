@@ -13,6 +13,11 @@ description: >-
 
 # workitem-analyze — an item becomes an attack plan, before any code
 
+**Language.** This skill's instructions are English; everything it hands the owner — the attack plan
+file, the verdict line, the questions and the chat report — is **Italian**. Markers stay as written,
+in the Italian plan too: the **S** / **D** / **A** tags, the verdict keywords, `[BLOCKING]` /
+`[non-blocking]`, `file:line`, and Azure DevOps field and type names.
+
 ## When
 
 - A work item or an epic has been picked up and no code has been written yet.

@@ -106,6 +106,19 @@ decision recorded.
 
 ## What to return
 
+### Output language
+
+The analysis is read by the repository's owner, so **the prose is Italian**: what the statement
+really does, the plan reading, each finding's one-line statement, `impact`, `cause`, `change`,
+`cost of the change`, the summary rows and the closing verdict line.
+
+Everything the engine owns stays **verbatim English** and is never translated, re-cased or
+reformatted: the SQL and the DDL you propose (the comments inside them included), plan and operator
+names, table, index, column, constraint, key and stored-procedure names, catalog and metadata view
+names, wait types, engine and provider names — plus the `CONFIRMED` / `INFERRED` verdict values and
+the category slugs, which are identifiers. Translate an operator or a column name and the analysis
+can no longer be checked against the engine.
+
 Fixed shape. Keep every heading, even when a section is empty.
 
 ```
@@ -120,7 +133,7 @@ evidence base: <plan (estimated|actual) | statistics | schema files only — inf
 - <operator / step> — <cost or rows, estimated vs actual> — <what it implies>
 
 ## Findings
-### <n>. <one-line statement> — CONFIRMED | INFERRED
+### <n>. <one-line statement, in Italian> — CONFIRMED | INFERRED
 - category: index | query-shape | cardinality | round-trips | contention | schema
 - impact: <what it costs today, in the terms you actually have: rows read, scans, round trips, waits>
 - cause: <the row from the table above, and why the others do not explain it>
@@ -136,11 +149,11 @@ CREATE INDEX ... ;
 <or: none — say why the existing indexes are already right>
 
 ## Summary
-| # | Category | Object | Finding | Verdict | Change |
-|---|----------|--------|---------|---------|--------|
-| 1 | index | `dbo.Orders` | selective predicate on CustomerId has no index | CONFIRMED | new index |
+| # | Categoria | Oggetto | Rilievo | Verdetto | Modifica |
+|---|-----------|---------|---------|----------|----------|
+| 1 | index | `dbo.Orders` | predicato selettivo su CustomerId senza indice | CONFIRMED | nuovo indice |
 
-Verdict: <n> findings · biggest win: <#n> · what I could not determine: <the missing number>
+Verdetto: <n> rilievi · guadagno maggiore: <#n> · non determinato: <il numero che manca>
 ```
 
 Nothing wrong is a real answer: say the plan is appropriate, name what you checked (plan, indexes,

@@ -6,7 +6,8 @@ useless findings.
 
 ## The template
 
-Fill every field. "None" is a valid value and is still information.
+Fill every field. "None" is a valid value and is still information. The package is written in
+Italian; the field names below are the format and stay as they are.
 
 ```text
 INTENT
@@ -36,9 +37,10 @@ FOCUS
   criteria. Omit for a general pass.
 
 OUTPUT CONTRACT
-  Findings only. Never post, never edit, never commit. Per finding: severity, category,
-  file:line anchor, the concrete failure scenario, the minimal fix, a CONFIRMED/PLAUSIBLE verdict,
-  and whether it is for the author or for the chat.
+  Findings only, prose in Italian. Never post, never edit, never commit. Per finding: severity,
+  category, file:line anchor, the concrete failure scenario, the minimal fix, a CONFIRMED/PLAUSIBLE
+  verdict, and whether it is for the author or for the chat. Severity labels, category slugs,
+  anchors, verdict values and quoted output keep their form — they are the format, not the prose.
 ```
 
 ## Building the scope without lying to yourself

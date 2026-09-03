@@ -9,58 +9,66 @@ grows past a page the verdict was probably **needs a plan**, and `plan-work` own
 Write it to a file so it survives the session. A plan that lives only in chat gets re-derived from
 scratch after the next comment.
 
+**The plan is written in Italian** — it is read by the owner, not by the model. Only the markers keep
+their form: the `[S]` / `[D]` / `[A]` tags, the verdict keywords, `[BLOCKING]` / `[non-blocking]`,
+`file:line` paths, and Azure DevOps field, type and state names. This page is guidance, so it is
+English; the two blocks below are the artefact, so they are Italian.
+
 ## The shape
 
 ```markdown
-# <id> <title> — attack plan
+# <id> <titolo> — piano di attacco
 
-**Verdict:** implementable | needs a plan | needs splitting | blocked | not ready
-**Type / state / iteration:** <type> · <state> · <iteration>
-**Parent:** <id> <title>
+**Verdetto:** implementable | needs a plan | needs splitting | blocked | not ready
+**Tipo / stato / iterazione:** <tipo> · <stato> · <iterazione>
+**Padre:** <id> <titolo>
 
-## What the item asks for
-- [S] "<quoted criterion or requirement>"
-- [S] "<quoted criterion>"  — superseded by the discussion of <date>: <what was decided instead>
+## Cosa chiede l'item
+- [S] "<criterio o requisito citato testualmente>"
+- [S] "<criterio citato>"  — superato dalla discussione del <data>: <cosa è stato deciso al posto suo>
 
-## What the code looks like today
-- [D] <behaviour> is decided in `<path>:<line>`
-- [D] <caller> reaches it through `<path>:<line>`
-- [D] no <thing the item assumes> exists — searched <where>
+## Com'è il codice oggi
+- [D] <comportamento> è deciso in `<path>:<line>`
+- [D] <chiamante> ci arriva da `<path>:<line>`
+- [D] <cosa l'item dà per esistente> non esiste — cercato in <dove>
 
-## Changes, by place
-| # | Where | Change | Why |
+## Modifiche, per punto
+| # | Dove | Modifica | Perché |
 | - | --- | --- | --- |
-| 1 | `<path>` | <what changes> | [S] <criterion> |
-| 2 | `<path>` | <what changes> | [D] <call site that forces it> |
-| 3 | <tests> | <what is covered> | the criteria above |
+| 1 | `<path>` | <cosa cambia> | [S] <criterio> |
+| 2 | `<path>` | <cosa cambia> | [D] <punto di chiamata che la impone> |
+| 3 | <test> | <cosa viene coperto> | i criteri qui sopra |
 
-## Out of scope
-- <thing a reader would assume is included, and is not> — owned by <item / nobody yet>
-- <thing the parent covers but this item does not>
+## Fuori perimetro
+- <cosa un lettore darebbe per incluso, e non lo è> — in carico a <item / a nessuno per ora>
+- <cosa copre il padre e questo item no>
 
-## Assumptions
-- [A] <decision made, and why> — implementation-only, reversible
+## Assunzioni
+- [A] <decisione presa, e perché> — solo implementativa, reversibile
 
-## Questions that must be answered first
-1. [BLOCKING] <closed question>  Recommendation: <option>. Consequence: <what changes>.
-2. [non-blocking] <closed question>  Recommendation: <option>.
+## Domande da chiudere prima
+1. [BLOCKING] <domanda chiusa>  Proposta: <opzione>. Conseguenza: <cosa cambia>.
+2. [non-blocking] <domanda chiusa>  Proposta: <opzione>.
 
-## Route
-<the next asset: the domain skill, `plan-work`, `workitem-create`, or nothing until Q1 is answered>
+## Prossimo passo
+<l'asset successivo: la skill di dominio, `plan-work`, `workitem-create`, o niente finché Q1 è aperta>
 ```
 
 ## The rules that make it useful
 
 | Section | Rule |
 | --- | --- |
-| Verdict | first line, always. It is the thing a reader needs in five seconds. |
-| What the item asks for | quoted, tagged **S**, and it names where a discussion overrode the description |
-| Code today | every line has a `file:line`, or it is not a **D** and does not belong here |
-| Changes by place | one row per place, and each row's "why" points at an S or a D — never at a feeling |
-| Out of scope | never empty. An empty exclusion list means the boundary was never drawn. |
-| Assumptions | only implementation-level ones survive here; anything observable is a question |
-| Questions | at most three, closed, each with a recommendation, blocking ones first |
-| Route | exactly one next step, named |
+| `Verdetto` | first line, always. It is the thing a reader needs in five seconds. |
+| `Cosa chiede l'item` | quoted, tagged **S**, and it names where a discussion overrode the description |
+| `Com'è il codice oggi` | every line has a `file:line`, or it is not a **D** and does not belong here |
+| `Modifiche, per punto` | one row per place, and each row's "why" points at an S or a D — never at a feeling |
+| `Fuori perimetro` | never empty. An empty exclusion list means the boundary was never drawn. |
+| `Assunzioni` | only implementation-level ones survive here; anything observable is a question |
+| `Domande da chiudere prima` | at most three, closed, each with a recommendation, blocking ones first |
+| `Prossimo passo` | exactly one next step, named |
+
+The section headings are part of the artefact, so they are Italian and fixed: do not re-title them
+per item, and do not translate them back to English.
 
 Two things the plan never contains: an estimate in hours, and code. An estimate belongs to whoever
 commits to the sprint, and code belongs after the verdict.
@@ -68,52 +76,54 @@ commits to the sprint, and code belongs after the verdict.
 ## Worked example
 
 ```markdown
-# 4711 Export the invoice list to CSV — attack plan
+# 4711 Esportazione elenco fatture in CSV — piano di attacco
 
-**Verdict:** implementable
-**Type / state / iteration:** User Story · New · Sprint 42
-**Parent:** 4690 Invoice management
+**Verdetto:** implementable
+**Tipo / stato / iterazione:** Product Backlog Item · New · Sprint 42
+**Padre:** 4690 Gestione fatture
 
-## What the item asks for
-- [S] "A user viewing the invoice list can download the same rows as a CSV file."
-- [S] "The export respects the filters currently applied on screen."
-- [S] "The file name contains the export date."
-- Discussion, 3 comments in: the separator must be a semicolon, because the finance team opens the
-  file in a locale where the comma is the decimal mark. Not in the description.
+## Cosa chiede l'item
+- [S] "Chi consulta l'elenco fatture può scaricare le stesse righe in un file CSV."
+- [S] "L'esportazione rispetta i filtri applicati a video in quel momento."
+- [S] "Il nome del file contiene la data di esportazione."
+- Discussione, al terzo commento: il separatore deve essere il punto e virgola, perché
+  l'amministrazione apre il file con la virgola come separatore decimale. Non è nella descrizione.
 
-## What the code looks like today
-- [D] The list is served by `InvoiceQueryHandler.Handle` in `src/Api/Invoices/InvoiceQueryHandler.cs:34`,
-  which already takes the filter object the screen sends.
-- [D] Paging is applied in the same method at `:58` — the export must bypass it, not reuse it.
-- [D] `src/Web/src/pages/Invoices/InvoiceList.tsx:120` holds the filter state the export needs.
-- [D] No CSV writer exists anywhere in the solution; searched `src/Api` and `src/Shared`.
+## Com'è il codice oggi
+- [D] L'elenco è servito da `InvoiceQueryHandler.Handle` in
+  `src/Api/Invoices/InvoiceQueryHandler.cs:34`, che già riceve l'oggetto filtro della schermata.
+- [D] La paginazione è applicata nello stesso metodo a `:58` — l'export deve scavalcarla, non riusarla.
+- [D] `src/Web/src/pages/Invoices/InvoiceList.tsx:120` tiene lo stato dei filtri che serve all'export.
+- [D] Nessuno scrittore CSV esiste nella solution; cercato in `src/Api` e `src/Shared`.
 
-## Changes, by place
-| # | Where | Change | Why |
+## Modifiche, per punto
+| # | Dove | Modifica | Perché |
 | - | --- | --- | --- |
-| 1 | `src/Api/Invoices/` | an export endpoint taking the same filter object, unpaged, streaming | [S] same rows, same filters |
-| 2 | `src/Api/Invoices/` | a CSV writer: semicolon separator, invariant number and date formats | discussion decision |
-| 3 | `src/Web/src/pages/Invoices/InvoiceList.tsx` | a download action passing the current filter state | [D] filter state lives here |
-| 4 | tests | filter equivalence against the list endpoint, separator, empty result | the criteria above |
+| 1 | `src/Api/Invoices/` | endpoint di export che riceve lo stesso oggetto filtro, senza paginazione, in streaming | [S] stesse righe, stessi filtri |
+| 2 | `src/Api/Invoices/` | scrittore CSV: separatore punto e virgola, formati numerici e data invarianti | decisione in discussione |
+| 3 | `src/Web/src/pages/Invoices/InvoiceList.tsx` | azione di download che passa lo stato dei filtri corrente | [D] lo stato dei filtri sta qui |
+| 4 | test | equivalenza dei filtri con l'endpoint di elenco, separatore, risultato vuoto | i criteri qui sopra |
 
-## Out of scope
-- Excel (`.xlsx`) output — the item says CSV; nobody owns xlsx yet.
-- Scheduled or e-mailed exports — the parent mentions them, this item does not.
-- Changing the list endpoint's own paging — item 1 adds a path, it does not alter the existing one.
+## Fuori perimetro
+- Output Excel (`.xlsx`) — l'item parla di CSV; l'xlsx non è in carico a nessuno.
+- Export pianificati o inviati per e-mail — li menziona il padre, non questo item.
+- Modifiche alla paginazione dell'endpoint di elenco — il punto 1 aggiunge un percorso, non altera
+  quello esistente.
 
-## Assumptions
-- [A] The export streams rather than buffering, because the filter can match the whole table.
-  Implementation-only and reversible.
+## Assunzioni
+- [A] L'export lavora in streaming invece di bufferizzare, perché il filtro può selezionare l'intera
+  tabella. Solo implementativa e reversibile.
 
-## Questions that must be answered first
-1. [non-blocking] Does the export include the columns hidden on screen, or only the visible ones?
-   Recommendation: only the visible ones, matching "the same rows as on screen".
-   Consequence: changes the projection, not the shape of the work.
+## Domande da chiudere prima
+1. [non-blocking] L'export include anche le colonne nascoste a video, o solo quelle visibili?
+   Proposta: solo quelle visibili, coerente con "le stesse righe che si vedono a video".
+   Conseguenza: cambia la proiezione, non la forma del lavoro.
 
-## Route
-`dotnet-backend` for items 1 and 2, `react` for item 3, `dotnet-testing` for item 4, then `done-check`.
+## Prossimo passo
+`dotnet-backend` per i punti 1 e 2, `react` per il 3, `dotnet-testing` per il 4, poi `done-check`.
 ```
 
 Note what the example does: it quotes, it cites lines, it says out loud that the discussion beat the
 description, it excludes three things a reader would have assumed, and it asks one question rather
-than five. That is the standard — and it fits on a page.
+than five. That is the standard — and it fits on a page. Note also what it does *not* translate: the
+verdict keyword, the tags, the paths and the state name.

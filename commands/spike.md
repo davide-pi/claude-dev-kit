@@ -36,16 +36,19 @@ code is scaffolding, and it gets deleted in step 5.
    be committed by accident and never appears in `git status`. Nothing goes into `src`, the solution
    file, or any `.csproj`.
 
-5. **Report, then delete.**
-   - **Question** — the claim from step 1.
-   - **Answer** — yes / no / "it depends, on this", in one line.
-   - **Evidence** — the actual output, trimmed to the lines that carry it.
-   - **Instrument** — what was run, so it can be re-run.
-   - **What this does not tell us** — the limit of the probe. One line, and it is not optional: a
+5. **Report in Italian, then delete.** Headings and prose are Italian; the command and the probe's
+   raw output are pasted verbatim, and when the answer *is* a literal value — a number, a status
+   code, a JSON body, an exit code — it is quoted exactly as it came out, never translated nor
+   turned into prose.
+   - **Domanda** — the claim from step 1.
+   - **Risposta** — `sì` / `no` / "dipende, da questo", in one line.
+   - **Prova** — the actual output, verbatim, trimmed to the lines that carry it.
+   - **Strumento** — what was run, so it can be re-run: the command exactly as typed.
+   - **Cosa non ci dice** — the limit of the probe. One line, and it is not optional: a
      probe on one input is not a general answer.
-   - **Deleted** — the files removed. Then remove them, unless `--keep` was passed, and say where
+   - **Eliminato** — the files removed. Then remove them, unless `--keep` was passed, and say where
      they are if it was.
-   - **Next** — one line: the change this answer implies, and the route for it.
+   - **Prossimo passo** — one line: the change this answer implies, and the route for it.
 
 ## Guardrails
 

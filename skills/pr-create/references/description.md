@@ -1,8 +1,9 @@
 # PR title and description
 
 The title and body are written in **Italian**, whatever language the conversation is in: they are
-read by the team, by the platform's search, and by whoever looks this change up in a year. Commit
-messages are the exception and stay English — they belong to the repository's history.
+read by the team, by the platform's search, and by whoever looks this change up in a year. So are
+commit messages — which is what makes a squash merge coherent, since the platform turns the PR
+title into the commit subject.
 
 ## The title
 
@@ -15,8 +16,8 @@ One imperative line, specific to this change, no trailing period.
 | `feature/billing-export` | the branch name | `Aggiungi export fatture per tenant` |
 | `Aggiunto il nuovo endpoint.` | past tense, trailing period | `Aggiungi endpoint API fatture` |
 
-If the branch is a single logical change, the PR title and the squashed commit subject say the same
-thing in two languages — Italian here, English in the commit (`commit`).
+If the branch is a single logical change, the PR title and the squashed commit subject are the same
+sentence — the platform copies one into the other, so write it once and write it well (`commit`).
 
 ## The body
 

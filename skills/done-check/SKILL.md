@@ -8,6 +8,10 @@ description: The completion gate. Requires evidence — a command that was run a
 Working alone means there is no second human reviewer, ever. This gate is the review: whatever it
 misses, nothing catches.
 
+**Language.** The evidence report and the verdict are written in **Italian** — the user reads them.
+The commands and the output lines quoted as evidence are reproduced **verbatim**, in the language
+the tool printed them: an evidence line that has been translated is no longer evidence.
+
 ## When
 
 - About to say done, fixed, working, passing or deployed.
@@ -28,9 +32,9 @@ Every claim maps to output read **in this session**. Three states exist, and onl
 
 | State | Wording |
 | --- | --- |
-| ran it, output confirms | `done — dotnet test …: Failed: 0, Passed: 42` |
+| ran it, output confirms | `fatto — dotnet test …: Failed: 0, Passed: 42` |
 | ran it, output does not confirm | not done; go fix it, and say nothing yet |
-| did not run it | `**not verified**: <what>, because <why>. Verify with: <command>.` |
+| did not run it | `**non verificato**: <cosa>, perché <motivo>. Verifica con: <comando>.` |
 
 There is no fourth state. "Should work", "looks correct", "the change is straightforward" and "the
 logic is sound" are the third state wearing the first state's clothes. A test never passes because
@@ -85,7 +89,7 @@ git diff --stat; git diff
 ```
 
 Report the claim and its evidence on the same line — the command, and the line of output that
-settles it. Quote the output; do not paraphrase it.
+settles it. Quote the output; do not paraphrase it, and never translate it.
 
 ## Traps
 

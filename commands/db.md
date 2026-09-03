@@ -54,17 +54,21 @@ invocation carries `--write`.
 6. **Describe** — one query against the catalog, per the engine's skill: `INFORMATION_SCHEMA` plus
    `sys.indexes` on SQL Server, `information_schema` plus `pg_indexes` on Postgres.
 
-7. **Report** — the engine, server and database on one line (never credentials) · the exact
-   statement run · the rows as a markdown table, truncated with the count stated · one line of
-   reading where the result is not self-explanatory. Empty result set → "0 rows", plus what that
-   rules out.
+7. **Report in Italian** — the prose, the reading and the answer to the question. Everything that
+   is a machine value is pasted **verbatim and untranslated**: the SQL statement, schema, table,
+   column and constraint names, the returned values, and any engine message. Layout: the engine,
+   server and database on one line (never credentials) · the exact statement run · the rows as a
+   markdown table keeping the real column names as headers, truncated with the count stated · one
+   line of reading where the result is not self-explanatory. Empty result set → "0 righe", plus
+   what that rules out.
 
 ## Writes
 
 `INSERT`, `UPDATE`, `DELETE`, `MERGE`, DDL and anything calling a procedure that writes require
 `--write` **in this invocation**. With it: show the statement, state the target database, state the
-rows it will affect (`SELECT COUNT(*)` on the same predicate first), get an explicit yes, then run
-it inside an explicit transaction. Without it: refuse, print the statement, and say `--write` is
+rows it will affect (`SELECT COUNT(*)` on the same predicate first), ask in Italian and get an
+explicit yes — the statement inside the question stays verbatim — then run it inside an explicit
+transaction. Without it: refuse, print the statement, and say `--write` is
 needed. A previous `--write` never carries over to the next invocation.
 
 ## Guardrails

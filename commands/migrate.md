@@ -7,6 +7,11 @@ Add an EF Core migration and get it reviewed before anything reaches a database.
 cost knowledge is in **`ef-core`**; this command is the safe sequence around `dotnet ef`. The stop
 in step 5 is the point of the command: **the generated SQL is read by a human before it runs.**
 
+**Language** — everything the user reads is **Italian**: the destructive-statement warnings, the
+one-line confirmation of step 5 and the report of step 7. Two things are not translated: the
+migration name, which becomes a C# class and stays **English** PascalCase, and every value echoed
+from the tooling — SQL statements, table and column names, `dotnet ef` output, the database name.
+
 ## Argument grammar
 
 - **`<MigrationName>`** — PascalCase, describing the schema change (`AddOrderShippedAt`). Missing →
@@ -54,7 +59,8 @@ in step 5 is the point of the command: **the generated SQL is read by a human be
    Print the script, or the destructive statements plus a summary if it is long, and state: the
    tables touched, the destructive statements, whether the `Down` is a true inverse, and — for a
    table with rows — whether the change needs a data backfill the migration does not contain.
-   Then **ask for confirmation in one line.** Wait. `--apply` skips the asking, not the showing.
+   Then **ask for confirmation in one Italian line.** Wait. `--apply` skips the asking, not the
+   showing.
 
 6. **Apply, on an explicit yes only**:
    ```powershell
@@ -63,8 +69,8 @@ in step 5 is the point of the command: **the generated SQL is read by a human be
    Name the target database from the resolved connection before running it, so the user sees *which*
    database is about to change. Then re-run step 2's `migrations list` and report the new state.
 
-7. **Report** — context, migration name and file path, tables touched, destructive statements found,
-   the SQL script path, and whether it was applied and to which database.
+7. **Report**, in Italian — context, migration name and file path, tables touched, destructive
+   statements found, the SQL script path, and whether it was applied and to which database.
 
 ## Guardrails
 

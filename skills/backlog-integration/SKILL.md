@@ -15,8 +15,12 @@ disable-model-invocation: true
 
 # backlog-integration — a client meeting becomes items on a live board
 
-**Language.** This skill's own prose is English; the item content it produces is **Italian**, as
-`user-story-standard` prescribes.
+**Language.** This skill's own prose is English. Everything the user reads during the session is
+**Italian**: the opening question of each point, the cart recap and the creation report including
+their column headers, and every confirmation request. The item content is Italian too, as
+`user-story-standard` prescribes. Instructional and machine text stays English: the per-step
+**Done when** gates, the work item type names (`Epic`, `Feature`, `Product Backlog Item`, `Bug`,
+`Tech`, `Impediment`, `Task`), the state names, WIQL and field reference names.
 
 ## When
 

@@ -72,6 +72,7 @@ mostly empty — each one has been read back with its accents intact, and the tr
 
 Print the tree that now exists, page by page, and say plainly what is a placeholder waiting for
 content: the empty sections in `Requisiti`, the constraints not yet collected, the questions not yet
-asked. That list is the first backlog of the wiki.
+asked. That list is the first backlog of the wiki, and it is written in Italian like every other
+report this skill hands over — page names excepted, which stay canonical.
 
 **Completo quando:** the user has the tree and the list of placeholders in front of them.

@@ -7,6 +7,11 @@ Turn a red build into a diagnosis. The method is **`debug-systematic`** (reprodu
 Azure DevOps CLI mechanics and the REST fallback are **`azdo-cli`**; YAML and template knowledge is
 **`pipeline`**. This command fetches the evidence and names the cause — it does not push a fix.
 
+**Language** — the diagnosis the user reads is **Italian**: the report of step 6, the class of step 5
+and the proposed fix explained. Evidence is never translated — quoted log lines, error codes, job,
+stage and step names, branch and commit values, and the YAML or diff of the fix itself are
+reproduced exactly as the pipeline gives them.
+
 ## Argument grammar
 
 - *(empty)* → the most recent failed run on the current branch, falling back to the repo's most
@@ -49,7 +54,9 @@ Azure DevOps CLI mechanics and the REST fallback are **`azdo-cli`**; YAML and te
    restore warnings, `NU1701`, deprecation notices, a retried download, the summary line that just
    repeats the count. Quote at most ten lines of evidence, with the step name.
 
-5. **Classify the cause. This is the answer, not the log.**
+5. **Classify the cause. This is the answer, not the log.** The classes are named in English below
+   for you; in the report they are stated in Italian — `il codice è sbagliato`, `la pipeline è
+   sbagliata`, `l'ambiente è diverso`, `flake`.
 
    | Class | What the log looks like | Where the fix goes |
    | --- | --- | --- |
@@ -60,12 +67,12 @@ Azure DevOps CLI mechanics and the REST fallback are **`azdo-cli`**; YAML and te
 
    Confirm the class before proposing: reproduce the "code is wrong" case with the same command the
    step ran (`dotnet build`, `dotnet test --filter <Name>`, `npm ci` then the script). A cause that
-   was never reproduced is labelled a hypothesis.
+   was never reproduced is labelled `ipotesi` in the report.
 
-6. **Report** — run id, pipeline or workflow, branch, commit, failing job and step · the isolated
-   error, quoted · the class from step 5 with the evidence for it · the minimal fix as a concrete
-   diff or YAML snippet · one line on what else the same cause would break. Then **ask** whether to
-   apply it.
+6. **Report**, in Italian — run id, pipeline or workflow, branch, commit, failing job and step ·
+   the isolated error, quoted · the class from step 5 with the evidence for it · the minimal fix as
+   a concrete diff or YAML snippet · one line on what else the same cause would break. Then **ask**
+   whether to apply it.
 
 ## Guardrails
 

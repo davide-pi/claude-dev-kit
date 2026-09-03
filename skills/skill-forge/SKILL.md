@@ -61,6 +61,7 @@ Two shapes for one need is duplication: a command may *route to* a skill, never 
 | Reference length | 200 lines maximum, one topic each, self-contained | cap |
 | Command length | 100 lines maximum, and a **Never** line in the body | cap |
 | Style | Tables and decision trees; PowerShell examples; no version numbers | review |
+| Language | The asset's prose is **English** and it *says* "produce Italian" for everything a person reads; code, a project's technical docs, plan files and specs stay English | review |
 | Identity | No organization names, no absolute machine paths, no addresses | validator, error |
 | Cross-references | Name other assets by bare name; never link a file that does not exist yet | validator, error |
 
@@ -115,8 +116,8 @@ node tools/validate.mjs
 #    the MUST NOT prompt and confirm it stays out. Reworking a description? Use skill-creator.
 ```
 
-**Finished means all five:** inside the caps, skeleton complete, validator clean, eval section
-added, README row added. Four out of five is not finished.
+**Finished means all six:** inside the caps, skeleton complete, output language stated, validator
+clean, eval section added, README row added. Five out of six is not finished.
 
 ## Traps
 
@@ -136,9 +137,8 @@ added, README row added. Four out of five is not finished.
    `## References` with the condition that sends you there.
 8. **An org name, a machine path or an address in an example** — placeholders are allowed only for
    those three things, and required for them.
-9. **MCP-first, or bash-first, instructions** — the CLI comes first (`az`, `gh`, `dotnet`, `docker`,
-   `sqlcmd`) with the MCP fallback stated, and examples are PowerShell unless bash is genuinely the
-   better instrument, which the asset then says.
+9. **MCP-first, or bash-first, instructions** — the CLI comes first (`az`, `gh`, `dotnet`, `docker`, `sqlcmd`)
+   with the MCP fallback stated, and examples are PowerShell unless the asset says why bash is better.
 10. **A command with no Never line** — nothing stops it from posting, dropping or deploying.
 11. **An asset that duplicates an installed plugin** — check the README plugin coverage table first.
 
@@ -147,4 +147,4 @@ added, README row added. Four out of five is not finished.
 - `references/description-craft.md` — writing a description that fires when it should and stays
   quiet otherwise, with the false-negative and false-positive patterns and how to test both.
 - `references/asset-templates.md` — copy-paste skeletons for a skill, a command, an agent and a
-  hook, plus the eval section and README row formats, and the finish checklist.
+  hook, the two-language rule with its exceptions, the eval and README formats, the finish checklist.

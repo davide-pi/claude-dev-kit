@@ -19,7 +19,9 @@ would actually hurt are caught by something cheaper than production. Two rules a
 2. **Every test must be seen failing before it is trusted.** A test that passed on its first run
    asserts nothing until proven otherwise.
 
-Everything else is a judgement call, and the tables below make it.
+Everything else is a judgement call, and the tables below make it. **Language:** the strategy and
+the recommendation are written in **Italian**; the test names, the test code and the fixtures they
+recommend follow the conventions already in the repository, which are English — never translate one.
 
 ## When
 

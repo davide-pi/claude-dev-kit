@@ -6,6 +6,12 @@ argument-hint: "[id | url] | (empty for your active items)"
 Put a work item on screen in a form a human can act on. Reading only: the item is not updated, not
 transitioned, not commented. CLI mechanics, auth and the MCP fallback come from **`azdo-cli`**.
 
+**Language** — the report is written in **Italian**: its headings (`Descrizione`, `Criteri di
+accettazione`, `Contesto`, `Link`, `Discussione`), the notes for what is missing and any question
+back to the user. The item's own content is printed as it stands, and so is everything the platform
+returns — state, area and iteration paths, field names such as `Acceptance Criteria`, branch and PR
+titles: quoted as-is, never translated.
+
 ## Argument grammar
 
 - *(empty)* → list the developer's active items.
@@ -54,14 +60,14 @@ transitioned, not commented. CLI mechanics, auth and the MCP fallback come from 
    Never print raw HTML at the user.
 
 5. **Empty list, empty answer.** Missing description or empty acceptance criteria is *the* finding —
-   say "no acceptance criteria" in place of the section instead of dropping it silently.
+   print `nessun criterio di accettazione` in place of the section, never drop it silently.
 
 6. **Report**, in this order: one header line (`#<id> · <type> · <state> · <assignee>` and the item
-   URL) · **Description** · **Acceptance criteria** as a checklist · **Context** (parent, children,
-   area, iteration, effort) · **Links** (PRs, commits, attachments with their names) ·
-   **Discussion**, oldest first, `author — date` then the comment, HTML converted, only the last
-   five unless the user asked for all. Close with **one** line: the obvious next step and the
-   command for it (`workitem-analyze`, `/ship`).
+   URL) · `Descrizione` · `Criteri di accettazione` as a checklist · `Contesto` (parent, children,
+   area, iteration, effort) · `Link` (PRs, commits, attachments with their names) · `Discussione`,
+   oldest first, `author — date` then the comment, HTML converted, only the last five unless the
+   user asked for all. Close with **one** Italian line: the obvious next step and the command for
+   it (`workitem-analyze`, `/ship`).
 
 ## No id — list the active items
 

@@ -7,6 +7,11 @@ One read-only sweep of everything that is currently on the developer's plate. No
 changed, transitioned or posted. Azure DevOps CLI mechanics (auth, WIQL, default org and project)
 come from **`azdo-cli`**; this command only assembles the picture.
 
+**Language** — the whole report is **Italian**: section headings, table columns, the closing line and
+the notes for what could not be read. Values the platform returns are printed exactly as they come
+back and never translated: work-item state (`New`, `Active`), field names, branch and PR titles,
+pipeline, stage and step names.
+
 ## Argument grammar
 
 - *(empty)* → all four sections.
@@ -57,19 +62,20 @@ come from **`azdo-cli`**; this command only assembles the picture.
    ```
    A failure on the current branch is the headline; anything else is context.
 
-7. **Report** — four short sections in this order, each at most five rows, newest first: **Items**,
-   **PRs** (yours, then awaiting you), **Branches**, **Builds**. Then **one** closing line naming
-   the single most urgent thing and the command that handles it (`/fix-ci`, `/ship`, `/item <id>`).
+7. **Report** — four short Italian sections in this order, each at most five rows, newest first:
+   `Item`, `PR` (yours, then awaiting you), `Branch`, `Build`. Then **one** closing line, also
+   Italian, naming the single most urgent thing and the command that handles it (`/fix-ci`,
+   `/ship`, `/item <id>`).
 
 ## Degrading gracefully
 
 | Situation | What to do |
 | --- | --- |
 | No git remote / not a repo | branches section only, one line for the rest |
-| Platform CLI not authenticated | name the section, say "not authenticated", carry on |
+| Platform CLI not authenticated | name the section, print `non autenticato`, carry on |
 | Azure DevOps default org or project unset | say so and route to `azdo-cli`; do not guess |
-| Repo has no pipelines or workflows | "no CI configured" — not an error |
-| A section returns empty | "none" — an empty section is a valid, useful answer |
+| Repo has no pipelines or workflows | `nessuna CI configurata` — not an error |
+| A section returns empty | `nessuno` — an empty section is a valid, useful answer |
 
 A section that cannot be read never aborts the others: report what worked, name what did not.
 

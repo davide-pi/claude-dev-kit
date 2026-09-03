@@ -2,7 +2,8 @@
 
 Four shapes that recur. Each gives the split, the per-agent prompt skeleton, and the merge step —
 which is the part that decides whether the fan-out paid for itself. All of them assume the output
-contract from `delegate-agents` is pasted verbatim into every prompt.
+contract from `delegate-agents` is pasted verbatim into every prompt — including its language line:
+Italian prose, machine fields untouched.
 
 ## 1. Closing a test gap
 

@@ -11,6 +11,15 @@ description: >-
 
 # branch-flow — branch it, isolate it, finish it
 
+**Language — one sentence, two languages.** This skill's instructions are English, and so is
+everything it produces as an **identifier**: branch names (`feature/*`, `fix/*`, kebab-case), the
+default-branch name, git commands and flags, platform verbs. Everything it says to a person is
+**Italian**: why a branch is named the way it is, the finish menu when it is actually presented, the
+recommendation, and the reason a branch is not merging. The two mix inside the same paragraph, and
+that is correct — *"Ho creato `feature/tenant-billing-dashboard` partendo da `origin/main`: il
+working tree era sporco, quindi ho isolato il lavoro in un worktree"*. The identifier is never
+translated; the prose around it is never left in English.
+
 ## When
 
 - New work starts and nothing has been branched yet.

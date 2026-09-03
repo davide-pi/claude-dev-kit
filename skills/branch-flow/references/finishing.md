@@ -32,6 +32,11 @@ If a gate is red, the branch is not finished. That is the whole decision.
 | Dead end | delete local and remote branch | a written lesson, not a branch |
 | Wanted later, not now | keep the branch, rebase it while it is cheap, say what blocks it | a named blocker |
 
+The table is the model's decision grid, in English. When the menu is **presented to the user** it is
+written in Italian, one line per option that actually applies — *"Fatto e verificato → push, PR,
+squash-merge, cancello il branch"*, *"Vicolo cieco → cancello il branch e scrivo cosa abbiamo
+imparato"* — with the branch names, the git commands and the platform verbs left exactly as they are.
+
 Never merge to "keep the work safe". A push already keeps it safe; merging publishes it.
 
 ## 3. Merging, per platform
@@ -63,7 +68,8 @@ appear on the base. That is expected — check the PR state, not the merge base,
 
 ## 5. Not merging, properly
 
-A branch that will not merge still owes an explanation. Write, in this order:
+A branch that will not merge still owes an explanation, written in Italian because a person reads it
+— the branch name and any command inside it stay as they are. Write, in this order:
 
 1. what the branch does, in one line;
 2. why it is not merging — wrong layer, cost, a requirement that changed, a simpler fix found;

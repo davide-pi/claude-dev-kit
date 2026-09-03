@@ -9,6 +9,7 @@ description: >
   debug an end-to-end flow that spans multiple services (e.g. a user-facing transaction, a
   multi-service saga, an async feed import). It maps the flow; it does not edit code.
 tools: Read, Grep, Glob
+model: sonnet
 ---
 
 You trace end-to-end flows across a .NET microservices backend where services communicate over a
@@ -40,6 +41,12 @@ walkthroughs — reuse them if the flow is already documented.
    SignalR push, or a terminal event with no consumer relevant to the flow. Watch for cycles.
 
 ## What to return
+
+Write the prose in **Italian**: the one line on what each hop does, the notes on branches and
+fan-out, and the gaps. Everything that identifies code stays **verbatim English** and is never
+translated, re-cased or reformatted — the `[Project/Service]` tag, `file.cs:line`, the bus verb, the
+message and event type names, the subscription id, and the mermaid node labels you take from code.
+Any excerpt you quote is pasted exactly as it stands in the file.
 
 - An **ordered hop list**, each hop as: `[Project/Service] file.cs:line — Verb<MessageType>` and one
   line on what it does. Show fan-out and branches explicitly.

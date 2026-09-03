@@ -1,12 +1,16 @@
 # Steps 4 to 6 — recap the cart, create in bulk, then loop or close
 
+This page is guidance, so it is English. Both tables below are shown to the user, so they are
+**Italian, headers included**; only the work item type names, the ids and the identities keep their
+own form. The **Done when** gates stay English: they address the model, not the user.
+
 ## Step 4 — recap and refine
 
 Print the **whole** cart, one row per draft, before anything is written:
 
 ```markdown
-| # | Type | Title | Parent Feature | Assignee | Images |
-|---|------|-------|----------------|----------|--------|
+| # | Tipo | Titolo | Feature padre | Assegnatario | Immagini |
+|---|------|--------|---------------|--------------|----------|
 | 1 | Product Backlog Item | <titolo> | #<featureId> — <titolo Feature> | <identity> | 2 (nomi file) |
 | 2 | Bug | <titolo> | #<featureId> — <titolo Feature> | <identity> | no |
 ```
@@ -16,8 +20,9 @@ the two fields that may not stay ambiguous**: resolve every doubt on those two b
 because a wrong assignee is invisible on the board and a wrong parent breaks the hierarchy.
 
 Ask the user, **before creating anything**, whether after this round they want to keep working on the
-same Epic or close the session — the answer is executed at step 6, not now. Either way step 5 runs
-with the cart as it stands.
+same Epic or close the session — in Italian, for instance **"Dopo questo giro continuiamo sullo
+stesso Epic o chiudiamo la sessione?"**. The answer is executed at step 6, not now. Either way step 5
+runs with the cart as it stands.
 
 **Done when:** the user has confirmed the cart, chosen continue or close, and every entry has an
 unambiguous assignee and parent Feature.
@@ -38,11 +43,12 @@ Per cart entry, in order, all of it in one pass — the verbs and flags are in `
 with the remaining entries. The same holds for a failed create: report the ids already created
 before stopping, so a retry does not duplicate them.
 
-Report the **real id** of every item created, and per image whether the attachment succeeded.
+Report the **real id** of every item created, and per image whether the attachment succeeded. The
+report is Italian, and so is any failure line inside it:
 
 ```markdown
-| # | Type | Id | Title | Parent | Assignee | Images |
-|---|------|----|-------|--------|----------|--------|
+| # | Tipo | Id | Titolo | Padre | Assegnatario | Immagini |
+|---|------|----|--------|-------|--------------|----------|
 | 1 | Product Backlog Item | #<id> | <titolo> | #<featureId> | <identity> | 2/2 ok |
 | 2 | Bug | #<id> | <titolo> | #<featureId> | <identity> | 1/2 — <file> KO: <errore> |
 ```

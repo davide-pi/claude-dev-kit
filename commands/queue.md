@@ -63,9 +63,13 @@ inside the broker container and are reached with `docker exec`.
    queue), and the payload; redact any token or connection string in it. A peek reorders the queue's
    head — say so when order matters.
 
-6. **Report** — broker container and vhost · a table of queues with depth, ready, unacked and
-   consumers, worst first · dead-letter queues separately with their `x-death` reason · the peeked
-   message if asked · one line naming the most likely cause from step 3 and what to look at next
+6. **Report in Italian** — the prose, the diagnosis and the next step; the row of step 3 that
+   matched is written out in Italian, not copied from the English table above. Machine values pass
+   through untouched: queue, exchange, vhost and container names, routing keys, header names such
+   as `x-death`, the counters and the peeked payload. Layout: broker container and vhost · a table
+   of queues, Italian headers over the real field values, with depth, ready, unacked and consumers,
+   worst first · dead-letter queues separately with their `x-death` reason · the peeked message if
+   asked · one line naming the most likely cause from step 3 and what to look at next
    (`/logs <consumer>`, `debug-systematic`).
 
 ## Guardrails

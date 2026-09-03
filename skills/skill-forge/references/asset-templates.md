@@ -138,6 +138,24 @@ One row per asset in the README table, matching the existing column shape:
 | `skills/<name>/SKILL.md` | Skill | <one sentence: what it decides, and the two things it covers>. |
 ```
 
+## Language
+
+An asset of this kit is **written in English** — its prose addresses the model, and this repository
+is public — and it *says* "produce Italian" for everything a person reads: chat output, a
+classification line, the questions asked, reports, tables, verdicts, an evidence summary, a Decision
+Summary, the explanation of a diagnosis. State it once, near the top of the asset, and the exception
+that applies to it where the asset produces one.
+
+| Stays English | Why |
+|---------------|-----|
+| Source code, identifiers, code comments, test code | It lives with the code and follows the repository's conventions |
+| A project's technical documentation tree (`docs/tech*`, architecture maps, flow docs, its own `CLAUDE.md`) | Technical reference an AI session consumes, not prose a person reads |
+| Plan files and design specs | Technical artifacts a later session reads back |
+| Machine identifiers: command names and flags, `file:line`, test names, `CONFIRMED`/`PLAUSIBLE`, exception and type names, log lines, tool output | They are the format; translated output stops being evidence |
+
+An asset written *in* Italian is the failure mode this rule prevents — `worklog` is the one
+deliberate exception, and it says so.
+
 ## Finish checklist
 
 | # | Check | How |
@@ -156,5 +174,6 @@ One row per asset in the README table, matching the existing column shape:
 | 12 | Eval section added | At least one MUST and one MUST NOT |
 | 13 | README row added | In the asset table |
 | 14 | Limits stated | Any asset that can write, post or delete says what it never does |
+| 15 | Output language stated | English prose that says "produce Italian", with the English exceptions named where the asset produces one |
 
-Thirteen out of fourteen is not finished.
+Fourteen out of fifteen is not finished.

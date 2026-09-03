@@ -1,5 +1,10 @@
 # Unknowns, questions, and the implementability verdict
 
+This page is guidance, so it is English. Everything it tells you to hand over is **Italian**: the
+questions asked of the owner, the assumption lines that go into the plan, and the split proposal.
+The `[BLOCKING]` / `[non-blocking]` labels, the **S** / **D** / **A** tags, the verdict keywords and
+the Azure DevOps type names are markers — leave them exactly as they are inside the Italian text.
+
 ## What counts as an unknown
 
 An unknown is a gap that **changes the code depending on how it resolves**. That test is the whole
@@ -36,12 +41,14 @@ Cap it at three questions. Beyond three, either the item is not ready — say th
 of the questions are not real unknowns and you should decide them yourself, tag them **A** and note
 the decision in the plan.
 
+The questions are written in Italian, with the recommendation and the consequence in Italian too:
+
 ```text
-1. [BLOCKING] Duplicate rows in the import: skip them, or reject the file?
-   Recommendation: skip and report, so a 5000-row file is not lost to one bad row.
-   Either answer changes the parser's error path and the criteria QA will test.
-2. [non-blocking] Does the export need the archived records too?
-   Recommendation: no — the current screen excludes them, so keep it consistent.
+1. [BLOCKING] Righe duplicate nell'import: le salto, o rifiuto tutto il file?
+   Proposta: saltarle e segnalarle, così un file da 5000 righe non si perde per una riga sbagliata.
+   Conseguenza: cambia il percorso di errore del parser e i criteri che il QA andrà a testare.
+2. [non-blocking] L'esportazione deve includere anche i record archiviati?
+   Proposta: no — la schermata attuale li esclude, meglio restare coerenti.
 ```
 
 ## Assumptions that stay assumptions
@@ -87,7 +94,8 @@ files is one item with a plan, not four items. Splitting a coherent change creat
 be tested independently, which is worse than one big one.
 
 When the verdict is a split, produce the proposal — type, title and one-line scope per proposed item,
-plus which existing item is the parent — and hand it to `workitem-create`. Nothing here creates,
+plus which existing item is the parent — in Italian, with the type names left as the project spells
+them, and hand it to `workitem-create`. Nothing here creates,
 edits or comments on anything: the split is a proposal until someone confirms it.
 
 ## Re-analysis

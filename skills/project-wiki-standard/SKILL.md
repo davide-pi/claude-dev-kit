@@ -21,10 +21,11 @@ use it as a source of truth without guessing where something lives or disambigua
 it. A client will have more than one product over time, so the structure has to hold several
 projects under the same client.
 
-**Language.** This skill's instructions are English; the wiki content it writes is **Italian**, and
-the canonical page names (`Requisiti`, `Vincoli`, `Architettura`, `Domande aperte`,
-`Domande cliente`, `Domande terze parti`, `Chiusura progetto`, `Glossario`, `Casi limite`) stay
-exactly as they are — they are the structure itself, not prose to translate. Do not "fix" them.
+**Language.** This skill's instructions are English; everything it produces for a person is
+**Italian** — the wiki content, and equally the audit report and the structure map it presents before
+changing anything. The canonical page names (`Requisiti`, `Vincoli`, `Architettura`,
+`Domande aperte`, `Domande cliente`, `Domande terze parti`, `Chiusura progetto`, `Glossario`,
+`Casi limite`) never change: they are the structure itself, not prose. Do not "fix" them.
 
 ## When
 

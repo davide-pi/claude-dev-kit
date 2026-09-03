@@ -5,6 +5,11 @@ description: Writes an implementation plan file for multi-step work — concrete
 
 # plan-work — a plan file with verifiable tasks, sized to the change
 
+**Language.** The plan file is written in **English**, because a later session or another agent
+reads it back as a technical artifact, next to the code it describes. Everything this skill says
+**in chat** while producing it — the proposal, the sizing question, the confirmation — is
+**Italian**.
+
 ## When
 
 - The work spans more than a couple of files, or more than one session.
@@ -98,6 +103,8 @@ Fill it from the template in `references/plan-template.md`. Then, while executin
    agent, cannot compile against a description; write the signature.
 7. A plan written for work already underway → half the tasks are already done → plan the remainder
    only, and say in the file where execution started.
+8. The file written in Italian → the conversation around it was Italian → only the chat is Italian;
+   the plan file, like a spec, stays English.
 
 ## References
 

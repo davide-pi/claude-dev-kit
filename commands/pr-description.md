@@ -26,8 +26,11 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
 - Reference concrete file / class / method names — no vague summaries.
 - No marketing language (seamlessly, robust, powerful, enhance).
 - Bullets in Modifiche; prose only in Sintesi and Motivazione. One idea per bullet.
-- Write the description in **Italian** — the team reads it. Identifiers, file names, `AB#<id>` and
-  the section headings keep the form given below.
+- Write the description **in Italian** — a person reads it — and the PR title too, if one is
+  generated: imperative Italian, one line, no prefix. English stays only where it is a machine
+  value: identifiers, file, class, method and branch names, code, commands and their output,
+  `AB#<id>`, and the section headings of the template below, which are used exactly as written
+  there (`Test` and `Breaking change` are the standard technical terms and stay in that form).
 - Omit any section with nothing meaningful to say.
 - This repo uses Azure DevOps PRs — link a work item as `AB#<id>` only if one is provided; don't invent one.
 
@@ -58,5 +61,5 @@ Migration steps. **Omit entirely if none.**
 ## Guardrails
 
 - Generate text only: never create, update, or merge the PR itself, never push, never commit.
-- Never invent verification. If the change was not exercised, the Testing section says exactly that.
+- Never invent verification. If the change was not exercised, the `Test` section says exactly that.
 - Never restate the diff line by line — the reviewer can read it; describe intent and consequence.

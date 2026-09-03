@@ -58,10 +58,14 @@ to **`dotnet-diagnostics`**, and the stack itself to **`docker-dev-env`**.
    the filter in the pipe, and say the stream is running and how to stop it. Never leave a follow
    running as the end of a turn.
 
-5. **Report** — source and service, the window, the line count read and how many matched · the
-   matching lines, oldest first, exceptions kept whole, the middle elided with the count when there
-   are many · one line naming the first distinct error and how often it repeats. Nothing matched →
-   say so with the window and filter used, and offer the wider window.
+5. **Report in Italian** — the framing, the counts and the conclusion. The log lines themselves are
+   quoted **verbatim**: never translated, never reworded, never paraphrased instead of quoted, or
+   the line stops matching what a search would find. Same for service, container and pod names,
+   `EventId`s, exception types and stack frames. Layout: source and service, the window, the line
+   count read and how many matched · the matching lines, oldest first, exceptions kept whole, the
+   middle elided with the count when there are many · one line, in Italian, naming the first
+   distinct error and how often it repeats. Nothing matched → say so with the window and filter
+   used, and offer the wider window.
 
 ## Guardrails
 

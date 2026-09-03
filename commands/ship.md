@@ -8,6 +8,17 @@ re-decided here: branch naming and the default-branch rule come from **`branch-f
 and body shape from **`pr-create`**, the Azure DevOps CLI mechanics from **`azdo-cli`**. This
 command runs the sequence and reports the links.
 
+**Output language** — stated here rather than inherited, because the three outputs do not agree:
+
+| Output | Language |
+| --- | --- |
+| Branch name | **English** kebab-case — it is an identifier (`feature/invoice-export`) |
+| Commit subject and body | **Italian**, per `/commit`; the code and its comments stay English |
+| PR title and description | **Italian**, per `pr-create` |
+
+Machine identifiers inside those texts — `AB#<id>`, `Fixes #<n>`, branch and file names, work-item
+state names — are written as-is and never translated. The step 8 report is Italian.
+
 ## Argument grammar
 
 Parse "$ARGUMENTS"; order does not matter, all parts optional.
@@ -28,20 +39,20 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
 
 3. **Branch** — `git branch --show-current`.
    - On the repo's **default branch** → never commit there. Derive a `feature/…` or `fix/…`
-     kebab-case name per `branch-flow` (`-b` wins), then `git switch -c <name>`, carrying the
-     working tree along.
+     kebab-case name **in English** per `branch-flow` (`-b` wins), then `git switch -c <name>`,
+     carrying the working tree along.
    - Already on a feature branch → keep it; state which one.
 
 4. **Commit** — stage what step 2 listed (`git add -A`, or only the already-staged set if the user
-   staged deliberately), generate the message per the **`/commit`** rules, then
+   staged deliberately), generate the message **in Italian** per the **`/commit`** rules, then
    `git commit -m "<subject>"`. A failing hook stops the run — surface its output, never
    `--no-verify`.
 
 5. **Push** — `git push -u origin <branch>`. A rejected push means the remote moved: report and
    stop; do not force.
 
-6. **Pull request** — title and body per `pr-create` (English, imperative title, body = what
-   changed and why, from `git log <base>..HEAD` and the diff).
+6. **Pull request** — title and body **in Italian** per `pr-create`: one imperative title line
+   with no trailing period; body = what changed and why, from `git log <base>..HEAD` and the diff.
 
    Azure DevOps:
    ```powershell
@@ -61,7 +72,7 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
    the body. Verify the link came back in the create output; if it did not, say so rather than
    assuming.
 
-8. **Report** — one block: branch, commit hash, PR id and URL, the linked item, the target branch,
+8. **Report** — one block, in Italian: branch, commit hash, PR id and URL, the linked item, the target branch,
    and one line on what still gates the merge (checks running, reviewers required).
 
 ## Guardrails

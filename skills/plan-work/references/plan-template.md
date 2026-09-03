@@ -3,6 +3,10 @@
 Copy the skeleton, delete what does not apply, keep the field names. Phases exist only for plans
 past ~12 tasks; below that, a flat numbered list is clearer.
 
+The file itself is written in **English**, whatever language the conversation is in: a later session
+reads it back as a technical artifact, next to the code. Only the chat around it — the proposal, the
+sizing question, the confirmation — is Italian (`plan-work`).
+
 ## Skeleton
 
 ```markdown

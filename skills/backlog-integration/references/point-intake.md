@@ -47,8 +47,11 @@ Nothing is uploaded now. Step 3 records intent plus paths; the upload happens at
 
 ## 4. Confirm, then add to the cart
 
-Have the user confirm title and content, assignee, and the image decision. Only then add the entry
-to the **cart** — the list of drafts, not yet written to the board. A cart entry holds:
+Have the user confirm title and content, assignee, and the image decision — asked in Italian, one
+short request, for instance **"Confermi titolo, contenuto e assegnatario così come sono?"**. Only
+then add the entry to the **cart** — the list of drafts, not yet written to the board. The cart
+entry's own field names below are internal bookkeeping and stay as they are; what reaches the user
+is the Italian recap table of step 4. A cart entry holds:
 
 | Field | Value |
 | --- | --- |
@@ -62,7 +65,8 @@ to the **cart** — the list of drafts, not yet written to the board. A cart ent
 **Done when:** the entry is in the cart with type, title, content, assignee and the image decision
 all confirmed by the user — proposed is not confirmed.
 
-Then ask whether there are more points to dig into, and repeat until the user says there are none.
+Then ask, in Italian, whether there are more points to dig into — **"Ci sono altri punti da
+approfondire?"** — and repeat until the user says there are none.
 
 ## Traps
 

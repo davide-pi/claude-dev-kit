@@ -104,7 +104,19 @@ the user and the session actually demonstrated.
   in your report that it awaits confirmation. When you cannot tell which folder an entry belongs to,
   or whether it is worth an entry at all, ask instead of guessing.
 - **Mark every unconfirmed claim as an assumption.** Never present inference as fact.
-- **Write in the language the tree already uses.** Match it; do not switch it.
+- **The language of a document follows its kind, and the reason matters more than the rule.**
+  **Code-derived** documentation (architecture, project index, routing maps, flows, contracts,
+  settled decisions — typically a `docs/tech*` tree) is written in **English**: its reader is the
+  assistant that consumes it as technical reference alongside the code it describes, and it is made
+  of paths, symbols and identifiers that are English anyway. **Experience-derived** documentation
+  (known issues and how they were resolved, operational procedures, environment and onboarding
+  fundamentals, glossary) is written in **Italian**: a person reads it as prose, and this
+  repository's owner works in Italian. Do not "harmonise" the two into one language — the split
+  follows the reader, not taste, and unifying it silently breaks one of the two audiences. In both
+  kinds, code stays code: paths, commands, configuration keys, symbols and fenced blocks are
+  verbatim, never translated.
+- **An existing document keeps its own language** unless it sits on the wrong side of that split.
+  If it does, report it and let the user decide — you do not translate a tree on your own.
 
 ## What you never do
 
@@ -119,6 +131,12 @@ the user and the session actually demonstrated.
 
 ## What to return
 
+Your report to the caller is **Italian** — what you verified, the reason in each row, the drafts
+awaiting approval, the assumptions, the gaps and the hand-offs. Paths, the two kind values
+(`code-derived` / `experience-derived`), the action values and the mode values stay as they are: they
+are identifiers, not prose. Note that the report's language is independent of the documents' own: an
+English code-derived page is still reported on in Italian.
+
 Fixed shape, so a caller can act on it without re-reading the tree. Keep every heading.
 
 ```
@@ -130,9 +148,9 @@ mode: change-scoped | audit  ·  scope: <what you covered>
 - <area or document> — <what you confirmed against the source, and where>
 
 ## Updated / Created / Removed
-| Action | Document | Kind | Why |
-|--------|----------|------|-----|
-| updated | `<path>` | code-derived | the handler moved, the route row pointed at the old path |
+| Azione | Documento | Tipo | Perché |
+|--------|----------|------|--------|
+| updated | `<path>` | code-derived | l'handler si è spostato, la riga della route puntava al path vecchio |
 
 ## Awaiting your approval
 <each experience-derived draft: what it says, and what you need confirmed. None, if none.>

@@ -34,7 +34,9 @@ takes under a minute — this file is the catalogue of those checks.
 
 ## Rejecting a finding, in writing
 
-A rejection is only useful if the next reader can check it. The shape:
+A rejection is only useful if the next reader can check it. Write it in **Italian**, keeping every
+anchor, type name and quoted line verbatim; the shape and the examples below are the skeleton, not
+the wording:
 
 ```text
 Rejected — <the premise that is false>.

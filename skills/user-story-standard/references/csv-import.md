@@ -28,7 +28,39 @@ For a Bug:
 Work Item Type,Title,Repro step,Actual result,Expected result
 ```
 
-The value of `Work Item Type` is `Product Backlog Item` or `Bug`, according to the case.
+The value of `Work Item Type` is `Product Backlog Item` or `Bug`, according to the case. The headers
+are machine text: they must match what the Azure DevOps import expects, so they stay English and
+stay exactly as written above, even though every value under them is Italian.
+
+## Which part of the body goes into which column
+
+For a Product Backlog Item the two content columns line up with the body one to one: `Description`
+takes the `Come … / voglio … / così da …` block, `Acceptance criteria` takes the whole
+`Criteri di accettazione` block, clean, exactly as `acceptance-criteria.md` produces it.
+
+For a **Bug** they do not line up, because the mandated body has two parts
+(`Comportamento attuale` / `Comportamento atteso`) and the CSV has three content columns. The
+mapping is fixed:
+
+| CSV column | What goes in it |
+| --- | --- |
+| `Work Item Type` | the literal `Bug` |
+| `Title` | the Bug title — Italian, problem-oriented, as `item-formats.md` requires |
+| `Repro step` | **nothing: the column is emitted and left empty.** See below |
+| `Actual result` | the text of `Comportamento attuale`, without its `Comportamento attuale:` label — the column header already says it |
+| `Expected result` | the text of `Comportamento atteso`, without its `Comportamento atteso:` label |
+
+`Repro step` is the column with no counterpart in the body. This standard's Bug shape is *only* the
+two `Comportamento` parts, and the standard never asks how the bug is reproduced — so the column is
+written out empty and **no extra question is invented to fill it**. Two things not to do with it:
+do not drop the column (the header row would stop matching), and do not copy
+`Comportamento attuale` into it as well — the same sentence in two columns is duplication, and
+`Actual result` is the column that owns it. If the user volunteered reproduction steps of their own
+accord while describing the bug, they may go here; they are never solicited.
+
+This mapping is written down here because **the source standard defines the Bug body and the CSV
+headers in separate places and never connects the two** — it is a deliberate completion of the
+standard, not a drift away from it, and the headers themselves are untouched.
 
 ## Quoting rules
 
@@ -48,11 +80,22 @@ Quando seleziona il pulsante ""Esporta PDF""
 Allora il sistema genera un file PDF con i dati del mese visualizzato"
 ```
 
+And the same file for a Bug, with `Repro step` present and empty:
+
+```csv
+Work Item Type,Title,Repro step,Actual result,Expected result
+Bug,Il totale mensile non si aggiorna dopo la modifica di una riga,,"modificando le ore di una
+giornata già inserita, il totale mensile in fondo alla tabella resta invariato finché non si
+ricarica la pagina","il totale mensile deve aggiornarsi automaticamente a ogni modifica di una riga,
+senza ricaricare la pagina"
+```
+
 ## Before handing the file over
 
 | Check | Why |
 | --- | --- |
 | The type names match the ones the project really has | the import fails on an unknown type; `workitem-create` discovers the real type list, this skill does not |
+| A Bug row has five fields, with the third one empty | `Repro step` has no counterpart in the body; the column stays, its value does not |
 | Every multi-line or comma-bearing field is quoted | one unquoted field shifts every column after it |
 | Inner double quotes are doubled | a single quote closes the field early |
 | The criteria block is still clean | no preamble, no trailing note — the chat note stays in the chat |

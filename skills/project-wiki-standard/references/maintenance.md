@@ -5,7 +5,9 @@ audit, closing an open question, adding a feature subpage, and filling `Chiusura
 them start from a full read of the page tree (`recursionLevel=full`, `azdo-cli`) with organization
 and project resolved from the working directory — see `references/wiki-write-rules.md`.
 
-Content is Italian; the canonical page names are never translated.
+Content is Italian, and so is everything presented to the user: the audit map, the intervention
+table and the gap reports. The canonical page names are never translated. This page is guidance, so
+it is English.
 
 ## Step B1 — Structure and duplication audit
 
@@ -13,19 +15,20 @@ Read the whole tree, then read the content of every page the audit needs to judg
 against the canonical structure in `references/canonical-structure.md`. **Report before changing
 anything.** Present one map, three lists:
 
-| List | What goes in it |
-| --- | --- |
-| Missing | pages the standard requires that do not exist |
-| Out of place | content that exists but, by the standard, belongs to a different page — a decision written in `Vincoli`, an edge case in a cross-cutting page, client contacts on a separate page instead of the root |
-| Duplicated | the same information present in more than one page, with both locations named |
+| List | Heading shown to the user | What goes in it |
+| --- | --- | --- |
+| Missing | `Mancanti` | pages the standard requires that do not exist |
+| Out of place | `Fuori posto` | content that exists but, by the standard, belongs to a different page — a decision written in `Vincoli`, an edge case in a cross-cutting page, client contacts on a separate page instead of the root |
+| Duplicated | `Duplicati` | the same information present in more than one page, with both locations named |
 
-Present it as a table, one row per intervention, and let the user decide row by row:
+Present it as a table, one row per intervention, **in Italian and with Italian headers**, and let the
+user decide row by row:
 
 ```markdown
-| # | Page | Finding | Proposed intervention |
-|---|------|---------|-----------------------|
-| 1 | /Vincoli | contains the polling choice, which is a decision | move that section to /Architettura as a decision record |
-| 2 | /<Progetto>/Casi limite | cross-cutting edge-case catalogue | split into the "Casi limite" section of each feature page |
+| # | Pagina | Rilievo | Intervento proposto |
+|---|--------|---------|---------------------|
+| 1 | /Vincoli | contiene la scelta del polling, che è una decisione | spostare quella sezione in /Architettura come decision record |
+| 2 | /<Progetto>/Casi limite | catalogo trasversale di casi limite | distribuirlo nella sezione "Casi limite" di ogni pagina di funzionalità |
 ```
 
 A reorganisation touches content other people are already using, so it is **confirmed page by
@@ -80,7 +83,8 @@ Fill `Chiusura progetto` with four things, however briefly:
 | Debito tecnico e limitazioni note | what is knowingly left behind for whoever comes next |
 | Architettura finale | a link to the `Architettura` page as it stands at closure |
 
-Say plainly which of the four could not be filled and why, rather than writing a plausible summary.
+Say plainly — in Italian, like the rest of what reaches the user — which of the four could not be
+filled and why, rather than writing a plausible summary.
 
 **Completo quando:** `Chiusura progetto` contains all four sections, and any section left thin is
 flagged to the user as such.

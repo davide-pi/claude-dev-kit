@@ -15,6 +15,11 @@ and adding one is a project, not a test. The top automated level is the host int
 
 ## The framework map — follow what the repository already uses
 
+**Language.** The recommendation and the reasoning around it are Italian; test names, test code,
+fixtures and builders follow the repository's own conventions, which are English. Renaming an
+existing pattern into Italian is a defect, not a translation — the `test-writer` agent has the same
+rule.
+
 | Where | Runner and style | Rule |
 |-------|------------------|------|
 | Recent .NET work | xUnit, substitute-style mocking, fluent assertions | The default for anything new |

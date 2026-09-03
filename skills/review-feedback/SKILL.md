@@ -16,6 +16,11 @@ description: >-
 two consequences the whole skill is built on: nobody supplies the missing intent unless you package
 it, and nobody is offended when a finding is rejected with evidence.
 
+**Language.** The review package, the triage of the findings and the wording of a disagreement are
+written in **Italian**: a person reads them, and the reviewer subagents now report in Italian too.
+Anchors (`file:line`), verdict values (`CONFIRMED`, `PLAUSIBLE`), category slugs, test names,
+commands and quoted output stay **verbatim** — they are the format, not the prose.
+
 ## When
 
 - A change is complete and something should look at it before it is committed or pushed.
@@ -55,6 +60,7 @@ Run the specialists **in one message** so they execute in parallel.
 | The constraints already decided (a pattern to keep, a dependency not to add, a deadline shortcut) | It relitigates decisions instead of reviewing the code |
 | Explicit out-of-scope: files touched only mechanically | Noise findings crowd out the real ones |
 | The axis to focus on, when there is one | The generalist spreads thin over the whole diff |
+| The output language: Italian prose, anchors and verdict values verbatim | Reports come back in mixed languages and cannot be merged, nor reused in a PR thread |
 
 ### Receiving a finding — the verification ladder
 

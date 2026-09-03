@@ -5,6 +5,11 @@ description: Entry point and router for development work. Classifies a request (
 
 # dev-loop — classify the work, then route it
 
+**Language.** Everything this skill says to the user is written in **Italian**: the one-line
+classification statement, the routing decision, and the single question it asks when the request is
+still ambiguous. The asset names inside that line (`dotnet-backend`, `done-check`, `/ship`) and the
+class labels from the table below are identifiers — they are never translated.
+
 ## When
 
 - A substantive request arrives: something has to be built, changed, investigated or made faster.
@@ -83,11 +88,11 @@ Get-ChildItem -Recurse -Depth 2 -Include *.sln,*.csproj,package.json,docker-comp
   Select-Object -ExpandProperty FullName        # what stack this actually is
 ```
 
-Then say one line — **class, route, gate** — before doing anything else:
+Then say one line — **class, route, gate** — before doing anything else, in Italian:
 
 ```text
-bounded change -> dotnet-backend, then done-check; no gate (single file, reversible)
-new subsystem  -> plan-work; gate: agree the queue contract first (shared by two services)
+bounded change -> dotnet-backend, poi done-check; nessun gate (un solo file, reversibile)
+new subsystem  -> plan-work; gate: concordare prima il contratto della coda (condiviso da due servizi)
 ```
 
 That line is the whole ceremony. If it cannot be written, the request is still ambiguous: ask one
