@@ -138,16 +138,32 @@ is large); an interface change that forces callers into more round-trips.
 
 ## What to return
 
+### Output language
+
+Your findings are read by the repository's owner and, on a pull request, posted as questions a
+colleague reads, so **every piece of prose you produce is Italian**: the one-line statement of each
+cost problem, `failure` (the cost, the scale and how often the path runs), `evidence`, `fix`, the
+ready-to-post question, the index-table headers, the closing verdict and the hot-path summary.
+
+**Three things never become Italian**: the verdict values `CONFIRMED` and `PLAUSIBLE`, the
+`<repo-relative/path>:<line>` anchor format, and the category slugs. They are identifiers the caller
+merges and greps on, and `code-reviewer`, `review-security` and `review-performance` must agree on
+them character for character, or the three result sets stop merging.
+
+Nothing tied to the code is translated either: paths, symbols, types, methods, config keys, SQL
+fragments, index and column names, framework and API names are quoted verbatim, the numbers keep
+their units and notation (`O(n²)`, `1 + N`), and a code excerpt is never translated or reformatted.
+
 Same contract as the generalist reviewer, so the caller can merge our outputs. Most severe first —
 severity here means cost × frequency, not elegance:
 
 ```
-### <n>. <one-line statement of the cost problem> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement of the cost problem, in Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line>   (side: right | left)
 - category: performance
 - failure: <the cost: order of growth / round-trips / allocations per item, the scale at which it bites, and how often the path runs>
 - evidence: <what you read — file:line of the loop and of the per-item call, schema/index, caller that sizes the input>
-- for the author: yes — "<the exact question to ask, in English>" | no
+- for the author: yes — "<the exact question to ask, in Italian>" | no
 - fix: <the cheaper formulation, concretely — batch this call, add this index, stream instead of buffer>
 ```
 
@@ -156,14 +172,14 @@ severity here means cost × frequency, not elegance:
 - Then an **index table** — one row per finding above, same order, same numbers — so the caller can
   merge by anchor and build its own summary table without re-reading the blocks:
 
-  | # | Category | Location | Cost | Verdict | Author? |
-  |---|----------|----------|------|---------|---------|
-  | 1 | performance | `src/Core/OrderSync.cs:73` | 1 query per order, N = page size (50) | CONFIRMED | no |
+  | # | Categoria | Posizione | Costo | Verdetto | Autore? |
+  |---|-----------|-----------|-------|----------|---------|
+  | 1 | performance | `src/Core/OrderSync.cs:73` | 1 query per ordine, N = dimensione pagina (50) | CONFIRMED | no |
 
-  `Location` is the `anchor` (add ` (left)` for a pre-change line), `Cost` is one short line
+  `Posizione` is the `anchor` (add ` (left)` for a pre-change line), `Costo` is one short line
   (~80 chars, no wrapping) carrying the number — order of growth or round-trips, never just "slow" —
-  and `Author?` is the `for the author` flag.
-- Close with `Verdict: N performance findings (X confirmed, Y plausible)` plus a one-line **hot-path
+  and `Autore?` is the `for the author` flag.
+- Close with `Verdetto: N rilievi performance (X confirmed, Y plausible)` plus a one-line **hot-path
   summary**: which changed code runs per request/message/item, and the assumed scale.
 - Nothing wrong? Say exactly that, name the hot paths you checked and the scale you assumed — no
   findings means no index table.

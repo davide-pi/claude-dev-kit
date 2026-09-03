@@ -2,7 +2,7 @@
 // Requires: Node.js 18+, git in PATH. No external npm dependencies.
 //
 // Segments:
-//   folder · git branch + dirty badges · context bar · rate limits (5h/7d)
+//   folder (+ worktree) · git branch + dirty badges · context bar · rate limits (5h/7d)
 //   model · effort level · PR badge · vim mode
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -128,16 +128,39 @@ function gitInfo(cwd) {
   return { branch, remote, staged, modified, untracked };
 }
 
+// Linked-worktree detection. Inside a linked worktree --git-dir points at
+// .git/worktrees/<name> while --git-common-dir points at the main checkout's
+// .git; in the main checkout the two are identical (both ".git"). A single
+// rev-parse returns both plus the worktree root, so this costs one git call.
+function worktreeInfo(cwd) {
+  try {
+    const out = execFileSync("git", ["-C", cwd, "--no-optional-locks", "rev-parse",
+      "--git-dir", "--git-common-dir", "--show-toplevel"], {
+      encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 2000,
+    }).trim().split("\n").map((l) => l.trim());
+    if (out.length < 3) return null;
+    const [gitDir, commonDir, root] = out;
+    const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return norm(gitDir) === norm(commonDir) ? null : { root };
+  } catch { return null; }
+}
+
 // ── Segment builders ──────────────────────────────────────────────────────────
 
-// Nerd Font glyphs (requires CaskaydiaCove NF or compatible):
-//    = nf-fa-folder
-//    = nf-fa-code_branch
-//    = nf-fa-brain
-//    = nf-fa-gauge
-//    = nf-fa-bolt
-//    = nf-dev-vim
-//    = nf-oct-git_pull_request (approximation)
+// Nerd Font glyphs used by the segments below. Written as explicit \u escapes
+// rather than pasted literals: these codepoints live in the Private Use Area, so
+// a raw glyph is invisible (or a tofu box) in any editor without the font and
+// survives copy/paste badly. Comments give each icon's Nerd Font class name.
+const ICONS = {
+  folder: "\uF07B", // nf-fa-folder      - cwd, outside a linked worktree
+  tree:   "\uF1BB", // nf-fa-tree        - worktree, replaces cwd inside one
+  branch: "\uF126", // nf-fa-code_branch - git branch
+  brain:  "\uEE9C", // nf-fa-brain       - context window
+  gauge:  "\uEEB2", // nf-fa-gauge       - rate limits
+  bolt:   "\uF0E7", // nf-fa-bolt        - effort level
+  pr:     "\uE725", // nf-oct-git_pull_request (approximation)
+  vim:    "\uF408", // nf-dev-vim        - vim mode
+};
 
 // Convert a Windows/POSIX path to a file:// URI. Ctrl/Cmd-clicking it in a
 // supporting terminal opens the folder (Explorer on Windows). Each segment is
@@ -182,17 +205,20 @@ function remoteWebUrl(remote, branch) {
   return null;
 }
 
-function segFolder(cwd) {
-  const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
-  const name  = parts.at(-1) || cwd;
-  return `${C.violet}${BLD} ${link(pathToFileUri(cwd), name)}${R}`;
+function segFolder(cwd, worktree) {
+  const base = (p) => p.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).at(-1) || p;
+  // Inside a linked worktree the worktree replaces the folder segment outright -
+  // tree icon, worktree name and link all point at its root - instead of hanging
+  // a "(wd: ...)" suffix off cwd. The main checkout keeps cwd and the folder icon.
+  const [icon, path] = worktree ? [ICONS.tree, worktree.root] : [ICONS.folder, cwd];
+  return `${C.violet}${BLD}${icon} ${link(pathToFileUri(path), base(path))}${R}`;
 }
 
 function segGit(git) {
   if (!git) return "";
   const dirty = git.staged > 0 || git.modified > 0;
   const col   = dirty ? C.yellow : C.lavender;
-  let s = `${col}${BLD} ${link(remoteWebUrl(git.remote, git.branch), git.branch)}${R}`;
+  let s = `${col}${BLD}${ICONS.branch} ${link(remoteWebUrl(git.remote, git.branch), git.branch)}${R}`;
   const badges = [];
   if (git.staged    > 0) badges.push(`${C.green}+${git.staged}${R}`);
   if (git.modified  > 0) badges.push(`${C.yellow}~${git.modified}${R}`);
@@ -209,7 +235,7 @@ function segContext(usedPct) {
   const col    = pct < 40 ? C.green : pct < 60 ? C.yellow : pct < 80 ? C.orange : C.red;
   const pctStr = `${Math.round(pct)}%`.padStart(4);
   const bar    = `${col}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${R}`;
-  return `${DIM}[${R}  ${bar} ${col}${pctStr}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${ICONS.brain} ${bar} ${col}${pctStr}${R} ${DIM}]${R}`;
 }
 
 function fmtCountdown(epoch) {
@@ -291,7 +317,7 @@ function segRateLimits(rl, stale) {
     parts.push(`${DIM}7d${R} ${mark}${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
   }
   if (!parts.length) return "";
-  return `${DIM}[${R}  ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
+  return `${DIM}[${R} ${ICONS.gauge} ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
 }
 
 function segModel(name) {
@@ -310,7 +336,7 @@ function segEffort(effort) {
     effort.level === "xhigh"  ? C.orange :
     effort.level === "high"   ? C.yellow :
     effort.level === "medium" ? C.green  : C.gray;
-  return `${DIM}[${R} ${col} ${effort.level.toUpperCase()}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${col}${ICONS.bolt} ${effort.level.toUpperCase()}${R} ${DIM}]${R}`;
 }
 
 // Open PR badge with review state
@@ -323,7 +349,7 @@ function segPR(pr) {
   const label = pr.review_state
     ? `#${pr.number} ${pr.review_state.replace(/_/g, " ")}`
     : `#${pr.number}`;
-  return `${DIM}[${R} ${col} ${link(pr.url, label)}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${col}${ICONS.pr} ${link(pr.url, label)}${R} ${DIM}]${R}`;
 }
 
 // Vim mode indicator (only visible when vim mode is active)
@@ -332,7 +358,7 @@ function segVim(vim) {
   const col =
     vim.mode === "INSERT"      ? C.green  :
     vim.mode.startsWith("VIS") ? C.orange : C.lavender;
-  return `${DIM}[${R} ${col} ${vim.mode}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${col}${ICONS.vim} ${vim.mode}${R} ${DIM}]${R}`;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -357,7 +383,7 @@ process.stdin.on("end", () => {
   }
 
   const parts = [
-    segFolder(cwd),
+    segFolder(cwd, worktreeInfo(cwd)),
     segGit(gitInfo(cwd)),
     segContext(data.context_window?.used_percentage),
     segRateLimits(rl, rlStale),

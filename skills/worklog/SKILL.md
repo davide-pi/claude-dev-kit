@@ -1,176 +1,147 @@
 ---
 name: worklog
-description: Ricostruisce dai transcript di Claude Code cosa e' stato fatto in un periodo (default oggi), stima il tempo per topic, e — dopo conferma — registra le ore sui work item Azure DevOps giusti. Due tabelle riassuntive con loop di conferma/modifica. Trigger esplicito: solo quando l'utente scrive /worklog.
+description: >-
+  Ricostruisce dai transcript di Claude Code cosa e' stato fatto in un periodo (default oggi), stima
+  il tempo per topic, e — dopo conferma — registra le ore sui work item Azure DevOps giusti via CLI
+  (MCP solo come fallback). Due tabelle riassuntive con loop di conferma/modifica, arrotondamento
+  nearest-0.5h senza cap, accorpamento dei micro-topic per ruolo e audit idempotente per non
+  riscrivere ore gia' registrate. Due casi distinti: ore di sviluppo sui Task degli item lavorati e
+  ore di gestione progetto nella struttura fissa Feature/PBI "Gestione progetto" della commessa, con
+  un solo Task per sessione. E' l'unico asset del kit che scrive ore. Trigger esplicito: solo quando
+  l'utente scrive /worklog.
 ---
 
-# /worklog — Cosa ho fatto + registrazione ore su Azure DevOps
+# worklog — cosa ho fatto, e le ore su Azure DevOps
 
-Skill in due atti, ciascuno con una tabella riassuntiva e un loop di conferma/modifica:
+## When
 
-1. **Riepilogo attivita'** (Fasi 1-4): dai transcript ricostruisce topic e tempo del periodo → **Tabella 1**.
-2. **Registrazione ore** (Fasi 5-7): mappa ogni topic sul work item Azure DevOps giusto → **Tabella 2** → alla conferma scrive (agent paralleli).
+- L'utente scrive `/worklog`, con o senza periodo (default: oggi).
+- Serve sapere cosa e' stato fatto in un giorno o in un range, con il tempo per topic.
+- Le ore di un periodo vanno registrate sui work item giusti.
+- Un periodo gia' registrato va ri-elaborato: si applica solo il **delta**.
+- Va rendicontato tempo di **gestione progetto** (incontri e call cliente, analisi e grooming del
+  backlog, stime, coordinamento) che non sta su nessun item di prodotto.
 
-Chat e tabelle in **italiano**. **Titoli e descrizioni degli item su Azure sempre in inglese.**
-Nessun nome di org/progetto/MCP e' hardcoded qui: org, progetti e nomi degli MCP si scoprono **a runtime**.
+Not for: creare work item nuovi da zero (`workitem-create`) o da un incontro cliente
+(`backlog-integration`), leggere o analizzare un item, recensire una PR (`pr-review`), o la
+configurazione/auth/verbi della CLI Azure DevOps (`azdo-cli`). Non parte mai senza il trigger
+esplicito.
 
----
+## Decide
 
-## Concetti
+### 1. Regole fisse
 
-- **Tempo attivo**: somma degli intervalli fra eventi consecutivi <= 15 min; gli intervalli piu' lunghi (incluse le notti fra i giorni di un range) sono pause e non contano. E' una stima indicativa. **I numeri del tempo vengono SOLO dall'engine**, mai inventati.
-- **Topic**: deriva dal branch git. Un `feature/*`/`bugfix/*`/`fix/*` = 1 topic (dagli un nome umano). Il lavoro su `master`/`HEAD`/`(nessun-branch)` non ha topic dal branch → **spezzalo in 1+ topic semantici** leggendo il digest, e ripartisci il suo tempo fra quei topic a stima ragionevole (dillo esplicitamente).
-- **Arrotondamento**: nearest-0.5h **indipendente per topic**, **nessun cap**, totale = somma reale. Fatto dall'helper. I topic sotto ~15 min arrotondano a **0h**.
-- **Micro-topic (accorpamento)**: i topic che arrotonderebbero a 0h si gestiscono per **ruolo** (vedi Fase 3), per non perdere il tempo ne' riempire il timesheet di righe minime senza casa:
-  - `main` = topic vero: riceve la redistribuzione, arrotonda normale.
-  - `donor` = micro-topic **senza** item dedicato: i suoi minuti vanno in un pool **spalmato equamente sui main**; il topic sparisce.
-  - `keep` = micro-topic **con** un item dedicato: resta e va a **min 0.5h** (così si logga).
-  - `internal` = tempo interno/non fatturabile (es. lavoro sul tooling `.claude`): resta come **riga a se'**, arrotonda normale (puo' fare 0h), **non** viene spalmato di default. Solo se l'utente lo chiede esplicitamente lo si converte in `donor`.
-- **Idempotenza**: cio' che e' gia' stato scritto su Azure e' registrato in `~/.claude/worklog/pushed.json`. In un ri-run dello stesso periodo la skill mostra "gia' scritto Nh" e applica solo il **delta** (le ore su Azure sono cumulative: mai riscrivere da zero).
+| Regola | Dettaglio |
+| --- | --- |
+| Chat e tabelle in **italiano** | ma titoli e descrizioni degli item su Azure **sempre in inglese** |
+| I numeri del tempo vengono **solo dall'engine** | mai stimati a mano; se si ripartisce un bucket, si dice |
+| Niente hardcoded | org, progetti e item si scoprono a runtime, ogni run |
+| Due gate | Tabella 1 e Tabella 2: si procede solo su conferma esplicita |
+| `CompletedWork` e' **cumulativo** | si legge, si somma il delta, si riscrive — mai sovrascrivere |
+| Mai lasciare un item in stato **New** | `Active` se il lavoro e' in corso, `Closed` se concluso |
 
----
+### 2. Le fasi
 
-## FASE 1 — Determina il periodo
+| Fase | Cosa fa | Dettaglio |
+| --- | --- | --- |
+| 1. Periodo | argomento in linguaggio naturale → `From`/`To` concreti (`yyyy-MM-dd`); se ambiguo **chiedi** | `tempo-e-topic.md` |
+| 2. Estrazione | `worklog.ps1` da' i minuti attivi per progetto/branch e scrive il digest grezzo | `tempo-e-topic.md` |
+| 3. Topic e ore | topic dal branch, ruolo per topic, poi `round.ps1` per arrotondare e accorpare | `tempo-e-topic.md` |
+| 4. Tabella 1 | riepilogo attivita' + loop conferma/modifica | `tabelle.md` |
+| 5. Discovery | per ogni topic loggabile: progetto, Task esistente o parent su cui crearlo, PR e commit, delta | `scrittura.md` |
+| 6. Tabella 2 | destinazione delle ore + loop conferma/modifica | `tabelle.md` |
+| 7. Scrittura | agent paralleli sugli item, poi audit in sequenza e recap verificato | `scrittura.md` |
 
-Argomento del comando (linguaggio naturale → risolvilo in `From`/`To` concreti, formato `yyyy-MM-dd`):
+### 3. Discovery e scrittura: CLI prima, MCP dove la CLI non arriva
 
-- vuoto → **oggi** (From=To=oggi)
-- `ieri` / `yesterday` → giorno prima
-- `yyyy-MM-dd` → quel giorno
-- range: `yyyy-MM-dd..yyyy-MM-dd`, "questa settimana", "settimana scorsa", "ultimi N giorni", "10-15 lug", ecc. → calcola i due estremi. Oggi e' la data corrente dal contesto.
+La CLI Azure DevOps e' la **prima mossa** per tutta la Fase 5 e per le scritture della Fase 7.
+Configurazione, auth, risoluzione org/progetto, WIQL e i verbi boards/repos stanno in `azdo-cli`:
+chiamala, non riscriverla qui.
 
-Se e' ambiguo (es. "settimana" senza sapere quale) **chiedi** prima di procedere.
+| Serve | Da dove |
+| --- | --- |
+| progetto pertinente | mapping workspace→progetto nelle istruzioni utente, altrimenti chiedi |
+| Task o User Story del topic | CLI: WIQL per assegnatario, branch, area o keyword del topic |
+| ore attualmente sul Task | CLI: lettura del work item (serve per il delta) |
+| scrittura ore, stato, assegnatario, Task nuovi figli di una US | CLI: verbi boards |
+| link della PR al work item | CLI: verbi repos (link reale, non URL nel testo) |
+| ricerca full-text, commenti sull'item, artifact link a un commit | **fallback MCP** — la CLI non ha verbo |
 
----
+Se un topic potrebbe stare su org diverse e non e' deducibile → **chiedi** su quale. Nel recap dichiara
+sempre progetto e interfaccia usata (CLI o fallback MCP).
 
-## FASE 2 — Estrai l'attivita' (engine)
+### 4. Due casi: ore di sviluppo e ore di gestione
 
-```
-pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd|vuoto>" -To "<yyyy-MM-dd|vuoto>"
-```
+Le ore si scrivono **solo qui**: nessun altro asset del kit le registra —
+`backlog-integration` chiude la sua sessione rimandando a `/worklog`, non scrivendole.
+La regola che separa i due casi e' l'**attribuibilita' del topic a un item di prodotto**:
 
-- Lo **stdout** da' le metriche autorevoli (progetto → branch, minuti attivi, fascia, prompt). Usale così come sono.
-- L'engine fa anche la **retention** (pota digest e voci di audit > 7 giorni) e stampa il path del **digest grezzo**.
-- Se stampa "Nessuna attivita'", riferiscilo e fermati.
+| Caso | Quando | Dove finiscono le ore |
+| --- | --- | --- |
+| **Sviluppo** | il topic e' lavoro sul prodotto: ha un branch, commit, una PR o un work item che lo copre | sul **Task** dell'item lavorato — Fasi 5-7, `scrittura.md` |
+| **Gestione progetto** | il topic non e' attribuibile a nessun item di prodotto: incontri e call cliente, analisi e grooming del backlog, stime, coordinamento, sessioni `/backlog-integration` | struttura fissa per commessa: Feature `Gestione progetto` → PBI `Gestione progetto - <titolo Epic>` → **un solo Task per sessione**, in `Done` — `ore-gestione.md` |
 
-Poi **leggi il digest grezzo** (path in stdout, tipo `~/.claude/worklog/_raw/<periodo>.md`): per progetto → branch → cronologia `TU:`/`CC:`. E' il materiale per topic, descrizioni e decisioni. Apri i transcript originali solo se manca un dettaglio.
+Un topic `internal` (tooling, non fatturabile) **non** e' gestione: resta riga a se' e non si logga.
+In dubbio → **chiedi**; mai spalmare ore di gestione su un item di prodotto per far tornare i conti.
+I Task che qui si creano o si aggiornano servono **solo al tempo**: una pull request non linka mai un
+Task, ma l'item padre (`pr-create`).
 
----
+## Do
 
-## FASE 3 — Topic, tempo e arrotondamento
-
-1. Per ogni progetto definisci i **topic** (regole in "Concetti"). Un topic puo' attraversare piu' progetti solo se e' chiaramente lo stesso lavoro; di norma tienili per progetto.
-2. Assegna a ogni topic i **minuti misurati** (dai numeri dell'engine; per i bucket `master` ripartisci a stima e dillo).
-3. **Assegna un ruolo** a ogni topic (`main`/`donor`/`keep`/`internal`, vedi "Concetti"). Criteri:
-   - Topic con tempo >= ~15 min → `main`.
-   - Micro-topic (< ~15 min) di lavoro **cliente senza** item dedicato → `donor`.
-   - Micro-topic con un item dedicato (o comunque da preservare) → `keep`. La certezza sull'item arriva in Fase 5: qui classifica **a giudizio** dai contenuti e ri-verifica in discovery.
-   - Tempo **interno/non fatturabile** → `internal`.
-4. **Arrotonda + accorpa** passando *tutti* i topic in un'unica invocazione (formato `minuti|descrizione-breve-in-inglese|ruolo`):
-   ```
-   pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
-   ```
-   L'helper spalma i `donor` sui `main`, porta i `keep` a min 0.5h, lascia gli `internal` a se', e stampa il totale loggabile.
-
----
-
-## FASE 4 — Tabella 1 + loop conferma/modifica
-
-Stampa in chat **solo** questa tabella (niente cronologia passo-passo, vive nel digest; la riporti solo se richiesta):
-
-```markdown
-| # | Topic | Very small description | Time | From | To | Rounded Time |
-|---|-------|------------------------|------|------|----|--------------|
-| 1 | import new markets | Import & mapping of new betting markets | 1h20m | 09:08 | 10:16 | 1.5h |
-| 2 | ... | ... | ... | ... | ... | 0h *(non loggato)* |
-| | **Totale** | | **<somma misurata>** | | | **<somma arrotondata>** |
-```
-
-- `#` numera le righe così l'utente può dire "cambia l'item 2".
-- `Very small description`: **breve, in inglese** (alimenta poi titolo/descrizione dell'item).
-- `Time` = misurato; `From`/`To` = fascia (aggiungi la data se il range copre piu' giorni); `Rounded Time` = dall'helper. Segna con nota le righe a **0h (non loggato)**.
-
-Poi **chiedi**: "Vuoi modificare qualcosa (topic, descrizioni, tempi, accorpare/dividere righe)?"
-- Se l'utente modifica → **applica, ri-arrotonda se cambiano i minuti, ristampa la Tabella 1 e richiedi conferma**. Ripeti finché non conferma esplicitamente.
-- Solo dopo la conferma si passa alla Fase 5.
-
----
-
-## FASE 5 — Discovery Azure DevOps (rediscovery, senza cache)
-
-Obiettivo: per ogni topic **loggabile** (Rounded > 0) trovare dove segnare le ore.
-
-### MCP disponibili
-Usa gli MCP Azure DevOps **connessi in questa sessione** — riconoscibili dai tool `mcp__<nome>__wit_*`, `..._search_*`, `..._repo_*`, `..._core_*`. Non assumere i nomi: guarda quali tool esistono davvero.
-- Possono essercene **piu' di uno**. Se **due MCP puntano allo stesso Azure DevOps** (stesso org) sono equivalenti → **usa il primo** che trovi.
-- Se un topic potrebbe stare su org diversi e non e' deducibile → **chiedi** all'utente su quale.
-- **I nomi dei tool citati sotto sono esempi, non un contratto.** Questo MCP accorpa la sua superficie
-  di tanto in tanto: `wit_get_work_item` e' diventato `wit_work_item`, `wit_update_work_item` e'
-  diventato `wit_work_item_write`, `wit_my_work_items`/`wit_query_by_wiql` sono diventati `wit_query`.
-  Abbina quindi per **capability** (leggere un item, scriverlo, collegarlo, cercare) fra i tool
-  realmente esposti; se un nome citato non esiste piu', usa quello con la stessa capability e **dillo
-  in chat**. Mai inventare un nome, mai saltare un passo perche' il nome d'esempio e' cambiato.
-
-### Per ogni topic
-1. **Trova il work item**: cerca fra i tuoi work item / per branch / per keyword del topic (`wit_query`, `wit_work_item`, `search_*`) sull'MCP/progetto pertinente. Determina:
-   - un **Task esistente** dove aggiungere le ore, **oppure**
-   - la **User Story / parent** sotto cui **creare** un nuovo Task (le ore si loggano sui Task, non sulle US).
-2. **PR e commit da linkare** (best-effort, poi conferma):
-   - **PR**: cerca la/le PR con source branch = il branch del topic (`repo_*`/`search_*`).
-   - **Commit su master**: `git -C "<path-progetto>" log --since=<From> --until=<To+1g> --author=<email utente> --oneline` (email da `git config user.email`). Prendi gli hash/URL pertinenti al topic.
-3. **Idempotenza**: cerca in `~/.claude/worklog/pushed.json` una voce con stesso `(periodFrom, periodTo, itemId)`. Se c'e', nota le ore **gia' scritte** e calcola il **delta** = (ore ora) − (ore gia' scritte).
-
----
-
-## FASE 6 — Tabella 2 + loop conferma/modifica
-
-```markdown
-| # | Topic | Very small description | Rounded Time | MCP used - Project | Item |
-|---|-------|------------------------|--------------|--------------------|------|
-| 1 | import new markets | Import & mapping of new markets | 1.5h | <mcp-name> - <Project> | [Task #105060 — Import & mapping of new betting markets](https://<org>.visualstudio.com/<project>/_workitems/edit/105060) (esistente, +1.5h) |
-| 2 | cache fix | Translations cache invalidation fix | 0.5h | <mcp-name> - <Project> | parent [US #105025 — Localization pipeline](https://<org>.visualstudio.com/<project>/_workitems/edit/105025) → **Task DA CREARE** ("Translations cache invalidation fix") |
+```powershell
+# Fase 2 — engine (unica fonte dei numeri). Vuoto = oggi; accetta anche 'ieri'/'yesterday'.
+pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd>" -To "<yyyy-MM-dd>"
 ```
 
-- `MCP used - Project`: nome MCP realmente connesso + progetto (così l'utente sa *quale* Azure DevOps e *quale* progetto).
-- `Item`:
-  - Task esistente → `[Task #<id> — <titolo item>](<link>) (esistente, +<delta>h)`; se in `pushed.json` risulta gia' scritto, indica `gia' scritto <X>h → delta <±Y>h`.
-  - Task da creare → `parent [US #<id> — <titolo parent>](<link>) → **Task DA CREARE**` (aggiungi fra virgolette il titolo previsto del nuovo Task).
-  - **Sempre link cliccabile con anche il titolo, mai il solo numero** — sia per il parent che per il Task (esistente o appena creato): il testo del link e' `<Tipo> #<id> — <titolo dell'item>`. Il titolo viene dal campo `System.Title` del work item restituito dall'MCP (per un Task ancora da creare, usa il titolo previsto). Costruisci l'URL da `_links.html.href` del work item restituito dall'MCP, oppure dal pattern `https://<org>.visualstudio.com/<project>/_workitems/edit/<id>` (org/project scoperti a runtime, mai hardcoded).
-- Sotto la tabella elenca, per riga, **PR e commit** che verranno linkati (o "nessuno").
-- Ometti le righe a 0h (non loggate), ma ricordale in una nota.
+Lo stdout da' progetto → branch, minuti attivi, fascia oraria e numero di prompt, piu' il path del
+**digest grezzo** e quello dell'**audit**. L'engine fa anche la retention (pota digest e voci di
+audit oltre i 7 giorni). Se stampa "Nessuna attivita'", riferiscilo e fermati. Poi **leggi il
+digest** (`_raw/<periodo>.md`) per ricavare topic, descrizioni e decisioni; i transcript originali
+solo se manca un dettaglio.
 
-Poi **chiedi** modifiche (item diverso, cambio MCP/progetto, creare/non creare, ore, PR/commit).
-- Se modifica → **rifai Fase 5 dove serve, ristampa la Tabella 2, richiedi conferma**. Ripeti finché non conferma.
-- Solo alla conferma esplicita si scrive.
+```powershell
+# Fase 3 — arrotondamento + accorpamento: TUTTI i topic in una sola invocazione
+pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" `
+  "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
+```
 
----
+Formato voce `minuti|descrizione-breve-in-inglese|ruolo`. L'helper spalma i `donor` sui `main`, porta
+i `keep` a minimo 0.5h, lascia gli `internal` a se', e stampa il totale e la quota **loggabile**.
 
-## FASE 7 — Scrittura su Azure (agent paralleli)
+```powershell
+git -C "<path-progetto>" log --since=<From> --until=<To+1g> --author=(git config user.email) --oneline
+```
 
-Alla conferma, esegui le scritture. Distribuisci i topic su **al massimo 4 sub-agent in parallelo**, con item **non sovrapposti** (nessun item toccato da due agent). Se i topic sono ≤4 → un agent per topic; altrimenti raggruppa in ≤4 lotti.
+I commit su master pertinenti al topic, per il link della Fase 5.
 
-Ogni agent, per i suoi item, applica le **Regole di scrittura** qui sotto e **riporta l'esito** (id item, ore prima/dopo, link creati, stato). **Non** scrive l'audit.
+## Traps
 
-Dopo che gli agent hanno finito, **l'orchestratore (tu)** aggiorna `~/.claude/worklog/pushed.json` **in sequenza** (una scrittura alla volta, niente race), poi stampa un **recap finale** di cosa e' stato scritto — ogni item e ogni parent citati nel recap devono essere **link cliccabili con anche il titolo** (`<Tipo> #<id> — <titolo>`), mai il solo numero (vedi regola in Fase 6).
+1. Le ore raddoppiano → `CompletedWork` sovrascritto invece di sommato → leggi, somma il delta,
+   riscrivi; l'audit dice quanto era gia' stato scritto per quel periodo.
+2. Un ri-run dello stesso periodo riscrive tutto → l'audit non e' stato consultato → cerca la voce
+   `(periodFrom, periodTo, itemId)` e applica solo il delta; delta 0 → non toccare le ore.
+3. Ore loggate su una User Story → le ore si registrano sui **Task** → se manca il Task, crealo come
+   figlio della US.
+4. Un item nuovo resta in stato `New` → il tipo parte da `New` per default → correggi subito lo stato
+   dopo la creazione.
+5. Il tempo non torna col vissuto → i gap oltre 15 min sono pause per definizione → e' una stima
+   indicativa; si corregge nel loop della Tabella 1, non inventando minuti.
+6. Il lavoro su `master` sparisce → non ha un branch-topic → spezzalo in topic semantici leggendo il
+   digest e **dichiara** che la ripartizione e' a stima.
+7. Due agent scrivono sullo stesso item → lotti sovrapposti in Fase 7 → item disgiunti per agent, e
+   l'audit lo scrive solo l'orchestratore, in sequenza.
+8. Il recap dice cose che sulla board non ci sono → si e' creduto al report degli agent → rileggi gli
+   item scritti prima di stampare il recap.
+9. Nasce un secondo Task ore di gestione per lo stesso giorno → ri-run del periodo con creazione
+   invece di delta → cerca la voce d'audit e il Task con lo stesso prefisso data, poi somma il delta.
 
-Prima di stampare il recap, **verifica direttamente** (non fidarti solo del report degli agent) rileggendo con `wit_work_item`/`wit_work_item` almeno gli item creati/aggiornati: conferma ore, parent, stato e link PR/commit effettivamente presenti.
+## References
 
-### Regole di scrittura (MCP per-org; valgono anche via REST se un MCP non e' connesso)
-- **CompletedWork e' CUMULATIVO**: leggi il valore attuale del Task (`wit_work_item`), poi scrivi `attuale + delta` (`wit_work_item_write`). **Mai** sovrascrivere. Il delta e' quello calcolato in Fase 5 (per un item nuovo, delta = ore intere del topic).
-- **Task nuovi**: creali come **figli** della User Story/parent indicata (ereditano Area/Iteration). Titolo e descrizione **in inglese**.
-- **Assegna a te**: risolvi l'identita' dell'utente a runtime (tool "me"/identity dell'MCP, oppure `git config user.email`) — non hardcodare l'account qui.
-- **Stato**: non lasciare **mai** un item nuovo (o esistente) in stato **New** — imposta sempre **Active** (lavoro in corso: PR aperta/non ancora mergiata, commit non ancora pushato, o in attesa di validazione dell'utente) oppure **Closed** (lavoro concluso: PR completata/mergiata, o commit gia' diretto su master). Se il work item type di default parte in "New", correggilo esplicitamente con `wit_work_item_write` subito dopo la creazione.
-- **Link PR**: come **ArtifactLink** (`wit_work_item_link_write`), non come URL nel testo.
-- **Link commit su master**: se l'MCP espone un tool per linkare un commit (ArtifactLink al commit), usalo; altrimenti aggiungi hash/URL dei commit nella **descrizione** o in un **commento** del work item.
-- Usa i **nomi dei tool realmente esposti** dal server connesso: non inventarli.
-
-### Idempotenza in scrittura
-- Se `pushed.json` ha gia' una voce per `(periodFrom, periodTo, itemId)`: applica solo il **delta** (ore-ora − ore-gia'-scritte). Se il delta e' 0 → non toccare le ore (eventualmente aggiorna solo link mancanti).
-- Dopo il successo, scrivi/aggiorna la voce con: `periodFrom`, `periodTo`, `topic`, `mcp`, `project`, `itemId`, `parentId` (se creato), `created` (bool), `hoursLogged` (ore totali di questo periodo su quell'item, non il delta), `prs`, `commits`, `ts`.
-
----
-
-## Stile
-- Chat/tabelle in italiano; titoli/descrizioni item in inglese.
-- Numeri del tempo solo dall'engine. Se ripartisci `master` fra topic, dillo.
-- Non stampare la cronologia passo-passo in chat (vive nel digest).
-- Alla prima scrittura in assoluto su un Azure DevOps mai testato in sessione: scrivi **un solo** item, mostra il risultato, poi procedi col resto.
+- `tempo-e-topic.md` — periodo, engine e digest, definizione di tempo attivo e di topic, i quattro
+  ruoli, regole di arrotondamento e uso di `round.ps1`.
+- `tabelle.md` — forma esatta di Tabella 1 e Tabella 2, formato dei link, loop di
+  conferma/modifica e recap finale.
+- `scrittura.md` — discovery per topic, regole di scrittura su Azure, parallelismo, idempotenza e
+  contenuto dell'audit.
+- `ore-gestione.md` — il caso gestione progetto: struttura fissa Feature/PBI della commessa, ricerca
+  per prefisso, Task ore per sessione, assegnatario a runtime, stato Done e idempotenza.

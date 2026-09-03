@@ -156,16 +156,32 @@ can trigger repeatedly.
 
 ## What to return
 
+### Output language
+
+Your findings are read by the repository's owner and, on a pull request, posted as questions a
+colleague reads, so **every piece of prose you produce is Italian**: the one-line statement of each
+vulnerability, `failure` (the attack path), `evidence`, `fix`, the ready-to-post question, the
+index-table headers, the closing verdict and the surface summary.
+
+**Three things never become Italian**: the verdict values `CONFIRMED` and `PLAUSIBLE`, the
+`<repo-relative/path>:<line>` anchor format, and the category slugs. They are identifiers the caller
+merges and greps on, and `code-reviewer`, `review-security` and `review-performance` must agree on
+them character for character, or the three result sets stop merging.
+
+Nothing tied to the code is translated either: paths, symbols, types, methods, config and header
+names, SQL fragments, framework and API names, log lines and exception type names are quoted
+verbatim, and a code excerpt is never translated or reformatted.
+
 Same contract as the generalist reviewer, so the caller can merge our outputs. Most severe first,
 one block each:
 
 ```
-### <n>. <one-line statement of the vulnerability> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement of the vulnerability, in Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line>   (side: right | left)
 - category: security
 - failure: <the attack path: who sends what, through which code, and what they obtain>
 - evidence: <what you read — file:line of the source, of the sink, of the missing/present guard>
-- for the author: yes — "<the exact question to ask, in English>" | no
+- for the author: yes — "<the exact question to ask, in Italian>" | no
 - fix: <minimal concrete mitigation, or omit>
 ```
 
@@ -174,13 +190,13 @@ one block each:
 - Then an **index table** — one row per finding above, same order, same numbers — so the caller can
   merge by anchor and build its own summary table without re-reading the blocks:
 
-  | # | Category | Location | Finding | Verdict | Author? |
-  |---|----------|----------|---------|---------|---------|
-  | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes |
+  | # | Categoria | Posizione | Rilievo | Verdetto | Autore? |
+  |---|-----------|-----------|---------|----------|---------|
+  | 1 | security | `src/Api/UsersController.cs:42` | l'id della route è concatenato nel testo SQL | CONFIRMED | yes |
 
-  `Location` is the `anchor` (add ` (left)` for a pre-change line), `Finding` is one short line
-  (~80 chars, no wrapping) restating the block's title, `Author?` is the `for the author` flag.
-- Close with `Verdict: N security findings (X confirmed, Y plausible)` plus a one-line **surface
+  `Posizione` is the `anchor` (add ` (left)` for a pre-change line), `Rilievo` is one short line
+  (~80 chars, no wrapping) restating the block's title, `Autore?` is the `for the author` flag.
+- Close with `Verdetto: N rilievi security (X confirmed, Y plausible)` plus a one-line **surface
   summary**: the entry points this change adds or widens, and for each whether it is guarded.
 - Nothing wrong? Say exactly that, list the surface you mapped and the guards you verified — no
   findings means no index table.
