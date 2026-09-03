@@ -37,6 +37,9 @@ buried in the middle, defeats the purpose.
 - After the table: at most the one-line verdict and one short question about what to fix next.
   Nothing longer, or the table scrolls off screen.
 - No findings → no table; say what was verified instead.
+- The headers and the finding statements are **Italian**, like every report I read. Three things in
+  the table stay verbatim because I grep on them: the `file:line` anchor, the
+  `CONFIRMED`/`PLAUSIBLE` value, and the category slug.
 # Workspaces → ALM platform, org, project
 Maps a working directory to the platform, organization and project the work belongs to. Use it
 whenever something has to land in the right place — hours (`/worklog`), work items
@@ -71,14 +74,22 @@ costs me more than it gives.
 - Depth goes in a reference file loaded on demand, never inline "just in case".
 - Applies to everything: chat answers, skills, PR and commit messages, work items, review reports.
 # Language
-Italian for everything a person reads as prose; English for everything tied to the code. The line is
-not about audience politeness, it is about where the text lives.
-- **Italian**: work items (title, description, acceptance criteria), pull request titles and
-  descriptions, comments posted on a pull request, verdict comments posted into a work item, wiki
-  pages, and chat.
-- **English**: source code, identifiers, code comments, **commit messages** (they belong to the
-  repository history), and the instructional prose of this kit's own assets — a skill tells the
-  model what to do in English, even when what it produces is Italian.
+**Italian by default.** English only for the code and for the text the AI itself reads back as
+technical reference. The dividing line is the reader, not the register.
+- **Italian** — everything I read as prose: chat answers, reports and their tables, questions;
+  **commit messages**; pull request titles and descriptions; comments posted on a pull request or
+  into a work item; work items (title, description, acceptance criteria); wiki pages.
+- **English** — the code and what the AI consumes:
+  - source code, identifiers, code comments, test code;
+  - a project's **technical documentation** tree (`docs/tech*`, architecture maps, flow docs, a
+    project's own `CLAUDE.md`) — it is written for the AI as much as for me;
+  - **plan files and design specs**, for the same reason: a later session reads them back;
+  - the instructional prose of this kit's own assets — a skill is written in English and *says*
+    "produce Italian";
+  - machine identifiers, always verbatim and never translated: `[Claude AI Review]`, `AB#<id>`,
+    `Fixes #<n>`, Azure DevOps type, state and field names, branch names, SQL, commands and flags,
+    `file:line` anchors, `CONFIRMED`/`PLAUSIBLE` verdicts, log lines and tool output.
+An evidence line, a log line or a query that has been translated is no longer evidence: quote it.
 # Resolving the organization and the project
 Never hardcode an Azure DevOps organization or project, and **never trust the `az devops configure`
 default** — it may still point at the previous session's client, which is how work lands in the

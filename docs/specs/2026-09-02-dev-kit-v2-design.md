@@ -37,13 +37,17 @@ A kit made only of skills covers one multiplier out of three. v1 was that kit; v
    better instrument, and say so.
 6. **No duplication of installed plugins.** See section 6. An asset that overlaps a plugin routes to
    it in one line instead of restating it.
-7. **Two languages, split by where the text lives** (revised 2026-09-03). An asset's own
-   instructional prose is **English** — it addresses the model, and this repository is public — and
-   so is everything tied to the code: source, identifiers, code comments, commit messages. What an
-   asset makes a person read is **Italian**: work items, pull request titles and descriptions,
-   comments posted on a pull request, verdicts written into a work item, wiki pages, chat. So a
-   skill is written in English and says "produce Italian". `worklog` is written in Italian
-   throughout, by design — its tables are read by one person.
+7. **Italian by default, English for the code and for what the AI reads back** (revised
+   2026-09-03). Everything an asset makes a **person** read is Italian: chat reports and their
+   tables, questions, commit messages, pull request titles and descriptions, comments posted on a
+   PR or into a work item, work items themselves, wiki pages. English is reserved for the code
+   (source, identifiers, comments, test code), for a project's **technical documentation** tree and
+   for **plan files and specs** — both are read back by a later session, which makes them AI-facing
+   reference rather than prose — and for the instructional prose of the assets in this repository,
+   which addresses the model and is public. So an asset is written in English and *says* "produce
+   Italian". Machine identifiers are never translated: tags, `AB#` keywords, Azure DevOps type,
+   state and field names, branch names, SQL, commands, `file:line`, verdict values, log lines.
+   `worklog` is written in Italian throughout, by design.
 8. **Say what an asset never does.** Every asset that could write, post or delete states its limits.
 
 ## 3. Asset contract

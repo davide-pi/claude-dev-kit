@@ -8,11 +8,13 @@ Angular, React**, with **Azure DevOps** as the ALM platform and GitHub alongside
 *technique*, anonymous on *identity*: the patterns, libraries and commands are real, while
 organization and project names, machine paths and addresses are placeholders.
 
-**Two languages, split by where the text lives.** Every asset here is written in English — it
-addresses the model, and this repository is public — and so is everything tied to the code: source,
-identifiers, comments, commit messages. What an asset makes a *person* read is Italian: work items,
-pull request titles and bodies, review comments, wiki pages. A skill is written in English and says
-"produce Italian". Swap that second half for your own language and nothing else changes.
+**Italian by default; English for the code and for what the AI reads back.** Everything an asset
+makes a *person* read is Italian — chat reports, commit messages, pull request titles and bodies,
+review comments, work items, wiki pages. English is reserved for the code, for a project's technical
+documentation tree, for plan files and specs (a later session reads those back, which makes them
+AI-facing reference), and for the instructional prose of the assets in this repository. So an asset
+is written in English and *says* "produce Italian" — swap that second half for your own language and
+nothing else changes. Machine identifiers are never translated in either direction.
 
 ## Five levels
 
