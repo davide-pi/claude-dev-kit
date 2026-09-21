@@ -225,16 +225,32 @@ caller's scale, say so and leave the sizing to the specialist rather than guessi
 
 ## What to return
 
+### Output language
+
+Your findings are read by the repository's owner and, on a pull request, posted as questions a
+colleague reads, so **every piece of prose you produce is Italian**: the one-line statement of each
+finding, `failure`, `evidence`, `fix`, the ready-to-post question, the completeness report, the
+clean-code list, the index-table headers and the closing verdict line.
+
+**Three things never become Italian**: the verdict values `CONFIRMED` and `PLAUSIBLE`, the
+`<repo-relative/path>:<line>` anchor format, and the category slugs. They are identifiers the caller
+merges and greps on, and `code-reviewer`, `review-security` and `review-performance` must agree on
+them character for character, or the three result sets stop merging.
+
+Nothing tied to the code is translated either: paths, symbols, types, methods, config keys, SQL
+fragments, framework and API names, log lines and exception type names are quoted verbatim, and a
+code excerpt is never translated or reformatted.
+
 Findings ordered **most severe first**, at most ~10 correctness-level ones (note in one line if you
 dropped further minor ones). One block each, exactly these fields:
 
 ```
-### <n>. <one-line statement of the defect> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement of the defect, in Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line>   (side: right | left)
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
 - failure: <concrete inputs/state → wrong output, crash, data issue — or, for completeness, the intent point that has no code>
 - evidence: <what you actually read — file:line, blame, quoted CLAUDE.md line, quoted intent>
-- for the author: yes — "<the exact question to ask, in English>" | no
+- for the author: yes — "<the exact question to ask, in Italian>" | no
 - fix: <minimal suggested change, or omit>
 ```
 
@@ -246,7 +262,7 @@ dropped further minor ones). One block each, exactly these fields:
   missing entirely, anchor the place where it should have been. The caller adapts this to whatever
   its API needs.
 - `for the author: yes` means it genuinely needs a human answer or decision — this is the signal
-  the caller uses to decide what gets posted, so put the ready-to-post English question there and
+  the caller uses to decide what gets posted, so put the ready-to-post Italian question there and
   keep it short and answerable. Explanations, notes and confirmations are always `no`.
 - Then, in this order and clearly separated:
   1. **Completeness report** — the intent points you checked, which are covered, which are not.
@@ -255,12 +271,12 @@ dropped further minor ones). One block each, exactly these fields:
      the same order and with the same numbers, so the caller can merge by anchor and build its own
      summary table without re-reading the blocks:
 
-     | # | Category | Location | Finding | Verdict | Author? |
-     |---|----------|----------|---------|---------|---------|
-     | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes |
+     | # | Categoria | Posizione | Rilievo | Verdetto | Autore? |
+     |---|-----------|-----------|---------|----------|---------|
+     | 1 | security | `src/Api/UsersController.cs:42` | l'id della route è concatenato nel testo SQL | CONFIRMED | yes |
 
-     `Location` is the `anchor` (add ` (left)` for a pre-change line), `Finding` is one short line
-     (~80 chars, no wrapping) restating the block's title, `Author?` is the `for the author` flag.
-  4. `Verdict: N findings (X confirmed, Y plausible) · security: N · completeness: N`.
+     `Posizione` is the `anchor` (add ` (left)` for a pre-change line), `Rilievo` is one short line
+     (~80 chars, no wrapping) restating the block's title, `Autore?` is the `for the author` flag.
+  4. `Verdetto: N rilievi (X confirmed, Y plausible) · security: N · completeness: N`.
 - Nothing wrong? Say exactly that, name the passes you ran, and list what you verified — including
   the intent points you confirmed as covered. No findings means no index table.

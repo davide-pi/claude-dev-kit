@@ -18,37 +18,54 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
    Azure DevOps MCP server connected **in this session** (identify it from the `mcp__<server>__repo_*`
    tools that actually exist — never assume a server name, and match tools by capability since that
    MCP renames them), create or update the PR on the current branch, set this text as its description,
-   and link a provided `AB#<id>` work item. Otherwise just output the text — opening a PR is
+   and link the verified parent work item. Otherwise just output the text — opening a PR is
    outward-facing, so never do it unprompted.
 
 ## Writing rules
 
 - Reference concrete file / class / method names — no vague summaries.
 - No marketing language (seamlessly, robust, powerful, enhance).
-- Bullets in Changes; prose only in Summary and Motivation. One idea per bullet.
+- Bullets in Modifiche; prose only in Sintesi and Motivazione. One idea per bullet.
+- Write the description **in Italian** — a person reads it — and the PR title too, if one is
+  generated: imperative Italian, one line, no prefix. English stays only where it is a machine
+  value: identifiers, file, class, method and branch names, code, commands and their output,
+  `AB#<id>`, and the section headings of the template below, which are used exactly as written
+  there (`Test` and `Breaking change` are the standard technical terms and stay in that form).
 - Omit any section with nothing meaningful to say.
-- This repo uses Azure DevOps PRs — link a work item as `AB#<id>` only if one is provided; don't invent one.
+- This repo uses Azure DevOps PRs. The item referenced is the **parent backlog item** — a User Story
+  or PBI, a Bug, an Impediment, a TECH activity — never a **Task**, which only carries hours: an id
+  that turns out to be a Task is replaced by its parent (type and parent read through `azdo-cli`).
+- Reference it as `AB#<id>` only for an id that was **provided or verified** — never one guessed from
+  a branch name, a commit message or memory. Nothing verified → leave the reference out and say the
+  PR still needs its parent item linked, which `pr-create` treats as a precondition.
 
 ## Output template
 
-### Summary
+### Sintesi
 
 One or two sentences: what this PR does, not how.
 
-### Motivation
+### Motivazione
 
 Why this was needed — bug, requirement, or tech debt.
 
-### Changes
+### Modifiche
 
 Bullets grouped by area (feature / fix / refactor / config) when there are more than ~5 items.
 
-### Testing
+### Test
 
 How it was verified. If the repo has an automated suite, say what it covers for this change; where it
 has none, describe the manual steps (build, run profile, health endpoint, exercised path). If it was
 not verified, say so plainly — that is more useful than an implied "it works".
 
-### Breaking changes
+### Breaking change
 
 Migration steps. **Omit entirely if none.**
+
+## Guardrails
+
+- Generate text only: never create, update, or merge the PR itself, never push, never commit.
+- Never invent a work item id: an unverified `AB#<id>` is worse than none at all.
+- Never invent verification. If the change was not exercised, the `Test` section says exactly that.
+- Never restate the diff line by line — the reviewer can read it; describe intent and consequence.

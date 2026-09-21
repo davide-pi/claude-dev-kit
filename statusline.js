@@ -2,8 +2,9 @@
 // Requires: Node.js 18+, git in PATH. No external npm dependencies.
 //
 // Segments:
-//   folder · git branch + dirty badges · context bar · rate limits (5h/7d)
-//   model · effort level · PR badge · vim mode
+//   line 1: folder (+ worktree) · git branch + dirty badges · context bar + tokens
+//           rate limits + weekly pacing + session cost · worklog badge · vim mode
+//   line 2: model · effort level
 // ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -128,16 +129,39 @@ function gitInfo(cwd) {
   return { branch, remote, staged, modified, untracked };
 }
 
+// Linked-worktree detection. Inside a linked worktree --git-dir points at
+// .git/worktrees/<name> while --git-common-dir points at the main checkout's
+// .git; in the main checkout the two are identical (both ".git"). A single
+// rev-parse returns both plus the worktree root, so this costs one git call.
+function worktreeInfo(cwd) {
+  try {
+    const out = execFileSync("git", ["-C", cwd, "--no-optional-locks", "rev-parse",
+      "--git-dir", "--git-common-dir", "--show-toplevel"], {
+      encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 2000,
+    }).trim().split("\n").map((l) => l.trim());
+    if (out.length < 3) return null;
+    const [gitDir, commonDir, root] = out;
+    const norm = (p) => p.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+    return norm(gitDir) === norm(commonDir) ? null : { root };
+  } catch { return null; }
+}
+
 // ── Segment builders ──────────────────────────────────────────────────────────
 
-// Nerd Font glyphs (requires CaskaydiaCove NF or compatible):
-//    = nf-fa-folder
-//    = nf-fa-code_branch
-//    = nf-fa-brain
-//    = nf-fa-gauge
-//    = nf-fa-bolt
-//    = nf-dev-vim
-//    = nf-oct-git_pull_request (approximation)
+// Nerd Font glyphs used by the segments below. Written as explicit \u escapes
+// rather than pasted literals: these codepoints live in the Private Use Area, so
+// a raw glyph is invisible (or a tofu box) in any editor without the font and
+// survives copy/paste badly. Comments give each icon's Nerd Font class name.
+const ICONS = {
+  folder: "\uF07B", // nf-fa-folder      - cwd, outside a linked worktree
+  tree:   "\uF1BB", // nf-fa-tree        - worktree, replaces cwd inside one
+  branch: "\uF126", // nf-fa-code_branch - git branch
+  brain:  "\uEE9C", // nf-fa-brain       - context window
+  gauge:  "\uEEB2", // nf-fa-gauge       - rate limits
+  bolt:   "\uF0E7", // nf-fa-bolt        - effort level
+  vim:    "\uF408", // nf-dev-vim        - vim mode
+  clock:  "\uF017", // nf-fa-clock_o     - working days whose hours are not logged
+};
 
 // Convert a Windows/POSIX path to a file:// URI. Ctrl/Cmd-clicking it in a
 // supporting terminal opens the folder (Explorer on Windows). Each segment is
@@ -182,17 +206,20 @@ function remoteWebUrl(remote, branch) {
   return null;
 }
 
-function segFolder(cwd) {
-  const parts = cwd.replace(/\\/g, "/").split("/").filter(Boolean);
-  const name  = parts.at(-1) || cwd;
-  return `${C.violet}${BLD} ${link(pathToFileUri(cwd), name)}${R}`;
+function segFolder(cwd, worktree) {
+  const base = (p) => p.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).at(-1) || p;
+  // Inside a linked worktree the worktree replaces the folder segment outright -
+  // tree icon, worktree name and link all point at its root - instead of hanging
+  // a "(wd: ...)" suffix off cwd. The main checkout keeps cwd and the folder icon.
+  const [icon, path] = worktree ? [ICONS.tree, worktree.root] : [ICONS.folder, cwd];
+  return `${C.violet}${BLD}${icon} ${link(pathToFileUri(path), base(path))}${R}`;
 }
 
 function segGit(git) {
   if (!git) return "";
   const dirty = git.staged > 0 || git.modified > 0;
   const col   = dirty ? C.yellow : C.lavender;
-  let s = `${col}${BLD} ${link(remoteWebUrl(git.remote, git.branch), git.branch)}${R}`;
+  let s = `${col}${BLD}${ICONS.branch} ${link(remoteWebUrl(git.remote, git.branch), git.branch)}${R}`;
   const badges = [];
   if (git.staged    > 0) badges.push(`${C.green}+${git.staged}${R}`);
   if (git.modified  > 0) badges.push(`${C.yellow}~${git.modified}${R}`);
@@ -201,15 +228,33 @@ function segGit(git) {
   return s;
 }
 
-function segContext(usedPct) {
-  const pct    = usedPct ?? 0;
+// Token counts are abbreviated to keep the segment short. The M step matters:
+// a 1M-token window would otherwise render as the unreadable "1000k".
+function abbrevTokens(n) {
+  n = Number(n);
+  if (!Number.isFinite(n) || n < 0) return null;
+  const scale = (v, suffix) =>
+    (Number.isInteger(v) ? String(v) : v.toFixed(1)) + suffix;
+  if (n >= 1e6)  return scale(n / 1e6, "M");
+  if (n >= 1000) return scale(n / 1000, "k");
+  return String(Math.round(n));
+}
+
+// The percentage alone doesn't say how much room is left in absolute terms, and
+// the window size varies by model: 62% of 200k and 62% of 1M are different
+// decisions. The token pair is rendered only when the payload carries both.
+function segContext(ctx) {
+  const pct    = ctx?.used_percentage ?? 0;
   const BAR_W  = 8;
   const filled = Math.min(BAR_W, Math.round(pct / 100 * BAR_W));
   const empty  = BAR_W - filled;
   const col    = pct < 40 ? C.green : pct < 60 ? C.yellow : pct < 80 ? C.orange : C.red;
   const pctStr = `${Math.round(pct)}%`.padStart(4);
   const bar    = `${col}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${R}`;
-  return `${DIM}[${R}  ${bar} ${col}${pctStr}${R} ${DIM}]${R}`;
+  const used   = abbrevTokens(ctx?.total_input_tokens);
+  const total  = abbrevTokens(ctx?.context_window_size);
+  const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
+  return `${DIM}[${R} ${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok} ${DIM}]${R}`;
 }
 
 function fmtCountdown(epoch) {
@@ -239,12 +284,40 @@ function rateColor(used, epoch, windowSec) {
   return projected <= 80 ? C.green : projected <= 100 ? C.yellow : C.red;
 }
 
+// Weekly pacing, on the SAME basis as the value it annotates: everything in this
+// segment is headroom left, so the target is how much SHOULD still be left at
+// this point in the window, and the delta is signed accordingly — positive means
+// ahead of pace (green), negative means burning too fast (red). Unlike a
+// whole-day target that jumps 14 points at midnight, the elapsed fraction is
+// continuous, so the delta moves only when consumption does. Both integers are
+// taken from what is actually printed, so the three numbers can never disagree
+// by a rounding step.
+function weeklyPace(remainingPct, epoch, windowSec) {
+  if (!epoch) return "";
+  const remainSec = (epoch * 1000 - Date.now()) / 1000;
+  if (remainSec <= 0 || remainSec > windowSec) return "";
+  const target = Math.round(remainSec / windowSec * 100);
+  const delta  = remainingPct - target;
+  const col    = delta >= 0 ? C.green : C.red;
+  const sign   = delta > 0 ? "+" : "";
+  return ` ${DIM}(t:${target}%${R} ${col}${sign}${delta}%${R}${DIM})${R}`;
+}
+
+// Session cost. Precision scales down so a short session isn't flattened to
+// "$0.00"; an untouched session (exactly 0) renders nothing rather than "$0.0000".
+function fmtCost(cost) {
+  const n = Number(cost);
+  if (!Number.isFinite(n) || n <= 0) return "";
+  const s = n < 0.01 ? n.toFixed(4) : n < 1 ? n.toFixed(3) : n.toFixed(2);
+  return `${C.yellow}$${s}${R}`;
+}
+
 // ── Rate-limit cache ────────────────────────────────────────────────────────
 // Claude Code populates `rate_limits` only after the first request of the
 // session registers usage; at cold start the field is absent and the segment
 // would be empty. To keep the 5h/7d readout visible immediately, we persist the
 // last-known snapshot on every render and fall back to it when live data is
-// missing.
+// missing, so the rate-limit readout is there from the first frame.
 const RL_CACHE = path.join(os.homedir(), ".claude", ".statusline-rate-limits.json");
 
 function saveRateLimitCache(rl) {
@@ -276,54 +349,95 @@ function reconcileCached() {
 
 // `stale` marks values sourced from the cache (last-known, not live) with a dim
 // "~" so they aren't mistaken for a fresh reading.
-function segRateLimits(rl, stale) {
-  if (!rl) return "";
+function segRateLimits(rl, stale, cost) {
   const mark = stale ? `${DIM}~${R}` : "";
   const parts = [];
-  if (rl.five_hour != null) {
-    const { used_percentage: u, resets_at: r } = rl.five_hour;
-    const col = rateColor(u, r, 18000);
-    parts.push(`${DIM}5h${R} ${mark}${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
+  if (rl) {
+    // The countdown already says which window a value belongs to, so the "5h"/"7d"
+    // label is redundant — except when resets_at is missing (a cached entry whose
+    // window has rolled over), where the label is the only thing telling them apart.
+    const win = (w, windowSec, label, pace) => {
+      const { used_percentage: u, resets_at: r } = w;
+      const col = rateColor(u, r, windowSec);
+      const cd  = fmtCountdown(r);
+      const lbl = cd ? "" : `${DIM}${label}${R} `;
+      const rem = Math.round(100 - u);
+      // Pacing is a weekly notion: over five hours the target moves too fast to act on.
+      const pc  = pace ? weeklyPace(rem, r, windowSec) : "";
+      parts.push(`${lbl}${mark}${col}${rem}%${R}${cd}${pc}`);
+    };
+    if (rl.five_hour != null) win(rl.five_hour, 18000,  "5h", false);
+    if (rl.seven_day != null) win(rl.seven_day, 604800, "7d", true);
   }
-  if (rl.seven_day != null) {
-    const { used_percentage: u, resets_at: r } = rl.seven_day;
-    const col = rateColor(u, r, 604800);
-    parts.push(`${DIM}7d${R} ${mark}${col}${Math.round(100 - u)}%${R}${fmtCountdown(r)}`);
-  }
+  const cost$ = fmtCost(cost);
+  if (cost$) parts.push(cost$);
   if (!parts.length) return "";
-  return `${DIM}[${R}  ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
+  return `${DIM}[${R} ${ICONS.gauge} ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
 }
 
-function segModel(name) {
+// Fallback for model and effort when the payload doesn't carry them (cold start,
+// or a truncated payload): the configured default from settings.json. It is a
+// guess, not a reading — settings.json stores an alias ("opus[1m]") rather than a
+// display name, and knows nothing of a mid-session /model switch — so a value
+// sourced from it is marked with the same dim "~" as a stale rate limit.
+const SETTINGS = path.join(os.homedir(), ".claude", "settings.json");
+let settingsCache;
+function readSettings() {
+  if (settingsCache === undefined) {
+    try { settingsCache = JSON.parse(fs.readFileSync(SETTINGS, "utf8")); }
+    catch { settingsCache = null; }
+  }
+  return settingsCache;
+}
+
+function segModel(name, stale) {
   if (!name) return "";
   const short = name
     .replace("Claude ", "").replace(" Sonnet", " Son")
     .replace(" Haiku",  " Hku").replace(" Opus", " Opx");
-  return `${DIM}[${R} ${C.sky}${short}${R} ${DIM}]${R}`;
+  const mark = stale ? `${DIM}~${R}` : "";
+  return `${DIM}[${R} ${mark}${C.sky}${short}${R} ${DIM}]${R}`;
 }
 
 // Effort level: low | medium | high | xhigh | max
-function segEffort(effort) {
-  if (!effort) return "";
+function segEffort(level, stale) {
+  if (!level) return "";
   const col =
-    effort.level === "max"    ? C.pink   :
-    effort.level === "xhigh"  ? C.orange :
-    effort.level === "high"   ? C.yellow :
-    effort.level === "medium" ? C.green  : C.gray;
-  return `${DIM}[${R} ${col} ${effort.level.toUpperCase()}${R} ${DIM}]${R}`;
+    level === "max"    ? C.pink   :
+    level === "xhigh"  ? C.orange :
+    level === "high"   ? C.yellow :
+    level === "medium" ? C.green  : C.gray;
+  const mark = stale ? `${DIM}~${R}` : "";
+  return `${DIM}[${R} ${mark}${col}${ICONS.bolt} ${level.toUpperCase()}${R} ${DIM}]${R}`;
 }
 
-// Open PR badge with review state
-function segPR(pr) {
-  if (!pr) return "";
-  const col =
-    pr.review_state === "approved"          ? C.green :
-    pr.review_state === "changes_requested" ? C.red   :
-    pr.review_state === "draft"             ? C.gray  : C.teal;
-  const label = pr.review_state
-    ? `#${pr.number} ${pr.review_state.replace(/_/g, " ")}`
-    : `#${pr.number}`;
-  return `${DIM}[${R} ${col} ${link(pr.url, label)}${R} ${DIM}]${R}`;
+// Working days that had real work and never reached a work item. The snapshot is
+// written by hooks/worklog-pending.js at session start; this only renders it, so
+// the statusline never pays for the scan. Stale means silent rather than wrong:
+// a snapshot from another day, or from before /worklog last wrote its audit, is
+// dropped — which is also how the badge clears itself the moment hours are logged.
+const WL_CACHE = path.join(os.homedir(), ".claude", ".worklog-pending.json");
+const WL_AUDIT = path.join(os.homedir(), ".claude", "worklog", "pushed.json");
+
+function segWorklog() {
+  try {
+    const snap = JSON.parse(fs.readFileSync(WL_CACHE, "utf8"));
+    const today = new Date();
+    const p = (n) => String(n).padStart(2, "0");
+    const iso = `${today.getFullYear()}-${p(today.getMonth() + 1)}-${p(today.getDate())}`;
+    if (snap.day !== iso) return "";
+    let auditMtime = 0;
+    try { auditMtime = fs.statSync(WL_AUDIT).mtimeMs; } catch { auditMtime = 0; }
+    if (snap.auditMtime !== auditMtime) return "";
+    const n = (snap.pending || []).length;
+    if (!n) return "";
+    // Red once the oldest is beyond the week: past that the transcripts start
+    // aging out and the day can no longer be reconstructed.
+    const oldest = snap.pending[0].date;
+    const stale  = (Date.now() - Date.parse(`${oldest}T12:00:00`)) > 7 * 864e5;
+    const col    = stale ? C.red : C.yellow;
+    return `${DIM}[${R} ${col}${ICONS.clock} ${n}d${R} ${DIM}]${R}`;
+  } catch { return ""; }
 }
 
 // Vim mode indicator (only visible when vim mode is active)
@@ -332,7 +446,7 @@ function segVim(vim) {
   const col =
     vim.mode === "INSERT"      ? C.green  :
     vim.mode.startsWith("VIS") ? C.orange : C.lavender;
-  return `${DIM}[${R} ${col} ${vim.mode}${R} ${DIM}]${R}`;
+  return `${DIM}[${R} ${col}${ICONS.vim} ${vim.mode}${R} ${DIM}]${R}`;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -356,27 +470,42 @@ process.stdin.on("end", () => {
     rlStale = rl != null;
   }
 
-  const parts = [
-    segFolder(cwd),
-    segGit(gitInfo(cwd)),
-    segContext(data.context_window?.used_percentage),
-    segRateLimits(rl, rlStale),
-    segModel(data.model?.display_name),
-    segEffort(data.effort),
-    segPR(data.pr),
-    segVim(data.vim),
-  ].filter(Boolean);
+  // Model and effort fall back to the configured default when the payload is
+  // silent; `stale` then marks them as a guess rather than a reading.
+  let modelName   = data.model?.display_name || "";
+  let effortLevel = data.effort?.level || "";
+  let modelStale  = false, effortStale = false;
+  if (!modelName || !effortLevel) {
+    const s = readSettings();
+    if (!modelName   && s?.model)       { modelName   = s.model;       modelStale  = true; }
+    if (!effortLevel && s?.effortLevel) { effortLevel = s.effortLevel; effortStale = true; }
+  }
 
   const sepStr = `  ${C.sep}·${R}  `;
-  const line   = parts.join(sepStr);
   const W      = termWidth() - 1;
-  const width  = visibleWidth(line);
 
-  if (width > W) {
-    // Reserve 1 column for the ellipsis appended by truncateAnsi.
-    process.stdout.write(truncateAnsi(line, W - 1) + "\n");
-  } else {
-    process.stdout.write(" ".repeat(W - width) + line + "\n");
-  }
+  // Right-align a line to the terminal edge, truncating when it doesn't fit
+  // (reserving 1 column for the ellipsis appended by truncateAnsi).
+  const fit = (line) => {
+    const width = visibleWidth(line);
+    return width > W ? truncateAnsi(line, W - 1) : " ".repeat(W - width) + line;
+  };
+
+  // Line 1 is the workspace and the budgets; line 2 is what the session runs as.
+  const line1 = [
+    segFolder(cwd, worktreeInfo(cwd)),
+    segGit(gitInfo(cwd)),
+    segContext(data.context_window),
+    segRateLimits(rl, rlStale, data.cost?.total_cost_usd),
+    segWorklog(),
+    segVim(data.vim),
+  ].filter(Boolean).join(sepStr);
+
+  const line2 = [
+    segModel(modelName, modelStale),
+    segEffort(effortLevel, effortStale),
+  ].filter(Boolean).join(sepStr);
+
+  process.stdout.write([line1, line2].filter(Boolean).map(fit).join("\n") + "\n");
 });
 process.stdin.on("error", () => { process.stdout.write("\n"); });

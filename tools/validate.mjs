@@ -137,7 +137,7 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith
 
 // Skills whose contract is "explicit trigger only": the description must say so, or the
 // model will fire them on its own.
-const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review'];
+const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review', 'items-qa'];
 for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
   const fm = frontMatter(rel);
   const dir = rel.split('/')[1];
@@ -165,15 +165,25 @@ const LEAKS = [
   [/\b(?:glsa_|ghp_|github_pat_|gho_|ghs_|ghu_|xoxb-|xoxp-|xapp-)[A-Za-z0-9_-]{8,}/g, 'token-shaped string'],
   [/\bAKIA[0-9A-Z]{16}\b/g, 'AWS access key id'],
   [/\bsk-(?:ant|proj|live|test)?-?[A-Za-z0-9_-]{20,}/g, 'API-key-shaped string'],
-  [/\b(?:Password|Pwd)\s*=\s*(?!<)[^;'"\s]{3,}/gi, 'password in a connection string'],
+  // `|` excluded from the value: a search pattern hunting for leaked secrets reads
+  // `Password=|Pwd=|Secret`, and a real password value never starts with an alternation.
+  [/\b(?:Password|Pwd)\s*=\s*(?!<)[^;'"\s|]{3,}/gi, 'password in a connection string'],
 ];
 // Allowed: the MIT line, and documented Windows system paths.
 const LEAK_ALLOW = [
   /Davide Piccinini/,                                   // the LICENSE holder, on purpose
   /C:\\Program Files\\PowerShell/,                      // documented system path
   /C:\\Users\\<[^>]+>/,                                 // explicit placeholder
+  // A password that is a *reference* to a secret, or an obvious stand-in, is the correct way to
+  // write an example — flagging it would push authors towards vaguer, less useful examples.
+  /(?:Password|Pwd)\s*=\s*(?:\$env:|\$\{|%[A-Za-z_]+%|\$\()/i,
+  /(?:Password|Pwd)\s*=\s*(?:changeme|change-me|placeholder|your[-_]?password|secret|xxx+|\*+)\b/i,
 ];
+// A file whose job is to detect credentials has to carry specimens of them. Only these two, and
+// only because the specimens are the test surface — never widen this to a directory.
+const LEAK_EXEMPT = new Set(['hooks/secret-scan.js', 'tools/secret-scan.test.mjs']);
 for (const rel of textFiles) {
+  if (LEAK_EXEMPT.has(rel)) continue;
   const text = read(rel);
   for (const [pattern, label] of LEAKS) {
     for (const m of text.matchAll(pattern)) {
@@ -252,6 +262,116 @@ for (const rel of textFiles.filter((f) => f.endsWith('.ps1') || f === 'settings.
 for (const name of referencedVars) {
   if (SYSTEM_VARS.has(name)) continue;
   if (!readme.includes(name)) fail('README.md', `environment variable ${name} is used by the kit but not documented`);
+}
+
+// ── 6. The v2 asset contract ─────────────────────────────────────────────────
+// The design spec under docs/specs/ sets three rules that nothing else can catch: hard line caps
+// (a skill needing more text needs a reference file, not a longer SKILL.md), a fixed body
+// skeleton, and no version numbers in an asset's prose. One skill is exempt: grill-me is fourteen
+// lines of interview instruction, and the skeleton would only pad it. Everything else conforms —
+// keep this list at one entry.
+const PRE_V2_SKILLS = new Set(['grill-me']);
+const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
+// wc -l semantics: a trailing newline is a terminator, not an empty final line.
+const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;
+
+const LINE_CAPS = [
+  [(f) => f.endsWith('/SKILL.md'), 150, 'SKILL.md'],
+  [(f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f), 200, 'reference file'],
+  [(f) => f.startsWith('commands/') && f.endsWith('.md'), 100, 'command'],
+];
+for (const rel of allFiles.filter((f) => f.endsWith('.md'))) {
+  for (const [matches, cap, kind] of LINE_CAPS) {
+    if (!matches(rel)) continue;
+    const lines = lineCount(rel);
+    if (lines <= cap) continue;
+    const msg = `${lines} lines against the ${cap}-line cap for a ${kind}`;
+    if (isPreV2(rel)) warn(rel, `${msg} — predates the contract, scheduled for the split`);
+    else fail(rel, `${msg}. Move the depth into references/, do not delete substance`);
+  }
+}
+
+// The skeleton is what lets several authors produce assets that read as one kit.
+const REQUIRED_SECTIONS = ['When', 'Decide', 'Do', 'Traps'];
+for (const rel of allFiles.filter((f) => f.endsWith('/SKILL.md'))) {
+  if (isPreV2(rel)) continue;
+  const text = read(rel);
+  for (const section of REQUIRED_SECTIONS) {
+    if (!new RegExp(`^##\\s+${section}\\b`, 'm').test(text)) {
+      fail(rel, `has no '## ${section}' section — the body skeleton is fixed`);
+    }
+  }
+  // "When" without its exclusions is half a trigger: it says what fires the skill and never what
+  // does not, which is how a skill ends up answering questions it has no business answering.
+  if (!/Not for:/.test(text)) warn(rel, "the 'When' section states no 'Not for:' exclusions");
+}
+
+// A reference file the SKILL.md never names can never be opened: it is tokens nobody reads.
+for (const rel of allFiles.filter((f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f))) {
+  const [, skill, , file] = rel.split('/');
+  const skillFile = `skills/${skill}/SKILL.md`;
+  if (!has(skillFile)) { fail(rel, `has no ${skillFile} to be reached from`); continue; }
+  if (!read(skillFile).includes(file)) fail(rel, `${skillFile} never names it — nothing can open it`);
+}
+
+// A version number in an asset rots on a schedule nobody can keep up with. State how to detect
+// the version instead (project file, manifest) or route to the docs plugin. Deliberate exceptions
+// carry `<!-- version-ok: reason -->` on the same line.
+const VERSIONED_TECH = [
+  '\\.NET', 'Angular', 'AngularJS', 'React', 'Node', 'TypeScript', 'EF Core', 'Entity Framework',
+  'Redis', 'RabbitMQ', 'PostgreSQL', 'Postgres', 'SQL Server', 'xUnit', 'NUnit', 'MSTest', 'Vite',
+  'Tailwind', 'RxJS', 'NgRx', 'Aspire', 'Serilog', 'Polly', 'MediatR', 'Npgsql', 'EasyNetQ',
+  'StackExchange\\.Redis', 'Vitest', 'Jest', 'Karma', 'Testcontainers', 'OpenTelemetry',
+];
+const VERSION_PATTERNS = [
+  [new RegExp(`\\b(?:${VERSIONED_TECH.join('|')})\\s+v?\\d+(?:\\.\\d+)*\\b`, 'gi'), 'a pinned version'],
+  [/\bv\d+\.\d+(?:\.\d+)?\b/g, 'a version-shaped token'],
+  [/\b\d+\.\d+\.\d+\b/g, 'a semantic version'],
+];
+for (const rel of allFiles.filter((f) => f.endsWith('.md') && (f.startsWith('skills/') || f.startsWith('commands/')))) {
+  if (isPreV2(rel)) continue;
+  const text = read(rel);
+  const lines = text.split('\n');
+  for (const [pattern, label] of VERSION_PATTERNS) {
+    for (const m of text.matchAll(pattern)) {
+      const lineNo = text.slice(0, m.index).split('\n').length;
+      if (/<!--\s*version-ok:/.test(lines[lineNo - 1] ?? '')) continue;
+      fail(`${rel}:${lineNo}`, `${label} (${m[0]}) — say how to detect the version instead`);
+    }
+  }
+}
+
+// An Azure DevOps organization or project name identifies a client, and this repository is public,
+// so every URL and every explicit --org value must carry a placeholder instead. Checked apart from
+// the leak rules because the shape is specific: a host segment that is not a placeholder.
+const ORG_PATTERNS = [
+  [/dev\.azure\.com\/(?![<{%]|your-)([A-Za-z0-9._-]{2,})/g, 'an Azure DevOps organization name'],
+  [/\b(?![<{])([A-Za-z][A-Za-z0-9-]{1,})\.visualstudio\.com/g, 'an Azure DevOps organization name'],
+];
+// Words that are stand-ins rather than customers: a comment documenting the URL shape writes `org`
+// without angle brackets, and Microsoft's own examples use contoso and fabrikam.
+const PLACEHOLDER_ORGS = new Set([
+  'org', 'orgname', 'organization', 'myorg', 'yourorg', 'example', 'placeholder',
+  'contoso', 'fabrikam', 'tenant',
+]);
+for (const rel of textFiles) {
+  const text = read(rel);
+  for (const [pattern, label] of ORG_PATTERNS) {
+    for (const m of text.matchAll(pattern)) {
+      if (PLACEHOLDER_ORGS.has(m[1].toLowerCase())) continue;
+      const line = text.slice(0, m.index).split('\n').length;
+      fail(`${rel}:${line}`, `${label} (${m[1]}) — use a placeholder such as <org>`);
+    }
+  }
+}
+
+// A command acts. What it must never do is the part that keeps it safe to run without reading it
+// first, so every command declares its limits — as a `## Guardrails` section (the house style) or,
+// for a short command, a single `**Never**` line.
+for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith('.md'))) {
+  if (!/(?:^|\n)\s*(?:#{2,4}\s+Guardrails\b|\*\*Never\*\*|Never:|#{2,4}\s+Never\b)/i.test(read(rel))) {
+    fail(rel, 'declares no limits — add a `## Guardrails` section or a `**Never**` line');
+  }
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────

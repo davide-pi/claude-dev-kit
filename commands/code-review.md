@@ -51,32 +51,41 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    anchor for the same defect (keep the more specific category and the higher-confidence verdict);
    keep both when they describe different failures at the same line; sort by severity across agents.
 
-5. **Report in chat** (user's language for the prose; keep code, identifiers, and suggested diffs
-   verbatim), in this order — the **summary table comes last**, so it is what is still on screen
-   when the report ends and the reader scrolls up only for the rows worth the detail:
+5. **Report in chat, in Italian** — every word a person reads is Italian: the finding blocks and
+   their one-line statements, the completeness notes, the verdict line and the closing question.
+   Code, identifiers, suggested diffs and `file:line` anchors are pasted verbatim, never translated
+   — and so are the **category slugs** the agents return (`correctness`, `security`, `performance`,
+   `clean-code`): they are identifiers the three reviewers agree on and the owner greps for, so the
+   column header is Italian while the value inside it is not.
+   Report in this order — the **summary table comes last**, so it is what is still on screen when
+   the report ends and the reader scrolls up only for the rows worth the detail:
 
-   - **Findings** — one block each, numbered `1.`, `2.`, … in severity order: what breaks, the
+   - **Rilievi** — one block each, numbered `1.`, `2.`, … in severity order: what breaks, the
      concrete failure scenario, the evidence (`file:line`), and the minimal fix. Group the
      `clean-code` items separately, after the correctness ones, keeping the same numbering.
-   - **Completeness** — the intent points checked, which are covered, which are not.
-   - **Summary table** — the **last block** of the report, one row per finding, same numbers and
-     same order as the blocks above (so the row order *is* the severity order):
+   - **Completezza** — the intent points checked, which are covered, which are not.
+   - **Tabella riassuntiva** — the **last block** of the report, one row per finding, same numbers
+     and same order as the blocks above (so the row order *is* the severity order). The column
+     headers are Italian, but three things inside the table are **never** translated: the `Verdetto`
+     values `CONFIRMED`/`PLAUSIBLE`, the `Posizione` anchors, and the `Categoria` slugs — all three
+     are identifiers the reader greps for and the agents agree on:
 
-     | # | Category | Location | Finding | Verdict |
-     |---|----------|----------|---------|---------|
-     | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED |
-     | 2 | clean-code | `src/Core/Mapper.cs:88` | duplicates `MapAddress`, drifts from it | CONFIRMED |
+     | # | Categoria | Posizione | Rilievo | Verdetto |
+     |---|-----------|-----------|---------|----------|
+     | 1 | security | `src/Api/UsersController.cs:42` | id di route concatenato nel testo SQL | CONFIRMED |
+     | 2 | clean-code | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne sta divergendo | CONFIRMED |
 
-     Every finding gets a row, `clean-code` and minor ones included (last). Keep the `Finding` cell
+     Every finding gets a row, `clean-code` and minor ones included (last). Keep the `Rilievo` cell
      to one short line (~80 chars, no wrapping): it is a pointer to the block above, not a summary
      of it.
-   - **Verdict** — one line right under the table: `N findings (X confirmed, Y plausible) ·
-     security: N · completeness: N`, plus which agents ran at which effort.
-   - Nothing found → say exactly that, list what was verified, and skip the table.
+   - **Verdetto** — one line right under the table: `N rilievi (X CONFIRMED, Y PLAUSIBLE) ·
+     security: N · completezza: N`, plus which agents ran at which effort.
+   - Nothing found → say exactly that in Italian, list what was verified, and skip the table.
 
-6. **Offer, do not act.** Close with **one short line** — the one or two fixes worth applying — and
-   ask whether to apply them. Keep it to that line so the table stays on screen. Apply nothing until
-   the user says so; if they do, that is a normal edit — this command itself never writes.
+6. **Offer, do not act.** Close with **one short line, in Italian** — the one or two fixes worth
+   applying — and ask whether to apply them. Keep it to that line so the table stays on screen.
+   Apply nothing until the user says so; if they do, that is a normal edit — this command itself
+   never writes.
 
 ## Guardrails
 

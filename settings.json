@@ -16,6 +16,81 @@
     "pr": "🤖 Opened with [Claude Code](https://claude.com/claude-code)"
   },
   "permissions": {
+    "deny": [
+      "Read(**/.env)",
+      "Read(**/.env.*)",
+      "Read(**/secrets/**)",
+      "Read(**/*.pem)",
+      "Read(**/*.key)",
+      "Read(~/.ssh/**)",
+      "Read(~/.aws/**)",
+      "Read(~/.git-credentials)",
+      "Read(~/.claude.json)",
+      "Read(~/.claude/.credentials.json)",
+      "Read(~/.config/gh/**)",
+      "Read(~/AppData/Roaming/GitHub CLI/**)",
+      "Edit(~/.ssh/**)",
+      "Edit(~/.aws/**)",
+      "PowerShell(git push --force*)",
+      "PowerShell(Remove-Item -Force*)",
+      "PowerShell(Remove-Item -Recurse*)",
+      "Bash(git push --force*)",
+      "Bash(rm -rf *)",
+      "PowerShell(dotnet ef database drop*)",
+      "PowerShell(dotnet ef migrations remove*)",
+      "PowerShell(docker compose down -v*)",
+      "PowerShell(docker compose down --volumes*)",
+      "PowerShell(docker system prune*)",
+      "PowerShell(docker volume rm*)",
+      "PowerShell(git clean -f*)",
+      "PowerShell(git branch -D*)",
+      "PowerShell(git push --delete*)",
+      "PowerShell(az group delete*)",
+      "PowerShell(az boards work-item delete*)",
+      "PowerShell(az repos delete*)",
+      "PowerShell(az pipelines delete*)",
+      "PowerShell(kubectl delete *)",
+      "Bash(dotnet ef database drop*)",
+      "Bash(dotnet ef migrations remove*)",
+      "Bash(docker compose down -v*)",
+      "Bash(docker compose down --volumes*)",
+      "Bash(docker system prune*)",
+      "Bash(docker volume rm*)",
+      "Bash(git clean -f*)",
+      "Bash(git branch -D*)",
+      "Bash(git push --delete*)",
+      "Bash(az group delete*)",
+      "Bash(az boards work-item delete*)",
+      "Bash(az repos delete*)",
+      "Bash(az pipelines delete*)",
+      "Bash(kubectl delete *)"
+    ],
+    "ask": [
+      "PowerShell(git reset --hard*)",
+      "PowerShell(git rebase*)",
+      "PowerShell(git cherry-pick*)",
+      "PowerShell(docker compose down*)",
+      "PowerShell(dotnet ef database update*)",
+      "PowerShell(dotnet tool install*)",
+      "PowerShell(npm install*)",
+      "Bash(git reset --hard*)",
+      "Bash(git rebase*)",
+      "Bash(git cherry-pick*)",
+      "Bash(docker compose down*)",
+      "Bash(dotnet ef database update*)",
+      "Bash(dotnet tool install*)",
+      "Bash(npm install*)",
+      "Read(**/appsettings*.json)",
+      "Read(**/*.pfx)",
+      "Read(**/connectionstrings*)",
+      "Read(**/.git/config)",
+      "PowerShell(curl *)",
+      "PowerShell(Invoke-WebRequest *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "PowerShell(Remove-Item -Recurse *)",
+      "Bash(rm -r *)"
+    ],
     "allow": [
       "Read(**)",
       "Grep(**)",
@@ -36,62 +111,76 @@
       "PowerShell(pytest*)",
       "PowerShell(winget search*)",
       "PowerShell(Get-ChildItem *)",
+      "PowerShell(git commit*)",
+      "Bash(git commit*)",
       "Bash(tsc *)",
       "Bash(eslint *)",
       "Bash(dotnet build*)",
       "Bash(dotnet test*)",
       "Bash(dotnet restore*)",
       "Bash(dotnet run*)",
-      "Bash(git status)",
-      "Bash(git diff*)",
-      "Bash(git log*)",
-      "Bash(git branch*)",
       "Bash(npm run *)",
       "Bash(npm test*)",
       "Bash(yarn *)",
       "Bash(pnpm *)",
       "Bash(pytest*)",
-      "Bash(ls *)"
-    ],
-    "deny": [
-      "Read(**/.env)",
-      "Read(**/.env.*)",
-      "Read(**/secrets/**)",
-      "Read(**/*.pem)",
-      "Read(**/*.key)",
-      "Read(~/.ssh/**)",
-      "Read(~/.aws/**)",
-      "Read(~/.git-credentials)",
-      "Read(~/.claude.json)",
-      "Read(~/.claude/.credentials.json)",
-      "Read(~/.config/gh/**)",
-      "Read(~/AppData/Roaming/GitHub CLI/**)",
-      "Edit(~/.ssh/**)",
-      "Edit(~/.aws/**)",
-      "PowerShell(git push --force*)",
-      "PowerShell(Remove-Item -Force*)",
-      "Bash(git push --force*)",
-      "Bash(rm -rf *)"
-    ],
-    "ask": [
-      "Read(**/appsettings*.json)",
-      "Read(**/*.pfx)",
-      "Read(**/connectionstrings*)",
-      "Read(**/.git/config)",
-      "PowerShell(curl *)",
-      "PowerShell(Invoke-WebRequest *)",
-      "PowerShell(npx *)",
-      "PowerShell(git commit*)",
+      "PowerShell(az devops *)",
+      "PowerShell(az boards *)",
+      "PowerShell(az repos *)",
+      "PowerShell(az pipelines *)",
+      "PowerShell(az account show*)",
+      "PowerShell(gh pr view*)",
+      "PowerShell(gh pr list*)",
+      "PowerShell(gh pr diff*)",
+      "PowerShell(gh pr checks*)",
+      "PowerShell(gh run list*)",
+      "PowerShell(gh run view*)",
+      "PowerShell(gh issue view*)",
+      "PowerShell(gh issue list*)",
+      "PowerShell(dotnet format*)",
+      "PowerShell(dotnet ef migrations list*)",
+      "PowerShell(dotnet ef migrations script*)",
+      "PowerShell(dotnet ef dbcontext info*)",
+      "PowerShell(dotnet list package*)",
+      "PowerShell(dotnet tool list*)",
+      "PowerShell(docker ps*)",
+      "PowerShell(docker logs*)",
+      "PowerShell(docker compose ps*)",
+      "PowerShell(docker compose logs*)",
+      "PowerShell(docker compose config*)",
+      "PowerShell(git fetch*)",
+      "PowerShell(git show*)",
+      "PowerShell(git rev-parse*)",
+      "PowerShell(git merge-base*)",
+      "PowerShell(git worktree list*)",
+      "PowerShell(git ls-files*)",
+      "Bash(az devops *)",
+      "Bash(az boards *)",
+      "Bash(az repos *)",
+      "Bash(az pipelines *)",
+      "Bash(az account show*)",
+      "Bash(dotnet format*)",
+      "Bash(dotnet ef migrations list*)",
+      "Bash(dotnet ef migrations script*)",
+      "Bash(dotnet ef dbcontext info*)",
+      "Bash(dotnet list package*)",
+      "Bash(dotnet tool list*)",
+      "Bash(docker compose ps*)",
+      "Bash(docker compose logs*)",
+      "Bash(docker compose config*)",
+      "Bash(git fetch*)",
+      "PowerShell(sqlcmd *)",
+      "Bash(sqlcmd *)",
+      "PowerShell(docker exec *)",
+      "Bash(docker exec *)",
       "PowerShell(git push*)",
-      "PowerShell(Remove-Item *)",
-      "Bash(curl *)",
-      "Bash(wget *)",
-      "Bash(npx *)",
-      "Bash(git commit*)",
       "Bash(git push*)",
-      "Bash(rm *)"
+      "PowerShell(git add *)",
+      "Bash(git add *)",
+      "PowerShell(npx ng *)",
+      "Bash(npx ng *)"
     ],
-    "defaultMode": "default"
+    "defaultMode": "auto"
   },
   "model": "opus[1m]",
   "fallbackModel": [
@@ -130,6 +219,67 @@
             ],
             "timeout": 15,
             "statusMessage": "Checking the branch before writing git history..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/guard-destructive.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Checking for an action with no undo..."
+          }
+        ]
+      },
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/secret-scan.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Scanning the change for credentials..."
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Write|Edit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "args": [
+              "-NoProfile",
+              "-ExecutionPolicy",
+              "Bypass",
+              "-Command",
+              "& \"$env:CLAUDE_HOOKS\\format-on-edit.ps1\""
+            ],
+            "timeout": 30,
+            "statusMessage": "Formatting the file just written..."
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/session-brief.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Reading the repository state..."
           }
         ]
       }
@@ -152,7 +302,7 @@
     "chrome-devtools-mcp@claude-plugins-official": true,
     "redis-development@claude-plugins-official": true,
     "typescript-lsp@claude-plugins-official": true,
-    "superpowers@claude-plugins-official": true,
+    "csharp-lsp@claude-plugins-official": true,
     "modern-web-guidance@claude-plugins-official": true
   },
   "language": "Italian",
@@ -162,5 +312,23 @@
   "editorMode": "normal",
   "preferredNotifChannel": "auto",
   "autoCompactEnabled": true,
-  "remoteControlAtStartup": false
+  "remoteControlAtStartup": false,
+  "autoUpdatesChannel": "latest",
+  "autoMode": {
+    "soft_deny": [
+      "$defaults"
+    ],
+    "allow": [
+      "$defaults",
+      "Reading any file in a working directory, including configuration and settings files, to understand the project before changing it",
+      "Editing source, tests, documentation, project configuration and asset files inside a working directory",
+      "The local development loop: restoring, building, formatting, linting, type-checking and running tests, and reading their output",
+      "Starting, stopping and inspecting local development containers through docker compose, and running a client inside one to read data",
+      "Read-only queries against a local or development database, and read-only inspection of a local broker or cache",
+      "Reading anything on the ALM platform: work items and their discussions, pull requests and their threads, pipelines and their logs, wikis, repositories",
+      "Creating and updating work items, posting a comment on a work item or a pull request, and creating a pull request, when the user asked for that work",
+      "Committing and pushing on a feature branch, and opening a pull request against the default branch",
+      "Writing scratch files, notes and generated artifacts under the session scratchpad directory"
+    ]
+  }
 }

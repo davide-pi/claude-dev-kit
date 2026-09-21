@@ -7,6 +7,10 @@ Interview the user relentlessly about every aspect of this plan until shared und
 
 If a question can be answered by exploring the codebase, do that instead of asking.
 
+Conduct the interview in **Italian** — the questions, the follow-ups and the pushback — and write
+the **Decision Summary** in Italian too. Code, identifiers, file paths and command names stay as
+they are.
+
 When all branches are resolved, verify no new questions emerged, then produce a **Decision Summary**:
 - Each decision point and its resolution
 - Dependencies between decisions
