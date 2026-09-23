@@ -71,7 +71,7 @@ Approving and merging a PR is a human decision. Prepare it, report it, do not de
 
 ```powershell
 git switch $base; git pull --ff-only
-git branch --delete feature/<name>      # -D only if the branch was squashed (git sees it unmerged)
+git branch -D feature/<name>            # always -D: every merge here is a squash, git sees it unmerged
 git fetch --prune                       # drop the remote-tracking ref
 git worktree remove ../<repo>-<topic>   # if the work lived in a worktree
 ```

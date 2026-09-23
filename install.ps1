@@ -68,6 +68,7 @@ $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 $ManagedDirs = @('skills/synced')
 
 $script:Problems = 0
+$script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 function Write-Ok      ([string]$m) { Write-Host "  ok      $m" -ForegroundColor DarkGray }
 function Write-Info    ([string]$m) { Write-Host "  ...     $m" -ForegroundColor Gray }
 function Write-Change  ([string]$m) { Write-Host "  changed $m" -ForegroundColor Cyan }
@@ -122,10 +123,14 @@ function Copy-Asset([string]$Relative, [string]$From, [string]$To) {
     $parent = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     # Anything already in the live config is someone's work — `commands/commit.md` is a likely
-    # collision — so keep a copy before overwriting. Pulling into the repo needs no backup: git is
-    # the backup there, and a .bak in the tree is only noise.
+    # collision — so keep a copy before overwriting. Copies go to one folder per run under
+    # backups\, never next to the asset: a .bak beside a skill is loaded, listed and diffed as if it
+    # were one, and seventy of them is how the live config became unreadable. Pulling into the repo
+    # needs no backup: git is the backup there.
     if ((Test-Path -LiteralPath $target) -and ($To -ne $RepoRoot)) {
-        Copy-Item -Force -LiteralPath $target -Destination "$target.bak"
+        $backup = Join-Path $To "backups\kit-install-$script:RunStamp\$($Relative.Replace('/', '\'))"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Copy-Item -Force -LiteralPath $target -Destination $backup
     }
     Copy-Item -Force -LiteralPath (Join-Path $From $Relative.Replace('/', '\')) -Destination $target
 }
