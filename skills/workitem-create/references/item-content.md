@@ -27,7 +27,7 @@ Setting one field that does not exist **fails the entire create**, not just that
 | Tags | safe, but only if the board actually uses tags |
 | Area / Iteration | inherit from the parent — do not set them by hand unless the user asks |
 | State | `New` unless the user says otherwise, or the type starts elsewhere (see below) |
-| Assigned to | empty unless asked; resolve the identity at runtime, never hardcode an account |
+| Assigned to | **the user**, unless they named someone else or explicitly asked for an unassigned item; resolve the identity against the organization at runtime (`azdo-cli`, "Resolving the identity to assign to"), never hardcode an account and never take it from `git config user.email` |
 | Priority / Severity | only when discovery confirms the field and the user asked for a value |
 
 ## Create order
@@ -52,8 +52,10 @@ it (at most four in flight), and parent-before-child still holds inside each sub
    remain. A retry must never duplicate.
 3. **State correction**: if the type's initial state is not `New`, or the user asked for another
    state, set it explicitly right after the create and say so.
-4. **Read back before the summary**: re-read every created item and confirm type, parent, state and
-   the fields that were set. The summary reports what the board says, not what the calls returned.
+4. **Read back before the summary**: re-read every created item and confirm type, parent, state,
+   **assignee** and the fields that were set. The summary reports what the board says, not what the
+   calls returned. An identity the organization could not resolve does not fail the call — it leaves
+   the field empty.
 5. **Never create a test item** on a real board — not to probe a field, not to check a permission.
    Probe with a read.
 
@@ -78,3 +80,6 @@ missing from which item.
    creation exists for this reason.
 6. Items look right in the call responses but wrong on the board → the response was trusted → read
    the items back.
+7. Every item lands unassigned on the second organization → the identity was resolved once, on the
+   first one, and the two sit on different tenants → resolve it per organization, and check it in
+   the read-back.

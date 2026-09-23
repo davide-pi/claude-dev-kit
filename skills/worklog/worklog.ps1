@@ -13,9 +13,11 @@
     e non vengono conteggiati. Il branch git e' il proxy del "topic".
   - Scrive un digest grezzo in <OutDir>\_raw\<from>[_<to>].md (materiale per la
     narrazione) e stampa a stdout le metriche (numeri autorevoli del tempo).
-  - Retention: al lancio pota (delete lazy) i digest e le voci di audit
-    (pushed.json) piu' vecchie di RetentionDays. Nessuno scheduler: la pulizia
-    avviene solo quando questo script gira.
+  - Retention: al lancio pota (delete lazy) SOLO i digest piu' vecchi di
+    RetentionDays. L'audit (pushed.json) non si pota mai: e' la memoria di cosa
+    e' gia' finito sulla board, e la usa anche l'hook worklog-pending.js per
+    dire quali giornate lavorate non sono mai state registrate.
+    Nessuno scheduler: la pulizia avviene solo quando questo script gira.
 
   NON scrive tabelle finali ne' tocca Azure DevOps: quello lo fa Claude via SKILL.md.
 #>
@@ -66,23 +68,15 @@ Get-ChildItem $rawDir -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEa
     if ($d -lt $cutoff) { Remove-Item $_.FullName -Force }
   }
 }
-# 2) audit pushed.json: pota le voci con periodTo (o period) piu' vecchie del cutoff
+# 2) audit pushed.json: NON si pota, mai.
+#    Il digest e' materiale di lavoro e scade; l'audit e' l'unica memoria di che ore sono finite
+#    sulla board, ed e' cio' su cui si basa la domanda "il 26 l'ho registrato?" — che con una
+#    finestra di 7 giorni resta senza risposta. Costa ~32KB dopo due mesi: potarlo non compra
+#    niente e rende possibile dimenticare un giorno.
+#    (Fino al 2026-09-04 questo blocco potava le voci oltre RetentionDays, ma leggeva
+#     $audit.entries su un file che e' sempre stato un array puro: la potatura non ha mai
+#     eseguito. Rimossa invece che corretta, di proposito.)
 $auditPath = Join-Path $OutDir 'pushed.json'
-if (Test-Path $auditPath) {
-  try {
-    $audit = Get-Content $auditPath -Raw -Encoding utf8 | ConvertFrom-Json
-    $entries = @($audit.entries | Where-Object {
-      $ref = if ($_.periodTo) { $_.periodTo } elseif ($_.period) { $_.period } else { $null }
-      if (-not $ref) { $true } else {
-        try { ([datetime]::ParseExact($ref,'yyyy-MM-dd',$null)) -ge $cutoff } catch { $true }
-      }
-    })
-    if ($entries.Count -ne @($audit.entries).Count) {
-      $audit.entries = $entries
-      ($audit | ConvertTo-Json -Depth 10) | Set-Content -Path $auditPath -Encoding utf8
-    }
-  } catch { }   # audit corrotto/illeggibile: non bloccare l'engine
-}
 
 # ---- helper ----
 function Clean([string]$s) {

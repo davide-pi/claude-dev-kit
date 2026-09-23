@@ -22,15 +22,24 @@ Solo per i topic **loggabili** (arrotondato > 0). Per ognuno:
 
    Se il topic e' di **gestione progetto** — non attribuibile a nessun item di prodotto — la
    destinazione non si cerca: e' la struttura fissa della commessa, in `ore-gestione.md`.
-3. **Ore attualmente sul Task.** Leggi il campo del lavoro completato: serve per calcolare il delta,
-   perche' la scrittura e' cumulativa.
+3. **Ore attualmente sul Task.** Leggi il campo del lavoro completato. Serve a due cose, non a una:
+   la scrittura e' cumulativa, e quel valore va **riconciliato** con l'audit (passo 5).
 4. **PR e commit da linkare** (best-effort, poi confermati in Tabella 2):
    - **PR**: cerca quella con source branch uguale al branch del topic;
    - **commit su master**: `git -C "<path-progetto>" log --since=<From> --until=<To+1g> --author=(git config user.email) --oneline`,
      e tieni gli hash pertinenti al topic.
-5. **Idempotenza.** Cerca nell'audit una voce con lo stesso `(periodFrom, periodTo, itemId)`. Se
-   c'e', prendi nota delle ore **gia' scritte** e calcola il **delta** = ore di adesso − ore gia'
-   scritte.
+5. **Riconciliazione con quello che c'e' gia'.** Confronta le ore lette al passo 3 con la somma di
+   tutte le voci d'audit per quell'`itemId`. La differenza sono **ore che questa skill non ha
+   scritto**: registrate a mano dall'utente, dal portale, o da un altro strumento.
+
+   | Situazione | Cosa fare |
+   | --- | --- |
+   | Item ↔ audit coincidono | idempotenza normale: delta = ore di adesso − ore gia' scritte **per questo periodo** |
+   | Sull'item ci sono ore che l'audit non conosce | **non sommare e basta.** In Tabella 2 dichiara `su item Xh (Yh non da worklog)` e **chiedi**: sono lo stesso lavoro (allora la stima **sostituisce** o si limita alla differenza) o lavoro diverso (allora si somma davvero)? |
+   | L'item ha piu' ore della stima e l'utente conferma che sono lo stesso lavoro | **delta 0**: le sue ore vincono sempre sulla stima dai transcript. Scrivi comunque la voce d'audit, cosi' la giornata risulta chiusa |
+
+   Il default sicuro e' **chiedere**: la stima viene da una timeline di prompt, le sue ore da lui.
+   Mai gonfiare un Task perche' l'audit non sapeva di una registrazione manuale.
 
 Nessuna cache fra run: la discovery si rifa' ogni volta, perche' item, stati e PR cambiano.
 
@@ -51,7 +60,7 @@ stato e link effettivamente presenti. Solo dopo stampa il recap.
 | --- | --- |
 | Ore **cumulative** | leggi il valore attuale del Task, scrivi `attuale + delta`. **Mai** sovrascrivere. Per un Task nuovo il delta e' l'intero delle ore del topic |
 | Task nuovi | creali come **figli** della User Story indicata, cosi' ereditano area e iteration. Titolo e descrizione **in inglese** |
-| Assegnazione | assegna all'utente, risolvendone l'identita' a runtime; non hardcodare mai un account |
+| Assegnazione | assegna all'utente, risolvendone l'identita' **contro l'organizzazione** a runtime (`azdo-cli`, "Resolving the identity to assign to"); mai un account hardcodato, mai `git config user.email` |
 | Stato | **mai** lasciare un item in `New`: `Active` se il lavoro e' in corso (PR aperta, commit non pushato, in attesa di validazione), `Closed` se concluso (PR completata, o commit gia' su master). Se il tipo parte da `New`, correggi subito dopo la creazione |
 | Link PR | come **link reale** fra PR e work item, non come URL nel testo: solo il link vero muove le policy |
 | Link commit | se non c'e' un verbo per l'artifact link al commit, metti hash e URL nella descrizione o in un commento dell'item, e dillo |
@@ -66,9 +75,25 @@ stato e link effettivamente presenti. Solo dopo stampa il recap.
   quell'item, non il delta), `prs`, `commits`, `ts`.
 - `hoursLogged` e' il totale del periodo, non il cumulativo del work item: e' quello che rende
   calcolabile il delta al ri-run.
-- L'audit viene potato dall'engine oltre la finestra di ritenzione: un ri-run molto piu' tardi non
-  trovera' la voce e ripartira' da zero. Se il periodo e' vecchio, verifica le ore sull'item prima
-  di scrivere.
+- L'audit **non viene mai potato**: la voce c'e' anche a mesi di distanza, quindi un ri-run vecchio
+  trova sempre il suo delta. E' il digest a scadere, non l'audit.
+
+### Il giorno chiuso
+
+Una giornata e' "chiusa" quando **esiste una voce d'audit che la copre** — e' il solo criterio, ed e'
+quello che legge `hooks/worklog-pending.js` per il promemoria a inizio sessione e per il badge in
+statusline. Da qui una regola che non e' facoltativa:
+
+| Caso | Cosa scrivere in audit |
+| --- | --- |
+| Ore registrate | la voce normale, una per item |
+| Ore finite su un **foglio** e non su una board (le root che la mappatura in `CLAUDE.md` manda a un foglio, eccezioni comprese) | voce di chiusura con le ore vere: `itemId: null`, `hoursLogged: <ore>`, `project: "<root>/<progetto>"`, `sheet: "<path del foglio>"` — senza, una giornata tutta su foglio non e' chiudibile se non mentendo con uno zero |
+| Il giorno c'e' stato ma **non c'e' niente da registrare** (solo tooling, ferie, permesso, giornata interamente `internal`) | una voce di chiusura: `topic: "nulla-da-registrare"`, `itemId: null`, `hoursLogged: 0`, `project: null`, piu' `periodFrom`/`periodTo`/`ts` |
+| L'utente rimanda ("lo faccio domani") | **niente**: la giornata resta pendente, ed e' esattamente cio' che deve succedere |
+
+Senza la voce di chiusura una giornata di sole ferie resta segnalata per sempre e il promemoria
+diventa rumore da ignorare — il modo esatto in cui un promemoria smette di funzionare. Chiedi
+esplicitamente prima di scriverla: "il <data> non c'e' niente da registrare, lo chiudo a zero?"
 
 ## Traps
 

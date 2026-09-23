@@ -82,6 +82,29 @@ it the pragmatic answer for the second organization when switching sign-ins beco
 az account get-access-token --tenant <tenant-domain> --query accessToken -o tsv
 ```
 
+## Resolving the identity to assign to
+
+`--assigned-to` needs a value the **organization** can resolve, and that is not the machine's git
+identity: an organization backed by a different Entra tenant knows the same person under a different
+UPN, so `git config user.email` is a plausible-looking wrong answer that silently assigns nobody.
+Resolve it against the organization, every run:
+
+```powershell
+# Canonical: ask the service who @Me is, and read the UPN back off any item it already owns.
+az boards query --org <org-url> -p <project> `
+  --wiql "SELECT [System.Id],[System.AssignedTo] FROM WorkItems WHERE [System.AssignedTo] = @Me ORDER BY [System.ChangedDate] DESC" `
+  --query "[0].fields.\"System.AssignedTo\".{name:displayName, upn:uniqueName}" -o jsonc
+```
+
+| Order | Source | When it fails |
+| --- | --- | --- |
+| 1 | the WIQL `@Me` probe above | the signed-in identity owns no item in that project — a genuinely new project |
+| 2 | `az account show --query user.name -o tsv`, then confirm it exists in the organization with `az devops user list --org <org-url> --query "items[].user.mailAddress" -o tsv` | the tenant signed in is not the organization's |
+| 3 | ask which identity to use, listing what `az devops user list` returned | — |
+
+Resolve once per organization and reuse it for the whole run. Never carry an identity over from
+another organization, and never write one into a skill, a script or a template.
+
 ## Discovery, once signed in
 
 ```powershell

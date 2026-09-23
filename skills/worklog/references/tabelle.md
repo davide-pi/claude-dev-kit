@@ -42,8 +42,12 @@ Si ripete finche' non conferma.
 - `Progetto`: il progetto Azure DevOps realmente risolto, cosi' l'utente sa dove finiscono le ore.
   Sotto la tabella dichiara anche l'**interfaccia** usata: CLI, oppure fallback MCP e perche'.
 - `Item`:
-  - Task esistente → `[Task #<id> — <titolo>](<link>) (esistente, +<delta>h)`; se l'audit dice che
-    per quel periodo era gia' stato scritto qualcosa, indica `gia' scritto <X>h → delta <±Y>h`;
+  - Task esistente → `[Task #<id> — <titolo>](<link>) (esistente, su item <T>h → +<delta>h)`. Le ore
+    **gia' presenti sull'item si mostrano sempre**, anche quando sono zero: e' il solo modo perche'
+    l'utente veda cosa sta per essere sommato a cosa. Se per quel periodo l'audit aveva gia' scritto
+    qualcosa, aggiungi `gia' scritto <X>h → delta <±Y>h`; se sull'item ci sono ore che l'audit non
+    conosce, marcale — `su item <T>h (<Y>h non da worklog)` — e **la riga resta da decidere** finche'
+    l'utente non dice se sono lo stesso lavoro (`scrittura.md`, Fase 5.5);
   - Task da creare → `parent [US #<id> — <titolo>](<link>) → **Task DA CREARE** ("<titolo previsto>")`.
 - **Sempre link cliccabile con il titolo, mai il solo numero** — vale per il parent, per il Task
   esistente e nel recap finale. Il testo del link e' `<Tipo> #<id> — <titolo>`; il titolo viene dal

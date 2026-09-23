@@ -63,6 +63,10 @@ $RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitigno
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 
+# Folders under the asset directories that Claude Code itself manages — skills synced down from the
+# claude.ai account — so neither side owns them and -Pull must never import them.
+$ManagedDirs = @('skills/synced')
+
 $script:Problems = 0
 function Write-Ok      ([string]$m) { Write-Host "  ok      $m" -ForegroundColor DarkGray }
 function Write-Info    ([string]$m) { Write-Host "  ...     $m" -ForegroundColor Gray }
@@ -86,7 +90,8 @@ function Get-DirAssets([string]$Root) {
         Get-ChildItem -LiteralPath $path -File -Recurse -ErrorAction SilentlyContinue |
             Where-Object { -not (Test-Ignorable $_.Name) }
     }
-    $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') }
+    $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
+        Where-Object { $rel = $_; -not ($ManagedDirs | Where-Object { $rel -like "$_/*" }) }
 }
 
 function Get-KitAssets {
@@ -271,6 +276,12 @@ function Test-Hooks {
 
     foreach ($name in ($shipped | Where-Object { $_ -notin $wired.Keys })) {
         Write-Info "$name is shipped by the repo but no settings.json entry runs it — wire it there yourself"
+    }
+
+    # The reminder hook reads its roots from settings.json → env; the template ships them empty, and
+    # empty is silence — the one state in which forgotten hours stay forgotten without a sign.
+    if ($wired.ContainsKey('worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
+        Write-Problem 'CLAUDE_WORKSPACE_ROOTS is empty in settings.json → env — worklog-pending.js will never report a day'
     }
 }
 

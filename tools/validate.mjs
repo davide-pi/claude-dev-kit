@@ -97,7 +97,9 @@ if (settings) {
 
   // Enabled plugins must be documented, or a fresh machine silently lacks them.
   const readme = read('README.md');
-  for (const name of Object.keys(settings.enabledPlugins ?? {})) {
+  // `false` is an explicit opt-out (the README says why), not an install requirement.
+  for (const [name, on] of Object.entries(settings.enabledPlugins ?? {})) {
+    if (on !== true) continue;
     const short = name.split('@')[0];
     if (!new RegExp(`/plugin install ${short}\\b`).test(readme)) {
       fail('README.md', `plugin '${short}' is enabled in settings.json but has no install step documented`);
@@ -123,7 +125,8 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
 
   // A whitelisted MCP tool only exists if its plugin is enabled — otherwise the agent silently
   // loses that capability (Claude Code names plugin tools mcp__plugin_<plugin>_<server>__<tool>).
-  const enabled = Object.keys(settings?.enabledPlugins ?? {}).map((p) => p.split('@')[0]);
+  const enabled = Object.entries(settings?.enabledPlugins ?? {})
+    .filter(([, on]) => on === true).map(([p]) => p.split('@')[0]);
   for (const m of (fm.tools ?? '').matchAll(/mcp__plugin_([\w-]+?)_([\w-]+)__([\w]+)/g)) {
     if (!enabled.includes(m[1])) fail(rel, `declares tool from plugin '${m[1]}', which is not enabled in settings.json`);
   }

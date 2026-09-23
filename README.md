@@ -21,10 +21,10 @@ nothing else changes. Machine identifiers are never translated in either directi
 | Level | What it solves | Assets |
 |---|---|---|
 | **Routing** | which asset owns this task | `dev-loop`, plus the rules in `CLAUDE.md` |
-| **Knowledge** | not re-deciding what was decided once | 33 skills, 114 reference files |
+| **Knowledge** | not re-deciding what was decided once | 33 skills, 115 reference files |
 | **Exploration** | finding context without burning the main context window | 8 subagents |
 | **Execution** | running a known sequence in one shot | 12 slash commands |
-| **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
+| **Safety net** | not forgetting, and not doing the irreversible | 7 hooks, the completion gate, the validator |
 
 Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
 **start at `dev-loop`**, and **try the CLI before the MCP server, every time**.
@@ -82,16 +82,16 @@ few capabilities the CLI genuinely lacks.
 
 | Skill | Purpose |
 |---|---|
-| `skills/azdo-cli/SKILL.md` | The foundation everything else calls: configuration and defaults, auth including an organization on another tenant, WIQL, the boards, repos, PR and pipeline verbs, `az devops invoke` as the REST escape hatch, and the fallback rules. |
+| `skills/azdo-cli/SKILL.md` | The foundation everything else calls: configuration and defaults, auth including an organization on another tenant, WIQL, the boards, repos, PR and pipeline verbs, resolving the identity to assign to **against the organization** rather than the machine, `az devops invoke` as the REST escape hatch, and the fallback rules. |
 | `skills/workitem-analyze/SKILL.md` | An item or epic becomes an attack plan before any code: specified against assumed, where the code is, and the questions that must be answered first. Read-only. |
 | `skills/user-story-standard/SKILL.md` | The company standard for **what an item says**: classifying a request as a User Story, Bug, Impediment or TECH, the exact body shape of each, and acceptance criteria in the mandatory `Dato che / Quando / Allora` form — plus the four coverage families behind them, and the rule that the criteria are never written together with the story, because what looks like one story usually contains three. |
-| `skills/workitem-create/SKILL.md` | `/workitem-create` — a description and images become work items after a Q&A pass and two confirmation tables. Owns the **mechanism**; the content follows `user-story-standard`. |
+| `skills/workitem-create/SKILL.md` | `/workitem-create` — a description and images become work items after a Q&A pass and two confirmation tables, assigned to you by default with the UPN shown before and read back after. Owns the **mechanism**; the content follows `user-story-standard`. |
 | `skills/backlog-integration/SKILL.md` | `/backlog-integration` — turns a client meeting into real items on an existing board: pick the Epic and Feature that scope the session, take one point at a time, build a cart, then create everything in bulk with parents and assignees. Writes no hours. |
 | `skills/project-wiki-standard/SKILL.md` | `/project-wiki-standard` — the canonical structure of an Azure DevOps project wiki and the zero-duplication rule that keeps it usable: one place per fact, an answered question **migrates** to the page that owns it and is deleted, and constraints stay separate from the decisions taken in response. |
-| `skills/worklog/SKILL.md` | `/worklog` — reconstructs what was done in a period from the session transcripts, estimates time per topic, then logs the hours on the right work items. Italian by design. |
+| `skills/worklog/SKILL.md` | `/worklog` — reconstructs what was done in a period from the session transcripts, estimates time per topic, then logs the hours on the right work items, reconciling hours already on an item that the audit does not know. The audit is never pruned: it is what closes a day, zero-hour days included, and what the reminder hook reads. Italian by design. |
 | `skills/pr-review/SKILL.md` | `/pr-review [target] [effort] [focus]` — reviews a PR and posts **only genuine questions**; everything else stays in chat. Delegates to `code-reviewer`, fanning out to the specialists from `high`. |
-| `skills/pr-create/SKILL.md` | Opening a PR on either platform: English imperative title, reviewer-sized body, protected-branch target read from the remote, work item linked. |
-| `skills/branch-flow/SKILL.md` | Branch conventions on both platforms, isolated worktrees, and the finish menu once the work is complete. |
+| `skills/pr-create/SKILL.md` | Opening a PR on either platform: Italian imperative title, reviewer-sized body with a `Rilascio:` block naming every component the change forces a deploy of, protected-branch target read from the remote, the parent backlog item linked (never a Task). |
+| `skills/branch-flow/SKILL.md` | Branch conventions on both platforms, isolated worktrees, and the finish menu once the work is complete — always squash and delete the source branch. |
 | `skills/items-qa/SKILL.md` | `/items-qa` — drives a real browser against a running site to test work items against their acceptance criteria, reads the existing discussion first, and posts a verdict that explicitly is not an approval. |
 
 **Environment and CI**
@@ -149,18 +149,19 @@ a broken hook must never block work — and each has a dependency-free test in `
 | `hooks/secret-scan.js` | `PreToolUse` | Blocks a write introducing a provider token, a cloud key, a private key block or a password-bearing connection string, naming the pattern and the line. Placeholders and variable references pass. |
 | `hooks/format-on-edit.ps1` | `PostToolUse` | Formats only the file just written, and does nothing where the project has no such tooling configured. |
 | `hooks/session-brief.js` | `SessionStart` | Five cached lines of orientation: branch and dirty state, last commit, upstream drift, PR, work item. No network call. |
-| `hooks/ensure-browser.ps1` | `PreToolUse` | Makes sure a browser carrying the Claude extension is running before a browser tool call. Never blocks. |
+| `hooks/worklog-pending.js` | `SessionStart` | Names the working days with activity under a mapped workspace root but no `/worklog` audit entry — current month, or current week where it reaches back — and caches the count for the statusline clock badge. Roots come from `CLAUDE_WORKSPACE_ROOTS`; unset means silence. |
+| `hooks/ensure-edge-cdp.ps1` | `PreToolUse` | Before a `browser-use` tool call, makes sure Edge is running with its CDP port open, starting it if needed. Never blocks. |
 
 ## Configuration and tooling
 
 | Path | Purpose |
 |---|---|
 | `CLAUDE.md` | User instructions: the routing and CLI rules, the review conventions, the writing rule, and the workspace-to-platform mapping (a template — fill in your own). |
-| `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules, the six hooks, PowerShell as the default shell, enabled plugins, status line, UI preferences. |
-| `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar, rate limits, model, effort, PR badge, vim mode. Names and branch are hyperlinks. |
+| `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the seven hooks, PowerShell as the default shell, enabled plugins, status line, UI preferences. |
+| `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, rate limits with weekly pacing, session cost, model, effort, PR badge, the unlogged-hours clock badge, vim mode. Names and branch are hyperlinks. |
 | `install.ps1` | Idempotent install into the Claude config directory, plus `-Check` (drift and environment report, exit 1 on problems) and `-Pull` (import live edits back into the repo, whole skill folders included). |
 | `tools/validate.mjs` | Dependency-free CI checks: JSON, front matter, cross-references, machine paths and secrets, the line caps, the body skeleton, reference reachability, pinned versions, declared command limits. |
-| `tools/guard-default-branch.test.mjs` | One test file per hook — this one plus four siblings — covering the true positives and, the part that matters, the false positives. |
+| `tools/guard-default-branch.test.mjs` | One test file per Node or routing hook — this one plus five siblings — covering the true positives and, the part that matters, the false positives. |
 | `evals/skill-triggering.md` | A `MUST` / `MUST NOT` case per skill and command. The `MUST NOT` rows are the borders between neighbouring assets. |
 | `mcp/servers.example.json` | The MCP servers the skills fall back to, as a mergeable JSON block. Not installed by copying — see below. |
 | `docs/specs/` | The design specs the kit was built from, including the asset contract every asset obeys. |
@@ -185,6 +186,7 @@ Installed plugins already own these, so no asset restates them — they route to
 - **Claude Code** (CLI, desktop, or IDE extension).
 - **Node.js 18+** and **git** on `PATH` — for the status line, the Node hooks, the validator and the tests.
 - **PowerShell 7** at `C:\Program Files\PowerShell\7\pwsh.exe` — hardcoded by `settings.json`, used by two hooks and the worklog scripts.
+- **Microsoft Edge** with remote debugging allowed (`edge://inspect`) — only for the `browser-use` plugin, which attaches to Edge's CDP port rather than launching a browser.
 - A **Nerd Font** in the terminal — the status line draws its badges with Nerd Font glyphs; without one you get replacement boxes.
 - **`az` with the `azure-devops` extension** (`az extension add --name azure-devops`) — the whole ALM pillar depends on the extension specifically. **`gh`**, authenticated, for GitHub repositories.
 - **`dotnet`** with the EF tool, **`docker`**, **`sqlcmd`**. The diagnostics skill installs the .NET diagnostic tools on demand.
@@ -202,8 +204,11 @@ Installed plugins already own these, so no asset restates them — they route to
 
 The installer discovers what the repo contains rather than working from a list, so a new asset needs
 no change here. It asks before overwriting `CLAUDE.md` or `settings.json` (`-Force` skips the
-prompt). Two settings are personal choices worth reviewing first: `"language": "Italian"`, and
-`model` / `effortLevel` / `alwaysThinkingEnabled`, which pick a capability *and* a cost profile.
+prompt). Some settings are personal choices worth reviewing first: `"language": "Italian"`;
+`model` / `effortLevel` / `alwaysThinkingEnabled` / `advisorModel`, which pick a capability *and* a
+cost profile; `voice`, `remoteControlAtStartup` and the push notifications; and
+`autoCompactEnabled: false` — auto-compaction is off on purpose, with the threshold kept at 70% for
+whoever turns it back on.
 
 Then restart Claude Code. `-Check` reports anything that exists only in the live config, which is
 the state where a retired skill keeps firing next to its replacement.
@@ -223,6 +228,17 @@ Register the marketplace once, then install each plugin and restart:
 /plugin install remember                # cross-session memory
 /plugin install csharp-lsp              # C# semantic navigation (needs csharp-ls on PATH)
 /plugin install typescript-lsp          # TypeScript semantic navigation
+/plugin install playwright              # headless browser automation
+/plugin install browser-use             # drives the real Edge profile over CDP (see ensure-edge-cdp)
+```
+
+`settings.json` also registers one third-party marketplace, `headroom-marketplace`, and enables its
+`headroom` plugin. Drop both entries if you do not want a plugin from outside the official catalogue;
+otherwise:
+
+```
+/plugin marketplace add chopratejas/headroom
+/plugin install headroom@headroom-marketplace
 ```
 
 The `superpowers` plugin is deliberately **not** enabled: the seven of its skills worth keeping were
@@ -255,6 +271,8 @@ item types and states. `azdo-cli` lists each one with the reason.
 | Variable | Who needs it | Value |
 |---|---|---|
 | `CLAUDE_HOOKS` | every hook in `settings.json` | The hooks directory inside your Claude config directory. Hooks run in *exec* form with no shell to expand variables, which is why the Node ones read it themselves. **Without it they fail silently** — by design they exit 0, so the only symptom is that nothing gets checked. `install.ps1` sets it at user level. |
+| `CLAUDE_WORKSPACE_ROOTS` | `hooks/worklog-pending.js` | The workspace roots whose work is billable, `;`-separated — the same roots as the mapping in `CLAUDE.md`. Set in `settings.json` → `env`, empty in the template: **empty means the reminder never fires**. |
+| `CLAUDE_WORKSPACE_NESTED` | `hooks/worklog-pending.js` | Folders under a root whose project is the subfolder below them (the per-subfolder shape of the mapping), `;`-separated, so the reminder labels `<root>/<project>`. Optional. |
 | `COLUMNS` | `statusline.js` | Terminal width for the context bar; falls back to a sane default when unset. |
 | `USERPROFILE`, `LOCALAPPDATA` | the PowerShell scripts | Standard Windows variables, listed so the dependency is explicit. |
 
@@ -278,7 +296,8 @@ status line and a parse of every PowerShell script.
 
 Three things are placeholders on purpose, because this repository is public: **Azure DevOps
 organization and project names**, **absolute machine paths**, and **addresses**. Replace them in the
-workspace mapping in `CLAUDE.md` and in `mcp/servers.example.json`.
+workspace mapping in `CLAUDE.md`, in `CLAUDE_WORKSPACE_ROOTS` / `CLAUDE_WORKSPACE_NESTED` in
+`settings.json`, and in `mcp/servers.example.json`.
 
 Everything else is meant to be opinionated. If a pattern does not match your project, change the
 skill — `skill-forge` tells you how to do it without breaking the contract, and the validator tells

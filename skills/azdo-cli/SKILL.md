@@ -4,7 +4,8 @@ description: >-
   Azure DevOps from the command line, and the foundation every other Azure DevOps asset calls:
   resolving the organization and project instead of trusting a default, signing in — including an
   organization on a different Entra tenant — WIQL queries, reading, creating, updating, commenting
-  and linking work items, the fields, states and types a project really has and which type name
+  and linking work items, resolving the identity an item is assigned to against the organization
+  rather than the machine, the fields, states and types a project really has and which type name
   fills each role (backlog item, defect, analysis, technical activity, time, grouping), attachments
   and inline images, wiki pages, pull requests from listing to completion, and pipelines. Use
   whenever an Azure DevOps board, repository, pull request, wiki or pipeline has to be read or
@@ -131,16 +132,15 @@ $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca697
    the Attachments tab → discover the type's real fields, and inline the `<img>` into the field HTML.
 7. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
    system codepage → write over REST with `charset=utf-8`, then read the page back.
-8. `--fields` ignored → `show` wants a **comma-separated** list, `create`/`update` **space-separated**
-   `field=value` pairs → different flags, same name.
+8. `--fields` ignored → `show` wants a **comma** list, `create`/`update` **space**-separated `field=value`.
 9. Hours logged on the wrong item, or a PR linked to a Task → only the time role carries hours, and
    a PR links the item above it → `references/work-item-roles.md`, section 5.
-10. A PR completes by accident → `--status completed` on `update` merges at once; that, abandoning
-    and `--bypass-policy` are irreversible → confirm first.
+10. A PR completes by accident → `--status completed` merges at once; it, abandon, `--bypass-policy`: confirm.
 
 ## References
 
-- `references/auth-and-config.md` — any auth or "not found" failure: sign-in, PAT versus Entra, tenants.
+- `references/auth-and-config.md` — any auth or "not found" failure: sign-in, PAT versus Entra, tenants,
+  and resolving the identity to assign to.
 - `references/boards-catalogue.md` — before any WIQL or work item write: queries, reads, updates, links.
 - `references/work-item-roles.md` — before naming a type: role-to-type per template, the confirming query.
 - `references/workitem-content.md` — before writing any field: real field names, the Bug form, images.

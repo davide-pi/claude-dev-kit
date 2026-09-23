@@ -58,7 +58,7 @@ sul comando.
 | --- | --- |
 | tipo | `Task`, figlio del PBI di gestione |
 | titolo | `AAAA/MM/GG - <titolo attivita'>` — la data e' quella della sessione loggata |
-| assegnatario | l'identita' CLI **correntemente loggata**, risolta a runtime; mai un valore fisso |
+| assegnatario | l'utente, con l'identita' risolta a runtime **contro l'organizzazione** (`azdo-cli`, "Resolving the identity to assign to"); mai un valore fisso, mai quella della macchina |
 | lavoro completato | le ore della sessione (arrotondate dall'helper, come ogni altra riga) |
 | stato | forzato a **Done** subito dopo la creazione — un Task ore non resta mai in `New` |
 

@@ -47,7 +47,15 @@ push, because `pr-create` will not open an unlinked PR.
 ## 3. Merging, per platform
 
 Both platforms: **squash** (one commit per PR, linear history) and **delete the source branch**
-after the merge. Both gates — pipeline green and at least one approved review — apply on both.
+after the merge. This is not a preference to weigh per PR — it is the only strategy used here, and a
+merge commit or a surviving branch is a mistake to fix, not an outcome to report. If a repository
+policy forbids squash, **stop and say so**; do not quietly merge some other way. Both gates —
+pipeline green and at least one approved review — apply on both platforms.
+
+The intent is set at **creation** (`pr-create` passes it), which covers auto-complete and every CLI
+completion; setting it again at completion is belt and braces, not a duplicate. What it does **not**
+cover is a human pressing Complete in the web dialog — only the branch policy `Limit merge types`
+(squash only) on the default branch does. Suggest it where the repo does not have it.
 
 - **GitHub** — `gh pr merge <n> --squash --delete-branch`. Add `--auto` to let it merge itself once
   the checks pass instead of babysitting them.

@@ -25,9 +25,15 @@ Short but complete. A reviewer should know, before reading the diff, **what chan
 
 ```markdown
 - Aggiunge `InvoiceExportService` e l'endpoint `/api/tenants/{id}/invoices/export`.
-- Sposta la risoluzione del tenant dai controller al middleware — tre controller la ripetevano e
-  uno sbagliava il caso di impersonation.
+- Sposta la risoluzione del tenant dai controller al middleware in `Shared.Tenancy` — tre controller
+  la ripetevano e uno sbagliava il caso di impersonation.
 - La migration `20260902_AddInvoiceExportLog` aggiunge una tabella; nessuna colonna esistente cambia.
+
+Rilascio:
+- `Billing.Api` — contiene il nuovo endpoint e applica la migration.
+- `Tenants.Api`, `Orders.Api` — ospitano due dei tre controller che perdono la risoluzione del
+  tenant, ora in `Shared.Tenancy`: referenziano la libreria modificata.
+- Database `billing` — migration da applicare prima dei servizi.
 
 Note per il reviewer:
 - Per ora l'export è sincrono; il percorso a coda è fuori scope (item #<id>).
@@ -43,7 +49,8 @@ Rules:
 3. Call out anything the reviewer must not miss: a migration, a config key, a breaking signature, a
    deliberate deviation, a follow-up left undone.
 4. Name what is **out of scope**, so the review does not turn into a design discussion.
-5. No empty template sections, no "N/A", no checklist nobody ticks.
+5. No empty template sections, no "N/A", no checklist nobody ticks — with **one exception**: the
+   `Rilascio:` block is always written, `nessun componente` included (see below).
 6. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
 
 ## Deriving it
@@ -57,6 +64,57 @@ git diff --stat "origin/$base...HEAD"       # where the weight actually is
 Read the linked parent item or issue too: the body should answer the item, and any gap between what
 the item asked and what the branch does belongs in the body as an explicit note. On Azure DevOps
 the item text comes through `azdo-cli`; on GitHub, `gh issue view <n> --json title,body`.
+
+## The release scope — the `Rilascio:` block
+
+Every body carries it, right after the change bullets. It answers one question: **which releasable
+components must be deployed for this PR to take effect**. One bullet per component, each with the
+reason it is in the list — the reason is what lets a reviewer contest the list.
+
+| What changed | What gets released |
+| --- | --- |
+| a file inside one deployable | that deployable |
+| a shared library, a contracts package, a shared UI lib | **every deployable that references it**, one by one |
+| a message contract — event, RPC, queue payload | the publisher **and every consumer** (`rabbitmq`) |
+| a migration | the deployable that applies it, plus the database as its own step |
+| only pipelines, docs, tests, editor config | nothing — `Rilascio: nessun componente` |
+
+### Finding the deployables
+
+1. **List the files**, not the commits: `git diff --name-only origin/<base>...HEAD`.
+2. **Map each file to the unit that gets deployed**, discovered in the repo rather than assumed:
+   - a **pipeline definition with path filters** is the authoritative release map where one exists —
+     the paths it triggers on are, by construction, the files that release that component
+     (`pipeline`);
+   - otherwise: a `Dockerfile`, an executable or Web-SDK project, an `application` entry in the
+     Angular workspace config, a Vite/Next app root, a function or worker host, a chart or
+     deployment manifest.
+3. **Fan out through references** — this is the step that is actually forgotten:
+   - a class library or contracts package → every deployable that reaches it through a project or
+     package reference, transitively;
+   - a shared frontend library or a path-mapped module → every app that imports it;
+   - a **message contract** — event, RPC request/response, queue payload → the **publisher and
+     every consumer**, found by searching the solution for the message type (`rabbitmq`);
+   - a database migration → the deployable that runs it, and the database itself as a release step
+     with its own ordering (usually before the services).
+4. **Ordering and prerequisites** where they matter: migration before services, producer before
+   consumer on an additive contract, consumer before producer on a removal, a config key or a
+   variable group that must exist in the environment first. One extra clause on the bullet, not a
+   runbook.
+5. **Unmappable file** → say so explicitly in the block. Silence turns a doubt into a missed
+   release; a line saying "non risolto: `<path>`" is a question the reviewer can answer.
+
+### Rules
+
+| Case | What the block says |
+| --- | --- |
+| Named components | `- <componente> — <perché>`, one per line, real deployable names from the repo |
+| A shared library changed | the **consumers**, never the library — a library is not deployed |
+| Nothing deployable (docs, tests, editor config, a pipeline that only builds) | `Rilascio: nessun componente` |
+| Uncertain fan-out | list what is certain, then one line naming the doubt |
+
+Never write "tutti i servizi" as shorthand: if it really is all of them, they are still listed by
+name — that list is what makes the size of the change visible.
 
 ## Linking
 
