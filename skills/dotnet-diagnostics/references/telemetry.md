@@ -82,7 +82,7 @@ Sort children by duration, then read top-down:
   many small database spans              -> N+1; fix the query, not the database (ef-core)
   one outbound HTTP span dominates       -> the dependency; check its own trace
   several identical HTTP spans           -> a retry policy firing; look at the attempts, not the call
-  the parent is long, children are short -> in-process work: profile it          (triage.md)
+  the parent is long, children are short -> in-process work: profile it          (tools.md)
   a gap with no span at all              -> queueing: thread pool, connection pool, or a lock
   the child span sum is far below the
     parent duration                      -> the same gap, stated differently

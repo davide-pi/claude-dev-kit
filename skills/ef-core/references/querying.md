@@ -121,7 +121,7 @@ total by materializing the list.
 
 One `SaveChanges` is already atomic. An explicit transaction is needed only to span several
 `SaveChanges` calls, a bulk operation, or raw SQL. Do not open a transaction per repository method:
-the transaction boundary belongs to the use case (`dotnet-backend`, `architecture.md`).
+the transaction boundary belongs to the use case — the handler that owns the unit of work.
 
 Never hold a transaction across an outbound HTTP call or a broker publish. That is how a database
 lock ends up waiting on a network timeout, and how you get the deadlocks in `sql-server`.

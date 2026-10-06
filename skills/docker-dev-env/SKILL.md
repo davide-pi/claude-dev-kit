@@ -1,23 +1,17 @@
 ---
 name: docker-dev-env
 description: >-
-  The local development environment for this stack: a docker compose file defining SQL Server,
-  Postgres, Redis, RabbitMQ, a mail catcher and a reverse proxy; reaching a database or broker
-  client that is not installed on this machine by running it inside the service container or in a
-  throwaway one; named volumes, what a reset costs and when to destroy one on purpose; healthchecks
-  and why a container that is up is not yet a service that is ready; published ports and port
-  collisions; environment and secret handling for local development, with no real credential ever in
-  a committed compose file; and .NET Aspire — what its app host orchestrates, how it differs from
-  driving compose by hand, and when each is the right tool. Use when a local service will not start
-  or the app cannot connect to it, when a compose service has to be added or changed, when a one-off
-  query needs a client missing from the machine, or when choosing how a solution runs locally.
+  Use whenever a service has to run locally — an Aspire profile, a compose stack — or a local
+  database, Redis or broker will not start or connect, a port collides, a volume needs a reset, or a
+  client like psql, redis-cli or rabbitmqctl is needed but not installed.
 ---
 
 # docker-dev-env — the local stack: compose, Aspire, and clients that live only in containers
 
-Two solutions here are orchestrated by a .NET Aspire app host; every other repository drives
-`docker compose` directly. `psql` and `redis-cli` are **not installed on this machine**, so every
-Postgres and Redis client recipe in this kit runs through a container.
+**Aspire first for the large backend** — its app host starts the .NET services by profile, while
+the databases and the broker come from configuration, not from containers it owns. Every other
+repository drives `docker compose` directly. `psql` and `redis-cli` are **not installed on this
+machine**: every client recipe in the kit lives once, in `references/clients-in-containers.md`.
 
 ## When
 
@@ -28,7 +22,7 @@ Postgres and Redis client recipe in this kit runs through a container.
 - Choosing how a solution runs locally: an Aspire app host, or compose by hand.
 - A published port is already taken, or two stacks fight over the same one.
 
-Not for: engine-specific syntax and inspection queries (`sql-server`, `postgres`, `redis-dotnet`,
+Not for: engine-specific syntax and inspection queries (`sql-server`, `redis-dotnet`,
 `rabbitmq`), containers a test suite starts and owns (`dotnet-testing`), Kubernetes or production
 deployment, build-agent service containers (`pipeline`). Image tags, engine releases and package
 versions come from the compose file, the `.env` beside it, or the app host project — never assumed.
@@ -39,6 +33,7 @@ versions come from the compose file, the `.env` beside it, or the app host proje
 
 | Situation                                                              | Instrument                    |
 | ---------------------------------------------------------------------- | ----------------------------- |
+| The large backend (an app host under `src/orchestration`)              | Aspire, smallest profile containing the changed service; its old compose file is stale |
 | The solution already contains an app host project                      | Aspire — it owns the topology |
 | The .NET services should start, wire up and be observable in one command | Aspire, with its dashboard  |
 | Only backing services are wanted; the app runs from the IDE            | compose                       |
@@ -102,14 +97,11 @@ Get-NetTCPConnection -LocalPort <port> -State Listen |
   ForEach-Object { Get-Process -Id $_.OwningProcess }  # who already holds the port
 ```
 
-Reaching a client that is not on the machine, and driving the lifecycle:
+Clients that are not on the machine: the per-client table in `references/clients-in-containers.md`.
+Driving the lifecycle:
 
 ```powershell
-docker compose exec -T postgres psql -U $env:POSTGRES_USER -d app -v ON_ERROR_STOP=1 -At -c "select 1"
-docker compose exec -T redis redis-cli PING
-docker compose exec -T rabbitmq rabbitmqctl list_queues name messages messages_unacknowledged
-Get-Content .\seed.sql | docker compose exec -T postgres psql -U $env:POSTGRES_USER -d app
-docker network ls; docker run --rm -it --network <net> <the image the compose file names> <client>
+$env:ASPIRE_PROFILE = '<profile>'; dotnet run --project <AppHost project>   # the large backend
 docker compose up -d --wait                  # start, and block until every healthcheck passes
 docker compose up -d --force-recreate <svc>  # new container, same volumes
 docker compose down                          # removes containers; volumes survive
@@ -136,7 +128,9 @@ docker compose down -v                       # DESTROYS the volumes — name the
    listeners on separate ports → test the one the client actually uses.
 9. Local mail never arrives → the mail catcher swallows it by design → read it in the catcher's web
    UI; a real SMTP host in local configuration is a bug, not a fallback.
-10. Aspire and a hand-started compose stack are both up → two servers on one port, and the app talks
+10. The backend's compose file used to run the stack → it lists services that no longer exist → use
+    the app host; its profiles are the live topology (`references/aspire.md`).
+11. Aspire and a hand-started compose stack are both up → two servers on one port, and the app talks
     to whichever won → pick one orchestrator and stop the other.
 
 ## References

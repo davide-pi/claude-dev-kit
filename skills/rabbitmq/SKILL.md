@@ -1,148 +1,108 @@
 ---
 name: rabbitmq
 description: >-
-  RabbitMQ messaging for .NET services: choosing a topology on purpose (exchange type, routing keys,
-  queue durability, dead-letter exchanges, TTL and length limits), picking between publish-subscribe,
-  request-response and saga and paying the right price for it, consumer-side idempotency and
-  deduplication because redelivery is guaranteed, acknowledgements and prefetch, poison messages and
-  a retry policy that terminates, the EasyNetQ conventions in use here including why a wrong
-  subscription id silently steals messages, and operating a broker through the management HTTP API
-  and CLI instead of a UI. Use when publishing or consuming messages, designing a queue or exchange,
-  investigating a stuck queue or a dead-letter backlog, or reviewing messaging code.
+  Use whenever code calls RequestAsync, RespondAsync, PublishAsync or SubscribeAsync, a message
+  contract changes, an RPC call times out or gets no responder, a queue backs up or dead-letters, or
+  the broker's state must be inspected without the UI.
 ---
 
-# rabbitmq — topology on purpose, consumers that survive redelivery
+# rabbitmq — RPC is the norm here; design for the timeout and the duplicate
 
-RabbitMQ runs in compose in two workspaces; **one** has an application client, EasyNetQ, using
-request-response, publish-subscribe and hand-rolled sagas. Everything below assumes at-least-once
-delivery, because that is what the broker offers: **every message can arrive twice.**
+The large backend talks service-to-service over RabbitMQ through EasyNetQ, and **RPC is the default
+call**: request/respond outnumbers subscribe by about ten to one. Two facts shape everything below —
+an RPC caller blocks until an answer or a two-minute timeout, and at-least-once delivery means
+**every published message can arrive twice.**
 
 ## When
 
-- Publishing or consuming a message, or adding a new message type.
-- Declaring or reviewing an exchange, a queue, a binding, a dead-letter route.
-- A queue is growing, a consumer is idle, messages are in an error or dead-letter queue.
-- A handler fails and the message comes back forever, or vanishes.
-- Choosing between an event, a command, an RPC call and a multi-step process.
-- Inspecting or draining a broker without clicking through the management UI.
+- Writing or reviewing a `RequestAsync`/`RespondAsync` pair, a publish, or a subscriber.
+- Adding or changing a request, response or event type in a `*.ServiceContract` project.
+- An RPC call times out, hangs for minutes, or a responder never answers.
+- A queue is growing, a consumer is idle, messages sit in an error or dead-letter queue.
+- Inspecting the broker from the command line, or replaying failed messages.
+- Following a flow that crosses several services over the bus.
 
-Not for: the compose service definition (`docker-dev-env`), general async and concurrency in C#
-(`dotnet-backend`), Redis pub/sub as a SignalR backplane (`redis-dotnet`), tracing a slow handler
-(`dotnet-diagnostics`). Broker-release-specific features (queue types, per-queue options): check
+Not for: the compose service or reaching the broker's CLI (`docker-dev-env`), general async and DI in
+C# (`dotnet-backend`), a slow handler's internals (`dotnet-diagnostics`), Redis Streams, which some
+services use as a work queue next to the bus (`redis-dotnet`). Broker-release features: check
 `rabbitmq-diagnostics status` and the official docs rather than assuming.
 
 ## Decide
 
-**What shape is this?** Get this wrong and no amount of tuning helps.
+**Where is the flow?** Locating code that spans services is not a grep job for the main thread.
 
-| The intent                                          | Shape             | Exchange                       | Price                                                     |
-| --------------------------------------------------- | ----------------- | ------------------------------ | --------------------------------------------------------- |
-| "This happened" — N interested parties, or none      | publish-subscribe | topic (or fanout)              | no reply, no ordering across consumers; each consumer owns its queue |
-| "Do this" — exactly one owner                        | command           | direct, or the default exchange | the owner must exist; a backlog is visible and fine        |
-| "I need an answer now"                               | request-response  | direct reply-to                | **caller blocks; both sides must be up.** Latency and availability couple |
-| "I need an answer, but not now"                      | command + event   | direct out, topic back          | correlation state to carry                                 |
-| Several steps across services, with compensation     | saga              | commands out, events back      | persisted state, timeouts, compensating actions — the most expensive option |
-| Work distributed over N identical workers            | competing consumers | any, one shared queue        | no per-consumer ordering                                   |
-| Same message needed by two *different* services      | two queues bound to one exchange | topic             | none — this is what an exchange is for                     |
+| Question | Route |
+| --- | --- |
+| "Which service answers this request / handles this event?" | `investigator` agent, locate mode |
+| "What happens end to end when X is called?" — the hop map | `investigator` agent, trace mode |
+| "What is the broker holding right now?" | `references/operations.md`, the procedure |
 
-**Never** use request-response for work that takes longer than a caller is willing to wait, and never
-put a synchronous HTTP request inside a message handler that holds an unacknowledged message.
+**RPC, event, or command?**
 
-**Topology decisions, and the default answer.**
+| The intent | Shape | Price |
+| --- | --- | --- |
+| an answer is needed to continue, within seconds | RPC | caller blocks; responder must be up; set a per-call deadline for user-facing paths |
+| "this happened", zero or more listeners | publish-subscribe | no answer; each subscriber owns its queue and must be idempotent |
+| an answer is needed, but not now; or the work outlives a request | command out, event back | correlation state to carry — the honest replacement for a long RPC |
+| several steps with compensation | hand-rolled saga | persisted state and timeouts are yours |
 
-| Decision                | Default here                              | Change it when                                          |
-| ----------------------- | ----------------------------------------- | ------------------------------------------------------- |
-| Exchange type           | topic — a direct exchange is a topic with no wildcards | fanout for true broadcast; headers almost never |
-| Queue durability        | durable                                   | never, for anything that matters                         |
-| Message persistence     | persistent                                | a transient metric stream, where loss is acceptable      |
-| Publisher confirms      | on                                        | never off in a service that owns data                    |
-| Dead-letter exchange    | on every work queue                       | never omit it — without one, a rejected message is gone   |
-| Message TTL             | set on retry/delay queues                  | on a work queue only when a stale message is worthless   |
-| `x-max-length`          | set on anything unbounded                  | with `x-overflow` chosen deliberately                     |
-| Auto-delete / exclusive | only for RPC reply queues                  | never for a work queue                                    |
-| Prefetch                | a small number, set explicitly              | 1 for long or heavy handlers                              |
+**An RPC call failed. Which case is it?** (details in `references/easynetq.md`)
 
-**A message failed. What now?**
+| Symptom | Cause | First check |
+| --- | --- | --- |
+| hangs for the full RPC timeout (120 s in the committed appsettings — confirm the deployed value), then a timeout/cancellation exception | no responder subscribed — down, failed bootstrap, or the contract type renamed | consumer count on the request queue |
+| `EasyNetQResponderException` | the responder threw; only the message crossed | the responder's own logs — its handler must return errors as data |
+| a response with an error status | a business outcome, by design | map it; it is not an exception |
+| times out but the effect happened | responder slower than the deadline; the reply was discarded | idempotency, and a shorter `WithExpiration` upstream |
 
-| Cause                                      | Action                                                        |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| Transient (a timeout, a deadlock victim)   | retry with backoff, bounded — a delay queue, not `requeue: true` |
-| Permanent (bad payload, missing reference) | reject without requeue → dead-letter, and alert                |
-| Unknown                                    | treat as transient, with a hard attempt limit, then dead-letter |
-| Already processed                          | acknowledge and do nothing — this is the idempotency check      |
-| The handler crashed the process            | the unacked message returns on its own; make sure it is idempotent |
-
-`BasicNack(requeue: true)` on a message that will always fail is an infinite loop that saturates the
-consumer — the classic poison-message incident. Requeue is only correct for "not now" (a shutdown, a
-dependency that is briefly down), never for "this is broken".
+**A subscriber's message failed. What now?** Transient → bounded retry with backoff, then
+dead-letter. Permanent → reject without requeue, dead-letter, alert. Already processed → ack and do
+nothing. `requeue: true` on a permanent failure is the poison-message hot loop
+(`references/principles.md`).
 
 ## Do
 
 ```powershell
-# The management CLI and HTTP API, through the container. No local rabbitmq tools needed.
-$c = @('compose','exec','-T','rabbitmq')
+# Who answers, who calls — before changing a contract, find every user of the type
+Get-ChildItem -Recurse -Filter *.cs | Select-String -Pattern 'RequestAsync<<Request>|RespondAsync<<Request>' |
+  Select-Object Path, LineNumber
+Get-ChildItem -Recurse -Filter appsettings*.json | Select-String -Pattern 'host=.*timeout='   # the RPC timeout in force
 
-docker @c rabbitmqctl list_queues name messages messages_ready messages_unacknowledged consumers
-docker @c rabbitmqctl list_consumers
-docker @c rabbitmq-diagnostics status          # alarms, memory, disk, listeners
-docker @c rabbitmq-diagnostics check_running
-
-# The HTTP API is the scriptable interface (management plugin, default port 15672).
-$auth = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
-    [Text.Encoding]::ASCII.GetBytes("$env:RABBIT_USER`:$env:RABBIT_PASS")) }
-$base = 'http://localhost:15672/api'
-
-# Queue depth, consumer count and rates, sorted by backlog
-(Invoke-RestMethod "$base/queues" -Headers $auth) |
-  Select-Object name, messages, messages_ready, messages_unacknowledged, consumers, idle_since |
-  Sort-Object messages -Descending | Format-Table
-
-# Peek at a dead-letter queue WITHOUT consuming: reject and requeue what you read
-$body = @{ count = 5; ackmode = 'reject_requeue_true'; encoding = 'auto'; truncate = 50000 } | ConvertTo-Json
-Invoke-RestMethod "$base/queues/%2F/my.queue.error/get" -Method Post -Headers $auth `
-  -ContentType 'application/json' -Body $body
+# Broker state: rabbitmqctl lives inside the container (procedure in references/operations.md)
+docker exec <container> rabbitmqctl list_queues --vhost <vhost> name messages messages_ready messages_unacknowledged consumers
+docker exec <container> rabbitmqadmin -V <vhost> get queue=<name> count=1 ackmode=reject_requeue_true   # peek only
 ```
 
-**Purging is destructive and irreversible.** `DELETE $base/queues/%2F/<queue>/contents` (or
-`rabbitmqctl purge_queue`) deletes every message in the queue. Read a sample first, save what you
-need, say out loud what will be lost, and only then purge — never as a first response to a backlog.
+**Never purge, consume or delete** while investigating — the guardrails are in
+`references/operations.md`. Exec and throwaway-container mechanics are in the `docker-dev-env`
+skill's clients-in-containers reference.
 
 ## Traps
 
-1. A wrong or copied EasyNetQ subscription id → two different services share one queue and each sees
-   half the messages → one id per logical consumer; see `references/easynetq.md`.
-2. Durable queue, non-persistent messages → the queue survives a restart, the messages do not → both
-   flags, or neither.
-3. No dead-letter exchange → a rejected message is silently discarded → declare a DLX on every work
-   queue at creation; it cannot be added to an existing queue without recreating it.
-4. `requeue: true` on a permanent failure → a hot loop that starves the queue → bounded retry via a
-   delay queue, then dead-letter.
-5. Unlimited prefetch → one consumer buffers the whole queue, distribution collapses, memory grows →
-   set it explicitly, small.
-6. A long handler holding an unacked message → the broker's consumer timeout closes the channel and
-   redelivers everything in flight → shorten the handler, or raise that broker setting knowingly.
-7. Publishing without confirms → the broker rejects or drops and the publisher never knows → confirms
-   on, plus `mandatory` and a return handler for unroutable messages.
-8. Consumers assumed to run in order → they never do, across instances → carry the ordering in the
-   payload, or use one queue and one consumer for the ordered stream.
-9. An `IModel`/channel shared across threads → protocol errors and closed channels → one channel per
-   consumer or publisher thread, one connection per process.
-10. A queue declared with different arguments than it has → `PRECONDITION_FAILED` and a dead channel
-    → arguments are immutable; recreate the queue as part of a deployment, deliberately.
-11. Publishers suddenly blocked → a memory or disk alarm on the node → `rabbitmq-diagnostics status`
-    before touching the application.
-12. Retrying inside the handler with `Thread.Sleep` → the message stays unacked and prefetch fills
-    with sleepers → delay the *message*, not the thread.
+1. An RPC caller with no timeout handling → a 500 two minutes later, after the user retried → catch
+   the timeout, return a clean failure, and make the responder idempotent.
+2. A responder that throws for a business rule → the caller gets a bare message string → return the
+   error in the response's outcome fields.
+3. A request type renamed or moved → the routing key changes and the old callers wait out every call →
+   contracts change additively; a breaking change is a new type served in parallel.
+4. The bootstrap retry gives up on a subscriber → the service is "healthy" with a missing responder →
+   read the startup log; `/health` does not check subscriptions.
+5. An RPC call inside a subscriber holding an unacked message → one slow responder stalls two queues.
+6. A copied subscription id → two services share one queue and each sees half the messages.
+7. A subscription id changed in a deploy → a new empty queue, and the old one fills forever.
+8. `requestedHeartbeat=0` → a half-open connection is detected only by the OS → after a network blip,
+   suspect the connection before the code.
+9. No dead-letter route on a work queue → a rejected message is silently gone.
+10. Publishers block with no error → a memory or disk alarm on the node → `rabbitmq-diagnostics status`.
+11. Replaying an error queue without idempotent handlers → every effect happens twice.
+12. A chain of RPC hops → each hop adds a full timeout budget → collapse it, or turn the tail into events.
 
 ## References
 
-- `references/topology.md` — exchanges, routing keys, durability, dead-letter routes, TTL and length
-  limits, and which topology fits which problem.
-- `references/patterns.md` — publish-subscribe, request-response and saga: what each costs, and how
-  to run a multi-step process without a saga engine.
-- `references/consumers.md` — acknowledgements, prefetch, idempotency and deduplication, poison
-  messages, and a retry policy that terminates.
-- `references/easynetq.md` — the conventions in use here: naming, subscription ids, the error queue,
-  and when to drop to the advanced bus.
-- `references/operations.md` — the management HTTP API and CLI: queue depth, dead-letter inspection,
-  shovelling and purging with care.
+- `references/easynetq.md` — how the bus is wired here, RPC semantics (timeouts, missing responder,
+  exceptions across the wire, shared contracts), the subscription-id trap, the error queue, the
+  advanced bus, and a review checklist.
+- `references/principles.md` — shape choice, the durability switches, acknowledgement and prefetch,
+  idempotency, and a retry policy that terminates.
+- `references/operations.md` — the broker-state procedure: health, queue depth, reading the numbers,
+  bindings, a non-destructive peek, the report, replay, and the guardrails.

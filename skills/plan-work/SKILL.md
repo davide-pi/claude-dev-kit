@@ -1,6 +1,9 @@
 ---
 name: plan-work
-description: Writes an implementation plan file for multi-step work — concrete tasks, named files, explicit interfaces, and one verification command per task — sized to the change so a small job gets three tasks instead of a document. Use before touching code on work that spans several files, several sessions or several agents, when a spec or work item has to become an ordered list of steps, when resuming half-finished work, or when deciding whether a plan is worth writing at all.
+description: >-
+  Use before touching code on work spanning several files, sessions or agents; when a work item or
+  spec must become ordered steps, including judging whether the item is ready to implement; when
+  resuming half-finished work; or when deciding whether a plan is worth writing.
 ---
 
 # plan-work — a plan file with verifiable tasks, sized to the change
@@ -14,6 +17,7 @@ reads it back as a technical artifact, next to the code it describes. Everything
 
 - The work spans more than a couple of files, or more than one session.
 - A spec, work item or design doc has to become an ordered list of steps.
+- A work item was picked up (`/item` read it) and nobody has judged yet whether it is ready to build.
 - The work will be handed to subagents and they need one shared target.
 - Order matters: something must exist before something else compiles or runs.
 - Returning to half-finished work whose next step is no longer obvious.
@@ -33,6 +37,7 @@ plan), or work that will be finished before the plan is read.
 | Migration plus code plus tests, where order matters | **yes** |
 | Work will pause and resume, or another agent executes it | **yes** — the file is the handoff |
 | Requirements still unknown | **no** — a plan over unknowns is fiction; probe first (`dev-loop`) |
+| It starts from a work item | the readiness verdict first — `references/from-work-item.md` |
 
 ### 2. Size it to the change
 
@@ -108,5 +113,7 @@ Fill it from the template in `references/plan-template.md`. Then, while executin
 
 ## References
 
+- `references/from-work-item.md` — the work starts from a work item: S/D/A tags, the readiness
+  verdict, the questions worth asking, the split test.
 - `references/plan-template.md` — the plan file skeleton with a worked example; read it before
   writing the first plan in a repo, or when a plan needs phases.

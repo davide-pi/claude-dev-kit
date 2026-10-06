@@ -1,6 +1,9 @@
 ---
 name: ef-core
-description: Entity Framework Core in this stack — entity and relationship configuration and where it belongs, the query cost model (N+1 shapes, no-tracking reads, split versus single query, projecting instead of loading, client-side evaluation traps), how to see the SQL that is really emitted, and the full migration workflow with guardrails: review the generated SQL before it touches a database, never drop, how to repair a bad migration that was already applied, multiple contexts and design-time factories. Also covers what differs between the SQL Server and Npgsql providers and when to drop to Dapper or raw SQL. Use when modelling entities, writing or fixing a query, chasing a slow or wrong query, adding, removing or applying a migration, or when the model and the database have diverged.
+description: >-
+  Use this skill whenever an EF Core migration has to be created, applied, reverted or inspected —
+  even if the user never says "migration" but changes an entity, adds a column or a DbContext — and
+  whenever a LINQ query is slow, wrong, or will not translate.
 ---
 
 # ef-core — modelling, querying, and migrating without breaking a database
@@ -14,13 +17,15 @@ description: Entity Framework Core in this stack — entity and relationship con
 - Deciding whether a piece of data access should be EF, raw SQL, or Dapper.
 - Moving between the SQL Server and Npgsql providers, or supporting both.
 
-Not for: index design, execution plans and deadlocks (`sql-server`), Postgres-specific server work
-(`postgres`), spinning up a database container (`docker-dev-env`), test setup against a real database
+Not for: index design, execution plans and deadlocks (`sql-server`, or the `db-analyst` agent for a
+plan or a schema review before a migration), the Postgres read cache, which has no EF model
+(`sql-server`), spinning up a database container (`docker-dev-env`), test setup against a real database
 (`dotnet-testing`), or provider APIs that changed between releases — route those to the
 `microsoft-docs` plugin.
 
-**Never hand-write or hand-edit a migration class or a model snapshot.** Generate with `dotnet ef`,
-then edit only the generated migration's `Up`/`Down` body. The snapshot is never edited by hand.
+**Never hand-write or hand-edit a migration class or a model snapshot** — the full procedure and its
+guardrails are owned by `references/migrations.md`; follow it step by step, including the stop that
+shows the SQL before any database sees it.
 
 ## Decide
 
@@ -76,19 +81,9 @@ Do several DbContexts live in the solution?
 dotnet tool restore                     # first, if dotnet-ef is pinned in a tool manifest
 dotnet ef --version                     # proves the tool resolves at all
 
-# Add. Name it for the intent: AddCustomerEmail, RemoveObsoleteUserColumn.
-dotnet ef migrations add <Name> --project .\src\<Data> --startup-project .\src\<Data> --context <Ctx>
-
-# ALWAYS look at what it will do, before any database sees it
-dotnet ef migrations script --idempotent --output .\migration.sql --project .\src\<Data> --startup-project .\src\<Data>
-dotnet ef migrations script <FromMigration> <ToMigration> --idempotent --output .\delta.sql
-Select-String -Path .\migration.sql -Pattern 'DROP TABLE|DROP COLUMN|DROP CONSTRAINT|TRUNCATE'
-
+# Add / review / apply: the seven-step procedure in references/migrations.md — not ad hoc.
 dotnet ef migrations list                # what exists, and which are applied
-dotnet ef migrations remove              # ONLY while unapplied anywhere shared
-dotnet ef database update                # local development database only
-dotnet ef database update <Migration>    # move to a specific one; 0 reverts everything (destructive)
-
+dotnet ef migrations has-pending-model-changes   # is there anything to migrate at all
 dotnet ef dbcontext info                 # which provider and connection string is really resolved
 dotnet ef dbcontext optimize             # precompiled model, for a large model's startup cost
 dotnet ef dbcontext scaffold "<conn>" <Provider> --output-dir Models --context <Ctx>   # DB-first
@@ -126,9 +121,10 @@ a design-time factory exists in the data project, both are that same project.
 9. One `include` of several collections returns far too many rows → cartesian explosion → split query,
    or project.
 10. `Sequence contains no elements`, or a change saved twice → the same `DbContext` used concurrently
-    or across requests → it is not thread-safe and must be scoped (`dotnet-backend`, `di-lifetimes.md`).
+    or across messages → it is not thread-safe: create one per handler call from the context
+    factory (`dotnet-backend`).
 11. An in-memory-provider test passes and the real database rejects the query → that provider is not
-    relational → test against the real engine (`dotnet-testing`, `real-database.md`).
+    relational → test against the real engine (`dotnet-testing`, `untested-legacy.md`).
 12. Ordering, casing or paging results differ between environments → collation, or a non-deterministic
     order → order by a unique column, and check the provider differences (`providers.md`).
 

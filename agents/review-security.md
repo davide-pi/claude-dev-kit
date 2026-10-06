@@ -1,6 +1,9 @@
 ---
 name: review-security
-description: Security-focused reviewer for a code change. Reads the change from an attacker's point of view — entry points, trust boundaries, taint paths, authz, secrets — and returns findings only (never posts, edits, or merges). Spawn it alongside `code-reviewer` for high-effort reviews, or alone when the request is explicitly about security. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
+description: >-
+  Security reviewer for a code change: entry points, trust boundaries, taint paths, authz,
+  secrets. Returns findings only, never posts or edits. Spawn beside code-reviewer from high
+  effort, or alone for a security review.
 tools: Read, Grep, Glob, Bash, PowerShell, Skill
 model: sonnet
 ---

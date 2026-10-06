@@ -1,150 +1,149 @@
 ---
 name: worklog
 description: >-
-  Ricostruisce dai transcript di Claude Code cosa e' stato fatto in un periodo (default oggi), stima
-  il tempo per topic, e — dopo conferma — registra le ore sui work item Azure DevOps giusti via CLI
-  (MCP solo come fallback). Due tabelle riassuntive con loop di conferma/modifica, arrotondamento
-  nearest-0.5h senza cap, accorpamento dei micro-topic per ruolo e audit idempotente per non
-  riscrivere ore gia' registrate. Due casi distinti: ore di sviluppo sui Task degli item lavorati e
-  ore di gestione progetto nella struttura fissa Feature/PBI "Gestione progetto" della commessa, con
-  un solo Task per sessione. E' l'unico asset del kit che scrive ore. Trigger esplicito: solo quando
-  l'utente scrive /worklog.
+  Reconstruct the work done in a period from the transcripts and log the hours on Azure DevOps.
+  Explicit trigger: only when the user types /worklog.
+disable-model-invocation: true
 ---
 
-# worklog — cosa ho fatto, e le ore su Azure DevOps
+# worklog — what was done, and the hours on Azure DevOps
+
+**Language.** This skill's prose is English. Everything the user reads — chat, both tables, their
+headers, the questions and the recap — is **Italian**, and so is everything written to the board:
+task titles, descriptions, comments (work items are Italian, per the user's Language rule). Machine
+text stays verbatim: field and state names, WIQL, engine output such as `Nessuna attivita'`.
 
 ## When
 
-- L'utente scrive `/worklog`, con o senza periodo (default: oggi).
-- Serve sapere cosa e' stato fatto in un giorno o in un range, con il tempo per topic.
-- Le ore di un periodo vanno registrate sui work item giusti.
-- Un periodo gia' registrato va ri-elaborato: si applica solo il **delta**.
-- Il promemoria (`hooks/worklog-pending.js`, badge orologio) elenca **giornate mai registrate** del
-  mese, o della settimana se sconfina: si chiudono con `/worklog <data>`; oltre, non si propongono.
-- Va rendicontato tempo di **gestione progetto** (incontri e call cliente, analisi e grooming del
-  backlog, stime, coordinamento) che non sta su nessun item di prodotto.
+- The user types `/worklog`, with or without a period (default: today).
+- What was done in a day or a range is needed, with time per topic.
+- A period's hours have to land on the right work items.
+- A period already logged is re-run: only the **delta** is applied.
+- The reminder (`hooks/worklog-pending.js`, clock badge) lists **days never logged** in the current
+  month, or week where it reaches back; close each with `/worklog <date>`, never older ones.
+- **Project-management** time (client meetings and calls, backlog analysis and grooming, estimates,
+  coordination) sits on no product item.
 
-Not for: creare work item nuovi da zero (`workitem-create`) o da un incontro cliente
-(`backlog-integration`), leggere o analizzare un item, recensire una PR (`pr-review`), o la
-configurazione/auth/verbi della CLI Azure DevOps (`azdo-cli`). Non parte mai senza il trigger
-esplicito.
+Not for: creating work items (`workitem-create`, including its session mode after a client
+meeting), reading or analysing an item, reviewing a PR (`pr-review`), Azure DevOps CLI config, auth
+and verbs (`azdo-cli`). Never fires without the explicit trigger.
 
 ## Decide
 
-### 1. Regole fisse
+### 1. Fixed rules
 
-| Regola | Dettaglio |
+| Rule | Detail |
 | --- | --- |
-| Chat e tabelle in **italiano** | ma titoli e descrizioni degli item su Azure **sempre in inglese** |
-| I numeri del tempo vengono **solo dall'engine** | mai stimati a mano; se si ripartisce un bucket, si dice |
-| Niente hardcoded | org, progetti e item si scoprono a runtime, ogni run |
-| Due gate | Tabella 1 e Tabella 2: si procede solo su conferma esplicita |
-| `CompletedWork` e' **cumulativo** | si legge, si somma il delta, si riscrive — mai sovrascrivere |
-| Le ore **gia' sull'item** si riconciliano, non si ignorano | se ce ne sono che l'audit non conosce (registrate a mano dall'utente, dal portale, da altro), si dichiarano in Tabella 2 e si **chiede** se sono lo stesso lavoro: le sue ore vincono sulla stima (`scrittura.md`, Fase 5.5) |
-| Mai lasciare un item in stato **New** | `Active` se il lavoro e' in corso, `Closed` se concluso |
-| Ogni giornata trattata si **chiude in audit** | anche quella senza niente da registrare (ferie, solo tooling): voce a `hoursLogged: 0`, previa conferma — altrimenti il promemoria la segnala per sempre (`scrittura.md`) |
+| Italian | chat, tables and everything written on the board |
+| Time comes **only from the engine** | never estimated by hand; splitting a bucket is said out loud |
+| Nothing hardcoded | org, projects and items are discovered at runtime, every run |
+| Two gates | Table 1 and Table 2: proceed only on explicit confirmation of each |
+| `CompletedWork` is **cumulative** | read it, add the delta, write it back — never overwrite |
+| Hours **already on the item** are reconciled, not ignored | hours the audit does not know (logged by hand, from the portal, by another tool) are shown in Table 2 and the user is **asked** whether they are the same work: their hours beat the estimate (`scrittura.md`, Phase 5 step 5) |
+| Never leave an item in **New** | `Active` if work is ongoing, `Closed` if finished |
+| Every day handled is **closed in the audit** | even one with nothing to log (leave, tooling only): an entry at `hoursLogged: 0`, after asking — otherwise the reminder flags it forever (`scrittura.md`) |
 
-### 2. Le fasi
+### 2. Phases
 
-| Fase | Cosa fa | Dettaglio |
+| Phase | What | Detail |
 | --- | --- | --- |
-| 1. Periodo | argomento in linguaggio naturale → `From`/`To` concreti (`yyyy-MM-dd`); se ambiguo **chiedi** | `tempo-e-topic.md` |
-| 2. Estrazione | `worklog.ps1` da' i minuti attivi per progetto/branch e scrive il digest grezzo | `tempo-e-topic.md` |
-| 3. Topic e ore | topic dal branch, ruolo per topic, poi `round.ps1` per arrotondare e accorpare | `tempo-e-topic.md` |
-| 4. Tabella 1 | riepilogo attivita' + loop conferma/modifica | `tabelle.md` |
-| 5. Discovery | per ogni topic loggabile: progetto, Task esistente o parent su cui crearlo, PR e commit, delta | `scrittura.md` |
-| 6. Tabella 2 | destinazione delle ore + loop conferma/modifica | `tabelle.md` |
-| 7. Scrittura | agent paralleli sugli item, poi audit in sequenza e recap verificato | `scrittura.md` |
+| 1. Period | natural-language argument → concrete `From`/`To` (`yyyy-MM-dd`); ambiguous → **ask** | `tempo-e-topic.md` |
+| 2. Extraction | `worklog.ps1` gives active minutes per project/branch and writes the raw digest | `tempo-e-topic.md` |
+| 3. Topics and hours | topic from the branch, a role per topic, then `round.ps1` rounds and merges | `tempo-e-topic.md` |
+| 4. Table 1 | activity summary + confirm/edit loop | `tabelle.md` |
+| 5. Discovery | per loggable topic: project, existing Task or parent to create it under, PRs and commits, delta | `scrittura.md` |
+| 6. Table 2 | where the hours go + confirm/edit loop | `tabelle.md` |
+| 7. Write | parallel agents on disjoint items, then the audit in sequence and a verified recap | `scrittura.md` |
 
-### 3. Discovery e scrittura: CLI prima, MCP dove la CLI non arriva
+### 3. Discovery and writes — CLI first
 
-La CLI Azure DevOps e' la **prima mossa** per tutta la Fase 5 e per le scritture della Fase 7.
-Configurazione, auth, risoluzione org/progetto, WIQL e i verbi boards/repos stanno in `azdo-cli`:
-chiamala, non riscriverla qui.
+The Azure DevOps CLI is the **first move** for all of Phase 5 and every write in Phase 7; config,
+auth, org/project resolution, WIQL and the boards/repos verbs belong to `azdo-cli`.
 
-| Serve | Da dove |
+| Needed | Source |
 | --- | --- |
-| progetto pertinente | mapping workspace→progetto nelle istruzioni utente, altrimenti chiedi |
-| Task o User Story del topic | CLI: WIQL per assegnatario, branch, area o keyword del topic |
-| ore attualmente sul Task | CLI: lettura del work item (serve per il delta) |
-| scrittura ore, stato, assegnatario, Task nuovi figli di una US | CLI: verbi boards |
-| link della PR al work item | CLI: verbi repos (link reale, non URL nel testo) |
-| ricerca full-text, commenti sull'item, artifact link a un commit | **fallback MCP** — la CLI non ha verbo |
+| the project | the workspace→project mapping in the user instructions, else ask |
+| the topic's Task or backlog item | WIQL by assignee, branch, area or topic keyword |
+| hours currently on the Task | read the work item (needed for the delta) |
+| hours, state, assignee, new Tasks under a backlog item | boards verbs |
+| PR ↔ work item link | repos verbs — the real link, never a URL in the text |
+| anything the CLI seems not to reach | the gap list in `azdo-cli` `mcp-fallback.md` decides |
 
-Se un topic potrebbe stare su org diverse e non e' deducibile → **chiedi** su quale. Nel recap dichiara
-sempre progetto e interfaccia usata (CLI o fallback MCP).
+A topic that could sit on different orgs and cannot be derived → **ask**. The recap always states
+the project and the interface used (CLI, or the MCP fallback and why).
 
-### 4. Due casi: ore di sviluppo e ore di gestione
+### 4. Two cases: development hours and management hours
 
-Le ore si scrivono **solo qui**: nessun altro asset del kit le registra —
-`backlog-integration` chiude la sua sessione rimandando a `/worklog`, non scrivendole.
-La regola che separa i due casi e' l'**attribuibilita' del topic a un item di prodotto**:
+Hours are written **only here** — no other asset logs them. The split is whether the topic is
+**attributable to a product item**:
 
-| Caso | Quando | Dove finiscono le ore |
+| Case | When | Where the hours go |
 | --- | --- | --- |
-| **Sviluppo** | il topic e' lavoro sul prodotto: ha un branch, commit, una PR o un work item che lo copre | sul **Task** dell'item lavorato — Fasi 5-7, `scrittura.md` |
-| **Gestione progetto** | il topic non e' attribuibile a nessun item di prodotto: incontri e call cliente, analisi e grooming del backlog, stime, coordinamento, sessioni `/backlog-integration` | struttura fissa per commessa: Feature `Gestione progetto` → PBI `Gestione progetto - <titolo Epic>` → **un solo Task per sessione**, in `Done` — `ore-gestione.md` |
+| **Development** | the topic is product work: a branch, commits, a PR or a work item covers it | the **Task** of the item worked on — Phases 5-7, `scrittura.md` |
+| **Project management** | attributable to no product item: client meetings and calls, backlog grooming, estimates, coordination, `/workitem-create` session-mode runs | the fixed per-engagement structure: Feature `Gestione progetto` → PBI `Gestione progetto - <Epic title>` → **one Task per session**, `Done` — `ore-gestione.md` |
 
-Un topic `internal` (tooling, non fatturabile) **non** e' gestione: resta riga a se' e non si logga.
-In dubbio → **chiedi**; mai spalmare ore di gestione su un item di prodotto per far tornare i conti.
-I Task che qui si creano o si aggiornano servono **solo al tempo**: una pull request non linka mai un
-Task, ma l'item padre (`pr-create`).
+An `internal` topic (tooling, not billable) is **not** management: its own row, never logged. In
+doubt → **ask**; never spread management hours onto a product item to make the numbers add up.
+Tasks created or updated here exist **only for time**: a PR never links a Task, it links the parent
+item (`pr-create`).
 
 ## Do
 
 ```powershell
-# Fase 2 — engine (unica fonte dei numeri). Vuoto = oggi; accetta anche 'ieri'/'yesterday'.
+# Phase 2 — the engine, the only source of the numbers. Empty = today; also accepts 'ieri'/'yesterday'.
 pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd>" -To "<yyyy-MM-dd>"
 ```
 
-Lo stdout da' progetto → branch, minuti attivi, fascia oraria e numero di prompt, piu' il path del
-**digest grezzo** e quello dell'**audit**. L'engine pota i digest oltre i 7 giorni, l'audit **mai**.
-"Nessuna attivita'" → riferiscilo e fermati. Poi **leggi il digest** (`_raw/<periodo>.md`) per
-topic, descrizioni e decisioni; i transcript originali solo se manca un dettaglio.
+Stdout gives project → branch, active minutes, time window and prompt count, plus the path of the
+**raw digest** and of the **audit**. The engine prunes digests older than 7 days, the audit **never**.
+`Nessuna attivita'` → report it and stop. Otherwise **read the digest** (`_raw/<period>.md`) for
+topics, descriptions and decisions; open the original transcripts only for a missing detail.
 
 ```powershell
-# Fase 3 — arrotondamento + accorpamento: TUTTI i topic in una sola invocazione
+# Phase 3 — rounding + merging: ALL topics in a single invocation
 pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" `
-  "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
+  "80|import nuovi mercati|main" "4|fix seed|donor" "7|fix proc|keep" "8|tooling worklog|internal"
 ```
 
-Formato voce `minuti|descrizione-breve-in-inglese|ruolo`. L'helper spalma i `donor` sui `main`, porta
-i `keep` a minimo 0.5h, lascia gli `internal` a se', e stampa il totale e la quota **loggabile**.
+Entry format `minutes|short-label|role` (the label is Italian: it seeds the Task title). The helper
+spreads `donor` over `main`, lifts `keep` to at least 0.5h, leaves `internal` alone, and prints the
+total and the **loggable** share.
 
 ```powershell
-git -C "<path-progetto>" log --since=<From> --until=<To+1g> --author=(git config user.email) --oneline
+git -C "<project-path>" log --since=<From> --until=<To+1d> --author=(git config user.email) --oneline
 ```
 
-I commit su master pertinenti al topic, per il link della Fase 5.
+The commits on the default branch relevant to a topic, for the Phase 5 link.
 
 ## Traps
 
-1. Le ore raddoppiano → `CompletedWork` sovrascritto invece di sommato → leggi, somma il delta,
-   riscrivi; l'audit dice quanto era gia' stato scritto per quel periodo.
-1-bis. Le ore raddoppiano lo stesso, pur sommando → sull'item c'erano ore registrate **a mano**, che
-   l'audit non conosce, e il delta e' rimasto la stima intera → riconcilia item e audit (Fase 5.5) e
-   chiedi: se e' lo stesso lavoro, le ore dell'utente vincono e il delta e' 0.
-2. Un ri-run dello stesso periodo riscrive tutto → l'audit non e' stato consultato → cerca la voce
-   `(periodFrom, periodTo, itemId)` e applica solo il delta; delta 0 → non toccare le ore.
-3. Ore loggate su una User Story → le ore vanno sui **Task** → manca il Task: crealo figlio della US.
-4. Un item nuovo resta in `New` → il tipo parte da `New` → correggi lo stato subito dopo la creazione.
-5. Il tempo non torna col vissuto → i gap oltre 15 min sono pause per definizione → e' una stima
-   indicativa; si corregge nel loop della Tabella 1, non inventando minuti.
-6. Il lavoro su `master` sparisce → non ha un branch-topic → spezzalo in topic semantici leggendo il
-   digest e **dichiara** che la ripartizione e' a stima.
-7. Due agent scrivono sullo stesso item → lotti sovrapposti in Fase 7 → item disgiunti per agent, e
-   l'audit lo scrive solo l'orchestratore, in sequenza.
-8. Il recap dice cose che sulla board non ci sono → si e' creduto al report degli agent → rileggi gli
-   item scritti prima di stampare il recap.
-9. Nasce un secondo Task ore di gestione per lo stesso giorno → ri-run del periodo con creazione
-   invece di delta → cerca la voce d'audit e il Task con lo stesso prefisso data, poi somma il delta.
-10. Il promemoria continua a segnalare un giorno gia' sistemato → la sessione si e' chiusa senza
-    scrivere l'audit (o il giorno era di sole ferie) → l'audit e' l'unico criterio: scrivi la voce,
-    a zero ore se non c'era niente da registrare.
+1. Hours double → `CompletedWork` overwritten instead of added → read, add the delta, write back;
+   the audit says how much was already written for that period.
+2. Hours double anyway, while adding → the item had hours **logged by hand** the audit does not
+   know, and the delta stayed the full estimate → reconcile item and audit (Phase 5 step 5) and ask: same
+   work → the user's hours win and the delta is 0.
+3. A re-run of the same period rewrites everything → the audit was not consulted → look up
+   `(periodFrom, periodTo, itemId)` and apply only the delta; delta 0 → leave the hours alone.
+4. Hours logged on a backlog item → hours go on **Tasks** → no Task: create it under the item.
+5. A new item stays in `New` → the type starts there → correct the state right after creating it.
+6. Time does not match memory → gaps over 15 min are breaks by definition → it is an indicative
+   estimate; fix it in the Table 1 loop, never by inventing minutes.
+7. Work on the default branch vanishes → it has no branch topic → split it into semantic topics from
+   the digest and **say** the split is an estimate.
+8. Two agents write the same item → overlapping batches in Phase 7 → disjoint items per agent; only
+   the orchestrator writes the audit, in sequence.
+9. The recap claims things the board does not show → the agents' reports were trusted → read the
+   written items back before printing the recap.
+10. A second management Task appears for the same day → a re-run created instead of applying the
+    delta → look up the audit entry and the Task with the same date prefix, then add the delta.
+11. The reminder keeps flagging a day already handled → the session closed without an audit entry
+    (or the day was leave only) → the audit is the only criterion: write the entry, at zero hours if
+    nothing was loggable.
 
 ## References
 
-- `tempo-e-topic.md` — periodo, engine e digest, tempo attivo, topic, i quattro ruoli, `round.ps1`.
-- `tabelle.md` — forma di Tabella 1 e 2, formato dei link, loop di conferma/modifica, recap finale.
-- `scrittura.md` — discovery per topic, scrittura su Azure, riconciliazione, idempotenza, audit.
-- `ore-gestione.md` — gestione progetto: Feature/PBI fissi, prefisso, Task per sessione, stato Done.
+- `tempo-e-topic.md` — period, engine and digest, active time, topics, the four roles, `round.ps1`.
+- `tabelle.md` — the shape of Table 1 and 2, link format, confirm/edit loops, the final recap.
+- `scrittura.md` — discovery per topic, writes on Azure DevOps, reconciliation, idempotence, audit.
+- `ore-gestione.md` — management hours: the fixed Feature/PBI, the title prefix, one Task per
+  session, state Done.

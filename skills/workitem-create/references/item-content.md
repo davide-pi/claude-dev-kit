@@ -61,11 +61,10 @@ it (at most four in flight), and parent-before-child still holds inside each sub
 
 ## Images and attachments
 
-The CLI has no attachment verb, so images are handled as **numbered placeholders plus a manual
-checklist** by default. If the connected MCP server exposes a work item attachment capability, it
-may be used as the fallback — check what the server actually exposes rather than assuming, and keep
-the checklist for whatever was not uploaded. Either way the user is told which images are still
-missing from which item.
+Images are attached over REST with the token of the current `az login` — no PAT, no MCP tool;
+the two calls, and inlining an image into a defect's field, are in `azdo-cli`. Whatever could not
+be attached stays a numbered placeholder in the body and a row in the manual-attachment checklist,
+so the user always knows which images are still missing from which item.
 
 ## Traps
 

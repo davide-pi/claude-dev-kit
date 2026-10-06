@@ -1,5 +1,5 @@
 {
-  "//": "Template for the user-scoped MCP servers this kit expects. These live in ~/.claude.json (NOT in ~/.claude/), so they are not installed by copying files — register them with `claude mcp add` (see README) or merge this block into the `mcpServers` object of ~/.claude.json. Replace every <placeholder>.",
+  "//": "Template for the MCP servers this kit expects. They live in ~/.claude.json (NOT in ~/.claude/), so they are not installed by copying files — register them with `claude mcp add` (see README). Replace every <placeholder>; never commit a real URL, token or connection string.",
   "mcpServers": {
     "azdo-<org-alias>": {
       "command": "npx",
@@ -22,6 +22,36 @@
         "-y",
         "@playwright/mcp@latest",
         "--headless"
+      ],
+      "env": {}
+    }
+  },
+  "//local": "LOCAL scope, one set per project: each points at one client's Grafana or database, so register it from inside that project's folder with `claude mcp add --scope local <name> ...` (it lands under that project's entry in ~/.claude.json). One entry per environment: <env> is prod, stg, dev. Database servers are read by the db-analyst agent through SELECT-only tools; point them at a read-only login.",
+  "localScopeMcpServers": {
+    "grafana-<env>": {
+      "type": "stdio",
+      "command": "<grafana-mcp-command>",
+      "args": [],
+      "env": {
+        "GRAFANA_URL": "<https://grafana.example.com>",
+        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<grafana-service-account-token>"
+      }
+    },
+    "sql-<env>": {
+      "type": "stdio",
+      "command": "<sql-server-mcp-command>",
+      "args": [],
+      "env": {
+        "SQL_CONNECTION_STRING": "Server=<host>;Database=<database>;User Id=<read-only-user>;Password=<password>;Encrypt=true"
+      }
+    },
+    "pg-<env>": {
+      "type": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-postgres",
+        "postgresql://<read-only-user>:<password>@<host>:5432/<database>"
       ],
       "env": {}
     }

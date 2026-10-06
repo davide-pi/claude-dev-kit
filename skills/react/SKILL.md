@@ -1,15 +1,9 @@
 ---
 name: react
 description: >-
-  React engineering for the Vite plus Tailwind applications here, all of which keep state in
-  components with no store and no data-fetching library. Covers hooks discipline (dependency arrays,
-  cleanup, the render-loop traps, and why an effect is usually the wrong tool), component composition
-  and where state belongs, the distinction between local UI state and server state that most
-  architectural mistakes here collapse, data fetching written by hand and the point at which adding a
-  library is justified, the Vite and Tailwind setup as actually configured, what memoization buys and
-  what it costs, forms, and component testing with the modern runner. Use when writing, reviewing or
-  restructuring React code, or when a component re-renders in a loop, refetches, or loses state.
-  Types themselves live in the `typescript` skill.
+  Use whenever React code is written, reviewed or debugged in the Vite and Tailwind apps — a
+  component re-renders in a loop, fetches twice or loses state, a store or query library is proposed,
+  the Vite or Tailwind config changes, or an `any` or a cast is in question.
 ---
 
 # react — state in the right place, effects almost nowhere
@@ -20,11 +14,11 @@ description: >-
 - Deciding where a piece of state lives: component, parent, context, URL, or the server.
 - A component re-renders in a loop, fetches twice, races itself, or resets state on navigation.
 - Someone proposes a state-management or query library — decide it against the threshold below.
-- Setting up or changing the Vite or Tailwind configuration, or writing component tests.
+- Setting up or changing the Vite or Tailwind configuration.
+- A type, a `tsconfig` option, an `any`, an `as` or a `!` is being written or reviewed.
 
 Not for:
 
-- Type modelling, `tsconfig`, DTO validation → `typescript`.
 - Web-platform APIs, CSS features and Core Web Vitals → the `modern-web-guidance` plugin.
 - Visual and UX design → the `frontend-design` plugin.
 - Runtime browser debugging, accessibility auditing, load metrics and heap analysis → the
@@ -39,7 +33,7 @@ Does the server own the truth?
 ├─ yes → SERVER STATE. It is a cache, not state: it can be stale, it can fail, it can be
 │         refetched, and two components asking for it must not each own a copy.
 │         Own it in one place per resource (a hook per resource, called by one owner),
-│         pass it down, and model it as a discriminated union — see `typescript`.
+│         pass it down, and model it as a discriminated union (house rules below).
 └─ no  → is it derivable from props, existing state, or the URL?
           ├─ yes → do not store it. Compute it during render. Copied state goes stale.
           └─ no  → who needs it?
@@ -81,6 +75,16 @@ one of these is true — then add exactly one, for the reason stated:
 | none of the above | nothing. A hook plus `useState` is not technical debt |
 
 Adding a library is a pull request of its own, with the threshold named in the description.
+
+### Types — the house rules, in five lines
+
+| Rule | In practice |
+| --- | --- |
+| `strict` is not negotiable | with it off, `null` fits every type and the compiler stops answering. New code compiles under it; where it is off, price it with `npx tsc --noEmit --strict` and fix folder by folder — never a `@ts-nocheck` amnesty |
+| Climb the escape-hatch ladder, stop at the first rung that works | narrowing → `unknown` + type guard → schema parse at the boundary → assertion function → `satisfies` → `as` to a narrower type with a comment. Never `any`, `as any`, `!` or `@ts-ignore`; a forced one is `@ts-expect-error` with a reason |
+| Data crossing in is unproven | an HTTP response, storage or a query string is parsed at the boundary, not described by an interface and trusted; contract types are generated, not hand-copied |
+| Exclusive states are a union | a discriminated union on `status` with an exhaustive `switch` and a `never` default — not optional fields on one flat interface |
+| The compiler on the build's project is the verdict | `npx tsc --noEmit` (and `--showConfig` for the merged `extends` chain); editor green proves nothing. No CLI is installed globally — always `npx` |
 
 ## Do
 
@@ -126,11 +130,11 @@ frameworks' CLIs are not installed globally, so everything goes through `npm run
 
 ## References
 
-- `references/hooks-and-effects.md` — dependency arrays, cleanup, refs, custom hooks, and the cost of
-  memoization.
 - `references/state-and-composition.md` — where state lives, local against server state, composition
   and context.
 - `references/data-and-forms.md` — fetching without a library, mutations, and forms.
 - `references/vite-tailwind-setup.md` — the build and styling setup as configured here, env modes,
   aliases, code splitting.
-- `references/testing.md` — component testing with the modern runner: what to assert, what to fake.
+
+Component tests: match the runner already in `package.json` and assert what the user sees, not hook
+internals; the decision of what deserves a test is in `dotnet-testing`'s strategy reference.

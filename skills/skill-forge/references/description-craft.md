@@ -10,12 +10,24 @@ the description has already won. It fails in two directions, and both cost real 
 
 ## The shape
 
-Third person, under 1024 characters, and built out of **situations**, not contents:
+**At most 50 words**, built out of **situations and trigger phrases**, never a catalogue of what
+the body contains. The budget is real: the session's skill listing has a character limit, and when
+it overflows, descriptions are dropped and those skills stop auto-triggering — one bloated
+description silences others.
 
 ```text
-<What it decides or produces, in one clause.> Use when <situation>, <situation>, <situation> —
-including <the phrasing a user actually types>. Covers <the two or three concrete things>.
-<For a trigger-only asset:> Trigger: /<name> [args].
+Use this skill whenever <situation>, <situation> or <situation> — even if the user never says
+'<the term>' but <the sloppy phrasing they actually type>.
+```
+
+A description that triggers well: *"Use this skill whenever an EF Core migration has to be created,
+applied, reverted or inspected in this repo — even if the user never says 'migration' but changes an
+entity, adds a column or a DbContext."*
+
+A trigger-only skill gets one line plus `disable-model-invocation: true` in its front matter:
+
+```text
+<What one invocation does, one clause.> Explicit trigger: only when the user types /<name>.
 ```
 
 | Include | Leave out |
@@ -48,9 +60,16 @@ including <the phrasing a user actually types>. Covers <the two or three concret
 ## Trigger-only assets
 
 An asset that posts, writes, creates or logs anything outside the working tree should fire **only**
-on its own command. The description must name the trigger literally, and the validator rejects it
-otherwise. Phrase it as the last sentence, so it is unambiguous: `Trigger: /<name> [args]` or
-`Explicit trigger: only when the user types /<name>`.
+on its own command. Two things make that hold: `disable-model-invocation: true` in the front matter,
+so the model never loads it on its own, and a one-line description that names the trigger literally
+(the validator rejects it otherwise): `Trigger: /<name> [args]` or `Explicit trigger: only when the
+user types /<name>`.
+
+## Project skills shadow kit skills
+
+A project's `.claude/skills/<name>` with the **same name** as a kit skill replaces the kit skill in
+that project — its whole procedure disappears. A project keeps only its own **data** there (paths,
+service names, conventions), under a different name, and the kit skill routes to it.
 
 ## Testing it
 

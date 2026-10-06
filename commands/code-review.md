@@ -71,6 +71,9 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
 
 ## Guardrails
 
+**Never**: post to a PR, edit, stage, commit or push — findings stay in chat.
+
+
 - Read-only: no edits, no staging, no `git commit`/`push`/`switch`/`stash`/`reset`, no posting to
   GitHub or Azure DevOps.
 - Do not build, typecheck, or run tests to produce findings — CI does that, and compiler/linter

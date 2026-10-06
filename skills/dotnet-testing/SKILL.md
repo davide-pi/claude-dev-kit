@@ -1,126 +1,110 @@
 ---
 name: dotnet-testing
-description: How to test .NET code in this stack — xUnit structure and fixtures, substitute-style mocking versus hand-written fakes, fluent assertion style, testing async code, integration tests against a real ASP.NET host with an in-memory test server, Testcontainers for a real database instead of the lying in-memory provider, test data builders, and how to keep a suite fast enough that it actually gets run. Also covers adding the first tests to legacy code that has none, and running and filtering tests from the CLI. Use when writing or fixing tests, deciding what kind of test a change deserves, choosing between a mock and a fake, setting up an integration or database test, diagnosing a flaky or slow suite, or opening a test project in an untested repository.
+description: >-
+  Use whenever a test is written, fixed or proposed, or a change raises "should this be tested,
+  and how" — especially in the backend that has no tests yet: a risky change, a bug fix needing a
+  regression test, a first test project, a mock-or-fake choice, or a flaky suite.
 ---
 
-# dotnet-testing — what to test, with which kind of test, and how to keep it fast
+# dotnet-testing — risk decides what gets a test; the codebase decides how
+
+The reality this skill is built around: the large RPC-heavy backend has **zero test projects**, and
+changes there are verified by build, an Aspire profile, `/health` and exercising the path. So the
+first question is rarely "how do I mock this" — it is "does this change earn the first test, and
+where is the seam". Smaller solutions elsewhere do have suites; there, follow what they already use.
 
 ## When
 
-- Writing tests for new code, or for a change to code that already has them.
-- Deciding what a change deserves: unit, integration against the host, or a real-database test.
-- Choosing between a substitute (mocking library) and a hand-written fake.
-- Testing async code, background services, or anything with a clock or a random value in it.
-- Adding the first test to a class in the large untested estate.
-- A suite that is flaky, or slow enough that nobody runs it locally.
-- Running or filtering tests from the command line.
+- A change is about to be written and the test question is open — what, at which level, first or after.
+- A bug has been reproduced and the fix needs locking in.
+- Code with no tests has to be changed, extended or refactored; a first test project is needed.
+- Writing or fixing tests: structure, async, substitutes against fakes, builders, determinism.
+- A suite is flaky, hangs, or is slow enough that nobody runs it.
 
-Not for: what the code under test should do (`dotnet-backend`, `ef-core`, `sql-server`), risk-based
-decisions about what to test first (`test-strategy`), diagnosing a running process
-(`dotnet-diagnostics`), or exact assertion and framework APIs — route those to the `microsoft-docs`
-plugin or the package's own docs.
+Not for: what the code under test should do (`dotnet-backend`, `ef-core`, `sql-server`), diagnosing a
+failing or flaky behaviour in the product (`debug-systematic`), deciding whether the whole change is
+done (`done-check`), Angular or React harness mechanics (`angular`, `react`), or exact framework APIs
+(the `microsoft-docs` plugin or the package's own docs).
+
+**Language:** the recommendation is written for the user in **Italian**; test names and test code
+follow the repository's English conventions.
 
 ## Decide
 
-### Which kind of test does this change deserve
+### Does this change earn a test — the short form
 
-| The change | Test | Why |
-|---|---|---|
-| A rule, a calculation, a mapping, a state transition | unit, no host, no database | fastest feedback, and this is where bugs live |
-| A query, a projection, a migration, a constraint | integration with a **real** database | the provider is the thing being tested |
-| Routing, binding, model validation, auth, filters, middleware | integration against the test host | only the real pipeline proves it |
-| A background service, a scheduled job, a consumer | unit-test the handler; smoke-test the loop | the loop is framework code |
-| A configuration or DI wiring change | host startup test — resolve the graph | catches captive dependencies and bad binding |
-| A bug fix | a failing test first, at the lowest level that reproduces it | otherwise it comes back |
+| The change | Answer | Detail |
+| --- | --- | --- |
+| A rule touching money, odds, settlement, permissions or data loss | yes, **first** — open the project if none exists | `references/strategy.md` |
+| A reproduced bug | yes, first: the failing test is the repro | `references/strategy.md` |
+| Legacy code about to change, behaviour not fully understood | characterization test first, committed alone | `references/untested-legacy.md` |
+| An RPC responder or subscriber | test the handler method directly — it is the seam | `references/untested-legacy.md` |
+| A query or raw SQL | a real engine, never the in-memory provider | `references/untested-legacy.md` |
+| Wiring, a pass-through, generated code, a spike | no — verify the house way and say so | `references/strategy.md` |
 
 ### Substitute or hand-written fake
 
 | Signal | Choose |
-|---|---|
-| One or two calls, and you assert they happened | substitute (mocking library) |
-| The dependency is a query surface used across many tests | fake — a dictionary-backed implementation |
-| The test needs behaviour: store, then read back what you stored | fake; a substitute would need setup per call |
+| --- | --- |
+| One or two calls, and you assert they happened (an outgoing RPC request, a published event) | substitute |
+| A query surface used across many tests, or the test stores then reads back | fake — a dictionary-backed implementation |
 | The setup block is longer than the assertion | fake |
-| You are mocking a type you own and could simply construct | neither — construct the real thing |
-| You are mocking a `DbContext` | neither — use a real database (see `real-database.md`) |
-| You are mocking three levels deep to reach one value | the design is wrong, not the test |
+| A type you own and could simply construct | neither — construct the real thing |
+| A `DbContext` | neither — a real database |
+| Mocking three levels deep to reach one value | the design is wrong, not the test |
 
-A fake wins the moment a dependency has state. It is written once, lives next to the tests, and turns
-five substitute setups into one line. A substitute wins for verifying an interaction — "the email was
-sent once, with this address".
-
-### How many test doubles is too many
-
-Two is normal. Four means the class under test is orchestrating too much: split it, and unit-test the
-piece that holds the logic. Do not fix this in the test.
+Two doubles is normal; four means the class orchestrates too much — split it and test the piece that
+holds the logic.
 
 ## Do
 
 ```powershell
+# What the repository already uses — copy it before inventing anything
+Get-ChildItem -Recurse -Filter *.csproj | Select-String -Pattern 'xunit|NSubstitute|Moq|FluentAssertions|Shouldly|Testcontainers|MSTest|NUnit' |
+  Select-Object -ExpandProperty Line -Unique
+
 dotnet test                                        # whole solution
-dotnet test .\tests\<Project>                      # one project
-dotnet test --no-build                             # after an explicit build, in a tight loop
-
-# Filter: run only what you care about
-dotnet test --filter "FullyQualifiedName~OrderService"
-dotnet test --filter "Category=Unit"               # trait-based, see suite-speed.md
-dotnet test --filter "Category!=Integration"       # the fast lane
-dotnet test --filter "FullyQualifiedName~Place_Order_Fails_When_Out_Of_Stock"
-
-# Diagnose a failure or a hang
-dotnet test --logger "console;verbosity=detailed"
+dotnet test .\src\<Tree>\tests\<Project>.Tests     # one project
+dotnet test --filter "FullyQualifiedName~<Class>"  # one class, or one test by full name
 dotnet test --blame-hang-timeout 2m                # names the test that never returns
 dotnet test --logger "trx;LogFileName=results.trx" # a file to read, not a wall of console
 
-dotnet test --collect:"XPlat Code Coverage"        # coverage, if the collector package is referenced
+# Prove a new test can fail: run it before the fix (expect failed), then after (expect passed)
+dotnet test --filter "FullyQualifiedName~<NewTest>"
 
-# Create a test project and wire it up
-dotnet new xunit -o .\tests\<Project>.Tests
-dotnet add .\tests\<Project>.Tests reference .\src\<Project>
-dotnet sln add .\tests\<Project>.Tests
-
-# What the repo already uses — copy its conventions before inventing your own
-Select-String -Path (Get-ChildItem -Recurse -Filter *.csproj).FullName -Pattern 'xunit|NSubstitute|Moq|FluentAssertions|Shouldly|Testcontainers|Respawn|Bogus|AutoFixture|WebApplicationFactory'
+# No tests in this tree? The house verification, stated in the change description
+dotnet build <solution file>
+#   then run the app-host profile containing the service (docker-dev-env), hit /health, exercise the path
 ```
 
-Docker must be running for anything using Testcontainers. `docker ps` is the first check when a
-database test fails on a machine where it used to pass.
+Opening the first test project, and the pipeline step that must ship with it, is in
+`references/untested-legacy.md`. Docker must be running for anything using Testcontainers.
 
 ## Traps
 
-1. A test passes alone and fails in the suite → shared state: a static field, a singleton fixture, a
-   database not reset → make the state per test, or reset it in the fixture.
-2. A test fails only on the build agent → it depended on the machine's culture, time zone, local
-   database or file path → inject a clock, pin the culture, use a container.
-3. `async void` test, or a test that does not await → it passes without asserting anything → return
-   `Task` from every async test and await every call.
-4. A hang with no failure → a blocking call on async inside the test, or a background loop with no
-   stopping token → use the hang-blame option to name it, then fix the code, not the test.
-5. `DateTime.UtcNow` in the assertion → passes today, fails at midnight or across a DST change →
-   inject a clock and freeze it.
-6. The in-memory EF provider makes a broken query pass → it is not a relational database → use a real
-   one; see `real-database.md` for why this is not a preference.
-7. A test asserting on every property of a returned object → one unrelated field change breaks twenty
-   tests → assert what the test is about, and use an object-graph comparison for the rest.
-8. Substitute setups repeated in fifteen tests → a change to the interface breaks all fifteen → move
-   the arrangement into a builder or a fake.
-9. Randomized data with no seed → the failure is not reproducible → seed the generator and log it.
-10. A "unit" test that opens a database connection → the suite is slow and nobody runs it → separate
-    the lanes with traits, and keep the fast lane genuinely fast.
-11. Every test rebuilds the host or the container → minutes of overhead → share the expensive fixture
-    across the collection and reset only the data. See `suite-speed.md`.
-12. A test written after the fix, from the fixed code → it asserts the implementation, not the bug →
-    write it first and watch it fail.
+1. A coverage percentage as the objective → getters get tested while the payout rule stays bare →
+   rank by risk, report which risks are covered.
+2. A test written after the fix, from the fixed code → it asserts the implementation, not the bug →
+   write it first and watch it fail.
+3. Changing legacy behaviour before characterizing it → the new tests encode the bug just introduced.
+4. A second test framework next to the existing one → two runners, half the suite forgotten.
+5. A test project not added to the solution, or no pipeline step → it never runs and silently dies.
+6. A test passes alone and fails in the suite → shared static state, a singleton fixture, a database
+   not reset → make state per test.
+7. `async void` test, or a call not awaited → it passes without asserting → return `Task`, await all.
+8. `DateTime.UtcNow` in code or assertion → fails at midnight or across DST → inject a clock.
+9. The in-memory EF provider makes a broken query pass → it is not relational → a real engine.
+10. Testing the RPC transport instead of the handler → slow, flaky, needs a broker → call the method.
+11. Randomized data with no seed → the failure is not reproducible → seed and log it.
+12. Every test rebuilds the host or a container → minutes of overhead → share the fixture per
+    collection and reset only the data.
 
 ## References
 
-- `unit-mechanics.md` — xUnit structure and lifecycle, fixtures, data-driven tests, fluent assertion
-  style, async testing, substitutes, hand-written fakes, and test data builders.
-- `integration-host.md` — testing against a real ASP.NET host in memory: the test factory, replacing
-  services, configuration and authentication overrides, and what only this proves.
-- `real-database.md` — Testcontainers for SQL Server and Postgres, exactly why the in-memory provider
-  lies, migrating and seeding, and resetting state between tests.
-- `untested-legacy.md` — the first test in a class that has none: seams, characterization tests,
-  sprout and wrap, and what to leave alone.
-- `suite-speed.md` — traits and lanes, parallelism, shared fixtures, container reuse, finding the
-  slow tests, and the local versus pipeline split.
+- `references/strategy.md` — what earns a test and when, test-first against test-after, where to start
+  when there is nothing, level choice, the framework map across the workspaces, what to assert.
+- `references/untested-legacy.md` — the centre for the backend: the responder-method seam,
+  characterization, breaking dependencies, sprout and wrap, opening the first test project and its
+  pipeline step, and a note on host and real-database tests.
+- `references/unit-mechanics.md` — xUnit structure and lifecycle, data-driven tests, assertion style,
+  async tests, substitutes, hand-written fakes, test data builders, determinism.

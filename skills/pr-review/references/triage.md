@@ -74,6 +74,44 @@ A PR that already carries `[Claude AI Review]` comments is reviewed **incrementa
 4. **Never post a duplicate**: a `todo` that matches an open tagged thread stays in chat; if the
    author's answer opens a new doubt, reply in that thread.
 
+## Acting on a finding — the verification ladder
+
+Applies to every finding acted on, from this review, `/code-review` or an author's reply on a
+thread. There is no second human reviewer: nobody else will catch an unverified fix. Never
+implement a finding before step 3; never reject one before step 3 either.
+
+| Step | Do | Outcome |
+| --- | --- | --- |
+| 1 | Open the cited `file:line`, read the enclosing method | anchor wrong or stale → find the real location, or drop it |
+| 2 | Restate the failure as a concrete scenario: this input, this state, this result | cannot be stated concretely → style opinion, not a defect |
+| 3 | Test the premise: a failing test, a probe, the API contract in the docs plugin, the compiler | premise false → reject with the evidence; true → it is real |
+
+| After step 3 | Response |
+| --- | --- |
+| real, in scope | fix it, plus the regression test that proves it (`dotnet-testing`) |
+| real, out of scope | record it as a work item and say so; do not widen the change |
+| real only under a state the code prevents upstream | reject, naming the guarantee and its `file:line` |
+| premise false (API, framework, language do not behave as claimed) | reject with the doc or the passing probe |
+| cannot be decided from the diff | ask the one question that settles it; leave the thread open |
+| taste, no failure behind it | decline, or fold into a separate cleanup |
+
+The checks that settle the recurring false positives in one minute each:
+
+| Claim | Check |
+| --- | --- |
+| "can be null" | the declaration and every caller — is the state reachable? |
+| "missing validation" | the filter, middleware or validator class the reviewer never opened |
+| "SQL injection" | parameterized, or user input interpolated? |
+| "not thread-safe" | the DI lifetime, and whether anything static holds it |
+| "N+1" | the SQL in the command log, not the LINQ |
+| "use the newer API" / "this method does not exist" | compile it, then the docs plugin; the project files decide the version |
+| "breaks existing behaviour" | the acceptance criteria — the change may be the point |
+| a claim about a file not in the diff | open it: an unopened file makes the claim a hypothesis |
+
+A rejection is written in Italian and is checkable: **the false premise**, **the evidence**
+(`file:line` or the doc), **what would change my mind**. "That cannot happen" with no location is
+an opinion. Agreement is a conclusion, not a courtesy: no "hai ragione" before step 3.
+
 ## Traps
 
 1. A CONFIRMED security finding kept in chat "to be polite" → the author never sees it → confirmed

@@ -1,18 +1,12 @@
 ---
 name: pipeline
 description: >-
-  Authoring and reviewing CI/CD definitions for this stack, which runs on Azure DevOps YAML
-  pipelines: the multi-stage build-and-deploy shape used in these repositories, what belongs in a
-  template versus in the pipeline that extends it, semantic versioning driven by a version config
-  file at the tree root, variables and variable groups against secrets and typed runtime parameters,
-  package caching against pipeline artifacts, triggers and path filters, approvals and environments,
-  and diagnosing a failed run from the CLI. GitHub Actions is covered briefly because it is barely
-  used here. Use when creating, editing or reviewing a file whose purpose is a CI/CD pipeline — an
-  Azure DevOps pipeline or template, a version config file, or a workflow. Not for plain YAML that
-  merely happens to be YAML, and not for a pipeline failing right now, which is the `/fix-ci` job.
+  Use whenever a file whose purpose is CI/CD is created, edited or reviewed — an Azure DevOps
+  pipeline or template under `.pipelines/`, a GitVersion config, a workflow — or a deploy playbook's
+  contract with the build is in question. Not for plain YAML, nor a red run (that is `/fix-ci`).
 ---
 
-# pipeline — Azure DevOps YAML: shape, templates, versioning, diagnosis
+# pipeline — Azure DevOps YAML: shape, templates, versioning, and the deploy contract
 
 ## When
 
@@ -23,6 +17,7 @@ description: >-
 - Adding caching, or passing build output between stages.
 - Changing how the version number is produced, or working out why it jumped.
 - Introducing a GitHub Actions workflow — which here needs a conversation first, not a commit.
+- Changing what a build publishes that the Ansible deploy consumes: artifact name, zips, `migration.sql`.
 
 Not for: a red pipeline needing triage right now — that is the `/fix-ci` command, which pulls the
 timeline, isolates the failing step and proposes the fix; plain YAML that is not a pipeline (compose
@@ -40,6 +35,18 @@ the pipeline and the project files — never assumed.
 | `<tree>/.pipelines/deploy.yml`           | deploy orchestrator: one stage per environment, nothing else    |
 | `<tree>/.pipelines/common/deploy-*.yml`  | one template per deployable, plus one for the database          |
 | `<tree>/<version config>.yml`            | the semantic-version rules for that tree                        |
+
+**House rules** (the same as the repositories' own pipeline instructions):
+
+| Rule | Why |
+| --- | --- |
+| scripts over tasks: `dotnet build` / `dotnet publish` instead of a task wrapper, wherever a CLI exists | tasks only where there is no CLI (signing, SSH, artifact publish); pin every tool version |
+| **no test stage** in a tree with no tests | a "publish test results" step that never produces anything is noise — add it with the first test project (`dotnet-testing`) |
+| a `displayName` on every step and job; an inline script over ~10 lines moves to a `.ps1` | readable runs, reviewable logic |
+| PowerShell steps start with `$ErrorActionPreference = 'Stop'`, bash with `set -euo pipefail` | fail fast, never green with a failed step |
+| explicit `trigger:`/`pr:` with path filters; production deploys only from the default or release branches | no reliance on platform defaults |
+| NuGet cache keyed on the lock-file hash | a miss is slower, never wrong |
+| least-privilege service connections; secrets never echoed; third-party tasks pinned to an immutable version | no floating `@latest` |
 
 **Template or pipeline?** The pipeline is the *entry point and the policy*; the template is *how*.
 
@@ -95,19 +102,8 @@ every third-party action to an immutable commit rather than a floating tag.
 ```powershell
 $org = 'https://dev.azure.com/<org>'; $proj = '<project>'
 
-# what exists, and what is red
 az pipelines list --org $org -p $proj -o table
-az pipelines runs list --org $org -p $proj --status completed --result failed --top 5 `
-  --query "[].{id:id, name:definition.name, branch:sourceBranch, finished:finishTime}" -o table
-
-# which step failed and why — no az verb covers the timeline, so invoke the API
-az devops invoke --org $org --area build --resource timeline `
-  --route-parameters project=$proj buildId=<runId> --api-version 7.1 `
-  --query "records[?result=='failed'].{name:name, log:log.id, issues:issues[].message}" -o json
-
-# that step's log
-az devops invoke --org $org --area build --resource logs `
-  --route-parameters project=$proj buildId=<runId> logId=<logId> --api-version 7.1
+# A red run is not diagnosed here: /fix-ci fetches the failing step's log and names the cause.
 
 # expand the YAML and validate template parameters WITHOUT queueing anything
 '{ "previewRun": true }' | Set-Content .\preview.json
@@ -139,11 +135,15 @@ The Azure DevOps MCP server stays the documented fallback for what `az devops in
    without a comment naming the reason.
 10. It builds locally and fails on the agent → the agent image ships different tooling → install the
     SDK the repository needs explicitly, and pin third-party extensions to an immutable version.
-11. A test-results step publishes nothing → that tree has no tests → add tests first (`test-strategy`).
+11. A test-results step publishes nothing → that tree has no tests → remove it; it returns with the
+    first test project (`dotnet-testing`).
+12. The deploy picks up nothing new, or the wrong zip → the artifact or inner zip was renamed in YAML
+    and the playbooks still expect the old name → `references/ansible-deploy.md`.
 
 ## References
 
 - `references/templates.md` — extends vs includes, typed parameters, loops, conditional insertion.
 - `references/versioning.md` — the version config, branch rules, build number, version handover.
 - `references/caching-and-artifacts.md` — cache keys, what must not depend on a cache, artifacts.
-- `references/diagnosis.md` — a failed run from the CLI: timeline, logs, pool problems, local repro.
+- `references/ansible-deploy.md` — what the Ansible deploy consumes from a build: artifact
+  resolution, release folders and systemd activation, the `migration.sql` database step, playbooks.

@@ -1,6 +1,9 @@
 ---
 name: done-check
-description: The completion gate. Requires evidence — a command that was run and output that was read — before any claim that work is done, fixed, passing or deployed, and defines what done means per change type: backend, frontend, database or migration, bugfix, config and infrastructure. Use before saying a task is complete, before committing, pushing or opening a pull request, before transitioning a work item, whenever a build, test or fix is about to be described as passing, and when verification turns out to be impossible.
+description: >-
+  Use before claiming work is done, fixed, passing or deployed — before committing, pushing, opening
+  a PR or moving a work item — and whenever a build or test is about to be called green, or
+  verification turns out to be impossible.
 ---
 
 # done-check — evidence before the claim

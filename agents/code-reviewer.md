@@ -1,6 +1,9 @@
 ---
 name: code-reviewer
-description: Analyzes a code diff or pull request and returns findings (does NOT post anything). Use this subagent to run any code review or PR-review analysis so it executes on its own model boundary. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
+description: >-
+  Analyzes a code diff or pull request and returns findings; never posts. Run every code or PR
+  review through it so the analysis gets its own model boundary. Defaults to Sonnet; the caller
+  may override the model.
 tools: Read, Grep, Glob, Bash, PowerShell, Skill
 model: sonnet
 ---

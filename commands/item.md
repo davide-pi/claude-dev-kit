@@ -1,5 +1,5 @@
 ---
-description: Read a work item properly — description, acceptance criteria, state, parent, links, attachments, discussion — or list your active items.
+description: Read a work item properly — criteria, state, parent, links, attachments, discussion — or list your active items.
 argument-hint: "[id | url] | (empty for your active items)"
 ---
 
@@ -19,7 +19,7 @@ titles: quoted as-is, never translated.
 - The request is to **create** an item ("new bug for…", "open a task…") → stop and route to
   **`workitem-create`**; this command does not create.
 - The request is **what to do about** the item ("how do I implement 1234", "break this down") →
-  read it first, then route to **`workitem-analyze`** with the id.
+  read it first, then route to **`plan-work`** with the id.
 
 ## Steps
 
@@ -67,7 +67,7 @@ titles: quoted as-is, never translated.
    area, iteration, effort) · `Link` (PRs, commits, attachments with their names) · `Discussione`,
    oldest first, `author — date` then the comment, HTML converted, only the last five unless the
    user asked for all. Close with **one** Italian line: the obvious next step and the command for
-   it (`workitem-analyze`, `/ship`).
+   it (`plan-work`, `pr-create`).
 
 ## No id — list the active items
 
@@ -79,10 +79,13 @@ Print id, type, state, iteration and title, newest change first, then ask which 
 
 ## Guardrails
 
+**Never**: update, transition, comment on or link the item — reading never changes it.
+
+
 - **Read-only.** No `az boards work-item update`, no `--discussion`, no `--state`, no
   `relation add`/`remove`, no `gh issue comment`/`edit`/`close`. Reading an item never changes it.
 - Never invent a missing acceptance criterion, description or estimate to make the item look
   complete: absent is reported as absent.
 - Do not download attachments unless asked — list their names and URLs.
-- Do not start implementing. Analysis is `workitem-analyze`; creation is `workitem-create`.
+- Do not start implementing. Planning is `plan-work`; creation is `workitem-create`.
 - Do not use `--open`: print the URL instead of launching a browser.

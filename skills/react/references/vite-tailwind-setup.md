@@ -10,7 +10,7 @@ which arrangement this project uses.
 | --- | --- |
 | `package.json` | the scripts CI runs, and which plugins and runner are installed. Read this first, always |
 | `vite.config.ts` | plugins, aliases, dev server and proxy, build options, test config if the runner shares it |
-| `tsconfig.json` (and its `extends` chain) | strictness and path aliases — see `typescript` |
+| `tsconfig.json` (and its `extends` chain) | strictness and path aliases — `strict` stays on |
 | the Tailwind entry | either a `tailwind.config` file with `content` globs, or a CSS-first setup where the theme is declared in the stylesheet. Which one you have decides where a design token goes |
 
 If a `tailwind.config` file exists, the `content` globs decide what is scanned. If it does not, look

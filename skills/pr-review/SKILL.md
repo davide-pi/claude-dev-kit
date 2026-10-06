@@ -1,12 +1,9 @@
 ---
 name: pr-review
 description: >-
-  Review a pull request on Azure DevOps or GitHub and post ONLY genuine questions and doubts as
-  inline comments, in Italian, tagged [Claude AI Review]; everything else is reported to the user in
-  chat and never touches the PR. Platform is detected from the remote and driven by the Azure DevOps
-  CLI or the `gh` CLI, with MCP as fallback. Delegates the analysis to the code-reviewer agent and
-  fans out to review-security and review-performance from high effort upward. Trigger: /pr-review
-  [target] [effort] [focus].
+  Review a pull request on Azure DevOps or GitHub, post only genuine questions tagged [Claude AI
+  Review], report the rest in chat. Trigger: /pr-review [target] [effort] [focus].
+disable-model-invocation: true
 ---
 
 # pr-review — review a PR, post only the questions
@@ -42,9 +39,8 @@ configuration, auth and verbs (`azdo-cli`).
 | `dev.azure.com`, `*.visualstudio.com` | Azure DevOps | the Azure DevOps CLI — `azdo-cli` | the CLI's generic REST invoke (`azdo-cli`); **MCP fallback** where no verb exists |
 | anything else | unknown | say so, review in chat only | nothing |
 
-CLI first on both. On Azure DevOps the MCP server is the documented fallback for what the CLI has no
-verb for — PR threads, work item comments and free-text search — and the chat report says which
-interface was used.
+CLI first on both. On Azure DevOps, what is a real CLI gap is decided only by `azdo-cli`
+`mcp-fallback.md`; the chat report says which interface was used.
 
 ### 3. Effort and fan-out
 
@@ -62,7 +58,8 @@ and how overlapping findings are merged: `effort-and-fanout.md`.
 **Post to the PR** only a real question: an intent question, a correctness concern only the author
 can settle, or a CONFIRMED security, regression or completeness finding phrased as the question the
 author has to answer. **Everything else goes to chat.** When unsure, chat. Full rules, phrasing and
-worked examples: `triage.md`.
+worked examples: `triage.md` — which also holds the verification ladder for **acting on** any
+finding (verify the premise before fixing or rejecting it).
 
 **A PR with no linked work item is itself a finding** — raised in **chat**, never posted on the PR:
 with no item there is no statement of intent to review the change against, so completeness cannot be
@@ -126,6 +123,6 @@ fare / Già fatti last** — mechanics and the exact report order in `posting.md
 - `effort-and-fanout.md` — the effort ladder, the package every agent receives, the model-selection
   convention, merging overlapping findings, and attribution tags.
 - `triage.md` — the two buckets in detail, how to turn a finding into a postable question, and the
-  cases that always stay in chat.
+  cases that always stay in chat; second passes; the verification ladder before acting on a finding.
 - `posting.md` — posting mechanics per platform, replying, retracting and resolving, plus the exact
   order of the chat report with the summary table last.

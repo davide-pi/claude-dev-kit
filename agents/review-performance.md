@@ -1,6 +1,9 @@
 ---
 name: review-performance
-description: Performance-focused reviewer for a code change. Reasons about cost — algorithmic complexity, per-item I/O, allocations, blocking, caching, database access — and returns findings only (never posts, edits, or merges). Spawn it alongside `code-reviewer` for high-effort reviews, or alone when the request is explicitly about performance. Default model is Sonnet; the caller may override via the Agent tool's model parameter.
+description: >-
+  Performance reviewer for a code change: complexity, per-item I/O, allocations, blocking,
+  caching, database access. Returns findings only, never posts or edits. Spawn beside
+  code-reviewer from high effort, or alone for a performance review.
 tools: Read, Grep, Glob, Bash, PowerShell, Skill
 model: sonnet
 ---

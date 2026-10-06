@@ -1,18 +1,12 @@
 ---
 name: angular
 description: >-
-  Angular engineering across the three eras that coexist in these workspaces: modern standalone
-  components with signals, the new control flow and `inject`, and the module-based apps built on
-  RxJS, a Redux-style store and a Material component library — plus how to tell from the project
-  files which one you are in. Covers RxJS discipline and subscription lifetime, when a signal
-  replaces an observable, typed reactive forms, HTTP interceptors and error handling, routing and
-  lazy loading, both test harnesses (the Karma-era one and the modern runner), and how to migrate a
-  module-based feature toward the modern style incrementally. Use when writing, reviewing or
-  restructuring Angular code, or when a leak, a change-detection miss or a test-setup failure needs
-  diagnosing. Types themselves live in the `typescript` skill.
+  Use whenever Angular code is written, reviewed or debugged — a component, store, form, route or
+  spec — or a view will not update, a subscription leaks, a request fires twice, TestBed fails, or an
+  `any` or a cast is in question. Tells the NgRx/Karma era from the signals/vitest era.
 ---
 
-# angular — one framework, three eras, one rule per era
+# angular — two eras in these workspaces, one rule per era
 
 ## When
 
@@ -20,11 +14,11 @@ description: >-
 - Deciding whether a piece of state should be a signal, an observable, or store state.
 - A view does not update, a request fires twice, or a subscription leaks across navigation.
 - Tests fail in setup and the harness in this project is not the one you last used.
+- A type, a `tsconfig` option, an `any`, an `as` or a `!` is being written or reviewed.
 - Moving a module-based feature toward standalone and signals without a rewrite.
 
 Not for:
 
-- Type modelling, `tsconfig`, narrowing, DTO validation → `typescript`.
 - The pre-TypeScript AngularJS generation — see the era table: read it, do not modernize it in place.
 - Web-platform APIs, CSS features and Core Web Vitals → the `modern-web-guidance` plugin.
 - Visual and UX design → the `frontend-design` plugin.
@@ -38,11 +32,12 @@ Not for:
 | Evidence in the project | Era, and what it means |
 | --- | --- |
 | no `angular.json`, no `tsconfig.json`; scripts calling `.module('app', [...])`, `.controller(`, `$scope` | **AngularJS**, the pre-TypeScript generation. Out of this skill's scope: keep it running, isolate it behind its own route or host page, and port features out of it rather than into it |
-| `angular.json` present, `main.ts` bootstraps an `AppModule` through a browser platform call, one `@NgModule` per feature, `StoreModule.forRoot` / an effects module, `*ngIf` / `*ngFor` in templates | **module era**: RxJS plus a Redux-style store, Material modules imported per feature module |
-| `angular.json` present, `main.ts` calls `bootstrapApplication(...)`, an `app.config.ts` full of `provide*` functions, `@if` / `@for` blocks, `signal(` / `computed(` / `inject(` in components | **modern era**: standalone plus signals |
-| a federation config file plus host/remote entries in the build target | modern era with native module federation — read the host manifest before touching a shared dependency |
-| `karma.conf.js` plus a test entry file | **Karma-era harness** |
-| no `karma.conf.js`; the `test` target on a modern builder, or a spec config for the modern runner | **modern harness** |
+| `package.json` has `@ngrx/store`, `@angular/material` and `karma`; `main.ts` bootstraps an `AppModule`; `*ngIf` / `*ngFor` | **store era** (module-based) — the player-facing app: RxJS plus NgRx, Material modules per feature module, Karma harness, `strict` **off** in its `tsconfig` |
+| `package.json` has `vitest`, no `karma`; `main.ts` calls `bootstrapApplication(...)`; `@if` / `@for`; `signal(` / `inject(` | **signals era** (standalone) — the back-office app: standalone, signals, `strict` plus strict templates on, vitest harness |
+| a federation config file plus host/remote entries in the build target | signals era with native module federation — read the host manifest before touching a shared dependency |
+
+Both apps live in the `ClientApp` folder of an ASP.NET host project: run every `npm`/`npx` command
+from there, not from the solution root. `npx ng version` names the release; never assume it.
 
 **Write in the project's era.** A signal dropped into a store-fed module component, or a standalone
 component also declared in an `NgModule`, produces a hybrid nobody can reason about and no test setup
@@ -54,10 +49,10 @@ covers. Cross the line for a whole feature, deliberately, using the ladder in
 | The value | Reach for |
 | --- | --- |
 | derived synchronously from other state and read in a template | `computed` — never a field recalculated in a getter or a lifecycle hook |
-| component-local UI state: open/closed, selected tab, filter text | `signal` (modern) or a plain field with `OnPush` and immutable updates (module era) |
-| an async stream needing cancellation, retry, debounce, or combination of several sources | RxJS — this is what it is for; convert to a signal at the component edge in modern code |
-| one HTTP call whose result renders | the client's observable, consumed by the template (`async` pipe in module code, a signal conversion in modern code) — never a manual `subscribe` that assigns a field |
-| state shared across unrelated features | a store: a signal-based service exposing `readonly` computeds (modern), or the existing Redux-style store (module era). One mechanism per app, not both |
+| component-local UI state: open/closed, selected tab, filter text | `signal` (signals era) or a plain field with `OnPush` and immutable updates (store era) |
+| an async stream needing cancellation, retry, debounce, or combination of several sources | RxJS — this is what it is for; convert to a signal at the component edge in signals-era code |
+| one HTTP call whose result renders | the client's observable, consumed by the template (`async` pipe in store-era code, a signal conversion in signals-era code) — never a manual `subscribe` that assigns a field |
+| state shared across unrelated features | a store: a signal-based service exposing `readonly` computeds (signals era), or the existing Redux-style store (store era). One mechanism per app, not both |
 | something that must *happen* when state changes | not an `effect` — do it in the handler that caused the change |
 
 ### Do I need the store at all
@@ -66,12 +61,22 @@ covers. Cross the line for a whole feature, deliberately, using the ladder in
 Is the state used by more than one feature, or must it survive navigation?
 ├─ no  → component state (signal / field). Adding an action, a reducer and a selector
 │         for one component's filter text is how a store becomes unreadable.
-└─ yes → is this a module-era app with a Redux-style store already?
+└─ yes → is this a store-era app with a Redux-style store already?
           ├─ yes → follow it exactly: action, reducer, memoized selector, effect for I/O.
           │         Never mutate state in a reducer; never call HTTP outside an effect.
           └─ no  → a signal-based service: private writable signals, exported computeds,
                     methods as the only writers. No new store library.
 ```
+
+### Types — the house rules, in five lines
+
+| Rule | In practice |
+| --- | --- |
+| `strict` is not negotiable | with it off, `null` fits every type and the compiler stops answering. New code compiles under it; where it is off, price it with `npx tsc --noEmit --strict` and fix folder by folder — never a `@ts-nocheck` amnesty |
+| Climb the escape-hatch ladder, stop at the first rung that works | narrowing → `unknown` + type guard → schema parse at the boundary → assertion function → `satisfies` → `as` to a narrower type with a comment. Never `any`, `as any`, `!` or `@ts-ignore`; a forced one is `@ts-expect-error` with a reason |
+| Data crossing in is unproven | an HTTP response, storage or a query string is parsed at the boundary, not described by an interface and trusted; contract types are generated, not hand-copied |
+| Exclusive states are a union | a discriminated union on `status` with an exhaustive `switch` and a `never` default — not optional fields on one flat interface |
+| The compiler on the build's project is the verdict | `npx tsc --noEmit` (and `--showConfig` for the merged `extends` chain); editor green proves nothing. No CLI is installed globally — always `npx` |
 
 ## Do
 
@@ -85,6 +90,7 @@ npx ng serve
 npx ng build --configuration production
 npx ng test --watch=false              # CI shape; add --browsers=ChromeHeadless on the Karma harness
 npx ng lint
+npx tsc --noEmit -p tsconfig.app.json   # types only; the spec project has its own tsconfig
 
 .\node_modules\.bin\ng version         # when npx resolution is in doubt on PowerShell
 

@@ -23,8 +23,8 @@ Printed at gate 3, before any Azure DevOps call. Nothing but this table.
 - Hierarchy is shown with one `↳` per level of nesting.
 - Titles are concise and specific: a title that fits three different items is not a title.
 
-Then ask: **"Do you want to change anything — number of items, roles, titles, the split, the
-hierarchy?"** Apply, reprint, re-ask. Only explicit approval opens gate 4.
+Then ask, in Italian: **"Vuoi cambiare qualcosa — numero di item, ruoli, titoli, suddivisione,
+gerarchia?"** Apply, reprint, re-ask. Only explicit approval opens gate 4.
 
 ## Table 2 — the split plus the target
 
@@ -61,8 +61,8 @@ table. Only explicit confirmation starts creating.
 
 ## The optional content preview
 
-Ask once, or honour what the user already said: **"Do you want to review the full body of each item
-before I create them, or should I create them directly?"** If yes, print each body in full,
+Ask once, or honour what the user already said: **"Vuoi rivedere il testo completo di ogni item
+prima che li crei, o procedo direttamente?"** If yes, print each body in full,
 including the numbered image placeholders, apply corrections, reprint, then confirm.
 
 ## Final summary

@@ -108,6 +108,14 @@ if (settings) {
 }
 
 // ── 2. Front matter of agents, commands and skills ────────────────────────────
+// Every description of a skill, command and agent is loaded into every session's listing, so they
+// share one budget: a description that grows pushes the others out of view. Collected below,
+// checked once all three kinds are read.
+const descriptionBudget = [];
+const DESCRIPTION_BUDGET_CHARS = 9500;  // ~60% of the total before the audit's cuts
+const SKILL_DESCRIPTION_WORDS = 50;
+const words = (text) => text.split(/\s+/).filter(Boolean).length;
+
 const AGENT_MODELS = ['sonnet', 'opus', 'haiku', 'fable', 'inherit'];
 const agentNames = new Set();
 
@@ -119,7 +127,10 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
   else if (fm.name !== expected) fail(rel, `front-matter name '${fm.name}' does not match the filename '${expected}'`);
   else agentNames.add(fm.name);
   if (!fm.description) fail(rel, 'front matter has no `description` — the Agent tool needs it to pick the agent');
-  else if (fm.description.length < 40) warn(rel, 'description is very short; agent selection depends on it');
+  else {
+    descriptionBudget.push([rel, fm.description]);
+    if (fm.description.length < 40) warn(rel, 'description is very short; agent selection depends on it');
+  }
   if (fm.model && !AGENT_MODELS.includes(fm.model)) fail(rel, `model '${fm.model}' is not one of ${AGENT_MODELS.join(', ')}`);
   if (fm.tools !== undefined && fm.tools.trim() === '') fail(rel, '`tools` is present but empty — the agent would have no tools');
 
@@ -136,11 +147,14 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith
   const fm = frontMatter(rel);
   if (!fm) { fail(rel, 'has no front matter'); continue; }
   if (!fm.description) fail(rel, 'front matter has no `description` — the slash command needs one');
+  else descriptionBudget.push([rel, fm.description]);
 }
 
 // Skills whose contract is "explicit trigger only": the description must say so, or the
 // model will fire them on its own.
-const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review', 'items-qa'];
+// They must also carry `disable-model-invocation: true`, the only switch that really keeps them out
+// of the model's hands — a description saying "explicit trigger only" is a request, not a lock.
+const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard'];
 for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
   const fm = frontMatter(rel);
   const dir = rel.split('/')[1];
@@ -153,7 +167,21 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
     if (EXPLICIT_TRIGGER.includes(dir) && !new RegExp(`/${dir}\\b`).test(fm.description)) {
       fail(rel, `is trigger-only but its description never names /${dir}, so it can fire unasked`);
     }
+    if (words(fm.description) > SKILL_DESCRIPTION_WORDS) {
+      warn(rel, `description is ${words(fm.description)} words; keep it under ${SKILL_DESCRIPTION_WORDS} — say when, not what`);
+    }
+    descriptionBudget.push([rel, fm.description]);
   }
+  if (EXPLICIT_TRIGGER.includes(dir) && fm['disable-model-invocation'] !== 'true') {
+    fail(rel, 'is trigger-only but lacks `disable-model-invocation: true`, so the model can still invoke it');
+  }
+}
+
+const descriptionTotal = descriptionBudget.reduce((sum, [, d]) => sum + d.length, 0);
+if (descriptionTotal > DESCRIPTION_BUDGET_CHARS) {
+  const top = [...descriptionBudget].sort((a, b) => b[1].length - a[1].length).slice(0, 5)
+    .map(([rel, d]) => `${rel} (${d.length})`).join(', ');
+  fail('descriptions', `skills + commands + agents total ${descriptionTotal} chars against a budget of ${DESCRIPTION_BUDGET_CHARS}. Largest: ${top}`);
 }
 
 // ── 3. Nothing machine-specific or secret ────────────────────────────────────
@@ -273,7 +301,7 @@ for (const name of referencedVars) {
 // skeleton, and no version numbers in an asset's prose. One skill is exempt: grill-me is fourteen
 // lines of interview instruction, and the skeleton would only pad it. Everything else conforms —
 // keep this list at one entry.
-const PRE_V2_SKILLS = new Set(['grill-me']);
+const PRE_V2_SKILLS = new Set([]);
 const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
 // wc -l semantics: a trailing newline is a terminator, not an empty final line.
 const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;
@@ -379,6 +407,7 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith
 
 // ── Report ───────────────────────────────────────────────────────────────────
 const label = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
+console.log(`descriptions: ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars across ${descriptionBudget.length} skills, commands and agents`);
 
 // In Actions, also emit annotations so findings land on the file and line in the PR view.
 if (process.env.GITHUB_ACTIONS) {

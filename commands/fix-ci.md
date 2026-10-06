@@ -1,5 +1,5 @@
 ---
-description: A red pipeline or workflow — find the failing run, fetch only the failing step's log, isolate the real error, and propose the fix.
+description: Diagnose a red pipeline or workflow — fetch only the failing step's log, isolate the real error, classify it, propose the fix.
 argument-hint: "[run-id | url | branch] [--current]"
 ---
 
@@ -76,6 +76,9 @@ reproduced exactly as the pipeline gives them.
 
 ## Guardrails
 
+**Never**: rerun, cancel or re-queue a run, edit CI definitions or variables, push a fix.
+
+
 - **Read-only against CI.** No `gh run rerun`/`cancel`/`delete`, no `az pipelines run`, no variable
   or definition edits, no re-queue "to see if it passes" — a rerun is a guess, not a diagnosis.
 - Do not edit code or YAML in this command: it diagnoses and proposes. Applying is a normal edit,
@@ -83,4 +86,4 @@ reproduced exactly as the pipeline gives them.
 - Never fetch or dump a full run log; step 3 fetches the failing step.
 - Never call a cause confirmed on log-reading alone — reproduce, or label it a hypothesis.
 - Do not blame flakiness to close the ticket: a flake claim needs the same commit having passed.
-- No commit, no push, no PR — that is `/ship`.
+- No commit, no push, no PR — that is `/commit` and `pr-create`.

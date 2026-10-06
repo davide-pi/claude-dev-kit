@@ -104,5 +104,5 @@ docker image prune                      # dangling images only
 
 Reach for `builder prune` and `image prune` first. Both leave every volume intact, and on a machine
 that builds regularly the layer cache is almost always the largest consumer. A database volume that
-is genuinely growing is a database problem, not a docker one — see `postgres` for bloat and
-`sql-server` for log-file growth.
+is genuinely growing is a database problem, not a docker one — Postgres bloat or SQL Server log-file
+growth, both `sql-server`.

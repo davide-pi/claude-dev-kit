@@ -1,16 +1,8 @@
 ---
 name: project-wiki-standard
 description: >-
-  The company standard for an Azure DevOps project wiki: one canonical structure every client and
-  project wiki follows, and exactly one place for every piece of information. Covers scaffolding a
-  new wiki (the client root, Glossario, then the full canonical tree under each project page) and
-  maintaining an existing one — a structure and duplication audit before anything is changed,
-  closing an open question by migrating its answer into the page that owns it, adding a feature
-  subpage with its Casi limite section, and filling Chiusura progetto. Enforces zero duplication,
-  the deliberate split between Vincoli (facts imposed from outside) and Architettura (the decisions
-  taken in response), the table-of-contents rule, Italian page content under canonical page names,
-  and organization and project resolved from the working directory instead of the CLI defaults.
-  Explicit trigger: only when the user types /project-wiki-standard.
+  Scaffold or maintain an Azure DevOps project wiki on the company's canonical structure. Explicit
+  trigger: only when the user types /project-wiki-standard.
 disable-model-invocation: true
 ---
 
@@ -40,7 +32,7 @@ Not for: a repository's own documentation tree — that belongs to `doc-keeper`,
 the other's territory: this skill writes only to the Azure DevOps project wiki and never to files in
 a repository, while `doc-keeper` writes only inside a repository's docs tree and never to the wiki.
 Also not for: `az devops` verbs, auth and REST mechanics (`azdo-cli`), work items
-(`workitem-create`, `workitem-analyze`), or wiki-wide full-text search. Never fires unasked.
+(`workitem-create`, `/item`), or wiki-wide full-text search. Never fires unasked.
 
 ## Decide
 

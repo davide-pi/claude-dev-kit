@@ -32,29 +32,31 @@ Before any fallback, all three have to fail:
 
 Only when all three fail is it a gap.
 
-## The gap list, with its counterpart
+## The gap list — the single owner
+
+Every other asset in the kit points here instead of keeping its own list. Only these are gaps:
 
 | Gap | Why the CLI cannot | The fallback |
 | --- | --- | --- |
-| A project's work item types, their states and their fields | no verb; reachable through `invoke` on the `wit` area | MCP work-item type read — it also returns the field set a create must respect |
-| Read a work item's discussion | `--discussion` writes only; no read verb | MCP work-item read with comments |
-| PR comment threads: read, post, reply, inline anchor, resolve | no verb anywhere under `az repos pr` | MCP PR-thread tools — they model the file, line range and iteration an inline thread needs |
-| A pipeline run's step logs | no verb; reachable through `invoke` on the `build` area | MCP build-log tool |
+| A type's **field set** — which fields a create on that type accepts | the `fields` resource lists the project's fields, not cleanly per type | MCP work-item type read |
 | Full-text search over code, wiki or work items | no verb, and no stable REST surface worth driving by hand | MCP search tools |
-| A file's content at a ref, with no clone | no verb | `git show <ref>:<path>` in a clone; MCP repo-file tool otherwise |
 | Backlog levels and board columns | no verb | MCP backlog tool |
-| Resolve a display name to an identity id | `az devops user list`/`show` covers organization members only | MCP identity tool |
+| A file's content at a ref, with no clone | no verb | `git show <ref>:<path>` in a clone; MCP repo-file tool otherwise |
+| Resolve a display name to an identity id outside the organization's members | `az devops user list`/`show` covers members only | MCP identity tool |
 
-Everything not in this table has a CLI path. If you believe you found a new gap, add the evidence —
-which group's help you read and which verb was absent — before treating it as one.
+If you believe you found a new gap, add the evidence — which group's help you read, which verb was
+absent, and why no `invoke` route could be verified — before treating it as one.
 
-Two capabilities that look like gaps and are **not**, because the CLI's own credential reaches them
-over REST — do not fall back for either:
+## Not gaps — the CLI reaches them, do not fall back
 
-| Looks like a gap | Actually | Where |
+| Looks like a gap | The CLI route | Where |
 | --- | --- | --- |
-| Attaching a file or an image to a work item | no verb, but two REST calls with the token of the current `az login` — no PAT | `workitem-content.md` |
-| Wiki page writes, and listing a wiki's page tree | the write verbs exist but corrupt accents, and there is no `list` verb; REST does both | `wiki-rest.md` |
+| A project's work item types and their states | `invoke --area wit --resource workItemTypes` / `workItemTypeStates` | `work-item-roles.md` |
+| Reading a work item's discussion (`--discussion` only writes) | `invoke --area wit --resource comments` | `boards-catalogue.md` |
+| A pipeline run's step logs | `invoke --area build --resource Timeline`, then `logs` | `pipelines-catalogue.md` |
+| PR comment threads: read, post, reply, resolve | `invoke --area git --resource pullRequestThreads` (and `pullRequestThreadComments`); the MCP PR-thread tools are accepted only when an inline anchor's thread context cannot be verified | `repos-and-prs.md` |
+| Attaching a file or an image to a work item | two REST calls with the current `az login` token — no PAT | `workitem-content.md` |
+| Wiki page writes, and listing a wiki's page tree | REST (the write verbs corrupt accents; there is no `list` verb) | `wiki-rest.md` |
 
 ## Using the fallback well
 

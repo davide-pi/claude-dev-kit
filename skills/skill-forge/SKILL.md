@@ -1,13 +1,9 @@
 ---
 name: skill-forge
 description: >-
-  How to create or change an asset of this kit — a skill, a command, an agent, a hook or a
-  reference file. Use when adding a new asset, when an existing skill misfires or never fires, when
-  one has outgrown its line cap and needs splitting, when choosing between a skill, a command, an
-  agent and a hook, and before declaring any asset finished. Encodes this kit's own contract: the
-  fixed body skeleton, the front-matter rules the validator enforces, the line caps, description
-  craft, and the finish checklist. The skill-creator plugin covers generic skill authoring; this
-  adds the kit's contract on top of it.
+  Use when a kit skill, command, agent, hook or reference is added or changed — a skill that
+  misfires or never fires, one over its line cap, choosing between shapes, or before calling an
+  asset finished. The kit's contract on top of skill-creator.
 ---
 
 # skill-forge — the kit's asset contract, as a procedure
@@ -54,8 +50,9 @@ Two shapes for one need is duplication: a command may *route to* a skill, never 
 |------|-------|-------------|
 | Folder | `skills/<name>/SKILL.md`, plus `references/*.md` and `*.ps1` beside it | convention |
 | `name` | Identical to the folder | validator, error |
-| `description` | Third person, under 1024 chars, says **when** to use it and what it covers | validator, error |
-| Explicit-trigger skill | The description must name its own slash trigger | validator, error |
+| `description` | **≤ 50 words**, phrased as **situations and trigger phrases**, never a catalogue of contents — the session skill listing has a character budget, and an overflowing listing drops descriptions so skills never auto-trigger | review (validator: < 1024 chars) |
+| Explicit-trigger skill | Front matter carries `disable-model-invocation: true`; the description is one line naming its slash trigger | validator (trigger), review (flag) |
+| Project shadowing | A project's `.claude/skills/<name>` with a kit skill's name **shadows** the kit skill entirely — a project keeps only its own data there, under a different name, and the kit skill routes to it | review |
 | Body skeleton | `# name — purpose`, `## When` (ending in a "Not for:" line), `## Decide`, `## Do`, `## Traps`, `## References` — in that order | review |
 | `SKILL.md` length | 150 lines maximum | cap |
 | Reference length | 200 lines maximum, one topic each, self-contained | cap |
@@ -121,26 +118,28 @@ clean, eval section added, README row added. Five out of six is not finished.
 
 ## Traps
 
-1. **A description written as a summary** — it says what the skill contains, not when to use it, so
-   nothing triggers it. Rewrite it around situations.
+1. **A description written as a summary, or past 50 words** — it says what the skill contains, and
+   it eats the listing budget that silences other skills. Rewrite it around situations.
 2. **A description so broad it fires on everything** — the "Not for:" cases belong in it, in the
    words a user would actually type.
-3. **A trigger-only skill whose description never names its trigger** — it fires unasked, and the
-   validator rejects it.
-4. **Shrinking a long skill instead of splitting it** — the substance that was dropped is exactly
+3. **A trigger-only skill without `disable-model-invocation: true`, or whose description never
+   names its trigger** — it fires unasked; the validator rejects the missing trigger.
+4. **A project skill named like a kit skill** — it silently replaces the kit skill in that project.
+   Keep project data under its own name.
+5. **Shrinking a long skill instead of splitting it** — the substance that was dropped is exactly
    why the skill existed.
-5. **A version number in prose** — the asset rots the day the version moves. Say how to detect the
+6. **A version number in prose** — the asset rots the day the version moves. Say how to detect the
    version, or route to the docs plugin.
-6. **A markdown link to a file added in a later commit** — the validator fails the whole run. Name
+7. **A markdown link to a file added in a later commit** — the validator fails the whole run. Name
    assets by bare name in prose.
-7. **A reference file no skill routes to** — it is never read. Every reference gets a line in
+8. **A reference file no skill routes to** — it is never read. Every reference gets a line in
    `## References` with the condition that sends you there.
-8. **An org name, a machine path or an address in an example** — placeholders are allowed only for
+9. **An org name, a machine path or an address in an example** — placeholders are allowed only for
    those three things, and required for them.
-9. **MCP-first, or bash-first, instructions** — the CLI comes first (`az`, `gh`, `dotnet`, `docker`, `sqlcmd`)
+10. **MCP-first, or bash-first, instructions** — the CLI comes first (`az`, `gh`, `dotnet`, `docker`, `sqlcmd`)
    with the MCP fallback stated, and examples are PowerShell unless the asset says why bash is better.
-10. **A command with no Never line** — nothing stops it from posting, dropping or deploying.
-11. **An asset that duplicates an installed plugin** — check the README plugin coverage table first.
+11. **A command with no Never line** — nothing stops it from posting, dropping or deploying.
+12. **An asset that duplicates an installed plugin** — check the README plugin coverage table first.
 
 ## References
 

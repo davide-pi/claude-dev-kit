@@ -111,8 +111,20 @@ script. But most clients exit 0 on a SQL error unless told not to:
 
 Without them, a broken migration script reports success and the pipeline or the loop carries on.
 
-## Where the engine-specific recipes live
+## One recipe per client — the only copy in the kit
 
-This file covers *how to get a client running*. What to type into it belongs to the domain skills:
-`postgres` for `psql`, catalog queries and dump/restore; `redis-dotnet` for read-only Redis triage;
-`sql-server` for the `sqlcmd` workflow and plans; `rabbitmq` for `rabbitmqctl` and the management API.
+`<svc>` is the compose service; with no compose file use `docker exec <container>` instead of
+`docker compose exec <svc>`. Secrets always arrive through `-e`, from the host environment.
+
+| Client | One-shot, scriptable | Notes |
+| --- | --- | --- |
+| `sqlcmd` (local) | `sqlcmd -S localhost,<port> -d <db> -U <user> -P $env:MSSQL_PASSWORD -C -b -W -Q "<sql>"` | `-C` trusts the dev container's self-signed certificate |
+| `sqlcmd` (in the image) | `docker compose exec -T <svc> bash -lc 'ls -d /opt/mssql-tools*/bin'` then call that path with the same flags | the tools path is versioned — glob it, never hardcode it |
+| `psql` | `docker compose exec -T -e PGPASSWORD=$env:PGPASSWORD <svc> psql -U <user> -d <db> -v ON_ERROR_STOP=1 -At -c "<sql>"` | `-At` gives unaligned, header-less output for parsing |
+| `pg_dump` | `docker compose exec -T <svc> pg_dump -U <user> -d <db> --schema-only` | binary formats need `-AsByteStream` on the host side |
+| `redis-cli` | `docker compose exec -T -e REDISCLI_AUTH=$env:REDIS_PASSWORD <svc> redis-cli <command>` | read-only commands only on a shared instance |
+| `rabbitmqctl` | `docker compose exec -T <svc> rabbitmqctl list_queues --vhost <vhost> name messages consumers` | node-local; needs no credentials inside the container |
+| `rabbitmqadmin` | `docker compose exec -T <svc> rabbitmqadmin -V <vhost> get queue=<q> count=1 ackmode=reject_requeue_true` | the management plugin must be enabled; this ackmode is the only non-destructive one |
+
+What to type into each client — queries, plans, stream and queue diagnosis — belongs to the domain
+skills: `sql-server` (both SQL engines), `redis-dotnet`, `rabbitmq`.

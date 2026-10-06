@@ -125,61 +125,28 @@ technical reference. The dividing line is the reader, not the register.
     `file:line` anchors, `CONFIRMED`/`PLAUSIBLE` verdicts, log lines and tool output.
 An evidence line, a log line or a query that has been translated is no longer evidence: quote it.
 # Resolving the organization and the project
-Never hardcode an Azure DevOps organization or project, and **never trust the `az devops configure`
-default** — it may still point at the previous session's client, which is how work lands in the
-wrong customer's board. Resolve both from the **current working directory** through the workspace
-mapping above, pass them explicitly on every command, and ask when the path is not mapped.
+Resolve both from the **current working directory** through the mapping above and pass them
+explicitly — never trust the `az devops configure` default; unmapped → ask. Details: `azdo-cli`.
 # Every pull request carries its parent work item
-A PR always links at least one work item, and it is the **parent backlog item** — the User Story or
-PBI, the Bug, the Impediment, the TECH activity — never a Task. Tasks exist to carry hours (that is
-`worklog`'s business), and a PR pointing at a Task says nothing about what was delivered.
-- Resolve it: collect the ids the branch touches, read each one's **type**, and when it is a Task
-  take its parent instead. Link them all when there are several — and if they sit under different
-  Features, say so: the branch is probably doing two things.
-- Nothing to link → **stop and ask**, or create the item first. Never open an unlinked PR.
-- On Azure DevOps use the real PR-to-work-item link, not the item URL pasted in the body: only the
-  real link makes the item follow the PR and transition when it completes.
+At least one, and it is the **parent backlog item**, never a Task; nothing to link → stop and ask.
+Use the real PR-to-work-item link. Details: `pr-create`.
 # Every work item created is assigned to me
-Default, not a question: any item created on my behalf — `/workitem-create`, `/backlog-integration`,
-a Task opened to carry hours, an item created mid-task — lands **assigned to me**. Only an explicit
-instruction changes it: another person's name, or "lascialo non assegnato".
-- **Resolve the identity against the organization**, never from the machine: `git config user.email`
-  is the wrong UPN the moment a second org on another Entra tenant is in play, and a wrong identity
-  does not fail the call — it silently leaves the field empty. The verb is in `azdo-cli`
-  ("Resolving the identity to assign to"); resolve once per org and reuse it for the run.
-- **Show it before writing it** — the confirmation table carries an `Assegnatario` column with the
-  real UPN — and **read it back** from the item afterwards. Those are the only two places a
-  wrong-tenant identity is catchable.
-- An item created for someone else, or deliberately left free, gets one line saying so.
+Unless told otherwise, with the identity **resolved against the organization**, never from `git
+config`; shown before writing, read back after. Details: `workitem-create`, `azdo-cli`.
 # Hours are never forgotten
-`/worklog` is the only asset that writes hours, and the only way it fails is by never being typed.
-So the reminder lives outside it, and it is authoritative: `hooks/worklog-pending.js` compares the
-days actually worked (from `history.jsonl`, under the roots in `CLAUDE_WORKSPACE_ROOTS` only)
-against `/worklog`'s own audit, and the statusline carries a clock badge with the count.
-- The window is the **current month, or the current week** where that reaches back into the previous
-  one. A day older than both is closed business: nothing should mention it or offer to log it.
-- When the session brief lists pending days, **say so in the first reply** — once, one line, naming
-  the days — then drop it. Repeating it every turn is how a reminder gets ignored.
-- A day is closed **only** by an audit entry. A day with genuinely nothing to log (ferie, solo
-  tooling) still gets one, at zero hours, after asking — otherwise it stays red forever.
-- Never log hours on your own initiative to clear the badge: the reminder is mine to act on.
+`/worklog` is the only asset that writes hours. When the session brief lists pending days, **say so
+once in the first reply**, one line naming the days; never log hours on your own initiative.
+Details: `worklog`.
 # Closing a PR is always squash + delete source branch
-No other merge strategy, on either platform, ever — not a preference to weigh per PR. A merge commit
-or a branch left behind is a mistake to fix, not an outcome to report.
-- Set the intent **at creation** (`--squash true --delete-source-branch true`, or the GitHub
-  equivalent) and again at completion. That covers auto-complete and every CLI path.
-- The only hard guarantee for a human pressing Complete in the web UI is the branch policy
-  **Limit merge types → Squash only** on the default branch: suggest enabling it per repo.
-- A repo policy that forbids squash → **stop and say so**; never fall back to another strategy.
+No other merge strategy, ever: set it at creation and at completion; a policy forbidding squash →
+stop and say so. Details: `branch-flow`.
 # Work item types are per-project — speak in roles
-Type names depend on the project's process template, so never hardcode one. Speak in **roles** —
-backlog item, defect, question to analyse, technical activity, unit of time, grouping — and resolve
-the real name at runtime; `azdo-cli` owns the mapping and the query. The one equivalence worth
-knowing: `Product Backlog Item` and `User Story` are the same role under two templates. The **defect
-role is always `Bug`** — `Issue` is never a defect. The trap that makes the query mandatory rather
-than polite: in the Agile template `Issue` is the *analysis* item, in Basic it is the *backlog item*
-— same name, opposite meaning, and neither of them is the defect. When a project has no type for a
-role, ask; do not substitute the nearest one.
+Never hardcode a type name: speak in roles and resolve the real type at runtime; the defect role is
+always `Bug`, never `Issue`; no type for a role → ask. Details: `azdo-cli`.
+# Done means verified
+Never claim done, fixed or passing without a command that was run and its output read. Report one
+of three states: **verified** (the command and its result), **not verified** (and why it could not
+be), **failed** (quote the output). The definition of done per change type is in `done-check`.
 # Search and read without triggering a prompt
 A permission rule is prefix-matched against the **whole command string**, so `cd <path> && grep …`
 starts with `cd` and can never match a `Bash(grep *)` rule — no rule anyone adds will ever cover it.

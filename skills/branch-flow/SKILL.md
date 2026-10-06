@@ -1,12 +1,9 @@
 ---
 name: branch-flow
 description: >-
-  Branch conventions, isolated worktrees and branch finishing, on both Azure DevOps and GitHub. Use
-  when new work starts and nothing is branched yet, when naming or renaming a branch, when work
-  needs isolation from the current tree, or when a finished branch has to reach the default branch
-  — or must not. Covers the protected default branch, `feature/*` and `fix/*` prefixes, kebab-case
-  names, platform detection from the remote, worktrees, squash-merge through a pull request, and
-  what to do with a branch nobody wants merged.
+  Use when new work starts with nothing branched, a branch must be named or renamed, work needs an
+  isolated worktree, or a finished branch has to reach the default branch — or must not — on Azure
+  DevOps or GitHub.
 ---
 
 # branch-flow — branch it, isolate it, finish it
@@ -82,8 +79,9 @@ switch, no half-finished edits mixed together. Mechanics in `worktrees.md`.
 | dead end | delete it locally and remotely, and write down what was learned |
 | partly wanted | cherry-pick the wanted commits onto a fresh branch, drop the rest |
 
-Merge only when the pipeline is green **and** at least one review is approved. Squash, so the
-default branch keeps one commit per PR. Full decision walk in `finishing.md`.
+Merge only when the pipeline is green **and** the PR has been reviewed — `/pr-review` (AI) plus the
+owner's own read; no human approval is required unless the repository's branch policy demands one.
+Squash, so the default branch keeps one commit per PR. Full decision walk in `finishing.md`.
 
 ## Do
 
