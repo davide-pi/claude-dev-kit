@@ -14,7 +14,7 @@
  *      single small file read. Resuming, compacting and clearing all re-fire this hook, so without
  *      a cache the cost would repeat all session long.
  *   3. Disk before subprocess. Branch, last commit and the upstream ref are read straight out of
- *      `.git`, exactly as guard-default-branch.js reads HEAD. Only the two facts that genuinely
+ *      `.git`, exactly as lib/default-branch.js reads HEAD. Only the two facts that genuinely
  *      need the index — how dirty the tree is, and by how much the upstream diverges — cost one
  *      `git status` call, bounded by a hard timeout and skipped entirely if it fails.
  *   4. No network, ever. Nothing here reaches a remote, so a session on a train starts as fast as

@@ -42,8 +42,8 @@ Read in this order:
 | Deadlock reports | Two paths taking the same rows in a different order | One consistent access order; shorten the transaction |
 | Elapsed high, CPU low, blocking session present | A long transaction holding locks | Shorten the unit of work; never hold a transaction across a remote call |
 
-Index design, deadlock graphs and T-SQL specifics live in `sql-server`; Postgres differences and
-`EXPLAIN (ANALYZE, BUFFERS)` live in `postgres`. Neither `psql` nor `redis-cli` is installed on this
+Index design, deadlock graphs, T-SQL specifics, Postgres differences and `EXPLAIN (ANALYZE, BUFFERS)`
+live in `sql-server`. Neither `psql` nor `redis-cli` is installed on this
 machine — run them through a container (`docker-dev-env`).
 
 ## Part 2 — the message

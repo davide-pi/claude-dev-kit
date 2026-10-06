@@ -3,7 +3,7 @@
  *
  * A credential that reaches a file is already halfway to the remote: the next `git add -A` takes
  * it, and once it is in the history it stays there. This hook is the last cheap moment to stop it,
- * so unlike the two guards it does not ask — it **denies** the write and names the pattern and the
+ * so unlike the shell guards it does not ask — it **denies** the write and names the pattern and the
  * line, which is all the information needed to fix it.
  *
  * The catalogue is the one tools/validate.mjs already enforces on the kit's own files — provider
@@ -39,23 +39,7 @@
 
 'use strict';
 
-const fs = require('fs');
-
-/** No output => the normal permission flow applies. */
-function approve() {
-  process.exit(0);
-}
-
-function deny(reason) {
-  process.stdout.write(JSON.stringify({
-    hookSpecificOutput: {
-      hookEventName: 'PreToolUse',
-      permissionDecision: 'deny',
-      permissionDecisionReason: reason,
-    },
-  }));
-  process.exit(0);
-}
+const { approve, deny, readPayload } = require('./lib/decision');
 
 /**
  * The catalogue. `value` is the capture group holding the part that has to look like a real secret;
@@ -175,10 +159,7 @@ function redact(value) {
 }
 
 try {
-  const raw = fs.readFileSync(0, 'utf8');
-  if (!raw.trim()) approve();
-
-  const payload = JSON.parse(raw);
+  const payload = readPayload();
   const filePath = payload?.tool_input?.file_path ?? '';
   const text = newText(payload?.tool_input);
   if (typeof text !== 'string' || !text.trim()) approve();

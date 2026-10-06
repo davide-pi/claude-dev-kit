@@ -1,12 +1,9 @@
 ---
 name: debug-systematic
 description: >-
-  The debugging discipline: reproduce, isolate, explain, then fix — and never fix before the
-  mechanism is written down. Use for any bug, exception, wrong result, hang, crash, test failure or
-  intermittent behaviour whose cause is not yet proven, including "it works on my machine" and "it
-  only fails in CI". Routes each symptom class to the instrument that produces evidence — .NET
-  counters, traces and dumps, SQL execution plans and statistics, broker queues and dead-letter,
-  pipeline logs, forced-repro loops — instead of guessing at the code.
+  Use for any bug, exception, wrong result, hang, crash, failing or flaky test whose cause is not
+  yet proven — including "works on my machine" and "only fails in CI" — to reproduce, isolate and
+  explain before any fix.
 ---
 
 # debug-systematic — evidence before the fix
@@ -26,7 +23,7 @@ names, and log lines are quoted **verbatim**: a translated log line is no longer
 Not for: implementing a fix whose cause is already proven; tuning code that works as intended
 (that is `review-performance`); browser runtime inspection — console, network, paint, heap — which
 the Chrome DevTools plugin owns end to end; reading acceptance criteria to decide what *should*
-happen (`workitem-analyze`).
+happen (`/item`, `plan-work`); the .NET diagnostic tools themselves (`dotnet-diagnostics`).
 
 ## Decide
 
@@ -37,7 +34,7 @@ happen (`workitem-analyze`).
 | 1 | Reproduce | A command or a click-path that fails on demand, and the failing output captured verbatim |
 | 2 | Isolate | The smallest input and narrowest layer that still fails; everything else ruled out by test, not by opinion |
 | 3 | Explain | One causal sentence, in Italian — "il valore è null **perché** la factory lo riscrive, **quindi** il mapper lancia `NullReferenceException`". Mechanism, not correlation |
-| 4 | Fix and prove | The fix targets the mechanism; the phase-1 repro now passes; a regression test locks it (`test-strategy`) |
+| 4 | Fix and prove | The fix targets the mechanism; the phase-1 repro now passes; a regression test locks it (`dotnet-testing`) |
 
 **The rule: no edit to production code before phase 3 exists in writing.** A change made during
 phases 1-2 is instrumentation only — logging, a probe, a failing test — and it is reverted or kept
@@ -53,8 +50,7 @@ re-read the whole code path, list every assumption, verify each one with an inst
 
 | Symptom | Instrument | Command shape | What the output tells you |
 |---------|-----------|---------------|---------------------------|
-| .NET process slow, leaking, hanging, burning CPU | `dotnet-counters`, then `dotnet-trace`, then `dotnet-dump` | `dotnet-counters monitor -n <proc> --counters System.Runtime,Microsoft.AspNetCore.Hosting` | Which resource is saturated: GC pressure and heap growth, thread-pool queue depth (starvation), exception rate, request queue |
-| A hang or a deadlock, no progress at all | `dotnet-dump` plus `clrstack` | `dotnet-dump collect -p <pid>`, then `dotnet-dump analyze <file>` | Every managed stack at the moment of the freeze: who waits on whom, sync-over-async, an exhausted pool |
+| .NET process slow, leaking, hung, deadlocked, burning CPU | counters, then trace, then dump — `dotnet-diagnostics` owns the tools and how to read them | `dotnet-counters monitor -n <proc>` | Which resource is saturated (GC, thread pool, exceptions, request queue); for a hang, every managed stack at the freeze |
 | Behaviour inside a dependency with no source | `ilspycmd`, then `csharprepl` | `ilspycmd -p -o <outDir> <path-to-assembly>` | The real logic instead of the documented one; the REPL then exercises that API outside the app |
 | A query slow, or returning the wrong rows | `sqlcmd` with statistics and the plan | `sqlcmd -S <server> -d <db> -E -Q "SET STATISTICS IO, TIME ON; <query>"` | Logical reads per table — the actual cost — plus plan shape: scan against seek, missing index, bad estimate (`sql-server`) |
 | Right in a SQL window, wrong from the app | The EF Core command log | log category `Microsoft.EntityFrameworkCore.Database.Command` at Information | The SQL actually sent, with parameters: a filter lost in translation, N+1, client-side evaluation (`ef-core`) |
@@ -64,8 +60,7 @@ re-read the whole code path, list every assumption, verify each one with an inst
 | Intermittent, locally and in CI alike | A forced-repro loop plus correlation logging | `for ($i=1; $i -le 200; $i++) { dotnet test --filter <Test> }` | A failure rate — no rate means no repro; with ids and timestamps in the log, the interleaving behind it |
 | It used to work | `git bisect` | `git bisect start <bad> <good>`, then `git bisect run <script>` | The single commit that introduced it, cheaper than reading the whole diff |
 
-Azure DevOps log fetch is CLI-first; when `az pipelines` cannot reach the step text, the Azure
-DevOps MCP build-log capability is the documented fallback — say which one was used.
+Azure DevOps step logs are reachable from the CLI (`azdo-cli`); a failing run end to end is `/fix-ci`.
 
 ## Do
 
@@ -73,12 +68,8 @@ DevOps MCP build-log capability is the documented fallback — say which one was
 # Phase 1 — capture the failure verbatim before touching anything.
 dotnet test --filter "FullyQualifiedName~<Test>" *> debug-repro.txt
 
-# Phase 2 — .NET triage, in this order. Install the tools once, globally.
-dotnet tool install -g dotnet-counters; dotnet tool install -g dotnet-trace; dotnet tool install -g dotnet-dump
-Get-Process -Name <proc> | Select-Object Id, WorkingSet, CPU   # the pid, and whether it moves
+# Phase 2 — a .NET process: counters first; trace and dump procedure in dotnet-diagnostics.
 dotnet-counters monitor -n <proc> --refresh-interval 1
-dotnet-trace collect -n <proc> --profile cpu-sampling          # then open the trace in a viewer
-dotnet-dump collect -p <pid> -o hang.dmp                       # last resort: a hang or a leak
 
 # Phase 2 — the database side.
 sqlcmd -S <server> -d <db> -E -Q "SET STATISTICS IO, TIME ON; <query>"
@@ -113,8 +104,8 @@ git stash; dotnet test --filter "FullyQualifiedName~<NewTest>"; git stash pop
 
 ## References
 
-- `references/dotnet-runtime.md` — a .NET process misbehaving: what each counter means, trace
-  profiles, dump analysis commands, leak and starvation signatures.
+- A .NET process misbehaving — counters, traces, dumps, leak and starvation signatures → the
+  `dotnet-diagnostics` skill.
 - `references/data-and-messaging.md` — a query that is slow or wrong, and a message that never
   arrives or arrives twice: plans, statistics, broker triage, dead-letter handling.
 - `references/intermittent-and-ci.md` — it cannot be reproduced, or only CI fails: what to log to

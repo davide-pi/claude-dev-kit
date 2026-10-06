@@ -1,86 +1,87 @@
-# Periodo, tempo, topic e arrotondamento
+# Period, time, topics and rounding
 
-## Fase 1 — il periodo
+## Phase 1 — the period
 
-L'argomento del trigger e' in linguaggio naturale e va risolto in due date concrete
-(`yyyy-MM-dd`) prima di lanciare l'engine:
+The trigger's argument is natural language and must become two concrete dates (`yyyy-MM-dd`)
+before the engine runs:
 
-| Argomento | `From` / `To` |
+| Argument | `From` / `To` |
 | --- | --- |
-| vuoto | oggi / oggi |
-| `ieri`, `yesterday` | il giorno prima |
-| `yyyy-MM-dd` | quel giorno |
-| `yyyy-MM-dd..yyyy-MM-dd` | i due estremi |
-| "questa settimana", "settimana scorsa", "ultimi N giorni", "10-15 lug" | calcola gli estremi dalla data corrente |
+| empty | today / today |
+| `ieri`, `yesterday` | the day before |
+| `yyyy-MM-dd` | that day |
+| `yyyy-MM-dd..yyyy-MM-dd` | the two ends |
+| "questa settimana", "settimana scorsa", "ultimi N giorni", "10-15 lug" | compute the ends from today's date |
 
-Se resta ambiguo (es. "la settimana" senza sapere quale) **chiedi** prima di procedere: un periodo
-sbagliato porta ore sul work item sbagliato.
+Still ambiguous ("la settimana" without knowing which) → **ask** first: a wrong period puts hours
+on the wrong work item.
 
-## Fase 2 — l'engine
+## Phase 2 — the engine
 
 ```powershell
 pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd>" -To "<yyyy-MM-dd>"
 ```
 
-Cosa fa, esattamente:
+What it does, exactly:
 
-- legge le sessioni **principali** dei transcript di Claude Code (esclude subagent e sidechain);
-- filtra gli eventi nel range e li attribuisce a `(progetto, branch)` su una timeline globale;
-- **tempo attivo** = somma degli intervalli fra eventi consecutivi entro la soglia di inattivita'
-  (default 15 minuti). Gli intervalli piu' lunghi — incluse le notti fra i giorni di un range — sono
-  pause e non contano;
-- stampa a stdout le metriche autorevoli: per progetto e per branch, minuti attivi, fascia oraria e
-  numero di prompt;
-- scrive il **digest grezzo** in `_raw/<periodo>.md` sotto la cartella di lavoro della skill e ne
-  stampa il path, insieme al path dell'**audit** (`pushed.json`);
-- fa la **retention** al lancio: pota **solo i digest** piu' vecchi della finestra di ritenzione
-  (default 7 giorni). Non c'e' nessuno scheduler: la pulizia avviene solo qui. L'**audit non si pota
-  mai**: e' l'unica memoria di quali periodi sono gia' finiti sulla board, e su di essa si regge il
-  promemoria delle giornate non registrate (vedi `scrittura.md`, "Il giorno chiuso").
+- reads the **main** Claude Code transcript sessions (subagents and sidechains excluded);
+- filters events in the range and attributes them to `(project, branch)` on one global timeline;
+- **active time** = the sum of intervals between consecutive events within the idle threshold
+  (default 15 minutes). Longer intervals — nights between the days of a range included — are breaks
+  and do not count;
+- prints the authoritative metrics on stdout: per project and per branch, active minutes, time
+  window and prompt count;
+- writes the **raw digest** to `_raw/<period>.md` under the skill's working folder and prints its
+  path, together with the **audit** path (`pushed.json`);
+- runs **retention** at launch: it prunes **only digests** older than the retention window (default
+  7 days). There is no scheduler; cleanup happens only here. The **audit is never pruned**: it is the
+  only memory of which periods already reached the board, and the unlogged-days reminder depends on
+  it (`scrittura.md`, "The closed day").
 
-Parametri opzionali oltre a `-From`/`-To`: radice dei progetti, cartella di output, soglia di
-inattivita', giorni di ritenzione e i limiti di troncamento del digest. Non toccarli senza motivo.
+Optional parameters beyond `-From`/`-To`: projects root, output folder, idle threshold, retention
+days and the digest truncation limits. Leave them alone without a reason.
 
-L'engine **non** scrive tabelle e **non** tocca Azure DevOps: quello e' compito della skill.
+The engine writes **no** tables and **never** touches Azure DevOps: that is the skill's job.
 
-Se stampa "Nessuna attivita'", riferiscilo e fermati. Altrimenti **leggi il digest**: per progetto →
-branch → cronologia dei prompt e delle risposte. E' il materiale da cui nascono topic, descrizioni e
-decisioni. I transcript originali si aprono solo se manca un dettaglio.
+`Nessuna attivita'` on stdout → report it and stop. Otherwise **read the digest**: project → branch
+→ timeline of prompts and replies. It is the material topics, descriptions and decisions come from;
+open the original transcripts only for a missing detail.
 
-## Fase 3 — topic e ruoli
+## Phase 3 — topics and roles
 
-**Il topic viene dal branch git.** Un `feature/*`, `fix/*` o `bugfix/*` e' un topic: dagli un nome
-umano. Il lavoro su `master`, `HEAD` o senza branch non ha un topic dal branch → **spezzalo in uno o
-piu' topic semantici** leggendo il digest, e ripartisci i suoi minuti a stima ragionevole,
-**dicendolo esplicitamente** in chat. Di norma i topic restano per progetto; ne attraversano due
-solo se e' chiaramente lo stesso lavoro.
+**The topic comes from the git branch.** A `feature/*`, `fix/*` or `bugfix/*` branch is a topic:
+give it a human name, in Italian. Work on the default branch, `HEAD` or no branch has no branch
+topic → **split it into one or more semantic topics** from the digest and spread its minutes by a
+reasonable estimate, **saying so** in chat. Topics normally stay per project; one crosses two only
+when it is clearly the same work.
 
-A ogni topic si assegna un **ruolo**, che decide come si comporta nell'arrotondamento:
+Each topic gets a **role**, which decides how it rounds:
 
-| Ruolo | Quando | Effetto |
+| Role | When | Effect |
 | --- | --- | --- |
-| `main` | topic vero, tempo >= ~15 min | riceve la redistribuzione dei donor, arrotonda normale |
-| `donor` | micro-topic (< ~15 min) di lavoro cliente **senza** item dedicato | i suoi minuti vanno in un pool spalmato **equamente** sui `main`; il topic sparisce dalla tabella |
-| `keep` | micro-topic **con** un item dedicato, o comunque da preservare | resta come riga e va a **minimo 0.5h**, cosi' si logga |
-| `internal` | tempo interno / non fatturabile (es. lavoro sul tooling) | resta riga a se', arrotonda normale (puo' fare 0h), **non** riceve il pool e **non** viene spalmato |
+| `main` | a real topic, time >= ~15 min | receives the donors' redistribution, rounds normally |
+| `donor` | a micro-topic (< ~15 min) of client work **without** its own item | its minutes go into a pool spread **evenly** over the `main` topics; the topic disappears from the table |
+| `keep` | a micro-topic **with** its own item, or otherwise worth keeping | stays a row, lifted to **at least 0.5h** so it gets logged |
+| `internal` | internal / non-billable time (e.g. tooling work) | its own row, rounds normally (may give 0h), **neither** receives the pool **nor** is spread |
 
-La certezza sull'item arriva in Fase 5: qui si classifica a giudizio e si ri-verifica in discovery.
-Un `internal` diventa `donor` solo se l'utente lo chiede esplicitamente.
+Certainty about the item comes in Phase 5: classify by judgement here, re-check in discovery. An
+`internal` topic becomes `donor` only when the user explicitly asks.
 
-## Arrotondamento
+## Rounding
 
 ```powershell
 pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" `
-  "80|import new markets|main" "4|seed fix|donor" "7|proc fix|keep" "8|worklog tooling|internal"
+  "80|import nuovi mercati|main" "4|fix seed|donor" "7|fix proc|keep" "8|tooling worklog|internal"
 ```
 
-- Formato voce: `minuti|etichetta|ruolo`; il ruolo e' opzionale e vale `main` per default.
-- **nearest-0.5h indipendente per topic**, **nessun cap**: il totale e' la somma reale dei
-  risultati, non un numero forzato. 45 minuti fanno 1.0h (equidistante → away-from-zero, non floor);
-  sotto ~15 minuti si arrotonda a **0h**.
-- L'helper spalma i `donor`, porta i `keep` a 0.5h, lascia gli `internal` a se', e stampa due totali:
-  tutte le righe e la quota **loggabile** (esclusi 0h e interni).
-- Passa **tutti** i topic in **una sola** invocazione: la redistribuzione dipende da quanti `main`
-  ci sono, quindi invocazioni separate danno numeri diversi e sbagliati.
-- Se ci sono `donor` ma nessun `main`, l'helper avvisa e li tratta come `keep`.
-- Se i minuti cambiano nel loop della Tabella 1, **ri-arrotonda**: non correggere le ore a mano.
+- Entry format: `minutes|label|role`; the role is optional and defaults to `main`. The label is
+  Italian — it seeds the short description and the Task title.
+- **Nearest-0.5h per topic, independently**, **no cap**: the total is the real sum of the results,
+  not a forced number. 45 minutes give 1.0h (a tie rounds away from zero, not down); under ~15
+  minutes rounds to **0h**.
+- The helper spreads the `donor` topics, lifts `keep` to 0.5h, leaves `internal` alone, and prints
+  two totals: all rows, and the **loggable** share (0h and internal excluded).
+- Pass **all** topics in **one** invocation: the redistribution depends on how many `main` topics
+  there are, so separate invocations give different, wrong numbers.
+- `donor` topics with no `main` → the helper warns and treats them as `keep`.
+- Minutes changed in the Table 1 loop → **re-round**; never correct hours by hand.

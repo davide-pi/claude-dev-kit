@@ -16,27 +16,16 @@
 Parse them into a list of `{item, url, credentials?, viewports?}`. **A missing URL stops the run**:
 there is nothing to test against, and it is the only argument that cannot be derived.
 
-## Finding the org, the project, and the right server
+## Finding the org and the project
 
 From an item link, the host gives the organisation (`{org}.visualstudio.com` or
-`dev.azure.com/{org}`) and the first path segment gives the project. Then pick the Azure DevOps MCP
-server connected **in this session** that serves that organisation.
+`dev.azure.com/{org}`) and the first path segment gives the project. Bare ids → resolve both from
+the workspace mapping in the global `CLAUDE.md`; not mapped → ask, never guess.
 
-> Tool names are examples here, never a contract — that server consolidates its surface from time to
-> time. Match by **capability**: read a work item, download an attachment, add a comment. Look at
-> which `mcp__<server>__wit_*` tools actually exist rather than assuming a name, and say in chat
-> which tool was used if a name in this kit has gone.
-
-| Situation                                  | Do                                                          |
-| ------------------------------------------ | ----------------------------------------------------------- |
-| Two servers serve that organisation        | either — they are equivalent                                 |
-| No server serves it                        | say so and ask; do not guess an organisation                 |
-| Bare ids, no link                          | ask which org and project                                    |
-| Bare ids and exactly one server is connected, exposing one plausible project | infer it, and say that you did |
-
-The CLI is the kit's default elsewhere, but the work-item read this skill needs — HTML fields,
-embedded attachments and the whole comment thread in one shape — is what the MCP returns directly,
-so it leads here. `az boards` remains available for the id-and-title level.
+**CLI first, like everywhere in the kit** (`azdo-cli`): the item with HTML fields via
+`az boards work-item show --id <id> --expand all`, the comment thread and attachment downloads via
+`az devops invoke` / REST. The MCP server is the fallback only for a real gap — the list lives in
+`azdo-cli/references/mcp-fallback.md`; say in chat when you fall back.
 
 ## Reading the item
 

@@ -1,16 +1,9 @@
 ---
 name: azdo-cli
 description: >-
-  Azure DevOps from the command line, and the foundation every other Azure DevOps asset calls:
-  resolving the organization and project instead of trusting a default, signing in — including an
-  organization on a different Entra tenant — WIQL queries, reading, creating, updating, commenting
-  and linking work items, resolving the identity an item is assigned to against the organization
-  rather than the machine, the fields, states and types a project really has and which type name
-  fills each role (backlog item, defect, analysis, technical activity, time, grouping), attachments
-  and inline images, wiki pages, pull requests from listing to completion, and pipelines. Use
-  whenever an Azure DevOps board, repository, pull request, wiki or pipeline has to be read or
-  changed from a shell, when a work item type has to be named, when an `az devops` call fails on
-  authentication or returns "not found", or when a capability may need MCP. CLI first, MCP fallback.
+  Use whenever an Azure DevOps board, work item, pull request, wiki or pipeline is read or changed
+  from a shell, when an org, project, item type or assignee must be resolved, or when
+  an `az devops` call fails on auth or "not found". CLI first; owns the MCP-fallback gap list.
 ---
 
 # azdo-cli — Azure DevOps through `az`, with the MCP servers as the documented fallback
@@ -19,15 +12,15 @@ description: >-
 
 - A board, repository, pull request, wiki or pipeline has to be read or written from a shell — or
   the organization, the project or the work item **type** it belongs to has to be resolved first.
-- Another asset needs the exact verb and flags: `workitem-create`, `workitem-analyze`, `pr-review`,
-  `pr-create`, `branch-flow`, `worklog`, `/ship`, `/status`, `/item`, `/fix-ci`.
+- Another asset needs the exact verb and flags: `workitem-create`, `pr-review`, `pr-create`,
+  `branch-flow`, `worklog`, `items-qa`, `/item`, `/fix-ci`.
 - A call fails on authentication, or cannot see a project or repository it should.
 - A capability might not exist in the CLI and the fallback decision has to be made honestly, or a
   flag, a field reference name or a **type name** is about to be guessed from memory.
 
 Not for: GitHub, which is `gh` (`branch-flow`, `pr-create`); authoring pipeline YAML (`pipeline`);
-deciding *what* a work item should say (`workitem-create`) or how to attack one
-(`workitem-analyze`); reconstructing and logging hours (`worklog`); reviewing a diff (`pr-review`).
+deciding *what* a work item should say (`user-story-standard`) or whether one is ready to build
+(`plan-work`); reconstructing and logging hours (`worklog`); reviewing a diff (`pr-review`).
 
 ## Decide
 
@@ -59,12 +52,11 @@ tool, as for a REST call bearing the token of the current `az login` (the resour
 
 ### 3. CLI first — and the gaps are known, not guessed
 
-The genuine gaps are few, and each is listed with its counterpart in `references/mcp-fallback.md`:
-PR comment threads, full-text search, backlog levels and board columns, and a type's field set. A
-type's states, a work item's discussion and a run's step logs are **not** gaps — `az devops invoke`
-on the `wit` and `build` areas reaches them, and the `az login` token reaches attachments, inline
-images and wiki writes over REST. **A real gap needs both signals**: `--help` lists no verb (a
-missing *flag* usually means the wrong verb), and `invoke` would need a route you cannot verify.
+`references/mcp-fallback.md` is the **single owner** of what is a real gap; every other asset points
+there instead of keeping its own list. Types and states, a work item's discussion, PR threads and a
+run's step logs are **not** gaps (`az devops invoke`), nor are attachments, inline images and wiki
+writes (REST with the `az login` token). **A real gap needs both signals**: `--help` lists no verb,
+and `invoke` would need a route you cannot verify.
 
 ### 4. A work item type name is discovered, never assumed
 

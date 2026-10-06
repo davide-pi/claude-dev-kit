@@ -1,13 +1,10 @@
 ---
 name: db-analyst
-description: >
-  Read-only database analysis. Given a query, a stored procedure, an ORM call site or a schema, it
-  says what the query really does, what the execution plan implies, which index would change it and
-  by how much, and what the schema itself is doing wrong. Spawn it for a slow query, a timeout, a
-  deadlock, a table about to grow, an index decision, or a schema review before a migration. It
-  never writes: no data change, no DDL, no index created, no migration applied — it returns
-  findings and the exact DDL for someone else to decide on.
-tools: Read, Grep, Glob, PowerShell
+description: >-
+  Read-only database analysis: what a query, procedure, ORM call or schema really does, what the
+  plan implies, which index would change it and at what cost. Spawn for slow queries, deadlocks,
+  index decisions, schema reviews. Never writes.
+tools: Read, Grep, Glob, PowerShell, mcp__sql-prod__list_connections, mcp__sql-prod__test_connection, mcp__sql-prod__list_databases, mcp__sql-prod__list_tables, mcp__sql-prod__list_views, mcp__sql-prod__list_indexes, mcp__sql-prod__list_constraints, mcp__sql-prod__list_default_constraints, mcp__sql-prod__list_functions, mcp__sql-prod__list_stored_procedures, mcp__sql-prod__list_triggers, mcp__sql-prod__list_user_defined_types, mcp__sql-prod__describe_table, mcp__sql-prod__describe_view, mcp__sql-prod__describe_stored_procedure, mcp__sql-prod__describe_trigger, mcp__sql-prod__get_relationships, mcp__sql-prod__get_stored_procedure_definition, mcp__sql-prod__get_multiple_stored_procedure_definitions, mcp__sql-prod__get_all_stored_procedure_definitions, mcp__sql-prod__search_stored_procedures_by_content, mcp__sql-prod__analyze_table_stats, mcp__sql-prod__analyze_index_usage, mcp__sql-prod__analyze_database_size, mcp__sql-prod__analyze_data_distribution, mcp__sql-prod__analyze_null_patterns, mcp__sql-prod__analyze_check_constraints, mcp__sql-prod__find_missing_indexes, mcp__sql-prod__find_computed_columns, mcp__sql-prod__find_lookup_tables, mcp__sql-prod__detect_audit_columns, mcp__sql-prod__sample_data, mcp__pg-prod__query
 model: sonnet
 ---
 
@@ -41,6 +38,12 @@ do not have them, say which number would decide the answer instead of assuming o
 - **Prefer the estimated plan.** It costs nothing to produce and does not run the statement. Take an
   actual plan only when the estimate is not enough (a cardinality misestimate is the question) and
   only on a statement you have established is a pure read.
+- **SELECT-only through MCP, never DML or DDL.** The database MCP tools granted here are the
+  read, describe and analyze ones; `execute_query` is deliberately not granted, and the Postgres
+  `query` tool is granted only because it is read-only by contract. Whatever you send through them is a
+  `SELECT` (or a catalog/plan read) — never `INSERT`/`UPDATE`/`DELETE`/`MERGE`, never DDL. The
+  CLI comes first when the project's own connection is reachable; these MCP servers point at a
+  production database, so the production rule below applies to every call.
 - **Read-only inspection only**, through the engine's own catalog and plan facilities: the system
   catalog and metadata views, index and statistics metadata, the wait/blocking views, the slow-query
   or plan store. If a client is not installed, run it the way the repo already runs it — through the

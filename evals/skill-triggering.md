@@ -47,6 +47,7 @@ exists.
 | `/workitem-create` | MUST load |
 | "crea un work item per il bug del filtro date" | MUST NOT (the skill is trigger-only by design; without the trigger, do it plainly) |
 | "apri una issue su GitHub per questo" | MUST NOT (different platform, different flow) |
+| "abbiamo fatto una riunione, ti racconto i punti" | MUST NOT without the trigger (meeting-driven creation, writes to a real board) |
 
 ### `pr-review` — explicit trigger only
 
@@ -56,6 +57,7 @@ exists.
 | `/pr-review 4312 high security` | MUST load, and the focus must narrow the fan-out to `review-security` |
 | "guarda la PR 4312 e dimmi se ci sono problemi" | MUST NOT post anything; a chat review is the correct answer |
 | "commenta tu la PR con i dubbi" | MUST load (that is exactly its contract) |
+| "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load (receiving findings) |
 
 ### `code-review` (command) — the local diff
 
@@ -66,13 +68,12 @@ exists.
 | "rivedi le modifiche che hai appena fatto" | MUST route through the review subagents (per the CLAUDE.md convention), not an inline read-through |
 | "sistema questo bug" | MUST NOT (fixing is not reviewing) |
 
-### `git-branching` / `pr-create` — convention skills, ambient
+### `pr-create` — convention skill, ambient
 
 | Prompt | Expected |
 |--------|----------|
-| "creami un branch per questa modifica" | `git-branching` MUST load (naming + protected-main rules) |
 | "apri la PR" | `pr-create` MUST load (title/description conventions) |
-| "fai il commit" | Both MUST NOT dominate — `/commit` owns this; branching only matters if a branch is created |
+| "fai il commit" | MUST NOT dominate — `/commit` owns this |
 
 ### `pipeline` — CI/CD authoring
 
@@ -91,13 +92,6 @@ exists.
 | `/commit -b fix/date-filter` | MUST create the branch and commit there |
 | "committa e pusha" | MUST commit; the push is a separate, explicit act (the command never pushes) — and on the default branch the guard hook asks first |
 | "cosa ho modificato?" | MUST NOT (a question about the diff, not a request to commit) |
-
-### `pr-description` (command, project-scoped)
-
-| Prompt | Expected |
-|--------|----------|
-| `/pr-description` | MUST generate the description from the branch diff, with `AB#<id>` linking |
-| "apri la PR" | MUST NOT — that is `pr-create`; this one only writes the description text |
 
 ### `grill-me` — scrutiny, not execution
 
@@ -123,6 +117,9 @@ exists.
 | "questo va rifatto o si aggiusta?" | MUST load (classification is the whole question) |
 | "qual è la differenza tra `IEnumerable` e `IQueryable`?" | MUST NOT (a knowledge question routes nothing) |
 | "/commit" | MUST NOT (the decision is already made; the command owns it) |
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike) |
+| "conviene spezzare questo lavoro su più agent?" | MUST load (parallel fan-out) |
+| "applica le tre migration in ordine" | MUST NOT fan out (sequential by construction) |
 
 ### `plan-work`
 
@@ -132,6 +129,8 @@ exists.
 | "spezza questo lavoro in task che posso seguire" | MUST load |
 | "rinomina questa variabile in `orderTotal`" | MUST NOT (single-file change: a plan is pure overhead) |
 | "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
+| "prendi in carico la story 4711, da dove parto?" | MUST load (item analysis) |
+| "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
 
 ### `done-check`
 
@@ -142,15 +141,6 @@ exists.
 | "fai una review del diff e dimmi se ci sono bug" | MUST NOT (defect hunting is the review axis, not the completion gate) |
 | "i test passano?" | MUST NOT (run them and answer; no gate to apply) |
 
-### `delegate-agents`
-
-| Prompt | Expected |
-|--------|----------|
-| "scrivi i test per queste otto classi, in parallelo" | MUST load |
-| "conviene spezzare questo lavoro su più agent?" | MUST load |
-| "applica le tre migration in ordine" | MUST NOT (sequential by construction) |
-| "chiedi al code-reviewer di guardare il diff" | MUST NOT (a single known subagent, no fan-out to design) |
-
 ### `debug-systematic`
 
 | Prompt | Expected |
@@ -159,24 +149,6 @@ exists.
 | "questo test passa in locale e fallisce in pipeline" | MUST load |
 | "aggiungi un endpoint per esportare gli ordini in CSV" | MUST NOT (a new feature, not a defect) |
 | "spiegami come funziona il garbage collector" | MUST NOT (knowledge question, nothing to diagnose) |
-
-### `review-feedback`
-
-| Prompt | Expected |
-|--------|----------|
-| "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load |
-| "prima di far girare la review, cosa gli passo?" | MUST load |
-| "/pr-review 4312" | MUST NOT (running and posting the review belongs to pr-review) |
-| "commenta questa funzione" | MUST NOT (writing comments in code, not receiving feedback) |
-
-### `test-strategy`
-
-| Prompt | Expected |
-|--------|----------|
-| "questo servizio non ha nessun test, da dove inizio?" | MUST load |
-| "vale la pena testare questo mapper?" | MUST load |
-| "il test X fallisce, sistemalo" | MUST NOT (a failure routes to debug-systematic) |
-| "come si scrive una fixture xUnit?" | MUST NOT (mechanics belong to dotnet-testing) |
 
 ### `skill-forge`
 
@@ -187,15 +159,6 @@ exists.
 | "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
 | "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
 
-### `typescript`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa risposta API ha campi nullable, come la tipizzo senza usare `any`?" | MUST load |
-| "conviene una union discriminata o tre classi?" | MUST load |
-| "aggiungi un indice sulla tabella Orders" | MUST NOT (no types involved) |
-| "questo `.cs` non compila" | MUST NOT (wrong language) |
-
 ### `angular`
 
 | Prompt | Expected |
@@ -203,7 +166,7 @@ exists.
 | "questo componente non si aggiorna dopo l'update dello store, e qui ci sono ancora gli NgModule" | MUST load |
 | "conviene passare a signal in questa feature?" | MUST load |
 | "come centro verticalmente questa card?" | MUST NOT (CSS and visual design belong to the plugins) |
-| "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to chrome-devtools-mcp) |
+| "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to the browser tools) |
 
 ### `react`
 
@@ -211,7 +174,7 @@ exists.
 |--------|----------|
 | "il componente rifà la fetch in loop e lo stato del filtro è duplicato in tre punti" | MUST load |
 | "mi serve una libreria di state management qui?" | MUST load |
-| "misura l'LCP di questa pagina" | MUST NOT (belongs to chrome-devtools-mcp) |
+| "misura l'LCP di questa pagina" | MUST NOT (Core Web Vitals belong to modern-web-guidance) |
 | "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
 
 ### `dotnet-backend`
@@ -219,7 +182,7 @@ exists.
 | Prompt | Expected |
 |--------|----------|
 | "questo service è registrato singleton ma inietta il DbContext, cosa cambio?" | MUST load |
-| "meglio un controller o un endpoint minimal per questa risorsa?" | MUST load |
+| "questo handler RPC EasyNetQ ritenta con Polly, la policy è giusta?" | MUST load |
 | "aggiungi un indice sulla colonna Status" | MUST NOT (belongs to sql-server) |
 | "il componente React rifà la fetch" | MUST NOT (wrong stack) |
 
@@ -230,7 +193,8 @@ exists.
 | "aggiungi i test a OrderService, il repo non ne ha nessuno" | MUST load |
 | "questo test tocca il database vero o lo fingo?" | MUST load |
 | "il test in CI fallisce con timeout, guarda il log della build" | MUST NOT (a red pipeline routes to the CI command) |
-| "quali test vale la pena scrivere per questo mapper?" | MUST NOT (strategy belongs to test-strategy) |
+| "questo servizio non ha nessun test, da dove inizio?" | MUST load (test strategy) |
+| "vale la pena testare questo mapper?" | MUST load |
 
 ### `dotnet-diagnostics`
 
@@ -238,7 +202,7 @@ exists.
 |--------|----------|
 | "il pod va al 100% di CPU in produzione, come capisco cosa fa?" | MUST load |
 | "questo endpoint è lento ma non so dove perde tempo" | MUST load |
-| "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the DevTools plugin) |
+| "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the browser tools) |
 | "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
 
 ### `ef-core`
@@ -248,7 +212,8 @@ exists.
 | "ho aggiunto la property Email all'entità Customer, allinea il database" | MUST load |
 | "questa query carica 500 righe per ogni ordine" | MUST load |
 | "scrivi la stored procedure per il report mensile" | MUST NOT (raw T-SQL belongs to sql-server) |
-| "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to postgres) |
+| "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to sql-server, Postgres section) |
+| "aggiungi una migration per la colonna ShippedAt" | MUST load (migration workflow) |
 
 ### `sql-server`
 
@@ -257,15 +222,8 @@ exists.
 | "questa stored procedure va in timeout solo per alcuni clienti, perché?" | MUST load |
 | "che indice serve a questa query?" | MUST load |
 | "aggiungi una migration EF per la colonna Email" | MUST NOT (belongs to ef-core) |
-| "questa query sul database di cache è lenta" | MUST NOT (the cache database is Postgres) |
-
-### `postgres`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa query sul database di cache è lenta, guarda l'EXPLAIN" | MUST load |
-| "porto questa tabella da SQL Server, cosa cambia?" | MUST load |
-| "come leggo un execution plan di SQL Server?" | MUST NOT (the other engine) |
+| "questa query sul database di cache è lenta, guarda l'EXPLAIN" | MUST load (the Postgres half) |
+| "porto questa tabella da SQL Server a Postgres, cosa cambia?" | MUST load (the Postgres half) |
 | "aggiungi il servizio postgres al compose" | MUST NOT (belongs to docker-dev-env) |
 
 ### `redis-dotnet`
@@ -285,6 +243,7 @@ exists.
 | "questo consumer riprocessa lo stesso messaggio due volte" | MUST load |
 | "aggiungi il servizio rabbitmq al docker compose" | MUST NOT (belongs to docker-dev-env) |
 | "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
+| "quanti messaggi ci sono nella dead-letter?" | MUST load (broker inspection) |
 
 ## Command cases
 
@@ -292,19 +251,13 @@ Commands are invoked by name, so the risk is different from a skill's: the failu
 model *acting* on a phrasing the command does not own, or reaching for a skill when a command would
 have done it in one shot.
 
-### `/ship`
+### `/docs-sync`
 
 | Prompt | Expected |
 |--------|----------|
-| "committa, pusha e apri la PR collegata al 4821" | MUST invoke |
-| "fai il merge della PR 210" | MUST NOT (ship stops before the merge, by design) |
-
-### `/status`
-
-| Prompt | Expected |
-|--------|----------|
-| "cosa ho in ballo adesso?" | MUST invoke |
-| "che stato ha il work item 4821?" | MUST NOT (one item belongs to /item) |
+| `/docs-sync` | MUST run `doc-keeper` on the working diff against the repo's docs tree |
+| `/docs-sync wiki --audit` | MUST audit the wiki tree against the source |
+| "aggiorna il README del progetto" | MUST NOT (a single edit, no docs-tree sync) |
 
 ### `/item`
 
@@ -312,13 +265,6 @@ have done it in one shot.
 |--------|----------|
 | "fammi vedere i criteri di accettazione del 4821" | MUST invoke |
 | "crea un bug per il crash del login" | MUST NOT (creation belongs to workitem-create) |
-
-### `/migrate`
-
-| Prompt | Expected |
-|--------|----------|
-| "aggiungi una migration per la colonna ShippedAt" | MUST invoke |
-| "perché questa query EF fa N+1?" | MUST NOT (belongs to ef-core) |
 
 ### `/fix-ci`
 
@@ -341,20 +287,6 @@ have done it in one shot.
 | "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
 
-### `/queue`
-
-| Prompt | Expected |
-|--------|----------|
-| "quanti messaggi ci sono nella dead-letter?" | MUST invoke |
-| "come progetto il dead-letter exchange?" | MUST NOT (belongs to rabbitmq) |
-
-### `/spike`
-
-| Prompt | Expected |
-|--------|----------|
-| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST invoke |
-| "implementa il nuovo endpoint di export" | MUST NOT (real work: dev-loop routes it) |
-
 ### `azdo-cli`
 
 | Prompt | Expected |
@@ -364,19 +296,11 @@ have done it in one shot.
 | "apri una issue su GitHub per questo bug" | MUST NOT (other platform: gh) |
 | "questa query WIQL è lenta" | MUST NOT (not a thing: WIQL is not tuned here) |
 
-### `workitem-analyze`
-
-| Prompt | Expected |
-|--------|----------|
-| "prendi in carico la story 4711, da dove parto?" | MUST load |
-| "questo epic è implementabile così com'è?" | MUST load |
-| "il filtro date restituisce righe sbagliate, sistemalo" | MUST NOT (a reproducible symptom goes to debug-systematic) |
-| "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
-
 ### `branch-flow`
 
 | Prompt | Expected |
 |--------|----------|
+| "creami un branch per questa modifica" | `branch-flow` MUST load (naming + protected-main rules) |
 | "come chiamo il branch per questa fix?" | MUST load |
 | "il lavoro è finito, come lo porto su main?" | MUST load |
 | "voglio lavorare su questa cosa senza toccare il working tree corrente" | MUST load (the worktree half) |
@@ -388,7 +312,7 @@ have done it in one shot.
 |--------|----------|
 | "il container di sql server non parte, si riavvia in loop" | MUST load |
 | "mi serve un postgres locale per provare questa cosa" | MUST load |
-| "questa query postgres è lenta, leggi l'EXPLAIN" | MUST NOT (belongs to postgres) |
+| "questa query postgres è lenta, leggi l'EXPLAIN" | MUST NOT (belongs to sql-server) |
 | "deploya in staging" | MUST NOT (local environments only) |
 
 ### `items-qa` — explicit trigger only
@@ -411,14 +335,6 @@ have done it in one shot.
 | "il filtro data mostra righe fuori range, ma non so se è un bug" | MUST load (the Impediment branch is exactly this) |
 | "crea questi tre item su Azure DevOps sotto la Feature 1234" | MUST NOT (putting items on the board is workitem-create) |
 | "traduci questa user story in inglese" | MUST NOT (a translation, not the standard) |
-
-### `backlog-integration` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/backlog-integration` | MUST load |
-| "crea un PBI per questa descrizione" | MUST NOT (one item, not a meeting-driven session: workitem-create) |
-| "abbiamo fatto una riunione, ti racconto i punti" | MUST NOT without the trigger (it writes to a real board) |
 
 ### `project-wiki-standard` — explicit trigger only
 

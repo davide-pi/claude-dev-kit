@@ -1,18 +1,50 @@
 ---
 name: grill-me
-description: Interview the user relentlessly about a plan or design, walking every branch of the decision tree until shared understanding, then output a Decision Summary. Use when the user wants their thinking scrutinized rather than executed — e.g. "grill me", "poke holes in this", "red-team my design", "challenge/pressure-test my assumptions", "play devil's advocate", "what am I missing here?". Prefer this over simply answering when the user is seeking rigorous scrutiny of a plan, not implementation.
+description: >-
+  Use when the user wants a plan or design scrutinized rather than executed — "grill me", "poke
+  holes in this", "red-team my design", "play devil's advocate", "what am I missing?" — interviewing
+  branch by branch until a Decision Summary.
 ---
 
-Interview the user relentlessly about every aspect of this plan until shared understanding is reached. Walk each branch of the design tree, resolving dependencies between decisions one by one.
+# grill-me — interrogate the plan until every branch is decided
 
-If a question can be answered by exploring the codebase, do that instead of asking.
+**Language.** The interview — questions, follow-ups, pushback — and the Decision Summary are
+**Italian**. Code, identifiers, paths and commands stay as they are.
 
-Conduct the interview in **Italian** — the questions, the follow-ups and the pushback — and write
-the **Decision Summary** in Italian too. Code, identifiers, file paths and command names stay as
-they are.
+## When
 
-When all branches are resolved, verify no new questions emerged, then produce a **Decision Summary**:
-- Each decision point and its resolution
-- Dependencies between decisions
-- Risks or trade-offs explicitly accepted
-- Open items deferred for later (if any)
+- The user asks for scrutiny, not execution: "grill me", "poke holes", "red-team", "devil's advocate".
+- A design is already on the table and the question is whether it holds (`dev-loop` routes here).
+- `workitem-create` escalates its Q&A because the work is ambiguous and decisions depend on each other.
+
+Not for: designing the solution yourself, writing the plan (`plan-work`), or a bug (`debug-systematic`).
+
+## Decide
+
+| Situation | Move |
+| --- | --- |
+| The codebase can answer it | explore and answer it yourself — never ask what a read settles |
+| Two decisions depend on each other | resolve the upstream one first, then walk down |
+| The answer is vague ("it should be fast") | push for the number, the owner, or the failure case |
+| A branch is resolved | state the resolution in one line, move to the next |
+| A new question appears while resolving | add it to the tree; nothing is closed until it is walked |
+| The user defers a point | record it as open, with what it blocks |
+
+One question at a time, relentless but specific: each question names the decision it settles.
+
+## Do
+
+1. Restate the plan as a decision tree (one line per branch) and confirm it.
+2. Walk every branch, one question per turn, until each has a resolution.
+3. Verify no new questions emerged, then output the **Decision Summary** (Italian):
+   - each decision point and its resolution;
+   - dependencies between decisions;
+   - risks and trade-offs explicitly accepted;
+   - open items deferred, and what each blocks.
+
+## Traps
+
+1. A redesign offered instead of an attack → the instinct to help → ask, do not propose.
+2. Five questions in one message → one gets answered → one at a time.
+3. Asking what the code already says → wasted turn and credibility → read first.
+4. Stopping when the user tires → the summary hides open branches → list them as deferred.

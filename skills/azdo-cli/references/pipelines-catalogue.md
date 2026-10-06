@@ -92,8 +92,8 @@ az devops invoke --area build --resource logs --route-parameters project=<projec
 
 A run id and a build id are the same number, which is why the `build` area answers for a pipeline
 run. If either call is rejected, confirm the route against the resource listing described in
-`auth-and-config.md`; the MCP build-log tool is the documented fallback and takes the run id
-directly.
+`auth-and-config.md`; not a gap (`mcp-fallback.md`) — the MCP build-log tool, which takes the run id
+directly, is acceptable only when no route can be verified.
 
 Two habits that matter more than the command:
 

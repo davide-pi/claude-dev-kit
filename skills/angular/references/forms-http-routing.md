@@ -33,8 +33,8 @@ interceptors, not one that does everything:
 
 Other HTTP rules:
 
-- The response type is a claim, not a check. Validate at this boundary — see `typescript`,
-  `references/boundaries.md`.
+- The response type is a claim, not a check. Parse it at this boundary — the type
+  house rules in the `angular` SKILL.md.
 - Keep DTO shapes inside the data layer and map to domain models before components see them.
 - Cancellation is free with `switchMap`; use it for anything the user can retrigger.
 - In modern apps interceptors are functional and registered through the HTTP `provide*` call; in

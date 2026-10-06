@@ -8,8 +8,11 @@ Copy the shape, then fill it. Deviating from the skeleton is a review rejection,
 ---
 name: <same as the folder>
 description: >-
-  <What it decides, in one clause.> Use when <situation>, <situation>, <situation>. Covers
-  <the concrete things>. <Trigger: /<name> [args] — only for a trigger-only skill.>
+  Use this skill whenever <situation>, <situation> or <situation> — even if the user never says
+  '<term>' but <the phrasing they type>.   # ≤ 50 words, situations only
+# Trigger-only skill instead: one line, "<what it does>. Explicit trigger: only when the user
+# types /<name>." plus the next line:
+# disable-model-invocation: true
 ---
 
 # <name> — <one-line purpose>
@@ -175,5 +178,7 @@ deliberate exception, and it says so.
 | 13 | README row added | In the asset table |
 | 14 | Limits stated | Any asset that can write, post or delete says what it never does |
 | 15 | Output language stated | English prose that says "produce Italian", with the English exceptions named where the asset produces one |
+| 16 | Description fits the budget | ≤ 50 words, situations not contents; a trigger-only skill is one line plus `disable-model-invocation: true` |
+| 17 | No shadowing | The name collides with no project-level `.claude/skills/<name>` in the workspaces it serves |
 
-Fourteen out of fifteen is not finished.
+Sixteen out of seventeen is not finished.

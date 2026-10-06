@@ -53,6 +53,9 @@ whether the **message** is overridden; otherwise generate the message from the d
 
 ## Guardrails
 
+**Never**: push, amend, rebase, force, or skip hooks with `--no-verify`.
+
+
 - Commit only — never `git push`. Pushing is outward-facing; do it only if separately asked.
 - Do not amend or rebase existing commits.
 - Don't build or run anything; this command just commits.

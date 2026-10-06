@@ -1,14 +1,9 @@
 ---
 name: items-qa
 description: >-
-  Test whether the frontend implementation of one or more Azure DevOps work items actually satisfies
-  their Description and Acceptance Criteria — read per role, since a defect carries current and
-  expected behaviour where a backlog item carries a description and criteria, and no work item type
-  name is ever assumed — by driving a real browser against a given URL
-  (Playwright when connected, Claude in Chrome otherwise or for anything behind a login), reading
-  the existing Discussion to confirm or contradict earlier test rounds and pick up explained
-  deviations, and then posting a [CLAUDE AI - NEED REVIEW] verdict with screenshots into each item's
-  Discussion. Explicit trigger: only when the user types /items-qa.
+  Test frontend work items against their acceptance criteria in a real browser and post the verdict
+  into each item's Discussion. Explicit trigger: only when the user types /items-qa.
+disable-model-invocation: true
 ---
 
 # items-qa — verify work items against the running site, then post a reviewable verdict

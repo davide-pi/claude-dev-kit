@@ -1,13 +1,10 @@
 #!/usr/bin/env node
 /**
- * Tests for hooks/format-on-edit.ps1. Zero dependencies — `node:test` on Node 18+.
+ * Tests for hooks/format-on-edit.js. Zero dependencies — `node:test` on Node 18+.
  *
  *   node --test "tools/*.test.mjs"
  *
- * The hook is the one PowerShell script in the set, but the test is Node like the others, so
- * the one command above stays enough to check every hook.
- *
- * The whole file runs the hook with `-DryRun`, which prints the formatter invocation instead of
+ * The whole file runs the hook with `--dry-run`, which prints the formatter invocation instead of
  * performing it. That is the only way to assert the routing on any machine: the real run needs the
  * .NET SDK, an installed node_modules tree, or both, and a test that formats real files would
  * rewrite them. So every case fabricates a project layout in a temp directory and asserts *which*
@@ -24,13 +21,8 @@ import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
-const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'format-on-edit.ps1');
+const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'format-on-edit.js');
 const created = [];
-
-/** pwsh is the kit's shell, but a machine without it must not fail the suite. */
-const PWSH = ['pwsh', 'powershell'].find(
-  (exe) => spawnSync(exe, ['-NoProfile', '-Command', 'exit 0'], { encoding: 'utf8' }).status === 0,
-);
 
 process.on('exit', () => {
   for (const root of created) {
@@ -57,18 +49,14 @@ function fixture(files) {
 /** Run the hook in dry-run mode and return what it decided to invoke ('' = nothing). */
 function run(payload) {
   const input = typeof payload === 'string' ? payload : JSON.stringify(payload);
-  const result = spawnSync(
-    PWSH,
-    ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', HOOK, '-DryRun'],
-    { input, encoding: 'utf8' },
-  );
+  const result = spawnSync(process.execPath, [HOOK, '--dry-run'], { input, encoding: 'utf8' });
   assert.equal(result.status, 0, 'the hook must always exit 0, whatever happens');
   return result.stdout.trim();
 }
 
 const onFile = (file_path) => run({ tool_name: 'Write', tool_input: { file_path } });
 
-test('a C# file in a project that configures a style is formatted with the .NET formatter', { skip: !PWSH }, () => {
+test('a C# file in a project that configures a style is formatted with the .NET formatter', () => {
   const root = fixture({
     '.editorconfig': '[*.cs]\nindent_size = 4\n',
     'src/App/App.csproj': '<Project Sdk="Microsoft.NET.Sdk" />',
@@ -81,7 +69,7 @@ test('a C# file in a project that configures a style is formatted with the .NET 
   assert.match(plan, /--no-restore/, 'a hook must never restore packages mid-session');
 });
 
-test('a web file in a project that configures a formatter goes through the local package runner', { skip: !PWSH }, () => {
+test('a web file in a project that configures a formatter goes through the local package runner', () => {
   const root = fixture({
     'package.json': '{ "name": "web", "devDependencies": {} }',
     '.prettierrc': '{ "singleQuote": true }',
@@ -93,7 +81,7 @@ test('a web file in a project that configures a formatter goes through the local
   assert.match(plan, /order-list\.component\.ts/);
 });
 
-test('the formatter key may live in the package manifest instead of its own file', { skip: !PWSH }, () => {
+test('the formatter key may live in the package manifest instead of its own file', () => {
   const root = fixture({
     'package.json': '{ "name": "web", "prettier": { "printWidth": 100 } }',
     'node_modules/': '',
@@ -104,13 +92,13 @@ test('the formatter key may live in the package manifest instead of its own file
 
 // ── Doing nothing is the common case, and the one that must never surprise ─────────────────────
 
-test('a file outside any project is left alone', { skip: !PWSH }, () => {
+test('a file outside any project is left alone', () => {
   const root = fixture({ 'scratch/Notes.cs': 'class Notes { }', 'scratch/script.ts': 'export {};' });
   assert.equal(onFile(join(root, 'scratch/Notes.cs')), '');
   assert.equal(onFile(join(root, 'scratch/script.ts')), '');
 });
 
-test('a project with no style configured is left alone', { skip: !PWSH }, () => {
+test('a project with no style configured is left alone', () => {
   // A .csproj but no .editorconfig: the project never chose a style, so there is none to apply.
   const noStyle = fixture({
     'src/App/App.csproj': '<Project Sdk="Microsoft.NET.Sdk" />',
@@ -127,7 +115,7 @@ test('a project with no style configured is left alone', { skip: !PWSH }, () => 
   assert.equal(onFile(join(noFormatter, 'src/main.ts')), '');
 });
 
-test('a project whose dependencies are not installed is left alone', { skip: !PWSH }, () => {
+test('a project whose dependencies are not installed is left alone', () => {
   // Without node_modules the local runner would have to fetch the formatter: never, mid-session.
   const root = fixture({
     'package.json': '{ "name": "web" }',
@@ -137,7 +125,7 @@ test('a project whose dependencies are not installed is left alone', { skip: !PW
   assert.equal(onFile(join(root, 'src/main.ts')), '');
 });
 
-test('generated and dependency trees are never formatted', { skip: !PWSH }, () => {
+test('generated and dependency trees are never formatted', () => {
   const root = fixture({
     'package.json': '{ "name": "web" }',
     '.prettierrc': '{}',
@@ -150,7 +138,7 @@ test('generated and dependency trees are never formatted', { skip: !PWSH }, () =
   assert.equal(onFile(join(root, 'src/App/obj/Debug/App.AssemblyInfo.cs')), '');
 });
 
-test('an extension with no formatter of its own is left alone', { skip: !PWSH }, () => {
+test('an extension with no formatter of its own is left alone', () => {
   const root = fixture({
     '.editorconfig': 'root = true\n',
     'package.json': '{ "name": "web" }',
@@ -165,7 +153,7 @@ test('an extension with no formatter of its own is left alone', { skip: !PWSH },
   }
 });
 
-test('anything unusable is a no-op rather than a failed tool call', { skip: !PWSH }, () => {
+test('anything unusable is a no-op rather than a failed tool call', () => {
   assert.equal(run(''), '');
   assert.equal(run('not json at all'), '');
   assert.equal(run('{}'), '');

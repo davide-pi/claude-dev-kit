@@ -1,17 +1,10 @@
 ---
 name: user-story-standard
 description: >-
-  The company standard for what an Azure DevOps work item says: classifying a request into one of
-  four roles — User Story, Bug, Impediment, TECH activity — the exact body shape each one must have,
-  and how to write acceptance criteria in the mandatory Italian "Dato che / Quando / Allora" form
-  under a section titled "Criteri di accettazione". These four are roles, not type names: the type
-  created for each is resolved per project. Use whenever a user story, backlog item, PBI, bug,
-  impediment, TECH item, technical-debt or refactoring task, item description or acceptance
-  criteria has to be written, reworded, split or reviewed — including when the user only describes
-  a new feature, a malfunction, or something to be analysed before a fix can be defined, without
-  naming a work item at all. Also covers the four coverage families behind good criteria, platform
-  coverage as a project-level datum, and the optional CSV bulk-import file. Item text is Italian by
-  company standard; the skill's own guidance is English.
+  Use whenever item text is written, reworded, split or reviewed — a user story, PBI, bug,
+  impediment or TECH item, its description or acceptance criteria ("Dato che / Quando / Allora") —
+  even when the user only describes a feature, a malfunction or something to analyse without naming
+  an item.
 ---
 
 # user-story-standard — the fixed shapes a work item's text must have
@@ -27,7 +20,7 @@ description: >-
 
 Not for: putting items on the board — `workitem-create` owns how an item gets there (discovery, the
 confirmation tables, the CLI calls) and this skill never restates any of it; reading an item that
-already exists in order to plan the work (`workitem-analyze`); Azure DevOps CLI mechanics, auth,
+already exists in order to plan the work (`/item`, `plan-work`); Azure DevOps CLI mechanics, auth,
 verbs and which real type fills each role (`azdo-cli`); testing a built item against its criteria
 (`items-qa`); hours (`worklog`).
 

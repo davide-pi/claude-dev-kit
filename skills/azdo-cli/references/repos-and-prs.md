@@ -48,7 +48,7 @@ az repos pr policy list --id <pr> --query "[].{policy:configuration.type.display
 author, `-10` rejected.
 
 `az repos pr show` returns the PR's metadata and reviewers — **not its comment threads**. There is no
-thread verb anywhere under `az repos pr`; see the gap section below.
+thread verb anywhere under `az repos pr`; `invoke` reaches them — see the threads section below.
 
 ## Creating a pull request
 
@@ -126,7 +126,7 @@ is equally a merge — it just happens later, when nobody is watching.
 `az repos pr checkout --id <pr>` checks the source branch out locally, and refuses if the working
 tree is dirty. It is the cheapest way to run a PR's code without hand-copying the branch name.
 
-## The gap: comments and threads
+## Comments and threads — no verb, reachable through invoke
 
 There is no comment or thread verb under `az repos pr` — only `reviewer`, `policy`, `work-item`,
 `checkout`, `create`, `list`, `set-vote`, `show`, `update`. Reading a discussion, posting a comment,
@@ -147,9 +147,8 @@ Two routes, in order:
    Writing a thread is the same resource with `--http-method POST --in-file <body.json>`, and the
    inline anchor lives in the body's thread context, not in a flag. Confirm the route parameters
    against the resource listing in `auth-and-config.md` before a write.
-2. The MCP PR-thread tools, which model the thread and its inline anchor directly. This is the one
-   PR capability where MCP is routinely the right answer: an inline thread needs a file path, a line
-   range and an iteration context, and a hand-built body gets one of them wrong.
+2. The MCP PR-thread tools — the accepted fallback (`mcp-fallback.md`) only when the inline
+   anchor's thread context (file path, line range, iteration) cannot be verified for route 1.
 
-`pr-review` depends on this: it reads threads to avoid repeating an existing comment, and it posts
-inline. Both halves take route 2 unless route 1 has been verified.
+`pr-review` depends on this: it reads threads to avoid repeating an existing comment, and posts
+inline — route 1 first, route 2 only for an unverifiable anchor, and it says which one it used.

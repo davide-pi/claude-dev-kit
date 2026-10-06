@@ -1,108 +1,102 @@
-# Discovery, scrittura e idempotenza
+# Discovery, writes and idempotence
 
-CLI prima, sempre. Configurazione, auth, risoluzione org/progetto, WIQL e i verbi boards e repos
-stanno in `azdo-cli`: si chiama quella. Il server MCP Azure DevOps resta il **fallback documentato**
-per cio' che la CLI non copre — ricerca full-text, commenti sull'item, artifact link a un commit — e
-nel recap si dichiara quale delle due ha scritto.
+CLI first, always: config, auth, org/project resolution, WIQL and the boards and repos verbs belong
+to `azdo-cli`. What counts as a real CLI gap — and so may go to the MCP server — is decided only by
+`azdo-cli` `mcp-fallback.md`; the recap states which interface wrote what.
 
-## Fase 5 — discovery per topic
+## Phase 5 — discovery per topic
 
-Solo per i topic **loggabili** (arrotondato > 0). Per ognuno:
+Only for **loggable** topics (rounded > 0). For each:
 
-1. **Progetto.** Dal mapping workspace→progetto nelle istruzioni utente, in base al path del
-   progetto da cui viene il topic. Se il path non e' mappato, o il topic potrebbe stare su org
-   diverse e non e' deducibile, **chiedi**: mai indovinare.
-2. **Dove segnare le ore.** Cerca via WIQL fra i propri work item, per branch, per area o per
-   keyword del topic. Due esiti possibili:
-   - un **Task esistente** a cui aggiungere le ore, oppure
-   - la **User Story / parent** sotto cui **creare** un nuovo Task.
+1. **Project.** From the workspace→project mapping in the user instructions, by the path of the
+   project the topic came from. Unmapped path, or a topic that could sit on different orgs and
+   cannot be derived → **ask**; never guess.
+2. **Where the hours go.** WIQL over the user's own items, by branch, area or topic keyword. Two
+   outcomes:
+   - an **existing Task** to add the hours to, or
+   - the **backlog item / parent** under which a new Task is **created**.
 
-   Le ore si registrano sui **Task**, non sulle User Story. Se il topic e' chiaramente parte di una
-   US che non ha un Task adatto, il Task va creato.
+   Hours go on **Tasks**, never on backlog items: a topic clearly part of an item with no suitable
+   Task gets one. A **management** topic — attributable to no product item — is not searched for:
+   its destination is the fixed structure in `ore-gestione.md`.
+3. **Hours currently on the Task.** Read completed work. It serves twice: the write is cumulative,
+   and the value is **reconciled** with the audit (step 5).
+4. **PRs and commits to link** (best effort, confirmed in Table 2):
+   - **PR**: the one whose source branch is the topic's branch;
+   - **commits on the default branch**: `git -C "<project-path>" log --since=<From> --until=<To+1d> --author=(git config user.email) --oneline`,
+     keeping the hashes relevant to the topic.
+5. **Reconcile with what is already there.** Compare the hours read at step 3 with the sum of every
+   audit entry for that `itemId`. The difference is **hours this skill did not write**: logged by
+   hand, from the portal, or by another tool.
 
-   Se il topic e' di **gestione progetto** — non attribuibile a nessun item di prodotto — la
-   destinazione non si cerca: e' la struttura fissa della commessa, in `ore-gestione.md`.
-3. **Ore attualmente sul Task.** Leggi il campo del lavoro completato. Serve a due cose, non a una:
-   la scrittura e' cumulativa, e quel valore va **riconciliato** con l'audit (passo 5).
-4. **PR e commit da linkare** (best-effort, poi confermati in Tabella 2):
-   - **PR**: cerca quella con source branch uguale al branch del topic;
-   - **commit su master**: `git -C "<path-progetto>" log --since=<From> --until=<To+1g> --author=(git config user.email) --oneline`,
-     e tieni gli hash pertinenti al topic.
-5. **Riconciliazione con quello che c'e' gia'.** Confronta le ore lette al passo 3 con la somma di
-   tutte le voci d'audit per quell'`itemId`. La differenza sono **ore che questa skill non ha
-   scritto**: registrate a mano dall'utente, dal portale, o da un altro strumento.
-
-   | Situazione | Cosa fare |
+   | Situation | Action |
    | --- | --- |
-   | Item ↔ audit coincidono | idempotenza normale: delta = ore di adesso − ore gia' scritte **per questo periodo** |
-   | Sull'item ci sono ore che l'audit non conosce | **non sommare e basta.** In Tabella 2 dichiara `su item Xh (Yh non da worklog)` e **chiedi**: sono lo stesso lavoro (allora la stima **sostituisce** o si limita alla differenza) o lavoro diverso (allora si somma davvero)? |
-   | L'item ha piu' ore della stima e l'utente conferma che sono lo stesso lavoro | **delta 0**: le sue ore vincono sempre sulla stima dai transcript. Scrivi comunque la voce d'audit, cosi' la giornata risulta chiusa |
+   | item ↔ audit agree | normal idempotence: delta = hours now − hours already written **for this period** |
+   | the item has hours the audit does not know | **do not just add.** Table 2 shows `su item Xh (Yh non da worklog)` and **asks**: same work (the estimate **replaces** them, or covers only the difference) or different work (then it really adds)? |
+   | the item has more hours than the estimate and the user confirms same work | **delta 0**: the user's hours always beat the transcript estimate. Still write the audit entry, so the day is closed |
 
-   Il default sicuro e' **chiedere**: la stima viene da una timeline di prompt, le sue ore da lui.
-   Mai gonfiare un Task perche' l'audit non sapeva di una registrazione manuale.
+   The safe default is **asking**: the estimate comes from a prompt timeline, their hours from them.
+   Never inflate a Task because the audit did not know about a manual entry.
 
-Nessuna cache fra run: la discovery si rifa' ogni volta, perche' item, stati e PR cambiano.
+No cache between runs: discovery is redone every time, because items, states and PRs change.
 
-## Fase 7 — scrittura
+## Phase 7 — writes
 
-Distribuisci i topic su **massimo 4 sub-agent in parallelo**, con item **non sovrapposti**: nessun
-item toccato da due agent. Se i topic sono 4 o meno, un agent per topic; altrimenti raggruppa in 4
-lotti. Ogni agent applica le regole qui sotto ai suoi item e **riporta l'esito** (id item, ore prima
-e dopo, link creati, stato). Nessun agent scrive l'audit.
+Spread the topics over **at most 4 parallel sub-agents**, with **disjoint** items: no item touched
+by two agents. Four topics or fewer → one agent per topic; otherwise four batches. Each agent applies
+the rules below and **reports** item id, hours before and after, links created, state. No agent
+writes the audit.
 
-Finiti gli agent, **l'orchestratore** aggiorna l'audit **in sequenza** — una scrittura alla volta,
-niente race — e poi **verifica direttamente** rileggendo gli item creati o aggiornati: ore, parent,
-stato e link effettivamente presenti. Solo dopo stampa il recap.
+When the agents finish, **the orchestrator** updates the audit **in sequence** — one write at a
+time, no race — then **verifies directly** by reading back the created or updated items: hours,
+parent, state and links actually present. Only then does it print the recap.
 
-### Regole di scrittura
+### Write rules
 
-| Regola | Dettaglio |
+| Rule | Detail |
 | --- | --- |
-| Ore **cumulative** | leggi il valore attuale del Task, scrivi `attuale + delta`. **Mai** sovrascrivere. Per un Task nuovo il delta e' l'intero delle ore del topic |
-| Task nuovi | creali come **figli** della User Story indicata, cosi' ereditano area e iteration. Titolo e descrizione **in inglese** |
-| Assegnazione | assegna all'utente, risolvendone l'identita' **contro l'organizzazione** a runtime (`azdo-cli`, "Resolving the identity to assign to"); mai un account hardcodato, mai `git config user.email` |
-| Stato | **mai** lasciare un item in `New`: `Active` se il lavoro e' in corso (PR aperta, commit non pushato, in attesa di validazione), `Closed` se concluso (PR completata, o commit gia' su master). Se il tipo parte da `New`, correggi subito dopo la creazione |
-| Link PR | come **link reale** fra PR e work item, non come URL nel testo: solo il link vero muove le policy |
-| Link commit | se non c'e' un verbo per l'artifact link al commit, metti hash e URL nella descrizione o in un commento dell'item, e dillo |
-| Prima scrittura in assoluto | su un'org mai toccata nella sessione: scrivi **un solo** item, mostra il risultato, poi procedi col resto |
+| **Cumulative** hours | read the Task's current value, write `current + delta`. **Never** overwrite. New Task → the delta is the topic's whole hours |
+| New Tasks | created as **children** of the backlog item, so they inherit area and iteration. Title and description **in Italian** |
+| Assignee | the user, identity resolved **against the organization** at runtime (`azdo-cli`, "Resolving the identity to assign to"); never a hardcoded account, never `git config user.email` |
+| State | **never** leave an item `New`: `Active` if work is ongoing (open PR, unpushed commit, awaiting validation), `Closed` if done (PR completed, or commit already on the default branch). A type starting at `New` is corrected right after creation |
+| PR link | a **real link** between PR and work item, never a URL in the text: only the real link drives the policies |
+| Commit link | no verb for the commit artifact link → hash and URL in the item's description or a comment, and say so |
+| First write ever | on an org not touched yet this session: write **one** item, show the result, then continue |
 
-### Idempotenza in scrittura
+### Idempotent writes
 
-- Se l'audit ha gia' una voce per `(periodFrom, periodTo, itemId)`: applica **solo il delta**. Delta
-  0 → non toccare le ore; eventualmente aggiungi solo i link mancanti.
-- A successo, scrivi o aggiorna la voce con: `periodFrom`, `periodTo`, `topic`, `project`, `itemId`,
-  `parentId` (se creato), `created` (bool), `hoursLogged` (le ore **totali** di quel periodo su
-  quell'item, non il delta), `prs`, `commits`, `ts`.
-- `hoursLogged` e' il totale del periodo, non il cumulativo del work item: e' quello che rende
-  calcolabile il delta al ri-run.
-- L'audit **non viene mai potato**: la voce c'e' anche a mesi di distanza, quindi un ri-run vecchio
-  trova sempre il suo delta. E' il digest a scadere, non l'audit.
+- The audit already has `(periodFrom, periodTo, itemId)` → apply **only the delta**. Delta 0 →
+  leave the hours alone; at most add the missing links.
+- On success, write or update the entry with: `periodFrom`, `periodTo`, `topic`, `project`,
+  `itemId`, `parentId` (if created), `created` (bool), `hoursLogged` (the **total** for that period
+  on that item, not the delta), `prs`, `commits`, `ts`.
+- `hoursLogged` is the period's total, not the work item's cumulative value: that is what makes the
+  delta computable on a re-run.
+- The audit is **never pruned**: the entry exists months later, so an old re-run always finds its
+  delta. The digest expires, not the audit.
 
-### Il giorno chiuso
+### The closed day
 
-Una giornata e' "chiusa" quando **esiste una voce d'audit che la copre** — e' il solo criterio, ed e'
-quello che legge `hooks/worklog-pending.js` per il promemoria a inizio sessione e per il badge in
-statusline. Da qui una regola che non e' facoltativa:
+A day is "closed" when **an audit entry covers it** — the only criterion, and the one
+`hooks/worklog-pending.js` reads for the session-start reminder and the statusline badge. So:
 
-| Caso | Cosa scrivere in audit |
+| Case | Audit entry |
 | --- | --- |
-| Ore registrate | la voce normale, una per item |
-| Ore finite su un **foglio** e non su una board (le root che la mappatura in `CLAUDE.md` manda a un foglio, eccezioni comprese) | voce di chiusura con le ore vere: `itemId: null`, `hoursLogged: <ore>`, `project: "<root>/<progetto>"`, `sheet: "<path del foglio>"` — senza, una giornata tutta su foglio non e' chiudibile se non mentendo con uno zero |
-| Il giorno c'e' stato ma **non c'e' niente da registrare** (solo tooling, ferie, permesso, giornata interamente `internal`) | una voce di chiusura: `topic: "nulla-da-registrare"`, `itemId: null`, `hoursLogged: 0`, `project: null`, piu' `periodFrom`/`periodTo`/`ts` |
-| L'utente rimanda ("lo faccio domani") | **niente**: la giornata resta pendente, ed e' esattamente cio' che deve succedere |
+| Hours logged | the normal entry, one per item |
+| Hours kept on a **sheet**, not a board (roots the `CLAUDE.md` mapping sends to a sheet, exceptions included) | a closing entry with the real hours: `itemId: null`, `hoursLogged: <hours>`, `project: "<root>/<project>"`, `sheet: "<sheet path>"` — without it a sheet-only day can only be closed by lying with a zero |
+| The day happened but **nothing is loggable** (tooling only, leave, a fully `internal` day) | a closing entry: `topic: "nulla-da-registrare"`, `itemId: null`, `hoursLogged: 0`, `project: null`, plus `periodFrom`/`periodTo`/`ts` |
+| The user postpones ("lo faccio domani") | **nothing**: the day stays pending, which is exactly right |
 
-Senza la voce di chiusura una giornata di sole ferie resta segnalata per sempre e il promemoria
-diventa rumore da ignorare — il modo esatto in cui un promemoria smette di funzionare. Chiedi
-esplicitamente prima di scriverla: "il <data> non c'e' niente da registrare, lo chiudo a zero?"
+Without the closing entry a leave-only day stays flagged forever and the reminder becomes noise to
+ignore. Ask explicitly before writing it, in Italian: "il <data> non c'è niente da registrare, lo
+chiudo a zero?"
 
 ## Traps
 
-1. Ore raddoppiate → scrittura sovrascritta o delta ignorato → leggi, somma, riscrivi.
-2. Ore su una User Story → si loggano sui Task → crea il Task figlio.
-3. Item nuovo lasciato in `New` → il tipo parte da `New` → correggi lo stato subito dopo.
-4. Due agent sullo stesso item → lotti sovrapposti → item disgiunti per agent.
-5. Audit corrotto da scritture concorrenti → gli agent lo hanno scritto → lo scrive solo
-   l'orchestratore, in sequenza.
-6. PR linkata come URL nella descrizione → non muove nulla → usa il link reale.
-7. Recap che descrive il piano invece dell'esito → non si e' riletto nulla → verifica sugli item
-   prima di stampare.
+1. Hours doubled → overwritten, or the delta ignored → read, add, write back.
+2. Hours on a backlog item → they go on Tasks → create the child Task.
+3. New item left `New` → the type starts there → correct the state right after.
+4. Two agents on one item → overlapping batches → disjoint items per agent.
+5. Audit corrupted by concurrent writes → the agents wrote it → only the orchestrator, in sequence.
+6. PR linked as a URL in the description → it drives nothing → the real link.
+7. The recap describes the plan instead of the outcome → nothing was read back → verify first.

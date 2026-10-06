@@ -8,6 +8,22 @@ The package versions that decide which APIs exist are in the app host's project 
 name here does not match what the solution has, read that file and confirm against the official
 docs (the `microsoft-docs` plugin) rather than guessing at a rename.
 
+## The app host in the large backend — what it does and does not do
+
+| Fact | Consequence |
+| --- | --- |
+| it starts the .NET service projects only, each with `WithHttpHealthCheck("/health")` | SQL Server, Postgres, Redis and RabbitMQ are **not** containers it owns: they come from each service's configuration (user secrets, environment variables) pointing at instances that already exist |
+| a profile, chosen with the `ASPIRE_PROFILE` environment variable, selects which services start — from the full set down to minimal per-flow sets | start the smallest profile containing the service you changed; read the profile list in the app host's `Program.cs` |
+| the solution's old compose file describes services that no longer exist | the app host is the source of truth for the live topology; do not "fix" the compose file to run the stack |
+| the dashboard collects every service's logs and traces | the first place to look locally, before `docker logs` or a debugger |
+
+```powershell
+$env:ASPIRE_PROFILE = '<profile>'          # unset → the full set
+dotnet run --project .\src\orchestration\<AppHost project>
+```
+
+The generic example below shows what an app host *can* own; this one deliberately owns less.
+
 ## What the app host actually does
 
 ```csharp

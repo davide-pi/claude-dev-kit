@@ -1,13 +1,9 @@
 ---
 name: pr-create
 description: >-
-  Open a pull request on Azure DevOps or GitHub, with an Italian title and description and at least
-  one work item linked — always the parent backlog item, never a Task. Use when creating a PR, when
-  writing a PR title or body, or when a finished branch has to be turned into a reviewable change.
-  Covers platform detection, the protected default branch, the imperative Italian title rule, the
-  body a reviewer needs and the releasable components — services, apps, jobs — the change forces a
-  deploy of, resolving a Task id to its parent, the refusal to open an unlinked PR, draft versus
-  ready, and re-pushing an open PR.
+  Use whenever a pull request has to be opened or its title and description written, on Azure DevOps
+  or GitHub — "open the PR", "ship this branch", "write the PR description" — including linking the
+  parent work item and naming what the change forces to deploy.
 ---
 
 # pr-create — turn a pushed branch into a reviewable PR

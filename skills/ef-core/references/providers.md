@@ -71,7 +71,7 @@ A query that filters inside JSON is therefore not portable, and on either engine
 an index unless one is created specifically for that path.
 
 Rule: JSON is for data you store and read whole. The moment you filter or join on a value inside it,
-promote that value to a real column. Postgres-specific JSONB work belongs to `postgres`.
+promote that value to a real column. Postgres porting and Npgsql specifics live in `sql-server`.
 
 ## Raw SQL and functions
 
@@ -112,7 +112,7 @@ If a solution genuinely must run on both:
 - one migrations assembly per provider;
 - no raw SQL in shared code;
 - run the test suite against **both** engines in containers, or the second provider is unverified
-  (`dotnet-testing`, `real-database.md`);
+  (`dotnet-testing`, `untested-legacy.md`);
 - decide whether it is worth it. Two verified providers is a permanent tax on every data change.
 
 ## Tooling on this machine

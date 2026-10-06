@@ -9,11 +9,11 @@ What it must handle, all of it, or it will be re-implemented badly in the next c
 
 | Requirement | Why |
 | --- | --- |
-| a discriminated state (idle / loading / loaded / failed), not three independent flags | otherwise loading-and-loaded render at once; see `typescript` |
+| a discriminated state (idle / loading / loaded / failed), not three independent flags | otherwise loading-and-loaded render at once |
 | an `AbortController`, aborted in the effect cleanup | a component unmounting mid-request, and rapid re-triggers, both leak and race |
 | ignoring a response whose request was superseded | out-of-order resolution overwrites fresh data with stale data |
 | a non-ok response treated as a failure | `fetch` rejects only on network errors — a server error status resolves normally, and the JSON parse then throws something unhelpful |
-| validation of the body at this boundary | the response type is a claim, not a check — `typescript`, `references/boundaries.md` |
+| validation of the body at this boundary | the response type is a claim, not a check — parse it here |
 | a stable request key (URL plus params) as the effect dependency | an object literal in the dependency array refetches on every render |
 | a way to refetch on demand | a counter or a callback the caller can invoke after a mutation |
 | idempotence under the development double invoke | it is deliberate; an effect that misbehaves under it is broken anyway |

@@ -1,5 +1,5 @@
 ---
-description: Tail and filter the current service's logs, whichever way this project produces them — compose, container, log files, Kubernetes or the Aspire dashboard.
+description: Tail and filter the current service's logs — compose, container, log files, Kubernetes or Aspire, whichever this project uses.
 argument-hint: "[service] [filter] [--since <dur>] [-n <lines>] [--follow] [--errors]"
 ---
 
@@ -68,6 +68,9 @@ to **`dotnet-diagnostics`**, and the stack itself to **`docker-dev-env`**.
    used, and offer the wider window.
 
 ## Guardrails
+
+**Never**: start, stop or restart anything, delete or rotate a log, quote a secret.
+
 
 - **Read-only.** No `docker compose up`/`down`/`restart`, no `docker rm`, no `kubectl delete`, no
   `--dry-run` side trips, no starting or stopping anything to make logs appear.

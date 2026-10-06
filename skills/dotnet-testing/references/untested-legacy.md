@@ -1,96 +1,109 @@
-# The first test in code that has none
+# The first test in code that has none — the normal case here
 
-The largest platform here is a layered microservices estate of over a hundred projects with almost no
-tests. The realistic goal is not coverage. It is: **the change I am about to make is protected, and
-the next person can extend that protection.**
+The large RPC-heavy backend has **no test projects at all**: no xUnit, NUnit or MSTest anywhere, and
+its pipelines carry no test stage on purpose. A change there is verified today by building the
+solution, running an Aspire app-host profile that includes the touched service, checking `/health`,
+and exercising the changed path by hand — and that verification is stated in the change, not implied.
+The realistic goal is not coverage. It is: **the change I am about to make is protected, and the next
+person can extend that protection.**
 
 ## Order of operations
 
 ```
-Is there any test project for this service?
-  no  -> create one, and write the host startup test first (it proves DI and config resolve)
-Can I call the class under test without a database or a host?
-  yes -> characterization test, then change
-  no  -> find a seam (below). Still not testable in under an hour?
-           -> sprout the new logic into a new tested class, and leave the old one alone
+Is the change risky (money, settlement, permissions, data loss, a recurring bug)?
+  no  -> verify the house way (build, profile, /health, exercise the path); write the gap down
+  yes -> is there a test project for this service tree?
+           no  -> create one (below), in the same pull request as the change
+         Can the code under test be called without a broker, a database or a host?
+           yes -> characterization test, commit it alone, then change the code
+           no  -> find a seam (below). Still not testable within the hour?
+                    -> sprout the new logic into a new tested class; leave the old one alone
 ```
 
-## The startup test, first
+Never refactor to make code testable *first*: that is an untested refactor of untested code.
 
-One test that boots the host in memory and requests one endpoint. It costs ten minutes and catches
-missing registrations, captive dependencies, bad configuration binding and broken middleware order —
-the failures that otherwise appear after deployment. In a service with no tests, this is the highest
-value per line you will ever write. See `integration-host.md`.
+## The seam this codebase hands you for free
 
-## Characterization tests
+Almost every unit of behaviour is an RPC responder or a subscriber: a class implementing the service's
+subscriber interface, whose `Subscribe()` registers a **public method** taking the request contract
+and returning the response contract. That method *is* the seam.
 
-Before changing behaviour you do not fully understand, pin down what it does **today**:
+| Piece | In the test |
+| --- | --- |
+| the responder method (`Task<TResponse> XxxAsync(TRequest)`) | call it directly with a request built from the `*.ServiceContract` type — no broker |
+| `IBus` used for an outgoing `Rpc.RequestAsync` / `PubSub.Publish` | a substitute; assert the outgoing request or the published event |
+| a DAO behind an interface | a substitute or a fake for rule logic; a real engine for the SQL itself |
+| a context factory creating a `DbContext` inside the method | a real database test — never the in-memory provider |
+| the error contract (`IsSuccess`, an error status on the response) | assert it: errors travel as data here, so the response *is* the outcome |
+| the bootstrap hosted service and its retry policy | out of scope — framework plumbing |
 
-1. Call the method with realistic input.
-2. Assert whatever it actually returns, even if it looks wrong. Run it, take the output, assert that.
-3. Add a comment: this records current behaviour, not desired behaviour.
-4. Now refactor. A red test means you changed something; decide whether you meant to.
-5. When you deliberately change behaviour, update the test in the same commit as the code, so the
-   diff shows the behaviour change explicitly.
+## Characterization — asserting what *is*
 
-This is the only technique that makes a risky refactor reviewable. Do not skip it because the code
-"obviously" does X.
+1. Call the method with a realistic input and assert something deliberately wrong.
+2. Run it; the failure message carries the actual value. Assert that value.
+3. Mark it: `// CHARACTERIZATION: records current behaviour, not intended behaviour.`
+4. Cover boundaries, empty, null, the largest realistic case, and one input from real data.
+5. Commit the tests **alone**, then change the code. A red test is either the intended change (update
+   it in the same commit, so the diff shows the behaviour change) or a regression (stop).
 
-## Finding a seam
+Output too large to assert field by field → a golden master: serialize to indented JSON beside the
+test and compare. No timestamps, generated ids, dictionary ordering or culture-dependent formatting
+inside it, and regenerated deliberately, never automatically in CI.
 
-A seam is a place where behaviour can be changed without editing the code under test.
+## Breaking dependencies without a rewrite
 
-| Obstacle | Smallest honest change |
-|---|---|
-| Dependencies constructed inside the method | promote them to constructor parameters (existing callers keep working if you add a second constructor) |
-| A static helper doing I/O | wrap it in an interface, inject the wrapper; the static stays for other callers |
-| `DateTime.UtcNow` inline | inject a clock; a default parameter avoids touching every caller |
-| A service locator lookup | pass the resolved dependency in |
-| Configuration read from a static root | bind an options object and inject it |
-| A sealed or internal type you must substitute | expose an interface, or test through the layer above |
-| A `DbContext` created in the method | inject it, then use a real database test |
+| Obstacle | Smallest honest change | Watch out for |
+| --- | --- | --- |
+| a concrete class constructed inline | promote it to a constructor parameter, keep a second constructor for callers | do not touch every call site in the same commit |
+| a static helper doing I/O | interface plus a default delegating to the static | the static stays for other callers |
+| `DateTime.UtcNow`, `Guid.NewGuid()`, `Random` inline | inject a provider | every use must go through it, or the test still flakes |
+| configuration read from a static root | bind an options object and inject it | reading configuration in a domain class is the real defect |
+| an HTTP client | an interface for the *operation*, not for the client | mocking the raw client makes brittle tests |
+| Redis through the cache SDK | the SDK's interfaces (`ICacheAdapter`, `IStreamManager`) are already the seam | assert the key and the TTL, not the serializer |
 
-Each of these is a mechanical, reviewable refactor with no behaviour change. Do them one at a time,
-committed separately from the feature, so a reviewer can see that nothing moved.
+Each move is mechanical and reviewable, committed separately from the feature.
 
-## Sprout and wrap
+**Sprout** — new logic in a new tested class, called from one line of the legacy method. **Wrap** —
+rename the old method intact, add a new one with the old name calling it plus the new, tested step.
+Both leave the untested mass exactly as untested as before; that is the right trade in a codebase of
+hundreds of projects.
 
-When the class resists testing and you cannot afford the refactor:
+## Opening the first test project
 
-- **Sprout** — the new logic goes into a new class with its own tests; the old method calls it. The
-  new code is covered, the old code is untouched, and the diff in the legacy file is one line.
-- **Wrap** — you must change existing behaviour: rename the old method (keeping it intact), write a
-  new method with the old name that calls the renamed one plus the new step. Both are visible, and
-  the new step is testable in isolation.
+```powershell
+dotnet new xunit -o .\src\<Tree>\tests\<Project>.Tests
+dotnet add .\src\<Tree>\tests\<Project>.Tests reference .\src\<Tree>\src\<Project>
+dotnet sln <solution file> add .\src\<Tree>\tests\<Project>.Tests   # .slnx works the same way
+dotnet test .\src\<Tree>\tests\<Project>.Tests
+```
 
-Both leave the untested mass exactly as untested as before. That is the trade, and it is the right one
-when the alternative is an untested change to a hundred-project estate.
+- Put it in the solution, or `dotnet test` and the pipeline never find it and it silently dies.
+- In the **same pull request**, add the test step to that tree's build pipeline: the "no test stage"
+  rule in `pipeline` holds only while a tree has no tests.
+- Keep it a unit lane: no broker, no database. The first slow test teaches everyone to skip the suite.
+
+## Integration host and real database — a note, not a plan
+
+- **Host test**: for an HTTP-facing service, one test that boots the host in memory and calls one
+  endpoint catches missing registrations, captive dependencies and bad binding. For a pure RPC
+  service, the equivalent is building the service provider and resolving every subscriber.
+- **Real database**: a SQL Server container through Testcontainers, migrated with the real
+  migrations, reset per test. The in-memory EF provider is not relational and passes queries the real
+  engine rejects. The Postgres read cache is tested against a Postgres container, because its SQL has
+  no compiler at all.
+- Both cost seconds per test and a running container runtime: they earn their place on data-loss and
+  money paths, not as the default.
 
 ## What to leave alone
 
 | Leave it | Reason |
-|---|---|
-| Code you are not changing | tests written for their own sake rot and nobody trusts them |
-| Generated code, migrations, snapshots | the generator is the contract |
-| A trivial pass-through (controller action calling one service) | the test asserts the compiler |
-| A class scheduled for deletion | write the test on its replacement |
-| The whole estate, "for coverage" | a number nobody acts on, bought with weeks |
+| --- | --- |
+| code you are not changing | tests written for their own sake rot |
+| generated code, migrations, snapshots | the generator is the contract |
+| a pass-through responder that only forwards to one DAO call | the test asserts the compiler |
+| a class scheduled for deletion | test its replacement |
+| the whole estate "for coverage" | a number nobody acts on, bought with weeks |
 
-## Prioritizing, when you get to choose
-
-Highest value first: code that has broken before; money, permissions, or data-loss paths; anything
-with branching logic on more than two conditions; anything about to be changed. Lowest: DTOs,
-mappings a compiler would catch, and thin wrappers.
-
-`test-strategy` covers the risk-based decision in full; this file covers making it possible at all.
-
-## Making it stick
-
-- Put the test project next to the code, in the solution, so `dotnet test` finds it. A test project
-  not in the solution will not run in the pipeline and will silently die.
-- Wire it into the pipeline in the same pull request. A test suite that is not gating merges stops
-  being maintained within weeks.
-- Keep the fast lane fast from day one — the first slow test is what teaches everyone to skip the
-  suite. See `suite-speed.md`.
-- Copy the conventions of the two repositories here that do have solid tests, rather than inventing a
-  third style. Check which assertion and substitute libraries they reference and use the same ones.
+Stop when the next test would cover a path that cannot lose money, leak data or corrupt state, and the
+change at hand does not touch it. Write the gap in the change description: a gap that is written down
+is a decision, one that is not is an accident.

@@ -94,7 +94,7 @@ on healthy dependencies. Causes, in order of frequency: blocking on async, synch
 database calls on hot paths, a lock held across an await, and `Task.Run` used to "make it async".
 
 Confirm it rather than guessing — the thread-pool queue length and thread count counters say so
-directly. See `dotnet-diagnostics`, `triage.md`.
+directly. See `dotnet-diagnostics` for the instruments.
 
 ## Locks and async
 

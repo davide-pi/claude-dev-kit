@@ -1,15 +1,9 @@
 ---
 name: workitem-create
 description: >-
-  Create one or more Azure DevOps work items from a description and images, complete enough for a
-  human or an AI to implement without asking anything back. Runs a targeted Q&A that escalates to
-  grilling, then two confirmation tables (type/title, then type/title/parent), then creates the
-  items in Italian through the Azure DevOps CLI, state New and assigned to the user by default.
-  Item wording and
-  acceptance criteria follow user-story-standard, which classifies by role. Project, parent and the
-  work item type that fills each role are discovered at runtime through azdo-cli — no type name is
-  ever hardcoded or defaulted, and a role the project has no type for is a question, not a
-  substitution. Explicit trigger: only when the user types /workitem-create.
+  Create Azure DevOps work items — one, a small tree, or a session cart from a client meeting —
+  through Q&A and confirmation tables. Explicit trigger: only when the user types /workitem-create.
+disable-model-invocation: true
 ---
 
 # workitem-create — a description becomes real work items
@@ -19,9 +13,12 @@ description: >-
 - The user types `/workitem-create`, with or without a description and pasted images.
 - A piece of work has to become one item, or a small hierarchy of items, on a board.
 - An existing parent — a grouping item, or a backlog item that needs units of time — takes children.
+- `/workitem-create` after a client meeting, or with "sessione" / several points to draft under one
+  feature: the **session mode** — one point at a time into a cart, recap, bulk create
+  (`references/session-cart.md`).
 
 Not for: logging hours on an existing item (`worklog`), reading or analysing an item already on the
-board, testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth, verbs and
+board (`/item`, `plan-work`), testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth, verbs and
 the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 
 ## Decide
@@ -30,7 +27,7 @@ the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 
 | Rule | Detail |
 | --- | --- |
-| Italian on the board | every title, description and criterion written to the board; chat, questions and tables follow the user |
+| Italian | every title, description and criterion written to the board, and every question, table and confirmation the user reads |
 | Nothing hardcoded | project, parent, fields and the type filling each role are **discovered at runtime**, every run |
 | New, assigned to the user | the default for every item created here; another assignee, or none at all, only where the user said so. The identity is resolved **against the organization** at gate 4 (`azdo-cli`) and shown in Table 2 |
 | Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
@@ -49,7 +46,7 @@ the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 
 Never merge two gates into one message, and never move past one without explicit approval.
 
-### 3. Discovery — CLI first, MCP where the CLI has no verb
+### 3. Discovery — CLI first
 
 The Azure DevOps CLI is the **first move** for everything in gate 4 and for the creation itself.
 Configuration, auth, org/project resolution, WIQL and the boards verbs all belong to `azdo-cli` —
@@ -66,7 +63,7 @@ has; `azdo-cli` owns the role-to-type mapping and the discovery calls.
 | which types are actually **in use** | CLI: a WIQL sample, deduped on the type field (WIQL has no `DISTINCT`) |
 | candidate parents | CLI: WIQL by area, title keyword or recent activity; propose the best, let the user confirm or give an id/URL |
 | the identity to assign to | CLI, **once per organization**: the WIQL `@Me` probe in `azdo-cli` — never `git config user.email`, which is the machine's identity and belongs to the wrong tenant as soon as a second org is in play |
-| free-text or cross-project search, attachments, item comments | **MCP fallback** — the CLI has no verb for these |
+| anything the CLI seems not to reach | the gap list in `azdo-cli` `mcp-fallback.md` decides — never restate it here |
 
 **No type name is a default.** If the project has no type for a role — a technical activity on a
 process that has none, an analysis item on a process without one — **ask** which type to use and
@@ -88,7 +85,7 @@ git remote get-url origin        # which repo, hence which project the work belo
 
 Everything else is Azure DevOps: project listing, type and field metadata, WIQL parent search, the
 creates, the parent links and the read-back verification all run through the CLI as documented in
-`azdo-cli`, with the MCP fallback above where no verb exists. Per-call rules — which fields are
+`azdo-cli`. Per-call rules — which fields are
 safe to set on which type, HTML bodies, creation order, first-create caution, mid-batch failure
 reporting and the read-back — are in `item-content.md`.
 
@@ -107,9 +104,8 @@ Report the result as the final table plus the manual-attachment checklist (`tabl
    created before stopping.
 5. Items are created in the wrong project → the project was inferred from the conversation, not the
    path → resolve it from the workspace mapping or ask; state the project in Table 2.
-6. Images silently disappear → the CLI cannot upload attachments → leave numbered placeholders in
-   the body and end with the manual-attachment checklist; use the MCP attachment capability only if
-   the connected server actually exposes one.
+6. Images silently disappear → they were never attached → attach them over REST with the `az login`
+   token (`azdo-cli`); whatever fails stays a numbered placeholder in the manual-attachment checklist.
 7. An item is created in state New but the type starts elsewhere → the process defines its own
    initial state → set the state explicitly after the create when it differs.
 8. A type name from the last project is reused → it was remembered instead of discovered → resolve
@@ -127,3 +123,5 @@ Report the result as the final table plus the manual-attachment checklist (`tabl
 - `tables.md` — the exact shape of Table 1, Table 2, the final summary and the attachment checklist,
   with the link and hierarchy formats and the confirmation loops.
 - `item-content.md` — fields and HTML, creation order and parent linking, safeguards, read-back.
+- `session-cart.md` — session mode: focus grouping and feature, one point at a time into a cart,
+  assignee inference, the recap and the bulk create.

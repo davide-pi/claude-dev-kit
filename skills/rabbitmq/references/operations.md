@@ -1,146 +1,125 @@
-# Operating the broker from the command line
+# Operating the broker from the command line — read the state, change nothing
 
-Everything here works against a broker in compose, without opening the management UI, so it can be
-scripted, diffed and pasted into a ticket.
+This is the procedure for "what is the broker holding right now". `rabbitmqctl` and `rabbitmqadmin`
+are **not on PATH**: they live inside the broker container and are reached with `docker exec`, or the
+management HTTP API is called directly. Topology and retry design are in `principles.md`; the client
+stack is `docker-dev-env`.
 
-## Two interfaces
+**Language:** the diagnosis and the report are **Italian**; queue, exchange, vhost and container
+names, routing keys, header names such as `x-death`, counters and payloads pass through verbatim.
 
-| Interface                 | Reach it with                                 | Good for                                        |
-| ------------------------- | --------------------------------------------- | ----------------------------------------------- |
-| `rabbitmqctl`             | `docker compose exec -T rabbitmq rabbitmqctl`  | node state, queues, consumers, users, purging    |
-| `rabbitmq-diagnostics`    | same, `rabbitmq-diagnostics`                   | health checks, alarms, memory breakdown          |
-| Management HTTP API       | `http://localhost:15672/api/...`               | everything, as JSON — rates, bindings, peeking at messages |
-| `rabbitmqadmin`           | shipped with the management plugin              | a thin CLI over that API, when curl-shaped work is awkward |
+## The procedure
 
-The HTTP API needs the management plugin enabled: `docker compose exec -T rabbitmq rabbitmq-plugins
-list` shows it. Credentials come from the compose file's environment, and the default virtual host
-`/` must be URL-encoded as `%2F` in every path.
+1. **Find the broker.** Nothing running → say so and stop; starting it is `docker-dev-env`'s job.
+   Credentials and vhost come from the project's config (compose environment, `appsettings*.json`),
+   never from a guess, and are never printed. Development brokers only: a non-local host stops here.
+
+   ```powershell
+   docker compose ps
+   docker ps --filter "ancestor=rabbitmq" --format "table {{.Names}}\t{{.Ports}}\t{{.Status}}"
+   $c = '<container>'; $vh = '<vhost>'
+   ```
+
+2. **Health first** — a blocked publisher is usually an alarm, not a bug:
+
+   ```powershell
+   docker exec $c rabbitmq-diagnostics check_running
+   docker exec $c rabbitmq-diagnostics status       # listeners, memory, disk free, any ALARM
+   ```
+
+   Past its memory or disk high-watermark a node stops accepting publishes: the connection is
+   *blocked*, not broken, so the application sees writes that never complete and no error at all.
+
+3. **Overview** — depth, ready, unacked and consumers in one call:
+
+   ```powershell
+   docker exec $c rabbitmqctl list_queues --vhost $vh name messages messages_ready messages_unacknowledged consumers state
+   ```
+
+4. **Read the numbers — the diagnosis is in the combination.**
+
+   | Pattern | Meaning |
+   | --- | --- |
+   | an RPC request queue (named after the request type) with `consumers` 0 | **the responder is not subscribed** — every caller waits the full RPC timeout, then throws |
+   | an RPC request queue with `messages_ready` > 0 and consumers > 0 | the responder is too slow; callers will time out before it answers |
+   | many `easynetq.response.*` queues | one reply queue per requesting bus — normal; one with depth is a caller that died mid-request |
+   | `messages_ready` high, `consumers` 0, on a subscriber queue | the consumer is down, or its subscription id changed in a deploy |
+   | `messages_ready` climbing with consumers > 0 | consumers too slow, or prefetch too low |
+   | `messages_unacknowledged` high and static | a handler took messages and never acked — stuck, or a swallowed exception |
+   | the error or dead-letter queue growing | messages fail repeatedly; the payload in step 6 is the evidence |
+   | a familiar type name in an unexpected queue, or two consumers where one was expected | a stray or copy-pasted subscription id (`easynetq.md`) |
+   | a queue with no consumers and no publishers | dead topology — a binding that no longer matches |
+
+5. **Dead letters, bindings, consumers.** Read the arguments rather than guessing from a name:
+
+   ```powershell
+   docker exec $c rabbitmqctl list_queues --vhost $vh name arguments messages
+   docker exec $c rabbitmqctl list_bindings --vhost $vh
+   docker exec $c rabbitmqctl list_consumers --vhost $vh      # queue, channel, prefetch, ack mode
+   ```
+
+   A missing **binding** is the silent failure: the publish succeeds, the exchange routes to nothing.
+
+6. **Peek, non-destructively.** The message must go back on the queue:
+
+   ```powershell
+   docker exec $c rabbitmqadmin -V $vh get queue=<name> count=1 ackmode=reject_requeue_true
+   ```
+
+   `ackmode=reject_requeue_true` is the only mode allowed — every `ack_*` mode removes the message.
+   Report the routing key, the headers (`x-death`: original queue, reason, count; an EasyNetQ error
+   message carries the exception text in its body), and the payload with any token or connection
+   string redacted. A peek reorders the head of the queue — say so when order matters.
+
+7. **Report**: broker container and vhost · a table of queues worst first (Italian headers over the
+   real field values) · dead-letter and error queues separately with their reason · the peeked
+   message if asked · one line with the most likely cause from step 4 and the next look
+   (`/logs <service>`, the `investigator` agent in trace mode for which service should be answering).
+
+## The management HTTP API, when a CLI is awkward
 
 ```powershell
-$c = @('compose','exec','-T','rabbitmq')
 $auth = @{ Authorization = 'Basic ' + [Convert]::ToBase64String(
     [Text.Encoding]::ASCII.GetBytes("$env:RABBIT_USER`:$env:RABBIT_PASS")) }
-$base = 'http://localhost:15672/api'
-$vh   = '%2F'
-```
-
-## Is the broker healthy?
-
-```powershell
-docker @c rabbitmq-diagnostics check_running
-docker @c rabbitmq-diagnostics status            # listeners, memory, disk free, and any ALARM
-docker @c rabbitmq-diagnostics memory_breakdown
-docker @c rabbitmq-diagnostics list_unresponsive_queues
-(Invoke-RestMethod "$base/overview" -Headers $auth) |
-  Select-Object rabbitmq_version, @{n='ready';e={$_.queue_totals.messages_ready}},
-                @{n='unacked';e={$_.queue_totals.messages_unacknowledged}}
-```
-
-**Memory and disk alarms are the first thing to check when publishers hang.** When a node crosses its
-high-watermark, it stops accepting publishes: the connection is *blocked*, not broken, so the
-application sees writes that never complete and no error at all. `status` names the alarm.
-
-## Queue state — the numbers that matter
-
-```powershell
-docker @c rabbitmqctl list_queues name messages messages_ready messages_unacknowledged consumers
+$base = 'http://localhost:15672/api'      # the default vhost '/' is '%2F' in every path
 (Invoke-RestMethod "$base/queues" -Headers $auth) |
-  Select-Object name, messages, messages_ready, messages_unacknowledged, consumers,
-                consumer_utilisation, idle_since,
-                @{n='in';e={$_.message_stats.publish_details.rate}},
-                @{n='out';e={$_.message_stats.deliver_get_details.rate}} |
+  Select-Object name, messages, messages_ready, messages_unacknowledged, consumers, idle_since |
   Sort-Object messages -Descending | Format-Table
+Invoke-RestMethod "$base/connections" -Headers $auth | Select-Object name, user, client_properties, state
 ```
 
-| Reading                                              | Diagnosis                                                    |
-| ---------------------------------------------------- | ------------------------------------------------------------ |
-| `consumers = 0` on a work queue                       | nobody is consuming: the service is down, or its subscription id changed |
-| `messages_ready` climbing, `in` > `out`               | the consumers cannot keep up: scale out, or the handler is the bottleneck |
-| `messages_unacknowledged` high and static             | handlers are stuck — a blocking call, or a consumer timeout about to fire |
-| `messages_unacknowledged` ≈ prefetch × consumers      | normal saturation                                             |
-| `consumer_utilisation` well below 1                   | consumers idle waiting for deliveries: raise prefetch          |
-| `idle_since` old on an error queue                    | good — nothing new is failing                                  |
-| An unexpected queue with a familiar type name         | a stray subscription id; see `easynetq.md`                     |
-| Two consumers on a queue you expected to be exclusive | a copy-pasted subscription id                                  |
-
-```powershell
-docker @c rabbitmqctl list_consumers                      # queue, channel, prefetch, ack mode
-Invoke-RestMethod "$base/queues/$vh/orders.created.q" -Headers $auth   # one queue, everything
-Invoke-RestMethod "$base/bindings" -Headers $auth |
-  Select-Object source, destination, routing_key            # is the binding you think exists there?
-Invoke-RestMethod "$base/connections" -Headers $auth |
-  Select-Object name, user, client_properties, state        # `product` set per service pays off here
-Invoke-RestMethod "$base/channels" -Headers $auth |
-  Select-Object name, prefetch_count, messages_unacknowledged
-```
-
-A missing **binding** is the silent failure mode: the publisher succeeds, the exchange routes to
-nothing, and the queue stays empty. Check `/bindings` before debugging the consumer, and enable the
-`mandatory` flag plus a returned-message handler so the publisher learns about it next time.
-
-## Inspecting a dead-letter or error queue without consuming it
-
-```powershell
-$body = @{ count = 10; ackmode = 'reject_requeue_true'; encoding = 'auto'; truncate = 50000 } |
-        ConvertTo-Json
-$msgs = Invoke-RestMethod "$base/queues/$vh/orders.created.error.q/get" -Method Post `
-        -Headers $auth -ContentType 'application/json' -Body $body
-$msgs | Select-Object -ExpandProperty properties | Select-Object message_id, headers
-$msgs | Select-Object routing_key, payload_bytes, redelivered, @{n='body';e={$_.payload}}
-```
-
-`ackmode = reject_requeue_true` puts the messages back — this is a **peek**. Any other ackmode
-consumes them. Two caveats: peeking moves the messages to the back of the queue's ordering, and it
-is a manual operation that must never be wired into monitoring.
-
-Read the `x-death` header first: it carries the original queue, the reason (`rejected`, `expired`,
-`maxlen`, `delivery_limit`) and the count. That tells you whether this is a poison message, a
-timeout, or an overflow, and the three have different fixes.
+The management listener and the AMQP listener are different ports: the UI answering proves nothing
+about the port the services use.
 
 ## Replaying and moving messages
 
-| Goal                                     | Tool                                                                   |
-| ---------------------------------------- | ---------------------------------------------------------------------- |
-| Move a queue's contents somewhere else   | the shovel plugin — a one-off dynamic shovel, deleted afterwards        |
-| Republish an EasyNetQ error queue        | `Hosepipe` (dump to disk, inspect, republish selectively)               |
-| Republish one message                    | read it with `get`, then publish it to the original exchange and key    |
-| Drain a queue nobody will ever consume   | purge — see below                                                       |
+| Goal | Tool |
+| --- | --- |
+| Republish an EasyNetQ error queue | `Hosepipe`: dump to disk, inspect, republish selectively |
+| Move a queue's contents elsewhere | a one-off dynamic shovel, deleted afterwards |
+| Republish one message | read it with `get`, publish it to the original exchange and routing key |
 
-Replay re-runs handlers. Confirm the handlers are idempotent (`consumers.md`) before replaying
-anything, and replay a sample of one before the batch.
+Replay re-runs handlers: confirm they are idempotent (`principles.md`) and replay a sample of one
+before the batch. An RPC request is never replayed — its caller gave up long ago.
 
-## Destructive operations — the rules
+## Guardrails
 
-```powershell
-# PURGE: deletes every message in the queue. Irreversible. Not a response to a backlog.
-Invoke-RestMethod "$base/queues/$vh/<queue>/contents" -Method Delete -Headers $auth
-docker @c rabbitmqctl purge_queue <queue>
-
-# DELETE a queue (and its bindings), or an exchange
-Invoke-RestMethod "$base/queues/$vh/<queue>" -Method Delete -Headers $auth
-```
-
-Before any of these:
-
-1. Record the depth and a sample of the payloads, and save them.
-2. Say explicitly which messages will be lost and why that is acceptable.
-3. Confirm the queue is not simply waiting for a consumer that is being restarted.
-4. Never purge a work queue to "clear a backlog" — the backlog is data.
-
-`rabbitmqctl stop_app`, `reset`, `force_reset`, `delete_vhost` and `set_policy` on a shared broker
-are operator actions, not debugging steps: `reset` erases the node's entire configuration and every
-queue on it.
+- **Never purge** (`rabbitmqctl purge_queue`, `rabbitmqadmin purge queue`, `DELETE …/contents`)
+  unless the user says purge explicitly *and* confirms the queue name and the count just read. Never
+  as cleanup, never to "unstick" a consumer: the backlog is data.
+- **Never consume**: no `ack_requeue_false`, no `ack_requeue_true`, no drain to a file.
+- Never publish, never replay a dead letter by hand without the steps above, never declare or delete
+  a queue, exchange, binding, policy or vhost.
+- Never `rabbitmqctl stop_app`, `reset`, `force_reset`, and never restart the container.
+- Never print broker credentials or a management URL carrying them.
+- Do not fix the consumer here: this reads state; the fix is a normal change.
 
 ## Policies
 
-Queue arguments are immutable, but a **policy** applies settings to queues matching a pattern and can
-be changed afterwards — the way to add a TTL or a length limit to queues that already exist:
+Queue arguments are immutable, but a policy applies settings to every queue matching a pattern and can
+be changed later — the way to add a TTL or a length limit to existing queues. It is broker
+configuration: it belongs in provisioning, not applied by hand and forgotten.
 
 ```powershell
-docker @c rabbitmqctl list_policies
-docker @c rabbitmqctl set_policy error-ttl '.*\.error\.q$' '{"message-ttl":604800000}' --apply-to queues
+docker exec $c rabbitmqctl list_policies --vhost $vh
 ```
-
-A policy is broker configuration, so it belongs in the compose or provisioning setup rather than
-being applied by hand and forgotten — an argument set by an invisible policy is the hardest topology
-bug to find.

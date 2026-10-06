@@ -122,8 +122,8 @@ az devops invoke --area wit --resource comments --route-parameters project=<proj
 
 The `wit`/`comments` resource is published under two route templates, so if the route parameter is
 rejected, list the areas as described in `auth-and-config.md` and read the template; if the endpoint
-rejects the default API version, pin it with `--api-version`. The MCP work-item read, which returns
-the comments alongside the item, is the fallback — see `mcp-fallback.md`.
+rejects the default API version, pin it with `--api-version`. This is not a gap (`mcp-fallback.md`): the
+MCP work-item read is acceptable only when no route can be verified from that listing.
 
 ## Parent and child links
 

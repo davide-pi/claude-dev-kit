@@ -25,8 +25,11 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
 
 ## Steps
 
-1. **Resolve the scope** per the grammar and show one line stating what is under review (range,
-   file count, insertions/deletions). If there is nothing to review, say so and stop.
+1. **Resolve the scope** per the grammar and write the diff **once** to the scratchpad, excluding
+   generated files: `git diff <range> --output=<scratchpad>/review.diff -- ':/' ':!*.lock'
+   ':!package-lock.json' ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs'
+   ':!*ModelSnapshot.cs' ':!*.g.cs'`. Show one line: range, file count, +/−, files excluded. Nothing
+   to review → say so and stop.
 
 2. **Establish the intent** — what this change was supposed to accomplish. In order: what the user
    asked for in this conversation; the branch's commit messages (`git log <base>..HEAD`); a linked
@@ -35,7 +38,7 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    guessing.
 
 3. **Run the review through the subagents** (never inline unless one is unavailable), passing each
-   the scope, the base branch, the intent, and the effort:
+   the **diff file path**, the base branch, the intent, the effort, and "lockfiles excluded":
    - `low` / `medium` → **`code-reviewer`** alone.
    - `high` / `xhigh` / `max` → **`code-reviewer`**, **`review-security`** and
      **`review-performance`** spawned **in parallel in a single message**.
@@ -49,45 +52,27 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
 
 4. **Merge the outputs**: drop a specialist finding the generalist already reported at the same
    anchor for the same defect (keep the more specific category and the higher-confidence verdict);
-   keep both when they describe different failures at the same line; sort by severity across agents.
+   keep both when they describe different failures at the same line. A finding already fixed in this
+   session becomes `status: done` (`Risolto da: sessione`). Sort per the global `CLAUDE.md`.
 
-5. **Report in chat, in Italian** — every word a person reads is Italian: the finding blocks and
-   their one-line statements, the completeness notes, the verdict line and the closing question.
-   Code, identifiers, suggested diffs and `file:line` anchors are pasted verbatim, never translated
-   — and so are the **category slugs** the agents return (`correctness`, `security`, `performance`,
-   `clean-code`): they are identifiers the three reviewers agree on and the owner greps for, so the
-   column header is Italian while the value inside it is not.
-   Report in this order — the **summary table comes last**, so it is what is still on screen when
-   the report ends and the reader scrolls up only for the rows worth the detail:
-
-   - **Rilievi** — one block each, numbered `1.`, `2.`, … in severity order: what breaks, the
-     concrete failure scenario, the evidence (`file:line`), and the minimal fix. Group the
-     `clean-code` items separately, after the correctness ones, keeping the same numbering.
+5. **Report in chat, in Italian**, exactly in the shape of the global `CLAUDE.md` § "Review output"
+   (two tables Da fare / Già fatti, the fields, the sort order, the verbatim values). Order:
+   - **Rilievi** — one block per `todo` finding, numbered in sort order: what breaks, the failure
+     scenario, the evidence (`file:line`), the minimal fix. `done` ones: one line each.
    - **Completezza** — the intent points checked, which are covered, which are not.
-   - **Tabella riassuntiva** — the **last block** of the report, one row per finding, same numbers
-     and same order as the blocks above (so the row order *is* the severity order). The column
-     headers are Italian, but three things inside the table are **never** translated: the `Verdetto`
-     values `CONFIRMED`/`PLAUSIBLE`, the `Posizione` anchors, and the `Categoria` slugs — all three
-     are identifiers the reader greps for and the agents agree on:
-
-     | # | Categoria | Posizione | Rilievo | Verdetto |
-     |---|-----------|-----------|---------|----------|
-     | 1 | security | `src/Api/UsersController.cs:42` | id di route concatenato nel testo SQL | CONFIRMED |
-     | 2 | clean-code | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne sta divergendo | CONFIRMED |
-
-     Every finding gets a row, `clean-code` and minor ones included (last). Keep the `Rilievo` cell
-     to one short line (~80 chars, no wrapping): it is a pointer to the block above, not a summary
-     of it.
-   - **Verdetto** — one line right under the table: `N rilievi (X CONFIRMED, Y PLAUSIBLE) ·
+   - **Tabelle** Da fare, then Già fatti — the **last** blocks, so they stay on screen.
+   - **Fix rapidi** and **Verdetto** — one line each: `N rilievi (X da fare, Y già fatti · P1: N) ·
      security: N · completezza: N`, plus which agents ran at which effort.
-   - Nothing found → say exactly that in Italian, list what was verified, and skip the table.
+   - Nothing found → say so, list what was verified, skip the tables.
 
-6. **Offer, do not act.** Close with **one short line, in Italian** — the one or two fixes worth
-   applying — and ask whether to apply them. Keep it to that line so the table stays on screen.
-   Apply nothing until the user says so; if they do, that is a normal edit — this command itself
-   never writes.
+6. **Offer, do not act.** One short Italian line: the P1s worth applying and "ok" for the fix rapidi.
+   Apply nothing until the user says so; if they do, that is a normal edit — this command never
+   writes.
 
 ## Guardrails
+
+**Never**: post to a PR, edit, stage, commit or push — findings stay in chat.
+
 
 - Read-only: no edits, no staging, no `git commit`/`push`/`switch`/`stash`/`reset`, no posting to
   GitHub or Azure DevOps.

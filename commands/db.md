@@ -1,10 +1,10 @@
 ---
-description: Inspect the current project's database — discover the engine and connection, then run a query or describe a schema. Read-only unless the invocation says --write.
+description: Query or describe the current project's database after discovering its engine and connection. Read-only unless the invocation says --write.
 argument-hint: "\"<query>\" | <table|schema> [--write] [--db <name>]"
 ---
 
 Query or describe the database this project actually uses. Engine discovery happens here; the SQL
-itself belongs to **`sql-server`** or **`postgres`**, and the container plumbing to
+itself belongs to **`sql-server`** (Postgres included), and the container plumbing to
 **`docker-dev-env`**. **Read-only by default** — a statement that writes runs only when the
 invocation carries `--write`.
 
@@ -73,8 +73,11 @@ needed. A previous `--write` never carries over to the next invocation.
 
 ## Guardrails
 
+**Never**: drop or truncate, write without `--write`, touch a non-development host, echo a credential.
+
+
 - **`DROP`, `TRUNCATE`, `ALTER … DROP`, `sp_detach_db`, `DROP DATABASE`: never**, `--write` or not.
-  Schema change is `/migrate`; a real drop is a deliberate, hand-typed act.
+  Schema change goes through `ef-core`'s migration workflow; a real drop is a deliberate, hand-typed act.
 - **No `DELETE`/`UPDATE` without a `WHERE`** — refuse it as a typo, always.
 - **Development databases only.** A connection string that names a staging or production host stops
   the command: say which host and stop.

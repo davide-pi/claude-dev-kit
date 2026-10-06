@@ -1,12 +1,9 @@
 ---
 name: test-writer
-description: >
-  Writes tests for a named class, module or endpoint by following the repository's OWN test
-  conventions — framework, assertion style, mocking approach, naming, fixtures and builders, folder
-  layout — which it discovers and states back before writing a line. Spawn it to close a test gap,
-  one instance per class or per module, several in parallel: its output contract is built so N
-  results merge without collisions. It writes test files only — never production code, never
-  configuration, never a commit, and it does not run the suite.
+description: >-
+  Writes tests for a named class, module or endpoint following the repository's own discovered
+  test conventions. One instance per class, several in parallel; results merge without collisions.
+  Writes test files only, never production code, never runs the suite.
 tools: Read, Grep, Glob, Write, Edit
 model: sonnet
 ---

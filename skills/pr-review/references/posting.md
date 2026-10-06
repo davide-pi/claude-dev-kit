@@ -59,24 +59,30 @@ gh api --method POST repos/{owner}/{repo}/pulls/<n>/reviews --input payload.json
 
 In this order, so the table is what is still on screen when the report ends:
 
-1. **Findings** — the full list, one block each, numbered `1.`, `2.`, … in severity order: what
-   breaks, the concrete failure scenario, the evidence as `file:line`, the minimal fix, and the
-   agent that found it. `clean-code` items grouped after the correctness ones, same numbering.
+1. **Findings** — one block per `todo` finding, numbered in the global `CLAUDE.md` § "Review output"
+   sort order: what breaks, the concrete failure scenario, the evidence as `file:line`, the minimal
+   fix, and the agent that found it. `done` findings: one line each.
 2. **Posted vs chat** — which findings became threads (thread ids on Azure DevOps, the review URL on
-   GitHub) and, for each finding kept in chat, why. If nothing was posted, say so explicitly.
-3. **Summary table** — the **last** block, one row per finding, same numbers and same order as the
-   blocks above, so the row order *is* the severity order:
+   GitHub) and, for each finding kept in chat, why. If nothing was posted, say so explicitly. On an
+   incremental pass, name the reviewed range (`<last-reviewed>..<head>`).
+3. **Summary tables** — the **last** blocks, same numbers and order as above. Shape and columns per
+   the global `CLAUDE.md`, with `Postato` added:
 
-   | # | Category | Location | Finding | Verdict | Posted |
-   |---|----------|----------|---------|---------|--------|
-   | 1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | yes — thread 118 |
-   | 2 | clean-code | `src/Core/Mapper.cs:88` | duplicates `MapAddress`, drifts from it | CONFIRMED | no — chat only |
+   **Da fare**
 
-   Every finding gets a row, `clean-code` and minor ones included, last. Keep the `Finding` cell to
-   one short line (~80 chars, no wrapping): it points at the block above, it does not summarise it.
-   `Posted` carries the thread id or comment link whenever the finding went onto the PR.
-4. **Verdict** — one line under the table:
-   `N findings (X posted, Y chat-only) · security: N · completeness: N`, plus which agents ran at
-   which effort, and which interface posted. Nothing after it.
+   | # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo | Postato |
+   |---|----------|-----------|-----------|---------|----------|---------|--------|---------|
+   | 1 | P1 | security | `src/Api/UsersController.cs:42` | id di route concatenato nel testo SQL | CONFIRMED | basso | S | sì — thread 118 |
+   | 2 | P3 | clean-code | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne diverge | CONFIRMED | basso | S | no — solo chat |
+
+   **Già fatti**
+
+   | # | Categoria | Posizione | Rilievo | Risolto da |
+   |---|-----------|-----------|---------|------------|
+   | 3 | correctness | `src/Core/Sync.cs:51` | null check rimosso sul path di retry | `a1b2c3d` |
+
+4. **Fix rapidi** and **Verdict** — one line each:
+   `N rilievi (X da fare, Y già fatti · P1: N · X postati) · security: N · completezza: N`, plus
+   which agents ran at which effort, and which interface posted. Nothing after it.
 
 No findings at all → say exactly that, list what was verified, and **skip the table**.

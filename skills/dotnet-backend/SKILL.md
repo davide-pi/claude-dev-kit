@@ -1,135 +1,120 @@
 ---
 name: dotnet-backend
-description: C# and ASP.NET Core backend idioms for this stack — choosing between a layered service and Clean Architecture (or neither), controllers versus minimal APIs, dependency-injection lifetimes and the captive-dependency trap, async and concurrency discipline, modelling failure as exceptions or result objects, where validation belongs, options binding and keeping secrets out of the repo, and the shape of a service that is easy to test. Use when adding or restructuring backend code, deciding which layer a piece of logic belongs in, wiring DI, hunting a lifetime bug or a sync-over-async hang, designing an endpoint, or making untested legacy code testable. Mentions Serilog, FluentValidation, Polly, MediatR, AutoMapper and Quartz only where they change the decision.
+description: >-
+  Use whenever backend C# is added or restructured in these services — a new responder or
+  subscriber, DI wiring, a Polly retry, a background job, options or secrets — or a lifetime bug, a
+  captive dependency, a sync-over-async hang or thread-pool starvation is suspected.
 ---
 
-# dotnet-backend — backend architecture and C# idioms that survive contact with legacy code
+# dotnet-backend — the stack as it is: singletons, RPC handlers, async all the way
+
+Read the real package list before reaching for an idiom. In the large backend the libraries that
+shape the code are **EasyNetQ** (the service-to-service call), **Polly** with its contrib jitter
+backoff (retries), **Serilog** (logging) and **Scrutor** (assembly scanning). **MediatR, AutoMapper
+and FluentValidation are absent** — do not introduce them as a side effect of a feature. **Quartz**
+appears in one service only; elsewhere scheduled work is a hosted service.
 
 ## When
 
-- Adding a feature to a backend service, or deciding which layer a piece of logic belongs in.
-- Starting a service or restructuring one: project layout, dependency direction, module boundaries.
-- Wiring dependency injection, or debugging a lifetime, captive-dependency or thread-safety bug.
+- Adding a responder, subscriber, hosted service, typed HTTP client or options class.
+- Wiring DI, or debugging a lifetime, captive-dependency or thread-safety bug.
 - Writing or fixing async code: cancellation, blocking, fan-out, a hang that only shows under load.
-- Modelling failure — exception or result object — and placing validation.
+- Adding or reviewing a Polly policy, or deciding what failure becomes an exception and what is data.
 - Binding configuration, and keeping connection strings and tokens out of the repository.
 
-Not for: EF Core modelling and queries (`ef-core`), test mechanics (`dotnet-testing`), investigating
-a running process (`dotnet-diagnostics`), T-SQL and indexes (`sql-server`), or exact API signatures
-and behaviour that changed between releases — route those to the `microsoft-docs` plugin.
+Not for: EF Core modelling and queries (`ef-core`), RabbitMQ semantics (`rabbitmq`), test mechanics
+(`dotnet-testing`), a running process (`dotnet-diagnostics`), T-SQL (`sql-server`), exact API
+signatures across releases (the `microsoft-docs` plugin).
 
 ## Decide
 
-### How much architecture does this change deserve
+### Where does this code go — match the layout, do not redesign it
 
-| Situation | Shape | Why |
-|---|---|---|
-| Bounded change inside an existing layered service | follow the layers already there | consistency beats purity; a lone Clean island is noise |
-| New service, real domain rules, expected to outlive one sprint | Clean: Domain / Application / Infrastructure / Api | the rules stay testable without a database |
-| New service that is mostly transport plus a database call | layered: Api then Services then Data | Clean here buys interfaces nobody substitutes |
-| A job, a webhook receiver, an integration shim | no layers — one project, handler plus client | ceremony would exceed the logic |
-| Cross-cutting rewrite of a legacy layered estate | do not | pick seams, add tests, change locally |
+| Project suffix | Holds |
+| --- | --- |
+| `*.ServiceContract` | request, response and event types shared with callers — additive changes only |
+| `*.Business` / `*.Application` | the subscribers (`ISubscriber`): one class per RPC responder or event handler, plus domain logic |
+| `*.Data` / `*.Infrastructure` | EF contexts and DAOs; `*.Infrastructure.PostgreSql` is the Dapper read cache |
+| `*.Service` / `*.WebApi` | the host: `Program.cs`, DI composition, the bootstrap hosted service, `/health` |
 
-Reading the repo tells you which it is: a `Domain` plus `Application` pair and an `Endpoints` folder
-mean Clean; a `Services` plus `Data` pair with controllers means layered. Match what you find.
+Not sure which project owns a behaviour across hundreds of them? The `investigator` agent locates it
+(entry file plus handler); its trace mode follows the call across services. Do not sweep by hand.
 
-### Controllers or minimal APIs
+### DI lifetime — the house shape
 
-| Signal | Choose |
-|---|---|
-| The solution already has controllers | controllers — do not mix styles per feature |
-| The solution has an `Endpoints` folder | minimal APIs, one file per endpoint group |
-| Heavy filters, model binders, conventions, inherited base controllers | controllers |
-| Few parameters, high throughput, no MVC machinery needed | minimal APIs |
-| Must be unit-testable without a host | either — but the handler body must be a named method |
+Subscribers are registered by Scrutor scan as **singletons**, and so are the DAOs and the custom
+`DbContext` factories they inject. Everything a subscriber touches must therefore be singleton-safe.
 
-The rule that matters in both: the endpoint parses input, calls one application service or handler,
-maps the outcome to a status code. No business rules, no `DbContext`, no `HttpContext` below it.
-
-### Failure: exception or result
-
-| The failure is | Model it as | Surfaces as |
-|---|---|---|
-| A bug or an impossible state | exception, uncaught | 500, logged with the correlation id |
-| Invalid input | validation result collected before the handler runs | 400 with field-level ProblemDetails |
-| A rule the caller can legitimately hit (duplicate, no stock) | result object with a typed error | 409/422, no stack trace, no log noise |
-| A dependency failing (timeout, socket, deadlock) | exception, retried by a resilience policy | 502/503 once the policy gives up |
-| Not found | result object, or a domain exception mapped in one place | 404 |
-
-Do not mix both models in one call chain: pick per module and stay consistent, because a caller that
-must both inspect a result and catch an exception will do neither.
-
-### DI lifetime
-
-| The dependency | Lifetime | Note |
-|---|---|---|
-| Stateless, cheap, no captured state | Singleton | must be thread-safe |
-| Holds per-request state, or wraps a `DbContext` | Scoped | the default for repositories and application services |
-| Wraps an unshareable, cheap-to-create resource | Transient | never inject it into a singleton |
-| `HttpClient` | neither `new` nor a hand-rolled singleton | register a typed client through the factory |
-| Background worker | Singleton (hosted service) | open a scope per unit of work inside it |
+| The dependency | Lifetime | Rule |
+| --- | --- | --- |
+| a subscriber / responder | singleton (scanned) | no per-request state in fields; inject only singleton-safe services |
+| data access | singleton factory; `await using var db = factory.Create()` **per handler call** | never inject a `DbContext` or any scoped service into a subscriber |
+| `IBus` | singleton, one per process (or a named bus collection) | never created per call |
+| an HTTP dependency | typed client through `AddHttpClient<T>` | never `new HttpClient`, never a hand-rolled singleton |
+| a hosted service needing scoped work | singleton | open a scope per unit of work through the scope factory |
 
 A shorter lifetime injected into a longer one is a captive dependency: it silently takes on the outer
-lifetime. See `di-lifetimes.md`.
+lifetime. Details and scope validation: `references/di-lifetimes.md`.
+
+### Failure: exception or data
+
+| The failure is | Model it as |
+| --- | --- |
+| a business outcome an RPC caller can branch on (refused, not found, not allowed) | **data**: the response's outcome fields (`IsSuccess`, an error status) — the house contract |
+| a bug or an impossible state | an exception, logged with context; never swallowed into a success response |
+| a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by a Polly policy — **only around idempotent work** |
+| invalid input at an HTTP edge | a 400 with field-level problem details, validated once at the edge |
+
+An exception thrown by a responder crosses the bus as a bare message string, so for RPC the data
+model is not a style choice. Detail: `references/errors-and-config.md`.
+
+### Polly — retry only what is safe to repeat
+
+| Wrapping | Verdict |
+| --- | --- |
+| a read, a subscribe at startup, an idempotent upsert | retry with jittered backoff, bounded attempts, logged on each retry |
+| a non-idempotent write, a publish, an RPC request with side effects | no retry until it is made idempotent |
+| a retry inside a retry (policy around an RPC whose responder also retries) | collapse to one layer — attempts multiply |
 
 ## Do
 
 ```powershell
-# What is actually referenced — this decides the idioms before you write any code
-Select-String -Path (Get-ChildItem -Recurse -Filter *.csproj).FullName -Pattern 'PackageReference'
-Get-ChildItem -Recurse -Filter Directory.Packages.props    # central versions live here, if present
+# What is actually referenced — this decides the idioms before any code is written
+Select-String -Path (Get-ChildItem -Recurse -Filter *.csproj).FullName -Pattern 'PackageReference' |
+  ForEach-Object { ($_ -split 'Include="')[1] -split '"' | Select-Object -First 1 } | Group-Object | Sort-Object Count -Descending
+Get-ChildItem -Recurse -Filter Directory.*.props                    # central versions and shared settings
 
-# Target framework, nullability and language settings, per project
-Select-String -Path (Get-ChildItem -Recurse -Filter *.csproj).FullName -Pattern 'TargetFramework|Nullable|LangVersion'
+# Lifetimes as registered
+Get-ChildItem -Recurse -Filter *.cs | Select-String -Pattern 'With(Singleton|Scoped|Transient)Lifetime|Add(Singleton|Scoped|Transient)<'
 
-# Prove the container is consistent at startup instead of at 3 in the morning
-Get-ChildItem -Recurse -Filter Program.cs | Select-String -Pattern 'ValidateScopes|ValidateOnBuild'
-
-# Secrets: keep them out of the tree, and check nothing leaked in
-dotnet user-secrets init --project .\src\<Api>
-dotnet user-secrets set  --project .\src\<Api> "ConnectionStrings:Default" "<value>"
+# Secrets: nothing in the tree
 Get-ChildItem -Recurse -Filter appsettings*.json | Select-String -Pattern 'Password=|Pwd=|AccountKey=|Secret'
-
-csharprepl                                                  # try an idiom without a project
-ilspycmd .\bin\Debug\<tfm>\<Assembly>.dll -t <Namespace>.<Type>   # see what a legacy assembly does
+dotnet user-secrets set --project .\src\<Host> "ConnectionStrings:<Name>" "<value>"
 ```
 
 ## Traps
 
-1. Blocking on async (`.Result`, `.Wait()`, `GetAwaiter().GetResult()`) → thread-pool starvation, or
-   a hard deadlock in the legacy .NET Framework tool → make the caller async all the way up.
-2. A request keeps working after the client disconnects → the `CancellationToken` was accepted and
-   dropped → thread it through every call, down to the query and the HTTP client.
-3. `ObjectDisposedException`, or one request seeing another's data → a scoped service captured by a
-   singleton or a hosted service → open a scope per operation through the scope factory.
-4. `Cannot consume scoped service from singleton` appears only in tests → production never validated
-   scopes → enable scope validation in every environment, not only Development.
-5. A configuration value is silently null → the section or property name does not match, or the file
-   is not deployed → bind the options and validate them at startup so the host fails loudly.
-6. Options never see an edited file → the plain options interface is a snapshot taken at first
-   resolve → use the snapshot or monitor variant when reload genuinely matters, and comment why.
-7. `async void` in an event handler or a scheduled job → the exception vanishes and can kill the
-   process → return `Task` and let the framework await it.
-8. `Parallel.ForEach` over I/O → threads park on the network and throughput falls → use the async
-   fan-out with a bounded degree of parallelism.
-9. A retry policy wrapping a non-idempotent write → duplicate rows or duplicate messages → make the
-   operation idempotent first, or retry reads only.
-10. Validation in the controller, the service and the entity, each copy different → validate input
-    once at the edge, keep invariants in the domain, delete the third copy.
-11. A mapping library used for non-trivial mappings → a rename silently drops a field → hand-write
-    any mapping that carries a rule; keep the library for flat, same-name DTOs.
-12. Mediator handlers used as a synchronous call stack five levels deep → the flow is untraceable →
-    route only real use cases through the mediator and call helpers directly.
+1. `.Result`, `.Wait()`, `GetAwaiter().GetResult()` → thread-pool starvation; RPC calls and Redis
+   time out together under load → async all the way up (`references/async-concurrency.md`).
+2. A scoped service or a `DbContext` injected into a scanned singleton subscriber → shared across
+   concurrent messages → inject the factory, create per call.
+3. Mutable state in a subscriber's fields → two messages race on it → keep state local to the call.
+4. `async void`, or a `Task` never awaited (fire-and-forget) → the exception vanishes; the bootstrap
+   service already does this with subscriptions, do not copy it.
+5. A Polly retry around a non-idempotent write → duplicate rows or messages.
+6. A `CancellationToken` accepted and dropped → work continues after the caller is gone.
+7. `Parallel.ForEach` over I/O → threads park on the network → bounded async fan-out.
+8. A configuration value silently null → names do not match, or the deployed config merge did not set
+   it → bind options and validate at startup.
+9. A responder that throws for a business rule → the caller receives only a message string.
+10. A new mapping, validation or mediator library introduced for one feature → a second idiom in a
+    codebase that has none → hand-write it the way the neighbours do.
 
 ## References
 
-- `architecture.md` — laying out layered versus Clean, dependency direction, where each kind of logic
-  goes, and when a mediator or a mapping library earns its place.
-- `api-surface.md` — controllers and minimal APIs in detail: shape, filters, ProblemDetails,
-  FluentValidation wiring, versioning, and keeping either style testable.
-- `di-lifetimes.md` — lifetimes, captive dependencies, scopes inside singletons and background
-  services, typed HTTP clients with resilience, and registration hygiene.
-- `async-concurrency.md` — async all the way, cancellation, `ConfigureAwait` reality here,
-  sync-over-async deadlocks, concurrency versus parallelism, bounded fan-out.
-- `errors-and-config.md` — exceptions versus results in code, validation placement, the options
-  pattern, configuration precedence, and secret handling and remediation.
+- `references/di-lifetimes.md` — lifetimes, captive dependencies, scopes inside singletons and hosted
+  services, typed HTTP clients with resilience, registration hygiene and scope validation.
+- `references/async-concurrency.md` — async all the way, cancellation, sync-over-async deadlocks,
+  concurrency against parallelism, bounded fan-out.
+- `references/errors-and-config.md` — exceptions against results in code, validation placement, the
+  options pattern, configuration precedence, secret handling and remediation.

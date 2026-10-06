@@ -97,7 +97,7 @@ project. It wins when the dependency has state or is used by many tests:
 The payoff: tests read as "given these two orders exist" instead of six setups; a new test costs one
 line; the fake's own behaviour can be verified once with a small suite of its own. The cost: it can
 drift from the real implementation, which is exactly why anything relational should use a real
-database rather than a fake repository (see `real-database.md`).
+database rather than a fake repository (see the note in `untested-legacy.md`).
 
 ## Test data builders
 
