@@ -57,31 +57,32 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
    **Task**, which only carries hours. For every candidate id read its **type**; a `Task` is replaced
    by its parent, then de-duplicate — types, parents and org/project resolution via `azdo-cli`.
    Nothing resolvable → **stop and ask** which item this change belongs to, or route to
-   `workitem-create`. Several parents → link them all, and if they sit under different Features say
-   the branch may want splitting.
+   `workitem-create`. Several parents → link them all; different Features → say it may want splitting.
 
 7. **Pull request** — title and body **in Italian** per `pr-create`: one imperative title line
-   with no trailing period; body = what changed and why, from `git log <base>..HEAD` and the diff.
-   The `<id>` below is the parent item resolved in step 6.
+   with no trailing period; body = what changed and why, from `git log <base>..HEAD` and the diff,
+   **plus the `Rilascio:` block** — the releasable components this change forces a deploy of, mapped
+   from `git diff --name-only origin/<base>...HEAD`, never omitted (`nessun componente` when nothing
+   deploys). The `<id>` below is the parent item resolved in step 6.
 
    Azure DevOps:
    ```powershell
    az repos pr create --source-branch <branch> --target-branch <base> `
-     --title "<title>" --description "<line1>" "<line2>" --work-items <id> --draft false
+     --title "<title>" --description "<line1>" "<line2>" --work-items <id> --draft false `
+     --squash true --delete-source-branch true
    ```
    GitHub:
    ```powershell
    gh pr create --base <base> --head <branch> --title "<title>" --body-file <file>
    ```
-   Long bodies go through `--body-file` on GitHub and repeated `--description` values on Azure
-   DevOps (each value becomes a new line) — never a shell heredoc, which breaks across the two
-   shells. On GitHub the link is `Closes #<n>` in the body. Verify every link came back in the
-   create output — an item missing from it is not linked: add it with
-   `az repos pr work-item add --id <pr-id> --work-items <id>` and read the result again.
+   Long bodies go through `--body-file` on GitHub and repeated `--description` values on Azure DevOps
+   (each value becomes a new line) — never a shell heredoc, which breaks across the two shells. On
+   GitHub the link is `Closes #<n>` in the body. Verify every link came back in the create output —
+   missing means not linked: `az repos pr work-item add --id <pr-id> --work-items <id>`, then re-read.
 
 8. **Report** — one block, in Italian: branch, commit hash, PR id and URL, **which item was linked**
-   — saying it is the parent when the id given was a Task — the target branch, and one line on what
-   still gates the merge (checks running, reviewers required).
+   — saying it is the parent when the id given was a Task — the target branch, **the components to
+   release** as written in the body, and what still gates the merge (checks, reviewers).
 
 ## Guardrails
 
@@ -95,4 +96,5 @@ Parse "$ARGUMENTS"; order does not matter, all parts optional.
   invocation.
 - Do not run builds or tests to decide whether to ship; CI is the gate. If the user wants a gate
   first, that is `done-check`.
-- No `--delete-source-branch`: branch cleanup belongs to `branch-flow` after the merge.
+- `--squash true --delete-source-branch true` go on the **create**: merge *intent*, not a merge, and
+  they carry the standing rule into auto-complete and every CLI path. Completing stays out of scope.

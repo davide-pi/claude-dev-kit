@@ -19,6 +19,8 @@ description: >-
 - Serve sapere cosa e' stato fatto in un giorno o in un range, con il tempo per topic.
 - Le ore di un periodo vanno registrate sui work item giusti.
 - Un periodo gia' registrato va ri-elaborato: si applica solo il **delta**.
+- Il promemoria (`hooks/worklog-pending.js`, badge orologio) elenca **giornate mai registrate** del
+  mese, o della settimana se sconfina: si chiudono con `/worklog <data>`; oltre, non si propongono.
 - Va rendicontato tempo di **gestione progetto** (incontri e call cliente, analisi e grooming del
   backlog, stime, coordinamento) che non sta su nessun item di prodotto.
 
@@ -38,7 +40,9 @@ esplicito.
 | Niente hardcoded | org, progetti e item si scoprono a runtime, ogni run |
 | Due gate | Tabella 1 e Tabella 2: si procede solo su conferma esplicita |
 | `CompletedWork` e' **cumulativo** | si legge, si somma il delta, si riscrive — mai sovrascrivere |
+| Le ore **gia' sull'item** si riconciliano, non si ignorano | se ce ne sono che l'audit non conosce (registrate a mano dall'utente, dal portale, da altro), si dichiarano in Tabella 2 e si **chiede** se sono lo stesso lavoro: le sue ore vincono sulla stima (`scrittura.md`, Fase 5.5) |
 | Mai lasciare un item in stato **New** | `Active` se il lavoro e' in corso, `Closed` se concluso |
+| Ogni giornata trattata si **chiude in audit** | anche quella senza niente da registrare (ferie, solo tooling): voce a `hoursLogged: 0`, previa conferma — altrimenti il promemoria la segnala per sempre (`scrittura.md`) |
 
 ### 2. Le fasi
 
@@ -94,10 +98,9 @@ pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM
 ```
 
 Lo stdout da' progetto → branch, minuti attivi, fascia oraria e numero di prompt, piu' il path del
-**digest grezzo** e quello dell'**audit**. L'engine fa anche la retention (pota digest e voci di
-audit oltre i 7 giorni). Se stampa "Nessuna attivita'", riferiscilo e fermati. Poi **leggi il
-digest** (`_raw/<periodo>.md`) per ricavare topic, descrizioni e decisioni; i transcript originali
-solo se manca un dettaglio.
+**digest grezzo** e quello dell'**audit**. L'engine pota i digest oltre i 7 giorni, l'audit **mai**.
+"Nessuna attivita'" → riferiscilo e fermati. Poi **leggi il digest** (`_raw/<periodo>.md`) per
+topic, descrizioni e decisioni; i transcript originali solo se manca un dettaglio.
 
 ```powershell
 # Fase 3 — arrotondamento + accorpamento: TUTTI i topic in una sola invocazione
@@ -118,12 +121,13 @@ I commit su master pertinenti al topic, per il link della Fase 5.
 
 1. Le ore raddoppiano → `CompletedWork` sovrascritto invece di sommato → leggi, somma il delta,
    riscrivi; l'audit dice quanto era gia' stato scritto per quel periodo.
+1-bis. Le ore raddoppiano lo stesso, pur sommando → sull'item c'erano ore registrate **a mano**, che
+   l'audit non conosce, e il delta e' rimasto la stima intera → riconcilia item e audit (Fase 5.5) e
+   chiedi: se e' lo stesso lavoro, le ore dell'utente vincono e il delta e' 0.
 2. Un ri-run dello stesso periodo riscrive tutto → l'audit non e' stato consultato → cerca la voce
    `(periodFrom, periodTo, itemId)` e applica solo il delta; delta 0 → non toccare le ore.
-3. Ore loggate su una User Story → le ore si registrano sui **Task** → se manca il Task, crealo come
-   figlio della US.
-4. Un item nuovo resta in stato `New` → il tipo parte da `New` per default → correggi subito lo stato
-   dopo la creazione.
+3. Ore loggate su una User Story → le ore vanno sui **Task** → manca il Task: crealo figlio della US.
+4. Un item nuovo resta in `New` → il tipo parte da `New` → correggi lo stato subito dopo la creazione.
 5. Il tempo non torna col vissuto → i gap oltre 15 min sono pause per definizione → e' una stima
    indicativa; si corregge nel loop della Tabella 1, non inventando minuti.
 6. Il lavoro su `master` sparisce → non ha un branch-topic → spezzalo in topic semantici leggendo il
@@ -134,14 +138,13 @@ I commit su master pertinenti al topic, per il link della Fase 5.
    item scritti prima di stampare il recap.
 9. Nasce un secondo Task ore di gestione per lo stesso giorno → ri-run del periodo con creazione
    invece di delta → cerca la voce d'audit e il Task con lo stesso prefisso data, poi somma il delta.
+10. Il promemoria continua a segnalare un giorno gia' sistemato → la sessione si e' chiusa senza
+    scrivere l'audit (o il giorno era di sole ferie) → l'audit e' l'unico criterio: scrivi la voce,
+    a zero ore se non c'era niente da registrare.
 
 ## References
 
-- `tempo-e-topic.md` — periodo, engine e digest, definizione di tempo attivo e di topic, i quattro
-  ruoli, regole di arrotondamento e uso di `round.ps1`.
-- `tabelle.md` — forma esatta di Tabella 1 e Tabella 2, formato dei link, loop di
-  conferma/modifica e recap finale.
-- `scrittura.md` — discovery per topic, regole di scrittura su Azure, parallelismo, idempotenza e
-  contenuto dell'audit.
-- `ore-gestione.md` — il caso gestione progetto: struttura fissa Feature/PBI della commessa, ricerca
-  per prefisso, Task ore per sessione, assegnatario a runtime, stato Done e idempotenza.
+- `tempo-e-topic.md` — periodo, engine e digest, tempo attivo, topic, i quattro ruoli, `round.ps1`.
+- `tabelle.md` — forma di Tabella 1 e 2, formato dei link, loop di conferma/modifica, recap finale.
+- `scrittura.md` — discovery per topic, scrittura su Azure, riconciliazione, idempotenza, audit.
+- `ore-gestione.md` — gestione progetto: Feature/PBI fissi, prefisso, Task per sessione, stato Done.

@@ -31,15 +31,20 @@ hierarchy?"** Apply, reprint, re-ask. Only explicit approval opens gate 4.
 Printed at gate 5, after discovery.
 
 ```markdown
-| # | Type       | Title | Parent |
-|---|------------|-------|--------|
-| 1 | Feature    | Dashboard di fatturazione multi-tenant | [Epic #4210 — Piattaforma di fatturazione](https://<org-host>/<project>/_workitems/edit/4210) |
-| 2 | User Story | ↳ Mostra l'elenco fatture per tenant  | → #1 (new, created in this run) |
-| 3 | Task       | ↳↳ Aggiungi endpoint API fatture     | → #2 (new, created in this run) |
+| # | Type       | Title | Parent | Assegnatario |
+|---|------------|-------|--------|--------------|
+| 1 | Feature    | Dashboard di fatturazione multi-tenant | [Epic #4210 — Piattaforma di fatturazione](https://<org-host>/<project>/_workitems/edit/4210) | <user-upn> |
+| 2 | User Story | ↳ Mostra l'elenco fatture per tenant  | → #1 (new, created in this run) | <user-upn> |
+| 3 | Task       | ↳↳ Aggiungi endpoint API fatture     | → #2 (new, created in this run) | <user-upn> |
 ```
 
 - `Type` is the role from Table 1 **resolved** to a type this project really has (gate 4). The type
   names in the examples on this page are one project's process; never reuse them as defaults.
+- `Assegnatario` is the **UPN as the organization resolved it** (`azdo-cli`, "Resolving the identity
+  to assign to") — the user by default, someone else only where they said so, `—` only where they
+  explicitly asked for an unassigned item. Print the UPN, never just "me": a wrong-tenant identity is
+  invisible on the board afterwards and this column is the one place it can be caught before the
+  create.
 - `Parent`:
   - an existing parent → a **clickable link** whose text is `<Type> #<id> — <title>`;
   - a child of a row in this run → `→ #<row> (new, created in this run)`;
@@ -63,14 +68,15 @@ including the numbered image placeholders, apply corrections, reprint, then conf
 ## Final summary
 
 ```markdown
-| # | Type       | Title (link) |
-|---|------------|--------------|
-| 1 | Feature    | [Dashboard di fatturazione multi-tenant](https://<org-host>/<project>/_workitems/edit/4711) |
-| 2 | User Story | ↳ [Mostra l'elenco fatture per tenant](https://<org-host>/<project>/_workitems/edit/4712) |
+| # | Type       | Title (link) | Assegnatario |
+|---|------------|--------------|--------------|
+| 1 | Feature    | [Dashboard di fatturazione multi-tenant](https://<org-host>/<project>/_workitems/edit/4711) | <user-upn> |
+| 2 | User Story | ↳ [Mostra l'elenco fatture per tenant](https://<org-host>/<project>/_workitems/edit/4712) | <user-upn> |
 ```
 
 Titles are clickable links to the created items; children stay indented so the hierarchy is visible
-at a glance. Then the attachment checklist, one row per item that carries placeholders:
+at a glance. `Assegnatario` is read **back from the item**, not repeated from Table 2 — an assignment
+that the organization silently dropped shows up here as empty. Then the attachment checklist, one row per item that carries placeholders:
 
 ```markdown
 Images to attach manually:
@@ -92,3 +98,6 @@ happen (a field folded into the description, a state corrected after the create,
    gets its own explicit approval.
 5. The final summary lists items but not the attachments → the user never attaches them → the
    checklist is part of the summary, not an optional extra.
+6. Items land unassigned → the assignment was a second pass, or the identity came from the machine
+   instead of the organization → resolve the identity once at gate 4, show it in Table 2, set it in
+   the same call as the create, and read it back for the final summary.

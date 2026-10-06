@@ -4,7 +4,8 @@ description: >-
   Create one or more Azure DevOps work items from a description and images, complete enough for a
   human or an AI to implement without asking anything back. Runs a targeted Q&A that escalates to
   grilling, then two confirmation tables (type/title, then type/title/parent), then creates the
-  items in Italian through the Azure DevOps CLI, state New and unassigned. Item wording and
+  items in Italian through the Azure DevOps CLI, state New and assigned to the user by default.
+  Item wording and
   acceptance criteria follow user-story-standard, which classifies by role. Project, parent and the
   work item type that fills each role are discovered at runtime through azdo-cli — no type name is
   ever hardcoded or defaulted, and a role the project has no type for is a question, not a
@@ -31,7 +32,7 @@ the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 | --- | --- |
 | Italian on the board | every title, description and criterion written to the board; chat, questions and tables follow the user |
 | Nothing hardcoded | project, parent, fields and the type filling each role are **discovered at runtime**, every run |
-| New and unassigned | unless the user explicitly asks otherwise |
+| New, assigned to the user | the default for every item created here; another assignee, or none at all, only where the user said so. The identity is resolved **against the organization** at gate 4 (`azdo-cli`) and shown in Table 2 |
 | Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
 | Never a throwaway | no "test" item on a real board, ever |
 | Content is not ours | role classification, wording and acceptance criteria come from `user-story-standard`; this skill owns the mechanism |
@@ -44,7 +45,7 @@ the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 | 2. Q&A | targeted batched questions, escalating to grilling when the work is ambiguous | `questions.md` |
 | 3. Table 1 | the split into items: `#`, role (provisional), title — confirm, edit, reprint until approved | `tables.md` |
 | 4. Discovery | project, which real type fills each role, their field sets, the parent | below |
-| 5. Table 2 | the same rows plus the resolved parent link — confirm, then optionally preview the full bodies, then create | `tables.md`, `user-story-standard` |
+| 5. Table 2 | the same rows plus the resolved parent link and the assignee — confirm, then optionally preview the full bodies, then create | `tables.md`, `user-story-standard` |
 
 Never merge two gates into one message, and never move past one without explicit approval.
 
@@ -64,6 +65,7 @@ has; `azdo-cli` owns the role-to-type mapping and the discovery calls.
 | which type fills a role here | the mapping in `azdo-cli`, matched against the types just discovered |
 | which types are actually **in use** | CLI: a WIQL sample, deduped on the type field (WIQL has no `DISTINCT`) |
 | candidate parents | CLI: WIQL by area, title keyword or recent activity; propose the best, let the user confirm or give an id/URL |
+| the identity to assign to | CLI, **once per organization**: the WIQL `@Me` probe in `azdo-cli` — never `git config user.email`, which is the machine's identity and belongs to the wrong tenant as soon as a second org is in play |
 | free-text or cross-project search, attachments, item comments | **MCP fallback** — the CLI has no verb for these |
 
 **No type name is a default.** If the project has no type for a role — a technical activity on a
@@ -82,7 +84,6 @@ this run. Create parents before children, sequentially.
 
 ```powershell
 git remote get-url origin        # which repo, hence which project the work belongs to
-git config user.email            # only if the user asks for the items to be assigned to them
 ```
 
 Everything else is Azure DevOps: project listing, type and field metadata, WIQL parent search, the
@@ -115,6 +116,9 @@ Report the result as the final table plus the manual-attachment checklist (`tabl
    the role against this project's types every run, and ask when no type fills it.
 9. Questions keep coming after Table 1 is approved → the Q&A gate was left open → resolve every
    material doubt in gate 2; after that, only discovery facts change the tables.
+10. The items are created but nobody owns them → the assignee was left empty, or set from the
+    machine's git identity on an organization whose tenant knows the user under another UPN → resolve
+    the identity per organization, set it in the create call, and check it in the read-back.
 
 ## References
 

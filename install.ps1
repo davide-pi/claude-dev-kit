@@ -63,7 +63,12 @@ $RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitigno
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 
+# Folders under the asset directories that Claude Code itself manages — skills synced down from the
+# claude.ai account — so neither side owns them and -Pull must never import them.
+$ManagedDirs = @('skills/synced')
+
 $script:Problems = 0
+$script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 function Write-Ok      ([string]$m) { Write-Host "  ok      $m" -ForegroundColor DarkGray }
 function Write-Info    ([string]$m) { Write-Host "  ...     $m" -ForegroundColor Gray }
 function Write-Change  ([string]$m) { Write-Host "  changed $m" -ForegroundColor Cyan }
@@ -86,7 +91,8 @@ function Get-DirAssets([string]$Root) {
         Get-ChildItem -LiteralPath $path -File -Recurse -ErrorAction SilentlyContinue |
             Where-Object { -not (Test-Ignorable $_.Name) }
     }
-    $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') }
+    $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
+        Where-Object { $rel = $_; -not ($ManagedDirs | Where-Object { $rel -like "$_/*" }) }
 }
 
 function Get-KitAssets {
@@ -117,10 +123,14 @@ function Copy-Asset([string]$Relative, [string]$From, [string]$To) {
     $parent = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
     # Anything already in the live config is someone's work — `commands/commit.md` is a likely
-    # collision — so keep a copy before overwriting. Pulling into the repo needs no backup: git is
-    # the backup there, and a .bak in the tree is only noise.
+    # collision — so keep a copy before overwriting. Copies go to one folder per run under
+    # backups\, never next to the asset: a .bak beside a skill is loaded, listed and diffed as if it
+    # were one, and seventy of them is how the live config became unreadable. Pulling into the repo
+    # needs no backup: git is the backup there.
     if ((Test-Path -LiteralPath $target) -and ($To -ne $RepoRoot)) {
-        Copy-Item -Force -LiteralPath $target -Destination "$target.bak"
+        $backup = Join-Path $To "backups\kit-install-$script:RunStamp\$($Relative.Replace('/', '\'))"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Copy-Item -Force -LiteralPath $target -Destination $backup
     }
     Copy-Item -Force -LiteralPath (Join-Path $From $Relative.Replace('/', '\')) -Destination $target
 }
@@ -271,6 +281,12 @@ function Test-Hooks {
 
     foreach ($name in ($shipped | Where-Object { $_ -notin $wired.Keys })) {
         Write-Info "$name is shipped by the repo but no settings.json entry runs it — wire it there yourself"
+    }
+
+    # The reminder hook reads its roots from settings.json → env; the template ships them empty, and
+    # empty is silence — the one state in which forgotten hours stay forgotten without a sign.
+    if ($wired.ContainsKey('worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
+        Write-Problem 'CLAUDE_WORKSPACE_ROOTS is empty in settings.json → env — worklog-pending.js will never report a day'
     }
 }
 

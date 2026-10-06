@@ -33,8 +33,10 @@ before promising anything, and fold what does not fit into the description.
 
 Inferred, not guessed: read who is already assigned to the items under the **focus feature**, count
 the identities, propose the most frequent one. Two identities tied, or a feature with no assigned
-items yet → **ask the user** directly. Never fall back to the currently logged-in identity as a
-silent default.
+items yet → propose **the user** — that is the standing default for anything created here — and say
+which of the two it is: "proposto per frequenza sotto la feature" or "default: tu". The inference is
+still worth running, because a feature owned by someone else is exactly the case where the default is
+wrong. Either way it is a **proposal**: it reaches the board only through the step-4 recap.
 
 ```powershell
 az boards query --org $org --project $prj -o table --wiql @"
@@ -85,8 +87,8 @@ approfondire?"** — and repeat until the user says there are none.
    board before step 5; the cart is what makes the step-4 recap possible.
 2. A defect lands with empty content → the answers went into `Description` → each answer goes into
    its own field, and only the ones actually given.
-3. An assignee appears out of nowhere → the inference found nothing and a default was assumed → an
-   empty inference is a question for the user.
+3. An assignee appears out of nowhere → the proposal was never labelled → say whether it came from
+   the inference or from the default, so the user can tell a real signal from a fallback.
 4. Images are attached without asking → the user pasted them, which looked like consent → pasting is
    context; attaching is a separate yes.
 5. Acceptance criteria are written for a technical activity or an analysis item → the backlog-item

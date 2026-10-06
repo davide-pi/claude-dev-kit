@@ -33,8 +33,10 @@ Cosa fa, esattamente:
   numero di prompt;
 - scrive il **digest grezzo** in `_raw/<periodo>.md` sotto la cartella di lavoro della skill e ne
   stampa il path, insieme al path dell'**audit** (`pushed.json`);
-- fa la **retention** al lancio: pota digest e voci di audit piu' vecchi della finestra di
-  ritenzione (default 7 giorni). Non c'e' nessuno scheduler: la pulizia avviene solo qui.
+- fa la **retention** al lancio: pota **solo i digest** piu' vecchi della finestra di ritenzione
+  (default 7 giorni). Non c'e' nessuno scheduler: la pulizia avviene solo qui. L'**audit non si pota
+  mai**: e' l'unica memoria di quali periodi sono gia' finiti sulla board, e su di essa si regge il
+  promemoria delle giornate non registrate (vedi `scrittura.md`, "Il giorno chiuso").
 
 Parametri opzionali oltre a `-From`/`-To`: radice dei progetti, cartella di output, soglia di
 inattivita', giorni di ritenzione e i limiti di troncamento del digest. Non toccarli senza motivo.

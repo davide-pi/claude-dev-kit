@@ -103,9 +103,9 @@ git branch --move <old> feature/<new>
 # already pushed under the wrong name
 git push origin --delete <old>; git push --set-upstream origin feature/<new>
 
-# after the PR is merged: drop the local branch and the stale remote ref
+# after the PR is merged (check its state first): squash means git sees it unmerged, so -D
 git switch $base; git pull --ff-only
-git branch --delete feature/<name>; git fetch --prune
+git branch -D feature/<name>; git fetch --prune
 ```
 
 ## Traps

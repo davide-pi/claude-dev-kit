@@ -41,7 +41,9 @@ Ask as a discrete choice, not open prose, when the answer set is small and known
   and only from types discovery confirmed exist.
 - **Hierarchy** — flat siblings under one parent, or a multi-level tree.
 - **Priority / severity** — only if the board actually uses those fields.
-- **State and assignment** — only when the user hints at something other than New and unassigned.
+- **State and assignment** — only when the user hints at something other than New and assigned to
+  them: another person's name, "lascialo libero", a team to triage it. The default needs no question,
+  and Table 2 shows it anyway.
 
 ## Image handling
 

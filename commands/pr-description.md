@@ -13,8 +13,11 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
    does not drag already-merged commits into the description. If empty, stop and say there's nothing
    to describe.
 3. **Changed files** — `git diff --name-status origin/<base>...HEAD`.
-4. **Write** the description using the template below.
-5. **(Optional) Publish** — only if the request or `$ARGUMENTS` asks to open/update the PR: use the
+4. **Release scope** — map that file list to the deployables that must be released, fanning out from
+   shared code and message contracts to the services that reference them; it fills the `Rilascio`
+   section and is never skipped (`pr-create` → `description.md`).
+5. **Write** the description using the template below.
+6. **(Optional) Publish** — only if the request or `$ARGUMENTS` asks to open/update the PR: use the
    Azure DevOps MCP server connected **in this session** (identify it from the `mcp__<server>__repo_*`
    tools that actually exist — never assume a server name, and match tools by capability since that
    MCP renames them), create or update the PR on the current branch, set this text as its description,
@@ -31,7 +34,14 @@ Generate a PR description from the current changes. Incorporate "$ARGUMENTS" if 
   value: identifiers, file, class, method and branch names, code, commands and their output,
   `AB#<id>`, and the section headings of the template below, which are used exactly as written
   there (`Test` and `Breaking change` are the standard technical terms and stay in that form).
-- Omit any section with nothing meaningful to say.
+- Omit any section with nothing meaningful to say — **except `Rilascio`**, which is always present:
+  when the change deploys nothing, it says `Nessun componente da rilasciare` and why (solo docs,
+  solo test, solo pipeline). An absent section reads as forgotten, not as empty.
+- `Rilascio` lists **releasable components, not changed files**: map each changed path to the unit
+  that gets deployed (pipeline path filters where they exist, otherwise Dockerfile / executable
+  project / app entry in the workspace config), and fan out from shared code to its consumers — a
+  class library, a contracts package or a message contract releases the services that reference it,
+  never itself. Procedure and edge cases in `pr-create` → `description.md`.
 - This repo uses Azure DevOps PRs. The item referenced is the **parent backlog item** — a User Story
   or PBI, a Bug, an Impediment, a TECH activity — never a **Task**, which only carries hours: an id
   that turns out to be a Task is replaced by its parent (type and parent read through `azdo-cli`).
@@ -52,6 +62,12 @@ Why this was needed — bug, requirement, or tech debt.
 ### Modifiche
 
 Bullets grouped by area (feature / fix / refactor / config) when there are more than ~5 items.
+
+### Rilascio
+
+The releasable components this change forces a deploy of — one bullet each, `- <componente> — <perché>`,
+plus any ordering that matters (migration first, producer before consumer). Never omitted: nothing to
+deploy → `Nessun componente da rilasciare` with the reason. Never the changed library — its consumers.
 
 ### Test
 
