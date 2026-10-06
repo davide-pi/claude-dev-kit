@@ -28,18 +28,31 @@ and `/security-review`, an ad-hoc "review this", a merged multi-agent run): the 
 a compact summary table, one row per finding, placed **after** all the detail. That is how I read a
 review — the table first, then I scroll up only to the rows I care about — so a table at the top, or
 buried in the middle, defeats the purpose.
-- Rows keep the findings' numbers and their order, so the row order **is** the severity order and
-  `#3` in the table is the block titled `3.` above it.
-- Minimum columns: `#`, category, `file:line`, a one-line statement of the finding (~80 chars, no
-  wrapping), and the `CONFIRMED`/`PLAUSIBLE` verdict. Add a `Posted` column whenever some findings
-  went onto a PR, so I can see at a glance what the author already sees.
-- Every reported finding gets a row — `clean-code` and low-severity ones included, last.
-- After the table: at most the one-line verdict and one short question about what to fix next.
-  Nothing longer, or the table scrolls off screen.
+- **Two tables, in this order**: **Da fare** (`status: todo`), then **Già fatti** (`status: done` —
+  already resolved by a later commit in scope, by a PR thread resolved **with a fix**, or by a fix
+  applied in this session; a thread closed as by-design is dropped, not `done`). A `done` finding is
+  one line: no failure, no fix.
+- **Per-finding fields** (the review agents emit them; values verbatim):
+  - `priority` — impact if *not* fixed: **P1** blocks the merge (CONFIRMED security, data loss,
+    crash, broken contract), **P2** fix before release, **P3** improvement (most `clean-code`).
+  - `risk` — what *applying the fix* can break, on the "Change scope" scale: `alto | medio | basso`.
+  - `effort` — **S** one place, minutes · **M** a few files · **L** design change or migration.
+- **Sort order** (this replaces "severity order" everywhere): P1 → P3, then `CONFIRMED` before
+  `PLAUSIBLE`, `clean-code` last within its priority. Rows keep the findings' numbers, so `#3` in a
+  table is the block titled `3.` above it.
+- **Columns** — Da fare: `#`, `Priorità`, `Categoria`, `Posizione` (`file:line`), `Rilievo` (~80
+  chars, no wrapping), `Verdetto`, `Rischio`, `Sforzo`. Già fatti: `#`, `Categoria`, `Posizione`,
+  `Rilievo`, `Risolto da` (commit, thread, or "sessione"). Add `Postato` whenever some findings went
+  onto a PR.
+- **Fix rapidi** — one line under the tables listing the `#` of every P3 + `basso` + `S` finding, so
+  I can approve them all with a single "ok".
+- Every reported finding gets a row — `clean-code` and low-priority ones included.
+- After the tables: at most the one-line verdict and one short question about what to fix next.
+  Nothing longer, or the tables scroll off screen.
 - No findings → no table; say what was verified instead.
-- The headers and the finding statements are **Italian**, like every report I read. Three things in
-  the table stay verbatim because I grep on them: the `file:line` anchor, the
-  `CONFIRMED`/`PLAUSIBLE` value, and the category slug.
+- The headers and the finding statements are **Italian**, like every report I read. Stay verbatim
+  because I grep on them: the `file:line` anchor, `CONFIRMED`/`PLAUSIBLE`, the category slug, and
+  the values `P1|P2|P3`, `S|M|L`.
 # Workspaces → ALM platform, org, project
 Maps a working directory to the platform, organization and project the work belongs to. Use it
 whenever something has to land in the right place — hours (`/worklog`), work items
@@ -76,6 +89,24 @@ costs me more than it gives.
 - No preamble, no restating what I just said, no summary of what you are about to do.
 - Depth goes in a reference file loaded on demand, never inline "just in case".
 - Applies to everything: chat answers, skills, PR and commit messages, work items, review reports.
+- **Answer shape**: one bold summary sentence first, then bullets or a table. Deeper explanation,
+  only when genuinely needed, goes in a separate `> **Dettaglio**` block below — so I can find the
+  point of interest before deciding whether to read on.
+# Change scope — only what the request needs
+Every edit is **contained**: the smallest diff that fully satisfies the request, written well
+(performance, clean code, local idiom) **inside** that perimeter.
+- No unrequested refactors, renames, reformatting, dependency bumps, "while I'm here" fixes or
+  comment rewrites on code the request does not need to touch.
+- Anything outside the perimeter you think is worth doing is **proposed, not applied**: list it at
+  the end of the answer, one row each, and stop. I ask for details if I want them.
+
+  | Proposta | Motivo | Rischio |
+  |----------|--------|---------|
+  | one line | one line | alto / medio / basso |
+
+- **Risk scale** (shared with review findings): **alto** = can break behaviour, data or a public
+  contract (API, event, schema, config); **medio** = touches logic, localized and verifiable by
+  tests; **basso** = cosmetic or style only, no behaviour change.
 # Language
 **Italian by default.** English only for the code and for the text the AI itself reads back as
 technical reference. The dividing line is the reader, not the register.

@@ -92,8 +92,13 @@ git diff HEAD                                   # include uncommitted work if re
 - No PR found → report it and stop. Read the **enclosing function** of every hunk: a bug in an
   unchanged line of a touched function is in scope.
 
-Then fan out per effort, merge, triage, post the PR bucket, and report in chat with the **summary
-table last** — mechanics and the exact report order in `posting.md`.
+- **Tagged comments already on the PR** → incremental pass: diff only from the last reviewed commit
+  and hand the previous findings to the agents (`triage.md` § "Second passes").
+- Write the diff **once** to the scratchpad, generated files excluded, and pass its path to every
+  agent (`effort-and-fanout.md` § package).
+
+Then fan out per effort, merge, triage, post the PR bucket, and report in chat with the **tables Da
+fare / Già fatti last** — mechanics and the exact report order in `posting.md`.
 
 ## Traps
 
@@ -103,8 +108,8 @@ table last** — mechanics and the exact report order in `posting.md`.
    file-level comment rather than dropping the question.
 3. A finding is posted as a lecture → it was copied from the agent's report verbatim → rewrite it as
    the one question the author must answer.
-4. The same question appears twice across passes → earlier comments were not checked → search the
-   PR for the tag before posting a second pass.
+4. The same question appears twice across passes, or a second pass re-reviews the whole PR →
+   earlier comments were not checked → search the PR for the tag first and review incrementally.
 5. A wrong comment cannot be removed on Azure DevOps → threads can be closed but not deleted →
    close it as by-design and tell the user it needs the web UI to disappear.
 6. The report opens with the summary table → the table scrolls off screen → findings first, table

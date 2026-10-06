@@ -21,13 +21,25 @@ one after another.
 
 Identical for all of them, and never trimmed:
 
-1. **The scope** — the diff (or how to produce it), the base branch, and the files in play.
+1. **The scope** — the **path of one diff file** written once to the scratchpad and shared by every
+   agent, the base branch, and the files in play. Generated files are excluded at write time and
+   the package says so ("lockfiles excluded"):
+
+   ```powershell
+   git diff "<range>" --output="<scratchpad>/review.diff" -- ':/' ':!*.lock' ':!package-lock.json' `
+     ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'
+   ```
+
+   Manifests (`package.json`, `*.csproj`) and migration `.cs` files are never excluded.
 2. **The effort**, so the agent calibrates depth rather than guessing.
 3. **The intent of the change** — the PR title and body, plus the text of what the PR implements:
    the linked Azure DevOps work items (through `azdo-cli`) or the linked GitHub issues
    (`gh pr view <n> --json closingIssuesReferences`, then `gh issue view <n> --json title,body`).
    Fall back to the branch's commit messages when that text is thin.
 4. **The instruction that it returns findings only** — no agent posts, edits, or commits.
+5. **Previous findings** — on an incremental pass only (`triage.md` § "Second passes"): each tagged
+   thread's anchor, question and state (active / resolved / answered), so the agent can mark it
+   `done` or re-report it as `todo`.
 
 The intent is what the completeness pass compares the diff against, so it is the one part that must
 never be omitted. If there genuinely is no stated intent, say so when spawning: the gap then shows
@@ -50,8 +62,10 @@ Three agents on one diff will collide. Merge before triage:
 1. Same anchor, same defect → keep one: the **more specific category**, the **higher-confidence**
    verdict, the union of the questions.
 2. Same line, **different** failure → keep both; they are two findings.
-3. Re-sort everything by severity **across** agents, then number the surviving findings `1..n`.
-   That numbering is what the chat report and the summary table both use.
+3. Re-sort everything **across** agents in the global `CLAUDE.md` § "Review output" order (`todo`
+   before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`), then number the surviving findings
+   `1..n`. On a conflict keep the **higher** priority. That numbering is what the chat report and
+   the summary tables both use.
 4. Track which agent produced each survivor — it decides the tag.
 
 ## Attribution

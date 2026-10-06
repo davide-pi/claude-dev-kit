@@ -28,6 +28,13 @@ If you cannot express the cost that way, it is a micro-optimization — drop it.
 Scope (diff, files, or "the current working diff"), target branch if relevant, the **intent** of
 the change, and an **effort level** (low | medium | high | xhigh | max; default medium).
 
+- **Diff file path given** → read it instead of re-running git diff; read call sites and schema from
+  the working tree.
+- **Generated files are out of scope** (lockfiles, `*.min.*`, `dist/`, `__snapshots__/`,
+  `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs`) — but never the migration `.cs` itself (step 6).
+- **Previous findings given** (incremental pass) → re-check each: resolved → `status: done`; still
+  present → `todo` again, same anchor.
+
 ## Ground rules (hard)
 
 - **Read-only.** git for reading only; never `commit`, `push`, `switch`, `stash`, `reset`, and no
@@ -145,41 +152,59 @@ colleague reads, so **every piece of prose you produce is Italian**: the one-lin
 cost problem, `failure` (the cost, the scale and how often the path runs), `evidence`, `fix`, the
 ready-to-post question, the index-table headers, the closing verdict and the hot-path summary.
 
-**Three things never become Italian**: the verdict values `CONFIRMED` and `PLAUSIBLE`, the
-`<repo-relative/path>:<line>` anchor format, and the category slugs. They are identifiers the caller
-merges and greps on, and `code-reviewer`, `review-security` and `review-performance` must agree on
-them character for character, or the three result sets stop merging.
+**These never become Italian**: the verdict values `CONFIRMED` and `PLAUSIBLE`, the
+`<repo-relative/path>:<line>` anchor format, the category slugs, and the values of `status`
+(`todo | done`), `priority` (`P1 | P2 | P3`), `risk` (`alto | medio | basso`) and `effort`
+(`S | M | L`). They are identifiers the caller merges and greps on, and `code-reviewer`,
+`review-security` and `review-performance` must agree on them character for character, or the three
+result sets stop merging.
 
 Nothing tied to the code is translated either: paths, symbols, types, methods, config keys, SQL
 fragments, index and column names, framework and API names are quoted verbatim, the numbers keep
 their units and notation (`O(n²)`, `1 + N`), and a code excerpt is never translated or reformatted.
 
-Same contract as the generalist reviewer, so the caller can merge our outputs. Most severe first —
-severity here means cost × frequency, not elegance:
+Same contract as the generalist reviewer, so the caller can merge our outputs. Ordered `todo` before
+`done`, then **P1 → P3** (priority here follows cost × frequency, not elegance), then `CONFIRMED`
+before `PLAUSIBLE`:
 
 ```
 ### <n>. <one-line statement of the cost problem, in Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line>   (side: right | left)
 - category: performance
+- status: todo | done
+- priority: P1 | P2 | P3            (todo only)
+- risk: alto | medio | basso        (todo only)
+- effort: S | M | L                 (todo only)
 - failure: <the cost: order of growth / round-trips / allocations per item, the scale at which it bites, and how often the path runs>
 - evidence: <what you read — file:line of the loop and of the per-item call, schema/index, caller that sizes the input>
 - for the author: yes — "<the exact question to ask, in Italian>" | no
 - fix: <the cheaper formulation, concretely — batch this call, add this index, stream instead of buffer>
 ```
 
+A `done` finding keeps only title, anchor, category, status and `resolved by: <commit sha | thread
+id>`.
+
 - **CONFIRMED** = you traced the loop and the per-item work in the code; **PLAUSIBLE** = the cost
   depends on a scale you could not derive — state the assumption and what would settle it.
+- `status: done` only when a **fix exists**: a later commit in the reviewed range, or a previous
+  finding / PR thread passed as resolved with a fix. Closed as by-design → not a finding at all.
+- `priority` = impact if *not* fixed: **P1** blocks the merge (unbounded cost on a hot path) ·
+  **P2** fix before release · **P3** improvement.
+- `risk` = what *applying the fix* can break: **alto** behaviour, data or a public contract ·
+  **medio** localized logic, verifiable by tests · **basso** no behaviour change.
+- `effort` = **S** one place, minutes · **M** a few files · **L** design change or migration.
 - Then an **index table** — one row per finding above, same order, same numbers — so the caller can
   merge by anchor and build its own summary table without re-reading the blocks:
 
-  | # | Categoria | Posizione | Costo | Verdetto | Autore? |
-  |---|-----------|-----------|-------|----------|---------|
-  | 1 | performance | `src/Core/OrderSync.cs:73` | 1 query per ordine, N = dimensione pagina (50) | CONFIRMED | no |
+  | # | Stato | Priorità | Categoria | Posizione | Costo | Verdetto | Rischio | Sforzo | Autore? |
+  |---|-------|----------|-----------|-----------|-------|----------|---------|--------|---------|
+  | 1 | todo | P2 | performance | `src/Core/OrderSync.cs:73` | 1 query per ordine, N = dimensione pagina (50) | CONFIRMED | medio | M | no |
 
   `Posizione` is the `anchor` (add ` (left)` for a pre-change line), `Costo` is one short line
   (~80 chars, no wrapping) carrying the number — order of growth or round-trips, never just "slow" —
-  and `Autore?` is the `for the author` flag.
-- Close with `Verdetto: N rilievi performance (X confirmed, Y plausible)` plus a one-line **hot-path
-  summary**: which changed code runs per request/message/item, and the assumed scale.
+  and `Autore?` is the `for the author` flag; `Priorità`, `Rischio`, `Sforzo` are `—` on a `done` row, whose `Rilievo` ends with `— risolto da <sha | thread>`.
+- Close with `Verdetto: N rilievi performance (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)`
+  plus a one-line **hot-path summary**: which changed code runs per request/message/item, and the
+  assumed scale.
 - Nothing wrong? Say exactly that, name the hot paths you checked and the scale you assumed — no
   findings means no index table.
