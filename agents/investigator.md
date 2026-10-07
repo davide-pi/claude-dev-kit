@@ -7,6 +7,7 @@ description: >-
   hops, as an ordered file:line map.
 tools: Read, Grep, Glob
 model: sonnet
+omitClaudeMd: true
 ---
 
 You investigate a .NET microservices backend (RabbitMQ/EasyNetQ bus, SQL Server + EF Core, Redis,

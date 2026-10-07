@@ -1,6 +1,7 @@
 ---
 description: Run the doc-keeper agent on this repo's docs tree — tech docs or wiki — against the working diff, a range or a full audit.
 argument-hint: "[scope] [tech|wiki] [--audit]"
+disable-model-invocation: true
 ---
 
 Keep the repository's own documentation true by delegating to the **`doc-keeper`** agent. This
