@@ -73,7 +73,7 @@ and drop the shapes you do not have.
     hours go there; the old sheet stays as the record of the hours tracked before the move.
 - Any other workspace → not mapped. Ask before assuming an org or a project.
 # Routing and the CLI rule
-The kit is four levels: `dev-loop` routes, skills carry knowledge, agents explore, commands act, and
+The kit is five levels: `dev-loop` routes, skills carry knowledge, agents explore, commands act, and
 hooks stop the irreversible. Two rules decide which one you use:
 - **Start at `dev-loop`** for anything substantive — it classifies the request and names the asset
   that owns it. Once the work is routed, do not re-enter it on every turn.

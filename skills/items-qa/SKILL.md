@@ -90,8 +90,8 @@ One comment per item. In order:
 
 1. **Resolve.** Parse `<items> <url> [viewport] [username]` into `{item, url, credentials?,
    viewports?}`; a per-group form (`101,102 -> https://a.example ; 201 -> https://b.example`) is
-   allowed. Take the org and project from an item link; match an Azure DevOps MCP server connected
-   in this session **by capability**, never by an assumed tool name. → `references/reading-items.md`
+   allowed. Take the org and project from an item link and reach them through `azdo-cli` — CLI first; an
+   MCP server only for a gap its `references/mcp-fallback.md` lists. → `references/reading-items.md`
 2. **Read the item.** Title, type and the role it maps to, then the fields that role actually
    carries. **Download and look at every
    embedded image** — mockups routinely carry requirements the prose never states, and that is what

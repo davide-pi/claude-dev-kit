@@ -85,7 +85,7 @@ the skill or command that should spawn it.
 | Two skills answering the same question | Merge, or make one route to the other in a single line |
 | A skill restating a plugin | Delete the restatement, keep one routing line |
 | A skill nobody triggers | The description is the bug, not the body (`references/description-craft.md`) |
-| Prose paragraphs explaining a choice | Convert to a table; if it will not fit a table, it is probably narrative and can go |
+| Prose paragraphs explaining a choice | A table row that keeps the reason; drop only narrative with no rule, reason or gotcha |
 
 ## Do
 
@@ -102,7 +102,7 @@ Get-ChildItem -Recurse -Path skills/<name> -Filter *.md |
 Select-String -Path skills/<name>/*.md, skills/<name>/references/*.md `
   -Pattern 'Users\\', 'Password\s*=', '\S+@\S+\.\w+', 'version \d' | Format-Table LineNumber, Line
 
-# 4. Run the kit validator and fix every error.
+# 4. In the kit's source repo (not the installed ~/.claude copy): run the validator, fix every error.
 node tools/validate.mjs
 
 # 5. Add the two artefacts that make it real:

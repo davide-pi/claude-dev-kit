@@ -8,18 +8,18 @@ halfway through means retyping the whole thing.
 
 ## No screenshots → the comment API
 
-The work-item comment write capability, adding a comment in Markdown. Prefer it whenever it
-suffices: one call, no rich-text editor to fight, nothing left half-written. A comment needs no
+`az boards work-item update --id <id> --discussion '<html>'` — the CLI's comment write
+(`azdo-cli`, `references/boards-catalogue.md`); the text is HTML. Prefer it whenever it suffices: one call, no rich-text editor to fight, nothing left half-written. A comment needs no
 images when every KO is provable in prose — a missing label, a wrong string, a count from a text
 search — or when there are no KO at all.
 
 ## Screenshots → upload them first, then still post through the API
 
-The MCP cannot *create* an attachment; its attachment tool only downloads one. But a Markdown
-comment renders an image fine as long as the attachment already exists:
+No CLI verb uploads an attachment, but the REST upload below does, and the comment then renders
+the image fine as long as the attachment already exists:
 
-```
-![AC03 desktop header](https://dev.azure.com/{org}/{project}/_apis/wit/attachments/{id}?fileName=x.png)
+```html
+<img alt="AC03 desktop header" src="https://dev.azure.com/{org}/{project}/_apis/wit/attachments/{id}?fileName=x.png">
 ```
 
 That is exactly the shape Azure DevOps itself writes into item descriptions. So try the API route
