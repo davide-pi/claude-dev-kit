@@ -23,7 +23,7 @@ nothing else changes. Machine identifiers are never translated in either directi
 | **Routing** | which asset owns this task | `dev-loop`, plus the rules in `CLAUDE.md` |
 | **Knowledge** | not re-deciding what was decided once | 26 skills, depth in reference files loaded on demand |
 | **Exploration** | finding context without burning the main context window | 7 subagents |
-| **Execution** | running a known sequence in one shot | 7 slash commands |
+| **Execution** | running a known sequence in one shot | 8 slash commands |
 | **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
 
 Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
@@ -46,7 +46,7 @@ the ceremony and rewritten for PowerShell.
 | `skills/done-check/SKILL.md` | The completion gate: evidence before the claim, with a definition of done per change type and the exact command each one requires. |
 | `skills/debug-systematic/SKILL.md` | Reproduce, isolate, explain, then fix — with a symptom-to-instrument table for .NET processes, query plans, brokers, pipelines and intermittent failures. |
 | `skills/skill-forge/SKILL.md` | How to add or change an asset of this kit: shape decision, front matter, caps, splitting, finish checklist. |
-| `skills/grill-me/SKILL.md` | Red-team a plan: interview every branch of the decision tree, then a Decision Summary. |
+| `skills/grill-me/SKILL.md` | Red-team a plan: interview the decision tree round by round — the whole frontier at once, each question with a recommended answer — then a Decision Summary. |
 
 **Backend .NET**
 
@@ -107,6 +107,7 @@ own guardrails, and none of them merges, deploys, force-pushes or drops.
 | `commands/logs.md` | Tail and filter the current service's logs, whichever way this project produces them. |
 | `commands/docs-sync.md` | Runs `doc-keeper` on the repository's tech docs or wiki tree, against the working diff, a range or a full audit. |
 | `commands/code-review.md` | `/code-review [scope] [effort] [focus]` — reviews the working diff and reports in chat only. |
+| `commands/retro.md` | `/retro [session] [focus]` — retrospective on a session: classifies every friction event and proposes the environment fix (pointer, check, hook, skill, access). Proposes only. |
 | `commands/commit.md` | A commit with a generated message, on the current, an existing or a new branch. Never pushes. |
 
 ## Subagents

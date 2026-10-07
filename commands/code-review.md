@@ -33,7 +33,8 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
 
 2. **Establish the intent** — what this change was supposed to accomplish. In order: what the user
    asked for in this conversation; the branch's commit messages (`git log <base>..HEAD`); a linked
-   work item or PR if one exists. If the intent stays unclear, **ask the user for one line** before
+   work item or PR if one exists — with its **acceptance criteria verbatim**, since the reviewer
+   judges each criterion on its own line. If the intent stays unclear, **ask the user for one line** before
    reviewing — without it the completeness pass has nothing to compare against, and saying so beats
    guessing.
 
@@ -59,7 +60,8 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    (two tables Da fare / Già fatti, the fields, the sort order, the verbatim values). Order:
    - **Rilievi** — one block per `todo` finding, numbered in sort order: what breaks, the failure
      scenario, the evidence (`file:line`), the minimal fix. `done` ones: one line each.
-   - **Completezza** — the intent points checked, which are covered, which are not.
+   - **Completezza** — each intent point or acceptance criterion with its verdict (coperto ·
+     parziale · mancante · implementato male), then any scope creep (behaviour nobody asked for).
    - **Tabelle** Da fare, then Già fatti — the **last** blocks, so they stay on screen.
    - **Fix rapidi** and **Verdetto** — one line each: `N rilievi (X da fare, Y già fatti · P1: N) ·
      security: N · completezza: N`, plus which agents ran at which effort.

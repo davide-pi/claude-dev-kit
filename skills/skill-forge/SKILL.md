@@ -147,3 +147,4 @@ clean, eval section added, README row added. Five out of six is not finished.
   quiet otherwise, with the false-negative and false-positive patterns and how to test both.
 - `references/asset-templates.md` — copy-paste skeletons for a skill, a command, an agent and a
   hook, the two-language rule with its exceptions, the eval and README formats, the finish checklist.
+- `references/writing-for-agents.md` — wording an asset: pointers, no-ops, positive phrasing, criteria.

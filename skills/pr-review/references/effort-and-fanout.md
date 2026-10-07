@@ -35,7 +35,8 @@ Identical for all of them, and never trimmed:
 3. **The intent of the change** — the PR title and body, plus the text of what the PR implements:
    the linked Azure DevOps work items (through `azdo-cli`) or the linked GitHub issues
    (`gh pr view <n> --json closingIssuesReferences`, then `gh issue view <n> --json title,body`).
-   Fall back to the branch's commit messages when that text is thin.
+   Pass the acceptance criteria **verbatim** — the reviewer judges each one on its own line and
+   flags scope creep against them. Fall back to the branch's commit messages when that text is thin.
 4. **The instruction that it returns findings only** — no agent posts, edits, or commits.
 5. **Previous findings** — on an incremental pass only (`triage.md` § "Second passes"): each tagged
    thread's anchor, question and state (active / resolved / answered), so the agent can mark it

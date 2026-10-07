@@ -35,7 +35,7 @@ The PR **always targets the protected default branch** read from the remote, nev
 | Part | Rule |
 | --- | --- |
 | Title | one line, **imperative**, specific, no trailing period — `Aggiungi export fatture per tenant` |
-| Body | what changed and why, as a few bullets, **plus the components to release**; only what a reviewer needs |
+| Body | what changed and why, as a few bullets, **plus the components to release** and a `Rischio merge:` line (reversibile / irreversibile + impatto); only what a reviewer needs |
 | Never | a filled-in template with empty sections, a commit-by-commit dump, or a diff restated in prose |
 
 Derive both from the change, not from the branch name: `git log --oneline origin/<base>..HEAD` and
