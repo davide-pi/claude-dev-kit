@@ -2,7 +2,8 @@
 
 Applies to every text an agent consumes: a skill, a reference, a command, an agent prompt, a
 `CLAUDE.md`. The goal is not the same output every run but the same **process** every run. Adapted
-from the `writing-for-agents` skill in `mattpocock/skills` (MIT).
+from the `writing-for-agents` skill in `mattpocock/skills` — MIT License,
+Copyright (c) 2026 Matt Pocock.
 
 ## Context pointers
 
