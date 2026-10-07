@@ -159,7 +159,7 @@ Installed plugins already own these, so no asset restates them — they route to
 
 | Area | Owner |
 |---|---|
-| Redis data modelling, clustering, search, security, observability | `redis-development` |
+| Redis data modelling, clustering, search, security, observability | `redis-development` (off by default, enabled on demand) |
 | Microsoft and .NET API lookup, signatures, samples | `microsoft-docs` |
 | Modern web-platform APIs, CSS features, Core Web Vitals | `modern-web-guidance` |
 | Visual and UX design | `frontend-design` |
@@ -205,7 +205,7 @@ Register the marketplace once, then install each plugin and restart:
 
 ```
 /plugin marketplace add anthropics/claude-plugins-official
-/plugin install redis-development       # Redis, everything but the .NET client
+/plugin install redis-development       # Redis, everything but the .NET client (off by default)
 /plugin install microsoft-docs          # live Microsoft and .NET documentation
 /plugin install modern-web-guidance     # web platform, CSS, Core Web Vitals
 /plugin install frontend-design         # visual and UX design

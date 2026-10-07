@@ -361,7 +361,7 @@
     "microsoft-docs@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
     "chrome-devtools-mcp@claude-plugins-official": false,
-    "redis-development@claude-plugins-official": true,
+    "redis-development@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false,
     "modern-web-guidance@claude-plugins-official": true,
