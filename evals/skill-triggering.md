@@ -265,7 +265,7 @@ have done it in one shot.
 | Prompt | Expected |
 |--------|----------|
 | `/retro` | MUST invoke on the current session and return proposals only, one row per friction event |
-| "facciamo una retrospettiva di questa sessione: cosa miglioriamo nel kit?" | MUST invoke |
+| "facciamo una retrospettiva di questa sessione: cosa miglioriamo nel kit?" | MUST NOT invoke on its own (`disable-model-invocation`): suggest `/retro` |
 | "com'è andato lo sprint?" | MUST NOT (a team retrospective, not a session's environment) |
 
 ### `/item`

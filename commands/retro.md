@@ -1,6 +1,7 @@
 ---
 description: Retrospective on a coding session — propose changes to the agent's environment (docs, checks, hooks, skills, access) so the next run goes better. Proposes only.
 argument-hint: "[session-id | current] [focus]"
+disable-model-invocation: true
 ---
 
 Look back at a session and propose improvements to the **environment** the agent works in — not to
