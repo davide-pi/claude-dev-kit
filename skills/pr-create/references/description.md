@@ -35,6 +35,13 @@ Rilascio:
   tenant, ora in `Shared.Tenancy`: referenziano la libreria modificata.
 - Database `billing` — migration da applicare prima dei servizi.
 
+Rischio merge: irreversibile — la migration crea una tabella che il rollback non elimina; impatto:
+export fatture di tutti i tenant.
+
+Verifica:
+- Prima: `dotnet test --filter InvoiceExport` → 2 falliti (endpoint assente).
+- Dopo: stesso comando → 14 passati; export di prova su tenant `demo` scaricato e aperto.
+
 Note per il reviewer:
 - Per ora l'export è sincrono; il percorso a coda è fuori scope (item #<id>).
 
@@ -49,9 +56,19 @@ Rules:
 3. Call out anything the reviewer must not miss: a migration, a config key, a breaking signature, a
    deliberate deviation, a follow-up left undone.
 4. Name what is **out of scope**, so the review does not turn into a design discussion.
-5. No empty template sections, no "N/A", no checklist nobody ticks — with **one exception**: the
-   `Rilascio:` block is always written, `nessun componente` included (see below).
-6. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
+5. No empty template sections, no "N/A", no checklist nobody ticks — with **two exceptions**: the
+   `Rilascio:` block is always written, `nessun componente` included (see below), and so is the
+   `Rischio merge:` line.
+6. **`Rischio merge:`** — one line: **reversibile** (a revert of the squash commit undoes it all) or
+   **irreversibile** (a migration that drops or rewrites data, a published contract, a message
+   already consumed, an external call with side effects) and what cannot be undone; then the
+   **impatto** — who or what breaks if it is wrong. It tells the reviewer how hard to look. The
+   minimal form, for a docs-only or tooling change: `Rischio merge: reversibile — revert dello
+   squash commit; nessun impatto a runtime`.
+7. **`Verifica:`** — when a command or a check was run, the evidence before and after: the failing
+   then passing test, the output, the screenshot path. Quote the command; never paraphrase a result
+   (`done-check`). Nothing was run → leave the block out rather than invent one.
+8. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
 
 ## Deriving it
 

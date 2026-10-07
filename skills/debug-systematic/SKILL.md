@@ -43,6 +43,16 @@ deliberately, never left standing as the fix.
 **When phase 1 fails**, reproducing *is* the task: add correlation ids and timing, then loop the
 scenario until the failure rate is measurable.
 
+**Before the first probe of phase 2, write 3–5 ranked, falsifiable hypotheses** — each one a
+prediction: "se la causa è X, allora cambiando Y il bug sparisce". A hypothesis with no prediction is
+a hunch: sharpen it or drop it. Show the ranked list to the user before testing — they often re-rank
+it at once ("abbiamo appena rilasciato #3") — but do not block on the answer. One hypothesis alone
+anchors on the first plausible idea.
+
+**The regression test of phase 4 needs a seam that reproduces the real call pattern.** If the only
+reachable seam is too shallow to exercise the bug as it happens at the call site, a test there is
+false confidence: say so, and report the missing seam as a finding instead.
+
 **Three wrong hypotheses in a row** means the mental model is wrong, not the code. Stop probing:
 re-read the whole code path, list every assumption, verify each one with an instrument.
 
@@ -99,8 +109,10 @@ git stash; dotnet test --filter "FullyQualifiedName~<NewTest>"; git stash pop
 7. **Changing several things per run** — when it passes, nothing was learnt. One variable at a time.
 8. **A dump taken from a process that must keep serving** — collection freezes it for seconds. Take
    counters and a trace first; dump only when a freeze is acceptable.
-9. **A log line added to diagnose, then committed** — instrumentation is not the fix. Remove it, or
-   promote it deliberately to structured logging with a stated reason.
+9. **A log line added to diagnose, then committed** — instrumentation is not the fix. Tag every
+   probe with one prefix per session (`[DEBUG-a4f2]`), so the cleanup is a single
+   `git grep -n "DEBUG-a4f2"`; then remove it, or promote it deliberately to structured logging
+   with a stated reason.
 
 ## References
 

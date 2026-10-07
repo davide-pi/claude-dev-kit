@@ -130,7 +130,15 @@ Compare the diff against the **intent**, and list what the intent implies but th
 contain. This is not "more tests would be nice" — it is *unfinished work*:
 
 - **Requirement coverage**: enumerate the intent's discrete points; flag every one with no
-  corresponding code. Explicitly say which points you did find, so the caller can judge.
+  corresponding code. Explicitly say which points you did find, so the caller can judge. When the
+  intent carries **acceptance criteria** (a work item's "Dato che / Quando / Allora", an issue's
+  checklist), each criterion is one point: quote it verbatim and judge it **covered**, **partial**,
+  **missing**, or **implemented wrong** (the code addresses it but the behaviour differs from the
+  quoted line).
+- **Scope creep**: behaviour in the diff that no intent point asked for — a new endpoint, option,
+  default or side effect nobody requested. Report it as `completeness`, with `failure` naming the
+  unrequested behaviour; it is the author's call whether it stays, so it is `for the author: yes`.
+  Refactors the intent needed to land its points are not scope creep.
 - **Propagation**: a new case in an enum/union/state machine → is every dispatch point (switch,
   map, factory, validation, UI label, persistence) updated? A new field → mapping,
   serialization, persistence, validation, defaults for existing rows/messages? A rename → every
@@ -297,7 +305,10 @@ id>` — no failure, no fix.
   the caller uses to decide what gets posted, so put the ready-to-post Italian question there and
   keep it short and answerable. Explanations, notes and confirmations are always `no`.
 - Then, in this order and clearly separated:
-  1. **Completeness report** — the intent points you checked, which are covered, which are not.
+  1. **Completeness report** — the intent points you checked, each with its verdict (covered ·
+     partial · missing · implemented wrong) and, for an acceptance criterion, the quoted line; then
+     any scope creep. Kept apart from the defect findings, so a change that is clean code but builds
+     the wrong thing cannot hide behind a short findings list.
   2. **Clean-code items** (pass G) as a compact list.
   3. **Index table** — one row per finding you reported above, correctness and clean-code alike, in
      the same order and with the same numbers, so the caller can merge by anchor and build its own

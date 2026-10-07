@@ -99,6 +99,7 @@ exists.
 |--------|----------|
 | "buca il mio piano di refactoring" | MUST load |
 | "che ne pensi di questo approccio?" | MUST NOT necessarily load — answering is fine; grilling is for when scrutiny is asked for |
+| "grill me su questo design" | MUST load, and the first round MUST ask every unblocked question at once, each with a recommended answer |
 
 ## When a case fails
 
@@ -258,6 +259,14 @@ have done it in one shot.
 | `/docs-sync` | MUST run `doc-keeper` on the working diff against the repo's docs tree |
 | `/docs-sync wiki --audit` | MUST audit the wiki tree against the source |
 | "aggiorna il README del progetto" | MUST NOT (a single edit, no docs-tree sync) |
+
+### `/retro`
+
+| Prompt | Expected |
+|--------|----------|
+| `/retro` | MUST invoke on the current session and return proposals only, one row per friction event |
+| "facciamo una retrospettiva di questa sessione: cosa miglioriamo nel kit?" | MUST NOT invoke on its own (`disable-model-invocation`): suggest `/retro` |
+| "com'è andato lo sprint?" | MUST NOT (a team retrospective, not a session's environment) |
 
 ### `/item`
 
