@@ -111,14 +111,14 @@ script. But most clients exit 0 on a SQL error unless told not to:
 
 Without them, a broken migration script reports success and the pipeline or the loop carries on.
 
-## One recipe per client — the only copy in the kit
+## One recipe per client — the canonical copy
 
 `<svc>` is the compose service; with no compose file use `docker exec <container>` instead of
 `docker compose exec <svc>`. Secrets always arrive through `-e`, from the host environment.
 
 | Client | One-shot, scriptable | Notes |
 | --- | --- | --- |
-| `sqlcmd` (local) | `sqlcmd -S localhost,<port> -d <db> -U <user> -P $env:MSSQL_PASSWORD -C -b -W -Q "<sql>"` | `-C` trusts the dev container's self-signed certificate |
+| `sqlcmd` (local) | `$env:SQLCMDPASSWORD = $env:MSSQL_PASSWORD; sqlcmd -S localhost,<port> -d <db> -U <user> -C -b -W -Q "<sql>"` | `-C` trusts the dev container's self-signed certificate |
 | `sqlcmd` (in the image) | `docker compose exec -T <svc> bash -lc 'ls -d /opt/mssql-tools*/bin'` then call that path with the same flags | the tools path is versioned — glob it, never hardcode it |
 | `psql` | `docker compose exec -T -e PGPASSWORD=$env:PGPASSWORD <svc> psql -U <user> -d <db> -v ON_ERROR_STOP=1 -At -c "<sql>"` | `-At` gives unaligned, header-less output for parsing |
 | `pg_dump` | `docker compose exec -T <svc> pg_dump -U <user> -d <db> --schema-only` | binary formats need `-AsByteStream` on the host side |

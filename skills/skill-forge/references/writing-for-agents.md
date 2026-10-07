@@ -83,7 +83,7 @@ long comments". A prohibition earns its place only as a hard guardrail with no p
 | **Duplication** | the same meaning in two places | keep one source of truth, route to it |
 | **Cache** | the text restates what one file or one command shows (`package.json`, `--help`, the folder layout) | delete it and point at the lookup; keep only what no lookup reveals — the unwritten convention, the why, the gotcha |
 | **No-op** | does the sentence change behaviour versus the model's default? | no → delete the **whole** sentence, not words from it |
-| **Weak word** | the word is too mild to beat the default ("be thorough") | replace it with a stronger leading word ("relentless") |
+| **Weak word** | the word restates a default the model already has ("be thorough") | it is a no-op (row above): delete it, or name the concrete behaviour wanted ("run the suite of every touched project"); an intensifier ("relentless") over-applies on current models |
 | **Sediment** | a stale layer nobody dares remove | delete; a shorter file is easier to keep true |
 
 The no-op test is model-relative, not reader-relative: settle a disagreement by running the asset

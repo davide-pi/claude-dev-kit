@@ -40,7 +40,7 @@ configuration, auth and verbs (`azdo-cli`).
 | anything else | unknown | say so, review in chat only | nothing |
 
 CLI first on both. On Azure DevOps, what is a real CLI gap is decided only by `azdo-cli`
-`mcp-fallback.md`; the chat report says which interface was used.
+`references/mcp-fallback.md`; the chat report says which interface was used.
 
 ### 3. Effort and fan-out
 
@@ -51,14 +51,14 @@ CLI first on both. On Azure DevOps, what is a real CLI gap is decided only by `a
 | `[focus]` given | only the matching specialist — a focus overrides the ladder |
 
 Every agent returns findings; **no agent ever posts**. The package each one gets, the model rule,
-and how overlapping findings are merged: `effort-and-fanout.md`.
+and how overlapping findings are merged: `references/effort-and-fanout.md`.
 
 ### 4. Triage — every finding into exactly one bucket
 
 **Post to the PR** only a real question: an intent question, a correctness concern only the author
 can settle, or a CONFIRMED security, regression or completeness finding phrased as the question the
 author has to answer. **Everything else goes to chat.** When unsure, chat. Full rules, phrasing and
-worked examples: `triage.md` — which also holds the verification ladder for **acting on** any
+worked examples: `references/triage.md` — which also holds the verification ladder for **acting on** any
 finding (verify the premise before fixing or rejecting it).
 
 **A PR with no linked work item is itself a finding** — raised in **chat**, never posted on the PR:
@@ -90,12 +90,12 @@ git diff HEAD                                   # include uncommitted work if re
   unchanged line of a touched function is in scope.
 
 - **Tagged comments already on the PR** → incremental pass: diff only from the last reviewed commit
-  and hand the previous findings to the agents (`triage.md` § "Second passes").
+  and hand the previous findings to the agents (`references/triage.md` § "Second passes").
 - Write the diff **once** to the scratchpad, generated files excluded, and pass its path to every
-  agent (`effort-and-fanout.md` § package).
+  agent (`references/effort-and-fanout.md` § package).
 
 Then fan out per effort, merge, triage, post the PR bucket, and report in chat with the **tables Da
-fare / Già fatti last** — mechanics and the exact report order in `posting.md`.
+fare / Già fatti last** — mechanics and the exact report order in `references/posting.md`.
 
 ## Traps
 
@@ -120,9 +120,9 @@ fare / Già fatti last** — mechanics and the exact report order in `posting.md
 
 ## References
 
-- `effort-and-fanout.md` — the effort ladder, the package every agent receives, the model-selection
+- `references/effort-and-fanout.md` — the effort ladder, the package every agent receives, the model-selection
   convention, merging overlapping findings, and attribution tags.
-- `triage.md` — the two buckets in detail, how to turn a finding into a postable question, and the
+- `references/triage.md` — the two buckets in detail, how to turn a finding into a postable question, and the
   cases that always stay in chat; second passes; the verification ladder before acting on a finding.
-- `posting.md` — posting mechanics per platform, replying, retracting and resolving, plus the exact
+- `references/posting.md` — posting mechanics per platform, replying, retracting and resolving, plus the exact
   order of the chat report with the summary table last.

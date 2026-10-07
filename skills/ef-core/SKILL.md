@@ -23,9 +23,10 @@ plan or a schema review before a migration), the Postgres read cache, which has 
 (`dotnet-testing`), or provider APIs that changed between releases — route those to the
 `microsoft-docs` plugin.
 
-**Never hand-write or hand-edit a migration class or a model snapshot** — the full procedure and its
+**Never hand-write a migration class or hand-edit a model snapshot** — the full procedure and its
 guardrails are owned by `references/migrations.md`; follow it step by step, including the stop that
-shows the SQL before any database sees it.
+shows the SQL before any database sees it. The one edit allowed in a generated migration is the
+data-loss fix below: a drop-then-add `Up()` rewritten as a rename.
 
 ## Decide
 

@@ -13,7 +13,7 @@ Derived AC:
 - AC01 — {Given/When/Then}
 - AC02 — {Given/When/Then}
 
-Success %: {estimated percentage of success}
+Success %: {AC passed / AC total, rounded to an integer}
 
 AC OK: {list of AC passed}
 

@@ -205,7 +205,7 @@ id>`.
 
   `Posizione` is the `anchor` (add ` (left)` for a pre-change line), `Costo` is one short line
   (~80 chars, no wrapping) carrying the number — order of growth or round-trips, never just "slow" —
-  and `Autore?` is the `for the author` flag; `Priorità`, `Rischio`, `Sforzo` are `—` on a `done` row, whose `Rilievo` ends with `— risolto da <sha | thread>`.
+  and `Autore?` is the `for the author` flag; `Priorità`, `Rischio`, `Sforzo` are `—` on a `done` row, whose `Costo` ends with `— risolto da <sha | thread>`.
 - Close with `Verdetto: N rilievi performance (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)`
   plus a one-line **hot-path summary**: which changed code runs per request/message/item, and the
   assumed scale.
