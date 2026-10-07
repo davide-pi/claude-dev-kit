@@ -3,13 +3,15 @@ name: redis-dotnet
 description: >-
   Use whenever .NET code reads or writes Redis — a cache key, a TTL, a Stream consumer group — or a
   RedisTimeoutException, a stuck stream or a cache latency spike appears. House facts only; generic
-  Redis goes to the redis-development plugin.
+  Redis goes to the redis-development plugin, enabled on demand.
 ---
 
 # redis-dotnet — the house facts; everything generic is the plugin's
 
 Generic Redis — data structures, keys, connections, clustering, security, observability — is the
-`redis-development` plugin's (`redis-core`, `redis-connections`, `redis-observability`, …).
+`redis-development` plugin's (`redis-core`, `redis-connections`, `redis-observability`, …). The
+plugin is **off by default**, since its eight descriptions weigh on every turn: when the question
+is generic, say so and enable it (`claude plugin enable redis-development@claude-plugins-official`).
 
 ## When
 
