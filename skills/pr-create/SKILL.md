@@ -95,6 +95,9 @@ Set-Content -Path pr-body.md -Encoding utf8 -Value @'
 Rilascio:
 - <deployable> — <perché è coinvolto>     (oppure una sola riga: nessun componente)
 
+Rischio merge: <reversibile | irreversibile — cosa non si annulla>; impatto: <chi o cosa>
+Verifica: <comando → esito, prima e dopo>     (ometti il blocco se non hai eseguito nulla)
+
 Fixes #<n>
 '@
 ```

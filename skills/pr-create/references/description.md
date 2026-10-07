@@ -62,7 +62,9 @@ Rules:
 6. **`Rischio merge:`** — one line: **reversibile** (a revert of the squash commit undoes it all) or
    **irreversibile** (a migration that drops or rewrites data, a published contract, a message
    already consumed, an external call with side effects) and what cannot be undone; then the
-   **impatto** — who or what breaks if it is wrong. It tells the reviewer how hard to look.
+   **impatto** — who or what breaks if it is wrong. It tells the reviewer how hard to look. The
+   minimal form, for a docs-only or tooling change: `Rischio merge: reversibile — revert dello
+   squash commit; nessun impatto a runtime`.
 7. **`Verifica:`** — when a command or a check was run, the evidence before and after: the failing
    then passing test, the output, the screenshot path. Quote the command; never paraphrase a result
    (`done-check`). Nothing was run → leave the block out rather than invent one.

@@ -8,7 +8,7 @@ doubt is left — not when the user runs out of patience, and not after a fixed 
 | Mode | When | How |
 | --- | --- | --- |
 | **Targeted Q&A** (default) | the work is clear in shape, only details are missing | batch the questions: discrete choices as a structured question prompt, open ones in chat; few iterations |
-| **Grilling** (escalation) | the work is complex or ambiguous, decisions depend on each other, or the user asks for it | the `grill-me` method: one question at a time, walk every branch, resolve dependencies before moving on |
+| **Grilling** (escalation) | the work is complex or ambiguous, decisions depend on each other, or the user asks for it | the `grill-me` method: the whole frontier per round, each question with a recommended answer; dependent questions wait for the next round |
 
 Escalate mid-pass the moment an answer opens two new unknowns. De-escalating is fine too: once the
 tree is walked, finish the details in one batch.
