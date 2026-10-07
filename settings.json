@@ -357,7 +357,7 @@
   "enabledPlugins": {
     "csharp-lsp@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
-    "remember@claude-plugins-official": true,
+    "remember@claude-plugins-official": false,
     "microsoft-docs@claude-plugins-official": true,
     "skill-creator@claude-plugins-official": true,
     "chrome-devtools-mcp@claude-plugins-official": false,
@@ -365,17 +365,8 @@
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false,
     "modern-web-guidance@claude-plugins-official": true,
-    "headroom@headroom-marketplace": false,
     "playwright@claude-plugins-official": false,
     "browser-use@claude-plugins-official": true
-  },
-  "extraKnownMarketplaces": {
-    "headroom-marketplace": {
-      "source": {
-        "source": "github",
-        "repo": "chopratejas/headroom"
-      }
-    }
   },
   "language": "Italian",
   "feedbackDrafts": "notify",

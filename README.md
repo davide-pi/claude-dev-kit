@@ -162,7 +162,7 @@ Installed plugins already own these, so no asset restates them — they route to
 | Microsoft and .NET API lookup, signatures, samples | `microsoft-docs` |
 | Modern web-platform APIs, CSS features, Core Web Vitals | `modern-web-guidance` |
 | Visual and UX design | `frontend-design` |
-| Cross-session memory | `remember` |
+| Cross-session memory | Claude Code's native auto-memory (`memory/` + `MEMORY.md`) |
 | Generic skill-authoring machinery | `skill-creator` |
 | Semantic navigation in C# and TypeScript | `csharp-lsp`, `typescript-lsp` |
 
@@ -209,20 +209,18 @@ Register the marketplace once, then install each plugin and restart:
 /plugin install modern-web-guidance     # web platform, CSS, Core Web Vitals
 /plugin install frontend-design         # visual and UX design
 /plugin install skill-creator           # generic skill authoring
-/plugin install remember                # cross-session memory
 /plugin install csharp-lsp              # C# semantic navigation (needs csharp-ls on PATH)
 /plugin install typescript-lsp          # TypeScript semantic navigation
 /plugin install browser-use             # drives the real Edge profile over CDP (see ensure-edge-cdp)
 ```
 
-`settings.json` also registers one third-party marketplace, `headroom-marketplace`, and enables its
-`headroom` plugin. Drop both entries if you do not want a plugin from outside the official catalogue;
-otherwise:
+Retired on purpose — `settings.json` keeps `remember` off, so an old install does not come back:
 
-```
-/plugin marketplace add chopratejas/headroom
-/plugin install headroom@headroom-marketplace
-```
+| Plugin | Why it is off |
+|---|---|
+| `remember` | its `PostToolUse` hook runs bash on **every** tool call, about a second each on Windows (upstream issue #913); the native auto-memory covers durable facts |
+| `headroom` | a proxy for context compression; native prompt caching does better on long sessions, and it sends telemetry by default |
+| `code-review` | GitHub-only and posts on its own; the kit's review agents and the native `/code-review` cover it |
 
 The `superpowers` plugin is deliberately **not** enabled: the seven of its skills worth keeping were
 absorbed into the process skills above — compacted, made Windows-native and wired to this stack —
