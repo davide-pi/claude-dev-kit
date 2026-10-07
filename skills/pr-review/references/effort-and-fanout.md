@@ -92,7 +92,7 @@ never report a high-effort review as if all three had run.
 
 1. Agents spawned sequentially → three round-trips and no parallelism → one message, several calls.
 2. An agent gets the diff but not the intent → completeness cannot be judged → the package is all
-   four parts or it is incomplete.
+   items 1-4 (plus 5 on an incremental pass) or it is incomplete.
 3. Both a specialist and the generalist report the same line → the report reads as two problems →
    merge first, triage second.
 4. A specialist's finding is posted with the generic tag → attribution was lost in the merge → track

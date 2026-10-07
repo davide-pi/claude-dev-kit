@@ -68,7 +68,7 @@ before running it, and never queue a release-shaped pipeline to "see what happen
 `az pipelines build cancel --build-id <run-id>` stops a run that is in progress — note that this
 verb spells the id flag `--build-id`, unlike every other run verb.
 
-## Reading a failed run's logs — the gap
+## Reading a failed run's logs — no `az pipelines` verb, reachable through invoke
 
 There is no log verb: `az pipelines runs` exposes only `list`, `show`, `artifact` and `tag`, and
 `az pipelines build` only `list`, `show`, `queue`, `cancel`, `definition` and `tag`. `runs show`

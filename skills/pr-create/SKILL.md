@@ -39,7 +39,7 @@ The PR **always targets the protected default branch** read from the remote, nev
 | Never | a filled-in template with empty sections, a commit-by-commit dump, or a diff restated in prose |
 
 Derive both from the change, not from the branch name: `git log --oneline origin/<base>..HEAD` and
-`git diff --stat origin/<base>...HEAD`. Body shape and the trailer are in `description.md`.
+`git diff --stat origin/<base>...HEAD`. Body shape and the trailer are in `references/description.md`.
 
 ### 3. Release scope — which components have to be released
 
@@ -48,7 +48,7 @@ Derive both from the change, not from the branch name: `git log --oneline origin
 the PR instead of inferring them from the diff. A shared library, a contracts package or a message
 contract releases **its consumers, named one by one**, never itself; a migration releases the database
 as its own step. Nothing deployable (docs, tests, pipelines) → the block still says `nessun
-componente`: absent is indistinguishable from forgotten. Mapping, fan-out, ordering: `description.md`.
+componente`: absent is indistinguishable from forgotten. Mapping, fan-out, ordering: `references/description.md`.
 
 ### 4. Linking the work — a precondition, not a step
 
@@ -145,5 +145,5 @@ no new PR, and no force-push unless the user asks.
 
 ## References
 
-- `description.md` — the body a reviewer needs: the bullet shape, deriving it from the diff and the
+- `references/description.md` — the body a reviewer needs: the bullet shape, deriving it from the diff and the
   work item, mapping changed files to the deployables to release, the trailer, and the draft note.

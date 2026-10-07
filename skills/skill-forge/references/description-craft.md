@@ -104,7 +104,8 @@ behaviour.
 ## Rewriting an existing description
 
 1. List, from memory or transcripts, the last five times this asset should have fired.
-2. Check whether each of those sentences contains any word from the description. Add what is missing.
+2. Check whether each sentence falls under one of the description's situations. Widen a situation
+   or add a new one — never a synonym per miss.
 3. List the two neighbours most likely to be confused with it, and add the exclusion.
 4. Cut every clause that describes the body rather than the situation.
 5. Re-run the eval cases, including the MUST NOT ones — a broadened description usually breaks

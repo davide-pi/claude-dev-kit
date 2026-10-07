@@ -20,7 +20,7 @@ services:
     ports: ["${MSSQL_PORT}:1433"]
     volumes: ["mssql-data:/var/opt/mssql"]
     healthcheck:
-      test: ["CMD-SHELL", "/opt/mssql-tools/bin/sqlcmd -S localhost -U sa -P \"$$MSSQL_SA_PASSWORD\" -Q 'SELECT 1' || exit 1"]
+      test: ["CMD-SHELL", "SQLCMDPASSWORD=\"$$MSSQL_SA_PASSWORD\" /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -Q 'SELECT 1' || exit 1"]
       interval: 10s
       retries: 12
       start_period: 40s        # the engine takes a while on first start; without this it flaps
@@ -46,7 +46,7 @@ services:
     ports: ["${REDIS_PORT}:6379"]
     volumes: ["redis-data:/data"]
     healthcheck:
-      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$$REDIS_PASSWORD\" redis-cli ping | grep -q PONG"]
       interval: 5s
       retries: 10
 

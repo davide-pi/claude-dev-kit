@@ -11,7 +11,7 @@ description: >-
 **Aspire first for the large backend** — its app host starts the .NET services by profile, while
 the databases and the broker come from configuration, not from containers it owns. Every other
 repository drives `docker compose` directly. `psql` and `redis-cli` are **not installed on this
-machine**: every client recipe in the kit lives once, in `references/clients-in-containers.md`.
+machine**: run them inside the service's own image — the canonical recipes are in `references/clients-in-containers.md`.
 
 ## When
 

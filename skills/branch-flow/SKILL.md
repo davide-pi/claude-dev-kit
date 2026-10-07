@@ -67,7 +67,7 @@ assume: `git symbolic-ref --short refs/remotes/origin/HEAD`.
 | parallel agents touching the same repo | one **worktree** per agent |
 
 A worktree is a second checkout of the same repository on its own branch — no stash, no context
-switch, no half-finished edits mixed together. Mechanics in `worktrees.md`.
+switch, no half-finished edits mixed together. Mechanics in `references/worktrees.md`.
 
 ### 4. Finish — the menu once the work is complete
 
@@ -81,7 +81,7 @@ switch, no half-finished edits mixed together. Mechanics in `worktrees.md`.
 
 Merge only when the pipeline is green **and** the PR has been reviewed — `/pr-review` (AI) plus the
 owner's own read; no human approval is required unless the repository's branch policy demands one.
-Squash, so the default branch keeps one commit per PR. Full decision walk in `finishing.md`.
+Squash, so the default branch keeps one commit per PR. Full decision walk in `references/finishing.md`.
 
 ## Do
 
@@ -127,7 +127,7 @@ git branch -D feature/<name>; git fetch --prune
 
 ## References
 
-- `worktrees.md` — creating, using and removing an isolated worktree: the native worktree tooling
+- `references/worktrees.md` — creating, using and removing an isolated worktree: the native worktree tooling
   first, the plain git command as fallback, one worktree per agent, and the clean-up rules.
-- `finishing.md` — the full finish walk: pre-merge gates, squash-merge and branch delete on both
+- `references/finishing.md` — the full finish walk: pre-merge gates, squash-merge and branch delete on both
   platforms, the not-merging paths, and what to leave behind either way.
