@@ -225,7 +225,7 @@ caller's scale, say so and leave the sizing to the specialist rather than guessi
 | `medium` (default) | + the rest of pass 0 (conventions), B, C, D, all of E and F, G, and H. This is the full baseline. |
 | `high` | + `git log`/`git blame` on the touched lines, code comments and tests the change contradicts, deeper propagation search (all dispatch points, all callers transitively one hop further). |
 | `xhigh` | + earlier PRs/commits on the same files and the review comments they got; error paths, concurrency, retries, idempotency; a short threat-model of each new entry point. |
-| `max` | + a verification pass: for every candidate finding, re-read the code and actively try to falsify it. Drop what you cannot break. |
+| `max` | + a verification pass: for every candidate finding, re-read the code and actively try to falsify it. Keep only what survives. |
 
 ## Drop these (false positives)
 
@@ -265,8 +265,8 @@ fragments, framework and API names, log lines and exception type names are quote
 code excerpt is never translated or reformatted.
 
 Findings ordered `todo` before `done`, then **P1 → P3**, then `CONFIRMED` before `PLAUSIBLE`,
-`clean-code` last within its priority. At most ~10 correctness-level ones (note in one line if you
-dropped further minor ones). One block each, exactly these fields:
+`clean-code` last within its priority. Report every finding that clears the bar in "Drop these";
+the caller's summary table has a row for each. One block each, exactly these fields:
 
 ```
 ### <n>. <one-line statement of the defect, in Italian> — CONFIRMED | PLAUSIBLE
