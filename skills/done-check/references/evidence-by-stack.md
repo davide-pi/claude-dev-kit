@@ -33,7 +33,7 @@ warning **count** against the pre-change count.
 | one spec | `npm test -- --watch=false --include '**/order.service.spec.ts'` | `Executed N of N SUCCESS` (or the runner's pass line) with the spec name |
 | whole suite | `npm test -- --watch=false` | `0 failed` |
 | lint | `npm run lint` | exit 0 |
-| the screen actually renders | drive a browser (Playwright, or the Chrome DevTools plugin) | a screenshot of the changed state **plus** an empty console-error list |
+| the screen actually renders | drive a browser (the `browser-use` plugin) | a screenshot of the changed state **plus** an empty console-error list |
 
 A frontend change is not done on a green unit test: the component that compiles and passes can still
 fail to render. The browser step is the row, not an extra.

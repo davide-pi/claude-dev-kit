@@ -2,6 +2,7 @@
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
   "cleanupPeriodDays": 30,
   "env": {
+    "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
     "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70",
     "CLAUDE_CODE_DEBUG_LOG_LEVEL": "warn",
     "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
@@ -246,10 +247,7 @@
     "defaultMode": "auto"
   },
   "model": "opus[1m]",
-  "fallbackModel": [
-    "claude-sonnet-4-6",
-    "claude-haiku-4-5"
-  ],
+  "fallbackModel": ["sonnet", "haiku"],
   "hooks": {
     "PreToolUse": [
       {
@@ -364,14 +362,14 @@
     "redis-development@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
     "superpowers@claude-plugins-official": false,
-    "modern-web-guidance@claude-plugins-official": true,
+    "modern-web-guidance@claude-plugins-official": false,
     "playwright@claude-plugins-official": false,
     "browser-use@claude-plugins-official": true
   },
   "language": "Italian",
   "feedbackDrafts": "notify",
   "alwaysThinkingEnabled": true,
-  "effortLevel": "high",
+  "effortLevel": "medium",
   "advisorModel": "fable",
   "askUserQuestionTimeout": "never",
   "autoUpdatesChannel": "latest",

@@ -1,31 +1,28 @@
 # Driving the browser
 
-## Playwright first, whenever it is connected
+## One driver: `browser-use` on the real Edge profile
 
-It gives the one thing this skill depends on most: **a viewport you actually control.** Resizing
-really resizes, so a desktop/tablet/mobile matrix is reproducible run after run; it does not fight
-the user's own browsing; and it sweeps locales and country parameters cheaply.
+The plugin attaches over CDP to the user's own Edge (the `ensure-edge-cdp` hook starts it if
+closed): already authenticated, visible to the user, and scriptable — one `browser-use` heredoc runs
+a whole sequence of steps and prints only what you ask for, which is far cheaper than one tool call
+per click.
 
-## The Claude browser extension, for what Playwright cannot reach
+- First navigation is `new_tab(url)`; **never drive tabs the user opened**, reuse your own tab for
+  the rest of the run, and close the tabs you created at the end unless the user wants to look.
+- A login wall → the user signs in themselves in that tab; passwords are never typed.
 
-| Reason to switch                                          | Why                                                                 |
-| --------------------------------------------------------- | ------------------------------------------------------------------- |
-| Playwright is not connected                                | nothing else drives a browser                                        |
-| Anything behind the user's login                           | Playwright starts from a clean profile; the extension is the user's real, already-authenticated session — and passwords may never be typed |
-| Posting the comment through the work item form             | Azure DevOps needs that same authenticated session                   |
-| An extension, an OS-level flow, a page that behaves differently outside a plain automation profile | Playwright cannot drive it |
-| The user asked to watch it happen                          | they can see the tab                                                 |
+**Viewports by emulation, not by resizing.** A window resize on a maximised window is silently
+ignored; CDP emulation is exact and reproducible:
 
-When switching: invoke the browser-extension skill first, read the tab context, then **create a new
-tab** — never drive tabs the user opened for their own work, and close the tabs you created when you
-are done unless the user wants to keep looking.
+```python
+cdp('Emulation.setDeviceMetricsOverride', width=390, height=844, deviceScaleFactor=3, mobile=True)
+print(js('[window.innerWidth, window.innerHeight]'))   # read it back before trusting it
+# ... checks for this viewport ...
+cdp('Emulation.clearDeviceMetricsOverride')            # always restore the user's tab
+```
 
-Sizing there is unreliable in one specific way: a window resize is silently ignored on a maximised
-window and still reports success. **Read `window.innerWidth` back** before believing you are at a
-mobile viewport. That unreliability is the main reason Playwright leads.
-
-Mixing both in one run is normal and worth stating in the report. Do not re-run the whole suite in
-both.
+Locales and country parameters: change the URL or `cdp('Emulation.setLocaleOverride', locale=...)`
+in the same script, one loop over the matrix.
 
 ## Deciding the test matrix
 

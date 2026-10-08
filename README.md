@@ -121,6 +121,7 @@ default to Sonnet; the caller can override.
 | `agents/review-security.md` | Works from the exposed surface inward: entry points, trust boundaries, taint paths, authz, secrets. Same output contract, so results merge. |
 | `agents/review-performance.md` | Reasons about cost: complexity, per-item I/O, allocations, blocking, caching, queries. No cost stated, no finding. |
 | `agents/investigator.md` | Two modes: `locate` turns a symptom into the exact `file:line` that owns it; `trace` maps a flow across services over the message bus, hop by hop. Read-only. |
+| `agents/implementer.md` | Writes production code for a scope the caller already decided, at `effort: high`, so an Opus session plans and reviews while Sonnet types. Contained diff, verified, never commits. |
 | `agents/test-writer.md` | Discovers the repository's own test conventions, states them, then writes tests to match. Parallelisable over many classes; test files only. |
 | `agents/db-analyst.md` | Read-only analysis of a query, plan or schema: the cause, the index that would change it, and the cost. May read through the database MCP servers, SELECT-only. Applies nothing. |
 | `agents/doc-keeper.md` | Maintains code-derived and experience-derived docs against the source. Active only where the repository actually has a docs tree. |
@@ -207,7 +208,7 @@ Register the marketplace once, then install each plugin and restart:
 /plugin marketplace add anthropics/claude-plugins-official
 /plugin install redis-development       # Redis, everything but the .NET client (off by default)
 /plugin install microsoft-docs          # live Microsoft and .NET documentation
-/plugin install modern-web-guidance     # web platform, CSS, Core Web Vitals
+/plugin install modern-web-guidance     # web platform, CSS, Core Web Vitals (off by default: enable on demand)
 /plugin install frontend-design         # visual and UX design
 /plugin install skill-creator           # generic skill authoring
 /plugin install csharp-lsp              # C# semantic navigation (needs csharp-ls on PATH)
@@ -227,8 +228,11 @@ The `superpowers` plugin is deliberately **not** enabled: the seven of its skill
 absorbed into the process skills above — compacted, made Windows-native and wired to this stack —
 and enabling it alongside them puts two processes in competition for the same moment.
 
-Browser automation needs no plugin: the user-scoped `playwright` MCP server (below) runs headless,
-`browser-use` drives the real Edge profile, and Claude in Chrome covers anything behind a login.
+Browser automation is `browser-use` alone: the real Edge profile, visible and already signed in, and one
+script batches many steps into one call. The Playwright MCP server and Claude in Chrome were retired:
+more tool names in every turn and one round-trip per action. `modern-web-guidance` is off by default
+because its description demands a lookup before every frontend task; `angular` and `react` cover the
+day-to-day.
 
 A plugin shipping its own MCP server may need extra tooling on the machine. `install.ps1 -Check`
 flags plugins enabled in `settings.json` but not actually installed: the state in which their tools
@@ -240,8 +244,7 @@ MCP servers do not live in the Claude config directory, so copying files does no
 Register them user-scoped, replacing the placeholder with your own organization:
 
 ```powershell
-claude mcp add --scope user azdo-<org-alias> -- npx -y @azure-devops/mcp <your-org> -d core repositories work-items pipelines search
-claude mcp add --scope user playwright      -- npx -y @playwright/mcp@latest --headless
+claude mcp add --scope user azdo-<org-alias> -- npx -y @azure-devops/mcp <your-org> -d core repositories work-items search
 ```
 
 One Azure DevOps entry per organization; the skills discover the server at runtime and match the
