@@ -58,6 +58,8 @@ irreversible.
 - **Code for a decided scope** (more than a few lines) → the `implementer` agent; this session
   plans, briefs and reviews its diff. Trivial edits stay inline.
 - Fan-out searches over many files → an agent, so only the conclusion enters this context.
+- Spawning `Explore` or `Plan`: pass `model: sonnet` — the built-ins inherit this session's model
+  and ignore `CLAUDE_CODE_SUBAGENT_MODEL`; `opus` only when the plan's quality is the point.
 - Every agent brief asks for a **concise** report; I ask for details when I need them.
 # How to write for me
 80/20: the 20% of the text carries 80% of the knowledge — reading time is my bottleneck.
