@@ -42,7 +42,8 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    the **diff file path**, the base branch, the intent, the effort, and "lockfiles excluded":
    - `low` / `medium` → **`code-reviewer`** alone.
    - `high` / `xhigh` / `max` → **`code-reviewer`**, **`review-security`** and
-     **`review-performance`** spawned **in parallel in a single message**.
+     **`review-performance`** spawned **in parallel in a single message**; tell `code-reviewer`
+     the specialists run beside it, so it does not repeat their axis.
    - **focus** given → only the matching specialist (`security` → `review-security`,
      `performance` → `review-performance`), otherwise the generalist told to concentrate on that
      axis. A focus overrides the effort-based fan-out.
@@ -60,8 +61,8 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
    (two tables Da fare / Già fatti, the fields, the sort order, the verbatim values). Order:
    - **Rilievi** — one block per `todo` finding, numbered in sort order: what breaks, the failure
      scenario, the evidence (`file:line`), the minimal fix. `done` ones: one line each.
-   - **Completezza** — each intent point or acceptance criterion with its verdict (coperto ·
-     parziale · mancante · implementato male), then any scope creep (behaviour nobody asked for).
+   - **Completezza** — `N punti — coperti N`, then each point or acceptance criterion that is
+     parziale · mancante · implementato male, then any scope creep (behaviour nobody asked for).
    - **Tabelle** Da fare, then Già fatti — the **last** blocks, so they stay on screen.
    - **Fix rapidi** and **Verdetto** — one line each: `N rilievi (X da fare, Y già fatti · P1: N) ·
      security: N · completezza: N`, plus which agents ran at which effort.

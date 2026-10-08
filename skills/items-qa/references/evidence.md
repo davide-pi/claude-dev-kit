@@ -19,9 +19,9 @@ one call instead of being typed into a browser form.
 ## Crop to the region that matters
 
 A full-page shot of a header bug spends the reader's attention on nine hundred pixels of hero image.
-Playwright takes an element screenshot by targeting the element; the extension can capture a
-rectangle. Either way, frame the thing that is wrong, plus enough surrounding context to make the
-location obvious.
+With `browser-use`, take the element's `getBoundingClientRect()` and pass it as the `clip` of
+`cdp('Page.captureScreenshot', format='png', clip={...,'scale':1})`, then decode the base64 into a
+file. Frame the thing that is wrong, plus enough surrounding context to make the location obvious.
 
 Where a comparison is the point — the mockup shows a round flag, the site renders a square one —
 crop both to the same region so they can be read side by side.
@@ -32,13 +32,9 @@ Every file you intend to attach must sit in a directory this session may read. *
 directory is safe**, and a relative subfolder such as `.qa-evidence` keeps a run's evidence
 together.
 
-| Tool                    | Writes to                                              | Consequence                                    |
-| ----------------------- | ------------------------------------------------------ | ---------------------------------------------- |
-| Playwright              | the working directory                                   | nothing to do                                   |
-| The browser extension, saving to disk | its own temp folder, **outside** the roots the upload accepts | copy the file into the working directory first, or the upload is rejected |
-
-This is a silent failure: the capture succeeds, the path looks fine, and the upload refuses it. Copy
-first, then upload.
+The `browser-use` script writes the decoded PNG wherever you tell it: give it an **absolute path**
+under the working directory (the daemon's own working directory is not yours), then check the file
+exists before uploading it.
 
 ## Timing
 

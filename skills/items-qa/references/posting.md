@@ -50,16 +50,16 @@ says nothing about the next one — see `azdo-cli` for the multi-tenant token ru
 
 ## Upload unavailable → the Discussion editor in the browser
 
-Then the **whole** comment goes through the form. This step belongs to the browser extension even
-when the test ran entirely in Playwright, because Azure DevOps needs the user's authenticated
-session and a fresh Playwright profile does not have one.
+Then the **whole** comment goes through the form, driven with `browser-use`: the real Edge profile
+is the user's authenticated Azure DevOps session. A file input takes an absolute path through
+`cdp('DOM.setFileInputFiles', files=[...], backendNodeId=...)`.
 
 1. Open `https://{org}.visualstudio.com/{project}/_workitems/edit/{id}` in a tab **you created**.
-2. Find the file input for attachments. Three refs come back — for the **Description**, the
+2. Find the file input for attachments. There are three — for the **Description**, the
    **Acceptance Criteria** and the **Discussion**. Take the Discussion one: uploading into either of
    the others edits the item body, which rule 4 forbids.
 3. Click the Discussion textbox and type the text down to the first screenshot's caption.
-4. Upload that screenshot onto the Discussion ref — it lands inline at the caret.
+4. Set that screenshot on the Discussion file input — it lands inline at the caret.
 5. **Before typing again, re-focus the editor and collapse the caret to the end**, or the next
    sentence lands in the wrong place:
 
@@ -78,9 +78,8 @@ session and a fresh Playwright profile does not have one.
 8. Click **the comment's own Save**, inside the Discussion box — not the work item Save in the
    toolbar. The toolbar save commits field edits, which rule 4 forbids.
 
-Right after an upload the screenshot tool can time out while the editor is busy. The page is fine —
-a script evaluation still answers. Wait and retry the screenshot; do not re-upload, that duplicates
-the image.
+Right after an upload a screenshot can time out while the editor is busy. The page is fine — `js()`
+still answers. Wait and retry the screenshot; do not re-upload, that duplicates the image.
 
 Close the tabs you created when you are done, unless the user wants to keep looking at them.
 

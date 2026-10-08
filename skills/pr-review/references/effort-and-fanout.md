@@ -41,6 +41,8 @@ Identical for all of them, and never trimmed:
 5. **Previous findings** — on an incremental pass only (`triage.md` § "Second passes"): each tagged
    thread's anchor, question and state (active / resolved / answered), so the agent can mark it
    `done` or re-report it as `todo`.
+6. **The specialists running beside it** — told to `code-reviewer` only, so it leaves their axis
+   to them instead of reviewing it twice.
 
 The intent is what the completeness pass compares the diff against, so it is the one part that must
 never be omitted. If there genuinely is no stated intent, say so when spawning: the gap then shows
@@ -92,7 +94,7 @@ never report a high-effort review as if all three had run.
 
 1. Agents spawned sequentially → three round-trips and no parallelism → one message, several calls.
 2. An agent gets the diff but not the intent → completeness cannot be judged → the package is all
-   items 1-4 (plus 5 on an incremental pass) or it is incomplete.
+   items 1-4 (plus 5 on an incremental pass, 6 when specialists run) or it is incomplete.
 3. Both a specialist and the generalist report the same line → the report reads as two problems →
    merge first, triage second.
 4. A specialist's finding is posted with the generic tag → attribution was lost in the merge → track

@@ -12,7 +12,8 @@
 **Size by merge capacity, not spawn capacity**: 2-4 agents for distinct judgement, up to 6-8 for one
 mechanical job over many targets, then waves. Unread reports are where fabricated success survives.
 Spawn a wave in **one message**. Multi-lens review is already owned by `/code-review` and
-`pr-review`; locating code by `investigator`; tests by `test-writer`.
+`pr-review`; locating code by `investigator`; tests by `test-writer`; writing code for a decided
+scope by `implementer`, so the session's model plans and reviews while a cheaper one types.
 
 ## Output contract — pasted verbatim into every prompt
 

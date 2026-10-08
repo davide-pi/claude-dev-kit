@@ -11,19 +11,8 @@
         "core",
         "repositories",
         "work-items",
-        "pipelines",
         "search"
       ]
-    },
-    "playwright": {
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@playwright/mcp@latest",
-        "--headless"
-      ],
-      "env": {}
     }
   },
   "//local": "LOCAL scope, one set per project: each points at one client's Grafana or database, so register it from inside that project's folder with `claude mcp add --scope local <name> ...` (it lands under that project's entry in ~/.claude.json). One entry per environment: <env> is prod, stg, dev. Database servers are read by the db-analyst agent through SELECT-only tools; point them at a read-only login.",
