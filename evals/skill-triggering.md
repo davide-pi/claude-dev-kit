@@ -11,34 +11,31 @@ Descriptions are the only thing driving this, so they need to be tested like cod
 covers the static half (a trigger-only skill must name its own trigger, descriptions stay under the
 length limit). This file covers the behavioural half.
 
-## How to run
+## Automated suites
 
-Cases are plain prompts. Two ways to use them, cheapest first:
+Thirteen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
+`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard` and the `paths:` skills (`angular`,
+`react`, `ef-core`, `sql-server`, `rabbitmq`, `pipeline`, `docker-dev-env`, `dotnet-backend`). Their
+MUST / MUST NOT rows moved there, one case folder per row (`prompt.md` + `graders/*.md`); run them with
+`pwsh tools/run-evals.ps1` (only the suites whose skill changed) and see the README row for the flags.
+A case that fails is a description bug: fix the description, do not fix the case.
 
-1. **By hand, in a scratch session.** Paste a prompt, then check with `/context` (or by watching
-   whether the skill's instructions show up) which skills loaded. Fast, no setup, good enough to
-   catch a regression after editing a description.
-2. **With `skill-creator`.** The `skill-creator` plugin can generate and run evals for a skill; feed
-   it the cases below for the skill you are changing and let it score them. Use this when you are
-   reworking a description rather than spot-checking it.
+### Not expressible in a suite
 
-Record what actually happened, not what should have. A case that fails is a description bug: fix the
-description, do not fix the case.
+| Row | Why it stays manual |
+|-----|---------------------|
+| `angular`, `react` and the other `paths:` skills: **hidden until a matching file is read, listed after** | The harness loads a skill folder as a plugin and lists it from the first turn (`angular:angular` is in the `init` skills of a run that never read a file), so the gate is never exercised; `add_dirs` only grants read access, and the only way to put a file in the sandbox is `--scaffold`, which runs shell as you. The suites measure the description; the gate is checked with `tools/instructions-log.js` in a real session. |
+
+## How to run the rest
+
+The skills below have no suite yet. Cases are plain prompts; paste one in a scratch session and check
+with `/context` (or by watching whether the skill's instructions show up) which skills loaded. Record
+what actually happened, not what should have.
 
 ## Cases
 
 `MUST` = the skill has to load. `MUST NOT` = it has to stay out. The parenthetical says why the case
 exists.
-
-### `worklog` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/worklog` | MUST load |
-| `/worklog ieri` | MUST load |
-| "quanto tempo ho passato oggi su questo progetto?" | MUST NOT (asking about time is not asking to log hours) |
-| "registra 3 ore sul task 105060" | MUST NOT (a direct work-item write, not the reconstruct-and-confirm flow) |
-| "cosa ho fatto questa settimana?" | MUST NOT (a question about history, no timesheet intent) |
 
 ### `workitem-create` — explicit trigger only
 
@@ -68,23 +65,6 @@ exists.
 | "rivedi le modifiche che hai appena fatto" | MUST route through the review subagents (per the CLAUDE.md convention), not an inline read-through |
 | "sistema questo bug" | MUST NOT (fixing is not reviewing) |
 
-### `pr-create` — convention skill, ambient
-
-| Prompt | Expected |
-|--------|----------|
-| "apri la PR" | `pr-create` MUST load (title/description conventions) |
-| "fai il commit" | MUST NOT dominate — `/commit` owns this |
-| "apri la PR" on a branch with no work item in its name or commits | MUST ask which parent item to link, offering the likely candidates (the `AB#` in the branch or commits, recent items assigned to the owner) as options — never create one unasked |
-
-### `pipeline` — CI/CD authoring
-
-| Prompt | Expected |
-|--------|----------|
-| "aggiungi uno stage di test a questa pipeline" (file under `.pipelines/`) | MUST load |
-| "modifica il docker-compose per aggiungere redis" | MUST NOT (compose is not a CI/CD pipeline) |
-| "questo YAML di Kubernetes è corretto?" | MUST NOT (manifest, not pipeline) |
-
-
 ### `commit`
 
 | Prompt | Expected |
@@ -111,7 +91,7 @@ exists.
 2. Change the **description**, not the body: that is what the model matches on. For a false positive,
    name the boundary explicitly ("only when the user types `/x`", "not for … "). For a false
    negative, add the words a user actually says.
-3. Re-run the affected cases, then `node tools/validate.mjs` (the description limits are enforced
+3. Re-run the affected cases (a suite: `pwsh tools/run-evals.ps1 -Suite <skill>`), then `node tools/validate.mjs` (the description limits are enforced
    there), and note in the PR which case changed behaviour.
 
 ### `plan-work`
@@ -145,37 +125,6 @@ exists.
 | "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
 | "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
 
-### `angular`
-
-| Prompt | Expected |
-|--------|----------|
-| "questo componente non si aggiorna dopo l'update dello store, e qui ci sono ancora gli NgModule" | MUST load |
-| "conviene passare a signal in questa feature?" | MUST load |
-| "come centro verticalmente questa card?" | MUST NOT (CSS and visual design belong to the plugins) |
-| "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to the browser tools) |
-| Read `src/app/orders.component.ts`, then "perché la vista non si aggiorna?" | MUST be listed and load (`paths`: the skill is hidden until a matching file is read) |
-
-### `react`
-
-| Prompt | Expected |
-|--------|----------|
-| "il componente rifà la fetch in loop e lo stato del filtro è duplicato in tre punti" | MUST load |
-| "mi serve una libreria di state management qui?" | MUST load |
-| "misura l'LCP di questa pagina" | MUST NOT (Core Web Vitals belong to modern-web-guidance) |
-| "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
-| Read `src/Orders.tsx`, then "perché rifà la fetch?" | MUST be listed and load (`paths`: the skill is hidden until a matching file is read) |
-
-### `dotnet-backend`
-
-| Prompt | Expected |
-|--------|----------|
-| "questo service è registrato singleton ma inietta il DbContext, cosa cambio?" | MUST load |
-| "questo handler RPC EasyNetQ ritenta con Polly, la policy è giusta?" | MUST load |
-| "aggiungi un indice sulla colonna Status" | MUST NOT (belongs to sql-server) |
-| "il componente React rifà la fetch" | MUST NOT (wrong stack) |
-| "il servizio va in RedisTimeoutException sotto carico" | MUST load (the Redis half) |
-| "che struttura dati Redis uso per una leaderboard?" | MUST NOT (data modelling belongs to the Redis plugin) |
-
 ### `dotnet-testing`
 
 | Prompt | Expected |
@@ -195,37 +144,6 @@ exists.
 | "mostrami i log di produzione dell'api nelle ultime 2 ore" | MUST load, and the Grafana reads MUST run inside `ops-analyst`, never on the main thread |
 | "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the browser tools) |
 | "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
-
-### `ef-core`
-
-| Prompt | Expected |
-|--------|----------|
-| "ho aggiunto la property Email all'entità Customer, allinea il database" | MUST load |
-| "questa query carica 500 righe per ogni ordine" | MUST load |
-| "scrivi la stored procedure per il report mensile" | MUST NOT (raw T-SQL belongs to sql-server) |
-| "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to sql-server, Postgres section) |
-| "aggiungi una migration per la colonna ShippedAt" | MUST load (migration workflow) |
-
-### `sql-server`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa stored procedure va in timeout solo per alcuni clienti, perché?" | MUST load |
-| "che indice serve a questa query?" | MUST load |
-| "aggiungi una migration EF per la colonna Email" | MUST NOT (belongs to ef-core) |
-| "questa query sul database di cache è lenta, guarda l'EXPLAIN" | MUST load (the Postgres half) |
-| "porto questa tabella da SQL Server a Postgres, cosa cambia?" | MUST load (the Postgres half) |
-| "aggiungi il servizio postgres al compose" | MUST NOT (belongs to docker-dev-env) |
-
-### `rabbitmq`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa coda cresce e i messaggi finiscono nell'error queue" | MUST load |
-| "questo consumer riprocessa lo stesso messaggio due volte" | MUST load |
-| "aggiungi il servizio rabbitmq al docker compose" | MUST NOT (belongs to docker-dev-env) |
-| "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
-| "quanti messaggi ci sono nella dead-letter?" | MUST load (broker inspection) |
 
 ## One-shot skill cases
 
@@ -279,34 +197,6 @@ must stay in the subagent.
 | "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke, forked into `ops-analyst` |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
 
-### `azdo-cli`
-
-| Prompt | Expected |
-|--------|----------|
-| "leggi il work item 4711 con i suoi criteri di accettazione" | MUST load |
-| "quali stati ha il tipo Bug in questo progetto?" | MUST load |
-| "apri una issue su GitHub per questo bug" | MUST NOT (other platform: gh) |
-| "questa query WIQL è lenta" | MUST NOT (not a thing: WIQL is not tuned here) |
-
-### `branch-flow`
-
-| Prompt | Expected |
-|--------|----------|
-| "creami un branch per questa modifica" | `branch-flow` MUST load (naming + protected-main rules) |
-| "come chiamo il branch per questa fix?" | MUST load |
-| "il lavoro è finito, come lo porto su main?" | MUST load |
-| "voglio lavorare su questa cosa senza toccare il working tree corrente" | MUST load (the worktree half) |
-| "scrivi il messaggio di commit" | MUST NOT (belongs to /commit) |
-
-### `docker-dev-env`
-
-| Prompt | Expected |
-|--------|----------|
-| "il container di sql server non parte, si riavvia in loop" | MUST load |
-| "mi serve un postgres locale per provare questa cosa" | MUST load |
-| "questa query postgres è lenta, leggi l'EXPLAIN" | MUST NOT (belongs to sql-server) |
-| "deploya in staging" | MUST NOT (local environments only) |
-
 ### `items-qa` — explicit trigger only
 
 | Prompt | Expected |
@@ -326,16 +216,6 @@ must stay in the subagent.
 | "dividi questa epica in item" | MUST NOT (splitting items is workitem-create / user-story-standard) |
 
 ## Cases for the standards ported from the PM's own skills
-
-### `user-story-standard`
-
-| Prompt | Expected |
-|--------|----------|
-| "mi serve una story per l'esportazione del report mensile in PDF" | MUST load |
-| "scrivimi i criteri di accettazione di questo item" | MUST load |
-| "il filtro data mostra righe fuori range, ma non so se è un bug" | MUST load (the Impediment branch is exactly this) |
-| "crea questi tre item su Azure DevOps sotto la Feature 1234" | MUST NOT (putting items on the board is workitem-create) |
-| "traduci questa user story in inglese" | MUST NOT (a translation, not the standard) |
 
 ### `project-wiki-standard` — explicit trigger only
 
