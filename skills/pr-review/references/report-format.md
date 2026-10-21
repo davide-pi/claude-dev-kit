@@ -17,13 +17,19 @@ so every report **ends** with the summary tables, after all the detail.
 
 | The request says | Reviewer A and specialists | Reviewer B |
 | --- | --- | --- |
-| nothing | omit `model` (frontmatter: sonnet) | the session family (opus \| sonnet \| haiku \| fable) |
+| nothing | omit `model` (frontmatter: sonnet) | the session family (opus \| haiku \| fable); `opus` when the session runs on sonnet |
 | "advanced" agents | the session family, explicitly | sonnet — B always runs on the model A does not |
 | "agent {model}" | that exact model | the session family, or sonnet if that is the same model |
+
+A and B get **one brief, built once**: the same text, differing only in `model`. A pair on one
+model is a degraded review: say so in the verdict line.
 
 Cross-model merge: same anchor and same defect from A and B → `CONFIRMED`, sorted first within its
 priority; found by one model only → `PLAUSIBLE`, unless the finding quotes evidence (the line, the
 failing call) that settles it.
+
+A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (one
+reviewer per file, same ladder, one merger) and wait for the user's yes; never launch it unasked.
 
 ## Fields (emitted by the agents, values verbatim)
 
@@ -35,6 +41,11 @@ failing call) that settles it.
 | `status` | `todo` → **Da fare**; `done` → **Già fatti** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
 
 ## Order and tables
+
+0. **Blocks, top to bottom**: **Rilievi** (one block per `todo`: what breaks, the scenario,
+   `file:line`, the minimal fix; `done` one line) · **Completezza** (`N punti — coperti N`, each
+   partial, missing or wrong point, scope creep) · the tables · `Verdetto` naming each agent that
+   ran, its model and effort, and any worker that was blocked or missing (a gap, never a pass).
 
 1. **Sort**: P1 → P3, `CONFIRMED` before `PLAUSIBLE`, `clean-code` last within its priority. Rows
    keep the findings' numbers (`#3` = block `3.`). A `done` finding is one line.

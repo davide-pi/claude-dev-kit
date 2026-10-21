@@ -45,13 +45,14 @@ Not for: the working diff without a PR (`/code-review`), writing the PR (`pr-cre
 | Effort (default `medium`) | Spawn, in **one message** |
 | --- | --- |
 | `low`, `medium` | `code-reviewer` (frontmatter model) |
-| `high`, `xhigh`, `max` | `code-reviewer` ×2 with the **same brief**, differing only in `model` (A: omitted → sonnet; B: the session family) + `review-security` + `review-performance` |
-| `[focus]` given | the matching specialist alone (or the generalist told to hold that axis) |
+| `high`, `xhigh`, `max` | `code-reviewer` ×2 with the **same brief**, differing only in `model` (A: omitted → sonnet; B: the session family; `opus` when the session runs on sonnet) + `review-security` + `review-performance` |
+| `[focus]` given | the matching specialist alone — a focus overrides the effort (or the generalist told to hold that axis) |
 
 Same anchor and same defect from both models → `CONFIRMED`, sorted first; one model only →
 `PLAUSIBLE` unless it quotes evidence. "advanced agents" / "agent {model}" from the user set the
 model as `references/report-format.md` says; reviewer B always runs on the other model than A. The
-package each agent gets and the merge rules: `references/effort-and-fanout.md`.
+package each agent gets and the merge rules: `references/effort-and-fanout.md`. 30+ files → offer
+`/review-large`, never launch it unasked.
 
 ### 4. Triage — every finding into one bucket
 
@@ -80,8 +81,9 @@ gh pr view <id> --json number,title,body,headRefName,baseRefName,headRefOid,url 
 3. Write the diff **once** to the scratchpad and pass its path; reviewers read the enclosing function
    of every hunk.
 4. Fan out per §3, merge, triage per §4, post the PR bucket (`references/posting.md`).
-5. Report in chat in the shape of `references/report-format.md`: findings first, then posted vs chat,
-   the **Da fare / Già fatti** tables last, one verdict line.
+5. Report in chat in the shape of `references/report-format.md`: one merged report in Italian,
+   findings first, then posted vs chat, the **Da fare / Già fatti** tables last, one verdict line
+   naming each agent and its model.
 
 ## Traps
 

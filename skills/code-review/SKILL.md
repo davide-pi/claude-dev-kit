@@ -35,15 +35,18 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 
 | Request | Agents |
 | --- | --- |
-| `low`, `medium` | `code-reviewer` |
-| `high`, `xhigh`, `max` | `code-reviewer` **A** + `code-reviewer` **B** on another model + `review-security` + `review-performance` |
+| `low`, `medium` | `code-reviewer` (frontmatter model) |
+| `high`, `xhigh`, `max` | `code-reviewer` **A** (`model` omitted → sonnet) + `code-reviewer` **B** (`model`: the session family; `opus` when the session runs on sonnet) + `review-security` + `review-performance` |
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 
-`model` per agent ("advanced", "agent `<model>`", A versus B): the table in the shared report format
-below. The brief: diff file path, base, intent (acceptance criteria verbatim), effort, which
-specialists run beside it, previous findings. Never review inline unless no subagent can be spawned
-— then say so.
+"advanced" / "agent `<model>`" from the user: the model table in
+`skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A and B
+unchanged: diff file path, base, intent (acceptance criteria verbatim), effort, which specialists
+run beside it, previous findings, and "you may be one of two reviewers on different models: do not
+soften for agreement". Never review inline unless no subagent can be spawned — then say so; a
+missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
+`/review-large`, never launch it unasked.
 
 ### Intent — before spawning
 
@@ -63,11 +66,9 @@ cannot be judged without it.
 
 ### Report
 
-Shape, fields, sort, columns, Fix rapidi and the closing lines: `skills/pr-review/references/report-format.md`.
-Order: **Rilievi** (one block per `todo`: what breaks, the scenario, `file:line`, the minimal fix;
-`done` one line) · **Completezza** (`N punti — coperti N`, then each partial, missing or wrong point,
-then scope creep) · tables last · `Verdetto` with the agents and efforts that ran · one line offering
-the P1s and "ok" for the fix rapidi. Apply nothing until the user answers.
+One merged report in Italian — blocks, fields, sort, columns, Fix rapidi, tables last:
+`skills/pr-review/references/report-format.md`. Close with one line offering the P1s and "ok" for
+the fix rapidi. Apply nothing until the user answers.
 
 ## Do
 
@@ -88,3 +89,5 @@ and stop.
 2. Compiler or linter errors reported as findings → CI owns them → no build, no test run.
 3. Findings invented to fill the report → "nulla da segnalare, verificato: …" is a valid result.
 4. Summary table first → it scrolls away → tables are the last block.
+5. The pair returns identical findings in identical words → both ran on one model, or one read the
+   other's output → separate spawns in one message, different `model`.

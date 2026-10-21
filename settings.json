@@ -428,7 +428,8 @@
   "worktree": {
     "baseRef": "fresh"
   },
-  "enableWorkflows": false,
+  "enableWorkflows": true,
+  "workflowSizeGuideline": "small",
   "defaultShell": "powershell",
   "statusLine": {
     "type": "command",
