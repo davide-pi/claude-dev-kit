@@ -221,12 +221,12 @@ test('dropping a database, schema or table', () => {
   asks('docker exec -i sqlserver /opt/mssql-tools/bin/sqlcmd -U sa -Q "DROP DATABASE Sales"', /drops a database/);
   asks('sqlcmd -S localhost -Q "drop table dbo.Orders"');
   asks('docker compose exec -T db psql -U postgres -c "DROP SCHEMA public CASCADE"');
-  asks('sqlcmd -Q "IF EXISTS (SELECT 1 FROM sys.tables) DROP TABLE dbo.Tmp"');
+  asks('sqlcmd -S localhost -Q "IF EXISTS (SELECT 1 FROM sys.tables) DROP TABLE dbo.Tmp"');
   asks('docker exec pg dropdb --if-exists sales', /through the database CLI/);
 });
 
 test('truncating a table', () => {
-  asks('sqlcmd -Q "TRUNCATE TABLE dbo.AuditLog"', /truncates a table/);
+  asks('sqlcmd -S localhost -Q "TRUNCATE TABLE dbo.AuditLog"', /truncates a table/);
   asks('docker exec pg psql -U postgres -d sales -c "truncate orders"');
 });
 
@@ -299,15 +299,15 @@ test('a searcher hunting for the danger is not the danger', () => {
 test('a comment is not an instruction', () => {
   approves('dotnet build # then dotnet ef database drop, once the backup is taken');
   approves('docker compose up -d   # remember: docker compose down -v wipes the volumes');
-  approves('sqlcmd -Q "-- DROP TABLE dbo.Orders was reverted"');
-  approves('sqlcmd -Q "/* DROP DATABASE Sales */ SELECT 1"');
+  approves('sqlcmd -S localhost -Q "-- DROP TABLE dbo.Orders was reverted"');
+  approves('sqlcmd -S localhost -Q "/* DROP DATABASE Sales */ SELECT 1"');
 });
 
 test('a file path that merely contains the word is not a statement', () => {
   approves('psql -U postgres -f scripts/drop-old-tables.sql');
   approves('code src/Migrations/20240101_DropTable.cs');
   approves('cat ./scripts/database-drop.ps1');
-  approves('sqlcmd -i migrations/truncate-staging.sql');
+  approves('sqlcmd -S localhost -i migrations/truncate-staging.sql');
   approves('git add tools/prune-artifacts.js');
 });
 
@@ -321,15 +321,15 @@ test('a dry run, a what-if or a help page changes nothing', () => {
 });
 
 test('a SELECT that merely mentions the word is read-only', () => {
-  approves('sqlcmd -Q "SELECT name FROM sys.tables WHERE name = \'DropLog\'"');
-  approves('sqlcmd -Q "SELECT \'DROP TABLE \' + name FROM sys.tables"');
+  approves('sqlcmd -S localhost -Q "SELECT name FROM sys.tables WHERE name = \'DropLog\'"');
+  approves('sqlcmd -S localhost -Q "SELECT \'DROP TABLE \' + name FROM sys.tables"');
   approves('docker exec pg psql -c "select * from pg_stat_activity where query like \'%truncate%\'"');
-  approves('sqlcmd -Q "SHOW TABLES"');
+  approves('sqlcmd -S localhost -Q "SHOW TABLES"');
 });
 
 test('a generated statement is still caught once the read-only part is stripped', () => {
   // The regression the SELECT rule could have caused: blanking too much.
-  asks('sqlcmd -Q "SELECT 1; DROP TABLE dbo.Tmp"');
+  asks('sqlcmd -S localhost -Q "SELECT 1; DROP TABLE dbo.Tmp"');
 });
 
 test('the everyday commands stay silent', () => {

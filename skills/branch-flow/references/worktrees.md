@@ -20,18 +20,24 @@ Check for the native path before shelling out: it is not always available, and t
 command is a complete fallback, never a downgrade in correctness. Say which one was used — in
 Italian, with the directory and branch names left as they are.
 
+**A worktree root wins over native-first.** When `CLAUDE.md` names a worktree root (a short path
+that keeps deep repos under the Windows path limit), every worktree goes there. The harness tools
+create under `<repo>\.claude\worktrees\` — the long-path trap the root exists to avoid — so use the
+git fallback unless a `WorktreeCreate` hook redirects them to the root.
+
 ## The git fallback
 
 ```powershell
-# one directory per worktree, as a sibling of the repo — never inside it
+# one directory per worktree, under the CLAUDE.md worktree root — none set → beside the repo
+$wt   = "<worktree-root>/<repo>-<topic>"   # no root: "../<repo>-<topic>"
 $base = (git symbolic-ref --short refs/remotes/origin/HEAD) -replace '^origin/', ''
 git fetch origin $base
 
 # new branch + new checkout in one move
-git worktree add ../<repo>-<topic> --track -b feature/<topic> "origin/$base"
+git worktree add $wt --track -b feature/<topic> "origin/$base"
 
 # an existing branch instead
-git worktree add ../<repo>-<topic> feature/<topic>
+git worktree add $wt feature/<topic>
 
 git worktree list                       # what exists, and which branch each one holds
 ```
@@ -44,9 +50,9 @@ worktree's branch only.
 1. **One branch, one worktree.** Git refuses to check out the same branch twice, and that refusal
    is a feature — do not work around it with a detached HEAD.
 2. **Outside the repository.** A worktree nested in the main checkout ends up in globs, watchers,
-   test discovery and, eventually, a commit. Put it beside the repo.
-3. **Name it after the work**, not after the date: `../<repo>-tenant-billing`, so `git worktree
-   list` reads like a to-do list.
+   test discovery and, eventually, a commit. Put it under the worktree root, or beside the repo.
+3. **Name it after the work**, not after the date: `<repo>-tenant-billing`, so `git worktree
+   list` reads like a to-do list. Short: every character counts against the path limit.
 4. **Untracked files do not follow.** `.env`, local `appsettings.*.json`, `node_modules`, build
    output and user-secret files exist only in the tree that created them: copy or re-create what the
    build needs, and expect the first build there to be a cold one.
@@ -57,8 +63,8 @@ worktree's branch only.
 ## Removing one
 
 ```powershell
-git worktree remove ../<repo>-<topic>           # refuses if the tree is dirty — look before forcing
-git worktree remove --force ../<repo>-<topic>   # only when the changes are genuinely disposable
+git worktree remove $wt           # refuses if the tree is dirty — look before forcing
+git worktree remove --force $wt   # only when the changes are genuinely disposable
 git worktree prune                              # after a manual directory delete
 ```
 

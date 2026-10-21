@@ -326,6 +326,16 @@
             "command": "node",
             "args": [
               "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/az-identity.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Pinning the Azure CLI identity for this workspace..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
               "try{require((process.env.CLAUDE_HOOKS||'')+'/session-brief.js')}catch{process.exit(0)}"
             ],
             "timeout": 10,

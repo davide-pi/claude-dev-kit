@@ -1,0 +1,23 @@
+{
+  "_comment": "Copy to ~/.claude/workspaces.json (local-only, never committed). One entry per workspace root; the longest matching path wins. hooks/az-identity.js reads `path` and `identity` (the suffix of the private Azure CLI config dir ~/.azure-<identity>); the other keys document the ALM target for the person and for later tooling.",
+  "roots": [
+    {
+      "path": "C:\\workspaces\\<product-root>",
+      "platform": "azure-devops",
+      "org": "<org-a>",
+      "project": "<Project>",
+      "identity": "<identity-a>"
+    },
+    {
+      "path": "C:\\workspaces\\<clients-root>",
+      "platform": "azure-devops",
+      "org": "<org-b>",
+      "project": "ask",
+      "identity": "<identity-b>"
+    },
+    {
+      "path": "C:\\workspaces\\<github-root>",
+      "platform": "github"
+    }
+  ]
+}

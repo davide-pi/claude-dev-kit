@@ -75,7 +75,7 @@ Completing the merge is the owner's decision. Prepare it, report it, do not deci
 git switch $base; git pull --ff-only
 git branch -D feature/<name>            # always -D: every merge here is a squash, git sees it unmerged
 git fetch --prune                       # drop the remote-tracking ref
-git worktree remove ../<repo>-<topic>   # if the work lived in a worktree
+git worktree remove <worktree-path>     # if the work lived in a worktree (see worktrees.md)
 ```
 
 A squash-merged branch looks **unmerged** to `git branch --merged`, because its commits never

@@ -333,6 +333,15 @@ have done it in one shot.
 | "controlla se questo componente rispetta gli AC" | MUST NOT (no explicit trigger: it drives a real browser and posts a comment) |
 | "apri il sito e fai uno screenshot" | MUST NOT (browser use is not a work-item verdict) |
 
+### `estimate` — explicit trigger only
+
+| Prompt | Expected |
+|--------|----------|
+| `/estimate 12345` | MUST load |
+| `/estimate` with a pasted request and "analisi di mercato" | MUST load |
+| "quante ore ci vogliono per questa feature?" | MUST NOT (no explicit trigger; answer from the code or ask) |
+| "dividi questa epica in item" | MUST NOT (splitting items is workitem-create / user-story-standard) |
+
 ## Cases for the standards ported from the PM's own skills
 
 ### `user-story-standard`

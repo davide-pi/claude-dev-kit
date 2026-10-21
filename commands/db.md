@@ -24,7 +24,8 @@ invocation carries `--write`.
    Get-ChildItem -Path . -Recurse -Depth 4 -Include appsettings*.json,docker-compose*.y*ml |
      Select-Object -ExpandProperty FullName
    Get-ChildItem -Path . -Recurse -Depth 4 -Filter appsettings*.json |
-     Select-String -Pattern "ConnectionStrings" -Context 0,8
+     Select-String -Pattern 'Server=|Data Source=|Host=' |
+     ForEach-Object { $_.Line -replace '(?i)(Password|Pwd)=[^;"]*', '$1=***' }
    ```
    `Server=`/`Data Source=` with `Initial Catalog`/`Database` → SQL Server. `Host=`/`Port=5432` or
    `Npgsql` in the csproj → Postgres. An Aspire AppHost → the connection is generated at run time:
