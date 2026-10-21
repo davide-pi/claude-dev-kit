@@ -19,7 +19,7 @@
    `az devops configure` default. No line, unmapped, or a dir added later -> ask.
 4. Code beyond a few lines, scope decided -> `implementer`; this session briefs and
    reviews it. Fan-out searches -> an agent. Briefs ask for concise reports.
-   `Explore`/`Plan`: pass `model: sonnet`.
+   `Plan`: pass `model: sonnet`.
 5. Reviews (`/code-review`, `/pr-review`, ad-hoc) run in subagents, never inline; the built-in
    `/security-review` only when I name it.
 

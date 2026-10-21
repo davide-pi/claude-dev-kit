@@ -22,7 +22,7 @@ nothing else changes. Machine identifiers are never translated in either directi
 |---|---|---|
 | **Routing** | which asset owns this task | the route table in `CLAUDE.md`, path-scoped `rules/` |
 | **Knowledge** | not re-deciding what was decided once | 26 skills, depth in reference files loaded on demand |
-| **Exploration** | finding context without burning the main context window | 7 subagents |
+| **Exploration** | finding context without burning the main context window | 9 subagents |
 | **Execution** | running a known sequence in one shot | 8 slash commands |
 | **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
 
@@ -121,9 +121,10 @@ default to Sonnet; the caller can override.
 | `agents/review-performance.md` | Reasons about cost: complexity, per-item I/O, allocations, blocking, caching, queries. No cost stated, no finding. |
 | `agents/investigator.md` | Two modes: `locate` turns a symptom into the exact `file:line` that owns it; `trace` maps a flow across services over the message bus, hop by hop. Read-only. |
 | `agents/implementer.md` | Writes production code for a scope the caller already decided, at `effort: high`, so an Opus session plans and reviews while Sonnet types. Contained diff, verified, never commits. |
-| `agents/test-writer.md` | Discovers the repository's own test conventions, states them, then writes tests to match. Parallelisable over many classes; test files only. |
-| `agents/db-analyst.md` | Read-only analysis of a query, plan or schema: the cause, the index that would change it, and the cost. May read through the database MCP servers, SELECT-only. Applies nothing. |
+| `agents/db-analyst.md` | The only holder of database access, and where `/db` runs: a query, plan or schema read through the CLI clients (non-dev hosts only via `db-ro.ps1`), the cause, the index that would change it, and its cost. Applies nothing. |
+| `agents/ops-analyst.md` | Logs, metrics, profiles and traces of a running service, and where `/logs` runs: Grafana through an inline MCP server (`GRAFANA_URL`, `GRAFANA_TOKEN`) that never reaches the main conversation, plus compose, containers, kubectl, Aspire and log files. Read-only, redacts secrets. |
 | `agents/doc-keeper.md` | Maintains code-derived and experience-derived docs against the source. Active only where the repository actually has a docs tree. |
+| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Sonnet at low effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
 
 ## Hooks
 
