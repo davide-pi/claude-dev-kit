@@ -1,5 +1,18 @@
 # The sqlcmd workflow — inspect first, change on purpose
 
+## Which route, per host
+
+| Host | SQL Server | Postgres | Redis |
+| --- | --- | --- | --- |
+| local dev (`localhost`, a compose service) | `sqlcmd` (installed) | `psql` native, else `docker compose exec -T <svc> psql`, else `wsl psql` | `docker compose exec -T <svc> redis-cli`, or `wsl redis-cli` |
+| anything else (staging, production, a shared instance) | `/db` → `db-ro.ps1` | `/db` → `db-ro.ps1` | `/db` → `db-ro.ps1` |
+
+`db-ro.ps1` runs inside the `db-analyst` agent: it probes the login's grants first and refuses (exit
+3) on any write permission, picks the client form that exists (native, then wsl, then docker), and
+keeps the secret out of argv. The shell hook denies a raw `sqlcmd`, `psql` or `redis-cli` aimed at
+a non-dev host, also inside `docker run|exec` or `wsl` — do not retry around a denial. On a dev host
+`redis-cli` is limited to read commands; `KEYS`, `MONITOR`, `CONFIG` ask.
+
 ## Read-only by default
 
 The default posture is: **nothing changes**. Before any statement, decide which bucket it is in.
@@ -33,11 +46,11 @@ other sessions, so do not walk away from step 2.
 
 ```powershell
 $s = 'localhost,1433'; $db = 'AppDb'
-$cred = @('-U', 'sa', '-P', $env:MSSQL_SA_PASSWORD)   # a container instance
-# A Windows instance with integrated auth: -E instead of $cred.
+$env:SQLCMDPASSWORD = $env:MSSQL_SA_PASSWORD   # a container instance; never -P on the command line
+# A Windows instance with integrated auth: -E instead of -U.
 # A connection string in a config file may name a different server: read it, do not guess.
 
-sqlcmd -S $s -d $db @cred -C -Q 'SELECT DB_NAME() AS db, SUSER_SNAME() AS login'
+sqlcmd -S $s -d $db -U sa -C -Q 'SELECT DB_NAME() AS db, SUSER_SNAME() AS login'
 ```
 
 | Flag                | Effect                                                            |

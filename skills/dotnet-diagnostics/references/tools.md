@@ -1,5 +1,8 @@
 # The diagnostic tools: install, target, collect
 
+These are for a local process or a host you can reach. Deployed logs, metrics and profiles come from
+Grafana through the `ops-analyst` agent, never from these tools and never into the main thread.
+
 None of these ship with the SDK. Install them as global tools once; they then work against any .NET
 process on the machine.
 

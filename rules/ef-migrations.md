@@ -3,8 +3,8 @@ paths: "**/Migrations/**/*.cs,**/*ModelSnapshot.cs"
 ---
 # EF Core migrations — house facts
 
-- Never hand-edit a generated migration or the model snapshot: change the model, remove the
-  unapplied migration with the tool, regenerate.
+- Never hand-write a migration class or edit the model snapshot: change the model, remove the
+  unapplied migration with the tool, regenerate. Editing `Up`/`Down` bodies (e.g. a rename) is fine.
 - Before any `database update`: `dotnet ef migrations script --idempotent -o <file>`, read end to
   end; every `DROP`, `ALTER COLUMN`, `TRUNCATE` must be deliberate.
 - A drop-then-add of a column with the same meaning is a lost rename: rename explicitly so the data

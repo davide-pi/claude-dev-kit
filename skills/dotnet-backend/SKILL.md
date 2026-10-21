@@ -1,120 +1,110 @@
 ---
 name: dotnet-backend
 description: >-
-  Use whenever backend C# is added or restructured in these services — a new responder or
-  subscriber, DI wiring, a Polly retry, a background job, options or secrets — or a lifetime bug, a
-  captive dependency, a sync-over-async hang or thread-pool starvation is suspected.
+  Use when backend C# changes: responder, subscriber, hosted service, DI wiring, Polly retry,
+  options, Redis cache or stream; lifetime bugs, thread-pool starvation, RedisTimeoutException.
+paths: "**/*.cs"
 ---
 
-# dotnet-backend — the stack as it is: singletons, RPC handlers, async all the way
+# dotnet-backend — the stack as it is: singleton handlers, RPC, async all the way
 
-Read the real package list before reaching for an idiom. In the large backend the libraries that
-shape the code are **EasyNetQ** (the service-to-service call), **Polly** with its contrib jitter
-backoff (retries), **Serilog** (logging) and **Scrutor** (assembly scanning). **MediatR, AutoMapper
-and FluentValidation are absent** — do not introduce them as a side effect of a feature. **Quartz**
-appears in one service only; elsewhere scheduled work is a hosted service.
+**Contract.** Code that matches the neighbouring layout and idioms · never adds a library or a
+second idiom the codebase lacks · explanations in Italian, code in English.
 
 ## When
 
-- Adding a responder, subscriber, hosted service, typed HTTP client or options class.
-- Wiring DI, or debugging a lifetime, captive-dependency or thread-safety bug.
-- Writing or fixing async code: cancellation, blocking, fan-out, a hang that only shows under load.
-- Adding or reviewing a Polly policy, or deciding what failure becomes an exception and what is data.
-- Binding configuration, and keeping connection strings and tokens out of the repository.
+- Adding a responder, subscriber, hosted service, typed HTTP client, options class, or Redis use.
+- A lifetime, captive-dependency or thread-safety bug; a hang or timeout that shows only under load.
+- Deciding what a failure becomes (exception or data) and what a Polly policy may wrap.
 
-Not for: EF Core modelling and queries (`ef-core`), RabbitMQ semantics (`rabbitmq`), test mechanics
-(`dotnet-testing`), a running process (`dotnet-diagnostics`), T-SQL (`sql-server`), exact API
-signatures across releases (the `microsoft-docs` plugin).
+Not for: EF modelling and queries (`ef-core`), message semantics (`rabbitmq`), evidence from a
+running process (`dotnet-diagnostics`).
+
+The always-true C# facts (async and tokens, no blocking waits, lifetimes, typed HTTP clients,
+Serilog templates, no secrets in settings) are in `rules/csharp.md`, loaded with any `.cs` file.
 
 ## Decide
 
-### Where does this code go — match the layout, do not redesign it
+### The libraries decide the idiom — read them first
+
+| Present in the large backend | Absent — never introduce for one feature |
+| --- | --- |
+| EasyNetQ (service calls), Polly with jittered backoff, Serilog, Scrutor (assembly scanning) | MediatR, AutoMapper, FluentValidation: hand-write it the way the neighbours do |
+| Quartz in one service only | elsewhere scheduled work is a hosted service |
+
+### Where the code goes — match the layout, never redesign it
 
 | Project suffix | Holds |
 | --- | --- |
 | `*.ServiceContract` | request, response and event types shared with callers — additive changes only |
-| `*.Business` / `*.Application` | the subscribers (`ISubscriber`): one class per RPC responder or event handler, plus domain logic |
+| `*.Business` / `*.Application` | subscribers (`ISubscriber`): one class per RPC responder or event handler, plus domain logic |
 | `*.Data` / `*.Infrastructure` | EF contexts and DAOs; `*.Infrastructure.PostgreSql` is the Dapper read cache |
 | `*.Service` / `*.WebApi` | the host: `Program.cs`, DI composition, the bootstrap hosted service, `/health` |
 
-Not sure which project owns a behaviour across hundreds of them? The `investigator` agent locates it
-(entry file plus handler); its trace mode follows the call across services. Do not sweep by hand.
+Which project owns a behaviour → the `investigator` agent (`locate`; `trace` across services), never a sweep by hand.
 
 ### DI lifetime — the house shape
 
-Subscribers are registered by Scrutor scan as **singletons**, and so are the DAOs and the custom
-`DbContext` factories they inject. Everything a subscriber touches must therefore be singleton-safe.
+Scrutor registers subscribers, DAOs and `DbContext` factories as **singletons**: everything a
+subscriber touches must be singleton-safe.
 
 | The dependency | Lifetime | Rule |
 | --- | --- | --- |
-| a subscriber / responder | singleton (scanned) | no per-request state in fields; inject only singleton-safe services |
-| data access | singleton factory; `await using var db = factory.Create()` **per handler call** | never inject a `DbContext` or any scoped service into a subscriber |
-| `IBus` | singleton, one per process (or a named bus collection) | never created per call |
-| an HTTP dependency | typed client through `AddHttpClient<T>` | never `new HttpClient`, never a hand-rolled singleton |
-| a hosted service needing scoped work | singleton | open a scope per unit of work through the scope factory |
+| subscriber / responder | singleton (scanned) | no per-message state in fields |
+| data access | singleton factory; `await using var db = factory.Create()` per handler call | never a `DbContext` or scoped service in a subscriber |
+| `IBus` | one per process (or a named bus collection) | never created per call |
+| HTTP dependency | typed client, `AddHttpClient<T>` | never a hand-rolled singleton `HttpClient` |
+| hosted service doing scoped work | singleton | a scope per unit of work from `IServiceScopeFactory` |
 
-A shorter lifetime injected into a longer one is a captive dependency: it silently takes on the outer
-lifetime. Details and scope validation: `references/di-lifetimes.md`.
+A shorter lifetime injected into a longer one is captive; `ValidateScopes` + `ValidateOnBuild` in
+Development catch it at startup (`references/di-lifetimes.md`).
 
 ### Failure: exception or data
 
 | The failure is | Model it as |
 | --- | --- |
-| a business outcome an RPC caller can branch on (refused, not found, not allowed) | **data**: the response's outcome fields (`IsSuccess`, an error status) — the house contract |
-| a bug or an impossible state | an exception, logged with context; never swallowed into a success response |
-| a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by a Polly policy — **only around idempotent work** |
+| a business outcome the RPC caller branches on (refused, not found, not allowed) | **data**: the response's outcome fields (`IsSuccess`, an error status) |
+| a bug or an impossible state | an exception, logged with context, never swallowed into a success |
+| a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by Polly — only around idempotent work |
 | invalid input at an HTTP edge | a 400 with field-level problem details, validated once at the edge |
 
-An exception thrown by a responder crosses the bus as a bare message string, so for RPC the data
-model is not a style choice. Detail: `references/errors-and-config.md`.
+A responder's exception crosses the bus as a bare message string: for RPC, data is the contract.
 
 ### Polly — retry only what is safe to repeat
 
 | Wrapping | Verdict |
 | --- | --- |
-| a read, a subscribe at startup, an idempotent upsert | retry with jittered backoff, bounded attempts, logged on each retry |
-| a non-idempotent write, a publish, an RPC request with side effects | no retry until it is made idempotent |
-| a retry inside a retry (policy around an RPC whose responder also retries) | collapse to one layer — attempts multiply |
+| a read, a subscribe at startup, an idempotent upsert | jittered backoff, bounded attempts, a log line per retry |
+| a non-idempotent write, a publish, an RPC request with side effects | no retry until it is idempotent |
+| a policy around an RPC whose responder also retries | one layer only — attempts multiply |
 
 ## Do
 
 ```powershell
-# What is actually referenced — this decides the idioms before any code is written
-Select-String -Path (Get-ChildItem -Recurse -Filter *.csproj).FullName -Pattern 'PackageReference' |
-  ForEach-Object { ($_ -split 'Include="')[1] -split '"' | Select-Object -First 1 } | Group-Object | Sort-Object Count -Descending
-Get-ChildItem -Recurse -Filter Directory.*.props                    # central versions and shared settings
+# The idioms available: every package the tree references
+Get-ChildItem -Recurse -Include *.csproj, Directory.Packages.props |
+  Select-String 'Package(Reference|Version) Include="([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[2].Value } | Sort-Object -Unique
 
 # Lifetimes as registered
-Get-ChildItem -Recurse -Filter *.cs | Select-String -Pattern 'With(Singleton|Scoped|Transient)Lifetime|Add(Singleton|Scoped|Transient)<'
-
-# Secrets: nothing in the tree
-Get-ChildItem -Recurse -Filter appsettings*.json | Select-String -Pattern 'Password=|Pwd=|AccountKey=|Secret'
-dotnet user-secrets set --project .\src\<Host> "ConnectionStrings:<Name>" "<value>"
+Get-ChildItem -Recurse -Filter *.cs | Select-String 'With(Singleton|Scoped|Transient)Lifetime|Add(Singleton|Scoped|Transient)<'
 ```
 
 ## Traps
 
-1. `.Result`, `.Wait()`, `GetAwaiter().GetResult()` → thread-pool starvation; RPC calls and Redis
-   time out together under load → async all the way up (`references/async-concurrency.md`).
-2. A scoped service or a `DbContext` injected into a scanned singleton subscriber → shared across
-   concurrent messages → inject the factory, create per call.
-3. Mutable state in a subscriber's fields → two messages race on it → keep state local to the call.
-4. `async void`, or a `Task` never awaited (fire-and-forget) → the exception vanishes; the bootstrap
-   service already does this with subscriptions, do not copy it.
-5. A Polly retry around a non-idempotent write → duplicate rows or messages.
-6. A `CancellationToken` accepted and dropped → work continues after the caller is gone.
-7. `Parallel.ForEach` over I/O → threads park on the network → bounded async fan-out.
-8. A configuration value silently null → names do not match, or the deployed config merge did not set
-   it → bind options and validate at startup.
-9. A responder that throws for a business rule → the caller receives only a message string.
-10. A new mapping, validation or mediator library introduced for one feature → a second idiom in a
-    codebase that has none → hand-write it the way the neighbours do.
+1. Mutable state in a subscriber's fields → two messages race on it → keep state local to the call.
+2. `async void` or an unawaited `Task` → the exception vanishes → the bootstrap service does it; never copy it.
+3. `Parallel.ForEach` over I/O → threads park on the network → bounded async fan-out
+   (`references/async-concurrency.md`).
+4. An options value silently null → the section name does not match, or the deploy-time config merge
+   did not set it → bind with `ValidateOnStart` and a validated options class.
+5. Redis cache or stream code, a `RedisTimeoutException`, a stuck stream → `references/redis.md`.
 
 ## References
 
-- `references/di-lifetimes.md` — lifetimes, captive dependencies, scopes inside singletons and hosted
-  services, typed HTTP clients with resilience, registration hygiene and scope validation.
-- `references/async-concurrency.md` — async all the way, cancellation, sync-over-async deadlocks,
-  concurrency against parallelism, bounded fan-out.
-- `references/errors-and-config.md` — exceptions against results in code, validation placement, the
-  options pattern, configuration precedence, secret handling and remediation.
+- `references/di-lifetimes.md` — captive dependencies, scopes in singletons and hosted services,
+  typed clients with resilience, scope validation.
+- `references/async-concurrency.md` — cancellation, sync-over-async deadlocks, bounded fan-out.
+- `references/errors-and-config.md` — exceptions against results, validation placement, options,
+  configuration precedence, secret remediation.
+- `references/redis.md` — the cache SDK wiring, Streams consumer groups and their traps, reading a
+  `RedisTimeoutException`, inspecting a local instance.
