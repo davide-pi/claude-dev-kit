@@ -2,8 +2,8 @@
 
 ## Phase 1 — the period
 
-The trigger's argument is natural language and must become two concrete dates (`yyyy-MM-dd`)
-before the engine runs:
+The argument is natural language and must become two concrete dates (`yyyy-MM-dd`) before the
+engine runs:
 
 | Argument | `From` / `To` |
 | --- | --- |
@@ -13,8 +13,9 @@ before the engine runs:
 | `yyyy-MM-dd..yyyy-MM-dd` | the two ends |
 | "questa settimana", "settimana scorsa", "ultimi N giorni", "10-15 lug" | compute the ends from today's date |
 
-Still ambiguous ("la settimana" without knowing which) → **ask** first: a wrong period puts hours
-on the wrong work item.
+Still ambiguous → **ask**: a wrong period puts hours on the wrong item. A range runs the engine
+**once**, then Phases 3-4 go **day by day**: coverage is a per-day fact, and per-day audit entries are
+what the reminder reads.
 
 ## Phase 2 — the engine
 
@@ -22,66 +23,75 @@ on the wrong work item.
 pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM-dd>" -To "<yyyy-MM-dd>"
 ```
 
-What it does, exactly:
+Reads every transcript under `~/.claude/projects` touched in the period — main sessions **and**
+subagents — and never touches Azure DevOps. A gap between two consecutive main-session events is:
 
-- reads the **main** Claude Code transcript sessions (subagents and sidechains excluded);
-- filters events in the range and attributes them to `(project, branch)` on one global timeline;
-- **active time** = the sum of intervals between consecutive events within the idle threshold
-  (default 15 minutes). Longer intervals — nights between the days of a range included — are breaks
-  and do not count;
-- prints the authoritative metrics on stdout: per project and per branch, active minutes, time
-  window and prompt count;
-- writes the **raw digest** to `_raw/<period>.md` under the skill's working folder and prints its
-  path, together with the **audit** path (`pushed.json`);
-- runs **retention** at launch: it prunes **only digests** older than the retention window (default
-  7 days). There is no scheduler; cleanup happens only here. The **audit is never pruned**: it is the
-  only memory of which periods already reached the board, and the unlogged-days reminder depends on
-  it (`scrittura.md`, "The closed day").
+| Gap | Active when | Counted as |
+| --- | --- | --- |
+| ≤ 15 min (`-IdleMinutes`) | always | base |
+| ≤ 45 min (`-HardPauseMinutes`) | anything in flight spans it: a tool call, a subagent, a background job, a turn | wait |
+| ≤ 45 min | the next event is on the **same topic** (project + branch) | continuity |
+| ≤ 20 min (`-SwitchMinutes`) | the topic changes | continuity |
+| 45-120 min (`-MaxSpanMinutes`) | a **foreground** tool call or a **working subagent** spans it — not a background job (dev servers live there), not a bare turn | wait |
+| longer | never | pause |
 
-Optional parameters beyond `-From`/`-To`: projects root, output folder, idle threshold, retention
-days and the digest truncation limits. Leave them alone without a reason.
+Parallel sessions share one timeline, so wall-clock time counts once. Each interval goes to the topic
+and the **day** of the event that opens it.
 
-The engine writes **no** tables and **never** touches Azure DevOps: that is the skill's job.
+Stdout, the authoritative numbers:
 
-`Nessuna attivita'` on stdout → report it and stop. Otherwise **read the digest**: project → branch
-→ timeline of prompts and replies. It is the material topics, descriptions and decisions come from;
-open the original transcripts only for a missing detail.
+- header: total active time and how much of it the waits and the continuity **recovered** over the
+  old fixed 15-minute threshold;
+- project → branch: active minutes, time window, prompt count;
+- **GIORNO** table, one row per day: `ATTIVO`, `RECUPERATI`, `TARGET`, `LOGGATO` (already in the
+  audit; a multi-day entry split evenly over its weekdays), `MANCANO` (target − logged);
+- **Attese lunghe**: every wait above 45 minutes counted active. A permission prompt left pending
+  over lunch looks exactly like a long build: show them in Table 1 and let the user drop them;
+- the paths of the raw digest, the audit and `targets.json`.
+
+**Targets**: `~/.claude/worklog/targets.json` — `{ "targetHours": 8, "days": { "<yyyy-MM-dd>": { "hours": 6, "note": "corso 4h + straordinario 2h" } } }`.
+Missing file or date → `targetHours` Monday-Friday, 0 at weekends. Only `worklog-push.ps1` writes it
+(a `target` row, `scrittura.md`); the user may edit it by hand for a known event.
+
+Retention: at launch the engine prunes **digests** older than 7 days; the **audit is never pruned**.
+`Nessuna attivita'` → say so; on a weekday ask whether the day still has hours to cover (gap prompt,
+`ore-gestione.md`) or closes at zero.
+
+Then **read the digest** (`_raw/<period>.md`): project → branch → prompts and replies. Topics,
+descriptions and decisions come from there; open a transcript only for a missing detail.
 
 ## Phase 3 — topics and roles
 
-**The topic comes from the git branch.** A `feature/*`, `fix/*` or `bugfix/*` branch is a topic:
-give it a human name, in Italian. Work on the default branch, `HEAD` or no branch has no branch
-topic → **split it into one or more semantic topics** from the digest and spread its minutes by a
-reasonable estimate, **saying so** in chat. Topics normally stay per project; one crosses two only
-when it is clearly the same work.
-
-Each topic gets a **role**, which decides how it rounds:
+**The topic comes from the git branch.** A `feature/*`, `fix/*` or `bugfix/*` branch is a topic: give
+it a human Italian name. Work on the default branch, `HEAD` or no branch → **split it into semantic
+topics** from the digest and spread its minutes by a reasonable estimate, **saying so**. A topic
+crosses projects only when it is clearly the same work.
 
 | Role | When | Effect |
 | --- | --- | --- |
-| `main` | a real topic, time >= ~15 min | receives the donors' redistribution, rounds normally |
-| `donor` | a micro-topic (< ~15 min) of client work **without** its own item | its minutes go into a pool spread **evenly** over the `main` topics; the topic disappears from the table |
-| `keep` | a micro-topic **with** its own item, or otherwise worth keeping | stays a row, lifted to **at least 0.5h** so it gets logged |
-| `internal` | internal / non-billable time (e.g. tooling work) | its own row, rounds normally (may give 0h), **neither** receives the pool **nor** is spread |
+| `main` | a real topic, ≥ ~15 min | receives the donors' minutes, rounds normally |
+| `donor` | a micro-topic (< ~15 min) of client work **without** its own item | minutes spread **evenly** over the `main` topics; the row disappears |
+| `keep` | a micro-topic **with** its own item, or worth keeping | stays a row, lifted to **at least 0.5h** |
+| `internal` | not billable (tooling, the kit) | own row, rounds normally, never receives or gives minutes, never logged — it shows in NON FATTURATO |
 
 Certainty about the item comes in Phase 5: classify by judgement here, re-check in discovery. An
-`internal` topic becomes `donor` only when the user explicitly asks.
+`internal` topic becomes `donor` only when the user asks.
 
-## Rounding
+## Rounding — one day per call
 
 ```powershell
-pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" `
-  "80|import nuovi mercati|main" "4|fix seed|donor" "7|fix proc|keep" "8|tooling worklog|internal"
+pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" -TargetHours 8 `
+  "80|import nuovi mercati|main" "4|fix seed|donor" "7|fix proc|keep" "40|tooling worklog|internal"
 ```
 
-- Entry format: `minutes|label|role`; the role is optional and defaults to `main`. The label is
-  Italian — it seeds the short description and the Task title.
-- **Nearest-0.5h per topic, independently**, **no cap**: the total is the real sum of the results,
-  not a forced number. 45 minutes give 1.0h (a tie rounds away from zero, not down); under ~15
-  minutes rounds to **0h**.
-- The helper spreads the `donor` topics, lifts `keep` to 0.5h, leaves `internal` alone, and prints
-  two totals: all rows, and the **loggable** share (0h and internal excluded).
-- Pass **all** topics in **one** invocation: the redistribution depends on how many `main` topics
-  there are, so separate invocations give different, wrong numbers.
-- `donor` topics with no `main` → the helper warns and treats them as `keep`.
+- Entry `minutes|label|role`, role default `main`; the Italian label seeds the Task title.
+- **Nearest 0.5h per topic**, no cap: 45 min → 1.0h (ties away from zero), under ~15 min → 0h.
+- **All of one day's topics in one call**: the donor spread depends on how many `main` rows there are.
+- `-TargetHours` = the day's `TARGET` from the GIORNO table. The helper prints:
+  - `TOTALE` and `di cui LOGGABILE` (0h and internal rows excluded);
+  - `NON FATTURATO`: internal minutes plus what rounding and the 0h rows dropped — said, never hidden;
+  - `COPERTURA: <loggabile>h / <target>h - mancano <x>h`, flagged `sotto target` when more than 1h
+    short: the trigger of the gap prompt.
 - Minutes changed in the Table 1 loop → **re-round**; never correct hours by hand.
+- A re-run of a day already in the audit: coverage counts this run's rows; the GIORNO `LOGGATO` says
+  what the board already holds, and the push writes only the delta.

@@ -19,11 +19,16 @@
   Regola arrotondamento: 45 min -> 1.0h (equidistante -> away-from-zero, non
   sempre floor). < ~15 min -> 0.0h. Le righe a 0.0h si mostrano ma non si loggano.
 
+  Stampa sempre il NON FATTURATO (interni + perdita di arrotondamento e righe a 0h).
+  Con -TargetHours (il target del giorno, dalla tabella GIORNO del motore) stampa anche la
+  COPERTURA: ore loggabili / target, quanto manca, e se il giorno e' sotto target (< target - 1h).
+
 .EXAMPLE
-  .\round.ps1 "35|company-config|main" "4|seed-fix|donor" "7|proc-fix|keep" "8|worklog|internal"
+  .\round.ps1 -TargetHours 8 "35|company-config|main" "4|seed-fix|donor" "7|proc-fix|keep" "8|worklog|internal"
 #>
 [CmdletBinding()]
 param(
+  [double]$TargetHours = -1,
   [Parameter(Position = 0, ValueFromRemainingArguments = $true)]
   [string[]]$Items
 )
@@ -89,3 +94,15 @@ if ($donors.Count -gt 0) {
 Write-Output ""
 Write-Output ("{0,-40} {1,-9} {2,9} {3,9} {4,7}h" -f 'TOTALE (tutte le righe)','','','', $tot)
 Write-Output ("{0,-40} {1,-9} {2,9} {3,9} {4,7}h" -f 'di cui LOGGABILE (no 0h/interni)','','','', $totLog)
+
+# what the board will not see: internal rows, plus what rounding and the 0h rows dropped
+$measured = ($parsed | Measure-Object Min -Sum).Sum
+$internal = [double](@($parsed | Where-Object Role -eq 'internal') | Measure-Object Min -Sum).Sum
+$roundDiff = ($measured - $internal) - $totLog * 60   # > 0 lost to rounding and 0h rows, < 0 rounded up
+$excess = if ($roundDiff -lt 0) { "; arrotondato in eccesso +$(FmtMin (-$roundDiff))" } else { '' }
+Write-Output ("NON FATTURATO: {0} (interni {1}, persi in arrotondamento e righe a 0h {2}{3})" -f `
+  (FmtMin ($internal + [math]::Max(0, $roundDiff))), (FmtMin $internal), (FmtMin ([math]::Max(0, $roundDiff))), $excess)
+if ($TargetHours -ge 0) {
+  $under = if ($totLog -lt $TargetHours - 1) { ' - sotto target: domanda sul gap' } else { '' }
+  Write-Output ("COPERTURA: {0}h / {1}h - mancano {2}h{3}" -f $totLog, $TargetHours, [math]::Max(0, $TargetHours - $totLog), $under)
+}
