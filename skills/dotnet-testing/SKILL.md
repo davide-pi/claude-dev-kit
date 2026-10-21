@@ -23,7 +23,7 @@ where is the seam". Smaller solutions elsewhere do have suites; there, follow wh
 
 Not for: what the code under test should do (`dotnet-backend`, `ef-core`, `sql-server`), diagnosing a
 failing or flaky behaviour in the product (`debug-systematic`), deciding whether the whole change is
-done (`done-check`), Angular or React harness mechanics (`angular`, `react`), or exact framework APIs
+done (`plan-work`'s `evidence-by-stack.md`), Angular or React harness mechanics (`angular`, `react`), or exact framework APIs
 (the `microsoft-docs` plugin or the package's own docs).
 
 **Language:** the recommendation is written for the user in **Italian**; test names and test code

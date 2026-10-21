@@ -126,3 +126,5 @@ fare / Già fatti last** — mechanics and the exact report order in `references
   cases that always stay in chat; second passes; the verification ladder before acting on a finding.
 - `references/posting.md` — posting mechanics per platform, replying, retracting and resolving, plus the exact
   order of the chat report with the summary table last.
+- `references/report-format.md` — who reviews on which model, the finding fields, the sort and the columns
+  of the Da fare / Già fatti tables; shared with `/code-review` and every ad-hoc review.

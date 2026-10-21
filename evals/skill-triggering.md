@@ -110,18 +110,6 @@ exists.
 3. Re-run the affected cases, then `node tools/validate.mjs` (the description limits are enforced
    there), and note in the PR which case changed behaviour.
 
-### `dev-loop` — the router
-
-| Prompt | Expected |
-|--------|----------|
-| "vorrei aggiungere l'export CSV degli ordini, come procediamo?" | MUST load |
-| "questo va rifatto o si aggiusta?" | MUST load (classification is the whole question) |
-| "qual è la differenza tra `IEnumerable` e `IQueryable`?" | MUST NOT (a knowledge question routes nothing) |
-| "/commit" | MUST NOT (the decision is already made; the command owns it) |
-| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike) |
-| "conviene spezzare questo lavoro su più agent?" | MUST load (parallel fan-out) |
-| "applica le tre migration in ordine" | MUST NOT fan out (sequential by construction) |
-
 ### `plan-work`
 
 | Prompt | Expected |
@@ -132,15 +120,8 @@ exists.
 | "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
 | "prendi in carico la story 4711, da dove parto?" | MUST load (item analysis) |
 | "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
-
-### `done-check`
-
-| Prompt | Expected |
-|--------|----------|
-| "ho finito, confermi che è tutto a posto prima del commit?" | MUST load |
-| "questa feature è pronta per la PR?" | MUST load |
-| "fai una review del diff e dimmi se ci sono bug" | MUST NOT (defect hunting is the review axis, not the completion gate) |
-| "i test passano?" | MUST NOT (run them and answer; no gate to apply) |
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike, `references/spike.md`) |
+| "conviene spezzare questo lavoro su più agent?" | MUST load (fan-out, `references/delegation.md`) |
 
 ### `debug-systematic`
 

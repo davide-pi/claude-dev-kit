@@ -44,7 +44,7 @@ that crosses services or the bus. Two touchpoints → two agents in parallel. An
 | 5 | An unresolved blocking dependency, or an **A** on observable behaviour | **blocked** | questions first; no editor |
 | 6 | Several independent deliverables (split test below) | **needs splitting** | the split proposal → `/workitem-create` |
 | 7 | 3+ files with a new interface, or a new module, integration or schema change | **needs a plan** | the plan file, sized by `plan-work` |
-| 8 | Otherwise | **implementable** | 3-task plan in chat, the domain skill, `done-check` |
+| 8 | Otherwise | **implementable** | 3-task plan in chat, the domain skill, `evidence-by-stack.md` |
 
 State the verdict in one line before anything else. Rows 4 and 5 are the ones worth defending under
 pressure: untestable criteria get argued about at review time instead, which costs more.

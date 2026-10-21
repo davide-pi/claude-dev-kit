@@ -177,6 +177,22 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
   }
 }
 
+// Rules load on touch through `paths`, which Claude Code reads as one comma-separated string: a
+// YAML list was silently ignored on earlier builds, leaving the rule loaded never (or always).
+const RULE_LINES = 25;
+for (const rel of allFiles.filter((f) => /^rules\/[\w.-]+\.md$/.test(f))) {
+  const text = read(rel);
+  const head = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!head) { fail(rel, 'has no front matter — a rule without `paths` loads every session like CLAUDE.md'); continue; }
+  const paths = head[1].match(/^paths:[ \t]*(.*)$/m);
+  if (!paths) fail(rel, 'front matter has no `paths`');
+  else if (!/^"[^"]+"$/.test(paths[1].trim())) {
+    fail(rel, '`paths` must be one quoted comma-separated string ("a,b"), not a YAML list or a bare value');
+  }
+  const lines = text.replace(/\n$/, '').split('\n').length;
+  if (lines > RULE_LINES) fail(rel, `${lines} lines against the ${RULE_LINES}-line cap for a rule — facts only, procedure in the skill`);
+}
+
 const descriptionTotal = descriptionBudget.reduce((sum, [, d]) => sum + d.length, 0);
 if (descriptionTotal > DESCRIPTION_BUDGET_CHARS) {
   const top = [...descriptionBudget].sort((a, b) => b[1].length - a[1].length).slice(0, 5)

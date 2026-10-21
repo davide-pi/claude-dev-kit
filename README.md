@@ -20,14 +20,14 @@ nothing else changes. Machine identifiers are never translated in either directi
 
 | Level | What it solves | Assets |
 |---|---|---|
-| **Routing** | which asset owns this task | `dev-loop`, plus the rules in `CLAUDE.md` |
+| **Routing** | which asset owns this task | the route table in `CLAUDE.md`, path-scoped `rules/` |
 | **Knowledge** | not re-deciding what was decided once | 26 skills, depth in reference files loaded on demand |
 | **Exploration** | finding context without burning the main context window | 7 subagents |
 | **Execution** | running a known sequence in one shot | 8 slash commands |
 | **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
 
 Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
-**start at `dev-loop`**, and **try the CLI before the MCP server, every time**.
+**route through the table**, and **try the CLI before the MCP server, every time**.
 
 ## Skills
 
@@ -41,9 +41,7 @@ the ceremony and rewritten for PowerShell.
 
 | Skill | Purpose |
 |---|---|
-| `skills/dev-loop/SKILL.md` | Entry point: classifies a request (probe, bug, bounded change, subsystem, design attack, parallelisable, integration), routes it, then sizes the approval gate on the cost of being wrong rather than the size of the diff. Owns throwaway spikes and when to fan work out to parallel subagents. |
 | `skills/plan-work/SKILL.md` | A plan file with verifiable tasks, sized to the change — and when not to write one at all. Also turns a work item into an attack plan before any code. |
-| `skills/done-check/SKILL.md` | The completion gate: evidence before the claim, with a definition of done per change type and the exact command each one requires. |
 | `skills/debug-systematic/SKILL.md` | Reproduce, isolate, explain, then fix — with a symptom-to-instrument table for .NET processes, query plans, brokers, pipelines and intermittent failures. |
 | `skills/skill-forge/SKILL.md` | How to add or change an asset of this kit: shape decision, front matter, caps, splitting, finish checklist. |
 | `skills/grill-me/SKILL.md` | Red-team a plan: interview the decision tree round by round — the whole frontier at once, each question with a recommended answer — then a Decision Summary. |
@@ -139,18 +137,20 @@ a broken hook must never block work — and each has a dependency-free test in `
 | `hooks/format-on-edit.js` | `PostToolUse` | Formats only the file just written, and does nothing where the project has no such tooling configured. Exits at once on an extension no formatter owns. |
 | `hooks/session-brief.js` | `SessionStart` | Five cached lines of orientation: branch and dirty state, last commit, upstream drift, PR, work item. No network call. |
 | `hooks/worklog-pending.js` | `SessionStart` | Names the working days with activity under a mapped workspace root but no `/worklog` audit entry — current month, or current week where it reaches back — and caches the count for the statusline clock badge. Roots come from `CLAUDE_WORKSPACE_ROOTS`; unset means silence. |
-| `hooks/az-identity.js` | `SessionStart` | Pins the Azure CLI identity to the workspace root the session runs in, by pointing `AZURE_CONFIG_DIR` (and `AZ_IDENTITY`, for PowerShell) at a private `~/.azure-<identity>` config dir through `CLAUDE_ENV_FILE`, so two sessions on different orgs never flip each other's default. The root map is local-only `~/.claude/workspaces.json` (copy `workspaces.example.json`); no map, no effect. |
+| `hooks/workspace-context.js` | `SessionStart` (`startup|resume|clear|compact`) | Turns the session cwd into one `ALM:` context line (platform, org, project or per-subfolder project, az identity, note) from local-only `~/.claude/workspaces.json` (copy `workspaces.example.json`), and pins the Azure CLI identity by exporting `AZURE_CONFIG_DIR` (and `AZ_IDENTITY`, for PowerShell) through `CLAUDE_ENV_FILE`, so two sessions on different orgs never flip each other's default. A map with no matching root prints `ALM: non mappato`; no map, no output. Fires again after `/compact`. |
 | `hooks/ensure-edge-cdp.ps1` | `PreToolUse` | Before a `browser-use` tool call, makes sure Edge is running with its CDP port open, starting it if needed. Never blocks. |
 
 ## Configuration and tooling
 
 | Path | Purpose |
 |---|---|
-| `CLAUDE.md` | User instructions: the routing and CLI rules, the review conventions, the writing rule, and the workspace-to-platform mapping (a template — fill in your own). |
+| `CLAUDE.md` | User instructions, kept under 2.7 KB because every turn pays for them: the route table, the gate, CLI before MCP, delegation, writing, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here. |
+| `rules/*.md` | Path-scoped facts per stack (C#, tests, EF migrations, TypeScript, Angular, React, SQL, pipelines, docker, kit assets): each loads only when a matching file is read or edited, `paths` as one comma-separated string, 25 lines at most, pointing at the skill that owns the procedure. |
+| `tools/instructions-log.js` | Dev-only `InstructionsLoaded` hook, wired in the repo's own `.claude/settings.local.json`: logs which instruction file loaded and why, to confirm a `paths` rule fires. |
 | `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, enabled plugins, status line, UI preferences. |
 | `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, rate limits with weekly pacing, session cost, model, effort, PR badge, the unlogged-hours clock badge, vim mode. Names and branch are hyperlinks. |
 | `scripts/sql-ro.ps1` | Read-only SQL Server access to non-dev hosts through go-sqlcmd: targets from local-only `~/.claude/db-targets.json`, the secret travels in `SQLCMDPASSWORD` for that process only, a fail-closed permission probe runs first (exit 3 on any write grant) and sqlcmd commands in the SQL are rejected. `hooks/lib/sql-target.js` denies a raw `sqlcmd`, `bcp` or `SqlPackage` at a non-dev host and points here. |
-| `workspaces.example.json` | Shape of the local-only `~/.claude/workspaces.json`: workspace root → platform, org, project and the az identity name. Placeholders only. |
+| `workspaces.example.json` | Shape of the local-only `~/.claude/workspaces.json` read by `hooks/workspace-context.js`: workspace root → platform, org, project (or a subfolder → project map), az identity, account, note. Placeholders only. |
 | `install.ps1` | Idempotent install into the Claude config directory, plus `-Check` (drift and environment report, exit 1 on problems) and `-Pull` (import live edits back into the repo, whole skill folders included). |
 | `tools/validate.mjs` | Dependency-free CI checks: JSON, front matter, cross-references, machine paths and secrets, the line caps, the body skeleton, reference reachability, pinned versions, declared command limits. |
 | `tools/guard-shell.test.mjs` | One test file per hook entry point — this one plus four siblings — covering the true positives and, the part that matters, the false positives. |
@@ -273,8 +273,9 @@ item types and states. `azdo-cli` lists each one with the reason.
 | Variable | Who needs it | Value |
 |---|---|---|
 | `CLAUDE_HOOKS` | every hook in `settings.json` | The hooks directory inside your Claude config directory. Hooks run in *exec* form with no shell to expand variables, which is why the Node ones read it themselves. **Without it they fail silently** — by design they exit 0, so the only symptom is that nothing gets checked. `install.ps1` sets it at user level. |
-| `CLAUDE_WORKSPACE_ROOTS` | `hooks/worklog-pending.js` | The workspace roots whose work is billable, `;`-separated — the same roots as the mapping in `CLAUDE.md`. Set in `settings.json` → `env`, empty in the template: **empty means the reminder never fires**. |
+| `CLAUDE_WORKSPACE_ROOTS` | `hooks/worklog-pending.js` | The workspace roots whose work is billable, `;`-separated — the same roots as `workspaces.json`. Set in `settings.json` → `env`, empty in the template: **empty means the reminder never fires**. |
 | `CLAUDE_WORKSPACE_NESTED` | `hooks/worklog-pending.js` | Folders under a root whose project is the subfolder below them (the per-subfolder shape of the mapping), `;`-separated, so the reminder labels `<root>/<project>`. Optional. |
+| `CLAUDE_WORKTREE_ROOT` | `branch-flow` (worktrees) | A short root for every worktree (`<root>/<repo>-<topic>`), keeping deep repos under the Windows path limit. Empty in the template: worktrees go beside the repo. |
 | `COLUMNS` | `statusline.js` | Terminal width for the context bar; falls back to a sane default when unset. |
 | `USERPROFILE`, `LOCALAPPDATA` | the PowerShell scripts | Standard Windows variables, listed so the dependency is explicit. |
 
@@ -298,7 +299,7 @@ status line and a parse of every PowerShell script.
 
 Three things are placeholders on purpose, because this repository is public: **Azure DevOps
 organization and project names**, **absolute machine paths**, and **addresses**. Replace them in the
-workspace mapping in `CLAUDE.md`, in `CLAUDE_WORKSPACE_ROOTS` / `CLAUDE_WORKSPACE_NESTED` in
+local-only `workspaces.json` (from `workspaces.example.json`), in `CLAUDE_WORKSPACE_ROOTS` / `CLAUDE_WORKSPACE_NESTED` in
 `settings.json`, and in `mcp/servers.example.json`.
 
 Everything else is meant to be opinionated. If a pattern does not match your project, change the

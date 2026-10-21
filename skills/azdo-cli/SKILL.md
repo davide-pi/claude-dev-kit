@@ -29,7 +29,7 @@ deciding *what* a work item should say (`user-story-standard`) or whether one is
 **Never hardcode an organization or a project, and never trust the configured default.** The
 `az devops configure` defaults may still point at the previous session's client, which is how work
 lands in the wrong customer's project. Resolve both from the **current working directory**, through
-the workspace-to-platform mapping the user keeps in their `CLAUDE.md`, and pass them with `--org`
+the session's `ALM:` line (hook `workspace-context.js`, from `workspaces.json`), and pass them with `--org`
 and `-p` on every command. If the path is not mapped, **ask** — never let `--detect` or the machine
 default fill the hole. `-p` is not a filter either: **`az boards query --project` does not scope
 reliably**, having returned items of other projects, so every WIQL repeats the scope itself,

@@ -48,16 +48,16 @@ Parse "$ARGUMENTS"; order does not matter, all parts are optional.
      `performance` → `review-performance`), otherwise the generalist told to concentrate on that
      axis. A focus overrides the effort-based fan-out.
 
-   **Pick each agent's model** per the "Review agents — model selection" convention in the global
-   `CLAUDE.md`: default → omit `model`; "advanced" → the current session model explicitly;
+   **Pick each agent's model** per `~/.claude/skills/pr-review/references/report-format.md`
+   (model selection): default → omit `model`; "advanced" → the current session model explicitly;
    "agent {model}" → that exact model.
 
 4. **Merge the outputs**: drop a specialist finding the generalist already reported at the same
    anchor for the same defect (keep the more specific category and the higher-confidence verdict);
    keep both when they describe different failures at the same line. A finding already fixed in this
-   session becomes `status: done` (`Risolto da: sessione`). Sort per the global `CLAUDE.md`.
+   session becomes `status: done` (`Risolto da: sessione`). Sort per `report-format.md`.
 
-5. **Report in chat, in Italian**, exactly in the shape of the global `CLAUDE.md` § "Review output"
+5. **Report in chat, in Italian**, exactly in the shape of `~/.claude/skills/pr-review/references/report-format.md`
    (two tables Da fare / Già fatti, the fields, the sort order, the verbatim values). Order:
    - **Rilievi** — one block per `todo` finding, numbered in sort order: what breaks, the failure
      scenario, the evidence (`file:line`), the minimal fix. `done` ones: one line each.

@@ -209,7 +209,8 @@ function line(pending) {
     .join(', ');
   const rest = pending.length > MAX_LISTED ? `, +${pending.length - MAX_LISTED} altri` : '';
   return `⏱ Ore non registrate su ${pending.length} giorn${pending.length === 1 ? 'o' : 'i'}: `
-    + `${shown}${rest} — chiudili con /worklog <data>.`;
+    + `${shown}${rest} — chiudili con /worklog <data>.`
+    + ' (Dillo una volta, in una riga, nella prima risposta; le ore le scrive solo /worklog, mai di tua iniziativa.)';
 }
 
 const snapshot = compute();

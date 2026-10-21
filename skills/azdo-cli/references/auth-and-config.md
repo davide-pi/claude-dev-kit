@@ -82,6 +82,21 @@ it the pragmatic answer for the second organization when switching sign-ins beco
 az account get-access-token --tenant <tenant-domain> --query accessToken -o tsv
 ```
 
+## One az identity per workspace root
+
+`az account set` and `az login` switch a **machine-global** default: two sessions on roots of
+different tenants flip each other mid-command. Never run `az account set`. Each identity owns a
+private config dir `~/.azure-<identity>` (signed in once into that dir); the SessionStart hook
+`workspace-context.js` reads `workspaces.json` and exports `AZURE_CONFIG_DIR` (Bash) and
+`AZ_IDENTITY` (PowerShell drops values holding `\`). In PowerShell, prefix every az call:
+
+```powershell
+$env:AZURE_CONFIG_DIR="$HOME\.azure-$env:AZ_IDENTITY"; az boards query --org https://dev.azure.com/<org> ...
+```
+
+Git credentials follow the same split, bound once per organization:
+`git credential-manager azure-repos bind <org> <user>`.
+
 ## Resolving the identity to assign to
 
 `--assigned-to` needs a value the **organization** can resolve, and that is not the machine's git

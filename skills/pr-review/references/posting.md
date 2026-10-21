@@ -59,14 +59,14 @@ gh api --method POST repos/{owner}/{repo}/pulls/<n>/reviews --input payload.json
 
 In this order, so the table is what is still on screen when the report ends:
 
-1. **Findings** — one block per `todo` finding, numbered in the global `CLAUDE.md` § "Review output"
+1. **Findings** — one block per `todo` finding, numbered in the `report-format.md`
    sort order: what breaks, the concrete failure scenario, the evidence as `file:line`, the minimal
    fix, and the agent that found it. `done` findings: one line each.
 2. **Posted vs chat** — which findings became threads (thread ids on Azure DevOps, the review URL on
    GitHub) and, for each finding kept in chat, why. If nothing was posted, say so explicitly. On an
    incremental pass, name the reviewed range (`<last-reviewed>..<head>`).
 3. **Summary tables** — the **last** blocks, same numbers and order as above. Shape and columns per
-   the global `CLAUDE.md`, with `Postato` added:
+   `report-format.md`, with `Postato` added:
 
    **Da fare**
 

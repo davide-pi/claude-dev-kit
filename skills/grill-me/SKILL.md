@@ -14,7 +14,7 @@ Summary are **Italian**. Code, identifiers, paths and commands stay as they are.
 ## When
 
 - The user asks for scrutiny, not execution: "grill me", "poke holes", "red-team", "devil's advocate".
-- A design is already on the table and the question is whether it holds (`dev-loop` routes here).
+- A design is already on the table and the question is whether it holds (the CLAUDE.md route table sends it here).
 - `workitem-create` escalates its Q&A because the work is ambiguous and decisions depend on each other.
 
 Not for: designing the solution yourself, writing the plan (`plan-work`), or a bug (`debug-systematic`).

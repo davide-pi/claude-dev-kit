@@ -21,8 +21,10 @@ reads it back as a technical artifact, next to the code it describes. Everything
 - The work will be handed to subagents and they need one shared target.
 - Order matters: something must exist before something else compiles or runs.
 - Returning to half-finished work whose next step is no longer obvious.
+- A "can we…" question needs a throwaway probe before any plan — `references/spike.md`.
+- Pieces of the work could go to parallel subagents — `references/delegation.md` first.
 
-Not for: a single-file change, a spike, a bug (that is `debug-systematic` — the reproduction is the
+Not for: a single-file change, a bug (that is `debug-systematic` — the reproduction is the
 plan), or work that will be finished before the plan is read.
 
 ## Decide
@@ -31,12 +33,12 @@ plan), or work that will be finished before the plan is read.
 
 | Situation | Plan? |
 | --- | --- |
-| One file, one behaviour, tests already exist | **no** — do it, then `done-check` |
+| One file, one behaviour, tests already exist | **no** — do it, then verify (`references/evidence-by-stack.md`) |
 | 2-4 files, one obvious order, one session | **no file** — say the steps in chat and go |
 | A new interface between components, or 5+ files | **yes** |
 | Migration plus code plus tests, where order matters | **yes** |
 | Work will pause and resume, or another agent executes it | **yes** — the file is the handoff |
-| Requirements still unknown | **no** — a plan over unknowns is fiction; probe first (`dev-loop`) |
+| Requirements still unknown | **no** — a plan over unknowns is fiction; probe first (`references/spike.md`) |
 | It starts from a work item | the readiness verdict first — `references/from-work-item.md` |
 
 ### 2. Size it to the change
@@ -90,7 +92,7 @@ Fill it from the template in `references/plan-template.md`. Then, while executin
 - Work in dependency order, and run each task's verify command before starting the next.
 - Tick progress in the file itself (`- [x]`), so a resumed session reads state instead of guessing.
 - When a task turns out wrong, edit the plan first and the code second — never diverge silently.
-- Plan finished → run `done-check` over the whole change, not just over the last task.
+- Plan finished → verify the whole change, not just the last task (`references/evidence-by-stack.md`).
 
 ## Traps
 
@@ -117,3 +119,9 @@ Fill it from the template in `references/plan-template.md`. Then, while executin
   verdict, the questions worth asking, the split test.
 - `references/plan-template.md` — the plan file skeleton with a worked example; read it before
   writing the first plan in a repo, or when a plan needs phases.
+- `references/spike.md` — a feasibility probe: the testable claim, the cheapest instrument, the
+  timebox, the Italian report shape, the guardrails that keep it throwaway.
+- `references/delegation.md` — before any fan-out to subagents: the independence test, the output
+  contract every agent returns, what is never delegated.
+- `references/evidence-by-stack.md` — before calling anything done: the three states, done per
+  change type, the exact command and output line per stack.

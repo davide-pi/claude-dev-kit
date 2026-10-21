@@ -48,7 +48,7 @@ answered (probe, doc lookup, ask the user). Empty is a valid answer; `TBD` insid
 ## Verification
 
 The whole-change gate, run after the last task, not instead of the per-task ones. Point at
-`done-check` for the change type and list the commands here so a resumed session does not rediscover
+`evidence-by-stack.md` for the change type and list the commands here so a resumed session does not rediscover
 them.
 
 ## Decisions taken
@@ -115,7 +115,7 @@ None.
 
 ## Verification
 
-`done-check`, backend row: build clean with warnings as errors, suite green, the new test named in
+`evidence-by-stack.md`, backend row: build clean with warnings as errors, suite green, the new test named in
 the output, `git diff --stat` reviewed.
 
 ## Decisions taken
@@ -131,5 +131,5 @@ where the system builds and its tests pass, so the work can stop there without l
 tree. Number tasks continuously across phases (`1`…`17`), so `depends on` never needs a phase
 qualifier.
 
-A phase boundary is also the natural place to stop and rerun `done-check`, and the natural cut line
+A phase boundary is also the natural place to stop and rerun the evidence check (`evidence-by-stack.md`), and the natural cut line
 when the plan turns out to be two plans.

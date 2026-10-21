@@ -52,7 +52,7 @@ forbidden operations (commit, push, migration, deploy); and that "zero findings"
 | --- | --- |
 | integration and wiring | it needs every piece at once — the caller's job |
 | the final review of merged output | reviewing N reports is what the caller exists for |
-| `done-check` on the whole change | the gate does not delegate to the reviewed |
+| the evidence check on the whole change (`evidence-by-stack.md`) | the gate does not delegate to the reviewed |
 | anything needing the conversation's history | a fresh agent guesses, then reports the guess confidently |
 | irreversible commands: migrations applied, deploys, pushes, deletes, cache flushes | blast radius, times N |
 | deciding **what** to build | scope is the caller's; agents execute a decided scope |

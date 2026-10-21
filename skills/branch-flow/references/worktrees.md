@@ -20,7 +20,7 @@ Check for the native path before shelling out: it is not always available, and t
 command is a complete fallback, never a downgrade in correctness. Say which one was used — in
 Italian, with the directory and branch names left as they are.
 
-**A worktree root wins over native-first.** When `CLAUDE.md` names a worktree root (a short path
+**A worktree root wins over native-first.** When `$env:CLAUDE_WORKTREE_ROOT` is set (a short path
 that keeps deep repos under the Windows path limit), every worktree goes there. The harness tools
 create under `<repo>\.claude\worktrees\` — the long-path trap the root exists to avoid — so use the
 git fallback unless a `WorktreeCreate` hook redirects them to the root.
@@ -28,8 +28,8 @@ git fallback unless a `WorktreeCreate` hook redirects them to the root.
 ## The git fallback
 
 ```powershell
-# one directory per worktree, under the CLAUDE.md worktree root — none set → beside the repo
-$wt   = "<worktree-root>/<repo>-<topic>"   # no root: "../<repo>-<topic>"
+# one directory per worktree, <repo>-<short topic>, under CLAUDE_WORKTREE_ROOT — unset → beside the repo
+$wt   = "$env:CLAUDE_WORKTREE_ROOT/<repo>-<topic>"   # no root: "../<repo>-<topic>"
 $base = (git symbolic-ref --short refs/remotes/origin/HEAD) -replace '^origin/', ''
 git fetch origin $base
 

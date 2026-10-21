@@ -16,8 +16,9 @@ git log --oneline "origin/$base..HEAD"  # what this branch actually adds
 git diff --stat "origin/$base...HEAD"   # how wide the change is
 ```
 
-Then run the repo's own gates — build, tests, linter, formatter — and read the output. `done-check`
-owns which evidence each kind of change requires; do not restate it here, run it.
+Then run the repo's own gates — build, tests, linter, formatter — and read the output.
+`plan-work`'s `references/evidence-by-stack.md` owns which evidence each kind of change requires;
+do not restate it here, run it.
 
 If a gate is red, the branch is not finished. That is the whole decision.
 
@@ -97,7 +98,7 @@ deferred forever, and it makes every other branch in the list less trustworthy.
 ## Traps
 
 1. "All tests pass" claimed without running them → memory of the last run → run them and read the
-   output; `done-check` exists for this.
+   output; `evidence-by-stack.md` (`plan-work`) exists for this.
 2. Merged to protect the work → confusing push with merge → push protects, merge publishes.
 3. Squash-merged branch not deleted because `--merged` does not list it → squash rewrites history →
    trust the PR state.

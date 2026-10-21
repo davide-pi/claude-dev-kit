@@ -36,7 +36,7 @@ longer a probe: reclassify it as a bounded change or a new subsystem.
 | **Strumento** | the command exactly as typed, so it can be re-run |
 | **Cosa non ci dice** | the limit of the probe — mandatory: one input is not a general answer |
 | **Eliminato** | the files removed |
-| **Prossimo passo** | the change the answer implies, and its route (`dev-loop` class) |
+| **Prossimo passo** | the change the answer implies, and its route (the CLAUDE.md route table) |
 
 A literal answer — a number, a status code, a JSON body — is quoted exactly as it came out.
 
@@ -47,7 +47,7 @@ A literal answer — a number, a status code, a JSON body — is quoted exactly 
 - **Read-only**: `GET`, `SELECT`. A probe that must write needs its own confirmation and its own
   throwaway data.
 - **Probe code is never promoted** — not moved into `src`, not wrapped in a test, not made "a bit
-  more reusable". The real change is written fresh, with the `dev-loop` gate.
+  more reusable". The real change is written fresh, with the CLAUDE.md gate (ask only before the irreversible).
 - No package, project, compose service or config entry added; no tracked file edited; no commit,
   branch or PR.
 - An answer from memory is not a spike: run the probe, or say it was not run.

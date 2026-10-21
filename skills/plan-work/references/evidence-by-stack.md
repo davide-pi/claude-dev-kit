@@ -1,5 +1,34 @@
 # Evidence by stack — the command, and the line that settles it
 
+Every claim maps to output read **in this session**. Three states, and only three:
+
+| State | Wording |
+| --- | --- |
+| ran it, output confirms | `fatto — dotnet test …: Failed: 0, Passed: 42` |
+| ran it, output does not confirm | not done; fix it and say nothing yet |
+| did not run it | `**non verificato**: <cosa>, perché <motivo>. Verifica con: <comando>.` |
+
+"Should work", "looks correct" and a subagent's report are the third state. Re-run a delegated
+agent's evidence lines for anything that matters.
+
+## Done per change type — applies to the whole change, not the last file
+
+| Change | Evidence | The output must show |
+| --- | --- | --- |
+| backend | build `-warnaserror`, then the tests of every touched test project | 0 errors, 0 warnings; `Failed: 0`; the new test **named** in the run |
+| frontend | build, specs, the changed screen in a real browser | 0 errors; the spec by name; console clean; a screenshot |
+| migration | idempotent script **read** before applying, update on a local database, read-back query | no unintended `DROP`/`ALTER COLUMN`/rewrite; the new shape and the old rows |
+| bugfix | the symptom reproduced **before** the fix, a test red before and green after, then the suite | two runs seen: red with the symptom, then green |
+| config / infra | apply, then read the state back from the target | the **running** target reflects it — the file saying so is not evidence |
+| every change | `git diff --stat` and a skim of the diff | no stray file, debug code, secret or commented-out block |
+
+Verification genuinely impossible (no local environment, production data, a human eye, load only):
+name the claim in the third-state wording, run the cheapest proxy that exists and call it a proxy,
+and write the gap where it survives the session — the PR description or the plan's verification
+section.
+
+## Per stack
+
 One row per check. "Accept when" is what has to be in the output; anything less is the third state
 ("non verificato"), regardless of how confident the change feels. Every command and every output
 line below is quoted verbatim; only the report around them is Italian.

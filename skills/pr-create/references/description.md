@@ -67,7 +67,7 @@ Rules:
    squash commit; nessun impatto a runtime`.
 7. **`Verifica:`** — when a command or a check was run, the evidence before and after: the failing
    then passing test, the output, the screenshot path. Quote the command; never paraphrase a result
-   (`done-check`). Nothing was run → leave the block out rather than invent one.
+   (`plan-work`'s `evidence-by-stack.md`). Nothing was run → leave the block out rather than invent one.
 8. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
 
 ## Deriving it

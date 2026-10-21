@@ -65,7 +65,7 @@ Three agents on one diff will collide. Merge before triage:
 1. Same anchor, same defect → keep one: the **more specific category**, the **higher-confidence**
    verdict, the union of the questions.
 2. Same line, **different** failure → keep both; they are two findings.
-3. Re-sort everything **across** agents in the global `CLAUDE.md` § "Review output" order (`todo`
+3. Re-sort everything **across** agents in the `report-format.md` order (`todo`
    before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`), then number the surviving findings
    `1..n`. On a conflict keep the **higher** priority. That numbering is what the chat report and
    the summary tables both use.
