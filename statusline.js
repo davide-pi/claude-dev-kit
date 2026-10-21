@@ -3,7 +3,7 @@
 //
 // Segments:
 //   line 1: folder (+ worktree) · git branch + dirty badges · context bar + tokens
-//           rate limits + weekly pacing + session cost · worklog badge · vim mode
+//           cache-cold badge · rate limits + weekly pacing + session cost · worklog badge · vim mode
 //   line 2: model · effort level
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -161,6 +161,7 @@ const ICONS = {
   bolt:   "\uF0E7", // nf-fa-bolt        - effort level
   vim:    "\uF408", // nf-dev-vim        - vim mode
   clock:  "\uF017", // nf-fa-clock_o     - working days whose hours are not logged
+  snow:   "\uF2DC", // nf-fa-snowflake_o - prompt cache expired
 };
 
 // Convert a Windows/POSIX path to a file:// URI. Ctrl/Cmd-clicking it in a
@@ -255,6 +256,40 @@ function segContext(ctx) {
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
   return `${DIM}[${R} ${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok} ${DIM}]${R}`;
+}
+
+// Per-session context snapshot for hooks/context-nudge.js, which runs on
+// UserPromptSubmit and has no access to this payload. One file per session so
+// parallel sessions never read each other's numbers; `used_percentage` is null
+// before the first response and right after /compact, and is written as null.
+// Resolved like the hooks resolve it (CLAUDE_CONFIG_DIR first), so both sides
+// agree on the path when the configuration directory is relocated.
+const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
+
+function saveContextSnapshot(sessionId, ctx, cache) {
+  if (typeof sessionId !== "string" || !/^[\w-]{1,128}$/.test(sessionId)) return;
+  try {
+    const dir = path.join(CONFIG_DIR, ".cache");
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, `context-${sessionId}.json`), JSON.stringify({
+      used_percentage: Number.isFinite(ctx?.used_percentage) ? ctx.used_percentage : null,
+      warm: typeof cache?.warm === "boolean" ? cache.warm : null,
+      caching_observed: cache?.caching_observed === true,
+      at: Date.now(),
+    }));
+  } catch { /* best-effort: the nudge simply stays silent */ }
+}
+
+// The cached prefix has expired: the next request re-writes the whole context
+// at cache-write price. Shown only once caching has been observed at all, so a
+// provider that never reports cache tokens does not wear a permanent badge.
+function segCacheCold(cache) {
+  if (!cache?.caching_observed) return "";
+  const expired = cache.warm === false ||
+    (Number.isFinite(cache.expires_at) && cache.expires_at * 1000 <= Date.now());
+  if (!expired) return "";
+  const tokens = abbrevTokens(cache.recache_tokens_if_cold);
+  return `${DIM}[${R} ${C.sky}${ICONS.snow} cache cold${tokens ? ` ${tokens}` : ""}${R} ${DIM}]${R}`;
 }
 
 function fmtCountdown(epoch) {
@@ -459,6 +494,7 @@ process.stdin.on("end", () => {
   if (!data || typeof data !== "object") { process.stdout.write("\n"); return; }
 
   const cwd = data.cwd || data.workspace?.current_dir || process.cwd();
+  saveContextSnapshot(data.session_id, data.context_window, data.prompt_cache);
 
   // Live rate-limit data if present (and cache it); otherwise fall back to the
   // last-known snapshot so the 5h/7d readout stays visible from cold start.
@@ -496,6 +532,7 @@ process.stdin.on("end", () => {
     segFolder(cwd, worktreeInfo(cwd)),
     segGit(gitInfo(cwd)),
     segContext(data.context_window),
+    segCacheCold(data.prompt_cache),
     segRateLimits(rl, rlStale, data.cost?.total_cost_usd),
     segWorklog(),
     segVim(data.vim),

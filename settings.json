@@ -15,8 +15,10 @@
     "FORCE_HYPERLINK": "1",
     "CLAUDE_WORKSPACE_ROOTS": "",
     "CLAUDE_WORKSPACE_NESTED": "",
-    "CLAUDE_WORKTREE_ROOT": ""
+    "CLAUDE_WORKTREE_ROOT": "",
+    "CLAUDE_DONE_CLAIM": ""
   },
+  "bashOutputMaxChars": 15000,
   "attribution": {
     "commit": "Co-Authored-By: Claude AI",
     "pr": "🤖 Opened with [Claude Code](https://claude.com/claude-code)"
@@ -356,6 +358,68 @@
             ],
             "timeout": 10,
             "statusMessage": "Checking for days whose hours were never logged..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/context-nudge.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||'')+'/done-claim.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "require((process.env.CLAUDE_HOOKS||'')+'/worktree-root.js')"
+            ],
+            "timeout": 90,
+            "statusMessage": "Creating the worktree under CLAUDE_WORKTREE_ROOT..."
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "require((process.env.CLAUDE_HOOKS||'')+'/worktree-root.js')"
+            ],
+            "timeout": 60,
+            "statusMessage": "Removing the worktree..."
           }
         ]
       }

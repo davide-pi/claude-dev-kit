@@ -264,6 +264,9 @@ test('purging or deleting a broker queue', () => {
 test('deleting a cloud, Azure DevOps or Kubernetes resource', () => {
   asks('az group delete --name rg-dev --yes --no-wait', /cloud or Azure DevOps resource/);
   asks('az boards work-item delete --id 4211 --yes');
+  asks('az storage blob delete-batch --source container', /cloud or Azure DevOps resource/);
+  // A `--delete-*` flag is a setting, not a deletion: the compliant PR create must not prompt.
+  approves('az repos pr create --title T --work-items 1 --squash true --delete-source-branch true');
   asks('kubectl delete deployment api -n staging', /Kubernetes resource/);
   asks('kubectl -n staging delete pvc data-api-0');
   asks('helm uninstall api -n staging', /Helm release/);
@@ -335,7 +338,7 @@ test('a generated statement is still caught once the read-only part is stripped'
 test('the everyday commands stay silent', () => {
   const quiet = [
     'dotnet build',
-    'dotnet test --no-build',
+    'dotnet test --no-build # raw',   // without `# raw` it is rewritten: tools/output-filter.test.mjs
     'npm run build',
     'npm uninstall lodash',
     'docker compose up -d',

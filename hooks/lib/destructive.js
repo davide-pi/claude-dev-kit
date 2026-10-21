@@ -233,7 +233,9 @@ const RULES = [
       + 'consumer bound to it stops receiving. Confirm?',
   },
   {
-    test: all(has(/\bdelete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
+    // `delete` as a command word (`delete`, `delete-batch`), not inside a flag: `--delete-source-branch`
+    // is the house squash-and-delete PR setting, and asking on it made every compliant PR create prompt.
+    test: all(has(/(?<![\w-])delete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
     reason: 'This deletes a cloud or Azure DevOps resource. Deletion there is server-side and '
       + 'immediate. Confirm?',
   },
