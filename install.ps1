@@ -15,10 +15,13 @@
   Every asset is user-level. The kit is opinionated on technique and anonymous only on identity
   (Azure DevOps org and project names, absolute machine paths, e-mail addresses), so nothing is
   project-scoped any more: agents/, commands/, hooks/ and skills/ are installed whole, plus the
-  root-level CLAUDE.md, settings.json and statusline.js.
+  root-level CLAUDE.md, settings.json and statusline.js. rules/, workflows/ and scripts/ are
+  installed the same way.
 
-  Assets are discovered, never listed: whatever the repo contains under those four directories is
+  Assets are discovered, never listed: whatever the repo contains under those directories is
   an asset, recursively, so a new skill folder with its references and scripts needs no edit here.
+  The exceptions are the local-only files (my-voice, workspaces.json, db-targets.json…): they live
+  in the live config only, -Check reports them as expected and -Pull never imports them.
 
 .EXAMPLE
   .\install.ps1 -Check
@@ -54,18 +57,22 @@ if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
 
 # The directories Claude Code loads assets from. Discovery recurses into them, so a new skill
 # folder, hook, agent or reference file is picked up without touching this file.
-$AssetDirs = @('agents', 'commands', 'hooks', 'skills')
+$AssetDirs = @('agents', 'commands', 'hooks', 'rules', 'scripts', 'skills', 'workflows')
 
 # Repo-only root files: they configure the repo itself, not Claude Code. Every other file at the
 # root is a user-level asset, so a new repo-only file at the root belongs in this list.
-$RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json')
+# workspaces.example.json is the template of the local-only workspaces.json, not an asset itself.
+$RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json',
+              'workspaces.example.json')
 
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 
-# Folders under the asset directories that Claude Code itself manages — skills synced down from the
-# claude.ai account — so neither side owns them and -Pull must never import them.
-$ManagedDirs = @('skills/synced')
+# Live-config-only paths, relative to the config root, file or folder: personal identity (my-voice),
+# what Claude Code itself manages (skills synced from the claude.ai account, the trash), and
+# machine data (workspaces.json, db-targets.json). Neither side owns them as an asset: -Pull never
+# imports them, install never writes them, and -Check reports them as expected.
+$LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -82,6 +89,11 @@ function Test-Ignorable([string]$Name) {
     return $false
 }
 
+function Test-LocalOnly([string]$Relative) {
+    foreach ($entry in $LocalOnly) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
+    return $false
+}
+
 function Get-DirAssets([string]$Root) {
     # Everything under the asset directories, recursively and whatever it is: a SKILL.md, a
     # reference file, a PowerShell helper next to its skill, an agent, a hook.
@@ -92,13 +104,13 @@ function Get-DirAssets([string]$Root) {
             Where-Object { -not (Test-Ignorable $_.Name) }
     }
     $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
-        Where-Object { $rel = $_; -not ($ManagedDirs | Where-Object { $rel -like "$_/*" }) }
+        Where-Object { -not (Test-LocalOnly $_) }
 }
 
 function Get-KitAssets {
     # Every user-level asset the repo ships, as repo-relative forward-slash paths.
     $root = Get-ChildItem -LiteralPath $RepoRoot -File |
-        Where-Object { -not (Test-Ignorable $_.Name) -and $_.Name -notin $RepoOnly } |
+        Where-Object { -not (Test-Ignorable $_.Name) -and $_.Name -notin $RepoOnly -and -not (Test-LocalOnly $_.Name) } |
         ForEach-Object { $_.Name }
     @($root) + @(Get-DirAssets $RepoRoot) | Sort-Object -Unique
 }
@@ -225,19 +237,22 @@ function Test-Toolchain {
     }
 
     $null = Test-Tool 'docker' 'docker' 'install with: winget install Docker.DockerDesktop'
-    $null = Test-Tool 'sqlcmd' 'sqlcmd' 'install with: winget install Microsoft.Sqlcmd'
+    Test-DbClients
+}
 
-    # Postgres and Redis have a real client in one platform only, and the kit's answer is the
-    # container, not a local install. Absent is the expected state here, never a problem.
+function Test-DbClients {
+    # scripts/db-ro.ps1 drives these three clients. Each one is native, reachable through docker,
+    # or missing — and none of the three is a problem: the database commands pick the route
+    # themselves, so this is information about which route they will take.
+    $docker = [bool](Get-Command docker -ErrorAction SilentlyContinue)
     foreach ($client in @(
-            @{ Name = 'psql';      Via = 'docker compose exec postgres psql' }
-            @{ Name = 'redis-cli'; Via = 'docker compose exec redis redis-cli' }
+            @{ Name = 'sqlcmd';    Image = 'mcr.microsoft.com/mssql-tools'; Install = 'winget install Microsoft.Sqlcmd' }
+            @{ Name = 'psql';      Image = 'postgres:17';                   Install = 'scoop install postgresql' }
+            @{ Name = 'redis-cli'; Image = 'redis:7';                       Install = 'docker, or WSL: apt install redis-tools' }
         )) {
-        if (Get-Command $client.Name -ErrorAction SilentlyContinue) {
-            Write-Info "$($client.Name) installed locally — the kit still reaches for: $($client.Via)"
-        } else {
-            Write-Ok "$($client.Name) absent, by design — the kit uses containers: $($client.Via)"
-        }
+        if (Get-Command $client.Name -ErrorAction SilentlyContinue) { Write-Ok "$($client.Name) (native)" }
+        elseif ($docker) { Write-Info "$($client.Name) not installed — via docker: docker run --rm -i $($client.Image) $($client.Name)" }
+        else { Write-Info "$($client.Name) missing, and no docker to fall back on — install: $($client.Install)" }
     }
 }
 
@@ -254,29 +269,41 @@ function Test-Hooks {
     # not installed yet, so a first run still validates the wiring.
     $settingsPath = Join-Path $ClaudeHome 'settings.json'
     if (-not (Test-Path -LiteralPath $settingsPath)) { $settingsPath = Join-Path $RepoRoot 'settings.json' }
+    # Every event under "hooks" is walked, whatever its name — a new event needs no edit here. A
+    # script wired on several events lists them all. A hook that runs no kit script (a prompt hook,
+    # an external executable) cannot be checked against the repo, so it is only counted.
     $wired = @{}
+    $unchecked = [ordered]@{}
     try {
         $settings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
         foreach ($evt in $settings.hooks.PSObject.Properties) {
             foreach ($group in @($evt.Value)) {
                 foreach ($hook in @($group.hooks)) {
                     $line = (@($hook.command) + @($hook.args)) -join ' '
-                    foreach ($m in [regex]::Matches($line, '[\w.-]+\.(?:ps1|js|mjs|cjs)')) {
-                        $wired[$m.Value] = $evt.Name
+                    $files = @([regex]::Matches($line, '[\w.-]+\.(?:ps1|js|mjs|cjs)') | ForEach-Object { $_.Value })
+                    foreach ($file in $files) {
+                        if (-not $wired.ContainsKey($file)) { $wired[$file] = @() }
+                        if ($evt.Name -notin $wired[$file]) { $wired[$file] += $evt.Name }
                     }
+                    if (-not $files) { $unchecked[$evt.Name] = 1 + [int]$unchecked[$evt.Name] }
                 }
             }
         }
     } catch { Write-Problem "cannot read the hook wiring from $settingsPath — $($_.Exception.Message)" }
 
     foreach ($name in ($wired.Keys | Sort-Object)) {
+        $events = $wired[$name] -join ', '
         if ($name -notin $shipped) {
-            Write-Problem "settings.json wires $($wired[$name]) -> $name, which the repo does not ship"
+            Write-Problem "settings.json wires $events -> $name, which the repo does not ship"
             continue
         }
         # Wired and shipped is still not enough: the hook is resolved from the hooks directory.
-        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) { Write-Ok "$name ($($wired[$name]))" }
-        else { Write-Problem "$name is wired on $($wired[$name]) but not installed in $ClaudeHome\hooks — run .\install.ps1" }
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) { Write-Ok "$name ($events)" }
+        else { Write-Problem "$name is wired on $events but not installed in $ClaudeHome\hooks — run .\install.ps1" }
+    }
+
+    foreach ($evt in $unchecked.Keys) {
+        Write-Info "${evt}: $($unchecked[$evt]) hook(s) run no kit script (prompt hook or external command) — not checked"
     }
 
     foreach ($name in ($shipped | Where-Object { $_ -notin $wired.Keys })) {
@@ -334,6 +361,41 @@ function Test-McpServers {
 }
 
 # ── Asset sync ────────────────────────────────────────────────────────────────
+function Get-AssetKey([string]$Relative) {
+    # What a person calls "one asset": a skill is its whole folder, every other asset is its file.
+    if ($Relative -match '^(skills/[^/]+)/') { return $Matches[1] }
+    return $Relative
+}
+
+function Test-AssetDrift([string[]]$Paths) {
+    # One finding per asset, not per file: a skill the live config lacks entirely is one line, not
+    # thirty reference files burying every other issue. A partly drifted skill names its files.
+    foreach ($group in ($Paths | Group-Object { Get-AssetKey $_ })) {
+        $key = $group.Name
+        $files = @($group.Group)
+        $missing = @()
+        $differs = @()
+        foreach ($rel in $files) {
+            $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
+            $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
+            if ($repoHash -eq $homeHash) { continue }
+            if ($null -eq $homeHash) { $missing += $rel } else { $differs += $rel }
+        }
+
+        if (-not $missing -and -not $differs) { Write-Ok $(if ($files.Count -gt 1) { "$key/ ($($files.Count) files)" } else { $key }); continue }
+        if ($files.Count -eq 1) {
+            if ($missing) { Write-Problem "$key is not installed" } else { Write-Problem "$key differs between repo and the live config" }
+            continue
+        }
+        if ($missing.Count -eq $files.Count) { Write-Problem "$key/ is not installed ($($files.Count) file(s))"; continue }
+
+        $parts = @()
+        if ($differs) { $parts += "differs: $(($differs | ForEach-Object { $_.Substring($key.Length + 1) }) -join ', ')" }
+        if ($missing) { $parts += "not installed: $(($missing | ForEach-Object { $_.Substring($key.Length + 1) }) -join ', ')" }
+        Write-Problem "$key/ drifted — $($parts -join '; ')"
+    }
+}
+
 function Sync-Assets {
     Write-Section $(if ($Check) { 'Assets (repo vs installed)' } elseif ($Pull) { 'Assets (installed -> repo)' } else { 'Assets (repo -> installed)' })
 
@@ -342,37 +404,13 @@ function Sync-Assets {
     # whole skill folder with its reference files included — is exactly what it has to bring back.
     $paths = if ($Pull) { @(@(Get-KitAssets) + @(Get-InstalledAssets) | Sort-Object -Unique) } else { @(Get-KitAssets) }
 
-    # Check mode only: a skill the live config does not have at all is one finding, not one per
-    # reference file — thirty skills' worth of files would bury every other issue in the report.
-    # A partially installed skill still reports file by file, which is the case worth seeing.
-    $missingSkills = @{}
-    if ($Check) {
-        foreach ($d in (Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'skills') -Directory -ErrorAction SilentlyContinue)) {
-            if (-not (Test-Path -LiteralPath (Join-Path $ClaudeHome "skills\$($d.Name)"))) { $missingSkills[$d.Name] = $true }
-        }
-    }
+    if ($Check) { Test-AssetDrift $paths; return }
 
     foreach ($rel in $paths) {
-        if ($Check -and ($rel -match '^skills/([^/]+)/') -and $missingSkills.ContainsKey($Matches[1])) {
-            $skill = $Matches[1]
-            if ($missingSkills[$skill]) {
-                $missingSkills[$skill] = $false   # report the folder once
-                $count = @($paths | Where-Object { $_ -like "skills/$skill/*" }).Count
-                Write-Problem "skills/$skill/ is not installed ($count file(s))"
-            }
-            continue
-        }
-
         $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
         $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
 
         if ($repoHash -eq $homeHash) { Write-Ok $rel; continue }
-
-        if ($Check) {
-            if ($null -eq $homeHash) { Write-Problem "$rel is not installed" }
-            else { Write-Problem "$rel differs between repo and the live config" }
-            continue
-        }
 
         if ($Pull) {
             if ($null -eq $homeHash) { Write-Info "$rel not installed — nothing to pull"; continue }
@@ -423,6 +461,19 @@ function Test-InstalledOnlyAssets {
     }
 }
 
+function Test-LocalOnlyAssets {
+    # Local-only paths are expected in the live config and never a finding there. The reverse is:
+    # one that has reached the repo carries identity or machine data into a shared kit.
+    Write-Section 'Local-only (never in the kit)'
+    foreach ($entry in $LocalOnly) {
+        $relPath = $entry.Replace('/', '\')
+        if (Test-Path -LiteralPath (Join-Path $RepoRoot $relPath)) {
+            Write-Problem "$entry is local-only but exists in the repo — remove it from the repo"
+        }
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome $relPath)) { Write-Info "$entry — local-only (expected)" }
+    }
+}
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 Write-Host "claude-dev-kit  ·  $(if ($Check) { 'check' } elseif ($Pull) { 'pull' } else { 'install' })  ·  home: $ClaudeHome"
 
@@ -434,6 +485,7 @@ if (-not (Test-Path -LiteralPath $ClaudeHome)) {
 
 Sync-Assets
 Test-InstalledOnlyAssets
+if ($Check) { Test-LocalOnlyAssets }
 Test-Environment
 Test-LanguageServers
 Test-Toolchain
