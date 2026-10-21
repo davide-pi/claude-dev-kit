@@ -33,17 +33,13 @@ If a gate is red, the branch is not finished. That is the whole decision.
 | Dead end | delete local and remote branch | a written lesson, not a branch |
 | Wanted later, not now | keep the branch, rebase it while it is cheap, say what blocks it | a named blocker |
 
-The table is the model's decision grid, in English. When the menu is **presented to the user** it is
-written in Italian, one line per option that actually applies — *"Fatto e verificato → push, PR,
-squash-merge, cancello il branch"*, *"Vicolo cieco → cancello il branch e scrivo cosa abbiamo
-imparato"* — with the branch names, the git commands and the platform verbs left exactly as they are.
+Presented to the user: one Italian line per option that actually applies — *"Fatto e verificato →
+push, PR, squash-merge, cancello il branch"*.
 
 Never merge to "keep the work safe". A push already keeps it safe; merging publishes it.
 
-Every route through a PR carries one precondition: the PR links at least one work item and that item
-is the **parent backlog item** — a User Story or PBI, a Bug, an Impediment, a TECH activity — never a
-Task, so if nothing is linkable, ask which item the work belongs to (or `workitem-create`) before the
-push, because `pr-create` will not open an unlinked PR.
+Every route through a PR needs a linkable parent backlog item (never a Task): nothing linkable →
+ask which item the work belongs to before the push (`pr-create` owns the rule).
 
 ## 3. Merging, per platform
 

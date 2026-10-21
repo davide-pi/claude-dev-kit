@@ -1,29 +1,29 @@
 ---
 name: estimate
 description: >-
-  Estimate the hours a piece of work will take, from the request and the team's recent completed
-  work on Azure DevOps. Explicit trigger: only when the user types /estimate.
+  Use when the user types /estimate to size new work in hours from the request and the team's
+  recent completed Azure DevOps items.
 disable-model-invocation: true
+argument-hint: "<item id | text | file> [per <persona>] [analisi di mercato] [commenta] [<n>h/giorno]"
 ---
 
 # estimate — hours for new work, deduced from the team's recent history
 
-**Language.** This skill's prose is English. Everything the user reads — the sufficiency verdict,
-the questions for the PO, the market checklist, the estimate tables, the reasoning, the "compreso /
-NON compreso" summary, an optional comment on the work item — is **Italian**. Verbatim: `AB#<id>`,
-type, state and field names, WIQL, script output.
+**Contract.** A sufficiency verdict, then an estimate whose every number cites recent items, with a
+built margin and a compreso / NON compreso list · read-only on the board (an optional comment only
+after its text is approved) · Italian; `AB#<id>`, type, state, field names, WIQL and script output
+verbatim.
 
 ## When
 
 - The user types `/estimate`, with a work item id, a pasted request, a file, or a mix.
-- Optional words in the invocation: a person ("per <nome>", a UPN) → personal basis; "analisi di
-  mercato" / "market" → the market pass; "commenta" → also post the result on the work item;
-  "<n>h/giorno" → hours per day (default 8).
+- Optional words: a person ("per <nome>", a UPN) → personal basis; "analisi di mercato" / "market" →
+  the market pass; "commenta" → also post the result on the item; "<n>h/giorno" → hours per day
+  (default 8).
 - The input can be one small API or a whole new project, fully specified or close to empty.
 
-Not for: writing or splitting the items themselves (`user-story-standard`, `workitem-create`);
-judging whether an item is ready to build, or ordering its steps (`plan-work`); logging hours
-(`worklog`). Never fires without the explicit trigger.
+Not for: writing or splitting items (`user-story-standard`), readiness or step order (`plan-work`),
+logging hours (`worklog`).
 
 ## Decide
 
@@ -48,7 +48,7 @@ declared approximation, the total also in days. The margin is **built**, not pic
 
 | Phase | What | Owner |
 | --- | --- | --- |
-| 1. Input | read the item or the text; resolve org and project from the working directory (`azdo-cli` decision 1), else ask | model |
+| 1. Input | read the item or the text; org and project from the session's `ALM:` line, else ask — never the `az devops` default | model |
 | 2. Sufficiency | code check (`Explore`, sonnet) when a repository is at hand, then the level; insufficient → stop after the questions | `references/sufficiency.md` |
 | 3. Market (opt-in) | only when asked; suggested when scarce or insufficient; a feature checklist, never hours | `references/sufficiency.md` |
 | 4. History | `candidates.ps1`: **every** completed item of the last 3 months, with hours, owner, outliers marked | `references/history.md` |
@@ -70,7 +70,7 @@ declared approximation, the total also in days. The margin is **built**, not pic
 ## Do
 
 ```powershell
-$org = 'https://dev.azure.com/<org>'; $proj = '<project>'      # resolved from the path, never the default
+$org = 'https://dev.azure.com/<org>'; $proj = '<project>'      # from the ALM: line, never the default
 # Type names are discovered (azdo-cli work-item-roles.md), then passed in; several as 'A,B'.
 $dir = Join-Path $env:TEMP "estimate-$(Get-Date -f yyyyMMdd-HHmmss)"; New-Item -ItemType Directory $dir | Out-Null
 pwsh -NoProfile -File "$HOME\.claude\skills\estimate\candidates.ps1" -Org $org -Project $proj `
@@ -91,16 +91,10 @@ a Task breakdown. After the report, write the history record (`references/output
    it resembles in structure, or label the row **stima a giudizio** with its reason.
 3. **A whole project sized as one item** — no decomposition → decompose into backlog-item-sized
    components first; Features in the index are the top-down cross-check.
-4. **Anchoring on an outlier** — the closest-looking item is marked `outlier` → it was cut on
-   purpose; use the next one, mention the outlier as context only.
-5. **Excluded work leaking in** — the tag sat on the Feature → exclusion is inherited; the script
-   re-checks after the walk.
-6. **Analogs from the wrong customer** — the `az devops` default org was used → pass `--org` / `-p`.
-7. **A tidy +20% over evidence that disagrees** — the references for one component spread wide →
+4. **A tidy +20% over evidence that disagrees** — the references for one component spread wide →
    the margin is built from that spread; above the cap, say so.
-8. **"Compreso" taken from habit** — test or deploy assumed included → read the Task titles of the
+5. **"Compreso" taken from habit** — test or deploy assumed included → read the Task titles of the
    references; what they do not show is NON compreso or `non rilevato`.
-9. **Arithmetic in the head** — a total or a day count drifts → compute it with a command.
 
 ## References
 

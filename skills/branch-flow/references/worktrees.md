@@ -5,25 +5,19 @@ The `.git` directory is shared, so branches, remotes, stashes and the object sto
 only the files on disk and the checked-out branch differ. That is what makes it the right tool for
 "I need to work on something else without disturbing what is in front of me".
 
-## Native tooling first
+## Where: the root first, then the tool
 
-Prefer whatever worktree support the running environment already exposes — it creates the
-directory, tracks it, and cleans it up on the way out, so nothing is left dangling:
+Every worktree lives under `$env:CLAUDE_WORKTREE_ROOT` as `<repo>-<short-topic>` — a short root
+keeps deep repos under the Windows path limit. Unset → beside the repo (`../<repo>-<topic>`).
 
-| Need | Native move | Fallback |
+| Need | Native move — only when the `worktree-root.js` hook (`WorktreeCreate`) is installed | Otherwise |
 | --- | --- | --- |
-| Work in isolation for a while, then come back | the harness worktree tools (`EnterWorktree` / `ExitWorktree`, when the session exposes them) | `git worktree add` + `git worktree remove` |
-| Give a subagent its own copy of the repo | dispatch it with worktree isolation (`isolation: "worktree"` on the agent call) | create the worktree first, then pass its path to the agent |
-| Editor-side worktree | the IDE's own worktree command | the git commands below |
+| work in isolation for a while, then come back | `EnterWorktree` / `ExitWorktree` | `git worktree add` + `git worktree remove` |
+| a subagent with its own copy of the repo | `isolation: "worktree"` on the agent call | create the worktree first, pass its path in the brief |
 
-Check for the native path before shelling out: it is not always available, and the plain git
-command is a complete fallback, never a downgrade in correctness. Say which one was used — in
-Italian, with the directory and branch names left as they are.
-
-**A worktree root wins over native-first.** When `$env:CLAUDE_WORKTREE_ROOT` is set (a short path
-that keeps deep repos under the Windows path limit), every worktree goes there. The harness tools
-create under `<repo>\.claude\worktrees\` — the long-path trap the root exists to avoid — so use the
-git fallback unless a `WorktreeCreate` hook redirects them to the root.
+Without the hook the native tools create under `<repo>\.claude\worktrees\` — inside the repo and
+past the path limit — so the git fallback below is the default, not a downgrade. Check for the hook:
+`Get-Content ~/.claude/settings.json | Select-String WorktreeCreate`. Say which route was used.
 
 ## The git fallback
 

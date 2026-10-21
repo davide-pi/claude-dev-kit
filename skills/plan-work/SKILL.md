@@ -1,31 +1,23 @@
 ---
 name: plan-work
 description: >-
-  Use before touching code on work spanning several files, sessions or agents; when a work item or
-  spec must become ordered steps, including judging whether the item is ready to implement; when
-  resuming half-finished work; or when deciding whether a plan is worth writing.
+  Use when work spans several files or sessions, a work item needs steps, half-done work resumes,
+  a feasibility spike, or subagents fan out.
 ---
 
 # plan-work — a plan file with verifiable tasks, sized to the change
 
-**Language.** The plan file is written in **English**, because a later session or another agent
-reads it back as a technical artifact, next to the code it describes. Everything this skill says
-**in chat** while producing it — the proposal, the sizing question, the confirmation — is
-**Italian**.
+**Contract.** A plan file of verifiable tasks, a spike's answer, or delegation briefs · never writes
+production code, never promotes spike code · plan file English, everything said in chat Italian.
 
 ## When
 
-- The work spans more than a couple of files, or more than one session.
-- A spec, work item or design doc has to become an ordered list of steps.
-- A work item was picked up (`/item` read it) and nobody has judged yet whether it is ready to build.
-- The work will be handed to subagents and they need one shared target.
-- Order matters: something must exist before something else compiles or runs.
-- Returning to half-finished work whose next step is no longer obvious.
-- A "can we…" question needs a throwaway probe before any plan — `references/spike.md`.
-- Pieces of the work could go to parallel subagents — `references/delegation.md` first.
+- The work spans several files or sessions, or order matters (something must exist first).
+- A spec or work item has to become steps, or be judged ready to build (`/item` read it first).
+- Half-finished work resumes and the next step is no longer obvious.
+- A "can we…" question needs a throwaway probe; or pieces could go to parallel subagents.
 
-Not for: a single-file change, a bug (that is `debug-systematic` — the reproduction is the
-plan), or work that will be finished before the plan is read.
+Not for: a single-file change; a bug (`debug-systematic` — the reproduction is the plan).
 
 ## Decide
 
@@ -33,95 +25,96 @@ plan), or work that will be finished before the plan is read.
 
 | Situation | Plan? |
 | --- | --- |
-| One file, one behaviour, tests already exist | **no** — do it, then verify (`references/evidence-by-stack.md`) |
-| 2-4 files, one obvious order, one session | **no file** — say the steps in chat and go |
-| A new interface between components, or 5+ files | **yes** |
-| Migration plus code plus tests, where order matters | **yes** |
-| Work will pause and resume, or another agent executes it | **yes** — the file is the handoff |
-| Requirements still unknown | **no** — a plan over unknowns is fiction; probe first (`references/spike.md`) |
-| It starts from a work item | the readiness verdict first — `references/from-work-item.md` |
+| one file, one behaviour, tests exist | **no** — do it, verify (`references/evidence-by-stack.md`) |
+| 2–4 files, one obvious order, one session | **no file** — the steps in chat, then go |
+| a new interface between components, or 5+ files | **yes** |
+| migration + code + tests where order matters | **yes** |
+| work will pause, or another agent executes it | **yes** — the file is the handoff |
+| requirements unknown | **no** — probe first (§5) |
+| it starts from a work item | the readiness verdict first (`references/from-work-item.md`) |
 
 ### 2. Size it to the change
 
 | Change | Tasks | Length |
 | --- | --- | --- |
-| bounded feature in existing code | 3-5 | under a page |
-| new module or integration | 6-12 | one to two pages |
-| subsystem, or a restructuring | 12-20, grouped in phases | one heading per phase |
+| bounded feature in existing code | 3–5 | under a page |
+| new module or integration | 6–12 | one to two pages |
+| subsystem or restructuring | 12–20, in phases | a heading per phase |
 
-A three-task plan is a plan. Past ~20 tasks the scope is really two plans: cut at the first point
-where the system is shippable and plan the rest when you get there.
+Past ~20 tasks it is two plans: cut at the first shippable point.
 
-### 3. What makes a task verifiable
+### 3. A verifiable task — five fields, no judgement call
 
-A task is done or not done, with no judgement call. Each one carries five fields:
+| Field | Rule | Good |
+| --- | --- | --- |
+| files | exact repo-relative paths, new or edit | `src/Ordering/OrderService.cs` (edit) |
+| change | the behaviour, one sentence | "reject an order with no lines, before persisting" |
+| interface | the signature, whenever anything depends on it | `Task<Result<OrderId>> Place(PlaceOrder cmd, CancellationToken ct)` |
+| verify | one command and what its output must show | `dotnet test tests/Ordering.Tests --filter Place_EmptyLines_Rejects` → 1 passed |
+| depends on | task numbers, or `none` | `depends on: 2` |
 
-| Field | Rule | Bad | Good |
-| --- | --- | --- | --- |
-| files | exact repo-relative paths, marked new or edit | "the service layer" | `src/Ordering/OrderService.cs` (edit) |
-| change | the behaviour, one sentence | "improve validation" | "reject an order with no lines, before persisting" |
-| interface | the signature or shape, whenever anything else depends on it | "add a method" | `Task<Result<OrderId>> Place(PlaceOrder cmd, CancellationToken ct)` |
-| verify | one command, plus what its output must show | "make sure it works" | `dotnet test tests/Ordering.Tests --filter Place_EmptyLines_Rejects` → 1 passed |
-| depends on | task numbers, or `none` | order left implied | `depends on: 2` |
+No `TBD`, no "handle errors appropriately". A field that cannot be filled is an **open question**,
+listed at the top of the plan, never inside a task.
 
-No placeholders, no `TBD`, no "handle errors appropriately". A field that cannot be filled means
-this is not a task yet but an open question — and open questions live in their own section at the
-top of the plan, never inside a task.
+### 4. Where the file lives
 
-### 4. Where the plan file lives
+Repo with `docs/` → `docs/plans/<yyyy-MM-dd>-<slug>.md`, committed with the work. No `docs/`, or the
+work may be abandoned → the session scratchpad. One plan per branch, kept current.
 
-- Repo has a `docs/` tree → `docs/plans/<yyyy-MM-dd>-<slug>.md`, committed with the work: the plan
-  becomes the record of why the code looks like it does.
-- No `docs/` tree, or the work may be abandoned → the session scratchpad directory. Never leave a
-  loose plan file in the repo root.
-- One plan per branch, and it stays current: a plan that contradicts the code is worse than none.
+### 5. Spike — answer one question, leave nothing behind
+
+| Step | Rule |
+| --- | --- |
+| claim | one testable line ("does `GET /orders?page=2` return page two?"); readable from the code → read it, no spike |
+| instrument | the cheapest that fits: `csharprepl`, one `SELECT` via `/db`, `Invoke-RestMethod`, `node -e` |
+| timebox | said out loud, minutes; blown → report what is known and what is not |
+| throwaway | scratch code outside the repo, read-only, never production, never promoted; `git status` unchanged |
+
+Report shape, instruments and guardrails: `references/spike.md`.
+
+### 6. Delegation — when and how to brief
+
+| Fan out only if all are "no" | If yes |
+| --- | --- |
+| two tasks write the same file? | serialise, or one worktree per agent (`branch-flow`) |
+| one task's output decides another's approach? | sequential |
+| they must agree on an interface not yet written? | write it first |
+| a task needs the conversation to be judged? | keep it here |
+
+Brief = owned absolute paths · the change · the conventions skill by name · the verify command and
+its expected output · forbidden operations · an output cap (**≤ 30 lines, table**; the agent's own
+contract when it has one, e.g. `implementer`). Ask for the conclusion, never the dump: every report
+lands in this context. Never delegate: irreversible commands, deciding *what* to build, integration,
+the final review and evidence check. Details: `references/delegation.md`.
 
 ## Do
 
 ```powershell
-$slug  = 'order-validation'
-$plans = Join-Path (git rev-parse --show-toplevel) 'docs/plans'
-New-Item -ItemType Directory -Force -Path $plans | Out-Null
-$file  = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), $slug)
-if (-not (Test-Path $file)) { New-Item -ItemType File -Path $file | Out-Null }
-$file
+$plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --show-toplevel) 'docs/plans')
+$file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
 ```
 
-Fill it from the template in `references/plan-template.md`. Then, while executing:
-
-- Work in dependency order, and run each task's verify command before starting the next.
-- Tick progress in the file itself (`- [x]`), so a resumed session reads state instead of guessing.
-- When a task turns out wrong, edit the plan first and the code second — never diverge silently.
-- Plan finished → verify the whole change, not just the last task (`references/evidence-by-stack.md`).
+Fill it from `references/plan-template.md`. While executing: dependency order; each task's verify
+before the next; tick `- [x]` in the file; a wrong task → edit the plan first, the code second.
+Finished → verify the whole change, not the last task (`references/evidence-by-stack.md`).
 
 ## Traps
 
-1. The plan reads like a design doc → prose was easier to write than tasks → a paragraph with no
-   file path and no command in it belongs in open questions, or nowhere.
-2. Tasks that cannot fail → "refactor for clarity", "improve error handling" → no verify command
-   means no task; restate it as an observable behaviour.
-3. A 15-task plan for a two-file change → planning felt productive → size from the table; the plan
-   is overhead the change has to pay back.
-4. The plan rots → the code diverged and the file was not touched → update the plan in the same edit
-   as the divergence, or stop calling it a plan.
-5. Placeholders survive into execution → `TBD: pick a library` left inside a task → decide before
-   writing the task, or promote it to an open question that blocks the task.
-6. Interfaces described instead of written → "add a repository method" → the next task, or the next
-   agent, cannot compile against a description; write the signature.
-7. A plan written for work already underway → half the tasks are already done → plan the remainder
-   only, and say in the file where execution started.
-8. The file written in Italian → the conversation around it was Italian → only the chat is Italian;
-   the plan file, like a spec, stays English.
+1. Tasks that cannot fail ("refactor for clarity") → no verify command → restate as an observable
+   behaviour, or drop it.
+2. The plan rots → code diverged, file untouched → update it in the same edit as the divergence.
+3. `TBD: pick a library` inside a task → a decision was deferred → decide, or promote it to an open
+   question that blocks the task.
+4. "Add a repository method" → the next agent cannot compile against prose → write the signature.
+5. A subagent report floods the context → the brief had no output cap → cap it, ask for the table.
 
 ## References
 
-- `references/from-work-item.md` — the work starts from a work item: S/D/A tags, the readiness
-  verdict, the questions worth asking, the split test.
-- `references/plan-template.md` — the plan file skeleton with a worked example; read it before
-  writing the first plan in a repo, or when a plan needs phases.
-- `references/spike.md` — a feasibility probe: the testable claim, the cheapest instrument, the
-  timebox, the Italian report shape, the guardrails that keep it throwaway.
-- `references/delegation.md` — before any fan-out to subagents: the independence test, the output
-  contract every agent returns, what is never delegated.
-- `references/evidence-by-stack.md` — before calling anything done: the three states, done per
-  change type, the exact command and output line per stack.
+- `references/from-work-item.md` — the work starts from an item: S/D/A tags, the readiness verdict,
+  the questions worth asking, the split test.
+- `references/plan-template.md` — a first plan in a repo, or one with phases: skeleton, example.
+- `references/spike.md` — a feasibility probe: instruments, the Italian report, the guardrails.
+- `references/delegation.md` — before a fan-out: sizing waves, the pasted output contract, the
+  correction round.
+- `references/evidence-by-stack.md` — before calling anything done: the three states, evidence per
+  change type and per stack.

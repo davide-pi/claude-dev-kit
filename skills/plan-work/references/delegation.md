@@ -1,61 +1,58 @@
 # Delegation — when to fan out, the contract every agent returns, what never leaves
 
-## Independence test — all four must be "no"
+The independence test and the never-delegate list are in `SKILL.md` §6. This page holds the rest.
 
-| Question | If yes |
-| --- | --- |
-| Do two tasks write the same file? | serialise them, or one worktree per agent (`branch-flow`) |
-| Does one task's output decide another's approach? | sequential |
-| Must they agree on an interface not yet written? | write the interface first, then fan out |
-| Does a task need the conversation's history to be judged correct? | keep it — a fresh agent starts blind |
+## Sizing and routing
 
-**Size by merge capacity, not spawn capacity**: 2-4 agents for distinct judgement, up to 6-8 for one
+**Size by merge capacity, not spawn capacity**: 2–4 agents for distinct judgement, up to 6–8 for one
 mechanical job over many targets, then waves. Unread reports are where fabricated success survives.
-Spawn a wave in **one message**. Multi-lens review is already owned by `/code-review` and
-`pr-review`; locating code by `investigator`; tests by `test-writer`; writing code for a decided
-scope by `implementer`, so the session's model plans and reviews while a cheaper one types.
+Spawn a wave in **one message**.
 
-## Output contract — pasted verbatim into every prompt
+| Job | Agent |
+| --- | --- |
+| code for a decided scope (tests included: the brief names `dotnet-testing`) | `implementer` |
+| multi-lens review | `/code-review`, `pr-review` — never a hand-rolled review fan-out |
+| locate code, trace a flow | `investigator` |
+| wide read-only search | `Explore` |
+| SQL, logs | `/db`, `/logs` (their forks run `db-analyst`, `ops-analyst`) |
+
+## The brief — what an agent cannot infer
+
+1. The absolute paths it owns, and that everything else is read-only.
+2. The change, one sentence per file or behaviour.
+3. The conventions skill by name.
+4. The verify command and what its output must show.
+5. The forbidden operations: commit, push, migration, deploy, MCP writes.
+6. That "zero findings" or "nothing to change" is a valid answer.
+7. The output contract and its cap — below.
+
+## Output contract
+
+Agents with their own contract (`implementer`, the reviewers, `investigator`, `doc-keeper`) keep it;
+say only "concise, your output contract". Everyone else gets this, pasted verbatim:
 
 ```text
-Return exactly these sections, nothing else — no narrative, no restatement of the task.
-Prose in Italian: your report is merged into one the user reads. Headings, file paths, commands,
-quoted output, test names, category slugs and verdict values (CONFIRMED, PLAUSIBLE) stay verbatim.
+Return at most 30 lines, exactly these sections — no narrative, no restated task.
+Prose in Italian; paths, commands, quoted output, test names and verdict values verbatim.
 
 ## Scope
-The one sentence of what you were asked, as you understood it.
+One sentence: what you were asked, as you understood it.
 
 ## Files
-One line per file: absolute path, (new|edited|unchanged), and what changed in it.
+One line per file: absolute path · new | edited | unchanged · what changed.
 
 ## Evidence
-Per claim: the command you ran and the line of output that settles it, quoted.
-Anything you did not run goes under Not verified, never here.
+Per claim: the command you ran and the output line that settles it, quoted.
 
 ## Not verified
-What you could not check, why, and the command that would check it. "none" is valid.
+What you could not check, why, and the command that would. "none" is valid.
 
 ## Open questions
-Decisions you had to guess: the guess and the alternative. "none" is valid.
-
-## Out of scope
-What you deliberately did not touch, and anything you noticed that another task owns.
+Each guess and its alternative; out-of-scope findings, one line each. "none" is valid.
 ```
 
-Also in every prompt — the five things an agent cannot infer: the absolute paths it owns and must
-not touch; the conventions skill by name; the verify command and what its output must show; the
-forbidden operations (commit, push, migration, deploy); and that "zero findings" is acceptable.
-
-## Never delegate
-
-| Never | Because |
-| --- | --- |
-| integration and wiring | it needs every piece at once — the caller's job |
-| the final review of merged output | reviewing N reports is what the caller exists for |
-| the evidence check on the whole change (`evidence-by-stack.md`) | the gate does not delegate to the reviewed |
-| anything needing the conversation's history | a fresh agent guesses, then reports the guess confidently |
-| irreversible commands: migrations applied, deploys, pushes, deletes, cache flushes | blast radius, times N |
-| deciding **what** to build | scope is the caller's; agents execute a decided scope |
+Ask for the conclusion, never the dump: every report lands in the main context, and a long report
+costs on every later turn.
 
 ## When a report is wrong — one correction round, never five
 

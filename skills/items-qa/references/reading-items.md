@@ -19,8 +19,10 @@ there is nothing to test against, and it is the only argument that cannot be der
 ## Finding the org and the project
 
 From an item link, the host gives the organisation (`{org}.visualstudio.com` or
-`dev.azure.com/{org}`) and the first path segment gives the project. Bare ids → resolve both from
-the workspace mapping in the global `CLAUDE.md`; not mapped → ask, never guess.
+`dev.azure.com/{org}`) and the first path segment gives the project. Bare ids → the run is a fork
+and never saw the session's `ALM:` line, so read `~/.claude/workspaces.json`: the root whose `path`
+is the longest prefix of the working directory gives `org` and `project` (or `projects` by first
+subfolder). No match → stop and return the question; never guess.
 
 **CLI first, like everywhere in the kit** (`azdo-cli`): the item with HTML fields via
 `az boards work-item show --id <id> --expand all`, the comment thread and attachment downloads via

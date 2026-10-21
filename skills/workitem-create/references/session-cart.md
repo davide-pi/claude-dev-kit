@@ -4,10 +4,6 @@ The mode for "what came out of the meeting goes on the board": many points, draf
 collected in a **cart**, recapped, then created in bulk. The gates of the default mode still apply;
 this page replaces gates 1-3 with a per-point loop under a fixed **focus**.
 
-**Language.** Everything the user reads — the per-point questions, the cart recap and creation
-report with their headers, every confirmation — is **Italian**; item content too
-(`user-story-standard`). The **Done when** gates below address the model and stay English.
-
 ## Hierarchy — in roles
 
 Top grouping (the engagement) → **feature** → backlog-level items (backlog item, defect, technical
@@ -19,7 +15,7 @@ project has no type for is a question.
 
 | # | Step | Done when |
 | --- | --- | --- |
-| 0 | Which project today? Org and project from the working directory (user mapping); unmapped → ask | the user confirmed a project |
+| 0 | Which project today? Org and project from the session's `ALM:` line; unmapped → ask | the user confirmed a project |
 | 1 | Which top grouping item? List the non-Done items of that type (id, title); always offer "create a new one" (title only) | a grouping id, existing or just created |
 | 2 | Which feature? List its non-Done feature children; always offer "create a new one". On a small project a generic container feature is fine | a feature id under the step-1 item — that pair is the session **focus** |
 | 3 | One point at a time (below), in the order the user raises them | the point is in the cart, every field **confirmed**, not merely proposed |

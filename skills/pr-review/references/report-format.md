@@ -6,16 +6,24 @@ so every report **ends** with the summary tables, after all the detail.
 
 ## Who reviews, on which model
 
-| Request | Agents |
+| Request | Agents, spawned in one message |
 | --- | --- |
-| any review (`/pr-review`, `/code-review`, an ad-hoc "review this") | `code-reviewer` subagent, never inline — a review command loaded into the main thread delegates too |
-| effort `high` or above | also `review-security` and `review-performance`, in parallel, one message, merged |
+| any review (`/pr-review`, `/code-review`, an ad-hoc "review this"), effort `low` / `medium` | `code-reviewer` subagent, never inline |
+| effort `high` or above | `code-reviewer` ×2 with the **same brief** — reviewer A and reviewer B on two different models — plus `review-security` and `review-performance`; merged |
 | "security review" / "performance review" | that specialist alone |
 | the built-in `/security-review` | only when the user names it; its output stays separate (different format) |
 
-`model` for **every** review subagent: nothing said → omit it (agent frontmatter); "advanced"
-agents → the current session family explicitly (opus | sonnet | haiku | fable); "agent {model}" →
-that exact model.
+`model` per agent:
+
+| The request says | Reviewer A and specialists | Reviewer B |
+| --- | --- | --- |
+| nothing | omit `model` (frontmatter: sonnet) | the session family (opus \| sonnet \| haiku \| fable) |
+| "advanced" agents | the session family, explicitly | sonnet — B always runs on the model A does not |
+| "agent {model}" | that exact model | the session family, or sonnet if that is the same model |
+
+Cross-model merge: same anchor and same defect from A and B → `CONFIRMED`, sorted first within its
+priority; found by one model only → `PLAUSIBLE`, unless the finding quotes evidence (the line, the
+failing call) that settles it.
 
 ## Fields (emitted by the agents, values verbatim)
 

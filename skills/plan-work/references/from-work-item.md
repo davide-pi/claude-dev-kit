@@ -4,9 +4,8 @@ Reading the item — description, criteria, attachments, discussion, parent, lin
 job; this page starts from what it printed. Two rules decide everything here: every statement in
 the plan is **tagged**, and a **readiness verdict** comes before any task list.
 
-**Language.** The verdict line, the questions and the split proposal go to the owner, in
-**Italian**. The plan file stays English (`plan-work`). Markers never change: `[S]` `[D]` `[A]`,
-the verdict keywords, `[BLOCKING]` / `[non-blocking]`, `file:line`, Azure DevOps type and state names.
+Markers stay verbatim in the Italian verdict: `[S]` `[D]` `[A]`, the verdict keywords,
+`[BLOCKING]` / `[non-blocking]`, `file:line`, Azure DevOps type and state names.
 
 ## 1. Read before judging
 

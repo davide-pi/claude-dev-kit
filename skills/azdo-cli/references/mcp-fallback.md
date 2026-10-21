@@ -11,10 +11,11 @@ identified.** This file exists so the fallback is a decision with evidence behin
 | Surface stability | the extension's verbs change slowly | tool names get consolidated and renamed between server versions |
 | Reproducibility | the exact command can be pasted into a script, a pipeline or a hand-off | a tool call cannot leave the session |
 | Availability | one binary, one credential | needs the server configured, connected and pointed at the right organization |
-| Cost | one process | a tool schema in the context window for every tool the server exposes |
+| Cost | `--query` and `-o tsv` trim the result before it enters the context | tool names and server instructions every turn (schemas are deferred by tool search), and the full result payload on every call |
+| Visibility | the user sees the command | every `azdo-*` call sits behind an `ask` permission: the user is prompted each time |
 
-The last row is the one that decides it. An MCP server's whole tool surface sits in the context
-window whether or not it is used; a CLI command costs a line of shell.
+The cost row decides it: the per-turn price is small, but an MCP result arrives untrimmed, while a
+CLI call returns only the fields asked for.
 
 ## The three tests, in order
 
@@ -60,8 +61,9 @@ absent, and why no `invoke` route could be verified — before treating it as on
 
 ## Using the fallback well
 
-- **Say so, once.** One line in chat: which capability, which route was tried, which tool was used.
-  A silent fallback is how CLI-before-MCP quietly stops being true.
+- **Say so, before the call.** The `azdo-*` servers are behind an `ask` permission, so the user is
+  prompted anyway: one line in chat first — which capability, which CLI route failed, which tool
+  comes next — turns the prompt into an informed yes.
 - **Match by capability, never by name.** These servers consolidate their surface over time: reads
   and writes that were separate tools end up behind one name plus an `action` parameter. Read the
   schema of the tool you are about to call; if a name you remember is gone, find the tool with the

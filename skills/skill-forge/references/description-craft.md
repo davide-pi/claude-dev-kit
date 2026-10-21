@@ -1,112 +1,90 @@
 # Writing a description that triggers correctly
 
-The description is the only thing that decides whether a skill loads. The body is irrelevant until
-the description has already won. It fails in two directions, and both cost real work:
-
-- **False negative** — the situation is exactly what the skill is for, it never loads, and the work
-  is done ad hoc against the conventions the skill exists to hold.
-- **False positive** — it fires on a superficially similar request and drags its whole procedure
-  into a task that did not want it.
+The description is the only thing that decides whether an auto skill loads; the body is irrelevant
+until it has won. It fails two ways: a **false negative** (the situation fits, the skill never loads,
+the work is done against the conventions it holds) and a **false positive** (it fires on a
+look-alike request and drags its procedure in).
 
 ## The shape
 
-**At most 50 words**, built out of **situations and trigger phrases**, never a catalogue of what
-the body contains. The budget is real: the session's skill listing has a character limit, and when
-it overflows, descriptions are dropped and those skills stop auto-triggering — one bloated
-description silences others.
+≤ 25 words, third person, a **directive opener** — `Use when …` — then the trigger terms the user
+actually types, front-loaded. Never a summary of the body.
 
 ```text
-Use this skill whenever <situation>, <situation> or <situation> — even if the user never says
-'<the term>' but <the sloppy phrasing they actually type>.
+Use when <situation>, <situation> or <symptom as typed> — <file types or tool names it owns>.
 ```
 
-A description that triggers well: *"Use this skill whenever an EF Core migration has to be created,
-applied, reverted or inspected in this repo — even if the user never says 'migration' but changes an
-entity, adds a column or a DbContext."*
+Good: *"Use whenever an EF Core migration is created, applied, reverted or inspected, or an entity,
+column or DbContext changes."*
 
-A trigger-only skill gets one line plus `disable-model-invocation: true` in its front matter:
-
-```text
-<What one invocation does, one clause.> Explicit trigger: only when the user types /<name>.
-```
+A secondhand activation study (650 trials, unverified) measured directive `Use when …` openers near
+100 % activation against ~37 % for passive summaries. Official guidance agrees on the shape: third
+person, what + when, key terms first; `name` ≤ 64 characters, description ≤ 1,024 (the listing cuts
+at 1,536 with `when_to_use`).
 
 | Include | Leave out |
-|---------|-----------|
-| The situations in the user's own words, including the sloppy phrasing | A summary of the sections inside the skill |
-| The concrete nouns the user will type: file kinds, tool names, symptoms | Adjectives about quality ("comprehensive", "best-practice") |
-| The decisions it makes | The procedure it follows |
-| The explicit trigger, when it is trigger-only | Version numbers, organization names |
-| What it explicitly is *not* for, when a neighbour skill exists | Anything that only makes sense after reading the body |
+| --- | --- |
+| situations in the user's own words, sloppy phrasing included | a summary of the sections inside |
+| concrete nouns: file kinds, tool names, error text, symptoms | quality adjectives ("comprehensive") |
+| the decision it owns | the procedure it follows |
+| the boundary against a neighbour, when one exists | version numbers, organization names |
+
+## User-invoked skills
+
+`disable-model-invocation: true` keeps the skill out of the listing entirely (it costs nothing per
+turn); the description is then read only by the `/` menu and by the validator, which requires the
+literal `/<name>`:
+
+```text
+Use when the user types /<name> [args] to <what one invocation does>.
+```
+
+Any skill that posts, writes, logs or changes State is user-invoked.
+
+## `paths` as the trigger fix — not yet
+
+A file-type skill that never fires is the case `paths:` exists for, but on current builds a skill
+with `paths` has been reported to vanish from the listing and to never auto-load its body. Until the
+kit's smoke test passes (`tools/PATHS_OK` exists): put the file types in the description, and put the
+facts every such file needs in a `rules/*.md` with `paths` — rules load on touch reliably.
 
 ## Patterns that cause a false negative
 
-| Pattern | Example of the miss | Fix |
-|---------|--------------------|-----|
-| Only the technical term, never the symptom | "diagnostics for managed processes" misses "the API is slow" | Add the symptoms as they are said out loud |
-| Only the formal noun, never the verb | "migration management" misses "add a column" | Add the actions |
-| Assumes the user names the tool | "counters and traces" misses "why is memory growing" | Add the observable effect |
-| Too abstract to match anything | "engineering discipline for quality" | Name the artefacts and situations |
-| Missing the other language the user types in | An Italian prompt never matches an English-only trigger list | Include the words actually used, when the asset is used in both |
+| Pattern | Miss | Fix |
+| --- | --- | --- |
+| only the technical term, never the symptom | "diagnostics for managed processes" misses "the API is slow" | add the symptom as said out loud |
+| only the noun, never the verb | "migration management" misses "add a column" | add the actions |
+| assumes the user names the tool | "counters and traces" misses "why is memory growing" | add the observable effect |
+| too abstract | "engineering discipline for quality" | name artefacts and situations |
+| one language only | an Italian prompt never matches an English trigger list | add the words actually typed |
 
 ## Patterns that cause a false positive
 
-| Pattern | Example of the misfire | Fix |
-|---------|-----------------------|-----|
-| A verb so common it appears everywhere | "use when reviewing code" fires on "review this design" | Qualify: what is being reviewed, and what comes out |
-| No boundary against a neighbour skill | A debugging skill firing on a performance-tuning request | State the exclusion in the description itself |
-| Claiming a whole domain | "everything about testing" fires on "run the tests" | Narrow to the decision it owns |
-| An explicit-trigger asset without its trigger | It fires on any similar request and writes somewhere | Name the trigger, and say it is the only entry |
-
-## Trigger-only assets
-
-An asset that posts, writes, creates or logs anything outside the working tree should fire **only**
-on its own command. Two things make that hold: `disable-model-invocation: true` in the front matter,
-so the model never loads it on its own, and a one-line description that names the trigger literally
-(the validator rejects it otherwise): `Trigger: /<name> [args]` or `Explicit trigger: only when the
-user types /<name>`.
-
-## Project skills shadow kit skills
-
-A project's `.claude/skills/<name>` with the **same name** as a kit skill replaces the kit skill in
-that project — its whole procedure disappears. A project keeps only its own **data** there (paths,
-service names, conventions), under a different name, and the kit skill routes to it.
+| Pattern | Misfire | Fix |
+| --- | --- | --- |
+| a verb that appears everywhere | "when reviewing code" fires on "review this design" | qualify what is reviewed and what comes out |
+| no boundary with a neighbour | debugging fires on performance tuning | state the exclusion in the description |
+| claiming a whole domain | "everything about testing" fires on "run the tests" | narrow to the decision it owns |
 
 ## Testing it
 
-Every asset gets a section in the kit's triggering evals with at least one MUST and one MUST NOT
-case. Write the cases as prompts, not as descriptions of prompts.
+Every skill gets a section in `evals/skill-triggering.md`:
 
-```markdown
-### `<name>` — <one-line contract>
+1. one MUST in the user's most natural phrasing, with no keyword from the description;
+2. one MUST for `/<name>` on a user-invoked skill;
+3. one MUST NOT that looks alike and belongs to a neighbour — it catches over-broad descriptions;
+4. one MUST NOT in the same domain that asks a question instead of requesting the work.
 
-| Prompt | Expected |
-|--------|----------|
-| "<a real sentence that must load it>" | MUST load |
-| "<a near-miss that must not>" | MUST NOT (<why the case exists>) |
-```
+Spot-check by pasting the prompt in a scratch session; for a real rework use the `skill-creator`
+eval runner, or `claude plugin eval` with a `tool_used: Skill` grader. `claude plugin validate
+~/.claude/skills` first: a skill with malformed YAML loads with empty metadata and never fires.
 
-Choosing the cases:
-
-1. One MUST in the user's most natural phrasing, with no keyword from the description.
-2. One MUST for the trigger itself, when there is one.
-3. One MUST NOT that is superficially similar and belongs to a neighbour asset — this is the case
-   that catches over-broad descriptions.
-4. One MUST NOT that names the same domain but asks a question rather than requesting the work
-   ("how much time did I spend" against "log my hours").
-
-Run them the cheap way first: paste the prompt in a scratch session and see whether the skill's
-instructions appear. Use the `skill-creator` plugin's eval runner when reworking a description
-rather than spot-checking it.
-
-**A failing case is a description bug.** Fix the description; never adjust the case to match the
-behaviour.
+**A failing case is a description bug.** Fix the description, never the case.
 
 ## Rewriting an existing description
 
-1. List, from memory or transcripts, the last five times this asset should have fired.
-2. Check whether each sentence falls under one of the description's situations. Widen a situation
-   or add a new one — never a synonym per miss.
-3. List the two neighbours most likely to be confused with it, and add the exclusion.
-4. Cut every clause that describes the body rather than the situation.
-5. Re-run the eval cases, including the MUST NOT ones — a broadened description usually breaks
-   those first.
+1. List the last five times it should have fired (transcripts, `/skill-doctor`).
+2. Map each to a situation in the description; widen a situation, never add a synonym per miss.
+3. Name the two neighbours most likely to be confused with it and add the boundary.
+4. Cut every clause that describes the body.
+5. Re-run the eval cases, MUST NOT first — a broadened description breaks those.
