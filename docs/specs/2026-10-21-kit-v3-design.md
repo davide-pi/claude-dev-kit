@@ -1,6 +1,8 @@
 # claude-dev-kit v3 — Design
 
-Status: draft 2026-10-21. Branch: `refactor/kit-v3`. Input: `kit-v3-findings.md` (usage, features, constraints).
+Status: revised 2026-10-21 (rev 2, after `2026-10-21-kit-v3-research.md` and the owner's decisions). Branch:
+`refactor/kit-v3`. Batches 1–2 committed (`ebd448b`, `f091f35`). Per-asset rewrite briefs for batches 3–5:
+`2026-10-21-kit-v3-briefs.md`. Local Claude Code 2.1.306.
 
 ## 0. Thesis
 
@@ -22,6 +24,17 @@ command hook prints the worktree path; prompt hooks on `Stop|PreToolUse|PostTool
 `SessionStart`; `enableWorkflows` (per user) and `disableWorkflows` (for everyone) are both real keys — live
 `enableWorkflows: false` means workflows are **off** (the findings file was wrong on this); MCP permission rules:
 `mcp__<server>__*` for a whole server, `mcp__*` only in deny/ask; `~/` is a valid path anchor in rules, `$HOME` is not.
+
+Corrections from the research file (accepted, applied below): skill `paths` is **unreliable** on current builds
+(#49835 skill vanishes from the listing, #62049 body never auto-loads; both closed *not planned*) → smoke test first,
+fallback ladder (§4b); tool search is on by default, so MCP **schemas** are deferred and only names + server
+instructions cost per turn (the 722-results argument stands, the schema argument does not); `MAX_MCP_OUTPUT_TOKENS`
+default is 25,000 (live 10,000 already strict); the statusline receives `context_window.used_percentage` → the nudge
+reads that, not a transcript-size proxy; an agent `mcpServers` **name reference shares the parent's connection** —
+only an **inline** definition keeps a server out of the main thread; after `/compact` CLAUDE.md and unscoped rules
+re-inject, `paths` rules are summarised away, SessionStart hooks re-run only with `compact` in the matcher; rules
+`paths` must be a **comma-separated string** (YAML list silently ignored on earlier builds); agent `memory` writes
+nothing when `tools:` lacks Write/Edit (#57507) and `project` scope resolves against the launch cwd (#82545).
 
 ## 1. dev-loop verdict: kill, fold the table into CLAUDE.md
 
@@ -48,10 +61,13 @@ Live file 9,504 B. Target ≤ 2,700 B. "Rule" = `~/.claude/rules/*.md`; unscoped
 | ALM rules table (860) | owning skills (pr-create, workitem-create, branch-flow, worklog) + **hook** `lib/alm-contract.js` (§7); worklog reminder text comes from `worklog-pending.js` itself | mechanical → enforced |
 | Git worktrees root (305) | **hook** `worktree-root.js` on `WorktreeCreate` (prints `<root>/<repo>-<name>`), root from `settings.env.CLAUDE_WORKTREE_ROOT`; branch-flow reference keeps the git fallback | enforced on the native path, documented on the manual one |
 | Done means verified (225) | keep as 2 lines | highest-value anti-hallucination rule |
-| Search without a prompt (550) | keep, compressed to ~200 B | behaviour, not mechanical |
+| Search without a prompt (550) | keep, compressed to ~200 B (+ one clause: `cd` + `git` always prompts; use `git -C`) | behaviour, not mechanical |
 
-New `rules/` (path-scoped — load only when a matching file is Read/Written/Edited). Globs are relative to the
-session cwd; `**/` prefix makes them work at user level.
+New `rules/` (path-scoped — load only when a matching file is Read/Written/Edited, or `cat`/`head` of one file).
+Globs are relative to the session cwd; `**/` prefix makes them work at user level. Frontmatter is
+`paths: "glob1,glob2"` (one comma-separated string). Rules are facts and gotchas a re-read can recover — after
+`/compact` they are summarised away, so nothing standing lives there. Verification: an `InstructionsLoaded` hook
+(dev-only, `settings.local.json` of the kit repo) logs `{file, load_reason}`.
 
 | File | `paths` | Content (summary) | est. B |
 | --- | --- | --- | --- |
@@ -70,7 +86,10 @@ Rules are *context*, not enforcement; each is ≤ 25 lines, facts only, no proce
 
 ## 3. Per-asset verdicts
 
-Description target: ≤ 25 words (today 23–52). Legend: K keep · R rewrite · M merge · X kill · C convert.
+Description target: ≤ 25 words, third person, directive opener (`Use when …`), trigger terms first (today 23–52
+words, passive summaries). Legend: K keep · R rewrite · M merge · X kill · C convert. Every K/R asset also gets the
+shared contract line and the per-asset brief in `2026-10-21-kit-v3-briefs.md`. "K + `paths`" = only after the batch-4
+smoke test (§4b); until then the trigger terms carry the file types.
 
 ### Skills
 
@@ -148,8 +167,8 @@ Description target: ≤ 25 words (today 23–52). Legend: K keep · R rewrite ·
 | `hooks/az-identity.js` (live only) | pull + R → `workspace-context.js` | data-driven, ALM line (§6) |
 | new `worktree-root.js`, `context-nudge.js`, `lib/alm-contract.js` | new | §6 |
 | `scripts/sql-ro.ps1` (live only) | pull + R → `scripts/db-ro.ps1` | three engines, permission probe (§8) |
-| `statusline.js` | R | context band colour from the nudge hook's cache file; under-target badge (§9b) |
-| `tools/validate.mjs` | R | rules/: `paths` present and parseable, ≤ 25 lines; skills: description ≤ 25 words (error, not warning), `paths` globs valid; agents: `maxTurns` present; no `commands/` dir |
+| `statusline.js` | R | **writes** `~/.claude/.cache/context-<session_id>.json` from its stdin (`used_percentage`, `prompt_cache.warm`, null-safe) for the nudge hook; context band colour; "cache cold" badge; under-target days badge (§9b) |
+| `tools/validate.mjs` | R | rules/: `paths` is a comma-separated **string** (YAML list → error), frontmatter parses, ≤ 25 lines; skills: description ≤ 25 words and directive opener (error), SKILL.md ≤ 120 lines, `paths` on a skill → warning until `tools/PATHS_OK` exists, `context: fork` skills carry `background`; agents: output contract section present, `memory` only with Write/Edit; no `commands/` dir |
 | `tools/*.test.mjs` | R | + cases for sql-target (psql/redis/docker/wsl), alm-contract, worktree-root, context-nudge |
 | `evals/skill-triggering.md` | R | drop dev-loop/done-check/redis sections; add a `paths` case per domain skill ("Read a `.cs` file → skill listed as active"), fork cases for `/db`, `/logs`, `/fix-ci` |
 | `mcp/servers.example.json` | R | azdo servers only; a note that database access is CLI (§8) |
@@ -193,15 +212,37 @@ Description target: ≤ 25 words (today 23–52). Legend: K keep · R rewrite ·
 | review-security | sonnet | — | — | default | same | — | — | 30 | `omitClaudeMd: true` |
 | review-performance | sonnet | — | — | default | same | — | — | 30 | `omitClaudeMd: true` |
 | investigator | sonnet | medium | project | default | Read, Grep, Glob | — | — | 25 | `omitClaudeMd: true` |
-| db-analyst | sonnet | medium | user | default | Read, Grep, Glob, PowerShell, Bash | none after §8 (CLI clients) | sql-server | 30 | no `permissionMode` (ignored under live `auto`); the gate is §8 |
-| ops-analyst | sonnet | medium | user | default | Read, Grep, Glob, Bash, PowerShell | grafana (name ref; verify §8) | dotnet-diagnostics | 30 | — |
+| db-analyst | sonnet | medium | — | default | Read, Grep, Glob, PowerShell, Bash | none (CLI clients, §8) | sql-server | 30 | no `permissionMode` (ignored under live `auto`); the gate is §8 |
+| ops-analyst | sonnet | medium | — | default | Read, Grep, Glob, Bash, PowerShell | grafana **inline** (`url: ${GRAFANA_URL}`, token from `${GRAFANA_TOKEN}`) | dotnet-diagnostics | 30 | the only place Grafana exists |
 | doc-keeper | sonnet | medium | project | default | Read, Grep, Glob, Write, Edit, Bash | — | — | 40 | — |
-| Explore | sonnet | low | — | default | Read, Grep, Glob, Bash (read-only use stated in body) | — | — | 20 | `omitClaudeMd: true` (the built-in also starts without CLAUDE.md) |
+| Explore | sonnet | low | — | default | Read, Grep, Glob, Bash (read-only use stated in body) | — | — | 20 | `omitClaudeMd: true`; own 20-line body |
 
 `omitClaudeMd` on the review agents is safe: their bodies already define `P1/P2/P3`, `alto/medio/basso`, `S/M/L`,
 `CONFIRMED/PLAUSIBLE` and Italian output (checked: 11 occurrences each); the caller's brief passes the report shape.
-`memory: user` on db-analyst/ops-analyst: schemas, label names and hosts recur across repos. `memory: project` on
-implementer/investigator/doc-keeper: conventions are per repo.
+`memory` only where the agent has Write/Edit (implementer, doc-keeper — `project`, and a MEMORY.md must appear after
+one run or the field goes); dropped on investigator, db-analyst, ops-analyst (#57507: silent no-op without Write/Edit;
+#55648: the agent may write memory instead of working). `maxTurns` is advisory (#41143) — set, never required by the
+validator. Every body ends with a hard **output contract** (≤ N lines, table): subagent returns land in the main
+context, so the contract is the cost control (briefs file, batch 5). Agent `model` is never set on a non-fork skill
+(cache miss for the whole history that turn); effort changes are cache-safe.
+
+## 4b. Skill `paths` — smoke test first, then the ladder
+
+Two closed-not-planned issues say a skill with `paths` can vanish from the listing (#49835) and never auto-load its
+body (#62049). Batch 4 therefore starts headless, in a temp project with one probe skill (`paths: "**/*.cs"`, body
+marker `PROBE-TOKEN-7731`; exact script in the briefs file):
+
+| `claude -p` check | Pass | Fail → |
+| --- | --- | --- |
+| "List every skill name available to you" lists `probe-cs` | listing intact | the skill is still invocable but invisible: keep file-type trigger terms in the description |
+| "Read `src/Foo.cs`, answer with the marker of any skill that loaded" returns the token | `paths` auto-loads: apply to the nine domain skills | fallback ladder below; validator keeps warning on skill `paths` until `tools/PATHS_OK` exists |
+
+Fallback ladder when auto-load fails: **(a)** the stack facts already live in `rules/*.md` (docs-confirmed loading);
+**(b)** `hooks/skill-on-path.js` — PreToolUse on `Read|Edit|Write`, globs `tool_input.file_path` against a small
+skill→glob map and returns `additionalContext` naming the skill to load (the #62049 workaround); **(c)** description
+with the file types as trigger terms and no `paths`. Second batch-4 check: with fork mode on (2.1.302+), `/db`
+(`context: fork`, `background: false`) must return in the same turn; if it arrives as a background notification, set
+`CLAUDE_CODE_FORK_SUBAGENT=0` (§11) — a backgrounded fork also loses the `Agent` tool (#88453).
 
 ## 5. Review — model diversity (pstack `interrogate`)
 
@@ -219,12 +260,14 @@ files: diversity comes from the `model` parameter, not from personas.
 
 | Hook | Event | Type | Converts | Status |
 | --- | --- | --- | --- | --- |
-| `workspace-context.js` (ex `az-identity.js`) | SessionStart | command | ALM mapping + az identity → one context line (stdout) + `AZURE_CONFIG_DIR`/`AZ_IDENTITY` via `CLAUDE_ENV_FILE`; data from local-only `workspaces.json` (kit ships `workspaces.example.json`) | `CwdChanged`/`DirectoryAdded` cannot add context, so `/add-dir` to another org → the skill asks |
+| `workspace-context.js` (ex `az-identity.js`) | SessionStart, matcher `startup\|resume\|clear\|compact` | command | ALM mapping + az identity → one context line (stdout) + `AZURE_CONFIG_DIR`/`AZ_IDENTITY` via `CLAUDE_ENV_FILE`; data from local-only `workspaces.json` (kit ships `workspaces.example.json`) | `compact` in the matcher or the `ALM:` line vanishes after `/compact` (same fix on `session-brief.js`); `CwdChanged`/`DirectoryAdded` cannot add context → `/add-dir` to another org: the skill asks |
+| `skill-on-path.js` (fallback only) | PreToolUse `Read\|Edit\|Write` | command | if the batch-4 smoke test fails: globs `tool_input.file_path` against the domain-skill map and returns `additionalContext` "file type owned by skill `<name>`: load it before changing the file" | shipped only when needed (§4b) |
+| `lib/output-filter.js` (in `guard-shell.js`) | PreToolUse Bash\|PowerShell | command (`updatedInput`) | `dotnet test`, `npm test`, `npx vitest`, `docker compose logs` without a filter → rewritten to pipe through a failure filter (failed tests, errors, the summary line); pairs with `bashOutputMaxChars` | the official costs-doc pattern; 6,762 Bash calls on the main thread; opt-out comment `# raw` in the command |
 | `guard-shell.js` + `lib/alm-contract.js` | PreToolUse Bash\|PowerShell | command (ask) | `az repos pr create` without `--work-items` or without `--squash true --delete-source-branch true`; `az boards work-item create` without `--assigned-to`; `az devops configure --defaults` | new lib, tests in `tools/` |
 | `lib/sql-target.js` (pull from live) + psql/redis-cli | PreToolUse | command (deny) | raw DB client at a non-dev host unless via `/db` script (§8) | live today for sqlcmd |
 | `worktree-root.js` | WorktreeCreate | command | `git worktree add <CLAUDE_WORKTREE_ROOT>/<repo>-<name>`, prints the path | contract confirmed; test on Windows paths |
-| `context-nudge.js` | UserPromptSubmit | command | `transcript_path` size as a proxy: at 2 / 4 / 6 MB inject once "context is large: `/compact` or `/clear` before a new topic" (no live token field exists) | proxy; calibrate against `/context` |
-| `done-claim.prompt` | Stop | prompt, `continueOnBlock` n/a | "last message claims done/fixed/passing without quoted command output → `ok:false`" | **opt-in experiment**: one background-model call per turn end; adopt only if false positives < 1/10 |
+| `context-nudge.js` | UserPromptSubmit | command | reads `~/.claude/.cache/context-<session_id>.json` written by `statusline.js` from its stdin (`context_window.used_percentage`, `prompt_cache.warm`; null-safe right after `/compact`); injects once per band at 50 / 70 / 85 %: "contesto al N %: `/compact <focus>` o `/clear` prima di un nuovo argomento"; statusline also shows a "cache cold" badge | exact, no proxy; one cache file per session (parallel sessions) |
+| `done-claim` | Stop | **tier 1** command: tail `transcript_path` for the last assistant message; regex `fatto\|done\|fixed\|passa\|passing\|verificato` with no fenced output block in the same message → `decision: block`, reason "quote the command and its output, or say *non verificato*"; honours `stop_hook_active`; **tier 2** prompt hook (background model, `impossible` honoured) only if tier 1 is too noisy | **opt-in** (owner): tier 1 costs 0 tokens; count false positives for 2 weeks before tier 2 |
 | `permissions.ask` | — | settings | every `mcp__azdo-*__*` call asks | CLI-before-MCP, visible |
 | `format-on-edit`, `secret-scan`, `session-brief`, `worklog-pending`, `ensure-edge-cdp` | — | — | unchanged | — |
 
@@ -243,8 +286,10 @@ Not adopted: ultracode (every task becomes a workflow — opposite of the cost g
 
 ## 8. Minimise MCP: database access through CLIs behind `/db`
 
-Today: `sql-prod` / `pg-prod` MCP servers (project-scoped `.mcp.json`) put ~35 tool schemas in every turn of those
-projects and 722 query results in the main context. Target: **no database MCP**; `/db` (fork → db-analyst) drives
+Today: `sql-prod` / `pg-prod` MCP servers (project-scoped `.mcp.json`) put 722 query results in the main context of
+those projects; with tool search on by default their *schemas* are deferred, so the per-turn cost is tool names +
+server instructions only — the saving is the results, measured with `/usage` attribution (per-server %) before and
+after, not with schema counts. Target: **no database MCP**; `/db` (fork → db-analyst) drives
 `sqlcmd`, `psql`, `redis-cli` through `scripts/db-ro.ps1` (ex `sql-ro.ps1`), targets from local-only
 `db-targets.json`. Read-only is guaranteed in layers; each layer alone is insufficient:
 
@@ -263,9 +308,13 @@ Clients are not installed (checked: `psql` no, `redis-cli` no, `sqlcmd` yes, `wi
 | sqlcmd | present (go-sqlcmd) | as today |
 
 `db-ro.ps1` owns the wrapper choice per client (native → wsl → docker, first found) so `/db` never asks which to use.
-`install.ps1 -Check` reports each client as *native / wsl / docker / missing*. Grafana MCP stays for now (no CLI equivalent) but moves
-to `ops-analyst.mcpServers` — verify whether a name reference keeps the server out of the main thread; fallback: inline
-definition whose command reads `${GRAFANA_URL}`/`${GRAFANA_TOKEN}` (no identity in the kit).
+`install.ps1 -Check` reports each client as *native / wsl / docker / missing*. Grafana MCP stays (owner decision),
+**inline** in `ops-analyst.md` (`${GRAFANA_URL}`, `${GRAFANA_TOKEN}` placeholders; a name reference would share the
+main thread's connection) and is removed from every `.mcp.json`. Server instructions of the azdo servers stay short
+and front-loaded (tool search matches on them, 4,096-char cap) so the rare `ask`-gated fallback still finds its tool.
+**Redis server-side credential is a TODO** (owner does not know the ACL/policy state): batch 6 ships the hook and the
+docker client; the main session explains to the owner what to create (ACL user with `-@all +@read +@connection +info
++ping`, or the Azure Cache *Data Reader* access policy) and the script refuses a target whose probe shows write grants.
 
 ## 9b. worklog — the engine under-measures
 
@@ -281,13 +330,12 @@ rounding and exclusions, and days with 1–3 h of Claude activity hide 5–7 h o
 | no expected-day comparison: 0.5 h closes a day | **daily target 8 h** (per-weekday override in `workspaces.json`: e.g. 13/10 event = 0, 20/10 = 4 + 2); the day table ends with `copertura: 3.5h / 8h — mancano 4.5h` and a **gap prompt**: how to cover the difference — meetings, calls, manual tests, other — as one `AskUserQuestion` with the management item preselected | SKILL.md phase 3, `ore-gestione.md` |
 | no external sources | opt-in sources for the gap: Outlook/Teams calendar (Graph: `me/calendarView` for the day) and Slack activity (`slack_search_public_and_private from:me on:<date>`); each event becomes a candidate row the user confirms | new `references/fonti-esterne.md`; sources are proposals, never auto-logged |
 | reminder = "no audit" only | `worklog-pending.js` also lists **under-target days** (`logged < target - 1h`) for the current month; statusline badge shows both counts | hook + `statusline.js` |
-| hours written outside `/worklog` (MCJ #15337, #15338, #15342 by two sessions) | **enforcement, owner decision**: hours writes go through one script, `scripts/worklog-push.ps1` (reads the confirmed rows, writes `CompletedWork`, appends the audit); `lib/alm-contract.js` denies any other `az boards work-item update` carrying `CompletedWork` / `Microsoft.VSTS.Scheduling.CompletedWork` with "le ore si registrano con /worklog"; the MCP `wit_work_item_write` is already under `permissions.ask` (§11) — same shape as `db-ro.ps1`, no environment magic | hook + script; mark ask vs deny |
+| hours written outside `/worklog` (MCJ #15337, #15338, #15342 by two sessions) | **enforcement = `ask`** (owner decision): hours writes go through one script, `scripts/worklog-push.ps1` (reads the confirmed rows, writes `CompletedWork`, appends the audit); `lib/alm-contract.js` **asks** on any other `az boards work-item update` carrying `CompletedWork` / `Microsoft.VSTS.Scheduling.CompletedWork` with "le ore si registrano con /worklog — confermi comunque?"; the MCP `wit_work_item_write` is already under `permissions.ask` (§11) | hook + script |
 
 Verification for the batch: re-run the engine on Oct 1–21 and compare day by day with the table above (engine active
 time ≥ the active column on every day; 13/10 and 20/10 honour their overrides); the gap prompt appears on every
-under-target day; the reminder lists under-target days; a direct `CompletedWork` write is refused with the message.
-**Deadline**: live `cleanupPeriodDays: 30` deletes the Oct 1 transcripts around Oct 31 — run batch 9 before then, or
-export the baseline now (`history.jsonl` slice + the `_raw` folder) so the comparison survives.
+under-target day; the reminder lists under-target days; a direct `CompletedWork` write prompts with the message.
+Transcripts survive: live `cleanupPeriodDays` is now 90 (owner, verified).
 
 ## 9. Always-loaded byte budget
 
@@ -303,22 +351,27 @@ Measured on the live config (bytes; descriptions = frontmatter `description` tex
 | Auto memory `MEMORY.md` | 1,785 | 1,785 | unchanged |
 | ALM line from hook | 0 | ~150 | replaces 1,921 in CLAUDE.md |
 | **Total** | **20,775 (~5.2k tokens)** | **~9,100 (~2.3k tokens)** | −56% |
-| Not measured | database MCP tool schemas (~35 tools) in RaptorNext/MCJ sessions | 0 after §8 | measure with `/context` before and after batch 6 |
+| Not measured | database MCP tool **names + instructions** (schemas are deferred by tool search) and 722 results in RaptorNext/MCJ sessions | 0 after §8 | `/usage` attribution per server before and after batch 6 |
+
+Listing budget facts: 1 % of the window in chars (~40 k on `opus[1m]`, ~8 k on a 200 k model), 1,536-char cap per
+description, overflow drops the least-invoked descriptions **silently**. This kit's ~3 k is far below both; the risk is
+not the budget but §4b. Metric for every batch: `/usage` ("Trim CLAUDE.md · N k tokens per request" row, per-skill /
+agent / MCP attribution) before and after, plus `/doctor` listing cost and `/skill-doctor` never-invoked list.
 
 ## 10. Migration batches (each committable and verifiable alone)
 
 | # | Batch | Contents | Verify |
 | --- | --- | --- | --- |
-| 1 | Reconcile live drift | pull `commands/db.md`, `hooks/guard-shell.js` + `lib/sql-target.js`, `branch-flow/references/*`, `az-identity.js` (ROOTS → `workspaces.json` + example), `skills/estimate` (anonymised), `scripts/sql-ro.ps1`, settings template hook wiring; worklog flag back to `true` (owner decision); **exclude** `skills/my-voice`, `skills/.trash`, `skills/synced`, catsay Stop/Notification hooks, `Read(//c/Users/…)` allows, `modelSettings`, the owner's `~/.claude/**` ask rules | `node tools/validate.mjs` clean (identity regexes); `install.ps1 -Check` lists only the known local-only set |
-| 2 | install.ps1 | `$AssetDirs += rules, workflows, scripts`; `$LocalOnly` exclusion list (my-voice, .trash, synced, `workspaces.json`, `db-targets.json`); `-Pull` skips them; `-Check` groups drift by asset; client presence (psql/redis-cli/sqlcmd: present/docker/missing); hook-wiring check knows every event | `install.ps1 -Check` exit 0 on a clean install; `pwsh` parse in CI |
-| 3 | CLAUDE.md v3 + rules + workspace hook | new CLAUDE.md (§2), 10 rules, `workspace-context.js`, routing table, kill dev-loop/done-check (refs moved) | `wc -c CLAUDE.md` ≤ 2,700; `/doctor prompt-audit` no conflicts; session shows the `ALM:` line in each mapped root; a `.cs` Read loads `rules/csharp.md` (`/context`) |
-| 4 | Skills | `paths`, descriptions ≤ 25 words, grill-me/skill-forge flags, redis merge, items-qa fork, commands → skills (fork for db/logs/fix-ci/retro) | validator; evals rerun for every changed description (MUST/MUST NOT); `/db` shows a fork, `/context` main thread unchanged |
-| 5 | Agents | frontmatter §4, `Explore.md`, `ops-analyst.md`, kill test-writer, implementer description | validator "agent named by prose" passes; spawn each once; `/context` confirms Explore runs sonnet |
-| 6 | DB through CLIs (§8) | `db-ro.ps1` (3 engines, permission probe), `sql-target.js` + psql/redis-cli, read-command allow-list, remove `sql-prod`/`pg-prod` from the project `.mcp.json`, install clients | `node --test tools/*.test.mjs` (new cases: psql URI, `PGHOST`, redis `-u`, docker wrappers); `/db "SELECT 1"` on each target; a write attempt exits 3; `/context` shows no `mcp__sql-prod__*` |
-| 7 | Hooks | `alm-contract.js`, `worktree-root.js`, `context-nudge.js`, optional `done-claim` prompt hook | unit tests; `EnterWorktree` lands under `cl-wt`; a PR create without `--work-items` asks |
-| 8 | Review diversity + workflows | pr-review/code-review rewrite, `report-format.md`, two saved workflows | `/code-review high` on a known diff spawns 4 agents, 2 models; `/workflows` shows size guideline |
+| 1 ✅ `ebd448b` | Reconcile live drift | pull `commands/db.md`, `hooks/guard-shell.js` + `lib/sql-target.js`, `branch-flow/references/*`, `az-identity.js` (ROOTS → `workspaces.json` + example), `skills/estimate` (anonymised), `scripts/sql-ro.ps1`, settings template hook wiring; worklog flag back to `true` (owner decision); **exclude** `skills/my-voice`, `skills/.trash`, `skills/synced`, catsay Stop/Notification hooks, `Read(//c/Users/…)` allows, `modelSettings`, the owner's `~/.claude/**` ask rules | `node tools/validate.mjs` clean (identity regexes); `install.ps1 -Check` lists only the known local-only set |
+| 2 ✅ `f091f35` | install.ps1 | `$AssetDirs += rules, workflows, scripts`; `$LocalOnly` exclusion list (my-voice, .trash, synced, `workspaces.json`, `db-targets.json`); `-Pull` skips them; `-Check` groups drift by asset; client presence (psql/redis-cli/sqlcmd: present/docker/missing); hook-wiring check knows every event | `install.ps1 -Check` exit 0 on a clean install; `pwsh` parse in CI |
+| 3 | CLAUDE.md v3 + rules + workspace hook | new CLAUDE.md (§2, brief), 10 rules (comma-string `paths`), `workspace-context.js` (+`compact` matcher, also on `session-brief.js`), routing table, kill dev-loop/done-check (refs moved), dev-only `InstructionsLoaded` logger | `wc -c CLAUDE.md` ≤ 2,700; `/doctor prompt-audit` no conflicts; `/usage` "Trim CLAUDE.md" row before/after; `ALM:` line in each mapped root **and after `/compact`**; `InstructionsLoaded` log shows `rules/csharp.md` on a `.cs` Read |
+| 4 | Skills | **step 0: `paths` smoke test (§4b)**, then fork-mode check; descriptions ≤ 25 words directive; grill-me/worklog flags; redis merge; items-qa fork; commands → skills (fork for db/logs/fix-ci/retro); briefs file applied per skill | `node tools/validate.mjs`; `claude plugin validate ~/.claude/skills`; evals rerun (MUST/MUST NOT + `/name` for every `disable-model-invocation` skill); `/db "SELECT 1"` returns in the same turn; `/doctor` listing cost, `/skill-doctor` baseline |
+| 5 | Agents | frontmatter §4, Explore override, `ops-analyst.md` with inline Grafana, kill test-writer, implementer description, output contracts; briefs applied | validator "agent named by prose" passes; spawn each once; `/context` in a spawned Explore shows sonnet; implementer and doc-keeper produce a MEMORY.md after one run; Grafana absent from the main `/context` |
+| 6 | DB through CLIs (§8) | `db-ro.ps1` (3 engines, permission probe), `sql-target.js` + psql/redis-cli (+ `docker run\|exec`, `wsl`), read-command allow-list, remove `sql-prod`/`pg-prod`/grafana from the project `.mcp.json`, install clients, Redis server-side TODO explained to the owner | `node --test tools/*.test.mjs` (new cases: psql URI, `PGHOST`, redis `-u`, docker/wsl wrappers); `/db "SELECT 1"` on each target; a write attempt exits 3; `/usage` shows 0 % for `sql-prod`/`pg-prod` |
+| 7 | Hooks | `alm-contract.js` (PR link/squash, assignee, `CompletedWork` → ask), `worktree-root.js`, `context-nudge.js` + statusline cache file and cold-cache badge, `lib/output-filter.js`, `done-claim` tier 1 (opt-in) | unit tests; `EnterWorktree` lands under `cl-wt`; a PR create without `--work-items` asks; nudge fires at the statusline's 50 %; `dotnet test` output arrives filtered; `done-claim` false positives counted for 2 weeks |
+| 8 | Review diversity + workflows | pr-review/code-review rewrite, `report-format.md`, two saved workflows, `enableWorkflows: true` (owner) + `small` | `/code-review high` on a known diff spawns 4 agents, 2 models, identical briefs except `model`; `/workflows` shows size guideline |
 | 9 | worklog measurement (§9b) | adaptive pause, transcript-based activity, daily target + gap prompt, external sources (opt-in), reminder for under-target days, `CompletedWork` guard | engine re-run on Oct 1–21 matches the owner's day table; a direct `CompletedWork` write is refused; `node --test` on the hook |
-| 10 | Live settings.json redesign (§11) | applied by the main session, one Edit per block, each a user prompt (owner's new `ask` rules on `~/.claude/**`); template updated in the same commit | `/status` shows user settings loaded, no Settings Warning; `claude doctor` lists no rejected entry; `/mcp` shows no M365/Figma/Airtable; `install.ps1 -Check` reports settings drift only on the known local-only keys |
+| 10 | Live settings.json redesign (§11) | applied by the main session, one Edit per block, each a user prompt (owner's new `ask` rules on `~/.claude/**`); template updated in the same commit | `/status` shows user settings loaded, no Settings Warning; `claude doctor` lists no rejected entry; `claude auto-mode config` shows defaults + custom entries and `claude auto-mode critique` is clean; `/mcp` shows no M365/Figma/Airtable; `install.ps1 -Check` reports settings drift only on the known local-only keys |
 
 ## 11. settings.json — redesign (template and live, batch 9)
 
@@ -333,11 +386,12 @@ live file the real values. Local-only keys never enter the template: catsay hook
 | `permissions.ask` | keep git/sql/docker set; add `mcp__azdo-<org-a>__*`, `mcp__azdo-<org-b>__*` (live: `mcp__azdo-engagelabs__*`, `mcp__azdo-engagesvc__*`); add `Edit(~/.claude/**)`, `Write(~/.claude/**)` (the owner's `~/.claude/*` misses subdirectories — `**` covers hooks, skills, agents) | CLI before MCP made visible; kit edits always confirmed |
 | `permissions.deny` | keep all; add `Edit(~/.claude/.credentials.json)`, `Read(~/.azure*/msal*)` | nothing removed: a deny expresses only what a prefix can see; the destructive-SQL and host checks stay in the hook, and `workspaces.json` / `db-targets.json` must stay readable for the hook and the script |
 | `deniedMcpServers` | re-add `claude.ai Microsoft 365`, `claude.ai Figma`, `claude.ai Airtable` **if absent** (present in the 16:44 snapshot of the live file; confirm with `/mcp`); template ships the three as the example of the shape | connector tools cost schema bytes every turn |
-| `autoMode` | new: `environment: ["Solo developer on Windows; Azure DevOps + GitHub; databases reached only through ~/.claude/scripts/db-ro.ps1"]`, `allow: ["$defaults", "Read-only az devops/boards/repos/pipelines and gh queries", "dotnet build/test, npm test, docker compose ps/logs"]`, `soft_deny: ["$defaults", "Any command that writes to a database not on localhost", "git push to the default branch", "Deleting a branch, worktree, volume or cloud resource", "Editing files under ~/.claude without the user's explicit request this turn"]`, `hard_deny: ["az account set", "dotnet ef database drop", "docker system prune"]` | the classifier gets the house rules instead of inferring them |
-| `env` | keep `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1`, `CLAUDE_WORKSPACE_ROOTS/NESTED`; add `CLAUDE_WORKTREE_ROOT` (live `C:\\__workspaces\\cl-wt`); `MAX_MCP_OUTPUT_TOKENS` 10000 → `4000`; drop `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (inert while `autoCompactEnabled: false`) | fewer inert keys |
-| model / effort | keep `model: opus[1m]`, `effortLevel: medium`, `fallbackModel`; add `subagentPromptCacheTtl: "1h"` (review fan-outs and workflows re-read the same prefix) | cheaper fan-outs |
+| `autoMode` | new, **every list starts with `"$defaults"`** (without it the built-in exfiltration and source-control rules are discarded): `environment: ["$defaults", "Solo developer on Windows; Azure DevOps + GitHub; non-dev databases only through ~/.claude/scripts/db-ro.ps1"]`, `allow: ["$defaults", "Read-only az devops/boards/repos/pipelines and gh queries", "dotnet build/test, npm test, docker compose ps/logs"]`, `soft_deny: ["$defaults", "Any command that writes to a database not on localhost", "git push to the default branch", "Deleting a branch, worktree, volume or cloud resource", "Editing files under ~/.claude without the user's explicit request this turn"]`, `hard_deny: ["$defaults", "az account set", "dotnet ef database drop", "docker system prune"]`; user settings only (project/local `autoMode` is ignored); `allow` entries are additive over `soft_deny`, so hard limits stay in `permissions.deny` and hooks | the classifier gets the house rules instead of inferring them |
+| `env` | keep `CLAUDE_CODE_SUBAGENT_MODEL=sonnet`, `CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS=1`, `CLAUDE_WORKSPACE_ROOTS/NESTED`, `MAX_MCP_OUTPUT_TOKENS=10000` (default is 25,000; already strict — the 4,000 proposal is withdrawn); add `CLAUDE_WORKTREE_ROOT` (live `C:\\__workspaces\\cl-wt`); add `CLAUDE_CODE_FORK_SUBAGENT=0` **only if** the batch-4 fork check shows `/db` results arriving as background notifications; drop `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` (inert while `autoCompactEnabled: false`) | fewer inert keys |
+| output size | add `bashOutputMaxChars` (v2.1.261+) at ~15,000 beside `lib/output-filter.js` | caps the inline tool result; the filter keeps the signal |
+| model / effort | keep `model: opus[1m]`, `effortLevel: medium`, `fallbackModel`; add `subagentPromptCacheTtl: "1h"` for the review fan-outs and workflows (1h cache **writes** bill higher and the key is ignored on usage credits — keep only if `/usage` shows a net gain after batch 8) | cheaper fan-outs, measured |
 | compaction | keep `autoCompactEnabled: false` (deliberate, per memory); the nudge hook replaces auto-compact | owner's choice |
-| workflows | `enableWorkflows: false` → `true` only with batch 8; add `workflowSizeGuideline: "small"` | §7 |
+| workflows | `enableWorkflows: false` → `true` with batch 8 (owner); add `workflowSizeGuideline: "small"`; never `/effort ultracode` (#66762: 4.4 M subagent tokens in one window) | §7 |
 | hooks | SessionStart: `workspace-context.js` replaces `az-identity.js`; add `WorktreeCreate` → `worktree-root.js`, `UserPromptSubmit` → `context-nudge.js`; optional `Stop` prompt hook (§6); keep catsay Stop/Notification live-only | §6 |
 | plugins | disable `skill-creator` (off live already — template still `true`), keep `csharp-lsp`, `typescript-lsp`, `microsoft-docs`, `browser-use`, `frontend-design`; `redis-development` stays off (the redis reference covers the house facts) | template = live |
 
@@ -364,11 +418,39 @@ Outside settings.json, live: remove `sql-prod`/`pg-prod` from the project `.mcp.
 | 14 | `/schedule` for `/worklog` | end of day | a routine that reminds, never logs |
 | 15 | Ctrl+G to edit a plan | a plan is almost right | edit in the editor instead of correcting in chat |
 
-## 13. Open decisions for the owner
+## 13. Decisions
 
-1. worklog `disable-model-invocation`: restore `true` (CLAUDE.md says only `/worklog` writes hours) or keep live `false`?
-2. Prompt hook `done-claim` on Stop: run as a 2-week experiment, or skip?
-3. Redis read-only on Azure Cache: is a *Data Reader* access policy available on the tiers in use, or do we create an ACL user on the server?
-4. Workflows: turn `enableWorkflows` on with batch 8 (bounded `small`), or stay off until a concrete multi-repo audit is needed?
-5. Grafana MCP: keep (attached to ops-analyst) or also replace with the Loki/Prometheus HTTP APIs through a `logs-ro.ps1` script?
-6. `CompletedWork` outside `/worklog`: hard deny, or ask with the reason shown? Calendar/Slack as worklog sources: opt-in per run, or always proposed on under-target days?
+Resolved by the owner (2026-10-21): worklog `disable-model-invocation: true` · `CompletedWork` guard = `ask` ·
+Redis server-side credential = TODO explained by the main session, batch 6 ships hook + docker client · workflows ON
+with batch 8 · Grafana stays, inline in ops-analyst · `done-claim` tried as opt-in (tier 1 first) ·
+`cleanupPeriodDays` 30 → 90 done.
+
+Still open:
+1. If the `paths` smoke test fails on Read (§4b): ship `skill-on-path.js` (one more PreToolUse hook on every Read/Edit/Write, ~1 ms) or stay on rules + description keywords only?
+2. `lib/output-filter.js` rewrites test/log commands through `updatedInput`: accept that a filtered run hides non-failure output (opt-out `# raw`), or apply only `bashOutputMaxChars`?
+3. Calendar/Slack as worklog sources: opt-in per run (`/worklog --fonti`) or always proposed on under-target days?
+
+## 14. Research disposition (`2026-10-21-kit-v3-research.md`)
+
+| # | Item | Verdict | Where |
+| --- | --- | --- | --- |
+| C1 | skill `paths` unreliable → smoke test + ladder | accepted | §4b, batch 4 step 0, validator warning until `PATHS_OK` |
+| C2 | autoMode `$defaults` in every list; `auto-mode config/critique` check | accepted | §11, batch 10 |
+| C3 | `memory` dead without Write/Edit; launch-cwd scope | accepted: dropped on read-only agents | §4 |
+| C4 | Grafana inline; measure MCP with `/usage` | accepted | §8, §4 |
+| C5 | nudge from statusline `used_percentage` | accepted | §6 |
+| I6 | SessionStart matcher incl. `compact`; `paths` rules compaction-fragile | accepted | §6, §2 |
+| I7 | listing budget facts; `skillOverrides: name-only` instead of `disable-model-invocation` | facts accepted; **mechanism rejected**: owner chose `disable-model-invocation: true`, and `skillOverrides` moves per-skill state into settings.json (prompted edits); kept as fallback if `/worklog` breaks (#78523) | §9, evals `/name` smoke test |
+| I8 | `/usage` as the metric | accepted | §9, §10 |
+| I9 | output filter via `updatedInput` + `bashOutputMaxChars` | accepted, owner decision 2 on the rewrite half | §6, §11 |
+| I10 | `done-claim` two tiers | accepted | §6 |
+| I11 | description craft (directive opener, triggers first, `plugin validate`) | accepted | briefs shared contract, validator |
+| I12 | skill `model:` = cache miss on non-fork skills | accepted: no `model` on non-fork skills | briefs, skill-forge |
+| I13 | outcome phrasing, lightweight CLAUDE.md | accepted | briefs shared contract |
+| I15 | output contract per agent; "conclusion, not dump" in delegation | accepted | §4, briefs batch 5, plan-work |
+| V16 | fork mode vs `background: false` | accepted as batch-4 check | §4b, §11 env |
+| I17 | `InstructionsLoaded` logger | accepted, dev-only | §2, batch 3 |
+| I18 | short MCP server instructions | accepted | §8 |
+| C (§1 row 3) | `MAX_MCP_OUTPUT_TOKENS` 4000 | **rejected**: default is 25,000, live 10,000 already strict; keep 10,000 | §11 |
+| §3 pitfalls | validator must *require* `maxTurns` | **rejected**: `maxTurns` is advisory (#41143); set it, do not require it | §4 |
+| §3 pitfalls | rules `paths` as YAML list | **rejected** in favour of the comma string | §2 |
