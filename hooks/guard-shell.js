@@ -6,9 +6,11 @@
  *   - lib/default-branch.js — a `git commit` / `git push` landing on the repo's default branch;
  *   - lib/destructive.js    — an action with no undo, even buried in `docker exec`, `sqlcmd -Q` or a
  *                             pipeline, where a permission prefix cannot see it;
- *   - lib/sql-target.js     — a raw `sqlcmd` / `bcp` / `SqlPackage` aimed at a host that is not a dev
- *                             host: non-dev databases go through `~/.claude/scripts/sql-ro.ps1`.
- *                             This is the one check that DENIES instead of asking;
+ *   - lib/sql-target.js     — a raw `sqlcmd` / `psql` / `redis-cli` (and kin) aimed at a host that
+ *                             is not a dev host: non-dev databases go through
+ *                             `~/.claude/scripts/db-ro.ps1`. This is the one check that DENIES;
+ *                             it also denies a non-read `redis-cli` command on a dev host and
+ *                             asks on `KEYS` / `MONITOR` / `CONFIG` / `DEBUG`;
  *   - lib/alm-contract.js   — an `az` write missing the house ALM flags (PR work item, squash +
  *                             delete, assignee), hours written outside /worklog, global defaults;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
@@ -53,11 +55,12 @@ try {
   const command = payload?.tool_input?.command;
   if (typeof command !== 'string' || !command.trim()) approve();
 
-  // The one denial: a raw SQL client on a non-dev host. It comes before the ask path.
-  const denial = safely(() => checkSqlTarget(command));
-  if (denial?.decision === 'deny') deny(denial.reason);
+  // The one denial: a raw database client on a non-dev host. It comes before the ask path.
+  const target = safely(() => checkSqlTarget(command));
+  if (target?.decision === 'deny') deny(target.reason);
 
   const reasons = [
+    target?.decision === 'ask' ? target.reason : null,
     safely(() => checkDefaultBranch(command, payload.cwd)),
     safely(() => checkDestructive(command)),
     safely(() => checkAlmContract(command)),

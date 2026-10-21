@@ -1,0 +1,32 @@
+{
+  "_comment": "Copy to ~/.claude/db-targets.json (local-only, never committed). devHosts: hosts any client may reach directly (hooks/lib/sql-target.js) - add the compose service names you use as -h. targets: <workspace root> -> <env> -> one non-dev database, read only through scripts/db-ro.ps1 (/db), longest root wins. engine: sqlserver (default) | postgres | redis. server: host,port (sqlserver) or host:port. Secrets: user + password, or auth (a connection-string fragment); any value may be a literal, env:NAME or envfile:<path>#KEY. databases: the allowed names (redis: indexes, default 0). Optional: encrypt, trustServerCertificate, applicationIntent (sqlserver); sslmode (postgres); tls (redis); clientImage (postgres, redis: the docker route's image); readOnlyAttested (redis only, used only when the server hides its ACL so the probe cannot prove read-only: who verified the access policy, and when). The probe refuses (exit 3) any credential with a write grant.",
+  "devHosts": ["localhost", "127.0.0.1", "(local)", ".", "host.docker.internal", "sqlserver", "postgres", "redis"],
+  "targets": {
+    "C:\\workspaces\\<product-root>": {
+      "prod": {
+        "server": "<sql-host>,1433",
+        "auth": "envfile:~/<secrets-dir>/<product>.env#DB_READONLY_CONNECTION",
+        "databases": ["<Database>"],
+        "encrypt": true,
+        "trustServerCertificate": false,
+        "applicationIntent": "ReadOnly"
+      },
+      "prod-pg": {
+        "engine": "postgres",
+        "server": "<pg-host>:5432",
+        "user": "<readonly-role>",
+        "password": "env:<PG_READONLY_PASSWORD>",
+        "databases": ["<database>"],
+        "sslmode": "require"
+      },
+      "prod-cache": {
+        "engine": "redis",
+        "server": "<cache-host>:6380",
+        "tls": true,
+        "user": "<readonly-acl-user>",
+        "password": "env:<REDIS_READONLY_SECRET>",
+        "databases": ["0"]
+      }
+    }
+  }
+}

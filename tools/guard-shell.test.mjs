@@ -237,8 +237,10 @@ test('the migration tool dropping or unwinding the model', () => {
 });
 
 test('flushing a cache', () => {
-  asks('docker exec -it redis redis-cli FLUSHALL', /EVERY key in EVERY database/);
-  asks('redis-cli -h localhost -n 3 flushdb', /the selected cache database/);
+  // redis-cli runs read commands only, so the SQL-target check denies a flush before this one asks
+  // (tools/sql-target.test.mjs); the flush rules still cover every other client.
+  assert.equal(runShell('docker exec -it redis redis-cli FLUSHALL').decision, 'deny');
+  assert.equal(runShell('redis-cli -h localhost -n 3 flushdb').decision, 'deny');
   asks('docker exec memcached bash -c "echo flush_all | nc localhost 11211"');
 });
 
@@ -307,7 +309,7 @@ test('a comment is not an instruction', () => {
 });
 
 test('a file path that merely contains the word is not a statement', () => {
-  approves('psql -U postgres -f scripts/drop-old-tables.sql');
+  approves('psql -h localhost -U postgres -f scripts/drop-old-tables.sql'); // no -h: denied, no host
   approves('code src/Migrations/20240101_DropTable.cs');
   approves('cat ./scripts/database-drop.ps1');
   approves('sqlcmd -S localhost -i migrations/truncate-staging.sql');

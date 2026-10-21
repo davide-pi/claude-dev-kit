@@ -39,7 +39,6 @@ Not for: plan or index analysis on a slow query (your analysis mode, spawned by 
 | a bare identifier | table → columns (type, nullability), primary key, foreign keys in and out, indexes, row count; schema → its tables with row counts |
 | `--db <name>` | override the database resolved from the project's config |
 | `--env <target>` | a named target in the local `db-targets.json` → `db-ro.ps1 -Env <target>`; absent → the project's dev connection |
-| `--write` | refused: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is typed by hand in the main thread after the user's explicit yes |
 
 ### Engine and connection — first match wins
 
@@ -58,9 +57,10 @@ Integrated security → `-E`. A password in a connection string is masked before
 | Statement | Action |
 | --- | --- |
 | `SELECT`, `WITH … SELECT`, catalog views, `sp_help*`, `EXPLAIN` without `ANALYZE`, Redis read commands | run |
-| DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements | refuse as `--write` |
+| DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements, Redis writes | refuse: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is the user's to type |
+| `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead; the hook asks on a dev host, `db-ro.ps1` refuses |
 | a read on a table of unknown size | `COUNT(*)` first, then `TOP 50` / `LIMIT 50`, projected to the columns that answer |
-| a non-dev host | only `db-ro.ps1`; exit `3` = a write grant was found → stop and report, no other route |
+| a non-dev host | only `db-ro.ps1`; exit `3` = the probe found a write grant or could not prove read-only → stop and report its message, no other route |
 
 ### Report — returned to the caller, ≤ 55 lines
 
