@@ -59,7 +59,7 @@ exists.
 | "commenta tu la PR con i dubbi" | MUST load (that is exactly its contract) |
 | "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load (receiving findings) |
 
-### `code-review` (command) — the local diff
+### `code-review` — the local diff
 
 | Prompt | Expected |
 |--------|----------|
@@ -74,6 +74,7 @@ exists.
 |--------|----------|
 | "apri la PR" | `pr-create` MUST load (title/description conventions) |
 | "fai il commit" | MUST NOT dominate — `/commit` owns this |
+| "apri la PR" on a branch with no work item in its name or commits | MUST ask which parent item to link, offering the likely candidates (the `AB#` in the branch or commits, recent items assigned to the owner) as options — never create one unasked |
 
 ### `pipeline` — CI/CD authoring
 
@@ -84,7 +85,7 @@ exists.
 | "questo YAML di Kubernetes è corretto?" | MUST NOT (manifest, not pipeline) |
 
 
-### `commit` (command)
+### `commit`
 
 | Prompt | Expected |
 |--------|----------|
@@ -97,7 +98,10 @@ exists.
 
 | Prompt | Expected |
 |--------|----------|
+| `/grill-me` | MUST load |
 | "buca il mio piano di refactoring" | MUST load |
+| "fammi le pulci a questo design" | MUST load (natural phrasing, no slash: the skill is auto-invocable) |
+| "attack this design" | MUST load |
 | "che ne pensi di questo approccio?" | MUST NOT necessarily load — answering is fine; grilling is for when scrutiny is asked for |
 | "grill me su questo design" | MUST load, and the first round MUST ask every unblocked question at once, each with a recommended answer |
 
@@ -149,6 +153,7 @@ exists.
 | "conviene passare a signal in questa feature?" | MUST load |
 | "come centro verticalmente questa card?" | MUST NOT (CSS and visual design belong to the plugins) |
 | "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to the browser tools) |
+| Read `src/app/orders.component.ts`, then "perché la vista non si aggiorna?" | MUST be listed and load (`paths`: the skill is hidden until a matching file is read) |
 
 ### `react`
 
@@ -158,6 +163,7 @@ exists.
 | "mi serve una libreria di state management qui?" | MUST load |
 | "misura l'LCP di questa pagina" | MUST NOT (Core Web Vitals belong to modern-web-guidance) |
 | "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
+| Read `src/Orders.tsx`, then "perché rifà la fetch?" | MUST be listed and load (`paths`: the skill is hidden until a matching file is read) |
 
 ### `dotnet-backend`
 
@@ -167,6 +173,8 @@ exists.
 | "questo handler RPC EasyNetQ ritenta con Polly, la policy è giusta?" | MUST load |
 | "aggiungi un indice sulla colonna Status" | MUST NOT (belongs to sql-server) |
 | "il componente React rifà la fetch" | MUST NOT (wrong stack) |
+| "il servizio va in RedisTimeoutException sotto carico" | MUST load (the Redis half) |
+| "che struttura dati Redis uso per una leaderboard?" | MUST NOT (data modelling belongs to the Redis plugin) |
 
 ### `dotnet-testing`
 
@@ -184,6 +192,7 @@ exists.
 |--------|----------|
 | "il pod va al 100% di CPU in produzione, come capisco cosa fa?" | MUST load |
 | "questo endpoint è lento ma non so dove perde tempo" | MUST load |
+| "mostrami i log di produzione dell'api nelle ultime 2 ore" | MUST load, and the Grafana reads MUST run inside `ops-analyst`, never on the main thread |
 | "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the browser tools) |
 | "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
 
@@ -208,15 +217,6 @@ exists.
 | "porto questa tabella da SQL Server a Postgres, cosa cambia?" | MUST load (the Postgres half) |
 | "aggiungi il servizio postgres al compose" | MUST NOT (belongs to docker-dev-env) |
 
-### `redis-dotnet`
-
-| Prompt | Expected |
-|--------|----------|
-| "il servizio va in RedisTimeoutException sotto carico" | MUST load |
-| "dove creo il ConnectionMultiplexer?" | MUST load |
-| "che struttura dati Redis uso per una leaderboard?" | MUST NOT (data modelling belongs to the Redis plugin) |
-| "configura le ACL sull'istanza" | MUST NOT (belongs to the Redis plugin) |
-
 ### `rabbitmq`
 
 | Prompt | Expected |
@@ -227,11 +227,12 @@ exists.
 | "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
 | "quanti messaggi ci sono nella dead-letter?" | MUST load (broker inspection) |
 
-## Command cases
+## One-shot skill cases
 
-Commands are invoked by name, so the risk is different from a skill's: the failure mode is the
-model *acting* on a phrasing the command does not own, or reaching for a skill when a command would
-have done it in one shot.
+The ex-commands are invoked by name, so the risk is different from a reference skill's: the failure
+mode is the model *acting* on a phrasing the skill does not own, or doing by hand what the skill would
+have done in one shot. The forked ones (`/db`, `/logs`, `/fix-ci`) add a second check: the raw output
+must stay in the subagent.
 
 ### `/docs-sync`
 
@@ -260,21 +261,22 @@ have done it in one shot.
 
 | Prompt | Expected |
 |--------|----------|
-| "la build su feature/orders è rossa, perché?" | MUST invoke |
+| "la build su feature/orders è rossa, perché?" | MUST invoke, forked: only the failing step's log and the verdict return |
 | "questo test fallisce in locale" | MUST NOT (belongs to debug-systematic) |
 
 ### `/db`
 
 | Prompt | Expected |
 |--------|----------|
-| "quante righe ha Orders con Status = 3?" | MUST invoke |
+| "quante righe ha Orders con Status = 3?" | MUST invoke, forked into `db-analyst` |
+| `/db "SELECT 1"` | MUST return the result in the same turn, from the fork |
 | "come indicizzo questa tabella?" | MUST NOT (belongs to sql-server) |
 
 ### `/logs`
 
 | Prompt | Expected |
 |--------|----------|
-| "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke |
+| "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke, forked into `ops-analyst` |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
 
 ### `azdo-cli`

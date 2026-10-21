@@ -14,6 +14,9 @@ paths: "**/.claude/skills/**,**/.claude/agents/**,**/.claude/hooks/**,**/claude-
 - Public repo: no org, project, email, machine path or token — placeholders (`<org>`); real values
   live in local-only files (`workspaces.json`, `db-targets.json`).
 - No version numbers in prose: say how to detect the version.
-- Before calling an asset done: `node tools/validate.mjs` and `node --test tools/*.test.mjs`.
+- Body = the 20 % of paths that cover 80 % of cases; rare branches go to a reference; every section
+  earns its tokens.
+- Before calling an asset done: `node tools/validate.mjs` and `node --test tools/*.test.mjs`, and see
+  each new test or hook fail once on a bad input — a check never seen failing proves nothing.
 
 Procedure: skill `skill-forge`.

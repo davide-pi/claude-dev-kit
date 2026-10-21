@@ -21,10 +21,10 @@ nothing else changes. Machine identifiers are never translated in either directi
 | Level | What it solves | Assets |
 |---|---|---|
 | **Routing** | which asset owns this task | the route table in `CLAUDE.md`, path-scoped `rules/` |
-| **Knowledge** | not re-deciding what was decided once | 26 skills, depth in reference files loaded on demand |
+| **Knowledge** | not re-deciding what was decided once | 32 skills, depth in reference files loaded on demand |
 | **Exploration** | finding context without burning the main context window | 9 subagents |
-| **Execution** | running a known sequence in one shot | 8 slash commands |
-| **Safety net** | not forgetting, and not doing the irreversible | 6 hooks, the completion gate, the validator |
+| **Execution** | running a known sequence in one shot | 8 one-shot skills (`/name`), 2 saved workflows |
+| **Safety net** | not forgetting, and not doing the irreversible | 10 hooks, the completion gate, the validator |
 
 Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
 **route through the table**, and **try the CLI before the MCP server, every time**.
@@ -32,8 +32,9 @@ Two rules govern all of them, and they live in `CLAUDE.md` so they apply without
 ## Skills
 
 One skeleton throughout — *When* (with what it explicitly excludes), *Decide* (a decision table or
-tree), *Do* (copy-pasteable PowerShell), *Traps*, *References* — capped at 150 lines, with depth in
-`references/` files loaded only on demand. No skill pins a version: where the answer depends on one,
+tree), *Do* (copy-pasteable PowerShell), *Traps*, *References* — a `**Contract.**` line after the title
+(what it produces · what it never does · the output language), the description a `Use when` trigger of
+25 words at most, the file capped at 120 lines, with depth in `references/` files loaded only on demand. No skill pins a version: where the answer depends on one,
 the skill says which file to read or where to verify it.
 
 **Routing and process.** These absorb the parts of the `superpowers` plugin worth keeping, without
@@ -50,17 +51,16 @@ the ceremony and rewritten for PowerShell.
 
 | Skill | Purpose |
 |---|---|
-| `skills/dotnet-backend/SKILL.md` | House shape of the backend: EasyNetQ RPC handlers, Polly retries, Serilog, Scrutor/Quartz; DI lifetimes and the captive dependency, async discipline, options and secrets. |
+| `skills/dotnet-backend/SKILL.md` | House shape of the backend: EasyNetQ RPC handlers, Polly retries, Serilog, Scrutor/Quartz; DI lifetimes and the captive dependency, async discipline, options and secrets; the Redis multiplexer, Streams consumer groups and their pending-forever trap (generic Redis → `redis-development` plugin). |
 | `skills/dotnet-testing/SKILL.md` | Adding tests where there are none: the RPC handler as the seam, the first test project and its pipeline step, what deserves a test, xUnit mechanics. |
-| `skills/dotnet-diagnostics/SKILL.md` | Production first through Grafana (Loki, Prometheus, Pyroscope), `/logs` and the Aspire dashboard locally, `dotnet-*` counters, traces and dumps as fallback. |
+| `skills/dotnet-diagnostics/SKILL.md` | Production first through Grafana (Loki, Prometheus, Pyroscope) — read inside `ops-analyst`, never on the main thread — `/logs` and the Aspire dashboard locally, `dotnet-*` counters, traces and dumps as fallback. |
 | `skills/ef-core/SKILL.md` | Modelling, the query cost model, and the single owner of the migration procedure and its guardrails (never hand-edit a migration or the snapshot). |
 
 **Data and messaging**
 
 | Skill | Purpose |
 |---|---|
-| `skills/sql-server/SKILL.md` | The house T-SQL rules, sqlcmd through docker, stored procedures, the slow-query ladder for SQL Server and the Postgres read cache; plans go to `db-analyst`. |
-| `skills/redis-dotnet/SKILL.md` | The house facts only: multiplexer wiring, Streams consumer groups and the pending-forever trap, timeout counters, docker inspection; generic Redis → `redis-development` plugin. |
+| `skills/sql-server/SKILL.md` | The house T-SQL rules, the clients (native, WSL or docker), stored procedures, the slow-query ladder for SQL Server and the Postgres read cache; plans go to `db-analyst`. |
 | `skills/rabbitmq/SKILL.md` | EasyNetQ RPC-first: timeouts, missing responders, exceptions across the wire, shared contracts; subscription ids, broker operations; flows → `investigator` (trace). |
 
 **Frontend**
@@ -80,7 +80,7 @@ few capabilities the CLI genuinely lacks.
 | `skills/workitem-create/SKILL.md` | `/workitem-create` — a description and images become work items after a Q&A pass and two confirmation tables, assigned to you by default with the UPN shown before and read back after. Owns the **mechanism** — including turning a client meeting into items on an existing board; the content follows `user-story-standard`. |
 | `skills/estimate/SKILL.md` | `/estimate` — hours for new work, deduced from the request and the team's last three months of completed items on Azure DevOps: a sufficiency verdict first, then a calibrated estimate with its references, margin and "not included" list. Read-only; `candidates.ps1` and `calibrate.ps1` do the history and the calibration. |
 | `skills/project-wiki-standard/SKILL.md` | `/project-wiki-standard` — the canonical structure of an Azure DevOps project wiki and the zero-duplication rule that keeps it usable: one place per fact, an answered question **migrates** to the page that owns it and is deleted, and constraints stay separate from the decisions taken in response. |
-| `skills/worklog/SKILL.md` | `/worklog` — reconstructs what was done in a period from the session transcripts, estimates time per topic, then logs the hours on the right work items, reconciling hours already on an item that the audit does not know. The audit is never pruned: it is what closes a day, zero-hour days included, and what the reminder hook reads. Italian by design. |
+| `skills/worklog/SKILL.md` | `/worklog` — reconstructs what was done in a period from the session transcripts, estimates time per topic, then logs the hours on the right work items, reconciling hours already on an item that the audit does not know. Every day is measured against its target (8h on a weekday, 0 at weekends, or its own value in `worklog/targets.json`) and a shortfall is chased before anything is logged. The audit is never pruned: it is what closes a day, zero-hour days included, and what the reminder hook reads. Italian by design. |
 | `skills/pr-review/SKILL.md` | `/pr-review [target] [effort] [focus]` — reviews a PR and posts **only genuine questions**; everything else stays in chat. Delegates to `code-reviewer`, fanning out to the specialists from `high`. Also owns receiving review findings: verify before implementing. |
 | `skills/pr-create/SKILL.md` | Opening a PR on either platform: Italian imperative title, reviewer-sized body with a `Rilascio:` block naming every component the change forces a deploy of, protected-branch target read from the remote, the parent backlog item linked (never a Task). |
 | `skills/branch-flow/SKILL.md` | Branch conventions on both platforms, isolated worktrees, and the finish menu once the work is complete — always squash and delete the source branch. |
@@ -90,24 +90,39 @@ few capabilities the CLI genuinely lacks.
 
 | Skill | Purpose |
 |---|---|
-| `skills/docker-dev-env/SKILL.md` | Aspire-first for the backend, compose for the rest; clients inside containers, healthchecks against readiness, deliberate volume resets, local secrets. |
+| `skills/docker-dev-env/SKILL.md` | Aspire-first for the backend, compose for the rest; clients native, in WSL or inside containers, healthchecks against readiness, deliberate volume resets, local secrets. |
 | `skills/pipeline/SKILL.md` | Azure DevOps YAML with the house rules (scripts over tasks, no test stage), templates, versioning, variables and caching; the Ansible deploy; failures → `/fix-ci`. |
 
-## Commands
+## One-shot skills and workflows
 
-The one-shot layer: the decision is already made, the command runs the sequence. Each declares its
-own guardrails, and none of them merges, deploys, force-pushes or drops.
+The one-shot layer: the decision is already made, the skill runs the sequence. These were slash
+commands; commands are now skills, so each is a `skills/<name>/SKILL.md` typed as `/name` and a
+`commands/` folder must not exist (the validator fails on it, and a stale live copy would shadow
+the skill — `install.ps1` offers to remove it). Each declares what it never does in its contract
+line, and none of them merges, deploys, force-pushes or drops. The noisy ones run **forked** in a
+subagent, so the raw output never reaches the main conversation.
 
-| Command | Does |
+| Skill | Does |
 |---|---|
-| `commands/item.md` | Reads a work item properly — acceptance criteria, parent, links, attachments, discussion — or lists your active ones. |
-| `commands/fix-ci.md` | A red run: fetch only the failing step's log, isolate the error, and separate a code fault from a pipeline fault from an environment difference. |
-| `commands/db.md` | Inspect the project's database: discover the engine and connection, run a query or describe a schema. Read-only by default. |
-| `commands/logs.md` | Tail and filter the current service's logs, whichever way this project produces them. |
-| `commands/docs-sync.md` | Runs `doc-keeper` on the repository's tech docs or wiki tree, against the working diff, a range or a full audit. |
-| `commands/code-review.md` | `/code-review [scope] [effort] [focus]` — reviews the working diff and reports in chat only. |
-| `commands/retro.md` | `/retro [session] [focus]` — retrospective on a session: classifies every friction event and proposes the environment fix (pointer, check, hook, skill, access). Proposes only. |
-| `commands/commit.md` | A commit with a generated message, on the current, an existing or a new branch. Never pushes. |
+| `skills/item/SKILL.md` | `/item` — reads a work item properly (acceptance criteria, parent, links, attachments, discussion), or lists your active ones. |
+| `skills/fix-ci/SKILL.md` | `/fix-ci`, forked — a red run: fetch only the failing step's log, isolate the error, and separate a code fault from a pipeline fault from an environment difference. |
+| `skills/db/SKILL.md` | `/db`, forked into `db-analyst` — inspect the project's database: discover the engine and connection, run a query or describe a schema. Read-only by default. |
+| `skills/logs/SKILL.md` | `/logs`, forked into `ops-analyst` — tail and filter the current service's logs, whichever way this project produces them. |
+| `skills/docs-sync/SKILL.md` | `/docs-sync` — runs `doc-keeper` on the repository's tech docs or wiki tree, against the working diff, a range or a full audit. |
+| `skills/code-review/SKILL.md` | `/code-review [scope] [effort] [focus]` — reviews the working diff and reports in chat only. |
+| `skills/retro/SKILL.md` | `/retro [session] [focus]`, forked — retrospective on a session: classifies every friction event and proposes the environment fix (an automated check first, then pointer, hook, skill, access). Proposes only. |
+| `skills/commit/SKILL.md` | `/commit` — a commit with a generated message, on the current, an existing or a new branch. Never pushes. |
+
+**Workflows** (`workflows/*.js`) are saved scripts that fan a job out over many subagents and merge
+the result; `enableWorkflows` in `settings.json` turns them on and each installs as `/<name>`. The
+validator compiles each one the way the runtime does (`meta` first, no import, no `Date.now`).
+Both exceed the `workflowSizeGuideline` of five agents on purpose, so the "Large workflow" notice
+is expected.
+
+| Workflow | Does |
+|---|---|
+| `workflows/review-large.js` | `/review-large` — `{ range, files?, intent, effort, modelB, filesPerReviewer }`: one `code-reviewer` per changed file of a diff too big for one reviewer, a second model alongside it from `high` effort up (`modelB`: the session's family, passed by the caller), one merger that applies the declared agreement rule and writes one Italian report. |
+| `workflows/audit-repos.js` | `/audit-repos` — `{ question, root?, repos? }`: the same read-only question put to every repository under a workspace root, the answers ranked by a rule declared before the fan-out; a repository that could not be read is a gap, never counted as clean. |
 
 ## Subagents
 
@@ -129,34 +144,40 @@ default to Sonnet; the caller can override.
 ## Hooks
 
 The safety net: it fires whether or not you remembered. Every hook exits 0 on any internal error —
-a broken hook must never block work — and each has a dependency-free test in `tools/`.
+a broken hook must never block work (`worktree-root.js` alone fails loudly: a silent failure would leave the session in a worktree that does not exist) — and each has a dependency-free test in `tools/`.
 
 | Hook | Event | Does |
 |---|---|---|
-| `hooks/guard-shell.js` | `PreToolUse` | One entry point for every shell guard, sharing `hooks/lib/`. Confirms before a commit or push lands on the repository's default branch, and before an action with no undo — dropping or truncating, dropping a database through the EF tool, flushing a cache, tearing down volumes, pruning, deleting a volume, queue, cloud or cluster resource — **including when it is nested inside a `docker exec`, a `sqlcmd -Q` or a pipeline**, which a permission pattern cannot see. The same words in a comment, a path, a search pattern or a dry run are ignored. |
+| `hooks/guard-shell.js` | `PreToolUse` | One entry point for every shell guard, sharing `hooks/lib/`. Confirms before a commit or push lands on the repository's default branch, and before an action with no undo — dropping or truncating, dropping a database through the EF tool, flushing a cache, tearing down volumes, pruning, deleting a volume, queue, cloud or cluster resource — **including when it is nested inside a `docker exec`, a `sqlcmd -Q` or a pipeline**, which a permission pattern cannot see. It also **asks** when an Azure DevOps write breaks the ALM contract (`lib/alm-contract.js`: a PR without `--work-items` or without squash and delete-source-branch, a work item without `--assigned-to`, `CompletedWork` written outside `worklog-push.ps1`, `az devops configure --defaults`), **denies** a raw `sqlcmd`, `psql` or `redis-cli` aimed at a non-dev host (`lib/sql-target.js`, pointing at `db-ro.ps1`), and **rewrites** a single `dotnet test`, `npm test`, `npx vitest` or non-follow `docker compose logs` through a filter that keeps the failures and the summary (`lib/output-filter.js`; `# raw` anywhere in the command opts out). The same words in a comment, a path, a search pattern or a dry run are ignored. |
 | `hooks/secret-scan.js` | `PreToolUse` | Blocks a write introducing a provider token, a cloud key, a private key block or a password-bearing connection string, naming the pattern and the line. Placeholders and variable references pass. |
 | `hooks/format-on-edit.js` | `PostToolUse` | Formats only the file just written, and does nothing where the project has no such tooling configured. Exits at once on an extension no formatter owns. |
-| `hooks/session-brief.js` | `SessionStart` | Five cached lines of orientation: branch and dirty state, last commit, upstream drift, PR, work item. No network call. |
-| `hooks/worklog-pending.js` | `SessionStart` | Names the working days with activity under a mapped workspace root but no `/worklog` audit entry — current month, or current week where it reaches back — and caches the count for the statusline clock badge. Roots come from `CLAUDE_WORKSPACE_ROOTS`; unset means silence. |
+| `hooks/session-brief.js` | `SessionStart` | Four cached lines of orientation: branch and dirty state, last commit, upstream drift, work item (from the branch name). No network call. |
+| `hooks/worklog-pending.js` | `SessionStart` | Names the working days with activity under a mapped workspace root but no `/worklog` audit entry — current month, or current week where it reaches back — and the logged days **under target** (more than an hour short of 8h on a weekday, or of the day's own value in `worklog/targets.json`), and caches the count for the statusline clock badge. Roots come from `CLAUDE_WORKSPACE_ROOTS`; unset means silence. |
 | `hooks/workspace-context.js` | `SessionStart` (`startup|resume|clear|compact`) | Turns the session cwd into one `ALM:` context line (platform, org, project or per-subfolder project, az identity, note) from local-only `~/.claude/workspaces.json` (copy `workspaces.example.json`), and pins the Azure CLI identity by exporting `AZURE_CONFIG_DIR` (and `AZ_IDENTITY`, for PowerShell) through `CLAUDE_ENV_FILE`, so two sessions on different orgs never flip each other's default. A map with no matching root prints `ALM: non mappato`; no map, no output. Fires again after `/compact`. |
 | `hooks/ensure-edge-cdp.ps1` | `PreToolUse` | Before a `browser-use` tool call, makes sure Edge is running with its CDP port open, starting it if needed. Never blocks. |
+| `hooks/context-nudge.js` | `UserPromptSubmit` | One line into the turn when the context first crosses 50, 70 and 85 %, once per band per session. The number is the harness's own: `statusline.js` writes it to `~/.claude/.cache/context-<session>.json` on every render and the hook only reads it. With auto-compaction off, nothing else says the window is filling. |
+| `hooks/done-claim.js` | `Stop` | Opt-in (`CLAUDE_DONE_CLAIM=1`). A turn that edited files and ends claiming success — "fatto", "fixed", "passing" — without a command, a quoted output line or an honest "non verificato" is sent back once to show the evidence. A regex over the final message, no tokens; each trigger is logged in `~/.claude/.cache/done-claim.log` so false positives can be counted. |
+| `hooks/worktree-root.js` | `WorktreeCreate`, `WorktreeRemove` | Puts the harness's own worktrees (`EnterWorktree`, an agent with `isolation: "worktree"`) under `CLAUDE_WORKTREE_ROOT` as `<root>/<repo>-<name>` instead of inside the checkout, away from the Windows path limit; removal refuses a dirty tree and never deletes the branch. Root unset: the native layout. |
 
 ## Configuration and tooling
 
 | Path | Purpose |
 |---|---|
-| `CLAUDE.md` | User instructions, kept under 2.7 KB because every turn pays for them: the route table, the gate, CLI before MCP, delegation, writing, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here. |
+| `CLAUDE.md` | User instructions, kept under 3 KB because every turn pays for them: the route table, the standing rules, how to write for the reader, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here; the ALM rules that a missing flag breaks are enforced by `lib/alm-contract.js`. |
 | `rules/*.md` | Path-scoped facts per stack (C#, tests, EF migrations, TypeScript, Angular, React, SQL, pipelines, docker, kit assets): each loads only when a matching file is read or edited, `paths` as one comma-separated string, 25 lines at most, pointing at the skill that owns the procedure. |
+| `output-styles/owner-80-20.md` | Output style for a senior developer who reads fast: decision first in one bold line, the shortest shape that fits, every item of a multi-ask answered in order, stable `#n` numbering, no narration between tools, ask only before the irreversible. Replaces the built-in `Concise`; select it with `"outputStyle": "owner-80-20"` in `settings.json` (a personal choice, not set by the template). |
 | `tools/instructions-log.js` | Dev-only `InstructionsLoaded` hook, wired in the repo's own `.claude/settings.local.json`: logs which instruction file loaded and why, to confirm a `paths` rule fires. |
-| `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, enabled plugins, status line, UI preferences. |
-| `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, rate limits with weekly pacing, session cost, model, effort, PR badge, the unlogged-hours clock badge, vim mode. Names and branch are hyperlinks. |
-| `scripts/sql-ro.ps1` | Read-only SQL Server access to non-dev hosts through go-sqlcmd: targets from local-only `~/.claude/db-targets.json`, the secret travels in `SQLCMDPASSWORD` for that process only, a fail-closed permission probe runs first (exit 3 on any write grant) and sqlcmd commands in the SQL are rejected. `hooks/lib/sql-target.js` denies a raw `sqlcmd`, `bcp` or `SqlPackage` at a non-dev host and points here. |
+| `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, workflows (`enableWorkflows`, `workflowSizeGuideline`, `workflowKeywordTriggerEnabled`), the one allow rule for `db-ro.ps1`, `bashOutputMaxChars` (how many characters of one shell result reach the context), enabled plugins, status line, UI preferences. |
+| `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, a cache-cold badge, rate limits with weekly pacing, session cost, model, effort, the unlogged-hours clock badge (also for under-target days), vim mode. Names and branch are hyperlinks. Each render writes the context snapshot `context-nudge.js` reads, under `~/.claude/.cache/`. |
+| `scripts/db-ro.ps1` | Read-only access to non-dev databases — SQL Server (go-sqlcmd), PostgreSQL (`psql`), Redis (`redis-cli`): targets from local-only `~/.claude/db-targets.json` (copy `db-targets.example.json`); the client runs native, else in WSL, else through docker (`sqlcmd`: native only); the secret travels in the client's own environment variable for that process only (`WSLENV` forwards it into WSL and is restored afterwards); a fail-closed permission probe runs first (`-Probe` runs it alone; exit 3 on any write grant) and write commands in the query are rejected. `hooks/lib/sql-target.js` denies a raw client at a non-dev host and points here. |
+| `db-targets.example.json` | Shape of the local-only `~/.claude/db-targets.json` read by `db-ro.ps1`: workspace root → environment → engine, server, credential reference (`env:NAME` or `envfile:<path>#KEY`), the allowed databases. Placeholders only. |
+| `workflows/*.js` | Saved workflows, see above; installed to `~/.claude/workflows/`. |
 | `workspaces.example.json` | Shape of the local-only `~/.claude/workspaces.json` read by `hooks/workspace-context.js`: workspace root → platform, org, project (or a subfolder → project map), az identity, account, note. Placeholders only. |
 | `install.ps1` | Idempotent install into the Claude config directory, plus `-Check` (drift and environment report, exit 1 on problems) and `-Pull` (import live edits back into the repo, whole skill folders included). |
-| `tools/validate.mjs` | Dependency-free CI checks: JSON, front matter, cross-references, machine paths and secrets, the line caps, the body skeleton, reference reachability, pinned versions, declared command limits. |
-| `tools/guard-shell.test.mjs` | One test file per hook entry point — this one plus four siblings — covering the true positives and, the part that matters, the false positives. |
-| `evals/skill-triggering.md` | A `MUST` / `MUST NOT` case per skill and command. The `MUST NOT` rows are the borders between neighbouring assets. |
-| `mcp/servers.example.json` | The MCP servers the skills fall back to, as a mergeable JSON block. Not installed by copying — see below. |
+| `tools/validate.mjs` | Dependency-free CI checks: JSON, front matter, cross-references, machine paths and secrets, the line caps (SKILL.md 120), the body skeleton and contract line, the 25-word `Use when` description, explicit-trigger skills locked with `disable-model-invocation`, reference reachability, pinned versions, the agents' contract and output sections, `memory` only with a write tool, no `commands/` folder, and each saved workflow compiled as the runtime does. |
+| `tools/*.test.mjs` | One dependency-free `node:test` file per hook entry point or library (`guard-shell`, `secret-scan`, `format-on-edit`, `session-brief`, `worklog-pending`, `workspace-context`, `worktree-root`, `context-nudge`, `done-claim`, `output-filter`, `alm-contract`, `sql-target`, the worklog scripts), covering the true positives and, the part that matters, the false positives. |
+| `evals/skill-triggering.md` | A `MUST` / `MUST NOT` case per skill, and `/name` for every user-invoked one. The `MUST NOT` rows are the borders between neighbouring assets. |
+| `mcp/servers.example.json` | The Azure DevOps MCP server the skills fall back to, as a mergeable JSON block, and the note on how the `ops-analyst` Grafana servers are wired. Not installed by copying — see below. |
 | `docs/specs/` | The design specs the kit was built from, including the asset contract every asset obeys. |
 
 ## What the kit deliberately does not cover
@@ -181,9 +202,9 @@ Installed plugins already own these, so no asset restates them — they route to
 - **Microsoft Edge** with remote debugging allowed (`edge://inspect`) — only for the `browser-use` plugin, which attaches to Edge's CDP port rather than launching a browser.
 - A **Nerd Font** in the terminal — the status line draws its badges with Nerd Font glyphs; without one you get replacement boxes.
 - **`az` with the `azure-devops` extension** (`az extension add --name azure-devops`) — the whole ALM pillar depends on the extension specifically. **`gh`**, authenticated, for GitHub repositories.
-- **`dotnet`** with the EF tool, **`docker`**, **`sqlcmd`**. The diagnostics skill installs the .NET diagnostic tools on demand.
+- **`dotnet`** with the EF tool, **`docker`**, and **`sqlcmd`** (go-sqlcmd: `db-ro.ps1` runs it native only). The diagnostics skill installs the .NET diagnostic tools on demand.
 - **Language servers** on `PATH`: `dotnet tool install -g csharp-ls` and `npm i -g typescript typescript-language-server`.
-- **`psql` and `redis-cli` are deliberately not required**: every client recipe runs through a container.
+- **`psql` and `redis-cli` are optional**: native, installed in WSL, or run through a container, in that order (`db-ro.ps1` picks the route, preferring an image already present locally over its default `postgres` / `redis` one). `install.ps1 -Check` reports which route each will take.
 - `settings.json` and the hooks are Windows and PowerShell oriented; adjust for macOS or Linux.
 
 ## Installation
@@ -195,12 +216,15 @@ Installed plugins already own these, so no asset restates them — they route to
 ```
 
 The installer discovers what the repo contains rather than working from a list, so a new asset needs
-no change here. It asks before overwriting `CLAUDE.md` or `settings.json` (`-Force` skips the
+no change here. It copies but never deletes on its own: it **detects and offers to remove** what the kit no
+longer ships and the live config still carries — a `commands/*.md` that now shadows a skill of the same
+name, and retired assets (`dev-loop`, `done-check`, `redis-dotnet`, `test-writer`, `az-identity.js`,
+`sql-ro.ps1`) — asking for each. It asks before overwriting `CLAUDE.md` or `settings.json` (`-Force` skips the
 prompt). Some settings are personal choices worth reviewing first: `"language": "Italian"`;
 `model` / `effortLevel` / `alwaysThinkingEnabled` / `advisorModel`, which pick a capability *and* a
 cost profile; `voice`, `remoteControlAtStartup` and the push notifications; and
 `autoCompactEnabled: false` — auto-compaction is off on purpose, with the threshold kept at 70% for
-whoever turns it back on.
+whoever turns it back on; and the keys of the v3 features — `enableWorkflows`, `workflowSizeGuideline` and `workflowKeywordTriggerEnabled: false` (the saved workflows run when typed by name, not when a prompt merely says "workflow"), `bashOutputMaxChars`, and `CLAUDE_DONE_CLAIM` / `CLAUDE_WORKTREE_ROOT` under `env`, both empty in the template (the completion gate and the short worktree root are opt-in).
 
 Then restart Claude Code. `-Check` reports anything that exists only in the live config, which is
 the state where a retired skill keeps firing next to its replacement.
@@ -255,15 +279,14 @@ claude mcp add --scope user azdo-<org-alias> -- npx -y @azure-devops/mcp <your-o
 One Azure DevOps entry per organization; the skills discover the server at runtime and match the
 organization from the git remote, so any naming scheme works.
 
-Observability and database servers are **per project**, not per user: they point at one client's
-Grafana or database, so they are registered `--scope local` from inside that project's folder. The
-`grafana-*`, `sql-*` and `pg-*` entries in `mcp/servers.example.json` are templates for that — fill
-the placeholders, keep credentials in environment variables, and grant the database ones only to
-`db-analyst`'s read-only tools.
-
-```powershell
-claude mcp add --scope local grafana-<env> -e GRAFANA_URL=<url> -e GRAFANA_SERVICE_ACCOUNT_TOKEN=<token> -- <grafana-mcp-command>
-```
+There is no database MCP server: database access is the CLI (`scripts/db-ro.ps1`, above), so the
+credential never enters a tool call and the hook can see the command. **Grafana** is defined inline in
+`agents/ops-analyst.md` as two HTTP servers (`grafana-staging`, `grafana-prod`) that exist only inside
+that agent and never reach the main conversation. They are not registered with `claude mcp add`: run
+the Grafana MCP server in HTTP mode for each environment — its own `GRAFANA_URL` and service-account
+token live in *that* process's environment, never in the kit — and point the agent at it with
+`GRAFANA_STAGING_MCP_URL` / `GRAFANA_PROD_MCP_URL` (defaults `http://localhost:8000/mcp` and
+`http://localhost:8001/mcp`).
 
 **CLI first.** A skill reaches for an MCP server only for what the CLI does not have: reading a work
 item discussion, attachments, PR comment threads, run logs, full-text search, and a project's work
@@ -277,6 +300,10 @@ item types and states. `azdo-cli` lists each one with the reason.
 | `CLAUDE_WORKSPACE_ROOTS` | `hooks/worklog-pending.js` | The workspace roots whose work is billable, `;`-separated — the same roots as `workspaces.json`. Set in `settings.json` → `env`, empty in the template: **empty means the reminder never fires**. |
 | `CLAUDE_WORKSPACE_NESTED` | `hooks/worklog-pending.js` | Folders under a root whose project is the subfolder below them (the per-subfolder shape of the mapping), `;`-separated, so the reminder labels `<root>/<project>`. Optional. |
 | `CLAUDE_WORKTREE_ROOT` | `branch-flow` (worktrees) | A short root for every worktree (`<root>/<repo>-<topic>`), keeping deep repos under the Windows path limit. Empty in the template: worktrees go beside the repo. |
+| `CLAUDE_DONE_CLAIM` | `hooks/done-claim.js` | `1` turns the completion gate on: a turn that edited files and claims success without evidence is sent back once. Empty in the template (opt-in). |
+| `GRAFANA_STAGING_MCP_URL`, `GRAFANA_PROD_MCP_URL` | `agents/ops-analyst.md` | The URL of the Grafana MCP server (HTTP mode) per environment; defaults `http://localhost:8000/mcp` and `:8001`. Optional. |
+| `WSLENV` | `scripts/db-ro.ps1` | Not set by you: the script appends the credential variable to it for the one WSL client process and restores it afterwards. Listed because the script reads and writes it. |
+| `CLAUDE_CONFIG_DIR` | the hooks, `statusline.js` | Claude Code's own variable; the caches and logs follow a relocated config directory. Rarely set. |
 | `COLUMNS` | `statusline.js` | Terminal width for the context bar; falls back to a sane default when unset. |
 | `USERPROFILE`, `LOCALAPPDATA` | the PowerShell scripts | Standard Windows variables, listed so the dependency is explicit. |
 

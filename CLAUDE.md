@@ -24,10 +24,14 @@
    `/security-review` only when I name it.
 
 ## Write for me
-80/20 everywhere: reading time is my bottleneck.
-- Tables, decision trees, numbered rules; no preamble, no restating.
-- One bold summary sentence, then bullets or a table; depth only in a `> **Dettaglio**` block
-  below, or in a reference loaded on demand.
+80/20: reading time is my bottleneck. Decision first.
+- Line 1, bold, <=140 chars: the result, and the one thing I must decide or confirm (if any).
+  No "procedo?" on a reversible step.
+- Then the shortest shape that fits: 1-3 sentences; a table when >=3 rows x >=2 real columns;
+  or numbered items. Depth only in `> **Dettaglio**` or a reference loaded on demand. No emoji.
+- Several asks in one message: answer each, in order, numbered; keep my `#n` stable. Number
+  options too (`#2` answers).
+- A yes/no question: yes or no, then one line of evidence.
 
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor,

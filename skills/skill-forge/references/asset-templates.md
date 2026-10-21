@@ -176,6 +176,6 @@ Registration lives in `settings.json` (`update-config`).
 | 9 | CLI before MCP | fallback stated |
 | 10 | Every reference reachable | a `## References` line with its condition |
 | 11 | Limits | anything that writes, posts or deletes says what it never does |
-| 12 | Validator and tests | `node tools/validate.mjs`; `node --test tools/*.test.mjs` |
+| 12 | Validator and tests | `node tools/validate.mjs`; `node --test tools/*.test.mjs`; every new check seen failing once on a bad input |
 | 13 | Eval section and README row | added |
 | 14 | No shadowing | no project skill with the same name in the workspaces it serves |

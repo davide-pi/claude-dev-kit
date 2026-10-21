@@ -1,9 +1,9 @@
 /**
- * SessionStart hook: at most five lines saying where the work stands.
+ * SessionStart hook: at most four lines saying where the work stands.
  *
  * The first question of every session is the same one — which branch am I on, is the tree dirty,
  * what did I last commit, am I in step with the remote, what is this branch for — and answering it
- * costs a handful of tool calls and a chunk of context every time. Five lines of orientation,
+ * costs a handful of tool calls and a chunk of context every time. Four lines of orientation,
  * injected once, replace them.
  *
  * The whole design is about not being felt at session start:
@@ -20,12 +20,9 @@
  *   4. No network, ever. Nothing here reaches a remote, so a session on a train starts as fast as
  *      one in the office.
  *
- * That last rule is why the "open PR for this branch" line is not computed: it can only come from
- * the host, and the cheapest honest lookup is still a network round trip. Instead the brief prints
- * it when something else has left it in the cache under `pr` — the documented slot for the ALM
- * commands, which already talk to the host and can afford to. Until then the line is simply
- * absent, which is the rule for every fact here: a line that cannot be determined is not printed,
- * and nothing is ever guessed.
+ * That last rule is why there is no "open PR for this branch" line: it can only come from the host,
+ * and the cheapest honest lookup is still a network round trip. A line that cannot be determined
+ * offline is not printed, which is the rule for every fact here: nothing is ever guessed.
  *
  * The work item is derived offline, from the branch name, because that is where the convention
  * puts it.
@@ -54,7 +51,7 @@ const CACHE = path.join(CONFIG_DIR, '.session-brief-cache.json');
 const TTL_MS = 3 * 60 * 1000;
 /** A brief nobody waited for is worth more than a complete one. */
 const STATUS_TIMEOUT_MS = 1500;
-const MAX_LINES = 5;
+const MAX_LINES = 4;
 
 /** Print nothing and get out of the way. */
 function silent() {
@@ -232,7 +229,7 @@ function workItemOf(branch) {
   return m ? m[1] : null;
 }
 
-function buildLines(found, cached) {
+function buildLines(found) {
   const { gitDir, root } = found;
 
   const branch = currentBranch(gitDir);
@@ -272,13 +269,7 @@ function buildLines(found, cached) {
     lines.push('no upstream configured — a push needs an explicit remote and branch');
   }
 
-  // 4. An open PR, only if something that can afford the lookup left it in the cache.
-  if (cached?.pr?.number) {
-    const title = cached.pr.title ? ` ${cached.pr.title}` : '';
-    lines.push(`open PR !${cached.pr.number}${title}`);
-  }
-
-  // 5. What this branch is for.
+  // 4. What this branch is for.
   const item = workItemOf(branch);
   if (item) lines.push(`work item #${item} (from the branch name)`);
 
@@ -320,8 +311,8 @@ try {
     emit(entry.lines);
   }
 
-  const lines = buildLines(found, entry);
-  cache[key] = { at: Date.now(), lines, pr: entry?.pr ?? null };
+  const lines = buildLines(found);
+  cache[key] = { at: Date.now(), lines };
   writeCache(cache);
   emit(lines);
 } catch {

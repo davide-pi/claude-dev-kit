@@ -14,14 +14,18 @@
 
   Every asset is user-level. The kit is opinionated on technique and anonymous only on identity
   (Azure DevOps org and project names, absolute machine paths, e-mail addresses), so nothing is
-  project-scoped any more: agents/, commands/, hooks/ and skills/ are installed whole, plus the
-  root-level CLAUDE.md, settings.json and statusline.js. rules/, workflows/ and scripts/ are
+  project-scoped any more: agents/, hooks/ and skills/ are installed whole, plus the root-level
+  CLAUDE.md, settings.json and statusline.js. rules/, workflows/, scripts/ and output-styles/ are
   installed the same way.
 
   Assets are discovered, never listed: whatever the repo contains under those directories is
   an asset, recursively, so a new skill folder with its references and scripts needs no edit here.
   The exceptions are the local-only files (my-voice, workspaces.json, db-targets.json…): they live
   in the live config only, -Check reports them as expected and -Pull never imports them.
+
+  Installing copies and never deletes on its own. What the kit retired (see $Retired: killed skills,
+  a hook, a script, and any commands/<name>.md that a skill of the same name replaced) is detected:
+  -Check reports it, a plain install asks before moving it to the backup folder.
 
 .EXAMPLE
   .\install.ps1 -Check
@@ -31,7 +35,8 @@
 param(
     [switch]$Check,
     [switch]$Pull,
-    # Skip the confirmation prompt when overwriting CLAUDE.md / settings.json.
+    # Skip the confirmation prompt when overwriting CLAUDE.md / settings.json and when moving a
+    # retired asset to the backup folder.
     [switch]$Force,
     [string]$ClaudeHome = (Join-Path $env:USERPROFILE '.claude')
 )
@@ -57,13 +62,14 @@ if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
 
 # The directories Claude Code loads assets from. Discovery recurses into them, so a new skill
 # folder, hook, agent or reference file is picked up without touching this file.
-$AssetDirs = @('agents', 'commands', 'hooks', 'rules', 'scripts', 'skills', 'workflows')
+$AssetDirs = @('agents', 'hooks', 'output-styles', 'rules', 'scripts', 'skills', 'workflows')
 
 # Repo-only root files: they configure the repo itself, not Claude Code. Every other file at the
 # root is a user-level asset, so a new repo-only file at the root belongs in this list.
-# workspaces.example.json is the template of the local-only workspaces.json, not an asset itself.
+# workspaces.example.json and db-targets.example.json are the templates of the local-only
+# workspaces.json and db-targets.json, not assets themselves.
 $RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json',
-              'workspaces.example.json')
+              'workspaces.example.json', 'db-targets.example.json')
 
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
@@ -73,6 +79,15 @@ $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 # machine data (workspaces.json, db-targets.json). Neither side owns them as an asset: -Pull never
 # imports them, install never writes them, and -Check reports them as expected.
 $LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json')
+
+# Assets the kit used to ship and no longer does, relative to the config root, file or folder. Install
+# copies but never deletes, so on a machine that had an older kit they linger: a retired skill keeps
+# firing next to its replacement, a retired hook stays wired. -Pull never imports them, -Check lists
+# them, and a plain install moves them to the run's backup folder after asking. Commands are not
+# listed: every live commands/<name>.md that a skill of the same name replaced is found by name.
+$Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
+             'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
+             'hooks/az-identity.js', 'scripts/sql-ro.ps1')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -91,6 +106,11 @@ function Test-Ignorable([string]$Name) {
 
 function Test-LocalOnly([string]$Relative) {
     foreach ($entry in $LocalOnly) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
+    return $false
+}
+
+function Test-Retired([string]$Relative) {
+    foreach ($entry in $Retired) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
     return $false
 }
 
@@ -117,8 +137,9 @@ function Get-KitAssets {
 
 function Get-InstalledAssets {
     # The live config, from the asset directories only: its root holds runtime state (session
-    # history, credentials, local settings) that the repo must never adopt.
-    @(Get-DirAssets $ClaudeHome) | Sort-Object -Unique
+    # history, credentials, local settings) that the repo must never adopt. Retired assets are left
+    # out too: they have a section of their own, and pulling one back would revive it.
+    @(Get-DirAssets $ClaudeHome | Where-Object { -not (Test-Retired $_) }) | Sort-Object -Unique
 }
 
 function Get-NormalizedHash([string]$Path) {
@@ -134,7 +155,7 @@ function Copy-Asset([string]$Relative, [string]$From, [string]$To) {
     $target = Join-Path $To $Relative.Replace('/', '\')
     $parent = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-    # Anything already in the live config is someone's work — `commands/commit.md` is a likely
+    # Anything already in the live config is someone's work — `skills/commit/SKILL.md` is a likely
     # collision — so keep a copy before overwriting. Copies go to one folder per run under
     # backups\, never next to the asset: a .bak beside a skill is loaded, listed and diffed as if it
     # were one, and seventy of them is how the live config became unreadable. Pulling into the repo
@@ -240,19 +261,65 @@ function Test-Toolchain {
     Test-DbClients
 }
 
+function Get-DbClientImages {
+    # The docker route's default images are scripts/db-ro.ps1's $DefaultImages: read them from there so
+    # the two cannot drift. A script that no longer carries the line falls back to the known pair.
+    $images = @{ 'psql' = 'postgres:17'; 'redis-cli' = 'redis:7' }
+    $dbRo = Join-Path $RepoRoot 'scripts\db-ro.ps1'
+    if (Test-Path -LiteralPath $dbRo) {
+        $line = Select-String -LiteralPath $dbRo -Pattern '^\$DefaultImages\s*=\s*@\{(.+)\}' | Select-Object -First 1
+        if ($line) {
+            foreach ($m in [regex]::Matches($line.Matches[0].Groups[1].Value, "'([\w-]+)'\s*=\s*'([^']+)'")) {
+                $images[$m.Groups[1].Value] = $m.Groups[2].Value
+            }
+        }
+    }
+    return $images
+}
+
+function Test-InWsl([string]$Name) {
+    # `wsl` exists on a machine with no distribution installed, and then `which` fails: that is "no".
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & wsl -e which $Name *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+    finally { $ErrorActionPreference = $previous }
+}
+
+function Get-LocalImage([string]$Repository) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        return (& docker image ls $Repository --format '{{.Repository}}:{{.Tag}}' 2>$null |
+            Where-Object { $_ -and $_ -notmatch '<none>' } | Select-Object -First 1)
+    } catch { return $null }
+    finally { $ErrorActionPreference = $previous }
+}
+
 function Test-DbClients {
-    # scripts/db-ro.ps1 drives these three clients. Each one is native, reachable through docker,
-    # or missing — and none of the three is a problem: the database commands pick the route
-    # themselves, so this is information about which route they will take.
+    # scripts/db-ro.ps1 drives three clients. psql and redis-cli run native, else in WSL, else through
+    # docker (an image already pulled, else its default); go-sqlcmd is native only. None of the three is
+    # a problem here: this says which route the database skill will take.
     $docker = [bool](Get-Command docker -ErrorAction SilentlyContinue)
+    $wsl = [bool](Get-Command wsl -CommandType Application -ErrorAction SilentlyContinue)
+    $images = Get-DbClientImages
+
+    if (Get-Command sqlcmd -ErrorAction SilentlyContinue) { Write-Ok 'sqlcmd (native)' }
+    else { Write-Info 'sqlcmd not installed — SQL Server targets of db-ro.ps1 need it, native only: winget install Microsoft.Sqlcmd' }
+
     foreach ($client in @(
-            @{ Name = 'sqlcmd';    Image = 'mcr.microsoft.com/mssql-tools'; Install = 'winget install Microsoft.Sqlcmd' }
-            @{ Name = 'psql';      Image = 'postgres:17';                   Install = 'scoop install postgresql' }
-            @{ Name = 'redis-cli'; Image = 'redis:7';                       Install = 'docker, or WSL: apt install redis-tools' }
+            @{ Name = 'psql';      Install = 'scoop install postgresql' }
+            @{ Name = 'redis-cli'; Install = 'WSL: apt install redis-tools' }
         )) {
-        if (Get-Command $client.Name -ErrorAction SilentlyContinue) { Write-Ok "$($client.Name) (native)" }
-        elseif ($docker) { Write-Info "$($client.Name) not installed — via docker: docker run --rm -i $($client.Image) $($client.Name)" }
-        else { Write-Info "$($client.Name) missing, and no docker to fall back on — install: $($client.Install)" }
+        $name = $client.Name
+        if (Get-Command $name -ErrorAction SilentlyContinue) { Write-Ok "$name (native)"; continue }
+        if ($wsl -and (Test-InWsl $name)) { Write-Ok "$name (WSL)"; continue }
+        if ($docker) {
+            $local = Get-LocalImage ($images[$name].Split(':')[0])
+            if ($local) { Write-Info "$name not installed — via docker, image $local (already pulled)" }
+            else { Write-Info "$name not installed — via docker, image $($images[$name]) (pulled on first use)" }
+            continue
+        }
+        Write-Info "$name missing, and no WSL or docker to fall back on — install: $($client.Install)"
     }
 }
 
@@ -461,6 +528,52 @@ function Test-InstalledOnlyAssets {
     }
 }
 
+function Get-RetiredInstalled {
+    # Retired assets still in the live config, as config-relative paths (a file or a whole folder).
+    $found = foreach ($entry in $Retired) {
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome $entry.Replace('/', '\'))) { $entry }
+    }
+    # Commands became skills. A live commands/<name>.md whose name the repo now ships as a skill is two
+    # assets for one name; any other command there is the user's own and is none of the kit's business.
+    $commands = Join-Path $ClaudeHome 'commands'
+    $shadowing = if (Test-Path -LiteralPath $commands) {
+        foreach ($file in Get-ChildItem -LiteralPath $commands -Filter '*.md' -File -ErrorAction SilentlyContinue) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (Test-Path -LiteralPath (Join-Path $RepoRoot "skills\$name")) { "commands/$($file.Name)" }
+        }
+    }
+    return @($found) + @($shadowing)
+}
+
+function Test-RetiredAssets {
+    # Install copies and never deletes, so the retired ones have to be named. -Check reports each; a plain
+    # install moves it to the run's backup folder after asking (-Force skips the question, a host that
+    # cannot prompt keeps everything). A retired hook may still be wired in a settings.json you kept:
+    # Test-Hooks reports that separately.
+    Write-Section 'Retired assets (the kit no longer ships them)'
+    $retired = @(Get-RetiredInstalled | Where-Object { $_ })
+    if (-not $retired) { Write-Ok 'none in the live config'; return }
+
+    foreach ($rel in $retired) {
+        if ($Pull) { Write-Info "$rel is retired and still in the live config — not pulled"; continue }
+        if ($Check) { Write-Problem "$rel is retired but still in the live config — run .\install.ps1 to remove it"; continue }
+        if (-not $Force) {
+            try {
+                $answer = Read-Host "  $rel was retired by the kit. Move it to the backup folder? [y/N]"
+            } catch {
+                Write-Info "$rel is retired, and this host cannot prompt — kept (pass -Force to remove)"
+                continue
+            }
+            if ($answer -notmatch '^(y|yes)$') { Write-Info "$rel kept"; continue }
+        }
+        $source = Join-Path $ClaudeHome $rel.Replace('/', '\')
+        $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\$($rel.Replace('/', '\'))"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Move-Item -LiteralPath $source -Destination $backup -Force
+        Write-Change "$rel retired (moved to backups\kit-install-$script:RunStamp)"
+    }
+}
+
 function Test-LocalOnlyAssets {
     # Local-only paths are expected in the live config and never a finding there. The reverse is:
     # one that has reached the repo carries identity or machine data into a shared kit.
@@ -485,6 +598,7 @@ if (-not (Test-Path -LiteralPath $ClaudeHome)) {
 
 Sync-Assets
 Test-InstalledOnlyAssets
+Test-RetiredAssets
 if ($Check) { Test-LocalOnlyAssets }
 Test-Environment
 Test-LanguageServers
@@ -505,6 +619,6 @@ if ($Pull) {
     exit 0
 }
 
-Write-Host '  done — restart Claude Code so it picks up agents, commands, skills and settings.' -ForegroundColor Green
+Write-Host '  done — restart Claude Code so it picks up agents, skills, workflows and settings.' -ForegroundColor Green
 if ($script:Problems -gt 0) { Write-Host "  $($script:Problems) environment item(s) still need attention (see ISSUE above)" -ForegroundColor Yellow }
 exit 0

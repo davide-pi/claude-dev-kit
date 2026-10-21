@@ -1,8 +1,8 @@
 ---
 name: grill-me
 description: >-
-  Use when the user types /grill-me to have a plan or design attacked round by round until a
-  Decision Summary.
+  Use when a plan or design must be attacked, not built: "grill me", "fammi le pulci", "poke holes",
+  "attack this design", /grill-me.
 argument-hint: "[the plan or design, or nothing to use the one under discussion]"
 ---
 
@@ -13,7 +13,8 @@ builds nothing, acts on nothing before the summary is confirmed · Italian; code
 
 ## When
 
-- The user types `/grill-me`: scrutiny, not execution — "poke holes", "red-team", "devil's advocate".
+- The user asks for scrutiny, not execution: `/grill-me`, "grill me", "fammi le pulci", "poke holes", "red-team",
+  "attack this design", "devil's advocate".
 - A design is on the table and the question is whether it holds.
 
 Not for: designing the solution yourself, writing the plan (`plan-work`), a bug (`debug-systematic`).

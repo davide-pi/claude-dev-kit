@@ -3,6 +3,7 @@ name: angular
 description: >-
   Use when Angular code changes or breaks: `*.component.ts`, `*.module.ts`, `angular.json`, specs; a
   view not updating, a leaking subscription, a double request, TestBed failing.
+paths: "**/angular.json,**/*.component.ts,**/*.component.html,**/*.module.ts"
 ---
 
 # angular — the era decides the idiom
@@ -18,7 +19,7 @@ never mixes store and signal state in one app · code English, explanations Ital
 
 Not for: AngularJS (`.module('app', [...])`, `$scope`, no `angular.json`) — keep it running, port
 features out, never modernise it; visual design, web-platform APIs and browser debugging → the
-`frontend-design`, `modern-web-guidance` and `chrome-devtools-mcp` plugins.
+`frontend-design` and `modern-web-guidance` plugins, and driving the page itself → `browser-use`.
 
 Facts also in `rules/angular.md` and `rules/typescript.md`, loaded when such a file is touched.
 

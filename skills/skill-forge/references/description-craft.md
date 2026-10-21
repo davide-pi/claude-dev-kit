@@ -41,12 +41,13 @@ Use when the user types /<name> [args] to <what one invocation does>.
 
 Any skill that posts, writes, logs or changes State is user-invoked.
 
-## `paths` as the trigger fix — not yet
+## `paths` as the trigger fix
 
-A file-type skill that never fires is the case `paths:` exists for, but on current builds a skill
-with `paths` has been reported to vanish from the listing and to never auto-load its body. Until the
-kit's smoke test passes (`tools/PATHS_OK` exists): put the file types in the description, and put the
-facts every such file needs in a `rules/*.md` with `paths` — rules load on touch reliably.
+A file-type skill that never fires is the case `paths:` exists for. The kit's smoke test showed a skill
+with `paths` is hidden from the listing until a matching file is read, then listed and loadable: it
+saves its description's tokens until then — so a skill that must be
+visible before any file is read (planning, debugging, the kit itself) carries none. Keep the file
+types in the description either way, and the facts every such file needs in a `rules/*.md`.
 
 ## Patterns that cause a false negative
 

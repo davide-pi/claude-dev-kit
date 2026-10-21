@@ -3,6 +3,7 @@ name: react
 description: >-
   Use when React code changes or breaks: `*.tsx`, `vite.config.*`, `tailwind.config.*`; a render
   loop, a double fetch, lost state, or a proposed store or query library.
+paths: "**/*.tsx,**/vite.config.*,**/tailwind.config.*"
 ---
 
 # react — state in the right place, effects almost nowhere
@@ -17,8 +18,8 @@ adds a store, query or form library under its threshold · code English, explana
 - A render loop, a double fetch, a race, state lost or not reset on navigation.
 - A library is proposed, or the Vite or Tailwind configuration changes.
 
-Not for: visual design, web-platform APIs and browser debugging → the `frontend-design`,
-`modern-web-guidance` and `chrome-devtools-mcp` plugins.
+Not for: visual design, web-platform APIs and browser debugging → the `frontend-design`
+and `modern-web-guidance` plugins, and driving the page itself → `browser-use`.
 
 Facts also in `rules/react.md` and `rules/typescript.md`, loaded when such a file is touched.
 

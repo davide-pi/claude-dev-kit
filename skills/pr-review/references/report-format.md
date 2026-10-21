@@ -42,8 +42,9 @@ reviewer per file, same ladder, one merger) and wait for the user's yes; never l
 
 ## Order and tables
 
-0. **Blocks, top to bottom**: **Rilievi** (one block per `todo`: what breaks, the scenario,
-   `file:line`, the minimal fix; `done` one line) · **Completezza** (`N punti — coperti N`, each
+0. **Blocks, top to bottom**: **Rilievi** (the findings that matter first: a full block per P1 and
+   P2 `todo` — what breaks, the scenario, `file:line`, the minimal fix; the P3s grouped under one
+   `Miglioramenti` block, one line each; `done` one line) · **Completezza** (`N punti — coperti N`, each
    partial, missing or wrong point, scope creep) · the tables · `Verdetto` naming each agent that
    ran, its model and effort, and any worker that was blocked or missing (a gap, never a pass).
 

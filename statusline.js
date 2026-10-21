@@ -111,20 +111,25 @@ function gitInfo(cwd) {
     } catch { return null; }
   }
 
-  const branch = run("rev-parse", "--abbrev-ref", "HEAD");
+  // One `status -b` call gives the branch (its `##` header) and the dirty counts: a separate
+  // `rev-parse --abbrev-ref HEAD` used to cost a second process on every render.
+  const out = run("status", "--porcelain", "-b");
+  if (!out) return null;
+  const lines = out.split("\n");
+  // `main...origin/main [ahead 1]` · `main` · `HEAD (no branch)` · `No commits yet on main`
+  const header = lines[0].startsWith("## ") ? lines.shift().slice(3) : "";
+  const branch = header.replace(/^(?:No commits yet|Initial commit) on /, "")
+    .split("...")[0].replace(/ \(no branch\)$/, "").trim();
   if (!branch) return null;
   const remote = run("remote", "get-url", "origin");
 
   let staged = 0, modified = 0, untracked = 0;
-  const out = run("status", "--porcelain");
-  if (out) {
-    for (const line of out.split("\n")) {
-      if (line.length < 2) continue;
-      const x = line[0], y = line[1];
-      if (x !== " " && x !== "?") staged++;
-      if (y !== " " && y !== "?") modified++;
-      if (line.startsWith("??")) untracked++;
-    }
+  for (const line of lines) {
+    if (line.length < 2) continue;
+    const x = line[0], y = line[1];
+    if (x !== " " && x !== "?") staged++;
+    if (y !== " " && y !== "?") modified++;
+    if (line.startsWith("??")) untracked++;
   }
   return { branch, remote, staged, modified, untracked };
 }

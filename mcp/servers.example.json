@@ -15,34 +15,6 @@
       ]
     }
   },
-  "//local": "LOCAL scope, one set per project: each points at one client's Grafana or database, so register it from inside that project's folder with `claude mcp add --scope local <name> ...` (it lands under that project's entry in ~/.claude.json). One entry per environment: <env> is prod, stg, dev. Database servers are read by the db-analyst agent through SELECT-only tools; point them at a read-only login.",
-  "localScopeMcpServers": {
-    "grafana-<env>": {
-      "type": "stdio",
-      "command": "<grafana-mcp-command>",
-      "args": [],
-      "env": {
-        "GRAFANA_URL": "<https://grafana.example.com>",
-        "GRAFANA_SERVICE_ACCOUNT_TOKEN": "<grafana-service-account-token>"
-      }
-    },
-    "sql-<env>": {
-      "type": "stdio",
-      "command": "<sql-server-mcp-command>",
-      "args": [],
-      "env": {
-        "SQL_CONNECTION_STRING": "Server=<host>;Database=<database>;User Id=<read-only-user>;Password=<password>;Encrypt=true"
-      }
-    },
-    "pg-<env>": {
-      "type": "stdio",
-      "command": "npx",
-      "args": [
-        "-y",
-        "@modelcontextprotocol/server-postgres",
-        "postgresql://<read-only-user>:<password>@<host>:5432/<database>"
-      ],
-      "env": {}
-    }
-  }
+  "//grafana": "Grafana is NOT registered here: agents/ops-analyst.md defines grafana-staging and grafana-prod inline, so the servers exist only inside that agent. Run the Grafana MCP server in HTTP mode per environment (its own Grafana URL and service-account token live in that process's environment, never in this file) and point the agent at it with GRAFANA_STAGING_MCP_URL / GRAFANA_PROD_MCP_URL (defaults http://localhost:8000/mcp and http://localhost:8001/mcp).",
+  "//databases": "There is no database MCP server: database access is the CLI, scripts/db-ro.ps1 with targets from the local-only ~/.claude/db-targets.json (copy db-targets.example.json)."
 }

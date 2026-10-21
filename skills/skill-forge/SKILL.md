@@ -49,7 +49,7 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | Skeleton | title, contract, `## When` (+ `Not for:`, ≤ 3 items), `## Decide`, `## Do`, `## Traps`, `## References` | validator |
 | Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 | validator |
 | Compaction | an invoked body re-injects capped at ~5 k tokens, cut from the bottom: `## Decide` near the top, nothing load-bearing after `## Do` | review |
-| Phrasing | the outcome, where the model already knows how; procedure only where the house way differs | review |
+| Phrasing | the outcome, where the model already knows how; procedure only where the house way differs; the body is the 20 % of paths that cover 80 % of cases, rare branches go to a reference — every section earns its tokens | review |
 | Drop | restated `CLAUDE.md` rules (language, 80/20, change scope), version numbers, Traps restating a Decide row, why-prose a row already carries | review |
 | Identity | placeholders (`<org>`, `<project>`) for org, project, address, machine path, token | validator |
 | Cross-refs | bare asset names; never a link to a file not yet committed; a hook not yet shipped is named by its bare file name | validator |
@@ -66,7 +66,7 @@ needed.
 | `context: fork` + `agent:` | runs in a subagent with **no history**: the body and the arguments only | the body restates every input it needs; `background: false` (a backgrounded fork arrives as a notification and loses `Agent`) |
 | `model:` | non-fork skill: full prompt-cache miss that turn · fork skill: the subagent's model | fork skills only |
 | `effort:` | cache-safe | when the job needs it |
-| `paths:` | limits activation to matching files; reported unreliable on skills (vanishes from the listing, body never auto-loads) | only once `tools/PATHS_OK` exists (smoke test passed); until then name the file types in the description |
+| `paths:` | hides the skill until a matching file is read, then lists it (smoke test passed) | file-type skills only; one needed before any file is read (`plan-work`, `skill-forge`) has none |
 | `argument-hint`, `allowed-tools` | autocomplete hint; pre-approved tools | user-invoked skills |
 
 Agent frontmatter (`tools`, `model`, `memory`, `maxTurns`, `omitClaudeMd`): `references/asset-templates.md`.
@@ -92,7 +92,7 @@ claude plugin validate ~/.claude/skills    # bad YAML loads with empty metadata 
 
 **Finished** = caps held · skeleton and contract line · validator clean · a section in
 `evals/skill-triggering.md` (one MUST, one MUST NOT, `/<name>` for a user-invoked skill) · a README
-asset row. Short of any one, it is not finished.
+asset row · each new test or hook seen failing once: a check never seen failing proves nothing.
 
 ## Traps
 

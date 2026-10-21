@@ -126,16 +126,15 @@ test('the brief names the branch, the last commit, the upstream and the work ite
   assert.equal(lines[3], 'work item #4211 (from the branch name)');
 });
 
-test('never more than five lines', () => {
+test('a PR left in the cache by an older version is ignored: there is no PR line', () => {
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });
-  // Seed a stale entry carrying a PR, so every one of the five lines can be produced at once.
   writeFileSync(join(cfg, '.session-brief-cache.json'), JSON.stringify({
     [join(root, '.git')]: { at: 0, lines: [], pr: { number: 128, title: 'Add the order list' } },
   }));
   const lines = run(root, cfg);
-  assert.equal(lines.length, 5);
-  assert.ok(lines.some((l) => l === 'open PR !128 Add the order list'), lines.join(' | '));
+  assert.equal(lines.length, 4);
+  assert.ok(!lines.some((l) => l.includes('open PR')), lines.join(' | '));
 });
 
 test('the last commit falls back to the reflog once the object is packed away', () => {

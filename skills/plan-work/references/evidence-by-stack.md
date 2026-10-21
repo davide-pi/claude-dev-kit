@@ -11,6 +11,9 @@ Every claim maps to output read **in this session**. Three states, and only thre
 "Should work", "looks correct" and a subagent's report are the third state. Re-run a delegated
 agent's evidence lines for anything that matters.
 
+A test, hook or check you wrote counts only after it was seen failing on the broken state: a check
+never seen failing proves nothing.
+
 ## Done per change type — applies to the whole change, not the last file
 
 | Change | Evidence | The output must show |

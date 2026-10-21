@@ -41,7 +41,7 @@ Not for: a single-file change; a bug (`debug-systematic` — the reproduction is
 | new module or integration | 6–12 | one to two pages |
 | subsystem or restructuring | 12–20, in phases | a heading per phase |
 
-Past ~20 tasks it is two plans: cut at the first shippable point.
+Past ~20 tasks it is two plans; the first slice is the 20 % of work worth 80 % of the value, the rest optional.
 
 ### 3. A verifiable task — five fields, no judgement call
 
@@ -50,7 +50,7 @@ Past ~20 tasks it is two plans: cut at the first shippable point.
 | files | exact repo-relative paths, new or edit | `src/Ordering/OrderService.cs` (edit) |
 | change | the behaviour, one sentence | "reject an order with no lines, before persisting" |
 | interface | the signature, whenever anything depends on it | `Task<Result<OrderId>> Place(PlaceOrder cmd, CancellationToken ct)` |
-| verify | one command and what its output must show | `dotnet test tests/Ordering.Tests --filter Place_EmptyLines_Rejects` → 1 passed |
+| verify | one command, seen failing once, and what its output must show | `dotnet test tests/Ordering.Tests --filter Place_EmptyLines_Rejects` → 1 passed |
 | depends on | task numbers, or `none` | `depends on: 2` |
 
 No `TBD`, no "handle errors appropriately". A field that cannot be filled is an **open question**,

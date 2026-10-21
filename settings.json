@@ -147,6 +147,7 @@
       "PowerShell(npx eslint *)",
       "PowerShell(npx prettier *)",
       "PowerShell(npx vitest*)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)",
       "Bash(az account show*)",
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
@@ -178,6 +179,7 @@
       "Bash(npx eslint *)",
       "Bash(npx prettier *)",
       "Bash(npx vitest*)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)",
       "Bash(wc *)",
       "Bash(find * -name *)"
     ],
@@ -430,6 +432,7 @@
   },
   "enableWorkflows": true,
   "workflowSizeGuideline": "small",
+  "workflowKeywordTriggerEnabled": false,
   "defaultShell": "powershell",
   "statusLine": {
     "type": "command",

@@ -138,10 +138,11 @@ try {
     const dotnet = onPath('dotnet');
     if (!dotnet) done();
 
-    // `whitespace` is the fast subset: indentation and line endings, no analyzer run, so the hook
-    // stays in the hundreds of milliseconds instead of rebuilding the project.
+    // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
+    // formats the project's directory as plain files instead of loading the project through MSBuild
+    // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
     invoke(dotnet, [
-      'format', 'whitespace', project.file, '--include', file, '--no-restore', '--verbosity', 'quiet',
+      'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
     ], project.directory);
     done();
   }

@@ -69,7 +69,7 @@ Non-negotiables in practice:
 | overlays | dialogs, menus and tooltips render outside the component tree — anything scoped by a parent selector will not reach them |
 | forms | the field wrapper expects a form control; a custom control must implement the value-accessor interface properly, including the disabled state |
 | testing | the library ships component test harnesses — use them instead of querying internal DOM classes, which change between releases |
-| accessibility | the library provides the a11y primitives; auditing the result is the `chrome-devtools-mcp` plugin's job |
+| accessibility | the library provides the a11y primitives; auditing the result in a real browser is `browser-use`'s job |
 
 ## When touching a feature in this era
 
