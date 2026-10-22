@@ -1,6 +1,6 @@
 /**
- * Stop hook (tier 1 of `done-claim`, opt-in): a turn that changed files and ends claiming success
- * without showing the evidence is sent back once to show it.
+ * Stop hook (tier 1 of `done-claim`, on in the template's settings): a turn that changed files and ends
+ * claiming success without showing the evidence is sent back once to show it.
  *
  * "Done means verified" is the standing rule most often broken in the letter: the reply says
  * "fatto" / "fixed" / "passing" and the command that would prove it is nowhere in the message. This
@@ -9,7 +9,7 @@
  * about a change made now.
  *
  * Fires when ALL hold:
- *   - `CLAUDE_DONE_CLAIM=1` (opt-in; anything else and the hook exits at once);
+ *   - `CLAUDE_DONE_CLAIM=1` (set in the kit's settings.json; anything else and the hook exits at once);
  *   - not `stop_hook_active` (it already sent the turn back once: never loop);
  *   - the turn since the last user prompt used an editing tool;
  *   - no Bash / PowerShell tool ran after the last edit: when one did, its output is already in the
@@ -18,7 +18,8 @@
  *     inline code;
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
  *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
- *     "non verificato" / "not verified".
+ *     "non verificato" / "not verified", and no `deliver` verdict block (a `Livello | Comando | Riga che
+ *     decide | Stato` table with a row of four filled cells ending `fatto` or `failed`).
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -61,6 +62,9 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit)\b)/i;
+/** The `deliver` verdict block: its header, and a row with a level, a command, a deciding line and a `fatto` / `failed` state. */
+const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/im;
+const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/im;
 
 const allow = () => process.exit(0);
 
@@ -122,6 +126,7 @@ function readTurn(entries) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
+  if (VERDICT_HEAD.test(message) && VERDICT_ROW.test(message)) return null;
   if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ');
   const found = prose.match(CLAIM);

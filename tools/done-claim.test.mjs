@@ -154,3 +154,22 @@ test('a bold "**fatto** da te" is the participle; "Fatto in due file." is a clai
   assert.equal(stop(edited('**Fatto** da te il merge, ora resta il deploy.')).reason, '');
   assert.match(stop(edited('Fatto in due file: il totale somma le righe.')).reason, /"Fatto"/);
 });
+
+const VERDICT = [
+  '| Livello | Comando | Riga che decide | Stato |',
+  '| --- | --- | --- | --- |',
+  '| unit | dotnet test Orders.Tests | Passed: 48, Failed: 0 | fatto |',
+  '| e2e | - | - | non verificato: serve staging |',
+].join('\n');
+
+test('a deliver verdict block with a filled "fatto" row is evidence → silent', () => {
+  assert.equal(stop(edited(`Fatto.\n\n${VERDICT}\nReview: giro 2, 0 P1/P2 aperti.`)).reason, '');
+  assert.equal(stop(edited(`Fatto.\n\n${VERDICT.replace('non verificato: serve staging', 'failed')}`.replace(/\n/g, '\r\n'))).reason, '');
+});
+
+test('a verdict block with no filled row, or a placeholder row, is not evidence → blocked', () => {
+  const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+  assert.match(stop(edited(`Fatto.\n\n${head}`)).reason, /"Fatto"/);
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | - | - | fatto |`)).reason, /"Fatto"/);
+  assert.match(stop(edited(`Fatto.\n\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
+});

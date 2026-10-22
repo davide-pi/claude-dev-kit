@@ -15,7 +15,7 @@
     "CLAUDE_WORKSPACE_ROOTS": "",
     "CLAUDE_WORKSPACE_NESTED": "",
     "CLAUDE_WORKTREE_ROOT": "",
-    "CLAUDE_DONE_CLAIM": "",
+    "CLAUDE_DONE_CLAIM": "1",
     "CLAUDE_NUDGE_TOKENS": ""
   },
   "bashOutputMaxChars": 15000,
