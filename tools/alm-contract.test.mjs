@@ -68,11 +68,31 @@ test('multi-line PR create (bash \\ and PowerShell backtick) keeps the later fla
   assert.equal(run(pwsh, 'PowerShell').decision, 'approve');
 });
 
-test('completing a PR without squash + delete asks; with them passes; other updates pass', () => {
-  assert.equal(run('az repos pr update --id 12 --status completed').decision, 'ask');
-  assert.equal(run('az repos pr update --id 12 --status completed --squash true --delete-source-branch true').decision, 'approve');
+test('completing a PR always asks, naming the missing flags when there are any; other updates pass', () => {
+  let r = run('az repos pr update --id 12 --status completed');
+  assert.equal(r.decision, 'ask');
+  assert.match(r.reason, /completes the PR/);
+  assert.match(r.reason, /--squash true/);
+  r = run('az repos pr update --id 12 --status completed --squash true --delete-source-branch true');
+  assert.equal(r.decision, 'ask', 'compliant flags do not make the merge itself silent');
+  assert.match(r.reason, /completes the PR/);
+  assert.doesNotMatch(r.reason, /lacks/);
+  assert.equal(run('az repos pr update --id 12 --auto-complete true').decision, 'ask');
   assert.equal(run('az repos pr update --id 12 --title "x"').decision, 'approve');
   assert.equal(run('az repos pr update --id 12 --status abandoned').decision, 'approve');
+  assert.equal(run('az repos pr update --id 12 --auto-complete false').decision, 'approve');
+});
+
+test('gh pr merge asks, in any shell and chain; the other gh pr verbs pass', () => {
+  for (const command of ['gh pr merge 12 --squash', 'gh pr merge --admin --squash --delete-branch', 'git push && gh pr merge 12']) {
+    const r = run(command);
+    assert.equal(r.decision, 'ask', command);
+    assert.match(r.reason, /merges the PR/, command);
+  }
+  assert.equal(run('gh pr merge 12', 'PowerShell').decision, 'ask');
+  for (const command of ['gh pr create --title T', 'gh pr comment 12 --body "merge when green"', 'gh pr view 12', 'echo "gh pr merge"']) {
+    assert.equal(run(command).decision, 'approve', command);
+  }
 });
 
 test('work-item create without --assigned-to asks; with it passes', () => {

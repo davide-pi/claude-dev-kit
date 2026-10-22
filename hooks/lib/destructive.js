@@ -42,7 +42,7 @@ const { splitSegments } = require('./segments');
  * `purge_queue` / `delete_queue` are listed in full because `_` is a word character, so `\bpurge\b`
  * does not match inside them — the broker CLIs would have slipped straight through the gate.
  */
-const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|down|nuke)\b/i;
+const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|down|nuke|clear|expire)\b/i;
 /** A flag cluster carrying `-D`: force-delete. Case-sensitive, because `-d` is the safe form. */
 const DANGER_FLAG = /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/;
 
@@ -277,6 +277,19 @@ const RULES = [
     ),
     reason: 'This force-deletes a branch, unmerged commits included. If the branch was never '
       + 'pushed, those commits are only in the reflog. Confirm?',
+  },
+  {
+    test: all(has(/\bgit\b/i), has(/\bstash\s+(?:drop|clear)\b/i)),
+    reason: 'This drops stashed work. A stash has no branch and no remote: once dropped, it is only '
+      + 'recoverable from an unreachable commit until git collects it. Confirm?',
+  },
+  {
+    test: all(has(/\bworktree\s+remove\b/i), has(/(?<![-\w])(?:--force|-f+)(?![\w-])/)),
+    reason: 'This force-removes a worktree, uncommitted and untracked changes included. Confirm?',
+  },
+  {
+    test: has(/\breflog\s+expire\b/i),
+    reason: 'This expires reflog entries, the only way back to commits no branch points to. Confirm?',
   },
 ];
 

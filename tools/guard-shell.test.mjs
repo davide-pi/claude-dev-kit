@@ -297,6 +297,23 @@ test('force-deleting a git branch', () => {
   asks('git branch -Dr origin/feature/spike');
 });
 
+test('local git actions with no undo: stash drop, forced worktree removal, reflog expiry', () => {
+  asks('git stash drop', /stashed work/);
+  asks('git stash drop stash@{2}');
+  asks('git stash clear');
+  asks('git -C ../wt stash drop');
+  asks('git worktree remove --force ../wt', /force-removes a worktree/);
+  asks('git worktree remove -f ../wt');
+  asks('git reflog expire --expire=now --all', /reflog/);
+  approves('git stash push -u -m "wip"');
+  approves('git stash list');
+  approves('git stash pop');
+  approves('git worktree remove ../wt');
+  approves('git worktree add ../wt feature/x');
+  approves('git reflog');
+  approves('Clear-Host');
+});
+
 test('the danger is found inside a pipeline, not only at the head of the line', () => {
   asks('dotnet build && docker compose down -v && docker compose up -d');
   asks('echo "cleaning" ; docker exec -i db sqlcmd -Q "DROP TABLE dbo.T"');
@@ -424,4 +441,33 @@ test('settings.json denies `az account set` outright in both shells', () => {
   for (const rule of ['Bash(az account set*)', 'PowerShell(az account set*)']) {
     assert.ok(settings.permissions.deny.includes(rule), rule);
   }
+});
+
+// ── The permission lists that sit beside these checks ─────────────────────────────────────────
+
+test('settings.json: deletes ask instead of deny, the unrecoverable ones stay denied', () => {
+  const { allow, deny, ask } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
+  for (const shell of ['Bash', 'PowerShell']) {
+    for (const rule of ['kubectl delete *', 'az repos delete*', 'az pipelines delete*', 'git push --delete*', 'git push -f*']) {
+      assert.ok(ask.includes(`${shell}(${rule})`), `${shell}(${rule}) asks`);
+      assert.ok(!deny.includes(`${shell}(${rule})`), `${shell}(${rule}) is not denied`);
+    }
+    for (const rule of ['az group delete*', 'git clean -f*', 'docker volume rm*', 'dotnet ef database drop*']) {
+      assert.ok(deny.includes(`${shell}(${rule})`), `${shell}(${rule}) stays denied`);
+    }
+    assert.ok(!ask.includes(`${shell}(git push*)`), 'a plain push is left to default-branch.js and the classifier');
+    assert.ok(!ask.includes(`${shell}(docker exec *)`), 'docker exec is read by sql-target.js and destructive.js');
+    assert.ok(allow.includes(`${shell}(az repos pr update*)`), 'the PR update the hook gates is allowed');
+  }
+  assert.ok(ask.includes('Bash(rm -rf *)') && ask.includes('Bash(rm -fr *)') && ask.includes('Bash(rm -r *)'));
+});
+
+test('settings.json: secret denies are absolute, and no rule carries a placeholder that would leak into the live file', () => {
+  const { permissions } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  for (const rule of ['Read(//**/.env)', 'Read(//**/*.pem)', 'Read(//**/*.pfx)', 'Read(~/.config/gh/hosts.yml)']) {
+    assert.ok(permissions.deny.includes(rule), rule);
+  }
+  assert.ok(!permissions.deny.includes('Read(**/.env.*)'), '.env.example must stay readable');
+  const placeholders = Object.values(permissions).flat().filter((r) => typeof r === 'string' && /<[^>]+>/.test(r));
+  assert.deepEqual(placeholders, []);
 });

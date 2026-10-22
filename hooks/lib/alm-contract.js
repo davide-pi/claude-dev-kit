@@ -7,7 +7,10 @@
  *
  *   - `az repos pr create` without `--work-items` (every PR links its parent backlog item) or
  *     without `--squash true` and `--delete-source-branch true` (squash + delete, set at creation);
- *   - `az repos pr update --status completed` without the same two flags (and at completion);
+ *   - `az repos pr update --status completed` (or `--auto-complete`) and `gh pr merge`: ALWAYS, because
+ *     completing a PR is the write that lands on the shared branch, and the allow list, which lets the
+ *     other `pr update` forms through, cannot tell it apart by prefix. The reason adds the squash and
+ *     delete-source-branch flags when they are missing too;
  *   - `az boards work-item create` without `--assigned-to` (every item is assigned to the user);
  *   - `az boards work-item create|update` writing `CompletedWork` outside `worklog-push.ps1`
  *     (hours are written only by /worklog, through that script);
@@ -29,10 +32,12 @@
 
 const { parseSegments } = require('./segments');
 
-/** Cheap gate: nothing below can fire without one of these. */
+/** Cheap gates: nothing below can fire without one of these. */
 const HINT = /\baz(?:\.cmd|\.exe)?\s[\s\S]*\b(?:repos|boards|devops)\b/i;
+const GH_HINT = /\bgh(?:\.exe)?\s[\s\S]*\bmerge\b/i;
 const CONTINUATION = /[\\`][ \t]*\r?\n/g;
 const AZ = /^(?:.*[\\/])?az(?:\.cmd|\.exe)?$/i;
+const GH = /^(?:.*[\\/])?gh(?:\.exe)?$/i;
 const FALSY = /^(?:false|no|off|0)$/i;
 const HOURS_SCRIPT = /worklog-push\.ps1/i;
 
@@ -79,9 +84,10 @@ function violations({ verb, flags, text }, command) {
     }
     const missing = mergeFlagsMissing(flags);
     if (missing.length) out.push(`The PR is not set to squash and delete its source branch: add ${missing.join(' and ')}.`);
-  } else if (verb === 'repos pr update' && /^completed$/i.test(flags.get('--status') ?? '')) {
+  } else if (verb === 'repos pr update' && (/^completed$/i.test(flags.get('--status') ?? '') || isOn(flags, '--auto-complete'))) {
     const missing = mergeFlagsMissing(flags);
-    if (missing.length) out.push(`Completing the PR without squash + source-branch delete: add ${missing.join(' and ')}.`);
+    out.push('This completes the PR, which lands on the shared branch.'
+      + (missing.length ? ` It also lacks ${missing.join(' and ')} (squash + source-branch delete).` : ''));
   } else if (verb === 'boards work-item create' || verb === 'boards work-item update') {
     if (verb.endsWith('create') && !hasValue(flags, '--assigned-to')) {
       out.push('The new work item has no assignee: add `--assigned-to <user>` (the identity resolved against the org).');
@@ -95,14 +101,22 @@ function violations({ verb, flags, text }, command) {
   return out;
 }
 
+/** `gh pr merge` in one segment: the merge itself is the shared-branch write. */
+function isGhPrMerge(tokens) {
+  const start = tokens.findIndex((t) => GH.test(t));
+  return start >= 0 && tokens[start + 1]?.toLowerCase() === 'pr' && tokens[start + 2]?.toLowerCase() === 'merge';
+}
+
 /** The confirmation reason when the command breaks an ALM contract, else null. */
 function checkAlmContract(command) {
-  if (!HINT.test(command)) return null;
+  const az = HINT.test(command);
+  if (!az && !GH_HINT.test(command)) return null;
   const joined = command.replace(CONTINUATION, ' ');
   const reasons = [];
   for (const tokens of parseSegments(joined)) {
-    const call = parseAzCall(tokens);
+    const call = az ? parseAzCall(tokens) : null;
     if (call) reasons.push(...violations(call, joined));
+    else if (isGhPrMerge(tokens)) reasons.push('This merges the PR, which lands on the shared branch.');
   }
   return reasons.length ? `${reasons.join('\n')}\nConfirm only if this exception is intended.` : null;
 }
