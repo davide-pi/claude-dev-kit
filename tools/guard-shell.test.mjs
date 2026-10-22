@@ -543,3 +543,36 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
   // No allow rule may start with a wildcard after -File: that would approve any script.
   assert.deepEqual(allow.filter((r) => /-File \*/.test(r)), []);
 });
+
+// ── The allowed scripts: no substitution in their arguments, no write-grant switch without a prompt ──
+
+const runTool = (tool_name, command) => runRaw(JSON.stringify({ tool_name, tool_input: { command }, cwd: onFeature }));
+const DB = 'pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1';
+const PERIMETER = 'pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1';
+
+test('an allowed script called with a command substitution asks', () => {
+  for (const command of [`${DB} -Env prod -Query "$(whoami)"`, `${PERIMETER} -Files $(cat list.txt)`, `${DB} -Env x; ${PERIMETER} -Close $(x)`]) {
+    for (const tool of ['Bash', 'PowerShell']) {
+      const { decision, reason } = runTool(tool, command);
+      assert.equal(decision, 'ask', `${tool}: ${command}`);
+      assert.match(reason, /command substitution.*Confirm\?$/, command);
+    }
+  }
+  // A backtick substitutes in Bash only; in PowerShell it is an escape.
+  assert.equal(runTool('Bash', `${DB} -Env prod -Query "\`id\`"`).decision, 'ask');
+  assert.equal(runTool('PowerShell', `${PERIMETER} -Files a\`b.cs`).decision, 'approve');
+});
+
+test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other parameters do not', () => {
+  for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', '-AcceptWriteGrant:$true', '\u2013AcceptWriteGrant', '-Acc`eptWriteGrant', '@grant']) {
+    for (const tool of ['Bash', 'PowerShell']) {
+      const { decision, reason } = runTool(tool, `${DB} -Env prod -Query "select 1" ${arg}`);
+      assert.equal(decision, 'ask', `${tool}: ${arg}`);
+      assert.match(reason, /(AcceptWriteGrant|command substitution).*Confirm\?$/, arg); // Bash reads a backtick as a substitution first
+    }
+  }
+  for (const command of [
+    `${DB} -Env prod -Db sales -Query "select 1" -MaxLines 50 -Wide`, `${DB} -Probe -Project p -Registry r.json -File q.sql`,
+    `${DB} -Env prod -Query "select count(*) from t where x = 'a-b'"`,
+  ]) assert.equal(runTool('PowerShell', command).decision, 'approve', command);
+});

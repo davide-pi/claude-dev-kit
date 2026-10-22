@@ -14,6 +14,8 @@
  *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
+ *   - lib/script-args.js    — a command substitution in the arguments of the allowed `perimeter.ps1` /
+ *                             `db-ro.ps1` calls, or `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation);
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);
@@ -45,6 +47,7 @@ const { checkSqlTarget } = require('./lib/sql-target');
 const { checkAlmContract } = require('./lib/alm-contract');
 const { checkSecretRead } = require('./lib/secret-read');
 const { checkDockerCp } = require('./lib/docker-cp');
+const { checkScriptArgs } = require('./lib/script-args');
 const { planFilter } = require('./lib/output-filter');
 const { planAzPin } = require('./lib/az-pin');
 
@@ -72,6 +75,7 @@ try {
     safely(() => checkDestructive(command)),
     safely(() => checkAlmContract(command)),
     safely(() => checkDockerCp(command, payload.cwd)),
+    safely(() => checkScriptArgs(command, payload.tool_name)),
   ].filter(Boolean);
 
   if (reasons.length) requestConfirmation(reasons.join('\n\n'));
