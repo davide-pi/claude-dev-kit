@@ -90,13 +90,12 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded), emitted as a plain markdown table, never inside a code fence:
 
-```text
 | Livello | Comando | Riga che decide | Stato |
 | --- | --- | --- | --- |
 | unit | dotnet test Orders.Tests | Passed: 48, Failed: 0 | fatto |
 | e2e | - | - | non verificato: serve staging |
+
 Review: giro 2, 0 P1/P2 aperti. Rischi residui: <elenco, o nessuno>.
-```
 
 States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with everything outside
 the perimeter (`outOfScope`, `minor`, open questions), `#` fixed for the conversation; the user picks:
