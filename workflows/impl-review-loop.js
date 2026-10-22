@@ -78,23 +78,28 @@ const isDirty = (path, dirty, root) => {
 const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '').trim()
   .split(' -> ').map(x => x.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
 
-// The identity of a finding across rounds and ids: where it is and what kind it is.
-const keyOf = (f, root) => `${rel(f.path, root)}:${f.line ?? ''}|${String(f.category ?? '').toLowerCase()}`
-
-// The same finding seen again, possibly on a shifted line or under a reworded title: same file and category,
-// a line within LINE_WINDOW and a similar title (the shorter title shares at least half its words with the other).
+// The same finding seen again, possibly on a shifted line or under a reworded title: same file and category
+// and a similar title (Jaccard >= 0.5 on the words left once IT/EN stopwords and words under 3 letters are
+// dropped). A reworded title must also sit within LINE_WINDOW lines; an identical title is the same finding
+// wherever the lines moved to.
 const LINE_WINDOW = 10
-const words = t => new Set(String(t ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3))
+const STOPWORDS = new Set(['non', 'per', 'con', 'del', 'della', 'dei', 'delle', 'nel', 'nella', 'che', 'una', 'uno', 'gli', 'dal', 'alla', 'sul',
+  'manca', 'mancano', 'senza', 'the', 'not', 'and', 'for', 'with', 'without', 'missing', 'does', 'from', 'when', 'that', 'this', 'are', 'but'])
+const words = t => new Set(String(t ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3 && !STOPWORDS.has(w)))
+const plain = t => String(t ?? '').trim().toLowerCase()
 const sameTitle = (a, b) => {
   const x = words(a), y = words(b)
-  if (!x.size || !y.size) return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
-  return [...x].filter(w => y.has(w)).length / Math.min(x.size, y.size) >= 0.5
+  if (!x.size || !y.size) return plain(a) === plain(b)
+  const shared = [...x].filter(w => y.has(w)).length
+  return shared / (x.size + y.size - shared) >= 0.5
 }
-const sameFinding = (a, b, root) => rel(a.path, root) === rel(b.path, root)
-  && String(a.category ?? '').toLowerCase() === String(b.category ?? '').toLowerCase()
-  && (!Number.isFinite(a.line) || !Number.isFinite(b.line) || Math.abs(a.line - b.line) <= LINE_WINDOW)
-  && sameTitle(a.title, b.title)
+const sameFinding = (a, b, root) => {
+  if (rel(a.path, root) !== rel(b.path, root) || plain(a.category) !== plain(b.category)) return false
+  const near = !Number.isFinite(a.line) || !Number.isFinite(b.line) || Math.abs(a.line - b.line) <= LINE_WINDOW
+  return plain(a.title) === plain(b.title) || (near && sameTitle(a.title, b.title))
+}
 const RANK = { P1: 1, P2: 2, P3: 3 }
+const rank = f => RANK[f?.priority] ?? 3
 
 const BLOCKING = new Set(['P1', 'P2'])
 
@@ -112,20 +117,18 @@ const classify = (f, files, { dirty = [], root = '' } = {}) => {
 
 // Several reviewers, one verdict per previous finding: open if ANY reviewer says open. An id no reviewer
 // answered has no verdict at all (it is asked again, not guessed). New findings are the union, de-duplicated
-// on the finding key.
+// with `sameFinding`; of two reports of the same defect the most severe is kept, different titles stay apart.
 const mergeReviews = (reviews, root) => {
   const verdicts = {}
   const found = []
-  const seen = new Set()
   for (const r of reviews) {
     for (const v of r.previous ?? []) {
       if (verdicts[v.id] !== 'open') verdicts[v.id] = v.status === 'closed' ? 'closed' : 'open'
     }
     for (const f of r.found ?? []) {
-      const key = keyOf(f, root)
-      if (seen.has(key)) continue
-      seen.add(key)
-      found.push(f)
+      const i = found.findIndex(g => sameFinding(f, g, root))
+      if (i < 0) found.push(f)
+      else if (rank(f) < rank(found[i])) found[i] = f
     }
   }
   return { verdicts, found }
@@ -133,16 +136,17 @@ const mergeReviews = (reviews, root) => {
 
 // A finding listed again under a new id is the known finding (same file and category, a line within
 // LINE_WINDOW, a similar title): when that one is tracked its verdict becomes open (a closed one back is a
-// STALL); when it was only recorded as minor / out of scope it is dropped, unless the new one is MORE severe
-// (a P2 on a known P3): that is fresh. A different defect on the same spot is fresh too.
+// STALL); when it was only recorded as minor / out of scope it is dropped. A new one MORE severe than the
+// known one (a P2 on a known P3, a P1 on an accepted P2) is fresh, tracked or not. A different defect on the
+// same spot is fresh too.
 //   known { id: finding }   every finding ever listed       tracked { id: { status } }
 const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '' } = {}) => {
   const next = { ...verdicts }
   const fresh = []
   const rematched = []
   for (const f of found) {
-    const hits = Object.entries(known).filter(([, k]) => sameFinding(f, k, root))
-    const hit = hits.find(([id]) => tracked[id]) ?? hits.find(([, k]) => (RANK[f.priority] ?? 3) >= (RANK[k.priority] ?? 3))
+    const hits = Object.entries(known).filter(([, k]) => sameFinding(f, k, root) && rank(f) >= rank(k))
+    const hit = hits.find(([id]) => tracked[id]) ?? hits[0]
     if (!hit) { fresh.push(f); continue }
     const [id] = hit
     if (tracked[id]) { next[id] = 'open'; rematched.push(id) }

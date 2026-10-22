@@ -21,8 +21,8 @@ import { createRequire } from 'node:module';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, keyOf, parseDirty } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, keyOf, parseDirty }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -207,7 +207,6 @@ test('script: no brief or no perimeter is refused without spawning', async () =>
 const NULL_GUARD = 'null guard missing on the order lookup';
 
 test('dedupeFound: the same finding under a new id (other case, shifted line, reworded title) re-opens a tracked one', () => {
-  assert.equal(keyOf({ path: 'C:\\repo\\SRC\\A.cs', line: 3, category: 'Correctness' }, ROOT), 'src/a.cs:3|correctness');
   const known = { F1: f('F1', { line: 3, title: NULL_GUARD }) };
   const again = (extra) => dedupeFound({
     found: [f('x', { line: 3, title: NULL_GUARD, ...extra })], known, tracked: { F1: { status: 'closed' } }, verdicts: { F1: 'closed' }, root: ROOT,
@@ -218,8 +217,41 @@ test('dedupeFound: the same finding under a new id (other case, shifted line, re
   assert.deepEqual(same.found, []);
   assert.equal(decideRound({ tracked: { F1: { status: 'closed' } }, verdicts: same.verdicts, files: FILES }).stalled[0].why, 'reappeared');
   assert.deepEqual(again({ line: 9, title: 'Missing null guard in order lookup' }).rematched, ['F1']);
-  assert.equal(again({ line: 40 }).rematched.length, 0);                    // far away: another finding
+  assert.equal(again({ line: 40, title: 'Missing null guard in order lookup' }).rematched.length, 0);   // reworded and far away: another finding
+  assert.deepEqual(again({ line: 40 }).rematched, ['F1']);                  // the identical title is the same finding wherever the lines went
   assert.equal(again({ category: 'security' }).rematched.length, 0);
+});
+
+test('sameFinding: stopwords and accents do not make two defects the same', () => {
+  const at = (title) => ({ path: 'a.cs', category: 'correctness', line: 5, title });
+  assert.equal(sameFinding(at('OrderId non validato in GetOrder'), at('GetOrder non gestisce null'), ROOT), false);
+  assert.equal(sameFinding(at('The cache is not invalidated in the handler'), at('The handler is not thread safe in the cache'), ROOT), false);
+  assert.equal(sameFinding(at('Validazione assente: perché è già nullo'), at('Perché è già nullo, validazione assente'), ROOT), true);
+  assert.equal(sameFinding(at('null guard missing on the order lookup'), at('Missing null guard in order lookup'), ROOT), true);
+});
+
+test('mergeReviews: the same finding from two reviewers keeps the most severe, different titles stay apart', () => {
+  const at = (extra) => ({ path: 'a.cs', category: 'correctness', line: 5, priority: 'P2', title: NULL_GUARD, ...extra });
+  const m = mergeReviews([
+    { found: [at({}), at({ title: 'off by one in the page size calculation' })] },
+    { found: [at({ priority: 'P1', title: 'Missing null guard in order lookup', line: 7 })] },
+  ], ROOT);
+  assert.equal(m.found.length, 2);
+  assert.equal(m.found[0].priority, 'P1');
+  assert.equal(m.found[1].priority, 'P2');
+  const lower = mergeReviews([{ found: [at({ priority: 'P1' })] }, { found: [at({ priority: 'P3' })] }], ROOT);
+  assert.deepEqual(lower.found.map((x) => x.priority), ['P1']);
+});
+
+test('dedupeFound: a new P1 on an accepted P2 is fresh; the same or a lower priority is the tracked one', () => {
+  const known = { F1: f('F1', { line: 3, title: NULL_GUARD, priority: 'P2' }) };
+  const seen = (priority) => dedupeFound({
+    found: [f('x', { line: 3, title: NULL_GUARD, priority })], known, tracked: { F1: { status: 'accepted' } }, verdicts: {}, root: ROOT,
+  });
+  assert.equal(seen('P1').found.length, 1);
+  assert.deepEqual(seen('P1').rematched, []);
+  assert.deepEqual(seen('P2').rematched, ['F1']);
+  assert.deepEqual(seen('P3').rematched, ['F1']);
 });
 
 test('dedupeFound: a different defect on the spot of a closed finding is fresh, not a false STALL', () => {
