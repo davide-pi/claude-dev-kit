@@ -27,7 +27,7 @@ guarantees come from the framework actually in use.
 | effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
 | previous findings | none |
 
-Diff file given → read it, not a fresh `git diff`. Skip lockfiles, `*.min.*`, `dist/`,
+Diff file given → read it, not a fresh `git diff`; it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines. Skip lockfiles, `*.min.*`, `dist/`,
 `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs`; judge a new dependency from its
 manifest. Previous findings: fixed → `done`, still there → `todo`, same anchor. You are the
 subagent path, not the built-in `/security-review`: never invoke it.
@@ -67,11 +67,27 @@ Drop: no reachable path; mitigated upstream (cite the guard) or guaranteed by th
 the change bypasses it; genuinely trusted input (say so); exposure on untouched lines the change
 does not make reachable; generic advice with no specific defect.
 
-## Output — ≤ 40 lines
+## Output
 
-Finding blocks, their order, the `done` rule and the field values: exactly as in
-`~/.claude/skills/pr-review/references/report-format.md` § "Finding block", with `category: security`.
-Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
+Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; two failures on one line are two blocks):
+
+```text
+### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
+- anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
+- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
+- status: todo | done
+- priority: P1 | P2 | P3            (todo only)
+- risk: alto | medio | basso        (todo only)
+- effort: S | M | L                 (todo only)
+- failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
+- evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
+- for the author: yes — "<short Italian question>" | no
+- fix: <minimal change, or omit>
+```
+
+Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `alto` behaviour, data or a public contract · `medio` localized logic · `basso` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
+
+Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
 is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink
 and the missing or present guard.
 

@@ -33,9 +33,12 @@ share the prompt-cache prefix:
 4. **Findings only** — no agent posts, edits or commits.
 5. **Previous findings** on an incremental pass (`triage.md` § "Second passes"): anchor, question,
    thread state, so each can be marked `done` or re-reported `todo`.
-6. **The specialists running beside it** — told to the generalists only, so they leave those axes.
+6. **The specialists running beside it** — told to the generalists only: no dedicated security or
+   performance pass, but they still report what their other passes surface.
 7. For the pair: "you may be one of two reviewers on different models — report what you see, do not
    soften for agreement".
+8. **The output contract in one line** — Finding blocks in the agent's Output format, Italian prose, anchors
+   on working-tree lines, one defect per block.
 
 ## Merging
 

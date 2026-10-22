@@ -28,4 +28,5 @@ identifiers, commands, tool output, `file:line`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2
    in plain text, one question, at the end of the first line.
 8. **No emoji, no hedging, no restating the request.** Errors, failing tests, security warnings and
    destructive-action confirmations keep full content.
+9. **A review report** follows `report-format.md` § Order: the bold summary line goes first, nothing else moves.
 Where these rules conflict with general formatting guidance elsewhere, these rules win.

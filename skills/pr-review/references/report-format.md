@@ -48,24 +48,25 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 
 ```text
 ### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
-- anchor: <repo-relative/path>:<line>   (side: right | left)
+- anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
 - risk: alto | medio | basso        (todo only)
 - effort: S | M | L                 (todo only)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
-- evidence: <file:line read, blame, quoted rule or intent line>
+- evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
 - for the author: yes — "<short Italian question>" | no
 - fix: <minimal change, or omit>
 ```
 
 | Field | Meaning |
 | --- | --- |
-| `CONFIRMED` / `PLAUSIBLE` | failing path traced in the code / depends on what the reviewer cannot see (caller, gateway, runtime config, scale) — say what would settle it |
-| `anchor` | no leading slash; post-change line (`right`), pre-change for a deleted line (`left`); a missing piece anchors where it belongs |
+| `CONFIRMED` / `PLAUSIBLE` | failing path traced in the code, and `evidence` quotes the line(s) that fail, verbatim (a paraphrase is `PLAUSIBLE`) / depends on what the reviewer cannot see (caller, gateway, runtime config, scale) — say what would settle it |
+| `anchor` | no leading slash; the line number of the **working-tree file** after the change (`right`; Read it, or `git show HEAD:<path>` for a committed range), pre-change for a deleted line (`left`); never the diff file's own line numbers — its hunk header `@@ -a,b +c,d @@` gives the start; a missing piece anchors where it belongs |
 | `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix**; by-design is not a finding |
 | `priority`, `risk`, `effort` | the values of the Fields table above, verbatim in every agent |
+| one defect per block | at most 12 lines per block, no cap on the count; two failures on one line are two blocks, never `(a) … (b) …` in one |
 
 A specialist writes only its own `category` (`security` or `performance`) and ends with its verdict
 line and one summary line (surface or hot paths); the generalist ends with the intent coverage.

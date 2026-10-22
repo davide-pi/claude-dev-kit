@@ -43,8 +43,9 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 "advanced" / "agent `<model>`" from the user: the model table in
 `skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A and B
 unchanged: diff file path, base, intent (acceptance criteria verbatim), effort, which specialists
-run beside it, previous findings, and "you may be one of two reviewers on different models: do not
-soften for agreement". Never review inline unless no subagent can be spawned — then say so; a
+run beside it, previous findings, "you may be one of two reviewers on different models: do not
+soften for agreement", and the output contract in one line: Finding blocks in your Output format, Italian
+prose, anchors on working-tree lines, one defect per block. Never review inline unless no subagent can be spawned — then say so; a
 missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
 `/review-large`, never launch it unasked.
 
@@ -66,8 +67,8 @@ cannot be judged without it.
 
 ### Report
 
-One merged report in Italian — blocks, fields, sort, columns, Fix rapidi, tables last:
-`skills/pr-review/references/report-format.md`. Close with one line offering the P1s and "ok" for
+One merged report in Italian — blocks, fields, sort, columns, Fix rapidi, tables last. Read
+`skills/pr-review/references/report-format.md` § "Order and tables" before writing it. Close with one line offering the P1s and "ok" for
 the fix rapidi. Apply nothing until the user answers.
 
 ## Do

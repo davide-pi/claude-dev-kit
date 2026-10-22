@@ -166,8 +166,9 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/'))) {
 // of the model's hands — a description saying "explicit trigger only" is a request, not a lock.
 // grill-me is not here: it fires on natural phrasing ("poke holes in this").
 // Named with a slash in the description on purpose, yet invocable by the model: `/code-review` is also
-// what "review this" resolves to (CLAUDE.md routes every review through it).
-const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review']);
+// what "review this" resolves to (CLAUDE.md routes every review through it). `grill-me` is meant to
+// trigger from natural language (owner decision, eval r2), so it stays model-invocable too.
+const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me']);
 const EXPLICIT_TRIGGER = [
   'worklog', 'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard',
   'docs-sync', 'retro', 'estimate',
@@ -317,6 +318,25 @@ const prose = textFiles
 for (const name of agentNames) {
   if (!new RegExp(`\\b${name}\\b`).test(prose)) {
     warn(`agents/${name}.md`, 'no command, skill or doc ever names this agent — nothing can reach it');
+  }
+}
+
+// The three review agents run with `omitClaudeMd` and cannot be trusted to read an external path, so
+// each carries an inline copy of the Finding block. The canonical one lives in report-format.md; a copy
+// that drifts makes the merger parse three dialects, so every copy must equal it byte for byte.
+{
+  const FORMAT = 'skills/pr-review/references/report-format.md';
+  const FENCE = /## Finding block[\s\S]*?```text\r?\n([\s\S]*?)\r?\n```/;
+  const canonical = has(FORMAT) ? read(FORMAT).replace(/\r\n/g, '\n').match(FENCE)?.[1] : null;
+  if (!canonical) fail(FORMAT, 'no fenced Finding block under "## Finding block"');
+  else {
+    for (const name of ['code-reviewer', 'review-security', 'review-performance']) {
+      const rel = `agents/${name}.md`;
+      if (!has(rel)) continue;
+      if (!read(rel).replace(/\r\n/g, '\n').includes('```text\n' + canonical + '\n```')) {
+        fail(rel, `inline Finding block differs from the one in ${FORMAT} — copy it verbatim`);
+      }
+    }
   }
 }
 

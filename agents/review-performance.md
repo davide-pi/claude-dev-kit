@@ -28,7 +28,7 @@ call) and the scale at which it bites; no number → micro-optimization, drop it
 | effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
 | previous findings | none |
 
-Diff file given → read it; read call sites and schema from the working tree. Skip lockfiles,
+Diff file given → read it to locate the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; read call sites and schema from the working tree. Skip lockfiles,
 `*.min.*`, `dist/`, `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs` — never the
 migration `.cs` itself. Previous findings: fixed → `done`, still there → `todo`, same anchor.
 
@@ -68,11 +68,27 @@ Drop: micro-optimizations with no effect at the real scale; what the compiler, J
 already handles; readability traded for an unquantified gain; speculative scaling advice;
 correctness problems (the generalist's) unless cost is the point.
 
-## Output — ≤ 40 lines
+## Output
 
-Finding blocks, their order, the `done` rule and the field values: exactly as in
-`~/.claude/skills/pr-review/references/report-format.md` § "Finding block", with `category: performance`,
-P1 → P3 by cost × frequency. Here **P1** is unbounded cost on a hot path; `failure` is the cost, the
+Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; two failures on one line are two blocks):
+
+```text
+### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
+- anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
+- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
+- status: todo | done
+- priority: P1 | P2 | P3            (todo only)
+- risk: alto | medio | basso        (todo only)
+- effort: S | M | L                 (todo only)
+- failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
+- evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
+- for the author: yes — "<short Italian question>" | no
+- fix: <minimal change, or omit>
+```
+
+Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `alto` behaviour, data or a public contract · `medio` localized logic · `basso` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
+
+Every block has `category: performance`, P1 → P3 by cost × frequency. Here **P1** is unbounded cost on a hot path; `failure` is the cost, the
 scale at which it bites and how often the path runs; `evidence` the loop and the per-item call, the
 schema or index, the caller sizing the input.
 

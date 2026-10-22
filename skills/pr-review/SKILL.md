@@ -81,7 +81,7 @@ gh pr view <id> --json number,title,body,headRefName,baseRefName,headRefOid,url 
 3. Write the diff **once** to the scratchpad and pass its path; reviewers read the enclosing function
    of every hunk.
 4. Fan out per §3, merge, triage per §4, post the PR bucket (`references/posting.md`).
-5. Report in chat in the shape of `references/report-format.md`: one merged report in Italian,
+5. Read `references/report-format.md` § "Order and tables", then report in chat in its shape: one merged report in Italian,
    findings first, then posted vs chat, the **Da fare / Già fatti** tables last, one verdict line
    naming each agent and its model.
 
