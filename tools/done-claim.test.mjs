@@ -78,6 +78,14 @@ test('"passa" is not a claim: "passa per il controller" is just a sentence', () 
   assert.match(stop(edited('I test passano.')).reason, /"passano"/);
 });
 
+test('"fatto" as a participle mid-sentence is not a claim; as an opening it is', () => {
+  assert.equal(stop(edited('Ho aperto la PR: il merge della PR fatto da te resta da verificare in staging.')).reason, '');
+  assert.equal(stop(edited('Il controllo fatto in anticipo evita il problema.')).reason, '');
+  assert.match(stop(edited('Ho sistemato il totale.\n\n**Fatto** anche il refactor.')).reason, /"Fatto"/);
+  assert.match(stop(edited('Sistemato il totale. Fatto: ora somma le righe.')).reason, /"Fatto"/);
+  assert.match(stop(edited('- fatto il cambio di nome')).reason, /"fatto"/);
+});
+
 test('an inline command with its result is evidence; a bare command is not', () => {
   assert.equal(stop(edited('Fatto: `dotnet test` → 42 passed.')).reason, '');
   assert.equal(stop(edited('Fatto: `npm test`: 0 failed')).reason, '');
