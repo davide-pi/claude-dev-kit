@@ -1,8 +1,8 @@
 ---
 name: commit
 description: >-
-  Use when changes must be committed: generates the Italian message from the diff, on the current,
-  an existing or a new branch. Never pushes.
+  Use when about to run `git commit`, or the user says "commit" or "committa": writes the Italian
+  message from the diff. Never pushes.
 argument-hint: "[branch] | -b [new-branch] | -m \"message\""
 allowed-tools: Bash(git add*), Bash(git commit*), PowerShell(git add*), PowerShell(git commit*)
 ---
@@ -17,7 +17,8 @@ Arguments: `$ARGUMENTS`
 
 ## When
 
-- `/commit`, "fai il commit", "committa": the current changes, ready to record.
+- `/commit`, "fai il commit", "committa", or any `git commit` you are about to run: the current changes,
+  ready to record. Load this first, so the message is the Italian one generated from the diff.
 
 Not for: naming or creating a branch for new work, worktrees, finishing a branch (`branch-flow`);
 pushing or opening a PR (`pr-create`); deciding whether the change is done (the evidence row below).

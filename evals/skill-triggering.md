@@ -72,6 +72,7 @@ exists.
 | `/commit` | MUST commit on the current branch, message generated from the diff |
 | `/commit -b fix/date-filter` | MUST create the branch and commit there |
 | "committa e pusha" | MUST commit; the push is a separate, explicit act (the command never pushes) — and on the default branch the guard hook asks first |
+| "ok, committa" after an edit turn | MUST load the skill before the first `git commit` |
 | "cosa ho modificato?" | MUST NOT (a question about the diff, not a request to commit) |
 
 ### `grill-me` — scrutiny, not execution
