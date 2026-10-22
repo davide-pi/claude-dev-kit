@@ -23,10 +23,6 @@
 5. Reviews (`/code-review`, `/pr-review`, ad-hoc) run in subagents, never inline; the built-in
    `/security-review` only when I name it.
 
-## Write for me
-Output style `owner-80-20` (`output-styles/`, selected in `settings.json`) sets how I read: its
-rules win over general formatting guidance.
-
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor,
 rename, reformat, dependency bump or "while I'm here" fix. Anything else worth doing: one row

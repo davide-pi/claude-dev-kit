@@ -165,7 +165,7 @@ a broken hook must never block work (`worktree-root.js` alone fails loudly: a si
 
 | Path | Purpose |
 |---|---|
-| `CLAUDE.md` | User instructions, kept under 3 KB because every turn pays for them: the route table, the standing rules, how to write for the reader, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here; the ALM rules that a missing flag breaks are enforced by `lib/alm-contract.js`. |
+| `CLAUDE.md` | User instructions, kept under 3 KB because every turn pays for them: the route table, the standing rules, change scope, language, done means verified. Workspace facts come from the `ALM:` line, not from here; the ALM rules that a missing flag breaks are enforced by `lib/alm-contract.js`. |
 | `rules/*.md` | Path-scoped facts per stack (C#, tests, EF migrations, TypeScript, Angular, React, SQL, pipelines, docker, kit assets): each loads only when a matching file is read or edited, `paths` as one comma-separated string, 25 lines at most, pointing at the skill that owns the procedure. |
 | `output-styles/owner-80-20.md` | Output style for a senior developer who reads fast: decision first in one bold line, the shortest shape that fits, every item of a multi-ask answered in order, stable `#n` numbering, no narration between tools, ask only before the irreversible. Replaces the built-in `Concise`; the template selects it with `"outputStyle": "owner-80-20"` in `settings.json`. |
 | `tools/instructions-log.js` | Dev-only `InstructionsLoaded` hook, wired in the repo's own `.claude/settings.local.json`: logs which instruction file loaded and why, to confirm a `paths` rule fires. |
