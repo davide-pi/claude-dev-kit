@@ -1,8 +1,8 @@
 ---
 name: user-story-standard
 description: >-
-  Use when a user story, PBI, bug, impediment or TECH item or its criteria are written, split or
-  reviewed, also from a bare feature description.
+  Use when writing, splitting or reviewing item text or criteria, or describing a feature or
+  malfunction ("non so se è un bug"); not translation.
 ---
 
 # user-story-standard — the fixed shapes a work item's text must have
