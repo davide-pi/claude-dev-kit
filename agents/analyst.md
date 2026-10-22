@@ -5,6 +5,7 @@ description: >-
   queries and reports; has no Edit or Write tool.
 disallowedTools: Edit, MultiEdit, Write, NotebookEdit
 model: sonnet
+effort: medium
 maxTurns: 60
 ---
 

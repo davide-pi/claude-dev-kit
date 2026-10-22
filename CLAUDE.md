@@ -4,6 +4,7 @@
 | Request | Owner |
 | --- | --- |
 | any code change: bug or failing test, perf, refactor, migration, feature, feasibility spike | `deliver` (it calls `debug-systematic`, `plan-work`, the stack's skill) |
+| question, explanation, review of an existing diff: no code change | answer, `investigator`, `/code-review`: never `deliver` |
 | work item to build | `/item`, then `plan-work` readiness, then `deliver` |
 | subsystem, 3+ files, new interface | `plan-work`, then `deliver` |
 | attack a design | `grill-me` |
@@ -16,8 +17,9 @@
 3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly, never the
    `az devops configure` default. No line, unmapped, or a dir added later -> ask.
 4. Code beyond a few lines, scope decided -> `implementer`; this session briefs and
-   reviews it. Fan-out searches -> an agent. Briefs ask for concise reports.
-   `Plan` runs on opus: no `model` override.
+   reviews it. A few lines (`deliver` size S) -> this session edits inline, then the same review
+   loop. Fan-out searches -> an agent. Briefs ask for concise reports.
+   `Plan`: pass `model: opus` (the subagent-model env var would otherwise pick sonnet).
 5. Reviews (`/code-review`, `/pr-review`, ad-hoc) run in subagents, never inline; the built-in
    `/security-review` only when I name it.
 

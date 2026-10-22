@@ -8,43 +8,46 @@ description: >-
 # deliver — every code change: triage, perimeter, loop, tests, verdict
 
 **Contract.** A change inside a written perimeter, reviewed in a loop, tested by level and closed by
-a verdict block and a table of everything left outside · never edits outside the perimeter, commits or
-pushes unasked, or lets a subagent ask the user · chat and verdict Italian, plan file English.
+a verdict block and a table of everything left outside · never edits outside the perimeter, reverts the
+user's own uncommitted work, commits or pushes unasked, or lets a subagent ask the user · chat and verdict
+Italian, notes English.
 
 ## When
 
 - Any request that ends in an edit to code, a query, a script or a schema: bug, slowness, restructure,
   migration, feature, "can we…" probe.
 
-Not for: reading or explaining code (`investigator`); reviewing an existing diff (`/code-review`);
-writing item text (`user-story-standard`); a bug with no proven cause yet (`debug-systematic` runs
-inside the bug scenario).
+Not for: a question or an explanation with no code change (answer it; `investigator` to read); reviewing
+an existing diff (`/code-review`); writing item text (`user-story-standard`); a bug with no proven cause
+yet (`debug-systematic` runs inside the bug scenario).
 
 ## Decide
 
-### 1. Triage — one pass, written to the plan file before any edit
+### 1. Triage — one pass, before any edit
 
 | Field | Values |
 | --- | --- |
 | scenario | `bug` · `perf` · `refactor` · `migration` · `feature` · `spike` |
 | size | **S** a few lines in one file · **M** one feature, 2–4 files · **L** a subsystem, a new interface or 5+ files |
-| PERIMETER | the files (paths, `dir/`, globs), the behaviour in scope, what is excluded |
+| PERIMETER | the files (paths, `dir/`, globs, repo-relative), the behaviour in scope, what is excluded |
 | test matrix | which levels apply (unit · integration · e2e · perf) and the command for each |
 
-The plan file is the one `plan-work` writes (`docs/plans/<yyyy-MM-dd>-<slug>.md`). The perimeter goes in
-it as a fenced block, because `scope-guard.js` reads it:
-
+The perimeter lives per worktree in `$(git rev-parse --git-dir)/deliver/perimeter.md`, never committed;
+write it with the shell, overwriting the previous one at every triage:
 ````text
-```perimeter
+branch: <git branch --show-current>
 status: active
 - src/Orders/OrdersQuery.cs
 - src/Orders/Dto/
 - tests/**/Orders*.cs
-```
 ````
 
-Tests of the change belong to the perimeter. Widening it is an edit to this block first, with the
-user's yes, then to the code.
+`scope-guard.js` reads that file only, and ignores it when the branch differs. Tests of the change belong
+to the perimeter; widening it is an edit to this file first, with the user's yes. `plan-work`'s plan file
+(`docs/plans/`) holds an L plan and the scenario's saved numbers, never the perimeter.
+
+**Start point**, before step 3: HEAD, the repo root and the files already dirty (`references/loop.md`). A
+perimeter file already dirty → ask the user first; any other dirty file is the user's, never reverted.
 
 ### 2. Analysis and review by size
 
@@ -52,11 +55,11 @@ user's yes, then to the code.
 | --- | --- | --- | --- |
 | analysis | none | the approach in one line | `plan-work`; `grill-me` if the design is argued |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
-| implementation | `implementer`, short brief | `implementer` | `implementer`, in steps |
+| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, in steps |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Sonnet high | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
 
-Implementation always goes through `implementer` (effort `medium`; `high` when the brief asks).
-Preparation comes before the loop: `references/scenarios.md`.
+`implementer` runs at `medium`; `high` when the brief asks (`implementerEffort`). Preparation comes
+before the loop: `references/scenarios.md`.
 
 ### 3. Who asks the user
 
@@ -78,17 +81,14 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 ## Do
 
-1. Triage, then the plan file and its perimeter block; scenario preparation.
-2. Analysis by size; ask only what the table says.
-3. Launch the workflow, `Workflow` with `name: impl-review-loop` and
-   `args: { brief, perimeter: { files, behaviour, exclusions }, size, verify, stackSkill, touches }`.
-   `status: OK` → step 4. `status: STALL` → show the stalled finding and ask: **accept the risk and note
-   it · one more round · change the approach**; relaunch with `resumeFromRunId` and
-   `resolutions: [{ round, accept?, guidance? }]` (the stalled round and the user's answer).
-4. Run the matrix from the plan; every failure goes back to step 3 with the failing output as the brief.
-5. Verdict block, perimeter block to `status: closed`, then `/commit`, `pr-create` when asked.
+1. Triage, then the perimeter file and the start point; scenario preparation.
+2. Analysis by size; ask only what the table says. S: make the edit inline now.
+3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
+   `status: OK` → step 4. `status: STALL` → ask the user, relaunch with every resolution so far.
+4. Run the matrix; every failure goes back to step 3 with the failing output as the brief.
+5. Verdict, perimeter file to `status: closed`, then `/commit`, `pr-create` when asked.
 
-The verdict, a table the `done-claim` hook accepts as evidence:
+The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, passed, failed, exit):
 
 ```text
 | Livello | Comando | Riga che decide | Stato |
@@ -98,23 +98,23 @@ The verdict, a table the `done-claim` hook accepts as evidence:
 Review: giro 2, 0 P1/P2 aperti. Rischi residui: <elenco, o nessuno>.
 ```
 
-States: `fatto`, `non verificato: <motivo>`, `failed`. S gets two or three lines of it. Close with
-the table of everything outside the perimeter (the workflow's `outOfScope`, `minor`, the implementer's
-open questions); the user picks row by row:
+States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with the table of
+everything outside the perimeter (`outOfScope`, `minor`, the implementer's open questions); the user picks:
 
 | Proposta | Motivo | Rischio |
 | --- | --- | --- |
 
 ## Traps
 
-1. The change keeps growing → the perimeter was a guess → stop, widen the block with the user's yes,
+1. The change keeps growing → the perimeter was a guess → stop, widen the file with the user's yes,
    never let an edit land first (`scope-guard.js` says "out of perimeter").
 2. A bug test written after the fix → it was never seen failing → revert the fix, run it red, restore.
-3. A spike drifts into the feature → it is throwaway → answer, delete the probe, stop; the feature is a
-   new triage.
+3. A spike drifts into the feature → it is throwaway → answer, delete the probe; the feature is a new triage.
 
 ## References
 
+- `references/loop.md` — launching the workflow: its args, the start point, size S inline, a `STALL` and the
+  resume with the user's answers.
 - `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
 - `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": the baseline, the runs,
   BenchmarkDotNet and HTTP timing, the result as ratio and spread.
