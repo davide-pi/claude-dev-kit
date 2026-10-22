@@ -3,11 +3,9 @@
 ## Route
 | Request | Owner |
 | --- | --- |
-| feasibility, "can we..." | `plan-work` spike, thrown away |
-| work item to build | `/item`, then `plan-work` readiness |
-| bug, failing test | `debug-systematic`, before any fix |
-| bounded change | the stack's skill |
-| subsystem, 3+ files, new interface | `plan-work` |
+| any code change: bug or failing test, perf, refactor, migration, feature, feasibility spike | `deliver` (it calls `debug-systematic`, `plan-work`, the stack's skill) |
+| work item to build | `/item`, then `plan-work` readiness, then `deliver` |
+| subsystem, 3+ files, new interface | `plan-work`, then `deliver` |
 | attack a design | `grill-me` |
 | commit, PR, ship | `branch-flow`, `/commit`, `pr-create` |
 
@@ -19,7 +17,7 @@
    `az devops configure` default. No line, unmapped, or a dir added later -> ask.
 4. Code beyond a few lines, scope decided -> `implementer`; this session briefs and
    reviews it. Fan-out searches -> an agent. Briefs ask for concise reports.
-   `Plan`: pass `model: sonnet`.
+   `Plan` runs on opus: no `model` override.
 5. Reviews (`/code-review`, `/pr-review`, ad-hoc) run in subagents, never inline; the built-in
    `/security-review` only when I name it.
 
