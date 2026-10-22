@@ -39,6 +39,10 @@ function snapshot(config, id, used_percentage, at = Date.now()) {
   writeFileSync(join(config, '.cache', `context-${id}.json`), JSON.stringify({ used_percentage, warm: true, at }));
 }
 
+function tokenSnapshot(config, id, used_tokens, window = 1_000_000, used_percentage = null) {
+  writeFileSync(join(config, '.cache', `context-${id}.json`), JSON.stringify({ used_percentage, used_tokens, window, warm: true, at: Date.now() }));
+}
+
 function nudge(config, id = 'sess-1') {
   const r = spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ session_id: id, hook_event_name: 'UserPromptSubmit', prompt: 'x' }),
@@ -48,6 +52,36 @@ function nudge(config, id = 'sess-1') {
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '';
 }
+
+test('absolute bands: 120k, 200k and 320k fire once each on a 1M window', () => {
+  const config = sandbox();
+  tokenSnapshot(config, 'sess-1', 100_000);
+  assert.equal(nudge(config), '', 'under 120k');
+  tokenSnapshot(config, 'sess-1', 150_000);
+  assert.match(nudge(config), /^Contesto a 150k token.*\/compact <focus>/);
+  assert.equal(nudge(config), '', 'same band: silent');
+  tokenSnapshot(config, 'sess-1', 210_000);
+  assert.match(nudge(config), /Contesto a 210k token/);
+  tokenSnapshot(config, 'sess-1', 330_000);
+  assert.match(nudge(config), /Contesto a 330k token/);
+});
+
+test('a percentage alone on a 1M window stays silent (15 % is 150k, 50 % would be 500k)', () => {
+  const config = sandbox();
+  writeFileSync(join(config, '.cache', 'context-sess-1.json'), JSON.stringify({ used_percentage: 60, window: 1_000_000, at: Date.now() }));
+  assert.equal(nudge(config), '');
+});
+
+test('CLAUDE_NUDGE_TOKENS moves the bands', () => {
+  const config = sandbox();
+  tokenSnapshot(config, 'sess-1', 70_000);
+  const run = (tokens) => spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ session_id: 'sess-1' }), encoding: 'utf8',
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_TOKENS: tokens },
+  }).stdout;
+  assert.equal(run('200000'), '');
+  assert.match(run('100000'), /Contesto a 70k token/);
+});
 
 test('below 50 % → silent', () => {
   const config = sandbox();
@@ -132,8 +166,36 @@ test('statusline writes the snapshot the hook reads, null-safe', () => {
   assert.match(r.stdout, /cache cold 146k/);
   const snap = JSON.parse(readFileSync(join(config, '.cache', 'context-sl-1.json'), 'utf8'));
   assert.equal(snap.used_percentage, 73);
+  assert.equal(snap.used_tokens, 146000, 'derived from the percentage and the window');
+  assert.equal(snap.window, 200000);
   assert.equal(snap.warm, false);
-  assert.match(nudge(config, 'sl-1'), /Contesto al 73 %/);
+  assert.match(nudge(config, 'sl-1'), /Contesto a 146k token/);
+});
+
+test('statusline: every cache it keeps lives under CLAUDE_CONFIG_DIR, none under the real home', () => {
+  const config = sandbox();
+  const home = mkdtempSync(join(tmpdir(), 'nudge-home-'));
+  created.push(home);
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: config, HOME: home, USERPROFILE: home };
+  spawnSync(process.execPath, [STATUSLINE], {
+    input: JSON.stringify({
+      session_id: 'sl-3', cwd: config,
+      rate_limits: { five_hour: { used_percentage: 12, resets_at: Date.now() / 1000 + 3600 } },
+    }),
+    encoding: 'utf8', env,
+  });
+  assert.ok(existsSync(join(config, '.statusline-rate-limits.json')), 'rate-limit cache in the config dir');
+  assert.ok(!existsSync(join(home, '.claude')), 'nothing written under the home .claude');
+
+  // The worklog badge reads its snapshot from the config dir too.
+  const d = new Date();
+  const p = (n) => String(n).padStart(2, '0');
+  writeFileSync(join(config, '.worklog-pending.json'), JSON.stringify({
+    day: `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`, auditMtime: 0, pending: [{ date: '2026-01-02' }],
+  }));
+  const out = spawnSync(process.execPath, [STATUSLINE], { input: JSON.stringify({ session_id: 'sl-3', cwd: config }), encoding: 'utf8', env });
+  assert.equal(out.status, 0, out.stderr);
+  assert.match(out.stdout, /1d/, 'the badge comes from the config dir snapshot');
 });
 
 test('statusline: no cold badge while warm or when caching was never observed', () => {

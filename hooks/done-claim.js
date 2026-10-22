@@ -3,7 +3,7 @@
  * without showing the evidence is sent back once to show it.
  *
  * "Done means verified" is the standing rule most often broken in the letter: the reply says
- * "fatto" / "fixed" / "passa" and the command that would prove it is nowhere in the message. This
+ * "fatto" / "fixed" / "passing" and the command that would prove it is nowhere in the message. This
  * tier costs no tokens — it is a regex over the final message, run only when the turn edited a file
  * (Edit, Write, MultiEdit, NotebookEdit): a question answered with "sì, è fatto" is not a claim
  * about a change made now.
@@ -12,12 +12,15 @@
  *   - `CLAUDE_DONE_CLAIM=1` (opt-in; anything else and the hook exits at once);
  *   - not `stop_hook_active` (it already sent the turn back once: never loop);
  *   - the turn since the last user prompt used an editing tool;
- *   - the final message has a claim word (fatto, done, fixed, passa, passing, verificato, …)
- *     outside inline code;
- *   - and no evidence: no fenced block, no `> ` quoted output line, no honest
+ *   - no Bash / PowerShell tool ran after the last edit: when one did, its output is already in the
+ *     context and asking for a rerun would only cost a turn (the log notes it as `shell-ran`);
+ *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
+ *     inline code;
+ *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
+ *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
- * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log`, so
- * false positives can be counted before deciding on tier 2.
+ * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
+ * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
  * The final message comes from `last_assistant_message` when the payload carries it, else from the
  * transcript. Only the transcript's last 512 KB are read: a turn's tail is all this needs.
@@ -46,10 +49,16 @@ const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.cl
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
 const TAIL_BYTES = 512 * 1024;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
+const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 
-const CLAIM = /(?<![\w-])(fatt[oaie]|done|fixed|pass(?:a|ano|ing)|verificat[oaie])(?![\w-])/i;
+// No bare "passa": "passa per il controller" is the commonest sentence in a dev chat.
+const CLAIM = /(?<![\w-])(fatt[oaie]|done|fixed|passano|passing|verificat[oaie])(?![\w-])/i;
 const HONEST = /non\s+(?:ancora\s+)?(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
-const EVIDENCE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
+const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
+/** A `> **Dettaglio**` block: the quoted lines that follow it are depth for the reader, not output. */
+const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
+/** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
+const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit)\b)/i;
 
 const allow = () => process.exit(0);
 
@@ -83,9 +92,10 @@ function isPrompt(entry) {
   return typeof content === 'string' || blocks(entry).some((b) => b?.type === 'text');
 }
 
-/** Whether the current turn edited a file, and its final assistant text. */
+/** Whether the current turn edited a file, ran a shell command after the last edit, and its final assistant text. */
 function readTurn(entries) {
   let edited = false;
+  let shellAfterEdit = false;
   let pastFinalMessage = false;                  // walked back over a tool result
   const finalText = [];
   for (let i = entries.length - 1; i >= 0; i -= 1) {
@@ -93,25 +103,29 @@ function readTurn(entries) {
     if (isPrompt(entry)) break;
     if (entry?.type === 'user') pastFinalMessage = true;
     if (entry?.type !== 'assistant') continue;
-    for (const b of blocks(entry)) {
-      if (b?.type === 'tool_use' && EDIT_TOOLS.has(b.name)) edited = true;
+    // Walking backwards, so the first edit met is the last one made: a shell call seen before it is later.
+    for (const b of [...blocks(entry)].reverse()) {
+      if (b?.type !== 'tool_use' || edited) continue;
+      if (EDIT_TOOLS.has(b.name)) edited = true;
+      else if (SHELL_TOOLS.has(b.name)) shellAfterEdit = true;
     }
     if (!pastFinalMessage) {
       const text = blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
       if (text) finalText.unshift(text);
     }
   }
-  return { edited, text: finalText.join('\n') };
+  return { edited, shellAfterEdit, text: finalText.join('\n') };
 }
 
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
-  if (!message || EVIDENCE.test(message) || HONEST.test(message)) return null;
+  if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
+  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ');
   return prose.match(CLAIM)?.[1] ?? null;
 }
 
-function log(payload, word, message) {
+function log(payload, rule, word, message) {
   try {
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     const at = message.search(CLAIM);
@@ -119,6 +133,7 @@ function log(payload, word, message) {
       at: new Date().toISOString(),
       session: payload.session_id,
       cwd: payload.cwd,
+      rule,
       word,
       excerpt: message.slice(Math.max(0, at - 60), at + 60).replace(/\s+/g, ' '),
     })}\n`);
@@ -139,7 +154,11 @@ try {
   const word = unprovenClaim(message);
   if (!word) allow();
 
-  log(payload, word, message);
+  if (turn.shellAfterEdit) {
+    log(payload, 'shell-ran', word, message);    // counted, not blocked: the output is already in context
+    allow();
+  }
+  log(payload, 'claim-without-evidence', word, message);
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `Dichiari un esito ("${word}") senza prova. Cita il comando eseguito e la riga di output che lo `

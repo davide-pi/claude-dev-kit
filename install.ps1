@@ -191,10 +191,9 @@ function Test-Environment {
 
     if (Get-Command git -ErrorAction SilentlyContinue) { Write-Ok 'git' } else { Write-Problem 'git not found in PATH' }
 
-    # settings.json hardcodes this path for the hooks.
-    $pwshPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
-    if (Test-Path -LiteralPath $pwshPath) { Write-Ok 'pwsh 7 at the path settings.json expects' }
-    else { Write-Problem "pwsh 7 not at '$pwshPath' — the hooks in settings.json will not fire; fix the path there" }
+    # settings.json starts the browser-use hook as `pwsh`, by name.
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) { Write-Ok 'pwsh on PATH' }
+    else { Write-Problem 'pwsh (PowerShell 7) not found in PATH — the browser-use hook and the worklog and database scripts will not run' }
 
     if (Get-Command claude -ErrorAction SilentlyContinue) { Write-Ok 'claude CLI' }
     else { Write-Info 'claude CLI not in PATH — register MCP servers from inside Claude Code instead' }
@@ -209,7 +208,10 @@ function Test-Environment {
     $userVar = [Environment]::GetEnvironmentVariable('CLAUDE_HOOKS', 'User')
     if ($userVar -and ($userVar.TrimEnd('\') -ieq $expected.TrimEnd('\'))) { Write-Ok "CLAUDE_HOOKS -> $userVar" }
     elseif ($userVar) { Write-Problem "CLAUDE_HOOKS points at '$userVar' instead of '$expected'" }
-    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) — the hooks fail silently, since they exit 0 by design" }
+    elseif ($Check -and ($expected.TrimEnd('\') -ieq (Join-Path $HOME '.claude\hooks').TrimEnd('\'))) {
+        Write-Ok 'CLAUDE_HOOKS not set — the hooks fall back to ~/.claude/hooks, which is where they are'
+    }
+    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) and the hooks are not in ~/.claude/hooks — they would not be found, and fail silently since they exit 0 by design" }
     else {
         [Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', $expected, 'User')
         $env:CLAUDE_HOOKS = $expected

@@ -6,6 +6,7 @@ description: >-
 disable-model-invocation: true
 context: fork
 agent: general-purpose
+model: sonnet
 background: false
 argument-hint: "<items> <url> [viewport] [username]"
 ---
@@ -102,8 +103,7 @@ One comment per item, in order:
 2. A mockup requirement missed → only the prose was read → every image, always.
 3. An AC "passes" on mobile only → the desktop branch was never opened → one context failing is KO.
 4. A screenshot mid-animation → taken right after opening a menu → wait, then shoot.
-5. A screenshot cannot be attached → it was written outside the readable roots → move it into the
-   working directory first.
+5. A screenshot cannot be attached → written outside the readable roots → move it into the working directory.
 6. A tool fails two or three times → the run grinds on → stop and return what was tried.
 7. A wrong comment goes out → API comments cannot be deleted → rule 2 is the only protection.
 

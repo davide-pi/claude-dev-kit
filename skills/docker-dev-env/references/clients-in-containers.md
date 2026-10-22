@@ -130,7 +130,7 @@ Without them, a broken migration script reports success and the pipeline or the 
 | `psql` | `docker compose exec -T -e PGPASSWORD=$env:PGPASSWORD <svc> psql -U <user> -d <db> -v ON_ERROR_STOP=1 -At -c "<sql>"` | `-At` gives unaligned, header-less output for parsing |
 | `pg_dump` | `docker compose exec -T <svc> pg_dump -U <user> -d <db> --schema-only` | binary formats need `-AsByteStream` on the host side |
 | `psql` (no stack) | `wsl psql -h localhost -p <port> -U <user> -d <db> -c "<sql>"` or `docker run --rm -i -e PGPASSWORD=$env:PGPASSWORD postgres:<tag> psql -h host.docker.internal -p <port> -U <user> -d <db> -c "<sql>"` | `<tag>` from the compose file or the server's `SELECT version()` |
-| `redis-cli` | `docker compose exec -T -e REDISCLI_AUTH=$env:REDIS_PASSWORD <svc> redis-cli <command>` | read commands; `KEYS`, `MONITOR`, `CONFIG` ask, writes and `FLUSH*` are denied |
+| `redis-cli` | `docker compose exec -T -e REDISCLI_AUTH=$env:REDIS_PASSWORD <svc> redis-cli <command>` | any command on a local cache; `FLUSHALL` / `FLUSHDB` ask; `SCAN`, not `KEYS` |
 | `redis-cli` (no stack) | `wsl redis-cli -h localhost -p <port> <command>` or `docker run --rm -i -e REDISCLI_AUTH=$env:REDIS_PASSWORD redis:<tag> redis-cli -h host.docker.internal -p <port> [--tls] <command>` | the image's client is the TLS-capable one |
 | `rabbitmqctl` | `docker compose exec -T <svc> rabbitmqctl list_queues --vhost <vhost> name messages consumers` | node-local; needs no credentials inside the container |
 | `rabbitmqadmin` | `docker compose exec -T <svc> rabbitmqadmin -V <vhost> get queue=<q> count=1 ackmode=reject_requeue_true` | the management plugin must be enabled; this ackmode is the only non-destructive one |

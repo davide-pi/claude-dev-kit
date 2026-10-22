@@ -4,7 +4,7 @@
 
 .DESCRIPTION
   pwsh -NoProfile -File db-ro.ps1 -Env <env> [-Db <name>] (-Query "<sql | redis command>" | -File <path.sql> | -Probe)
-                                  [-MaxLines 200] [-Wide] [-Project <workspace root>] [-Registry <path>]
+                                  [-MaxLines 200] [-Wide] [-AcceptWriteGrant] [-Project <workspace root>] [-Registry <path>]
 
   Targets come from $HOME\.claude\db-targets.json (-Registry overrides the path, for tests); the
   kit's db-targets.example.json shows every key:
@@ -29,14 +29,18 @@
     - the secret never reaches argv or the output: it travels in SQLCMDPASSWORD / PGPASSWORD /
       REDISCLI_AUTH, set for this process only (docker gets `-e NAME` without a value, WSL gets
       WSLENV), and every message is scrubbed of it;
-    - the credential is probed first, and any write capability aborts before the user input runs
-      (fail closed, exit 3). SQL Server: fn_my_permissions + writer/owner roles. Postgres: role
+    - the credential is probed first. A write capability stops the run before the user input runs
+      (exit 4) and prints every grant found; the caller shows them to the user, who decides once per
+      target. With -AcceptWriteGrant the run goes on with the client-side filter as the only layer
+      (SQL Server and Postgres: one SELECT / WITH statement per batch, no write keyword; Redis: the
+      read-command list) and the output header says `readonly=NO`. A probe that cannot run or prove
+      anything stays a refusal (exit 3), flag or not. SQL Server: fn_my_permissions + writer/owner roles. Postgres: role
       attributes, membership in writer roles, CREATE on the database or a schema, any write grant
       on a table or sequence. Redis: ACL WHOAMI + ACL GETUSER, only read categories and commands;
       a server that hides its ACL is refused unless the target carries `readOnlyAttested`;
     - client-side read-only on top: Postgres runs with default_transaction_read_only=on and refuses
       SQL that would turn it off, backslash commands other than \d* / \l; Redis runs only the
-      read-command allow-list (identical to hooks/lib/sql-target.js), KEYS / MONITOR / CONFIG /
+      read-command allow-list below, KEYS / MONITOR / CONFIG /
       DEBUG refused; SQL Server rejects sqlcmd commands (:r, :!!, :setvar, ED, RESET, ...).
   -Probe runs the probe alone and prints its verdict: whether the credential is read-only
   server-side.
@@ -45,8 +49,9 @@
   <image> <client>`; image = clientImage, else a local image of that repository, else the default).
   sqlcmd is native only.
 
-  Exit codes: 0 ok, 2 usage or registry error, 3 the probe refused (write capability, or not
-  provable), otherwise the client's (psql's own 3, a script error, is reported as 1).
+  Exit codes: 0 ok, 2 usage or registry error, 3 the probe could not prove read-only, 4 the credential
+  holds write grants (re-run with -AcceptWriteGrant once the user accepts), otherwise the client's
+  (psql's own 3, a script error, is reported as 1).
 
   Why no -X1 on sqlcmd: go-sqlcmd then ignores SQLCMDPASSWORD and prompts for it, so the input
   filter is the barrier against sqlcmd commands, not the -X switch.
@@ -59,6 +64,7 @@ param(
   [string]$Query,
   [string]$File,
   [switch]$Probe,
+  [switch]$AcceptWriteGrant,
   [int]$MaxLines = 200,
   [switch]$Wide,
   [string]$Project,
@@ -81,8 +87,8 @@ $ClearedSqlcmdVars = @('SQLCMDINI', 'SQLCMDUSER', 'SQLCMDSERVER', 'SQLCMDDBNAME'
 $ClearedPgVars = @('PGHOSTADDR', 'PGSERVICE', 'PGSERVICEFILE', 'PGPASSFILE', 'PGSYSCONFDIR', 'PSQLRC')
 $PgOptions = '-c default_transaction_read_only=on -c statement_timeout=60s -c lock_timeout=5s'
 
-# Redis commands that run; a two-word entry names a subcommand. Keep identical to
-# REDIS_READ_COMMANDS in hooks/lib/sql-target.js (tools/sql-target.test.mjs pins the parity).
+# Redis commands that run; a two-word entry names a subcommand. Explicit on purpose: HGETDEL, HGETEX,
+# GETDEL, GETEX, ZRANGESTORE and SORT look like reads and write.
 $RedisReadCommands = @(
   'GET', 'MGET', 'GETRANGE', 'STRLEN', 'EXISTS', 'TYPE', 'TTL', 'PTTL', 'DBSIZE', 'PING', 'INFO',
   'SCAN', 'HGET', 'HMGET', 'HGETALL', 'HKEYS', 'HVALS', 'HLEN', 'HEXISTS', 'HSCAN',
@@ -106,6 +112,7 @@ $RedisSafeCommands = @(
 $DefaultImages = @{ 'psql' = 'postgres:17'; 'redis-cli' = 'redis:7' }
 
 $script:Secret = $null
+$script:WriteGrantsAccepted = $false
 $script:TempFiles = [System.Collections.Generic.List[string]]::new()
 $script:SetVars = [System.Collections.Generic.List[string]]::new()
 $script:PreviousWslEnv = $env:WSLENV
@@ -279,7 +286,7 @@ function Resolve-Target([string]$EnvName, [string]$ProjectPath, [string]$Registr
     Stop-Wrapper "Environment '$EnvName' is not registered for '$($best.Key)'.`n$(Get-RegistryHelp $registry.targets)"
   }
 
-  $devHosts = @('localhost', '127.0.0.1', '(local)', '.', 'host.docker.internal')
+  $devHosts = @('localhost', '127.0.0.1', '::1', '(local)', '(localdb)', '.', 'host.docker.internal')
   if ($registry.PSObject.Properties['devHosts']) { $devHosts = @($registry.devHosts) }
   return @{ Root = $best.Key; Target = $match.Value; DevHosts = $devHosts }
 }
@@ -323,9 +330,51 @@ function Assert-PlainPgSql([string]$Sql) {
     Stop-Wrapper "Input rejected: line $number carries a backslash. Only plain SQL and \d* / \l lines are allowed."
   }
   # The read-only default is a session setting the SQL could turn off; the grants stay the guarantee.
-  if ($Sql -match '(?i)transaction_read_only|\bread\s+write\b|\bset_config\b|\bset\s+(?:session\s+|local\s+)?role\b|\bsession\s+authorization\b') {
-    Stop-Wrapper 'Input rejected: the SQL changes the read-only setting or the role.'
+  if ($Sql -match '(?i)transaction_read_only|\bread\s+write\b|\bset_config\b|\bset\s+(?:session\s+|local\s+)?role\b|\bsession\s+authorization\b|\breset\s+\w|\bdiscard\s+\w') {
+    Stop-Wrapper 'Input rejected: the SQL changes the read-only setting or the role (SET, RESET, DISCARD).'
   }
+}
+
+# A credential that holds write grants. Without -AcceptWriteGrant nothing runs: exit 4 with every grant, for
+# the caller to show the user. With it the run goes on, and the warning says the filter is all that is left.
+function Confirm-WriteGrants([string]$Subject, [string[]]$Grants) {
+  $list = ($Grants | Sort-Object -Unique) -join "`n"
+  if (-not $AcceptWriteGrant) {
+    Stop-Wrapper ("$Subject is not read-only. Grants beyond read:`n$list`n" +
+      'Nothing ran. Show these grants to the user and ask once for this target; if they accept, re-run with ' +
+      '-AcceptWriteGrant: the client-side filter is then the only layer, and no write statement will run.') 4
+  }
+  $script:WriteGrantsAccepted = $true
+  return "write grants accepted, client-side filter only: $(($Grants | Sort-Object -Unique) -join '; ')"
+}
+
+# With write grants accepted, the statement filter is the only barrier: every statement of every batch
+# must be a SELECT or WITH, with no write keyword anywhere (comments and literals removed first).
+function Assert-ReadStatements([string]$Sql, [string]$Engine) {
+  $text = [regex]::Replace($Sql, '(?s)/\*.*?\*/', ' ')
+  $text = [regex]::Replace($text, '--[^\r\n]*', ' ')
+  $text = [regex]::Replace($text, "'(?:[^']|'')*'", "''")
+  $text = [regex]::Replace($text, '"[^"]*"', '"x"')
+  if ($Engine -eq 'postgres') { $text = [regex]::Replace($text, '(?m)^\s*\\.*$', ' ') }   # \d* and \l lines, already vetted
+  $banned = '\b(?:INSERT|UPDATE|DELETE|MERGE|TRUNCATE|DROP|ALTER|CREATE|GRANT|REVOKE|INTO|EXEC|EXECUTE|OPENROWSET|OPENQUERY|OPENDATASOURCE|BULK|COPY|CALL|DO|VACUUM|REINDEX|LOCK)\b|\bxp_\w+|\bpg_(?:read|write|ls)_\w*|\blo_(?:import|export)\b|\bdblink\w*|\bFOR\s+(?:NO\s+KEY\s+)?(?:UPDATE|SHARE)\b|\bKEY\s+SHARE\b'
+  foreach ($batch in ($text -split '(?im)^\s*GO(?:\s+\d+)?\s*$')) {
+    foreach ($piece in ($batch -split ';')) {
+      $statement = $piece.Trim()
+      if (-not $statement) { continue }
+      if ($statement -notmatch '^(?i:SELECT|WITH)\b') {
+        Stop-Wrapper "Input rejected: write grants were accepted, so only SELECT / WITH statements run; got '$($statement.Split([char[]]"`r`n")[0])'."
+      }
+      if ($statement -match "(?i)$banned") {
+        Stop-Wrapper "Input rejected: write grants were accepted, and this statement carries '$($Matches[0])'. Only plain reads run."
+      }
+    }
+  }
+}
+
+# What the header says about read-only: proven server-side, or only held by this script's filter.
+function Get-ReadOnlyLabel {
+  if ($script:WriteGrantsAccepted) { return 'NO(write-grants-accepted;client-side-filter-only)' }
+  return 'verified'
 }
 
 # A redis command line -> its arguments (single or double quotes group). One command only.
@@ -463,7 +512,8 @@ UNION ALL SELECT 'FLAG', 'db_ddladmin', CONVERT(varchar(10), ISNULL(IS_MEMBER('d
 UNION ALL SELECT 'RCSI', 'rcsi', CONVERT(varchar(10), is_read_committed_snapshot_on) FROM sys.databases WHERE database_id = DB_ID();
 '@
 
-# The fail-closed gate. Returns @{ Rcsi = <bool>; Warnings = <string[]> } or throws exit 3.
+# The gate. Returns @{ Rcsi = <bool>; Warnings = <string[]> }; throws exit 3 when it cannot prove anything,
+# exit 4 when the login holds write grants (see Confirm-WriteGrants).
 function Test-ReadOnlyLogin($Client, [string[]]$CommonArgs, [string]$DbName) {
   $gateFile = New-TempSql $GateSql
   $result = Invoke-Capture $Client ($CommonArgs + @('-h', '-1', '-W', '-s', '|', '-i', $gateFile)) $null
@@ -501,14 +551,11 @@ function Test-ReadOnlyLogin($Client, [string[]]$CommonArgs, [string]$DbName) {
   if ($flagsSeen -ne $RoleFlags.Count -or $permissions.Count -eq 0 -or $null -eq $rcsi) {
     Stop-Wrapper "Permission gate returned an unexpected result on '$DbName'; refusing to continue." 3
   }
-  if ($offending.Count -or $roleHits.Count) {
-    $message = "Permission gate refused: this login is not read-only on database '$DbName'."
-    if ($offending.Count) { $message += "`nPermissions beyond read: " + (($offending | Sort-Object -Unique) -join ', ') }
-    if ($roleHits.Count) { $message += "`nRole membership: " + ($roleHits -join ', ') }
-    Stop-Wrapper $message 3
-  }
-
   $warnings = [System.Collections.Generic.List[string]]::new()
+  if ($offending.Count -or $roleHits.Count) {
+    $grants = @($offending | ForEach-Object { "permission $_" }) + @($roleHits | ForEach-Object { "role membership $_" })
+    $warnings.Add((Confirm-WriteGrants "This login on database '$DbName'" $grants))
+  }
   if (-not ($permissions -contains 'SELECT' -or $permissions -contains 'SELECT ALL USER SECURABLES')) {
     $warnings.Add("login holds no SELECT on '$DbName': queries on user tables will fail")
   }
@@ -540,10 +587,11 @@ function Invoke-SqlServer($Target, [string]$Server, [string]$DbName, [string]$Lo
   $gate = Test-ReadOnlyLogin $client $commonArgs $DbName
   $isolation = if ($gate.Rcsi) { 'READ COMMITTED' } else { 'READ UNCOMMITTED' }
 
-  [Console]::Out.WriteLine("# env=$Env engine=sqlserver server=$Server db=$DbName login=$Login readonly=verified " +
+  [Console]::Out.WriteLine("# env=$Env engine=sqlserver server=$Server db=$DbName login=$Login readonly=$(Get-ReadOnlyLabel) " +
     "isolation=$isolation intent=$(if ($readOnlyIntent) { 'ReadOnly' } else { 'default' })")
   foreach ($warning in $gate.Warnings) { [Console]::Out.WriteLine("# warn: $warning") }
   if ($Probe) { return 0 }
+  if ($script:WriteGrantsAccepted) { Assert-ReadStatements $Sql 'sqlserver' }
 
   $prelude = "SET NOCOUNT ON; SET LOCK_TIMEOUT 5000; SET TRANSACTION ISOLATION LEVEL $isolation;`r`nGO`r`n"
   $queryFile = New-TempSql ($prelude + $Sql)
@@ -585,7 +633,7 @@ UNION ALL SELECT 'READ', 'relations', count(*)::text FROM rel
 UNION ALL SELECT 'END', 'end', 'end';
 '@
 
-# The fail-closed gate for Postgres. Returns warnings or throws exit 3.
+# The gate for Postgres. Returns warnings; throws exit 3 when it cannot prove anything, exit 4 on write grants.
 function Test-ReadOnlyPgRole($Client, [string[]]$CommonArgs, [string]$DbName) {
   $result = Invoke-Capture $Client ($CommonArgs + @('-t', '-A', '-F', '|', '-f', '-')) $PgGateSql
   if ($result.Exit -ne 0) {
@@ -615,11 +663,8 @@ function Test-ReadOnlyPgRole($Client, [string[]]$CommonArgs, [string]$DbName) {
   if ($attrs -ne 3 -or -not $ended -or $null -eq $readable) {
     Stop-Wrapper "Permission probe returned an unexpected result on '$DbName'; refusing to continue." 3
   }
-  if ($offending.Count) {
-    Stop-Wrapper ("Permission probe refused: this role is not read-only on database '$DbName'.`n" +
-      ($offending -join "`n")) 3
-  }
   $warnings = [System.Collections.Generic.List[string]]::new()
+  if ($offending.Count) { $warnings.Add((Confirm-WriteGrants "This role on database '$DbName'" $offending.ToArray())) }
   if ($readable -eq 0) { $warnings.Add("role can SELECT no relation in '$DbName': queries on user tables will fail") }
   return $warnings
 }
@@ -644,9 +689,10 @@ function Invoke-Postgres($Target, [string]$Server, [string]$DbName, [string]$Log
   $warnings = Test-ReadOnlyPgRole $client $commonArgs $DbName
 
   [Console]::Out.WriteLine("# env=$Env engine=postgres server=$($endpoint.Host):$($endpoint.Port) db=$DbName login=$Login " +
-    "readonly=verified session=default_transaction_read_only client=$($client.Label)")
+    "readonly=$(Get-ReadOnlyLabel) session=default_transaction_read_only client=$($client.Label)")
   foreach ($warning in $warnings) { [Console]::Out.WriteLine("# warn: $warning") }
   if ($Probe) { return 0 }
+  if ($script:WriteGrantsAccepted) { Assert-ReadStatements $Sql 'postgres' }
 
   $format = if ($Wide) { @() } else { @('-A', '-F', '|') }
   $exit = Write-Result $client ($commonArgs + $format + @('-f', '-')) $Sql
@@ -683,7 +729,8 @@ function Get-RedisWriteGrants([System.Collections.Generic.List[string]]$Lines) {
   return , $offending.ToArray()
 }
 
-# The probe for Redis. Returns 'verified' or 'attested: ...', or throws exit 3.
+# The probe for Redis. Returns 'verified', 'attested: ...' or 'NO ...' (write grants accepted); throws exit 3
+# when it cannot prove anything, exit 4 on write grants without -AcceptWriteGrant.
 function Test-ReadOnlyRedis($Client, [string[]]$CommonArgs, $Target, [string]$Login) {
   $unreachable = 'Could not connect|Connection refused|NOAUTH|WRONGPASS|invalid username-password|Name or service not known|timed out'
   $who = Invoke-Capture $Client ($CommonArgs + @('--raw', 'ACL', 'WHOAMI')) $null
@@ -711,8 +758,8 @@ function Test-ReadOnlyRedis($Client, [string[]]$CommonArgs, $Target, [string]$Lo
       $grants = Get-RedisWriteGrants $get.Lines
       if ($null -eq $grants) { Stop-Wrapper "Permission probe returned an unexpected result for user '$user'; refusing to continue.`n$getText" 3 }
       if ($grants.Count) {
-        Stop-Wrapper ("Permission probe refused: user '$user' is not read-only.`nGrants beyond read: " +
-          (($grants | Sort-Object -Unique) -join ' ')) 3
+        $null = Confirm-WriteGrants "Redis user '$user'" $grants
+        return 'NO(write-grants-accepted;client-side-filter-only)'
       }
       return 'verified'
     }

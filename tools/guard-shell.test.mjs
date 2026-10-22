@@ -23,7 +23,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -237,10 +237,9 @@ test('the migration tool dropping or unwinding the model', () => {
 });
 
 test('flushing a cache', () => {
-  // redis-cli runs read commands only, so the SQL-target check denies a flush before this one asks
-  // (tools/sql-target.test.mjs); the flush rules still cover every other client.
-  assert.equal(runShell('docker exec -it redis redis-cli FLUSHALL').decision, 'deny');
-  assert.equal(runShell('redis-cli -h localhost -n 3 flushdb').decision, 'deny');
+  // On a dev host redis-cli is not otherwise restricted, so the flush rules are what stops a wipe.
+  asks('docker exec -it redis redis-cli FLUSHALL', /EVERY key/);
+  asks('redis-cli -h localhost -n 3 flushdb', /selected cache database/);
   asks('docker exec memcached bash -c "echo flush_all | nc localhost 11211"');
 });
 
@@ -376,4 +375,31 @@ test('a destructive action on the default branch is still caught', () => {
   assert.equal(decision, 'ask');
   assert.match(reason, /force-deletes a branch/);
   assert.doesNotMatch(reason, /default branch/);
+});
+
+// ── The settings.json wiring: guards are ON by default ─────────────────────────────────────────
+
+test('the shell guard wired in settings.json still denies with CLAUDE_HOOKS unset (default hooks directory)', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const wiring = settings.hooks.PreToolUse.find((g) => g.matcher === 'Bash|PowerShell').hooks[0];
+  assert.equal(wiring.command, 'node');
+
+  // A fake home whose ~/.claude/hooks is a copy of the kit's: the only place the default can point.
+  const home = mkdtempSync(join(tmpdir(), 'guard-home-'));
+  created.push(home);
+  cpSync(dirname(HOOK), join(home, '.claude', 'hooks'), { recursive: true });
+
+  const run = (env) => {
+    const clean = { ...process.env, HOME: home, USERPROFILE: home };
+    delete clean.CLAUDE_HOOKS;
+    const r = spawnSync(process.execPath, wiring.args, {
+      input: JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'sqlcmd -S prod-sql.example.com -Q "SELECT 1"' }, cwd: home }),
+      encoding: 'utf8', env: { ...clean, ...env },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout.trim() ? JSON.parse(r.stdout).hookSpecificOutput.permissionDecision : 'approve';
+  };
+
+  assert.equal(run({}), 'deny', 'unset: the default directory');
+  assert.equal(run({ CLAUDE_HOOKS: dirname(HOOK) }), 'deny', 'set: that directory');
 });

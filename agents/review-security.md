@@ -1,8 +1,8 @@
 ---
 name: review-security
 description: >-
-  Use when a change needs a security review, alone or beside code-reviewer from high effort:
-  entry points, trust boundaries, taint, authz, secrets. Findings only.
+  Use when a change needs a security review, alone or beside code-reviewer: entry points, trust
+  boundaries, taint, authz, secrets. Findings only.
 tools: Read, Grep, Glob, Bash, PowerShell
 model: sonnet
 omitClaudeMd: true
@@ -69,38 +69,17 @@ does not make reachable; generic advice with no specific defect.
 
 ## Output — ≤ 40 lines
 
-Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`. One block per finding; a
-`done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`.
-
-```text
-### <n>. <one-line vulnerability, Italian> — CONFIRMED | PLAUSIBLE
-- anchor: <repo-relative/path>:<line>   (side: right | left)
-- category: security
-- status: todo | done
-- priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
-- effort: S | M | L                 (todo only)
-- failure: <attack path: who sends what, through which code, gaining what>
-- evidence: <file:line of source, sink, missing or present guard>
-- for the author: yes — "<short Italian question>" | no
-- fix: <minimal concrete mitigation, or omit>
-```
-
-| Field | Meaning |
-| --- | --- |
-| `CONFIRMED` / `PLAUSIBLE` | source → sink traced with no guard / depends on what you cannot see (caller, gateway, runtime config) — say what would settle it |
-| `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix** |
-| `priority` | **P1** any CONFIRMED reachable vulnerability · **P2** before release · **P3** hardening |
-| `risk` | what applying the fix can break: **alto** behaviour, data, public contract · **medio** localized, testable · **basso** none |
-| `effort` | **S** one place · **M** a few files · **L** design change or migration |
+Finding blocks, their order, the `done` rule and the field values: exactly as in
+`~/.claude/skills/pr-review/references/report-format.md` § "Finding block", with `category: security`.
+Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
+is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink
+and the missing or present guard.
 
 Close with `Verdetto: N rilievi security (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)` and
 one **surface summary** line: each entry point added or widened, guarded or not. Nothing wrong →
 one line with the surface mapped and the guards verified.
 
-Prose in Italian. Verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, `security`, the values of `status`,
-`priority`, `risk`, `effort` (identical in `code-reviewer` and `review-performance`), anything from
-the code.
+Prose in Italian; values, anchors and anything from the code verbatim.
 
 ## Never
 

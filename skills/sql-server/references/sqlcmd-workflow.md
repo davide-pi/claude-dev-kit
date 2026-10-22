@@ -10,8 +10,9 @@
 `db-ro.ps1` runs inside the `db-analyst` agent: it probes the login's grants first and refuses (exit
 3) on any write permission, picks the client form that exists (native, then wsl, then docker), and
 keeps the secret out of argv. The shell hook denies a raw `sqlcmd`, `psql` or `redis-cli` aimed at
-a non-dev host, also inside `docker run|exec` or `wsl` — do not retry around a denial. On a dev host
-`redis-cli` is limited to read commands; `KEYS`, `MONITOR`, `CONFIG` ask.
+a non-dev host, also inside `docker run|exec` or `wsl` — do not retry around a denial. On a dev host,
+or with no host given (the client's own local default), a client runs freely; the destructive-action
+guard still asks before a `DROP`, a `TRUNCATE` or a `FLUSHALL` / `FLUSHDB`.
 
 ## Read-only by default
 

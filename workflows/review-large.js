@@ -1,16 +1,19 @@
 export const meta = {
   name: 'review-large',
-  description: 'Review a large diff: one code-reviewer per changed file (two models at high effort), one merger, one Italian report',
-  whenToUse: 'A diff of 30+ files that one reviewer cannot hold. args: { range, files?, intent, effort, modelB, filesPerReviewer }',
+  description: 'Review a large diff: one code-reviewer per group of files (two models at high effort), one merger, one Italian report',
+  whenToUse: 'A diff of 30+ files that one reviewer cannot hold; at most 8 reviewers per model. args: { range, files?, intent, effort, modelB, filesPerReviewer }',
   phases: [
     { title: 'Scope', detail: 'list the changed files when args.files is absent' },
-    { title: 'Review', detail: 'one code-reviewer per file; reviewer B on a second model at high effort and above' },
+    { title: 'Review', detail: 'one code-reviewer per group of files; reviewer B on a second model at high effort and above' },
     { title: 'Merge', detail: 'one merger applies the declared rule and writes the report' },
   ],
 }
 
 // args: a range string, or { range, files?, intent?, effort?, modelB?, filesPerReviewer? }.
-// modelB is the session family (the script cannot see it); the caller passes it, default opus.
+// modelB is the session family (the script cannot see it); the caller passes it, default opus, and it
+// is used only at high effort and above: below that one model reviews.
+// Cost guard: filesPerReviewer defaults to 6 and the reviewers are capped (MAX_REVIEWERS per model),
+// so a 30-file diff is 5 reviewers (10 with B) instead of 30 (60 with B) before anyone sees a cost line.
 const input = typeof args === 'string' ? { range: args } : (args ?? {})
 const range = typeof input.range === 'string' ? input.range.trim() : ''
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -20,7 +23,8 @@ const modelB = typeof input.modelB === 'string' && input.modelB ? input.modelB :
 const intent = typeof input.intent === 'string' && input.intent.trim()
   ? input.intent.trim()
   : 'NOT STATED: report completeness as unjudgeable; never invent the intent.'
-const perReviewer = Number.isInteger(input.filesPerReviewer) && input.filesPerReviewer > 0 ? input.filesPerReviewer : 1
+const perReviewer = Number.isInteger(input.filesPerReviewer) && input.filesPerReviewer > 0 ? input.filesPerReviewer : 6
+const MAX_REVIEWERS = 8
 const EXCLUDE = `':!*.lock' ':!package-lock.json' ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'`
 
 const MERGE_RULE = [
@@ -104,7 +108,12 @@ if (!files.length) return `review-large: no changed files in ${range} (generated
 
 const groups = []
 for (let i = 0; i < files.length; i += perReviewer) groups.push(files.slice(i, i + perReviewer))
-log(`${files.length} files -> ${groups.length} reviewer(s)${twoModels ? ` x 2 models (A sonnet, B ${modelB})` : ' (sonnet)'} + 1 merger`)
+if (groups.length > MAX_REVIEWERS) {
+  return `review-large: ${files.length} files at ${perReviewer} per reviewer would spawn ${groups.length} reviewers${twoModels ? ' per model' : ''}, above the cap of ${MAX_REVIEWERS}. Narrow \`files\` or raise \`filesPerReviewer\`.`
+}
+// The spawn count is stated before the first reviewer starts, so the cost is known up front.
+const spawns = groups.length * (twoModels ? 2 : 1) + 1
+log(`${files.length} files -> ${groups.length} reviewers${twoModels ? ` x 2 models (A sonnet, B ${modelB})` : ' (sonnet)'} + 1 merger = ${spawns} agents`)
 
 // One brief per group, built once and passed unchanged to A and B: only `model` differs.
 const brief = group => [

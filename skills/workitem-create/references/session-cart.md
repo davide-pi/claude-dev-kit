@@ -6,7 +6,7 @@ this page replaces gates 1-3 with a per-point loop under a fixed **focus**.
 
 ## Hierarchy — in roles
 
-Top grouping (the engagement) → **feature** → backlog-level items (backlog item, defect, technical
+Top grouping (the account) → **feature** → backlog-level items (backlog item, defect, technical
 activity, analysis — all at the same level) → unit of time. A backlog-level item is **never** a
 direct child of the top grouping. Every role resolves to a real type through `azdo-cli`; a role the
 project has no type for is a question.

@@ -57,6 +57,38 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(log.length, 1);
   assert.equal(JSON.parse(log[0]).word, 'Fatto');
+  assert.equal(JSON.parse(log[0]).rule, 'claim-without-evidence');
+});
+
+test('a shell command ran after the last edit → silent: its output is already in context, and counted', () => {
+  const { reason, dir } = stop([prompt('sistema il bug'), tool('Edit'), result(), tool('Bash'), result(), say('Fatto: il totale ora somma le righe.')]);
+  assert.equal(reason, '');
+  const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
+  assert.equal(JSON.parse(log[0]).rule, 'shell-ran');
+  assert.equal(stop([prompt('x'), tool('Edit'), result(), tool('PowerShell'), result(), say('Done.')]).reason, '');
+});
+
+test('a shell command that ran BEFORE the last edit proves nothing about it → blocked', () => {
+  const entries = [prompt('x'), tool('Bash'), result(), tool('Edit'), result(), say('Fatto.')];
+  assert.match(stop(entries).reason, /"Fatto"/);
+});
+
+test('"passa" is not a claim: "passa per il controller" is just a sentence', () => {
+  assert.equal(stop(edited('La richiesta passa per il controller e poi per il servizio.')).reason, '');
+  assert.match(stop(edited('I test passano.')).reason, /"passano"/);
+});
+
+test('an inline command with its result is evidence; a bare command is not', () => {
+  assert.equal(stop(edited('Fatto: `dotnet test` → 42 passed.')).reason, '');
+  assert.equal(stop(edited('Fatto: `npm test`: 0 failed')).reason, '');
+  assert.match(stop(edited('Fatto, ho cambiato `Order.cs` per il totale.')).reason, /"Fatto"/);
+});
+
+test('a "> **Dettaglio**" block is prose, not evidence', () => {
+  const detail = '> **Dettaglio**\n> Ho spostato il calcolo nel servizio e aggiornato i chiamanti.';
+  assert.match(stop(edited(`Fatto.\n\n${detail}`)).reason, /"Fatto"/);
+  // Real quoted output outside the block still counts.
+  assert.equal(stop(edited(`Fatto.\n> Passed!  - Failed: 0, Passed: 42\n\n${detail}`)).reason, '');
 });
 
 test('English claims are caught too', () => {

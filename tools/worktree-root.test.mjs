@@ -47,10 +47,37 @@ function fixture() {
   return { repo, root };
 }
 
+// The hook reads `worktree.baseRef` from settings: an empty config dir keeps the user's real one out.
+const emptyConfig = mkdtempSync(join(tmpdir(), 'wtr-config-'));
+created.push(emptyConfig);
+
 function hook(payload, env = {}) {
   return spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, ...env },
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: emptyConfig, ...env },
   });
+}
+
+/** A config dir whose settings.json sets worktree.baseRef. */
+function configWith(baseRef) {
+  const dir = mkdtempSync(join(tmpdir(), 'wtr-config-'));
+  created.push(dir);
+  writeFileSync(join(dir, 'settings.json'), JSON.stringify({ worktree: { baseRef } }));
+  return dir;
+}
+
+/** `repo` plus a bare `origin` it pushed `main` to, then one more local commit: HEAD is ahead of origin/main. */
+function withOrigin() {
+  const f = fixture();
+  const origin = join(dirname(f.repo), 'origin.git');
+  git(dirname(f.repo), 'init', '-q', '--bare', '-b', 'main', origin);
+  git(f.repo, 'remote', 'add', 'origin', origin);
+  git(f.repo, 'push', '-q', 'origin', 'main');
+  git(f.repo, 'remote', 'set-head', 'origin', 'main');
+  const pushed = git(f.repo, 'rev-parse', 'HEAD');
+  writeFileSync(join(f.repo, 'b.txt'), 'b\n');
+  git(f.repo, 'add', '.');
+  git(f.repo, 'commit', '-q', '-m', 'local only');
+  return { ...f, pushed, ahead: git(f.repo, 'rev-parse', 'HEAD') };
 }
 
 test('create → <root>/<repo>-<name> on branch worktree-<name>, path alone on stdout', () => {
@@ -71,6 +98,48 @@ test('created from inside a linked worktree → still named after the main repo'
   const first = hook({ hook_event_name: 'WorktreeCreate', name: 'one', cwd: repo }, env).stdout.trim();
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'two', cwd: first }, env);
   assert.equal(r.stdout.trim(), join(root, 'shop-two'));
+});
+
+test('without baseRef the branch starts at the HEAD of the session, not of the main checkout', () => {
+  const { repo, root } = fixture();
+  const env = { CLAUDE_WORKTREE_ROOT: root };
+  const first = hook({ hook_event_name: 'WorktreeCreate', name: 'one', cwd: repo }, env).stdout.trim();
+  writeFileSync(join(first, 'c.txt'), 'c\n');
+  git(first, 'add', '.');
+  git(first, 'commit', '-q', '-m', 'work in the first worktree');
+  const second = hook({ hook_event_name: 'WorktreeCreate', name: 'two', cwd: first }, env).stdout.trim();
+  assert.equal(git(second, 'rev-parse', 'HEAD'), git(first, 'rev-parse', 'HEAD'));
+  assert.notEqual(git(second, 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'HEAD'));
+});
+
+test('baseRef "fresh" starts at the default branch of origin, not at the local HEAD', () => {
+  const { repo, root, pushed, ahead } = withOrigin();
+  const r = hook({ hook_event_name: 'WorktreeCreate', name: 'fresh', cwd: repo },
+    { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('fresh') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(r.stdout.trim(), 'rev-parse', 'HEAD'), pushed);
+  assert.notEqual(pushed, ahead);
+});
+
+test('baseRef "head" or unset starts at the local HEAD even when origin exists; a project setting wins', () => {
+  const { repo, root, pushed, ahead } = withOrigin();
+  const head = hook({ hook_event_name: 'WorktreeCreate', name: 'head', cwd: repo },
+    { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('head') });
+  assert.equal(git(head.stdout.trim(), 'rev-parse', 'HEAD'), ahead);
+
+  mkdirSync(join(repo, '.claude'));
+  writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ worktree: { baseRef: 'fresh' } }));
+  const project = hook({ hook_event_name: 'WorktreeCreate', name: 'proj', cwd: repo },
+    { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('head') });
+  assert.equal(git(project.stdout.trim(), 'rev-parse', 'HEAD'), pushed);
+});
+
+test('baseRef "fresh" with no origin falls back to the session HEAD', () => {
+  const { repo, root } = fixture();
+  const r = hook({ hook_event_name: 'WorktreeCreate', name: 'noremote', cwd: repo },
+    { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('fresh') });
+  assert.equal(r.status, 0, r.stderr);
+  assert.equal(git(r.stdout.trim(), 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'HEAD'));
 });
 
 test('a name with separators or dots is slugged', () => {

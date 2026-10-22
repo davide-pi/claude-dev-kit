@@ -49,9 +49,11 @@ function describe(entry, dir, envFile) {
   if (/^[\w.-]+$/.test(entry.identity ?? '')) {
     const azDir = path.join(os.homedir(), `.azure-${entry.identity}`);
     if (fs.existsSync(azDir)) {
-      // Forward slashes: bash strips unquoted backslashes, and az accepts either separator.
+      // Forward slashes: bash strips unquoted backslashes, and az accepts either separator. Single-quoted:
+      // the file is sourced by bash, and a home directory may hold a space or a `$`.
       if (envFile) {
-        fs.appendFileSync(envFile, `export AZURE_CONFIG_DIR=${azDir.replace(/\\/g, '/')}\nexport AZ_IDENTITY=${entry.identity}\n`);
+        const value = azDir.replace(/\\/g, '/').replace(/'/g, `'\\''`);
+        fs.appendFileSync(envFile, `export AZURE_CONFIG_DIR='${value}'\nexport AZ_IDENTITY=${entry.identity}\n`);
       }
       parts.push(`az identity ${entry.identity} (${PS_PREFIX})`);
     } else {

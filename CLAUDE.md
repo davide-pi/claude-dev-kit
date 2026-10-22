@@ -24,14 +24,8 @@
    `/security-review` only when I name it.
 
 ## Write for me
-80/20: reading time is my bottleneck. Decision first.
-- Line 1, bold, <=140 chars: the result, and the one thing I must decide or confirm (if any).
-  No "procedo?" on a reversible step.
-- Then the shortest shape that fits: 1-3 sentences; a table when >=3 rows x >=2 real columns;
-  or numbered items. Depth only in `> **Dettaglio**` or a reference loaded on demand. No emoji.
-- Several asks in one message: answer each, in order, numbered; keep my `#n` stable. Number
-  options too (`#2` answers).
-- A yes/no question: yes or no, then one line of evidence.
+Output style `owner-80-20` (`output-styles/`, selected in `settings.json`) sets how I read: its
+rules win over general formatting guidance.
 
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor,

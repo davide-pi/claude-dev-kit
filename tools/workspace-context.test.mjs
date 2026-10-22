@@ -37,11 +37,11 @@ const ROOTS = [
 ];
 
 /** A fresh sandbox: config dir with the map, a home with the listed az dirs, an empty env file. */
-function sandbox({ map = { roots: ROOTS }, azDirs = ['work', 'labs'] } = {}) {
+function sandbox({ map = { roots: ROOTS }, azDirs = ['work', 'labs'], homeName = 'home' } = {}) {
   const base = mkdtempSync(join(tmpdir(), 'wsc-'));
   created.push(base);
   const config = join(base, 'config');
-  const home = join(base, 'home');
+  const home = join(base, homeName);
   mkdirSync(config);
   mkdirSync(home);
   if (map !== null) writeFileSync(join(config, 'workspaces.json'), typeof map === 'string' ? map : JSON.stringify(map));
@@ -74,8 +74,21 @@ test('mapped root → ALM line with org, project, identity; env file pinned', ()
   const { context, envFile } = run(box, 'D:\\work\\product\\repo-a\\src');
   assert.match(context, /^ALM: Azure DevOps · org org-a · project Product · az identity work /);
   assert.match(context, /AZ_IDENTITY/);
-  assert.match(envFile, /^export AZURE_CONFIG_DIR=.*\/\.azure-work\nexport AZ_IDENTITY=work\n$/);
+  assert.match(envFile, /^export AZURE_CONFIG_DIR='.*\/\.azure-work'\nexport AZ_IDENTITY=work\n$/);
   assert.doesNotMatch(envFile, /\\/);
+});
+
+test('a home directory with a space, a quote or a dollar sign survives being sourced by bash', () => {
+  const bash = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
+  if (bash.status !== 0) return; // no bash here: the quoting is checked by the previous test's shape
+  for (const homeName of ['my home', "o'neil", 'dollar$HOME']) {
+    const box = sandbox({ homeName });
+    run(box, 'D:\\work\\product\\repo-a');
+    const sourced = spawnSync('bash', ['-c', `. "$ENVFILE"; printf %s "$AZURE_CONFIG_DIR"`], {
+      encoding: 'utf8', env: { ...process.env, ENVFILE: box.envFile.replace(/\\/g, '/') },
+    });
+    assert.equal(sourced.stdout, join(box.home, '.azure-work').replace(/\\/g, '/'), homeName);
+  }
 });
 
 test('cwd case does not matter', () => {

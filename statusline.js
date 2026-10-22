@@ -271,6 +271,11 @@ function segContext(ctx) {
 // agree on the path when the configuration directory is relocated.
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".claude");
 
+function usedTokens(ctx) {
+  if (!Number.isFinite(ctx?.used_percentage) || !Number.isFinite(ctx?.context_window_size)) return null;
+  return Math.round(ctx.used_percentage / 100 * ctx.context_window_size);
+}
+
 function saveContextSnapshot(sessionId, ctx, cache) {
   if (typeof sessionId !== "string" || !/^[\w-]{1,128}$/.test(sessionId)) return;
   try {
@@ -278,6 +283,10 @@ function saveContextSnapshot(sessionId, ctx, cache) {
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(path.join(dir, `context-${sessionId}.json`), JSON.stringify({
       used_percentage: Number.isFinite(ctx?.used_percentage) ? ctx.used_percentage : null,
+      // Absolute size, for the nudge's token bands: the percentage alone means little on a 1M window.
+      // Derived from the percentage, not from `total_input_tokens`, which is cumulative over the session.
+      used_tokens: usedTokens(ctx),
+      window: Number.isFinite(ctx?.context_window_size) ? ctx.context_window_size : null,
       warm: typeof cache?.warm === "boolean" ? cache.warm : null,
       caching_observed: cache?.caching_observed === true,
       at: Date.now(),
@@ -358,7 +367,7 @@ function fmtCost(cost) {
 // would be empty. To keep the 5h/7d readout visible immediately, we persist the
 // last-known snapshot on every render and fall back to it when live data is
 // missing, so the rate-limit readout is there from the first frame.
-const RL_CACHE = path.join(os.homedir(), ".claude", ".statusline-rate-limits.json");
+const RL_CACHE = path.join(CONFIG_DIR, ".statusline-rate-limits.json");
 
 function saveRateLimitCache(rl) {
   try {
@@ -420,7 +429,7 @@ function segRateLimits(rl, stale, cost) {
 // guess, not a reading — settings.json stores an alias ("opus[1m]") rather than a
 // display name, and knows nothing of a mid-session /model switch — so a value
 // sourced from it is marked with the same dim "~" as a stale rate limit.
-const SETTINGS = path.join(os.homedir(), ".claude", "settings.json");
+const SETTINGS = path.join(CONFIG_DIR, "settings.json");
 let settingsCache;
 function readSettings() {
   if (settingsCache === undefined) {
@@ -456,8 +465,8 @@ function segEffort(level, stale) {
 // the statusline never pays for the scan. Stale means silent rather than wrong:
 // a snapshot from another day, or from before /worklog last wrote its audit, is
 // dropped — which is also how the badge clears itself the moment hours are logged.
-const WL_CACHE = path.join(os.homedir(), ".claude", ".worklog-pending.json");
-const WL_AUDIT = path.join(os.homedir(), ".claude", "worklog", "pushed.json");
+const WL_CACHE = path.join(CONFIG_DIR, ".worklog-pending.json");
+const WL_AUDIT = path.join(CONFIG_DIR, "worklog", "pushed.json");
 
 function segWorklog() {
   try {

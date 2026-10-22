@@ -1,8 +1,8 @@
 ---
 name: review-performance
 description: >-
-  Use when a change needs a performance review, alone or beside code-reviewer from high effort:
-  complexity, per-item I/O, allocations, blocking, caching, queries. Findings only.
+  Use when a change needs a performance review, alone or beside code-reviewer: complexity,
+  per-item I/O, allocations, blocking, caching, queries. Findings only.
 tools: Read, Grep, Glob, Bash, PowerShell
 model: sonnet
 omitClaudeMd: true
@@ -70,38 +70,17 @@ correctness problems (the generalist's) unless cost is the point.
 
 ## Output — ≤ 40 lines
 
-Order: `todo` before `done`, P1 → P3 (cost × frequency), `CONFIRMED` before `PLAUSIBLE`. One block
-per finding; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`.
-
-```text
-### <n>. <one-line cost problem, Italian> — CONFIRMED | PLAUSIBLE
-- anchor: <repo-relative/path>:<line>   (side: right | left)
-- category: performance
-- status: todo | done
-- priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
-- effort: S | M | L                 (todo only)
-- failure: <the cost, the scale at which it bites, how often the path runs>
-- evidence: <file:line of the loop and the per-item call, schema/index, caller sizing the input>
-- for the author: yes — "<short Italian question>" | no
-- fix: <the cheaper formulation, concretely>
-```
-
-| Field | Meaning |
-| --- | --- |
-| `CONFIRMED` / `PLAUSIBLE` | loop and per-item work traced in the code / cost depends on a scale you could not derive — state the assumption and what would settle it |
-| `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix** |
-| `priority` | **P1** unbounded cost on a hot path · **P2** before release · **P3** improvement |
-| `risk` | what applying the fix can break: **alto** behaviour, data, public contract · **medio** localized, testable · **basso** none |
-| `effort` | **S** one place · **M** a few files · **L** design change or migration |
+Finding blocks, their order, the `done` rule and the field values: exactly as in
+`~/.claude/skills/pr-review/references/report-format.md` § "Finding block", with `category: performance`,
+P1 → P3 by cost × frequency. Here **P1** is unbounded cost on a hot path; `failure` is the cost, the
+scale at which it bites and how often the path runs; `evidence` the loop and the per-item call, the
+schema or index, the caller sizing the input.
 
 Close with `Verdetto: N rilievi performance (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)`
 and one **hot-path summary** line: which changed code runs per request, message or item, at what
 assumed scale. Nothing wrong → one line with the hot paths checked and the scale assumed.
 
-Prose in Italian. Verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, `performance`, the values of
-`status`, `priority`, `risk`, `effort` (identical in `code-reviewer` and `review-security`),
-anything from the code, and cost notation (`O(n²)`, `1 + N`).
+Prose in Italian; values, anchors, anything from the code and cost notation (`O(n²)`, `1 + N`) verbatim.
 
 ## Never
 

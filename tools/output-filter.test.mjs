@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -56,9 +56,36 @@ test('plain test and log commands are rewritten through the filter, allowed', ()
   }
 });
 
-test('PowerShell gets the same pipe without the bash-only pipefail', () => {
+test('PowerShell records the command exit code before the pipe and exits with it', () => {
   const out = guard('dotnet test', 'PowerShell');
-  assert.match(out.updatedInput.command, /^dotnet test 2>&1 \| node ".*output-filter\.js" --filter test$/);
+  assert.match(out.updatedInput.command, /^\$global:__rc = 0; & \{ dotnet test 2>&1; \$global:__rc = \$LASTEXITCODE \} \| node ".*output-filter\.js" --filter test; if \(\$global:__rc\) \{ exit \$global:__rc \}/);
+  assert.doesNotMatch(out.updatedInput.command, /pipefail/);
+});
+
+// The rewritten PowerShell line, run for real against a `dotnet` shim that prints a short green log
+// and exits with a chosen code: the filter alone would report 0, only the command knows it was 3.
+const hasPwsh = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' }).status === 0;
+const skipShim = !hasPwsh ? 'pwsh 7 not on PATH' : (process.platform === 'win32' ? false : 'the shim is a .cmd');
+
+function runRewritten(shimExit) {
+  const bin = mkdtempSync(join(tmpdir(), 'filter-bin-'));
+  try {
+    writeFileSync(join(bin, 'dotnet.cmd'), ['@echo off', 'echo Passed! - Failed: 0, Passed: 3, Total: 3', `exit /b ${shimExit}`, ''].join('\r\n'));
+    const command = guard('dotnet test', 'PowerShell').updatedInput.command;
+    const r = spawnSync('pwsh', ['-NoProfile', '-Command', command], {
+      encoding: 'utf8', env: { ...process.env, PATH: `${bin};${process.env.PATH}` },
+    });
+    return { status: r.status, out: r.stdout };
+  } finally {
+    rmSync(bin, { recursive: true, force: true });
+  }
+}
+
+test('PowerShell: a failing dotnet keeps its exit code through the filter, a passing one stays 0', { skip: skipShim }, () => {
+  const red = runRewritten(3);
+  assert.equal(red.status, 3, red.out);
+  assert.match(red.out, /Passed!/);
+  assert.equal(runRewritten(0).status, 0);
 });
 
 test('the rest of the tool input is preserved', () => {

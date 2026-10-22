@@ -58,9 +58,9 @@ Integrated security → `-E`. A password in a connection string is masked before
 | --- | --- |
 | `SELECT`, `WITH … SELECT`, catalog views, `sp_help*`, `EXPLAIN` without `ANALYZE`, Redis read commands | run |
 | DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements, Redis writes | refuse: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is the user's to type |
-| `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead; the hook asks on a dev host, `db-ro.ps1` refuses |
+| `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead (`KEYS` blocks the server); `db-ro.ps1` refuses them |
 | a read on a table of unknown size | `COUNT(*)` first, then `TOP 50` / `LIMIT 50`, projected to the columns that answer |
-| a non-dev host | only `db-ro.ps1`; exit `3` = the probe found a write grant or could not prove read-only → stop and report its message, no other route |
+| a non-dev host | only `db-ro.ps1`; exit `3` = read-only could not be proven → stop, report its message; exit `4` = the credential holds write grants → return the grant list and ask the caller **once per target**; on a yes re-run with `-AcceptWriteGrant` (the filter is then the only layer: say so in the report); never another route |
 
 ### Report — returned to the caller, ≤ 55 lines
 

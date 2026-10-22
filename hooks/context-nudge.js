@@ -1,17 +1,21 @@
 /**
- * UserPromptSubmit hook: one line into the turn when the context crosses 50 / 70 / 85 %.
+ * UserPromptSubmit hook: one line into the turn when the context crosses 60 % / 100 % / 160 % of
+ * an absolute token threshold (default 200k, `CLAUDE_NUDGE_TOKENS` overrides): 120k / 200k / 320k.
  *
  * Cost is context size times turns, and with auto-compact off nothing else tells the session the
- * window is filling up. A hook cannot see the context size itself, but the statusline can: it
- * receives `context_window.used_percentage` on every render and writes it to
- * `<config>/.cache/context-<session_id>.json` (see statusline.js). This hook only reads that file,
- * so the number is the harness's own, not a transcript-size proxy.
+ * window is filling up. The bands are absolute on purpose: on a 1M window a percentage band of 50 %
+ * is 500k tokens, above what almost any session reaches, so it would never fire. A hook cannot see
+ * the context size itself, but the statusline can: it receives `context_window` on every render and
+ * writes `used_tokens` and `used_percentage` to `<config>/.cache/context-<session_id>.json` (see
+ * statusline.js). This hook only reads that file, so the number is the harness's own, not a
+ * transcript-size proxy. A snapshot without `used_tokens` falls back to 50 / 70 / 85 % — only for a
+ * window of 250k tokens or less (or one of unknown size), where a percentage is a real alarm.
  *
- * Once per band per session. The band already announced lives in a separate
+ * Once per band per session. The band already announced (its index, 1-3) lives in a separate
  * `<config>/.cache/nudge-<session_id>.json` — never written into the statusline's file, which is
- * rewritten on every render and would race this read-modify-write. When the percentage drops below
+ * rewritten on every render and would race this read-modify-write. When the context drops below
  * the announced band (`/compact`, `/clear`), the state follows it down, so the next crossing
- * announces again. A null percentage (no response yet, just compacted) or no snapshot: silent.
+ * announces again. No usable number (no response yet, just compacted) or no snapshot: silent.
  *
  * Both cache families are pruned after a few days whenever a nudge fires (at most three times a
  * session), so one file per session never accumulates for good.
@@ -29,7 +33,15 @@ const path = require('path');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CACHE_DIR = path.join(CONFIG_DIR, '.cache');
-const BANDS = [50, 70, 85];
+/** Absolute thresholds as shares of the main one (200k by default): 120k / 200k / 320k. */
+const TOKEN_SHARES = [0.6, 1, 1.6];
+const PERCENT_BANDS = [50, 70, 85];
+/** Above this window a percentage band says little: without a token count, stay silent. */
+const PERCENT_FALLBACK_MAX_WINDOW = 250_000;
+const nudgeTokens = () => {
+  const configured = Number(process.env.CLAUDE_NUDGE_TOKENS);
+  return Number.isFinite(configured) && configured > 0 ? configured : 200_000;
+};
 /** A snapshot older than this belongs to a session that stopped rendering: do not trust it. */
 const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
@@ -45,8 +57,8 @@ function readJson(file) {
   }
 }
 
-/** The highest band at or below `pct`, 0 when under the first. */
-const bandOf = (pct) => BANDS.filter((b) => pct >= b).pop() ?? 0;
+/** How many of the ascending `limits` the value has reached: 0 when under the first. */
+const bandOf = (value, limits) => limits.filter((l) => value >= l).length;
 
 function prune(now) {
   try {
@@ -67,12 +79,24 @@ try {
 
   const now = Date.now();
   const snapshot = readJson(path.join(CACHE_DIR, `context-${id}.json`));
-  const pct = snapshot?.used_percentage;
-  if (!Number.isFinite(pct) || !Number.isFinite(snapshot.at) || now - snapshot.at > SNAPSHOT_MAX_AGE_MS) silent();
+  if (!Number.isFinite(snapshot?.at) || now - snapshot.at > SNAPSHOT_MAX_AGE_MS) silent();
+
+  const tokens = snapshot.used_tokens;
+  const pct = snapshot.used_percentage;
+  let band;
+  let level;                                     // how the context is named in the message
+  if (Number.isFinite(tokens)) {
+    band = bandOf(tokens, TOKEN_SHARES.map((s) => s * nudgeTokens()));
+    level = `Contesto a ${Math.round(tokens / 1000)}k token`;
+  } else if (Number.isFinite(pct) && !(snapshot.window > PERCENT_FALLBACK_MAX_WINDOW)) {
+    band = bandOf(pct, PERCENT_BANDS);
+    level = `Contesto al ${Math.round(pct)} %`;
+  } else {
+    silent();
+  }
 
   const stateFile = path.join(CACHE_DIR, `nudge-${id}.json`);
   const announced = readJson(stateFile)?.band ?? 0;
-  const band = bandOf(pct);
   if (band === announced) silent();
 
   fs.writeFileSync(stateFile, JSON.stringify({ band, at: now }));
@@ -83,7 +107,7 @@ try {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext:
-        `Contesto al ${Math.round(pct)} %. A fine risposta, una riga all'utente: `
+        `${level}. A fine risposta, una riga all'utente: `
         + '`/compact <focus>` (proponi tu il focus del task in corso) oppure `/clear` prima di un argomento nuovo.',
     },
   }));

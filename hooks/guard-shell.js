@@ -9,8 +9,6 @@
  *   - lib/sql-target.js     — a raw `sqlcmd` / `psql` / `redis-cli` (and kin) aimed at a host that
  *                             is not a dev host: non-dev databases go through
  *                             `~/.claude/scripts/db-ro.ps1`. This is the one check that DENIES;
- *                             it also denies a non-read `redis-cli` command on a dev host and
- *                             asks on `KEYS` / `MONITOR` / `CONFIG` / `DEBUG`;
  *   - lib/alm-contract.js   — an `az` write missing the house ALM flags (PR work item, squash +
  *                             delete, assignee), hours written outside /worklog, global defaults;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
@@ -57,10 +55,9 @@ try {
 
   // The one denial: a raw database client on a non-dev host. It comes before the ask path.
   const target = safely(() => checkSqlTarget(command));
-  if (target?.decision === 'deny') deny(target.reason);
+  if (target) deny(target.reason);
 
   const reasons = [
-    target?.decision === 'ask' ? target.reason : null,
     safely(() => checkDefaultBranch(command, payload.cwd)),
     safely(() => checkDestructive(command)),
     safely(() => checkAlmContract(command)),

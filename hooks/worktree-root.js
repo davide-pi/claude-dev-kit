@@ -12,7 +12,12 @@
  * its absolute path — the only thing on stdout, since the harness reads the path from there.
  *   - directory: `<CLAUDE_WORKTREE_ROOT>\<repo>-<name>`; root unset → `<repo>\.claude\worktrees\<name>`,
  *     the native layout, so wiring the hook without the variable changes nothing;
- *   - branch: `worktree-<name>`, the native naming; checked out if it exists, else created at HEAD;
+ *   - branch: `worktree-<name>`, the native naming; checked out if it exists, else created at the
+ *     base the `worktree.baseRef` setting names (project `settings.local.json`, then `settings.json`,
+ *     then the user's): `fresh` = the default branch of `origin`, as the native layout does; anything
+ *     else, or unset = the HEAD of the *session* (`git -C <cwd>`), not of the main checkout, which
+ *     can be on another branch when the session runs inside a worktree. `fresh` with no `origin`
+ *     falls back to the session HEAD;
  *   - an existing worktree at that path is reused, any other existing directory is an error.
  * WorktreeRemove (`worktree_path`): `git worktree remove` WITHOUT `--force`, so a dirty tree is
  * refused and kept; the branch is never deleted. Without this half the harness keeps every
@@ -27,6 +32,7 @@
 'use strict';
 
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
@@ -51,6 +57,49 @@ function slug(name) {
   return s;
 }
 
+/** `worktree.baseRef` from the first settings file that sets it: project local, project, user. */
+function readBaseRef(repoRoot) {
+  const userDir = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const files = [
+    path.join(repoRoot, '.claude', 'settings.local.json'),
+    path.join(repoRoot, '.claude', 'settings.json'),
+    path.join(userDir, 'settings.json'),
+  ];
+  for (const file of files) {
+    try {
+      const value = JSON.parse(fs.readFileSync(file, 'utf8'))?.worktree?.baseRef;
+      if (typeof value === 'string' && value.trim()) return value.trim().toLowerCase();
+    } catch {
+      /* missing or unreadable: the next one */
+    }
+  }
+  return '';
+}
+
+/** `origin/main` and the like: the remote default branch, or null when there is none. */
+function originDefault(repoRoot) {
+  const head = spawnSync('git', ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], {
+    cwd: repoRoot, encoding: 'utf8', windowsHide: true,
+  });
+  if (head.status === 0 && head.stdout.trim()) return head.stdout.trim();
+  for (const candidate of ['origin/main', 'origin/master']) {
+    const found = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/remotes/${candidate}`], {
+      cwd: repoRoot, windowsHide: true,
+    });
+    if (found.status === 0) return candidate;
+  }
+  return null;
+}
+
+/** The commit a new worktree branch starts from. */
+function baseCommit(repoRoot, cwd) {
+  if (readBaseRef(repoRoot) === 'fresh') {
+    const remote = originDefault(repoRoot);
+    if (remote) return git(repoRoot, ['rev-parse', '--verify', `${remote}^{commit}`]);
+  }
+  return git(cwd, ['rev-parse', '--verify', 'HEAD^{commit}']);   // the session's HEAD
+}
+
 function create(payload) {
   const cwd = payload.cwd || process.cwd();
   const repoRoot = mainRoot(cwd);
@@ -68,7 +117,7 @@ function create(payload) {
   const exists = spawnSync('git', ['show-ref', '--verify', '--quiet', `refs/heads/${branch}`], {
     cwd: repoRoot, windowsHide: true,
   }).status === 0;
-  git(repoRoot, exists ? ['worktree', 'add', target, branch] : ['worktree', 'add', '-b', branch, target, 'HEAD']);
+  git(repoRoot, exists ? ['worktree', 'add', target, branch] : ['worktree', 'add', '-b', branch, target, baseCommit(repoRoot, cwd)]);
   return target;
 }
 

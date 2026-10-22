@@ -27,6 +27,7 @@ function walk(dir = '', out = []) {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
     if (['.git', 'node_modules', '.remember', '.claude'].includes(entry.name)) continue;
     const rel = dir ? `${dir}/${entry.name}` : entry.name;
+    if (rel === 'evals/results') continue; // untracked run output of `claude plugin eval`
     if (entry.isDirectory()) walk(rel, out);
     else out.push(rel);
   }
@@ -164,6 +165,9 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/'))) {
 // They must also carry `disable-model-invocation: true`, the only switch that really keeps them out
 // of the model's hands — a description saying "explicit trigger only" is a request, not a lock.
 // grill-me is not here: it fires on natural phrasing ("poke holes in this").
+// Named with a slash in the description on purpose, yet invocable by the model: `/code-review` is also
+// what "review this" resolves to (CLAUDE.md routes every review through it).
+const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review']);
 const EXPLICIT_TRIGGER = [
   'worklog', 'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard',
   'docs-sync', 'retro', 'estimate',
@@ -188,6 +192,12 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
   }
   if (EXPLICIT_TRIGGER.includes(dir) && fm['disable-model-invocation'] !== 'true') {
     fail(rel, 'is trigger-only but lacks `disable-model-invocation: true`, so the model can still invoke it');
+  }
+  // A description that names `/<name>` reads as "only when typed": without the flag the skill is still
+  // listed on every turn (bytes paid) and still fires on prose. Warn, so a deliberate exception shows.
+  if (fm.description && new RegExp(`/${dir}\\b`).test(fm.description) && fm['disable-model-invocation'] !== 'true'
+      && !EXPLICIT_TRIGGER.includes(dir) && !MODEL_INVOCABLE_BY_DESIGN.has(dir)) {
+    warn(rel, `description names /${dir} but the skill lacks \`disable-model-invocation: true\` — still listed every turn and invocable by the model`);
   }
 }
 
@@ -219,6 +229,11 @@ const LEAKS = [
   // Case-insensitive on purpose: `c:\users\…` must not slip past a capitalised pattern.
   [/[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!<)[A-Za-z0-9._-]+/gi, 'absolute user path'],
   [/\/(?:home|Users)\/(?!<)[A-Za-z][A-Za-z0-9._-]{2,}/gi, 'absolute home path'],
+  // Any other absolute Windows path names a machine's layout (a workspace root, a worktree root).
+  // System paths are allowed below; a path with a <placeholder> segment is the way to write one.
+  [/\b[A-Za-z]:(?![\\/]{1,2}(?:Program Files|Users)\b)[\\/]{1,2}[A-Za-z_][\w.-]+[^\s"'`|*]*/gi, 'absolute Windows path'],
+  // An MCP server alias is an organization's name: only a placeholder or a wildcard may stand there.
+  [/mcp__azdo-(?![<*{])[A-Za-z0-9]\w*/gi, 'MCP server alias (use <org-alias>)'],
   // `git@host` in a clone URL is not an address; neither is anything at example.*
   [/(?<!git)(?<![\w.+-])[\w.+-]+@(?!example\.|ssh\.)[\w-]+\.[a-z]{2,}/gi, 'e-mail address'],
   // Hyphen-segmented provider keys (sk-ant-api03-…, sk-proj-…) are the ones most likely to be
@@ -235,6 +250,8 @@ const LEAK_ALLOW = [
   /Davide Piccinini/,                                   // the LICENSE holder, on purpose
   /C:\\Program Files\\PowerShell/,                      // documented system path
   /C:\\Users\\<[^>]+>/,                                 // explicit placeholder
+  /^[A-Za-z]:[\\/]{1,2}[^<]*<[^>]+>/,                   // a path with a <placeholder> segment
+  /^C:\\{1,2}db\\{1,2}x/,                                 // the sample in destructive.js's comment
   // A password that is a *reference* to a secret, or an obvious stand-in, is the correct way to
   // write an example — flagging it would push authors towards vaguer, less useful examples.
   /(?:Password|Pwd)\s*=\s*(?:\$env:|\$\{|%[A-Za-z_]+%|\$\()/i,
@@ -243,10 +260,15 @@ const LEAK_ALLOW = [
 // A file whose job is to detect credentials has to carry specimens of them. Only these two, and
 // only because the specimens are the test surface — never widen this to a directory.
 const LEAK_EXEMPT = new Set(['hooks/secret-scan.js', 'tools/secret-scan.test.mjs']);
+// Test fixtures write fake drive paths (a drive letter and a made-up folder) to exercise path matching: for them, and only
+// for the absolute-path rule, a drive path is the subject under test, not a leak.
+const PATH_RULE = 'absolute Windows path';
+const isTestFile = (rel) => /^tools\/[\w.-]+\.test\.mjs$/.test(rel);
 for (const rel of textFiles) {
   if (LEAK_EXEMPT.has(rel)) continue;
   const text = read(rel);
   for (const [pattern, label] of LEAKS) {
+    if (label === PATH_RULE && isTestFile(rel)) continue;
     for (const m of text.matchAll(pattern)) {
       const line = text.slice(0, m.index).split('\n').length;
       const snippet = m[0].length > 60 ? `${m[0].slice(0, 57)}...` : m[0];
@@ -300,16 +322,24 @@ for (const name of agentNames) {
 
 // ── 4b. Every skill has triggering cases ─────────────────────────
 // Descriptions are the only thing that decides whether a skill fires, so an untested one is an
-// untested trigger. A warning, not an error: adding the asset should not be blocked by it.
+// untested trigger. A warning, not an error: adding the asset should not be blocked by it. Covered
+// by an automated suite (`evals/<skill>/<case>/prompt.md`, run by `tools/run-evals.ps1`) or by a
+// manual section of `evals/skill-triggering.md`.
 if (has('evals/skill-triggering.md')) {
   const evals = read('evals/skill-triggering.md');
   const named = allFiles.filter((f) => f.endsWith('/SKILL.md')).map((f) => f.split('/')[1]);
+  const suites = new Set(allFiles.filter((f) => /^evals\/[^/]+\/.+\/prompt\.md$/.test(f)).map((f) => f.split('/')[1]));
   // Look for a heading that names the asset, not a mention anywhere in the file: `/commit` appearing
   // inside another skill's case row used to count as coverage for the commit skill.
   for (const name of new Set(named)) {
+    if (suites.has(name)) continue;
     if (!new RegExp(`^#{2,4} .*\\b${name}\\b`, 'm').test(evals)) {
-      warn('evals/skill-triggering.md', `no triggering case section covers '${name}'`);
+      warn('evals/skill-triggering.md', `no triggering case section or evals/${name}/ suite covers '${name}'`);
     }
+  }
+  // A suite for a skill that does not exist is a rename that left its cases behind.
+  for (const suite of suites) {
+    if (!named.includes(suite)) fail(`evals/${suite}`, 'suite has no matching skills/' + suite + '/SKILL.md');
   }
 }
 

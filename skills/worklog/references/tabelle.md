@@ -19,7 +19,7 @@ One block per day (a range prints one per day). Only this in chat; the timeline 
 | | **Totale** | | **2h25m** | | | **2h loggabili** | |
 
 Non fatturato: 40m (interni 40m, arrotondamento 0m)
-Attese lunghe contate: 10:45-12:04 (1h18m, raptor-backend) — tienile o toglile
+Attese lunghe contate: 10:45-12:04 (1h18m, <repo>) — tienile o toglile
 **Copertura: 2h / 8h — mancano 6h**
 ```
 

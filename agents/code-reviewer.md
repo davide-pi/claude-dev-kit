@@ -1,8 +1,8 @@
 ---
 name: code-reviewer
 description: >-
-  Use when a diff, branch or pull request needs reviewing: defects, regressions, security, clean
-  code, completeness. Returns findings; never posts or edits.
+  Use when a diff, branch or PR needs review: defects, regressions, clean code, completeness.
+  Findings only; never posts or edits.
 tools: Read, Grep, Glob, Bash, PowerShell
 model: sonnet
 omitClaudeMd: true
@@ -69,41 +69,16 @@ security advice with no reachable path.
 
 ## Output — ≤ 60 lines at `medium`
 
-Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`, `clean-code` last within its
-priority. One block per finding; a `done` block keeps title, anchor, category, status and
-`resolved by: <sha | thread id>`.
-
-```text
-### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
-- anchor: <repo-relative/path>:<line>   (side: right | left)
-- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
-- status: todo | done
-- priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
-- effort: S | M | L                 (todo only)
-- failure: <inputs/state → wrong outcome, or the intent point with no code>
-- evidence: <file:line read, blame, quoted rule or intent line>
-- for the author: yes — "<short Italian question>" | no
-- fix: <minimal change, or omit>
-```
-
-| Field | Meaning |
-| --- | --- |
-| `CONFIRMED` / `PLAUSIBLE` | failing path traced in the code / depends on what you cannot see (caller, runtime config, deployment) |
-| `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix**; by-design is not a finding |
-| `priority` | **P1** blocks the merge (CONFIRMED security, data loss, crash, broken contract) · **P2** before release · **P3** improvement |
-| `risk` | what applying the fix can break: **alto** behaviour, data, public contract · **medio** localized, testable · **basso** cosmetic |
-| `effort` | **S** one place · **M** a few files · **L** design change or migration |
-| `anchor` | no leading slash; post-change line (`right`), pre-change for a deleted line (`left`); a missing piece anchors where it belongs |
+Finding blocks, their order, the `done` rule and the field values: exactly as in
+`~/.claude/skills/pr-review/references/report-format.md` § "Finding block". `category` is any slug
+listed there; `clean-code` sorts last within its priority.
 
 Close with `Intento: N punti — coperti N` plus one line per partial, missing or wrong point
 (criterion quoted, verdict) and the scope creep, then
 `Verdetto: N rilievi (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N) · security: N · completeness: N`.
 Nothing wrong → one line naming the passes run and the intent points verified.
 
-Prose in Italian. Verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, category slugs, the values of
-`status`, `priority`, `risk`, `effort` (identical in `review-security` and `review-performance`),
-and anything taken from the code.
+Prose in Italian; values, anchors and anything from the code verbatim.
 
 ## Never
 

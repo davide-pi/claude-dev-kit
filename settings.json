@@ -1,11 +1,10 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "cleanupPeriodDays": 30,
+  "cleanupPeriodDays": 90,
   "env": {
     "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
     "MAX_MCP_OUTPUT_TOKENS": "10000",
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70",
     "CLAUDE_CODE_DEBUG_LOG_LEVEL": "warn",
     "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
     "CLAUDE_CODE_DISABLE_MOUSE": "0",
@@ -16,7 +15,8 @@
     "CLAUDE_WORKSPACE_ROOTS": "",
     "CLAUDE_WORKSPACE_NESTED": "",
     "CLAUDE_WORKTREE_ROOT": "",
-    "CLAUDE_DONE_CLAIM": ""
+    "CLAUDE_DONE_CLAIM": "",
+    "CLAUDE_NUDGE_TOKENS": ""
   },
   "bashOutputMaxChars": 15000,
   "attribution": {
@@ -228,6 +228,8 @@
       "Bash(kubectl delete *)"
     ],
     "ask": [
+      "mcp__azdo-<org-a>__*",
+      "mcp__azdo-<org-b>__*",
       "PowerShell(git push*)",
       "Bash(git push*)",
       "PowerShell(git push --force*)",
@@ -253,6 +255,35 @@
     ],
     "defaultMode": "auto"
   },
+  "deniedMcpServers": [
+    { "serverName": "claude.ai Microsoft 365" },
+    { "serverName": "claude.ai Figma" },
+    { "serverName": "claude.ai Airtable" }
+  ],
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Solo developer on Windows; Azure DevOps + GitHub; non-dev databases only through ~/.claude/scripts/db-ro.ps1"
+    ],
+    "allow": [
+      "$defaults",
+      "Read-only az devops/boards/repos/pipelines and gh queries",
+      "dotnet build/test, npm test, docker compose ps/logs"
+    ],
+    "soft_deny": [
+      "$defaults",
+      "Any command that writes to a database not on localhost",
+      "git push to the default branch",
+      "Deleting a branch, worktree, volume or cloud resource",
+      "Editing files under ~/.claude without the user's explicit request this turn"
+    ],
+    "hard_deny": [
+      "$defaults",
+      "az account set",
+      "dotnet ef database drop",
+      "docker system prune"
+    ]
+  },
   "model": "opus[1m]",
   "fallbackModel": ["sonnet", "haiku"],
   "hooks": {
@@ -262,13 +293,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "command": "pwsh",
             "args": [
               "-NoProfile",
               "-ExecutionPolicy",
               "Bypass",
               "-Command",
-              "& \"$env:CLAUDE_HOOKS\\ensure-edge-cdp.ps1\""
+              "$d = if ($env:CLAUDE_HOOKS) { $env:CLAUDE_HOOKS } else { \"$HOME\\.claude\\hooks\" }; & \"$d\\ensure-edge-cdp.ps1\""
             ],
             "timeout": 30,
             "statusMessage": "Checking Edge's CDP port for browser-use..."
@@ -283,7 +314,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/guard-shell.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/guard-shell.js')}catch{process.exit(0)}"
             ],
             "timeout": 15,
             "statusMessage": "Checking the command before it runs..."
@@ -298,7 +329,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/secret-scan.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/secret-scan.js')}catch{process.exit(0)}"
             ],
             "timeout": 15,
             "statusMessage": "Scanning the change for credentials..."
@@ -315,7 +346,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/format-on-edit.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/format-on-edit.js')}catch{process.exit(0)}"
             ],
             "timeout": 30,
             "statusMessage": "Formatting the file just written..."
@@ -332,7 +363,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/workspace-context.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/workspace-context.js')}catch{process.exit(0)}"
             ],
             "timeout": 10,
             "statusMessage": "Resolving the ALM target and az identity for this workspace..."
@@ -342,7 +373,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/session-brief.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/session-brief.js')}catch{process.exit(0)}"
             ],
             "timeout": 10,
             "statusMessage": "Reading the repository state..."
@@ -356,7 +387,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/worklog-pending.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worklog-pending.js')}catch{process.exit(0)}"
             ],
             "timeout": 10,
             "statusMessage": "Checking for days whose hours were never logged..."
@@ -372,7 +403,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/context-nudge.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/context-nudge.js')}catch{process.exit(0)}"
             ],
             "timeout": 5
           }
@@ -387,7 +418,7 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/done-claim.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/done-claim.js')}catch{process.exit(0)}"
             ],
             "timeout": 5
           }
@@ -402,7 +433,7 @@
             "command": "node",
             "args": [
               "-e",
-              "require((process.env.CLAUDE_HOOKS||'')+'/worktree-root.js')"
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worktree-root.js')"
             ],
             "timeout": 90,
             "statusMessage": "Creating the worktree under CLAUDE_WORKTREE_ROOT..."
@@ -418,7 +449,7 @@
             "command": "node",
             "args": [
               "-e",
-              "require((process.env.CLAUDE_HOOKS||'')+'/worktree-root.js')"
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worktree-root.js')"
             ],
             "timeout": 60,
             "statusMessage": "Removing the worktree..."
@@ -443,7 +474,7 @@
     "frontend-design@claude-plugins-official": true,
     "remember@claude-plugins-official": false,
     "microsoft-docs@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": false,
     "chrome-devtools-mcp@claude-plugins-official": false,
     "redis-development@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
@@ -453,6 +484,7 @@
     "browser-use@claude-plugins-official": true
   },
   "language": "Italian",
+  "outputStyle": "owner-80-20",
   "feedbackDrafts": "notify",
   "alwaysThinkingEnabled": true,
   "effortLevel": "medium",
@@ -467,7 +499,6 @@
   "editorMode": "normal",
   "preferredNotifChannel": "auto",
   "autoCompactEnabled": false,
-  "remoteControlAtStartup": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "voiceEnabled": true

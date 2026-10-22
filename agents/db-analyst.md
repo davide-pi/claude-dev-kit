@@ -33,9 +33,11 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
   update, no cache or plan-cache clearing, no migration. A write request is refused: say so.
 - **Probe first.** One cheap call proves the target before any real query (`SELECT @@SERVERNAME,
   DB_NAME()` · `SELECT current_database(), inet_server_addr()` · `PING`); name the host you hit.
-- **Non-dev hosts only through `db-ro.ps1`.** It probes the credential and exits `3` on any write
-  grant, or when read-only cannot be proven: stop and report its message, never look for another
-  login, client or path around it.
+- **Non-dev hosts only through `db-ro.ps1`.** It probes the credential. Exit `3` = read-only cannot
+  be proven: stop and report its message. Exit `4` = the credential holds write grants: return the
+  grant list to the caller and ask **once per target per session**; on a yes, re-run with
+  `-AcceptWriteGrant`, which leaves only the client-side filter (reads only) and says so in its
+  header: say so in your report too. Never look for another login, client or path around it.
 - **The hook denies anything else** (a raw client at a non-dev host, a destructive statement): read
   the reason, do not retry around it.
 - **Estimated plan first**; an actual plan only on a statement proven to be a pure read, and only
@@ -47,7 +49,7 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
 
 | Host | Client |
 | --- | --- |
-| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands only (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …); `KEYS` asks — use `SCAN` |
+| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, not `KEYS` |
 | client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
 | anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Db <name>] -Query "<sql or one redis command>"`; `-Probe` alone reports whether the credential is read-only server-side |
 

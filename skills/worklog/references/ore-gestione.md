@@ -3,7 +3,7 @@
 The "management" case: time **attributable to no product item** — client meetings and calls,
 backlog analysis and grooming, estimates, coordination, `/workitem-create` session-mode runs. It
 does not go on the Tasks of the work done (that is `scrittura.md`) but into a **fixed structure per
-engagement**. Most of it never shows in a transcript: the gap prompt is where it is recovered.
+account**. Most of it never shows in a transcript: the gap prompt is where it is recovered.
 
 ## The gap prompt — an under-target day
 
@@ -30,11 +30,11 @@ Rules:
 
 ## The fixed structure
 
-Per engagement, where **the engagement is the Epic's title**. The titles below are board data —
+Per account, where **the account is the Epic's title**. The titles below are board data —
 Italian and exact:
 
 ```text
-Epic  <Epic title>                                   ← the engagement
+Epic  <Epic title>                                   ← the account
 └── Feature  "Gestione progetto"                     ← exact title, one per Epic
     └── PBI  "Gestione progetto - <Epic title>"      ← exactly one, holds all the hours
         ├── Task  "<yyyy/MM/dd> - <activity title>"  ← one per logged session
@@ -52,12 +52,12 @@ Epic  <Epic title>                                   ← the engagement
 1. **Org and project** from the `workspaces.json` root matching the project's path (the map behind
    the `ALM:` line); passed explicitly on every command, never the `az devops configure` default.
    Unmapped path → **ask**.
-2. **The engagement's Epic.** Several Epics and the right one not derivable from the period's work
-   → **ask**: management hours land on an engagement, and the wrong one is the wrong client.
-3. **Every Feature of the Epic**, **Done ones included** — no state filter: an old engagement's
+2. **The account's Epic.** Several Epics and the right one not derivable from the period's work
+   → **ask**: management hours land on an account, and the wrong one is the wrong client.
+3. **Every Feature of the Epic**, **Done ones included** — no state filter: an old account's
    management Feature is often closed.
 4. **The PBI among those Features' children, by prefix match**, not exact title — the title carries
-   the engagement name and may not match character for character:
+   the account name and may not match character for character:
 
    ```text
    [System.WorkItemType]='<backlog-item type>'
