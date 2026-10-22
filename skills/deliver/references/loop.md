@@ -5,8 +5,12 @@
 ```powershell
 git rev-parse HEAD                    # start.head
 git rev-parse --show-toplevel         # repoRoot
-git status --porcelain                # start.dirty: the paths already modified or untracked
+git ls-files -m -o --exclude-standard # start.dirty: modified and untracked files, plain paths
+git diff --name-only --cached         # start.dirty too: the staged ones
 ```
+
+`start.dirty` is the union of the two lists, plain paths (not `git status --porcelain`, whose `XY` prefix,
+quotes and rename arrows are not paths; the workflow strips them if they come anyway).
 
 A file dirty here is the user's work. The workflow reviews only the files the change touched since this
 point and never reverts a dirty file: an edit of the change in one, outside the perimeter, comes back as
@@ -42,5 +46,9 @@ stalled round:
 `resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true }]`
 
 `accept` takes the risk (it goes in the verdict), `retry: true` is one more round with no direction,
-`guidance` is one more round with the user's direction. A missing reviewer verdict is not a stall: the
-workflow asks again by itself, and lists the gap under `gaps`.
+`guidance` is one more round with the user's direction. A missing reviewer verdict is not a stall at first: the
+workflow asks again, only that id, and lists the gap under `gaps`; two rounds in a row without a verdict on the
+same id is a stall (`why: "no-verdict"`), handled like any other.
+
+If a resume replays a cached null implementer result (`stall.reason` says the implementer returned nothing),
+relaunch WITHOUT `resumeFromRunId`.

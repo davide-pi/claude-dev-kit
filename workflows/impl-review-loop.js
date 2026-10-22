@@ -17,13 +17,17 @@ export const meta = {
 //
 // Rounds have NO cap. The loop ends in exactly two ways: no P1/P2 inside the perimeter is open (OK), or a
 // finding stalls (STALL): still open after a fix, or closed earlier and open again (a closed finding
-// re-reported under a new id counts). A reviewer that gives no verdict for an id is not a stall: the id is
-// asked again the next round. `decideRound` makes the call in plain code, never a model. A subagent never
+// re-reported under a new id, a shifted line or a reworded title counts). A reviewer that gives no verdict for
+// an id is not a stall at first: only that id is asked again the next round; two rounds in a row without a
+// verdict on it is the same finding unresolved, a STALL ('no-verdict'). `decideRound` makes the call in plain
+// code, never a model. A subagent never
 // asks the user: a stall returns to the caller (the deliver skill), which asks and relaunches with
 // `resumeFromRunId` and `args.resolutions`.
 //
-// Start point: deliver records HEAD and the files already dirty before the change (`args.start`). Only the
-// files the implementer reports changed are reviewed, files dirty at the start are the user's and are never
+// Start point: deliver records HEAD and the files already dirty before the change (`args.start`; a
+// `git status --porcelain` line is tolerated, a trailing "/" entry is a directory). The reviewer derives the
+// files the change touched from git (`git diff <head> --name-only` plus untracked, minus the dirty ones): the
+// implementer's declared list is a hint only. Files dirty at the start are the user's and are never
 // reverted (an edit of the change there, outside the perimeter, is reported, not reverted), and a perimeter
 // file already dirty is refused unless `dirtyConfirmed`. `inline: true` skips the implementer: the session
 // edited `changed` itself and only the review loop runs (fixes still go to the implementer).
@@ -32,13 +36,15 @@ export const meta = {
 // `resolutions: [{ round, accept?, guidance?, retry? }]` (round = the one each STALL reported). The agent
 // calls before the decision are cached; the first changed call runs live. `accept` lists finding ids the
 // user takes as a residual risk; `guidance` or `retry: true` sends the stalled findings to the fixer once
-// more (guidance puts the user's direction in the brief).
+// more (guidance puts the user's direction in the brief). If the resume replays a cached null implementer
+// result (a STALL on "the implementer returned nothing"), relaunch WITHOUT resumeFromRunId.
 //
 // The pure functions sit between the markers below. tools/impl-review-loop.test.mjs extracts that block
 // and runs it: keep it free of agent(), log() and phase().
 
 // --- pure:begin
-const norm = p => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase()
+// Git Bash writes a drive as "/c/...", a reviewer or the harness as "C:\...": both become "c:/...".
+const norm = p => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase().replace(/^\/([a-z])\//, '$1:/')
 
 // A path as repo-relative as it can be made: the repo root is stripped from an absolute one.
 const rel = (p, root) => {
@@ -61,13 +67,34 @@ const inPerimeter = (path, files, root) => {
   const p = rel(path, root)
   return !!p && !isAbsolute(p) && (files ?? []).some(f => entryRegex(f).test(p))
 }
+// A dirty entry ending with "/" is a collapsed untracked directory: it protects every file under it.
 const isDirty = (path, dirty, root) => {
   const p = rel(path, root)
-  return !!p && (dirty ?? []).some(d => rel(d, root) === p)
+  return !!p && (dirty ?? []).some(d => { const x = rel(d, root); return x.endsWith('/') ? p.startsWith(x) : x === p })
 }
+
+// start.dirty as the caller recorded it, tolerant of `git status --porcelain` lines: the "XY " prefix, the
+// quotes, a rename "old -> new" (both ends are dirty). Plain paths pass through.
+const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '').trim()
+  .split(' -> ').map(x => x.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
 
 // The identity of a finding across rounds and ids: where it is and what kind it is.
 const keyOf = (f, root) => `${rel(f.path, root)}:${f.line ?? ''}|${String(f.category ?? '').toLowerCase()}`
+
+// The same finding seen again, possibly on a shifted line or under a reworded title: same file and category,
+// a line within LINE_WINDOW and a similar title (the shorter title shares at least half its words with the other).
+const LINE_WINDOW = 10
+const words = t => new Set(String(t ?? '').toLowerCase().split(/[^a-z0-9]+/).filter(w => w.length >= 3))
+const sameTitle = (a, b) => {
+  const x = words(a), y = words(b)
+  if (!x.size || !y.size) return String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase()
+  return [...x].filter(w => y.has(w)).length / Math.min(x.size, y.size) >= 0.5
+}
+const sameFinding = (a, b, root) => rel(a.path, root) === rel(b.path, root)
+  && String(a.category ?? '').toLowerCase() === String(b.category ?? '').toLowerCase()
+  && (!Number.isFinite(a.line) || !Number.isFinite(b.line) || Math.abs(a.line - b.line) <= LINE_WINDOW)
+  && sameTitle(a.title, b.title)
+const RANK = { P1: 1, P2: 2, P3: 3 }
 
 const BLOCKING = new Set(['P1', 'P2'])
 
@@ -104,18 +131,20 @@ const mergeReviews = (reviews, root) => {
   return { verdicts, found }
 }
 
-// A finding listed again under a new id is the known finding: when that one is tracked its verdict becomes
-// open (a closed one back is a STALL); when it was only recorded as minor / out of scope it is dropped.
+// A finding listed again under a new id is the known finding (same file and category, a line within
+// LINE_WINDOW, a similar title): when that one is tracked its verdict becomes open (a closed one back is a
+// STALL); when it was only recorded as minor / out of scope it is dropped, unless the new one is MORE severe
+// (a P2 on a known P3): that is fresh. A different defect on the same spot is fresh too.
 //   known { id: finding }   every finding ever listed       tracked { id: { status } }
 const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '' } = {}) => {
-  const byKey = {}
-  for (const [id, k] of Object.entries(known)) if (!(keyOf(k, root) in byKey)) byKey[keyOf(k, root)] = id
   const next = { ...verdicts }
   const fresh = []
   const rematched = []
   for (const f of found) {
-    const id = byKey[keyOf(f, root)]
-    if (!id) { fresh.push(f); continue }
+    const hits = Object.entries(known).filter(([, k]) => sameFinding(f, k, root))
+    const hit = hits.find(([id]) => tracked[id]) ?? hits.find(([, k]) => (RANK[f.priority] ?? 3) >= (RANK[k.priority] ?? 3))
+    if (!hit) { fresh.push(f); continue }
+    const [id] = hit
     if (tracked[id]) { next[id] = 'open'; rematched.push(id) }
   }
   return { found: fresh, verdicts: next, rematched }
@@ -127,14 +156,17 @@ const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root
 //   found       [{ id, path, category, priority, ... }]              this round's NEW findings (ids assigned)
 //   files       the perimeter file list; dirty, root: see classify
 //   resolution  { accept?: [ids], guidance?: string, retry?: true }  what the user decided after a stall
-// Returns { action: 'DONE' | 'FIX' | 'RECHECK' | 'STALL', tracked, stalled, unanswered, toFix, closed, minor, outOfScope }.
-// RECHECK: nothing to fix and nothing stalled, but some open id got no verdict: review again, no fix.
-const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', resolution } = {}) => {
+//   silent      { id: n }   rounds in a row each id got no verdict, up to the previous round
+// Returns { action: 'DONE' | 'FIX' | 'RECHECK' | 'STALL', tracked, stalled, unanswered, silent, toFix, closed, minor, outOfScope }.
+// RECHECK: nothing to fix and nothing stalled, but some open id got no verdict: review again, no fix. An id with
+// no verdict in 2 rounds in a row is the same finding unresolved: stalled, why 'no-verdict'.
+const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', resolution, silent = {} } = {}) => {
   const accept = new Set(resolution?.accept ?? [])
   const guided = !!resolution?.guidance || resolution?.retry === true
   const next = {}
   const stalled = []
   const unanswered = []
+  const nextSilent = {}
   const closed = []
   const toFix = []
   for (const [id, t] of Object.entries(tracked)) {
@@ -152,8 +184,11 @@ const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirt
       next[id].status = 'accepted'
     } else if (verdict === 'open') {
       stalled.push({ id, why: 'still-open' })
+    } else if ((silent[id] ?? 0) + 1 >= 2) {
+      stalled.push({ id, why: 'no-verdict' })
     } else {
       unanswered.push(id)
+      nextSilent[id] = (silent[id] ?? 0) + 1
     }
   }
   const minor = []
@@ -170,7 +205,7 @@ const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirt
     for (const s of stalled) { next[s.id].status = 'open'; toFix.push(s.id) }
     stalled.length = 0
   }
-  const out = { tracked: next, stalled, unanswered, closed, minor, outOfScope }
+  const out = { tracked: next, stalled, unanswered, silent: nextSilent, closed, minor, outOfScope }
   if (stalled.length) return { action: 'STALL', toFix: [], ...out }
   toFix.push(...fresh)
   return { action: toFix.length ? 'FIX' : unanswered.length ? 'RECHECK' : 'DONE', toFix, ...out }
@@ -185,7 +220,7 @@ const files = strings(perimeter.files)
 const repoRoot = typeof input.repoRoot === 'string' ? input.repoRoot.trim() : ''
 const inline = input.inline === true
 const startHead = typeof input.start?.head === 'string' ? input.start.head.trim() : ''
-const dirty = strings(input.start?.dirty)
+const dirty = strings(input.start?.dirty).flatMap(parseDirty)
 if (!brief || !files.length) {
   return 'impl-review-loop: args.brief and args.perimeter.files are required, e.g. { brief: "...", perimeter: { files: ["src/Orders/OrdersQuery.cs"], behaviour: "...", exclusions: "..." }, repoRoot: "<git rev-parse --show-toplevel>", start: { head, dirty: [] }, size: "M" }'
 }
@@ -316,17 +351,25 @@ if (!inline) {
   ;(impl.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
 }
 
+let skipped = []                      // ids a reviewer gave no verdict for last round: only those are asked next
+let silent = {}                       // id -> rounds in a row without a verdict
+
 const previousBlock = () => {
-  const list = Object.keys(tracked).map(id => `- ${id} [${tracked[id].status}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}`)
+  const ids = skipped.length ? skipped : Object.keys(tracked)
+  const list = ids.map(id => `- ${id} [${tracked[id].status}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}`)
+  if (skipped.length) return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, for each of these ids only; an id you skip again stalls the loop):\n${list.join('\n')}`
   return list.length
     ? `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id, closed ones too; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}`
     : 'PREVIOUS FINDINGS: none (first round: review the whole change).'
 }
 
+// The files the change touched come from git, not from what the implementer declared: that list is a hint.
+const touchedByGit = (declared) => `Find the files the change touched yourself: \`git diff ${startHead || 'HEAD'} --name-only\` plus the untracked files (\`git ls-files -o --exclude-standard\`)${dirty.length ? `, minus the files already modified before the start (${dirty.join(', ')}; an entry ending with "/" is a whole directory), except that a file in both is reviewed for the change's own edit only` : ''}. The list ${inline ? 'the session' : 'the implementer'} declared (${declared || 'none'}) is a hint, never the limit of the review.`
+
 // What each review reads: round 1 the files the change touched since the start point, later rounds the delta of the last fix.
 const scopeOfReview = () => (lastFix
-  ? `Review the DELTA of the last fix, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}`
-  : `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}, only in the files ${inline ? 'the session' : 'the implementer'} reported changed: ${[...changed].join(', ') || '(none reported)'}.`)
+  ? `Review the DELTA of the last fix, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit([...changed].join(', '))}`
+  : `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit([...changed].join(', '))}`)
 
 while (true) {
   round += 1
@@ -352,8 +395,10 @@ while (true) {
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
   found.forEach(f => { known[f.id] = f })
   const resolution = resolutions.find(r => Number(r.round) === round)
-  const decision = decideRound({ tracked, verdicts: deduped.verdicts, found, files, dirty, root: repoRoot, resolution })
+  const decision = decideRound({ tracked, verdicts: deduped.verdicts, found, files, dirty, root: repoRoot, resolution, silent })
   tracked = decision.tracked
+  silent = decision.silent
+  skipped = decision.action === 'RECHECK' ? decision.unanswered : []
   decision.minor.forEach(id => minor.push(known[id]))
   decision.outOfScope.forEach(id => outOfScope.push({ source: 'review', ...known[id] }))
   if (decision.unanswered.length) gaps.push(`round ${round}: no verdict for ${decision.unanswered.join(', ')}, asked again`)
