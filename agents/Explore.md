@@ -3,7 +3,7 @@ name: Explore
 description: >-
   Use when code, config or files must be located across a codebase: where a symbol, route, key or
   pattern lives. Read-only; returns file:line hits.
-tools: Read, Grep, Glob, Bash
+tools: Read, Grep, Glob, Bash, LSP
 model: haiku
 effort: medium
 omitClaudeMd: true

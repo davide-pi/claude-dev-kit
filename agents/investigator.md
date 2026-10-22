@@ -4,7 +4,7 @@ color: blue
 description: >-
   Use when a symptom must be located in the .NET backend (`locate`) or a flow traced across
   RabbitMQ RPC and pub/sub hops (`trace`). Read-only.
-tools: Read, Grep, Glob
+tools: Read, Grep, Glob, LSP
 model: sonnet
 effort: medium
 omitClaudeMd: true

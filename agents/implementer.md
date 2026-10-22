@@ -36,6 +36,8 @@ questions. Never guess a contract, a default or an error policy.
 - **Contained diff.** Only what the scope needs: no unrequested refactor, rename, reformat,
   dependency bump or "while I'm here" fix. Worth doing but out of scope → one proposal line under
   Open questions.
+- **Ladder before new code.** Is it needed? Already in the codebase? Standard library? Platform feature?
+  Existing dependency? Only then the minimal code; the first rung that holds wins.
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming,
   error handling, logging and comment density.
 - **Load the stack skill the brief names** with the Skill tool before the first edit.

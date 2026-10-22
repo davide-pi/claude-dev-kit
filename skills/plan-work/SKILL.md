@@ -94,7 +94,7 @@ $plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --s
 $file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
 ```
 
-Fill it from `references/plan-template.md`. While executing: dependency order; each task's verify
+Fill it from `references/plan-template.md` (a multi-session plan ends with its `/goal` line). While executing: dependency order; each task's verify
 before the next; tick `- [x]` in the file; a wrong task → edit the plan first, the code second.
 Finished → verify the whole change, not the last task (`references/evidence-by-stack.md`).
 
@@ -112,7 +112,7 @@ Finished → verify the whole change, not the last task (`references/evidence-by
 
 - `references/from-work-item.md` — the work starts from an item: S/D/A tags, the readiness verdict,
   the questions worth asking, the split test.
-- `references/plan-template.md` — a first plan in a repo, or one with phases: skeleton, example.
+- `references/plan-template.md` — a first plan in a repo, or one with phases: skeleton, example, the closing `/goal` line.
 - `references/spike.md` — a feasibility probe: instruments, the Italian report, the guardrails.
 - `references/delegation.md` — before a fan-out: sizing waves, the pasted output contract, the
   correction round.

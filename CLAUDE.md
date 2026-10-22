@@ -25,13 +25,14 @@
 
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor,
-rename, reformat, dependency bump or "while I'm here" fix. Anything else worth doing: one row
-each at the end, then stop.
+rename, reformat, dependency bump or "while I'm here" fix. Remove only what your change made
+unused (imports, variables, functions), never pre-existing dead code. Anything else:
+one row each at the end, then stop.
 
 | # | Proposta | Motivo | Rischio |
 | --- | --- | --- | --- |
 
-`#` stays stable for the whole conversation; one item per row, never a range.
+`#` stays stable all conversation; one item per row, never a range.
 
 Rischio: **alto** behaviour, data, public contract; **medio** local logic, testable; **basso**
 cosmetic.

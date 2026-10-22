@@ -124,6 +124,16 @@ the output, `git diff --stat` reviewed.
   results to problem details and would have to grow a catch block otherwise.
 ```
 
+## Closing `/goal` line (multi-session plans)
+
+A plan that spans sessions ends with one ready line the owner can paste:
+
+```text
+/goal every task's verify shows its expected output (command + line), no other test files touched, or stop after 20 turns
+```
+
+Never started by the assistant, never inside `deliver`.
+
 ## Phased form (subsystem)
 
 Group tasks under `## Phase N — <name>` when the plan passes ~12 tasks. Each phase ends at a point
