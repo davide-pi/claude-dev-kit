@@ -108,6 +108,15 @@ exists.
 | "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike, `references/spike.md`) |
 | "conviene spezzare questo lavoro su più agent?" | MUST load (fan-out, `references/delegation.md`) |
 
+### `deliver` — every code change, before the first edit
+
+| Prompt | Expected |
+|--------|----------|
+| "l'export degli ordini è lento, rendilo più veloce" | MUST load (perf scenario: baseline first) |
+| "aggiungi il filtro per stato alla lista ordini" | MUST load (feature, perimeter and loop) |
+| "spiegami cosa fa OrdersQuery" | MUST NOT (reading code, no change) |
+| "rivedi il diff che ho in working tree" | MUST NOT (review of an existing diff belongs to code-review) |
+
 ### `debug-systematic`
 
 | Prompt | Expected |

@@ -43,6 +43,7 @@ the ceremony and rewritten for PowerShell.
 | Skill | Purpose |
 |---|---|
 | `skills/plan-work/SKILL.md` | A plan file with verifiable tasks, sized to the change — and when not to write one at all. Also turns a work item into an attack plan before any code. |
+| `skills/deliver/SKILL.md` | Every code change from triage to verdict: scenario and size, a written perimeter, the `impl-review-loop` workflow, tests by level run in the main session, a verdict block and a table of what was left outside. References for the scenarios and for perf baselines. |
 | `skills/debug-systematic/SKILL.md` | Reproduce, isolate, explain, then fix — with a symptom-to-instrument table for .NET processes, query plans, brokers, pipelines and intermittent failures. |
 | `skills/skill-forge/SKILL.md` | How to add or change an asset of this kit: shape decision, front matter, caps, splitting, finish checklist. |
 | `skills/grill-me/SKILL.md` | Red-team a plan: interview the decision tree round by round — the whole frontier at once, each question with a recommended answer — then a Decision Summary. |
