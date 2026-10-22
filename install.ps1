@@ -362,6 +362,15 @@ function Test-Hooks {
         }
     } catch { Write-Problem "cannot read the hook wiring from $settingsPath — $($_.Exception.Message)" }
 
+    # nudges.js runs the nudges itself, so a script listed in its NUDGES table is wired through it.
+    if ($wired.ContainsKey('nudges.js')) {
+        $dispatcher = Get-Content -Raw -LiteralPath (Join-Path $hookDir 'nudges.js') -ErrorAction SilentlyContinue
+        $table = [regex]::Match("$dispatcher", '(?s)const NUDGES = \{(.*?)\};').Groups[1].Value
+        foreach ($file in @([regex]::Matches($table, '[\w.-]+\.js') | ForEach-Object { $_.Value } | Sort-Object -Unique)) {
+            if (-not $wired.ContainsKey($file)) { $wired[$file] = @('via nudges.js') }
+        }
+    }
+
     foreach ($name in ($wired.Keys | Sort-Object)) {
         $events = $wired[$name] -join ', '
         if ($name -notin $shipped) {
