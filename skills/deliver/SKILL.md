@@ -32,15 +32,14 @@ yet (`debug-systematic` runs inside the bug scenario).
 | PERIMETER | the files (paths, `dir/`, globs, repo-relative), the behaviour in scope, what is excluded |
 | test matrix | which levels apply (unit · integration · e2e · perf) and the command for each |
 
-The perimeter lives per worktree in `$(git rev-parse --git-dir)/deliver/perimeter.md`, never committed;
-write it with the shell, overwriting the previous one at every triage:
-````text
-branch: <git branch --show-current>
-status: active
-- src/Orders/OrdersQuery.cs
-- src/Orders/Dto/
-- tests/**/Orders*.cs
-````
+The perimeter lives per worktree in `$(git rev-parse --git-dir)/deliver/perimeter.md`, never committed. Write
+it at every triage (it overwrites the previous one, records the branch, works in a linked worktree), close it at
+the verdict, with the kit script, never an ad-hoc shell write:
+```powershell
+pwsh -NoProfile -File $HOME/.claude/scripts/perimeter.ps1 -Files "src/Orders/OrdersQuery.cs,src/Orders/Dto/,tests/**/Orders*.cs"
+pwsh -NoProfile -File $HOME/.claude/scripts/perimeter.ps1 -Close
+```
+The file holds `branch:`, `status: active|closed` and one `- <entry>` line per entry.
 
 `scope-guard.js` reads that file only, and ignores it when the branch differs. Tests of the change belong
 to the perimeter; widening it is an edit to this file first, with the user's yes. `plan-work`'s plan file
@@ -86,9 +85,9 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
    `status: OK` → step 4. `status: STALL` → ask the user, relaunch with every resolution so far.
 4. Run the matrix; every failure goes back to step 3 with the failing output as the brief.
-5. Verdict, perimeter file to `status: closed`, then `/commit`, `pr-create` when asked.
+5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
-The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, passed, failed, exit):
+The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded):
 
 ```text
 | Livello | Comando | Riga che decide | Stato |

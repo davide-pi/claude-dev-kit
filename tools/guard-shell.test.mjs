@@ -537,5 +537,6 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
   assert.deepEqual(allow.filter((r) => /Select-Object|Sort-Object|ForEach-Object|Where-Object/.test(r)), []);
   for (const shell of ['Bash', 'PowerShell']) {
     assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File */scripts/db-ro.ps1 *)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File */scripts/perimeter.ps1 *)`), shell);
   }
 });
