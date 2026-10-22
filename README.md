@@ -337,8 +337,12 @@ MCP servers do not live in the Claude config directory, so copying files does no
 Register them user-scoped, replacing the placeholder with your own organization:
 
 ```powershell
-claude mcp add --scope user azdo-<org-alias> -- npx -y @azure-devops/mcp <your-org> -d core repositories work-items search
+npm install -g @azure-devops/mcp
+claude mcp add --scope user azdo-<org-alias> -- mcp-server-azuredevops <your-org> -d core repositories work-items search
 ```
+
+The global install starts the server in about a second; `npx -y` checks the registry at every
+session start and can hit the MCP connect timeout. Update it with `npm install -g @azure-devops/mcp@latest`.
 
 One Azure DevOps entry per organization; the skills discover the server at runtime and match the
 organization from the git remote, so any naming scheme works.

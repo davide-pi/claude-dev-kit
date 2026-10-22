@@ -97,8 +97,9 @@ tenant: `az login --tenant <tenant-domain> --allow-no-subscriptions`.
 ### Azure DevOps MCP (optional)
 
 ```powershell
-winget install --exact --id OpenJS.NodeJS.LTS         # if node/npx is missing
-claude mcp add --scope user azdo-<alias> -- npx -y @azure-devops/mcp <org> -d core work-items search
+winget install --exact --id OpenJS.NodeJS.LTS         # if node/npm is missing
+npm install -g @azure-devops/mcp                      # global: no registry check at each start
+claude mcp add --scope user azdo-<alias> -- mcp-server-azuredevops <org> -d core work-items search
 claude mcp list                                       # azdo-<alias> must appear
 ```
 
@@ -132,8 +133,9 @@ a value from me or an interactive login.
    `! az login --allow-no-subscriptions` myself (with --tenant if the org is on another tenant).
 4. Check access with az devops invoke --area wit --resource workItemTypes on the project and show
    me the types found.
-5. Ask whether I want the Azure DevOps MCP; if yes register it with
-   claude mcp add --scope user azdo-<alias> -- npx -y @azure-devops/mcp <org> -d core work-items search
+5. Ask whether I want the Azure DevOps MCP; if yes install it with npm install -g @azure-devops/mcp,
+   register it with
+   claude mcp add --scope user azdo-<alias> -- mcp-server-azuredevops <org> -d core work-items search
    and check it with claude mcp list.
 6. Check that $HOME\.claude\workspaces.json maps my working folder to org and project; if not,
    propose the entry and write it only after my ok.
