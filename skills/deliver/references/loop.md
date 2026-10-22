@@ -26,7 +26,7 @@ or change the perimeter); on a yes, relaunch with `dirtyConfirmed: true`.
 | Arg | Rule |
 | --- | --- |
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
-| `size` | `S`, `M` or `L` from the triage: it picks the reviewers |
+| `size` | `S`, `M` or `L` from the triage: it picks the reviewers; past 8 changed files reviewer A splits into one per group of 8 |
 | `implementerEffort` | `high` only when the brief asks; default `medium` |
 | `touches` | `security`, `performance`: L only, adds the specialist reviewers |
 
@@ -49,6 +49,13 @@ stalled round:
 `guidance` is one more round with the user's direction. A missing reviewer verdict is not a stall at first: the
 workflow asks again, only that id, and lists the gap under `gaps`; two rounds in a row without a verdict on the
 same id is a stall (`why: "no-verdict"`), handled like any other.
+
+Every reviewer and fixer prompt carries a tool-call budget. An agent that still stops without its structured
+result (turn cap) counts as no answer: a reviewer is a `gaps` line, no reviewer at all or the implementer or fixer
+is a `STALL` with `stall.reason`. So is a group reviewer that returned nothing while no whole-change reviewer
+answered (size S/M, or L without B): the reason names the unreviewed files, never `OK`. Such files stay unread
+across rounds: the next round asks that group's reviewer, and any whole-change reviewer, for them in full, not only
+the delta of the fix.
 
 If a resume replays a cached null implementer result (`stall.reason` says the implementer returned nothing),
 relaunch WITHOUT `resumeFromRunId`.

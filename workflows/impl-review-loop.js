@@ -39,6 +39,10 @@ export const meta = {
 // more (guidance puts the user's direction in the brief). If the resume replays a cached null implementer
 // result (a STALL on "the implementer returned nothing"), relaunch WITHOUT resumeFromRunId.
 //
+// Budget: every reviewer and fixer prompt carries a tool-call cap below the agent's own turn cap and asks for the
+// structured result before it runs out. An agent() that throws anyway (turn cap, no StructuredOutput) is caught
+// and read as an empty result, so the gap / no-verdict logic handles it and the run goes on.
+//
 // The pure functions sit between the markers below. tools/impl-review-loop.test.mjs extracts that block
 // and runs it: keep it free of agent(), log() and phase().
 
@@ -102,6 +106,37 @@ const RANK = { P1: 1, P2: 2, P3: 3 }
 const rank = f => RANK[f?.priority] ?? 3
 
 const BLOCKING = new Set(['P1', 'P2'])
+
+// Reviewer A reads at most MAX_REVIEW_FILES files: past that it fans out into one reviewer per group, in order,
+// so a group keeps its files while later fixes only append. A list within the limit stays one group.
+const MAX_REVIEW_FILES = 8
+const groupFiles = (list, max = MAX_REVIEW_FILES) => {
+  const groups = []
+  for (let i = 0; i < list.length; i += max) groups.push(list.slice(i, i + max))
+  return groups.length ? groups : [[]]
+}
+// The group that owns a path (a finding's anchor): the one listing it, else the last (it also owns the stray files).
+const groupOf = (path, groups, root) => {
+  const p = rel(path, root)
+  const i = groups.findIndex(g => g.some(x => rel(x, root) === p))
+  return i < 0 ? groups.length - 1 : i
+}
+
+// The files nobody has read yet, carried between rounds: a group whose reviewer returned nothing adds its files, a
+// group reviewer that answers removes them (it is asked for them in full), a whole-change reviewer that answered
+// covers all. A round with a file still here must not conclude DONE.
+//   answers    one entry per reviewer, null when it returned nothing      reviewers   [{ key, group?, whole? }]
+// Only a reviewer flagged `whole` (a general reviewer over the whole change) covers all files: a specialist reads its own area only.
+//   pending    the files still unread after the previous round
+const unreviewedFiles = (answers, reviewers, groups, pending = []) => {
+  if (answers.some((a, i) => a && reviewers[i].whole)) return []
+  const left = new Set(pending)
+  answers.forEach((a, i) => {
+    if (reviewers[i].group === undefined) return
+    groups[reviewers[i].group].forEach(f => (a ? left.delete(f) : left.add(f)))
+  })
+  return [...left]
+}
 
 // A finding is blocking when it is P1/P2 and inside the perimeter. A `scope` finding is a diff line the
 // implementer put OUTSIDE the perimeter: it is ours to revert, so it blocks (P2 at least) - unless the file
@@ -242,9 +277,10 @@ const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
 // Reviewers by size: S one Sonnet at medium, M one Sonnet at high, L Sonnet and Opus at high plus the
 // specialists for what the change touches.
-const REVIEWERS = [{ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: size === 'S' ? 'medium' : 'high' }]
+// Reviewer A fans out per round (see reviewersForRound) when the change touched more than MAX_REVIEW_FILES files.
+const REVIEWERS = [{ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: size === 'S' ? 'medium' : 'high', whole: true }]
 if (size === 'L') {
-  REVIEWERS.push({ key: 'B', agentType: 'code-reviewer', model: 'opus', effort: 'high' })
+  REVIEWERS.push({ key: 'B', agentType: 'code-reviewer', model: 'opus', effort: 'high', whole: true })
   if (touches.includes('security')) REVIEWERS.push({ key: 'security', agentType: 'review-security', model: 'sonnet', effort: 'high' })
   if (touches.includes('performance')) REVIEWERS.push({ key: 'performance', agentType: 'review-performance', model: 'sonnet', effort: 'high' })
 }
@@ -260,6 +296,10 @@ const perimeterText = [
 const dirtyText = dirty.length
   ? `Already modified before the change started${startHead ? ` (HEAD ${startHead})` : ''}, the user's own work: ${dirty.join(', ')}. Never change or revert those files; an out-of-perimeter edit there is reported, never reverted.`
   : ''
+
+const budgetText = calls => `TOOL BUDGET: at most ${calls} tool calls in total, the structured-output call included. Read selectively, stop exploring after about ${calls - 10} and return the structured result before the budget runs out: a partial result beats none, and a run that ends without it is lost.`
+const REVIEW_BUDGET = budgetText(25)
+const FIX_BUDGET = budgetText(45)
 
 const RULES = 'You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.'
 
@@ -315,12 +355,24 @@ let tracked = {}
 let nextId = 1
 let round = 0
 let lastFix = null                    // the implementer's last fix report: the delta the next review looks at
+let unread = []                       // files whose group reviewer returned nothing and nobody else read: reviewed in full
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = []
 const minor = []
 const gaps = []
 const notes = []                      // the implementer's "found elsewhere" lines
 const rounds = []
+
+const failures = {}                   // label -> why an agent() threw
+// An agent() that throws (turn cap, no StructuredOutput) is an empty result, like a stopped one.
+const ask = async (prompt, opts) => {
+  try { return await agent(prompt, opts) } catch (e) {
+    failures[opts.label] = String(e?.message ?? e).slice(0, 200)
+    log(`${opts.label}: agent failed: ${failures[opts.label]}`)
+    return null
+  }
+}
+const why = label => (failures[label] ? `: ${failures[label]}` : '')
 
 const addFiles = r => (r?.files ?? []).forEach(f => changed.add(f))
 const RESUME_AGAIN = 'Relaunch with the same args and resumeFromRunId, plus every resolution so far: resolutions: [{ round, accept?, guidance?, retry? }].'
@@ -339,7 +391,7 @@ const result = extra => ({
 
 if (!inline) {
   phase('Implement')
-  const impl = await agent([
+  const impl = await ask([
     brief,
     perimeterText,
     dirtyText,
@@ -349,7 +401,7 @@ if (!inline) {
     'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
   ].filter(Boolean).join('\n\n'), { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
   if (!impl) {
-    return result({ status: 'STALL', stall: { round: 0, findings: [], reason: 'the implementer returned nothing (stopped or failed)' }, resume: RESUME_AGAIN })
+    return result({ status: 'STALL', stall: { round: 0, findings: [], reason: `the implementer returned nothing (stopped or failed${why('implement')})` }, resume: RESUME_AGAIN })
   }
   addFiles(impl)
   ;(impl.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
@@ -358,8 +410,11 @@ if (!inline) {
 let skipped = []                      // ids a reviewer gave no verdict for last round: only those are asked next
 let silent = {}                       // id -> rounds in a row without a verdict
 
-const previousBlock = () => {
-  const ids = skipped.length ? skipped : Object.keys(tracked)
+// A group reviewer is asked only for the previous findings anchored in its files; a whole reviewer for all of them.
+const previousBlock = (mine = () => true) => {
+  const all = skipped.length ? skipped : Object.keys(tracked)
+  const ids = all.filter(mine)
+  if (all.length && !ids.length) return 'PREVIOUS FINDINGS: none on your files (give no verdict).'
   const list = ids.map(id => `- ${id} [${tracked[id].status}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}`)
   if (skipped.length) return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, for each of these ids only; an id you skip again stalls the loop):\n${list.join('\n')}`
   return list.length
@@ -370,26 +425,50 @@ const previousBlock = () => {
 // The files the change touched come from git, not from what the implementer declared: that list is a hint.
 const touchedByGit = (declared) => `Find the files the change touched yourself: \`git diff ${startHead || 'HEAD'} --name-only\` plus the untracked files (\`git ls-files -o --exclude-standard\`)${dirty.length ? `, minus the files already modified before the start (${dirty.join(', ')}; an entry ending with "/" is a whole directory), except that a file in both is reviewed for the change's own edit only` : ''}. The list ${inline ? 'the session' : 'the implementer'} declared (${declared || 'none'}) is a hint, never the limit of the review.`
 
+// Reviewer A as one reviewer per group of at most MAX_REVIEW_FILES of the files the change is known to touch.
+const reviewersForRound = () => {
+  // One entry per file however it was declared (absolute or relative, any case): the first spelling, at its first place.
+  const seen = new Map()
+  for (const f of changed) { const k = rel(f, repoRoot); if (!seen.has(k)) seen.set(k, f) }
+  const groups = groupFiles([...seen.values()])
+  const [first, ...rest] = REVIEWERS
+  if (groups.length < 2) return { groups, list: REVIEWERS }
+  return { groups, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
+}
+const shareText = (r, groups) => (r.group === undefined ? '' : [
+  `Your share: review ONLY these files, the other reviewers hold the rest (this overrides the "hint" rule above): ${groups[r.group].join(', ')}.`,
+  r.group === groups.length - 1 ? 'You also own any touched file git lists that is not in the declared list.' : '',
+].filter(Boolean).join(' '))
+
 // What each review reads: round 1 the files the change touched since the start point, later rounds the delta of the last fix.
-const scopeOfReview = () => (lastFix
+// A group reviewer that owns files never read in full (its reviewer returned nothing earlier) reviews them whole; a
+// whole-change reviewer does the same for every unread file, since its answer clears them all.
+const scopeOfReview = (r, groups) => {
+  const full = r.group !== undefined ? groups[r.group].filter(f => unread.includes(f)) : r.whole ? unread : []
+  return scopeOfDelta() + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
+}
+const scopeOfDelta = () => (lastFix
   ? `Review the DELTA of the last fix, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit([...changed].join(', '))}`
   : `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit([...changed].join(', '))}`)
 
 while (true) {
   round += 1
   phase('Review')
-  const answers = await parallel(REVIEWERS.map(r => () => agent([
-    scopeOfReview(),
+  const { groups, list: reviewers } = reviewersForRound()
+  const answers = await parallel(reviewers.map(r => () => ask([
+    scopeOfReview(r, groups),
+    shareText(r, groups),
     `Intent: ${brief}`,
     perimeterText,
     dirtyText,
     'Perimeter rule: every changed line outside the perimeter, in the files the change touched, is a finding with category "scope" (priority P2), except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed.',
-    `Effort: ${r.effort}. ${size === 'L' && r.key === 'A' ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
-    previousBlock(),
+    `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
+    previousBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart.`,
-  ].join('\n\n'), { label: `R${round} ${r.key}`, phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
+    REVIEW_BUDGET,
+  ].filter(Boolean).join('\n\n'), { label: `R${round} ${r.key}`, phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.filter(Boolean)
-  answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${REVIEWERS[i].key} returned nothing`) })
+  answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(`R${round} ${reviewers[i].key}`)}`) })
   if (!alive.length) {
     return result({ status: 'STALL', stall: { round, findings: [], reason: 'no reviewer answered: nothing can be concluded' }, resume: RESUME_AGAIN })
   }
@@ -409,6 +488,10 @@ while (true) {
   rounds.push({ round, reviewers: alive.length, new: found.map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: decision.toFix, stalled: decision.stalled, unanswered: decision.unanswered })
   log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${decision.toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
+  unread = unreviewedFiles(answers, reviewers, groups, unread)
+  if (decision.action === 'DONE' && unread.length) {
+    return result({ status: 'STALL', stall: { round, findings: [], reason: `no reviewer read these files (their group reviewer returned nothing): ${unread.join(', ')}` }, resume: RESUME_AGAIN })
+  }
   if (decision.action === 'DONE') return result({ status: 'OK' })
   if (decision.action === 'STALL') {
     return result({
@@ -421,7 +504,7 @@ while (true) {
 
   phase('Fix')
   const fix = decision.toFix.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}`).join('\n')
-  const fixed = await agent([
+  const fixed = await ask([
     'Fix exactly these review findings and nothing else. A "scope" finding means revert that change outside the perimeter: only an edit the change itself made, never the user\'s earlier work.',
     fix,
     `Intent: ${brief}`,
@@ -431,10 +514,11 @@ while (true) {
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
     RULES,
+    FIX_BUDGET,
     'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
   ].filter(Boolean).join('\n\n'), { label: `fix R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
   if (!fixed) {
-    return result({ status: 'STALL', stall: { round, findings: [], reason: 'the implementer returned nothing on the fix (stopped or failed)' }, resume: RESUME_AGAIN })
+    return result({ status: 'STALL', stall: { round, findings: [], reason: `the implementer returned nothing on the fix (stopped or failed${why(`fix R${round}`)})` }, resume: RESUME_AGAIN })
   }
   lastFix = fixed
   addFiles(fixed)

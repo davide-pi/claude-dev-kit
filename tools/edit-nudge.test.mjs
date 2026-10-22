@@ -77,6 +77,13 @@ test('Write counts like Edit; other tools and other events do not', () => {
   assert.match(edit(config, { tool_name: 'Write' }).additionalContext, /implementer/, 'the third real edit');
 });
 
+test('MultiEdit counts like Edit', () => {
+  const config = sandbox();
+  edit(config, { tool_name: 'MultiEdit' });
+  edit(config, { tool_name: 'MultiEdit' });
+  assert.match(edit(config, { tool_name: 'MultiEdit' }).additionalContext, /implementer/, 'the third edit');
+});
+
 test('edits made inside a subagent are not counted (agent_id, or a subagents transcript)', () => {
   const config = sandbox();
   for (let i = 0; i < 5; i += 1) assert.equal(edit(config, { agent_id: 'agent-7', agent_type: 'implementer' }), null);

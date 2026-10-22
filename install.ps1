@@ -77,10 +77,10 @@ $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 # Live-config-only paths, relative to the config root, file or folder: personal identity (my-voice),
 # what Claude Code itself manages (skills synced from the claude.ai account, the trash), and
 # machine data (workspaces.json, db-targets.json), and the type declarations the plugin engine generates
-# inside a mod (mods/<name>/.claude-plugin/types). Neither side owns them as an asset: -Pull never
+# inside a mod (mods/<name>/.claude-plugin/types) and the mod's tsconfig.json, which only extends them. Neither side owns them as an asset: -Pull never
 # imports them, install never writes them, and -Check reports them as expected.
 $LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json',
-               'settings.overlay.json', 'mods/cockpit/.claude-plugin/types')
+               'settings.overlay.json', 'mods/cockpit/.claude-plugin/types', 'mods/cockpit/tsconfig.json')
 
 # Assets the kit used to ship and no longer does, relative to the config root, file or folder. Install
 # copies but never deletes, so on a machine that had an older kit they linger: a retired skill keeps
@@ -410,30 +410,33 @@ function Test-Hooks {
     }
 
     # The libraries the .js hooks require are part of the same smoke test: a broken one fails every caller.
-    # A lib the repo ships but the install lacks is a failure of its own, whether or not node can parse.
+    # Only when the repo ships hooks\lib. A lib the repo ships but the install lacks is a failure of its own,
+    # whether or not node can parse.
     $installedLib = Join-Path $ClaudeHome 'hooks\lib'
-    if (-not (Test-Path -LiteralPath $installedLib -PathType Container)) {
-        Write-Problem "$installedLib is missing — the hooks cannot load their libraries; run .\install.ps1"
-        $failed++
-    }
-    else {
-        foreach ($shippedLib in @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'hooks\lib') -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
-            if (-not (Test-Path -LiteralPath (Join-Path $installedLib $shippedLib.Name))) {
-                Write-Problem "hooks\lib\$($shippedLib.Name) is shipped by the repo but not installed in $installedLib — run .\install.ps1"
-                $failed++
-            }
+    $repoLib = Join-Path $RepoRoot 'hooks\lib'
+    if (Test-Path -LiteralPath $repoLib -PathType Container) {
+        if (-not (Test-Path -LiteralPath $installedLib -PathType Container)) {
+            Write-Problem "$installedLib is missing — the hooks cannot load their libraries; run .\install.ps1"
+            $failed++
         }
-        if ($canParse) {
-            foreach ($lib in @(Get-ChildItem -LiteralPath $installedLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
-                if (Test-HookSyntax $lib.FullName) { $parsed++ } else { $failed++ }
+        else {
+            foreach ($shippedLib in @(Get-ChildItem -LiteralPath $repoLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+                if (-not (Test-Path -LiteralPath (Join-Path $installedLib $shippedLib.Name))) {
+                    Write-Problem "hooks\lib\$($shippedLib.Name) is shipped by the repo but not installed in $installedLib — run .\install.ps1"
+                    $failed++
+                }
+            }
+            if ($canParse) {
+                foreach ($lib in @(Get-ChildItem -LiteralPath $installedLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+                    if (Test-HookSyntax $lib.FullName) { $parsed++ } else { $failed++ }
+                }
             }
         }
     }
     if ($canParse) {
-        if ($failed -eq 0 -and $parsed -gt 0) {
-            Write-Ok "$parsed installed hook script(s) and librar(ies) parse (node --check / PowerShell parser, nothing executed)"
-        }
-        else { Write-Problem "$failed hook script(s) or librar(ies) failed the smoke test, $parsed parsed" }
+        if ($failed -gt 0) { Write-Problem "$failed of the wired hook scripts and the top-level hooks\lib\*.js failed the smoke test, $parsed parsed" }
+        elseif ($parsed -eq 0) { Write-Info 'smoke test: nothing was checked (no wired hook script installed, no hooks\lib\*.js)' }
+        else { Write-Ok "$parsed script(s) parse: the wired hooks plus the top-level hooks\lib\*.js (node --check / PowerShell parser, nothing executed)" }
     }
 
     foreach ($evt in $unchecked.Keys) {

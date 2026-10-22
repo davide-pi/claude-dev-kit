@@ -21,8 +21,8 @@ import { createRequire } from 'node:module';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -131,8 +131,12 @@ async function run(args, reviews, implementers = []) {
   const impls = [...implementers];                // optional scripted implementer answers (null = it returned nothing)
   const agent = async (prompt, opts = {}) => {
     calls.push({ prompt, opts });
-    if (opts.agentType === 'implementer') return impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', openQuestions: [] };
-    return queue.shift();
+    // an Error in a queue is an agent() that throws (turn cap, no StructuredOutput)
+    const answer = opts.agentType === 'implementer'
+      ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', openQuestions: [] })
+      : queue.shift();
+    if (answer instanceof Error) throw answer;
+    return answer;
   };
   const parallel = (thunks) => Promise.all(thunks.map((t) => t()));
   const fn = new AsyncFunction('args', 'agent', 'parallel', 'pipeline', 'phase', 'log', 'budget', 'workflow', BODY);
@@ -468,4 +472,168 @@ test('the workflow and hooks/scope-guard.js match perimeter entries the same way
   for (const [entry, path] of table) {
     assert.equal(inPerimeter(path, [entry]), guard.entryRegex(entry).test(path), `${entry} vs ${path}`);
   }
+});
+
+// ── reviewer budget, fan-out by group of files, an agent that throws ─────────────────────────────────
+test('groupFiles: at most 8 per group, in order; a list within the limit is one group', () => {
+  const n = k => Array.from({ length: k }, (_, i) => `src/f${i}.cs`);
+  assert.deepEqual(groupFiles(n(8)).map(g => g.length), [8]);
+  assert.deepEqual(groupFiles(n(9)).map(g => g.length), [8, 1]);
+  assert.deepEqual(groupFiles(n(14)).map(g => g.length), [8, 6]);
+  assert.deepEqual(groupFiles(n(17)).map(g => g.length), [8, 8, 1]);
+  assert.equal(groupFiles(n(14))[1][0], 'src/f8.cs');
+  assert.deepEqual(groupFiles([]), [[]]);
+});
+
+test('groupOf: a path goes to the group listing it (root, case and slashes ignored), a stray one to the last', () => {
+  const groups = [['src/a.cs', 'src/b.cs'], ['src/c.cs']];
+  assert.equal(groupOf('src/b.cs', groups, ROOT), 0);
+  assert.equal(groupOf('C:\\repo\\SRC\\c.cs', groups, ROOT), 1);
+  assert.equal(groupOf('src/stray.cs', groups, ROOT), 1);
+});
+
+const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
+const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
+const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
+
+test('script: every reviewer and fixer prompt carries the tool-call budget', async () => {
+  const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
+  for (const c of calls.filter(x => x.opts.label !== 'implement')) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
+});
+
+test('script: more than 8 changed files, reviewer A fans out per group; B stays whole; the budget is on each', async () => {
+  const { out, calls } = await run(manyArgs(), [review([]), review([]), review([])], [manyImpl]);
+  assert.equal(out.status, 'OK');
+  const r1 = calls.filter(c => c.opts.label?.startsWith('R1'));
+  assert.deepEqual(r1.map(c => c.opts.label), ['R1 A1', 'R1 A2', 'R1 B']);
+  assert.deepEqual(r1.map(c => c.opts.model), ['sonnet', 'sonnet', 'opus']);
+  assert.match(r1[0].prompt, /review ONLY these files.*src\/Orders\/F0\.cs.*src\/Orders\/F7\.cs/);
+  assert.doesNotMatch(r1[0].prompt, /You also own/);
+  assert.match(r1[1].prompt, /review ONLY these files.*F8\.cs.*F13\.cs.*You also own any touched file/s);
+  assert.doesNotMatch(r1[2].prompt, /review ONLY/);
+  r1.forEach(c => assert.match(c.prompt, /TOOL BUDGET/));
+  assert.equal(out.roundLog[0].reviewers, 3);
+});
+
+test('script: 8 changed files or fewer, reviewer A stays one reviewer', async () => {
+  const { calls } = await run(manyArgs(), [review([]), review([])], [{ ...manyImpl, files: MANY.slice(0, 8) }]);
+  assert.deepEqual(calls.filter(c => c.opts.label?.startsWith('R1')).map(c => c.opts.label), ['R1 A', 'R1 B']);
+});
+
+test('script: a group reviewer is asked only for the previous findings on its files', async () => {
+  const { out, calls } = await run(manyArgs(), [
+    review([], [finding({ path: 'src/Orders/F1.cs' }), finding({ path: 'src/Orders/F12.cs', line: 50, title: 'a second defect elsewhere' })]),
+    review([]), review([]),
+    review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F2', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }]),
+  ], [manyImpl, manyImpl]);
+  assert.equal(out.status, 'OK');
+  const r2 = Object.fromEntries(calls.filter(c => c.opts.label?.startsWith('R2')).map(c => [c.opts.label, c.prompt]));
+  assert.match(r2['R2 A1'], /- F1 \[open\]/);
+  assert.doesNotMatch(r2['R2 A1'], /- F2 /);
+  assert.match(r2['R2 A2'], /- F2 \[open\]/);
+  assert.doesNotMatch(r2['R2 A2'], /- F1 /);
+  assert.match(r2['R2 B'], /- F1 \[open\].*- F2 \[open\]/s);
+});
+
+test('unreviewedFiles: a failed group is unreviewed unless a whole-change reviewer answered', () => {
+  const groups = [['a', 'b'], ['c']];
+  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
+  const ok = { previous: [], found: [] };
+  assert.deepEqual(unreviewedFiles([null, ok, null], rs, groups), ['a', 'b']);
+  assert.deepEqual(unreviewedFiles([null, ok, ok], rs, groups), []);
+  assert.deepEqual(unreviewedFiles([null, null, ok], rs, groups), []);
+  assert.deepEqual(unreviewedFiles([null, null, null], rs, groups), ['a', 'b', 'c']);
+  assert.deepEqual(unreviewedFiles([ok], [{ key: 'A', whole: true }], [['a']]), []);
+});
+
+test('unreviewedFiles: a specialist that answers never covers the files a failed group and a failed whole reviewer left unread', () => {
+  const groups = [['a', 'b'], ['c']];
+  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }, { key: 'security' }];
+  const ok = { previous: [], found: [] };
+  assert.deepEqual(unreviewedFiles([null, ok, null, ok], rs, groups), ['a', 'b']);
+  assert.deepEqual(unreviewedFiles([null, null, null, ok], rs, groups), ['a', 'b', 'c']);
+  assert.deepEqual(unreviewedFiles([null, null, ok, ok], rs, groups), []);
+});
+
+test('unreviewedFiles: the unread files are carried; a group that answers clears its own, a whole reviewer clears all', () => {
+  const groups = [['a', 'b'], ['c']];
+  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
+  const ok = { previous: [], found: [] };
+  assert.deepEqual(unreviewedFiles([ok, ok, null], rs, groups, ['a', 'b']), []);
+  assert.deepEqual(unreviewedFiles([null, ok, null], rs, groups, ['a', 'b']), ['a', 'b']);
+  assert.deepEqual(unreviewedFiles([ok, null, null], rs, groups, ['a', 'b']), ['c']);
+  assert.deepEqual(unreviewedFiles([null, ok, ok], rs, groups, ['a', 'b']), []);
+});
+
+test('script: a reviewer that throws is a gap; a whole reviewer covers its group, otherwise a resumable STALL naming the files; all throwing is a STALL', async () => {
+  const boom = new Error('subagent completed without calling StructuredOutput');
+  const partial = await run(manyArgs(), [boom, review([]), review([])], [manyImpl]);
+  assert.equal(partial.out.status, 'OK');
+  assert.match(partial.out.gaps.join('\n'), /round 1: reviewer A1 returned nothing: subagent completed without calling StructuredOutput/);
+  const uncovered = await run(manyArgs({ size: 'M' }), [boom, review([])], [manyImpl]);
+  assert.equal(uncovered.out.status, 'STALL');
+  assert.match(uncovered.out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
+  assert.doesNotMatch(uncovered.out.stall.reason, /F8\.cs/);
+  assert.match(uncovered.out.resume, /resumeFromRunId/);
+  const none = await run(ARGS, [new Error('max turns')]);
+  assert.equal(none.out.status, 'STALL');
+  assert.match(none.out.stall.reason, /no reviewer answered/);
+  assert.match(none.out.resume, /resumeFromRunId/);
+});
+
+test('script: size L with a specialist: A1 and B throw, A2 and the specialist answer, STALL naming the unread files, never OK', async () => {
+  const boom = new Error('max turns');
+  const { out } = await run(manyArgs({ touches: ['security'] }), [boom, review([]), boom, review([])], [manyImpl]);
+  assert.equal(out.status, 'STALL');
+  assert.match(out.stall.reason, /no reviewer read these files.*F0.cs.*F7.cs/);
+  assert.doesNotMatch(out.stall.reason, /F8.cs/);
+});
+
+test('script: a group whose reviewer threw in round 1 reads its files in full in round 2, even after a fix', async () => {
+  const boom = new Error('subagent completed without calling StructuredOutput');
+  const { out, calls } = await run(manyArgs({ size: 'M' }), [
+    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]),                         // R1: A1 throws, A2 has a P2
+    review([]), review([{ id: 'F1', status: 'closed' }]),                              // R2: both answer, nothing new
+  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
+  assert.equal(out.status, 'OK');
+  const r = Object.fromEntries(calls.filter(c => c.opts.label?.startsWith('R')).map(c => [c.opts.label, c.prompt]));
+  assert.doesNotMatch(r['R1 A1'], /never been reviewed/);
+  assert.match(r['R2 A1'], /DELTA of the last fix/);
+  assert.match(r['R2 A1'], /never been reviewed: review them IN FULL.*F0\.cs.*F7\.cs/s);
+  assert.doesNotMatch(r['R2 A2'], /never been reviewed/);
+});
+
+test('script: a whole reviewer that answers after a fix is asked for the files left unread in full, not only the delta', async () => {
+  const boom = new Error('max turns');
+  const { out, calls } = await run(manyArgs(), [
+    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,                   // R1: A1 and B throw, A2 has a P2
+    boom, review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }]), // R2: A1 throws again, A2 and B answer
+  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
+  assert.equal(out.status, 'OK');
+  const r = Object.fromEntries(calls.filter(c => c.opts.label?.startsWith('R')).map(c => [c.opts.label, c.prompt]));
+  assert.doesNotMatch(r['R1 B'], /never been reviewed/);
+  assert.match(r['R2 B'], /DELTA of the last fix/);
+  assert.match(r['R2 B'], /never been reviewed: review them IN FULL.*F0\.cs.*F7\.cs/s);
+  assert.doesNotMatch(r['R2 A2'], /never been reviewed/);
+});
+
+test('script: a group that threw in round 1 and again in round 2 is a STALL naming its files, never OK', async () => {
+  const boom = new Error('max turns');
+  const { out } = await run(manyArgs({ size: 'M' }), [
+    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]),
+    boom, review([{ id: 'F1', status: 'closed' }]),
+  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
+  assert.equal(out.status, 'STALL');
+  assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
+});
+
+test('script: an implementer or a fixer that throws is the same resumable STALL as one that returns nothing', async () => {
+  const first = await run(ARGS, [], [new Error('max turns')]);
+  assert.equal(first.out.status, 'STALL');
+  assert.equal(first.out.stall.round, 0);
+  assert.match(first.out.stall.reason, /implementer returned nothing.*max turns/);
+  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, new Error('max turns')]);
+  assert.equal(fix.out.status, 'STALL');
+  assert.equal(fix.out.stall.round, 1);
+  assert.match(fix.out.stall.reason, /on the fix.*max turns/);
 });
