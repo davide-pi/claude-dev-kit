@@ -8,9 +8,12 @@
  *                             pipeline, where a permission prefix cannot see it;
  *   - lib/sql-target.js     — a raw `sqlcmd` / `psql` / `redis-cli` (and kin) aimed at a host that
  *                             is not a dev host: non-dev databases go through
- *                             `~/.claude/scripts/db-ro.ps1`. This is the one check that DENIES;
+ *                             `~/.claude/scripts/db-ro.ps1`. This one and secret-read DENY;
  *   - lib/alm-contract.js   — an `az` write missing the house ALM flags (PR work item, squash +
  *                             delete, assignee), hours written outside /worklog, global defaults;
+ *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
+ *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
+ *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);
@@ -22,11 +25,11 @@
  * PreToolUse matcher can only filter by tool name, not by command text): one Node start-up, one
  * stdin parse. Node, not PowerShell — the whole hook is ~150ms against ~370ms just to start `pwsh`.
  *
- * The SQL-target check runs first: when it denies, nothing else matters. The other two always run.
+ * The two denying checks run first: when one denies, nothing else matters. The others always run.
  * When both fire (`git push origin main && docker compose down -v`), the user gets one prompt
  * carrying both reasons.
  *
- * Apart from that denial it never blocks on its own: at most it escalates to the user
+ * Apart from those denials it never blocks on its own: at most it escalates to the user
  * (permissionDecision "ask"), and any error lets the command through. The rewrites come last, so a
  * command that asks is never rewritten (nor auto-allowed). Always exits 0.
  *
@@ -40,6 +43,8 @@ const { checkDefaultBranch } = require('./lib/default-branch');
 const { checkDestructive } = require('./lib/destructive');
 const { checkSqlTarget } = require('./lib/sql-target');
 const { checkAlmContract } = require('./lib/alm-contract');
+const { checkSecretRead } = require('./lib/secret-read');
+const { checkDockerCp } = require('./lib/docker-cp');
 const { planFilter } = require('./lib/output-filter');
 const { planAzPin } = require('./lib/az-pin');
 
@@ -57,14 +62,16 @@ try {
   const command = payload?.tool_input?.command;
   if (typeof command !== 'string' || !command.trim()) approve();
 
-  // The one denial: a raw database client on a non-dev host. It comes before the ask path.
-  const target = safely(() => checkSqlTarget(command));
+  // The denials: a raw database client on a non-dev host, a shell read of a secret file. They come
+  // before the ask path.
+  const target = safely(() => checkSqlTarget(command)) ?? safely(() => checkSecretRead(command));
   if (target) deny(target.reason);
 
   const reasons = [
     safely(() => checkDefaultBranch(command, payload.cwd)),
     safely(() => checkDestructive(command)),
     safely(() => checkAlmContract(command)),
+    safely(() => checkDockerCp(command, payload.cwd)),
   ].filter(Boolean);
 
   if (reasons.length) requestConfirmation(reasons.join('\n\n'));

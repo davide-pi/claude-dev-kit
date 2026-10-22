@@ -135,3 +135,37 @@ test('unrelated az and non-az commands pass untouched', () => {
     assert.equal(run(command).decision, 'approve', command);
   }
 });
+
+test('az accepts unique flag prefixes and unreadable values: none of them slips past the completion ask', () => {
+  for (const command of [
+    'az repos pr update --id 12 --stat completed',
+    'az repos pr update --id 12 --status=completed',
+    'az repos pr update --id 12 --status $s',
+    'az repos pr update --id 12 --status "$env:PR_STATUS"',
+    'az repos pr update --id 12 --status',
+    'az repos pr update --id 12 --auto true',
+    'az repos pr update --id 12 --auto-complete',
+    'az repos pr update --id 12 --bypass-policy true --status active',
+  ]) {
+    assert.equal(run(command).decision, 'ask', command);
+  }
+  for (const command of ['az repos pr update --id 12 --status active', 'az repos pr update --id 12 --status Abandoned', 'az repos pr update --id 12 --description "stat completed"']) {
+    assert.equal(run(command).decision, 'approve', command);
+  }
+});
+
+test('a PR created to complete on its own asks, with or without the other flags', () => {
+  const r = run(`${FULL_PR} --auto-complete true`);
+  assert.equal(r.decision, 'ask');
+  assert.match(r.reason, /complete on its own/);
+  assert.equal(run(`${FULL_PR} --auto true`).decision, 'ask', 'unique prefix');
+  assert.equal(run(`${FULL_PR} --auto-complete false`).decision, 'approve');
+});
+
+test('an az or gh write nested in a shell wrapper is read like a bare one', () => {
+  assert.equal(run('pwsh -NoProfile -c "az repos pr update --id 12 --status completed"').decision, 'ask');
+  assert.equal(run("bash -c 'az repos pr update --id 12 --status completed'", 'Bash').decision, 'ask');
+  assert.equal(run('pwsh -c "gh pr merge 12 --squash"').decision, 'ask');
+  assert.equal(run('wsl -e bash -c "az repos pr create --title T"').decision, 'ask', 'the nested create lacks --work-items');
+  assert.equal(run('pwsh -c "az repos pr update --id 12 --status abandoned"').decision, 'approve');
+});

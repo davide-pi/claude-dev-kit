@@ -353,6 +353,31 @@ function firstDecision(commands, depth, command) {
   return null;
 }
 
+/**
+ * Every command of a line as a token list, the ones nested in `pwsh -c "..."`, `bash -c`, `wsl` and
+ * `docker exec <ctr> sh -c` included, so a check that reads tokens also sees what a shell wrapper runs.
+ */
+function expandSegments(command) {
+  const out = [];
+  const walk = (tokens, depth) => {
+    out.push(tokens);
+    if (depth > 3) return;
+    const cmd = stripWrappers(tokens);
+    if (!cmd.length) return;
+    const name = baseName(cmd[0]);
+    if (name === 'wsl') { walk(afterWsl(cmd), depth + 1); return; }
+    if (SHELLS.has(name)) { for (const inner of innerCommands(cmd, 1, name)) walk(inner, depth + 1); return; }
+    const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((x) => /^(?:exec|run)$/i.test(x)) : -1;
+    if (launch < 0) return;
+    for (let i = launch + 1; i < cmd.length; i += 1) {
+      const shell = baseName(cmd[i]);
+      if (SHELLS.has(shell)) { for (const inner of innerCommands(cmd, i + 1, shell)) walk(inner, depth + 1); return; }
+    }
+  };
+  for (const tokens of parseSegments(command)) walk(tokens, 0);
+  return out;
+}
+
 /** `{ decision: 'deny', reason }` for a database client the rules above stop, else null. */
 function checkSqlTarget(command) {
   try {
@@ -363,4 +388,4 @@ function checkSqlTarget(command) {
   }
 }
 
-module.exports = { checkSqlTarget };
+module.exports = { checkSqlTarget, expandSegments, stripWrappers, baseName };

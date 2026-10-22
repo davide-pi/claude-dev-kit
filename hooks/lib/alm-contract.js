@@ -7,7 +7,8 @@
  *
  *   - `az repos pr create` without `--work-items` (every PR links its parent backlog item) or
  *     without `--squash true` and `--delete-source-branch true` (squash + delete, set at creation);
- *   - `az repos pr update --status completed` (or `--auto-complete`) and `gh pr merge`: ALWAYS, because
+ *   - `az repos pr update` with any `--status` other than `active`/`abandoned`, `--auto-complete`,
+ *     `--bypass-policy` (az accepts unique flag prefixes: `--stat`), and `gh pr merge`: ALWAYS, because
  *     completing a PR is the write that lands on the shared branch, and the allow list, which lets the
  *     other `pr update` forms through, cannot tell it apart by prefix. The reason adds the squash and
  *     delete-source-branch flags when they are missing too;
@@ -18,6 +19,8 @@
  *     and `--project` on each call instead).
  *
  * All of them ASK, never deny: each has a legitimate exception the user can confirm.
+ *
+ * A command nested in `pwsh -c "..."`, `bash -c` or `wsl` is read too (`expandSegments`).
  *
  * Multi-line commands are re-joined first: a PR create written over several lines with `\` (bash)
  * or a backtick (PowerShell) continuation would otherwise be split at each newline by the
@@ -30,7 +33,7 @@
 
 'use strict';
 
-const { parseSegments } = require('./segments');
+const { expandSegments } = require('./sql-target');
 
 /** Cheap gates: nothing below can fire without one of these. */
 const HINT = /\baz(?:\.cmd|\.exe)?\s[\s\S]*\b(?:repos|boards|devops)\b/i;
@@ -41,6 +44,14 @@ const GH = /^(?:.*[\\/])?gh(?:\.exe)?$/i;
 const FALSY = /^(?:false|no|off|0)$/i;
 const HOURS_SCRIPT = /worklog-push\.ps1/i;
 
+/** The flags that complete a PR. az accepts any unique prefix of a long flag, so `--stat` is `--status`. */
+const COMPLETION_FLAGS = ['--status', '--auto-complete', '--bypass-policy'];
+const canonicalFlag = (name) => {
+  if (!name.startsWith('--') || name.length < 5) return name;
+  const hits = COMPLETION_FLAGS.filter((full) => full.startsWith(name));
+  return hits.length === 1 ? hits[0] : name;
+};
+
 /** `--name value`, `--name=value`, `--name` alone (az reads a bare boolean flag as true). */
 function flagsOf(tokens) {
   const flags = new Map();
@@ -48,9 +59,9 @@ function flagsOf(tokens) {
     const t = tokens[i];
     if (!t.startsWith('-')) continue;
     const eq = t.indexOf('=');
-    if (eq > 0) { flags.set(t.slice(0, eq).toLowerCase(), t.slice(eq + 1)); continue; }
+    if (eq > 0) { flags.set(canonicalFlag(t.slice(0, eq).toLowerCase()), t.slice(eq + 1)); continue; }
     const next = tokens[i + 1];
-    flags.set(t.toLowerCase(), next !== undefined && !next.startsWith('-') ? next : '');
+    flags.set(canonicalFlag(t.toLowerCase()), next !== undefined && !next.startsWith('-') ? next : '');
   }
   return flags;
 }
@@ -67,6 +78,8 @@ function parseAzCall(tokens) {
 
 const isOn = (flags, name) => flags.has(name) && !FALSY.test(flags.get(name));
 const hasValue = (flags, name) => Boolean(flags.get(name)?.trim());
+/** `--auto-complete` and `--bypass-policy` finish the PR as surely as `--status completed`. */
+const completesOnItsOwn = (flags) => isOn(flags, '--auto-complete') || isOn(flags, '--bypass-policy');
 
 function mergeFlagsMissing(flags) {
   const missing = [];
@@ -84,10 +97,17 @@ function violations({ verb, flags, text }, command) {
     }
     const missing = mergeFlagsMissing(flags);
     if (missing.length) out.push(`The PR is not set to squash and delete its source branch: add ${missing.join(' and ')}.`);
-  } else if (verb === 'repos pr update' && (/^completed$/i.test(flags.get('--status') ?? '') || isOn(flags, '--auto-complete'))) {
-    const missing = mergeFlagsMissing(flags);
-    out.push('This completes the PR, which lands on the shared branch.'
-      + (missing.length ? ` It also lacks ${missing.join(' and ')} (squash + source-branch delete).` : ''));
+    if (completesOnItsOwn(flags)) out.push('This sets the new PR to complete on its own, which lands on the shared branch.');
+  } else if (verb === 'repos pr update') {
+    // Only `active` and `abandoned` are literal and reversible: `completed`, an unreadable value
+    // (`--status $s`) and a bare flag all ask, because the allow list cannot tell them apart.
+    const status = flags.get('--status');
+    const unreadable = status !== undefined && !/^(?:active|abandoned)$/i.test(status);
+    if (unreadable || completesOnItsOwn(flags)) {
+      const missing = mergeFlagsMissing(flags);
+      out.push('This completes the PR, or sets a status the guard cannot read: either lands on the shared branch.'
+        + (missing.length ? ` It also lacks ${missing.join(' and ')} (squash + source-branch delete).` : ''));
+    }
   } else if (verb === 'boards work-item create' || verb === 'boards work-item update') {
     if (verb.endsWith('create') && !hasValue(flags, '--assigned-to')) {
       out.push('The new work item has no assignee: add `--assigned-to <user>` (the identity resolved against the org).');
@@ -113,12 +133,13 @@ function checkAlmContract(command) {
   if (!az && !GH_HINT.test(command)) return null;
   const joined = command.replace(CONTINUATION, ' ');
   const reasons = [];
-  for (const tokens of parseSegments(joined)) {
+  for (const tokens of expandSegments(joined)) {
     const call = az ? parseAzCall(tokens) : null;
     if (call) reasons.push(...violations(call, joined));
     else if (isGhPrMerge(tokens)) reasons.push('This merges the PR, which lands on the shared branch.');
   }
-  return reasons.length ? `${reasons.join('\n')}\nConfirm only if this exception is intended.` : null;
+  const unique = [...new Set(reasons)]; // a nested command is also visible in its wrapper's tokens
+  return unique.length ? `${unique.join('\n')}\nConfirm only if this exception is intended.` : null;
 }
 
 module.exports = { checkAlmContract };

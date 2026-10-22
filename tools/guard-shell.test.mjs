@@ -471,3 +471,71 @@ test('settings.json: secret denies are absolute, and no rule carries a placehold
   const placeholders = Object.values(permissions).flat().filter((r) => typeof r === 'string' && /<[^>]+>/.test(r));
   assert.deepEqual(placeholders, []);
 });
+
+// ── Linked worktrees: HEAD is the worktree's own, refs and origin/HEAD live in the common dir ─────
+
+/** A linked worktree on `current` of a repo whose default branch is `defaultBranch`. */
+function worktreeFixture(current, defaultBranch = 'main') {
+  const main = fixture(defaultBranch);
+  const wt = mkdtempSync(join(tmpdir(), 'guard-wt-'));
+  created.push(wt);
+  const gitDir = join(main, '.git', 'worktrees', 'wt');
+  mkdirSync(gitDir, { recursive: true });
+  writeFileSync(join(gitDir, 'HEAD'), `ref: refs/heads/${current}\n`);
+  writeFileSync(join(gitDir, 'commondir'), '../..\n');
+  writeFileSync(join(wt, '.git'), `gitdir: ${gitDir}\n`);
+  return wt;
+}
+
+test('in a linked worktree the default branch is read from the common directory', () => {
+  const onFeatureWt = worktreeFixture('feature/x');
+  const pushMain = run('git push origin main', onFeatureWt);
+  assert.equal(pushMain.decision, 'ask');
+  assert.match(pushMain.reason, /pushes to 'main'/);
+  assert.equal(run('git push origin feature/x', onFeatureWt).decision, 'approve');
+
+  const onMainWt = worktreeFixture('main');
+  const commit = run('git commit -m "wip"', onMainWt);
+  assert.equal(commit.decision, 'ask');
+  assert.match(commit.reason, /default branch/);
+});
+
+// ── Pushes, deletes and switches that discard, found anywhere in the segment ───────────────────────
+
+test('a push that deletes or force-overwrites a ref asks, whatever the spelling', () => {
+  for (const command of [
+    'git push origin --delete old', 'git push -d origin old', 'git push -fu origin feature/x',
+    'git push origin feature/x --force', 'git push --force-with-lease origin feature/x',
+    'git push origin +feature/x', 'git push origin :feature/old', 'git push --force-if-includes origin x',
+  ]) asks(command, /deletes or force-overwrites/);
+  for (const command of [
+    'git push origin feature/x', 'git push -u origin feature/x', 'git push --set-upstream origin feature/fix-bug-d',
+    'git push origin HEAD:feature/y', 'git push --follow-tags', 'git push --dry-run -f origin x',
+  ]) approves(command);
+});
+
+test('a recursive or forced delete asks, in either shell and behind sudo or xargs', () => {
+  for (const command of [
+    'rm -rf node_modules', 'rm -fr dist', 'rm -r build', 'rm -R build', 'rm --recursive dist', 'sudo rm -rf /var/x',
+    'ls | xargs rm -rf', 'Remove-Item -Recurse -Force .\dist', 'Remove-Item dist -Force', 'ri dist -r', 'del /s /q dist', 'rd /s dist',
+  ]) asks(command, /recursively or by force/);
+  for (const command of [
+    'rm notes.txt', 'rm -i notes.txt', 'Remove-Item notes.txt', 'Remove-Item -Path a.txt -LiteralPath b.txt',
+    'git rm -r --cached dist', 'echo rm -rf', 'grep -rn "rm -rf" scripts',
+  ]) approves(command);
+});
+
+test('git switch that discards local changes asks', () => {
+  for (const command of ['git switch -f main', 'git switch --force main', 'git switch --discard-changes main', 'git switch -fc fix/x']) {
+    asks(command, /discards local changes/);
+  }
+  for (const command of ['git switch main', 'git switch -c feature/x', 'git switch --create fix-feature', 'git switch -']) approves(command);
+});
+
+test('settings.json: no script-block cmdlet in the allow list, db-ro matched by its scripts path', () => {
+  const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
+  assert.deepEqual(allow.filter((r) => /Select-Object|Sort-Object|ForEach-Object|Where-Object/.test(r)), []);
+  for (const shell of ['Bash', 'PowerShell']) {
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File */scripts/db-ro.ps1 *)`), shell);
+  }
+});

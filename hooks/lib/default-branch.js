@@ -108,6 +108,19 @@ function findGitDir(start) {
   }
 }
 
+/**
+ * Where refs live. A linked worktree keeps only its own HEAD in `.git/worktrees/<name>`; branches,
+ * packed-refs and origin/HEAD are in the common directory that `commondir` points at.
+ */
+function commonDir(gitDir) {
+  try {
+    const pointer = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    return pointer ? path.resolve(gitDir, pointer) : gitDir;
+  } catch {
+    return gitDir;
+  }
+}
+
 function readRef(gitDir, relative) {
   try {
     return fs.readFileSync(path.join(gitDir, relative), 'utf8').trim();
@@ -167,7 +180,7 @@ function checkDefaultBranch(command, cwd) {
   if (!gitDir) return null;
 
   const current = currentBranch(gitDir);
-  const fallback = defaultBranch(gitDir);
+  const fallback = defaultBranch(commonDir(gitDir));
   if (!current || !fallback) return null;
 
   if (current !== fallback) {

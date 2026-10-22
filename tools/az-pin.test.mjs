@@ -146,7 +146,7 @@ test('never grants: a command the allow list does not cover is not rewritten, so
     'az repos pr list --status active',
     'cd src && az account show',                          // `cd` is no allowed command
     'az account show | ConvertFrom-Json',                 // neither is the pipe target
-    'az account show; Remove-Item -Recurse x',
+    'az account show; Remove-Item x',
   ]) {
     assert.equal(guard(box, command), null, command);
   }
