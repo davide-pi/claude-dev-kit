@@ -43,7 +43,7 @@ function fire(config, payload) {
   const r = spawnSync(process.execPath, [HOOK], {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '120000,200000,320000' },
   });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
@@ -95,7 +95,7 @@ function viaRequire(config, hook, payload) {
   const r = spawnSync(process.execPath, ['-e', `try{require(${JSON.stringify(file)})}catch{process.exit(0)}`], {
     input: JSON.stringify(payload),
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '120000,200000,320000' },
   });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;

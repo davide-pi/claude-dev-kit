@@ -1,11 +1,10 @@
 /**
- * UserPromptSubmit hook: one line into the turn when the context crosses 60 % / 100 % / 160 % of
- * an absolute token threshold (default 200k, `CLAUDE_NUDGE_TOKENS` overrides): 120k / 200k / 320k.
- * `CLAUDE_NUDGE_STEPS` (comma-separated absolute tokens, e.g. `250000` for one nudge at 250k) replaces
- * that ladder when set and valid; empty or invalid, the ladder above applies.
+ * UserPromptSubmit hook, OFF by default: it runs only when `CLAUDE_NUDGE_STEPS` (comma-separated
+ * absolute tokens, e.g. `250000` for one nudge at 250k) is set and valid; unset, empty or invalid,
+ * it is silent (auto-compaction handles the window). When on, one line into the turn each time the
+ * context crosses a step.
  *
- * Cost is context size times turns, and with auto-compact off nothing else tells the session the
- * window is filling up. The bands are absolute on purpose: on a 1M window a percentage band of 50 %
+ * Cost is context size times turns. The steps are absolute on purpose: on a 1M window a percentage band of 50 %
  * is 500k tokens, above what almost any session reaches, so it would never fire. A hook cannot see
  * the context size itself, but the statusline can: it receives `context_window` on every render and
  * writes `used_tokens` and `used_percentage` to `<config>/.cache/context-<session_id>.json` (see
@@ -13,13 +12,13 @@
  * transcript-size proxy. A snapshot without `used_tokens` falls back to 50 / 70 / 85 % — only for a
  * window of 250k tokens or less (or one of unknown size), where a percentage is a real alarm.
  *
- * Once per band per session. The band already announced (its index, 1-3) lives in a separate
+ * Once per band per session. The band already announced (its index) lives in a separate
  * `<config>/.cache/nudge-<session_id>.json` — never written into the statusline's file, which the
  * statusline rewrites whenever a value moves and would race this read-modify-write. When the context drops below
  * the announced band (`/compact`, `/clear`), the state follows it down, so the next crossing
  * announces again. No usable number (no response yet, just compacted) or no snapshot: silent.
  *
- * Both cache families are pruned after a few days whenever a nudge fires (at most three times a
+ * Both cache families are pruned after a few days whenever a nudge fires (once per step at most, per
  * session), so one file per session never accumulates for good.
  *
  * Always exits 0; any error is silence.
@@ -35,19 +34,13 @@ const path = require('path');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CACHE_DIR = path.join(CONFIG_DIR, '.cache');
-/** Absolute thresholds as shares of the main one (200k by default): 120k / 200k / 320k. */
-const TOKEN_SHARES = [0.6, 1, 1.6];
 const PERCENT_BANDS = [50, 70, 85];
 /** Above this window a percentage band says little: without a token count, stay silent. */
 const PERCENT_FALLBACK_MAX_WINDOW = 250_000;
-/** `CLAUDE_NUDGE_STEPS`: ascending absolute thresholds that replace the derived ladder; null when unset or invalid. */
+/** `CLAUDE_NUDGE_STEPS`: ascending absolute thresholds; null when unset or invalid (the hook is then off). */
 const nudgeSteps = () => {
   const steps = String(process.env.CLAUDE_NUDGE_STEPS ?? '').split(',').map((s) => Number(s.trim()));
   return steps.every((n) => Number.isFinite(n) && n > 0) ? steps.sort((a, b) => a - b) : null;
-};
-const nudgeTokens = () => {
-  const configured = Number(process.env.CLAUDE_NUDGE_TOKENS);
-  return Number.isFinite(configured) && configured > 0 ? configured : 200_000;
 };
 /** A snapshot older than this belongs to a session that stopped rendering: do not trust it. */
 const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
@@ -79,6 +72,8 @@ function prune(now) {
 
 /** The hook's output for one payload, or null when there is nothing to say. */
 function run(payload) {
+  const steps = nudgeSteps();
+  if (!steps) return null;
   const id = payload.session_id;
   if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) return null;
 
@@ -91,7 +86,7 @@ function run(payload) {
   let band;
   let level;                                     // how the context is named in the message
   if (Number.isFinite(tokens)) {
-    band = bandOf(tokens, nudgeSteps() ?? TOKEN_SHARES.map((s) => s * nudgeTokens()));
+    band = bandOf(tokens, steps);
     level = `Contesto a ${Math.round(tokens / 1000)}k token`;
   } else if (Number.isFinite(pct) && !(snapshot.window > PERCENT_FALLBACK_MAX_WINDOW)) {
     band = bandOf(pct, PERCENT_BANDS);
@@ -106,7 +101,7 @@ function run(payload) {
 
   fs.writeFileSync(stateFile, JSON.stringify({ band, at: now }));
   if (band < announced) return null;             // compacted or cleared: re-arm, say nothing
-  prune(now);                                    // at most three times a session
+  prune(now);                                    // once per step at most
 
   return {
     hookSpecificOutput: {
