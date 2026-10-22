@@ -173,3 +173,19 @@ test('a verdict block with no filled row, or a placeholder row, is not evidence 
   assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | - | - | fatto |`)).reason, /"Fatto"/);
   assert.match(stop(edited(`Fatto.\n\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
 });
+
+test('a verdict row counts only inside the verdict table, with a deciding cell that looks like output', () => {
+  const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"Fatto"/);
+  assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | exit 0 | fatto |`)).reason, '');
+  // a row that sits in another table, after prose, is not the verdict's
+  assert.match(stop(edited(`Fatto.\n\n${head}\n\nAltro:\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
+});
+
+test('"non ho verificato" / "non è stato verificato" are honest; "va verificato" is not a claim', () => {
+  assert.equal(stop(edited('Non ho verificato a schermo: il layout è cambiato.')).reason, '');
+  assert.equal(stop(edited('Il totale non è stato verificato, fatto in due file.')).reason, '');
+  assert.equal(stop(edited('Non ho ancora verificato il rendering, fatto il resto.')).reason, '');
+  assert.equal(stop(edited('Il comportamento va verificato con `worktree-root.js`.')).reason, '');
+  assert.match(stop(edited('Il totale è verificato e il resto torna.')).reason, /"verificato"/);
+});

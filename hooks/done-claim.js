@@ -19,7 +19,8 @@
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
  *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified", and no `deliver` verdict block (a `Livello | Comando | Riga che
- *     decide | Stato` table with a row of four filled cells ending `fatto` or `failed`).
+ *     decide | Stato` table with a row of four filled cells, the third looking like output (a digit, ok,
+ *     passed, failed, exit), ending `fatto` or `failed`).
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -55,16 +56,27 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // No bare "passa": "passa per il controller" is the commonest sentence in a dev chat. "fatto" is a claim
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
 // ("il merge fatto da te", "**fatto** da te"); the other words claim wherever they stand.
-const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|verificat[oaie])(?![\w-]))/i;
-const HONEST = /non\s+(?:ancora\s+)?(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
+const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
+const HONEST = /non\s+(?:ho\s+|è\s+stato\s+)?(?:ancora\s+)?(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Dettaglio**` block: the quoted lines that follow it are depth for the reader, not output. */
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit)\b)/i;
-/** The `deliver` verdict block: its header, and a row with a level, a command, a deciding line and a `fatto` / `failed` state. */
-const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/im;
-const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/im;
+/** The `deliver` verdict table: its header, then, among the table's own lines, a row with a level, a command, a
+ *  deciding line that looks like real output (a digit, ok, passed, failed, exit) and a `fatto` / `failed` state. */
+const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/i;
+const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[^|]*(?:\d|\b(?:ok|passed|failed|exit)\b)[^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/i;
+
+/** Whether a verdict table (the header, then its contiguous `|` lines) holds a proven row. */
+function verdictProof(message) {
+  const lines = message.split(/\r?\n/);
+  for (let i = 0; i < lines.length; i += 1) {
+    if (!VERDICT_HEAD.test(lines[i])) continue;
+    for (let j = i + 1; j < lines.length && /^[ \t]*\|/.test(lines[j]); j += 1) if (VERDICT_ROW.test(lines[j])) return true;
+  }
+  return false;
+}
 
 const allow = () => process.exit(0);
 
@@ -126,7 +138,7 @@ function readTurn(entries) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  if (VERDICT_HEAD.test(message) && VERDICT_ROW.test(message)) return null;
+  if (verdictProof(message)) return null;
   if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ');
   const found = prose.match(CLAIM);
