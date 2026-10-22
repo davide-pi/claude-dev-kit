@@ -20,7 +20,7 @@ const path = require('path');
 const { readRoots, resolveDir, matchRoot } = require('./lib/workspaces');
 
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
-const PS_PREFIX = 'PowerShell: anteponi $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; ad az, mai az account set';
+const PS_PREFIX = 'PowerShell: az fuori dalla allow list → anteponi $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; (il guard pinna gli altri), mai az account set';
 
 function projectOf(entry, dir) {
   if (entry.projects && typeof entry.projects === 'object') {

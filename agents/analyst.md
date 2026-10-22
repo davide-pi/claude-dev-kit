@@ -3,9 +3,9 @@ name: analyst
 description: >-
   Use when a forked skill runs a read-only analysis: `/fix-ci`, `/retro`, `/items-qa`. Reads,
   queries and reports; has no Edit or Write tool.
-disallowedTools: Edit, Write, NotebookEdit
+disallowedTools: Edit, MultiEdit, Write, NotebookEdit
 model: sonnet
-maxTurns: 120
+maxTurns: 60
 ---
 
 # analyst — the environment of a forked analysis, with no way to edit

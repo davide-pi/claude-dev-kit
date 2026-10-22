@@ -79,19 +79,22 @@ test('PowerShell: the command is prefixed with the mapped identity, single-quote
     `$env:AZURE_CONFIG_DIR='${box.azDir}'; az account show --query user.name -o tsv`);
 });
 
-test('Bash: one plain command takes an inline assignment, a chained one an export', () => {
+test('Bash: one plain command takes an inline assignment', () => {
   const box = sandbox();
   assert.equal(pinned(box, 'az account show', { tool: 'Bash' }), `AZURE_CONFIG_DIR='${box.azDir}' az account show`);
-  assert.equal(pinned(box, 'az account show && az boards query --wiql x', { tool: 'Bash' }),
-    `export AZURE_CONFIG_DIR='${box.azDir}'; az account show && az boards query --wiql x`);
-  assert.equal(pinned(box, 'az account show; ls /tmp', { tool: 'Bash' }),
-    `export AZURE_CONFIG_DIR='${box.azDir}'; az account show; ls /tmp`);
 });
 
-test('PowerShell: a chained command is pinned once, for the whole line', () => {
+test('only a single command is rewritten: a chained line goes to the permission flow and the manual prefix', () => {
   const box = sandbox();
-  assert.equal(pinned(box, 'az account show; az boards query --wiql x'),
-    `$env:AZURE_CONFIG_DIR='${box.azDir}'; az account show; az boards query --wiql x`);
+  for (const tool of ['Bash', 'PowerShell']) {
+    for (const command of [
+      'az account show && az boards query --wiql x',
+      'az account show; az boards query --wiql x',
+      'az account show; ls /tmp',
+    ]) {
+      assert.equal(guard(box, command, { tool }), null, `${tool}: ${command}`);
+    }
+  }
 });
 
 test('a home with a space or a quote survives both shells (the rewritten line is run for real)', () => {
@@ -102,9 +105,6 @@ test('a home with a space or a quote survives both shells (the rewritten line is
       const line = pinned(box, 'az account show', { tool: 'Bash' });
       const r = spawnSync('bash', ['-c', `az() { printf %s "$AZURE_CONFIG_DIR"; }; ${line}`], { encoding: 'utf8' });
       assert.equal(r.stdout, box.azDir, `bash, ${homeName}`);
-      const chained = pinned(box, 'az account show && az account show', { tool: 'Bash' });
-      const c = spawnSync('bash', ['-c', `az() { printf %s "$AZURE_CONFIG_DIR"; }; ${chained}`], { encoding: 'utf8' });
-      assert.equal(c.stdout, box.azDir + box.azDir, `bash, chained, ${homeName}`);
     }
     const pwsh = spawnSync('pwsh', ['-NoProfile', '-Command', '1'], { encoding: 'utf8' });
     if (pwsh.status === 0) {
@@ -152,6 +152,27 @@ test('never grants: a command the allow list does not cover is not rewritten, so
   }
   // A rule of the other tool does not count.
   assert.equal(guard(sandbox({ settings: { permissions: { allow: ['Bash(az account show*)'] } } }), 'az account show'), null);
+});
+
+test('never rewritten: a command that matches a user deny or ask rule, in either tool', () => {
+  const settings = (extra) => ({ permissions: { allow: ALLOW, ...extra } });
+  const rules = {
+    deny: { PowerShell: 'PowerShell(az boards query --wiql secret*)', Bash: 'Bash(az boards query --wiql secret*)' },
+    ask: { PowerShell: 'PowerShell(az account show --query*)', Bash: 'Bash(az account show --query*)' },
+  };
+  const hit = { deny: 'az boards query --wiql secret-items', ask: 'az account show --query user' };
+  const miss = { deny: 'az boards query --wiql other', ask: 'az account show' };
+  for (const kind of ['deny', 'ask']) {
+    for (const tool of ['PowerShell', 'Bash']) {
+      const box = sandbox({ settings: settings({ [kind]: [rules[kind][tool]] }) });
+      assert.equal(guard(box, hit[kind], { tool }), null, `${kind}, ${tool}: matches the rule`);
+      assert.ok(pinned(box, miss[kind], { tool }), `${kind}, ${tool}: a command the rule does not match is still pinned`);
+    }
+  }
+  // The legacy prefix form, a bare tool rule and the other tool's rule.
+  assert.equal(guard(sandbox({ settings: settings({ deny: ['Bash(az boards query:*)'] }) }), 'az boards query --wiql x', { tool: 'Bash' }), null);
+  assert.equal(guard(sandbox({ settings: settings({ ask: ['PowerShell'] }) }), 'az account show'), null, 'every command of the tool asks');
+  assert.ok(pinned(sandbox({ settings: settings({ deny: ['Bash(az account show*)'] }) }), 'az account show'), 'a Bash rule does not bind PowerShell');
 });
 
 test('never grants: redirection, substitution, a subshell or a backtick keeps the line out', () => {

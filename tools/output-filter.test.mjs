@@ -90,6 +90,57 @@ test('PowerShell: a failing dotnet keeps its exit code through the filter, a pas
   assert.equal(runRewritten(0).status, 0);
 });
 
+// The rewritten line for both shells, run for real against a fake `dotnet` (a function defined ahead of
+// the command, calling a node script): 80 noise lines and a summary, then the chosen exit code. Both
+// shells run, whichever the platform, and each is skipped when it is not there.
+const probe = (cmd, args) => spawnSync(cmd, args, { encoding: 'utf8' }).status === 0;
+const NODE = process.execPath.replace(/\\/g, '/');
+const hasBash = probe('bash', ['-c', `'${NODE}' -e 0`]);
+const fakeDir = mkdtempSync(join(tmpdir(), 'filter-fake-'));
+process.on('exit', () => { try { rmSync(fakeDir, { recursive: true, force: true }); } catch { /* tmp */ } });
+const FAKE = join(fakeDir, 'fake-dotnet.js').replace(/\\/g, '/');
+writeFileSync(FAKE, [
+  "for (let i = 0; i < 80; i += 1) console.log(`  Restored project ${i}`);",
+  "console.log('Passed!  - Failed: 0, Passed: 3, Total: 3');",
+  'process.exit(Number(process.argv[2]));',
+].join('\n'));
+
+function runLine(shell, command, exitCode) {
+  const plan = guard(command, shell === 'pwsh' ? 'PowerShell' : 'Bash');
+  const line = plan?.updatedInput.command;
+  assert.ok(line, `rewritten: ${command}`);
+  const [file, args] = shell === 'pwsh'
+    ? ['pwsh', ['-NoProfile', '-Command', `function dotnet { & '${NODE}' '${FAKE}' ${exitCode} }; ${line}`]]
+    : ['bash', ['-c', `dotnet() { '${NODE}' '${FAKE}' ${exitCode}; }; ${line}`]];
+  const r = spawnSync(file, args, { encoding: 'utf8' });
+  return { status: r.status, out: r.stdout, err: r.stderr };
+}
+
+for (const [shell, skip] of [['pwsh', !hasPwsh && 'pwsh 7 not on PATH'], ['bash', !hasBash && 'no usable bash on PATH']]) {
+  for (const command of ['dotnet test', 'dotnet build']) {
+    test(`${shell}: the rewritten "${command}" runs, filters the long output and keeps the exit code`, { skip }, () => {
+      for (const exitCode of [0, 3]) {
+        const r = runLine(shell, command, exitCode);
+        assert.match(r.out, /^\[output-filter\] \d+ of 81 lines/, `${shell} exit ${exitCode}: ${r.out}${r.err}`);
+        assert.match(r.out, /Passed!/);
+        assert.doesNotMatch(r.out, /Restored project 40\b/, 'the noise is dropped');
+        assert.equal(r.status, exitCode, `${shell} exit ${exitCode}: ${r.out}${r.err}`);
+      }
+    });
+  }
+}
+
+test('a trailing comment keeps the command out of the rewrite: it would swallow the closing brace or the pipe', () => {
+  // Rewritten, `& { dotnet test # note 2>&1; … }` is a parse error in PowerShell and, in Bash, ends the
+  // pipe inside the comment. Left alone, the command runs as typed. A `#` inside quotes is no comment.
+  for (const command of ['dotnet test # note', 'dotnet test #note', 'dotnet build # x', 'npm test -- --run # why', 'dotnet test\t# tab']) {
+    for (const tool of ['Bash', 'PowerShell']) assert.equal(guard(command, tool), null, `${tool}: ${command}`);
+  }
+  for (const command of ['dotnet test --filter "Name~A # B"', "dotnet test --filter 'Name~A # B'"]) {
+    assert.equal(guard(command)?.permissionDecision, 'allow', command);
+  }
+});
+
 test('the rest of the tool input is preserved', () => {
   const out = guard('npm test', 'Bash', { description: 'Run tests', timeout: 600000 });
   assert.equal(out.updatedInput.description, 'Run tests');

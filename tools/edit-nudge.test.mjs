@@ -87,6 +87,23 @@ test('edits made inside a subagent are not counted (agent_id, or a subagents tra
   assert.match(edit(config).additionalContext, /implementer/);
 });
 
+test('a Write or Edit of a scratch file under the system temp directory is not counted', () => {
+  const config = sandbox();
+  const scratch = join(tmpdir(), 'claude', 'session', 'scratchpad');
+  mkdirSync(scratch, { recursive: true });
+  created.push(join(tmpdir(), 'claude', 'session'));
+  const report = join(scratch, 'report.md');
+  writeFileSync(report, 'x');
+  for (let i = 0; i < 5; i += 1) {
+    assert.equal(edit(config, { tool_name: i % 2 ? 'Edit' : 'Write', tool_input: { file_path: report } }), null, 'scratch ' + i);
+  }
+  // A relative path is read against the payload's cwd.
+  assert.equal(edit(config, { tool_input: { file_path: 'report.md' }, cwd: scratch }), null, 'relative to cwd');
+  assert.equal(edit(config), null, 'a repository file: first');
+  assert.equal(edit(config), null, 'second');
+  assert.match(edit(config).additionalContext, /implementer/, 'third real edit');
+});
+
 test('parallel sessions keep separate counts', () => {
   const config = sandbox();
   edit(config, { session_id: 'a' });

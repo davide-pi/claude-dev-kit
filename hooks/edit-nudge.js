@@ -20,6 +20,9 @@
  * a subagent's edits would be counted and the nudge could fire while the session is already delegating:
  * noise, never a block.
  *
+ * A file under the system temp directory (`os.tmpdir()`, where Claude keeps its scratchpad at
+ * `<tmp>/claude/…`) is not code to delegate: a report or a diff written there is never counted.
+ *
  * Counter files are pruned after a few days whenever the nudge fires, so one file per session never
  * accumulates for good. Always exits 0; any error is silence.
  *
@@ -41,6 +44,22 @@ const COUNTER_FILE = /^edits-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
 
 const silent = () => process.exit(0);
+
+/** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
+function canonical(file, base) {
+  const abs = path.resolve(base || process.cwd(), file);
+  let real = abs;
+  try { real = fs.realpathSync.native(abs); } catch { /* not there: compare as given */ }
+  return process.platform === 'win32' ? real.toLowerCase() : real;
+}
+
+/** True for a file under the system temp directory: the session's scratchpad (`<tmp>/claude/…`), a report, a diff. */
+function isScratch(file, cwd) {
+  if (typeof file !== 'string' || !file) return false;
+  const tmp = canonical(os.tmpdir());
+  const rel = path.relative(tmp, canonical(file, cwd));
+  return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
+}
 
 function prune(now) {
   try {
@@ -75,6 +94,7 @@ try {
   }
   if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) silent();
   if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) silent();
+  if (isScratch(payload.tool_input?.file_path, payload.cwd)) silent();
 
   const count = readCount(file) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });

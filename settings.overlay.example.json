@@ -1,0 +1,12 @@
+{
+  "model": "sonnet",
+  "effortLevel": "high",
+  "outputStyle": "my-output-style",
+  "alwaysThinkingEnabled": null,
+  "permissions": {
+    "allow": [
+      "PowerShell(my-tool --version*)",
+      "Bash(my-tool --version*)"
+    ]
+  }
+}

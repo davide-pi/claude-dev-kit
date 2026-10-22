@@ -10,15 +10,19 @@
  * model to prefix every call by hand is the step that gets forgotten, so this does it:
  *
  *   PowerShell   $env:AZURE_CONFIG_DIR='<dir>'; <command>
- *   Bash         AZURE_CONFIG_DIR='<dir>' <command>              one plain command
- *                export AZURE_CONFIG_DIR='<dir>'; <command>      anything chained
+ *   Bash         AZURE_CONFIG_DIR='<dir>' <command>
  *
  * The rewrite is returned with `permissionDecision: "allow"` (see decision.js), and the prefix would
  * stop a permission rule from matching the command anyway, so it is limited to what the allow list
- * already allows: the rewrite grants nothing. Every chained command must prefix-match an `allow` rule
- * of `<config>/settings.json` for this tool, and the line may carry no redirection, substitution,
- * subshell or backtick. Anything else (an `az` write, `cd x && az …`, a pipe into a tool no rule names)
- * is left to the normal permission flow, and the model prefixes it by hand as the azdo-cli skill says.
+ * already allows: the rewrite grants nothing. It takes ONE plain command (no chain, pipe, redirection,
+ * substitution, subshell or backtick) that prefix-matches an `allow` rule of `<config>/settings.json`
+ * for this tool and matches no `deny` or `ask` rule there. Anything else (an `az` write, `cd x && az …`,
+ * a pipe into a tool no rule names) is left to the normal permission flow, and the model prefixes it by
+ * hand as the azdo-cli skill says.
+ *
+ * Only the user-scope `settings.json` is read; project and local settings are not consulted. That is
+ * safe because the allow comes from the user file alone, and Claude Code still applies the deny and ask
+ * rules of every scope to the rewritten command (documented behaviour of `updatedInput`, not tested here).
  *
  * Left alone, too: a command that already sets AZURE_CONFIG_DIR, a working directory the map does not
  * hold, a root with no identity or whose `~/.azure-<identity>` does not exist, and `# raw`.
@@ -52,17 +56,26 @@ function hasShellTricks(command) {
   return quote !== null;
 }
 
-/** The `allow` patterns of settings.json for one tool: `Bash(az boards query*)` gives `az boards query*`. */
-function allowPatterns(toolName) {
-  const { permissions } = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'settings.json'), 'utf8'));
+/**
+ * The patterns of one rule list of settings.json for one tool: `Bash(az boards query*)` gives
+ * `az boards query*`. A bare tool rule (`Bash`) covers every command, so in `deny` and `ask` it gives `*`
+ * (a blanket rule); in `allow` it is ignored.
+ */
+function rulePatterns(permissions, list, toolName) {
   const head = `${toolName}(`;
-  return (permissions?.allow ?? [])
-    .filter((rule) => typeof rule === 'string' && rule.startsWith(head) && rule.endsWith(')'))
-    .map((rule) => rule.slice(head.length, -1));
+  return (permissions?.[list] ?? []).flatMap((rule) => {
+    if (typeof rule !== 'string') return [];
+    if (rule === toolName) return list === 'allow' ? [] : ['*'];
+    return rule.startsWith(head) && rule.endsWith(')') ? [rule.slice(head.length, -1)] : [];
+  });
 }
 
-/** A permission pattern as a regular expression: `*` is the only wildcard. */
-const patternToRegExp = (pattern) => new RegExp(`^${pattern.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+/** A permission pattern as a regular expression: `*` is the wildcard, a trailing `:*` the legacy prefix form. */
+function patternToRegExp(pattern) {
+  const prefix = pattern.endsWith(':*');
+  const body = (prefix ? pattern.slice(0, -2) : pattern).replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*');
+  return new RegExp(`^${body}${prefix ? '(?:\\s.*)?' : ''}$`);
+}
 
 /** The pinned command line, or null when this command is left alone. */
 function planAzPin(command, toolName, cwd) {
@@ -71,21 +84,19 @@ function planAzPin(command, toolName, cwd) {
   if (RAW_OPT_OUT.test(command) || ALREADY_PINNED.test(command) || hasShellTricks(command)) return null;
 
   const segments = splitSegments(command).map((s) => s.trim());
-  if (!segments.some((s) => AZ_SEGMENT.test(s))) return null;
+  if (segments.length !== 1 || !AZ_SEGMENT.test(segments[0])) return null;
 
   const entry = matchRoot(readRoots(), resolveDir(cwd));
   const dir = entry && azConfigDir(entry);
   if (!dir) return null;
 
-  const allowed = allowPatterns(toolName).map(patternToRegExp);
-  if (!segments.every((s) => allowed.some((re) => re.test(s)))) return null;
+  const { permissions } = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'settings.json'), 'utf8'));
+  const matches = (list) => rulePatterns(permissions, list, toolName).map(patternToRegExp).some((re) => re.test(segments[0]));
+  if (!matches('allow') || matches('deny') || matches('ask')) return null;
 
   const value = dir.replace(/\\/g, '/');
   if (toolName === 'PowerShell') return `$env:AZURE_CONFIG_DIR='${value.replace(/'/g, "''")}'; ${command.trim()}`;
-  const quoted = `'${value.replace(/'/g, `'\\''`)}'`;
-  return segments.length > 1
-    ? `export AZURE_CONFIG_DIR=${quoted}; ${command.trim()}`
-    : `AZURE_CONFIG_DIR=${quoted} ${command.trim()}`;
+  return `AZURE_CONFIG_DIR='${value.replace(/'/g, `'\\''`)}' ${command.trim()}`;
 }
 
 module.exports = { planAzPin };

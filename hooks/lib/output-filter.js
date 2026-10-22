@@ -17,7 +17,8 @@
  * rewritten input is used only with a decision): allowing `cd x && dotnet test` would also allow
  * whatever precedes the test. These commands are in the template's allow list already, so the
  * allow grants nothing new. Opt-out: `# raw` anywhere in the command; help, version, test listing,
- * watch modes and a log follow are never rewritten (a follow would never reach the filter's end).
+ * watch modes and a log follow are never rewritten (a follow would never reach the filter's end), nor
+ * is a command with any other unquoted `#` (a trailing comment).
  *
  * The rewrite. Bash prefixes `set -o pipefail;` so the command's own exit code survives the pipe:
  *
@@ -43,8 +44,12 @@
 const fs = require('fs');
 
 const RAW_OPT_OUT = /#\s*raw\b/i;
-/** Any of these outside quotes makes the line more than one plain command. */
-const COMPOUND = new Set(['|', '&', ';', '>', '<', '\n', '\r', '`', '(', ')', '{', '}']);
+/**
+ * Any of these outside quotes makes the line more than one plain command. `#` is here too: a trailing
+ * comment would swallow the closing `}` of the PowerShell wrapper (a parse error) and the filter pipe of
+ * the Bash one, and cutting it off would need each shell's idea of where a comment starts.
+ */
+const COMPOUND = new Set(['|', '&', ';', '>', '<', '\n', '\r', '`', '(', ')', '{', '}', '#']);
 /** `-t` lists dotnet tests but filters vitest tests, and `-f` is a framework or a follow: per tool. */
 const flag = (names) => new RegExp(`(?:^|\\s)(?:${names})(?=\\s|=|$)`, 'i');
 /** A build the user asked to see in full: `-v:d`, `-v:diag`, `--verbosity detailed`. */

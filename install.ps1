@@ -66,10 +66,10 @@ $AssetDirs = @('agents', 'hooks', 'output-styles', 'rules', 'scripts', 'skills',
 
 # Repo-only root files: they configure the repo itself, not Claude Code. Every other file at the
 # root is a user-level asset, so a new repo-only file at the root belongs in this list.
-# workspaces.example.json and db-targets.example.json are the templates of the local-only
-# workspaces.json and db-targets.json, not assets themselves.
+# workspaces.example.json, db-targets.example.json and settings.overlay.example.json are the templates
+# of the local-only workspaces.json, db-targets.json and settings.overlay.json, not assets themselves.
 $RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json',
-              'workspaces.example.json', 'db-targets.example.json')
+              'workspaces.example.json', 'db-targets.example.json', 'settings.overlay.example.json')
 
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
@@ -78,7 +78,8 @@ $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 # what Claude Code itself manages (skills synced from the claude.ai account, the trash), and
 # machine data (workspaces.json, db-targets.json). Neither side owns them as an asset: -Pull never
 # imports them, install never writes them, and -Check reports them as expected.
-$LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json')
+$LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json',
+               'settings.overlay.json')
 
 # Assets the kit used to ship and no longer does, relative to the config root, file or folder. Install
 # copies but never deletes, so on a machine that had an older kit they linger: a retired skill keeps
@@ -471,6 +472,24 @@ function Test-AssetDrift([string[]]$Paths) {
     }
 }
 
+function Test-SettingsMerge([string]$Overlay) {
+    # tools/merge-settings.mjs: exit 0 the live settings.json is template + overlay, 1 it is not (the
+    # differing keys on stdout), 2 a file could not be read.
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { Write-Problem 'settings.json cannot be compared with template + overlay: node is not on PATH'; return }
+    $output = @(& $node.Source (Join-Path $RepoRoot 'tools\merge-settings.mjs') `
+        --template (Join-Path $RepoRoot 'settings.json') --overlay $Overlay `
+        --check (Join-Path $ClaudeHome 'settings.json') 2>&1)
+    switch ($LASTEXITCODE) {
+        0 { Write-Ok 'settings.json matches the template + overlay' }
+        1 {
+            Write-Problem 'settings.json differs from the template + overlay (~ differs, + missing from the live file, - only in it)'
+            foreach ($line in $output) { Write-Info "$line" }
+        }
+        default { Write-Problem "settings.json could not be compared with template + overlay: $($output -join ' ')" }
+    }
+}
+
 function Sync-Assets {
     Write-Section $(if ($Check) { 'Assets (repo vs installed)' } elseif ($Pull) { 'Assets (installed -> repo)' } else { 'Assets (repo -> installed)' })
 
@@ -480,8 +499,11 @@ function Sync-Assets {
     $paths = if ($Pull) { @(@(Get-KitAssets) + @(Get-InstalledAssets) | Sort-Object -Unique) } else { @(Get-KitAssets) }
 
     if ($Check) {
-        # settings.json is the template you merged your own choices into, so it always differs by design.
-        Write-Info 'settings.json is not compared: your copy is a personalised merge of the template, by design'
+        # settings.json is the template you merged your own choices into, so it differs by design, unless
+        # the choices live in an overlay: then the live file has to be exactly template + overlay.
+        $overlay = Join-Path $ClaudeHome 'settings.overlay.json'
+        if (Test-Path -LiteralPath $overlay) { Test-SettingsMerge $overlay }
+        else { Write-Info 'settings.json is not compared: your copy is a personalised merge of the template, by design' }
         Test-AssetDrift @($paths | Where-Object { $_ -ne 'settings.json' })
         return
     }
