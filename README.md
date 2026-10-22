@@ -175,7 +175,8 @@ a broken hook must never block work (`worktree-root.js` alone fails loudly: a si
 | `tools/instructions-log.js` | Dev-only `InstructionsLoaded` hook, wired in the repo's own `.claude/settings.local.json`: logs which instruction file loaded and why, to confirm a `paths` rule fires. |
 | `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, workflows (`enableWorkflows`, `workflowSizeGuideline`, `workflowKeywordTriggerEnabled`), the one allow rule for `db-ro.ps1`, `bashOutputMaxChars` (how many characters of one shell result reach the context), enabled plugins, status line, UI preferences. |
 | `loop.md` | Maintenance prompt that a bare `/loop` runs (installed at `~/.claude/loop.md` like any root file): PR status and active threads, the branch's latest pipeline run, `/fix-ci` suggested when red; read-only. Runs only when the owner types `/loop`: the assistant never starts, schedules or suggests it. |
-| `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, a cache-cold badge, rate limits with weekly pacing, session cost, model, effort, the unlogged-hours clock badge (also for under-target days), vim mode. Names and branch are hyperlinks. Each render writes the context snapshot `context-nudge.js` reads, under `~/.claude/.cache/`. |
+| `statusline.js` | Model and effort first, then the folder — or, inside a linked worktree, the worktree under a tree icon — git branch and dirty badges, context bar with token count, the 5h and 7d rate-limit windows with weekly pacing, session cost always shown; a second line only when it has something: the unlogged-hours clock badge (also for under-target days), a cache-cold badge, vim mode. Segments are joined by a dim dot, no brackets; names and branch are hyperlinks. Each render writes the context snapshot `context-nudge.js` reads, under `~/.claude/.cache/`. With the optional cockpit mod (below) it also shows the last turn's cost and agents and tasks badges. |
+| `mods/cockpit/` | The cockpit mod (a Claude Code plugin, see "Cockpit mod"), installed to `~/.claude/mods/cockpit` like `scripts/`. |
 | `scripts/db-ro.ps1` | Read-only access to non-dev databases — SQL Server (go-sqlcmd), PostgreSQL (`psql`), Redis (`redis-cli`): targets from local-only `~/.claude/db-targets.json` (copy `db-targets.example.json`); the client runs native, else in WSL, else through docker (`sqlcmd`: native only); the secret travels in the client's own environment variable for that process only (`WSLENV` forwards it into WSL and is restored afterwards); a permission probe runs first (`-Probe` runs it alone): exit 3 when read-only cannot be proven, exit 4 listing the grants when the credential can write — the user is asked once per target and `-AcceptWriteGrant` then runs on the client-side filter alone (reads only, the header says `readonly=NO`) — and write commands in the query are rejected. `hooks/lib/sql-target.js` denies a raw client at a non-dev host and points here. |
 | `scripts/perimeter.ps1` | Writes (`-Files a,b,c`) or closes (`-Close`) the `deliver` perimeter of the current worktree: `<git dir>/deliver/perimeter.md`, bound to the checked-out branch, UTF-8 without BOM, linked worktrees included. The settings allow exactly this script. |
 | `db-targets.example.json` | Shape of the local-only `~/.claude/db-targets.json` read by `db-ro.ps1`: workspace root → environment → engine, server, credential reference (`env:NAME` or `envfile:<path>#KEY`), the allowed databases. Placeholders only. |
@@ -316,6 +317,19 @@ day-to-day.
 A plugin shipping its own MCP server may need extra tooling on the machine. `install.ps1 -Check`
 flags plugins enabled in `settings.json` but not actually installed: the state in which their tools
 silently do not exist.
+
+## Cockpit mod
+
+`mods/cockpit/` is a plugin that adds a side pane beside the chat with the model, cost, git, context, credits and agents of the session. `settings.json` loads it with `CLAUDE_CODE_PLUGIN_DIRS` (`~/.claude/mods/cockpit`) and `install.ps1` copies the folder to `~/.claude/mods/` like any asset (`-Check` compares it, `-Pull` imports it, except the engine-generated `.claude-plugin/types/`).
+
+- `/cockpit` opens the pane. It is closed by default; the `x` in the pane closes it and the status line comes back (while the pane is open the status line prints an empty line, since the pane carries the same data).
+- `statusLine.refreshInterval` is `2` in the template, so the line re-renders every two seconds and picks up the pane state and the running agents without waiting for the next message.
+- The mod writes its state to `~/.claude/.cache/cockpit-<session>.json` (pane open or closed, last turn cost, agents, tasks); `statusline.js` only reads it.
+- `~/.claude/mods` is kit-owned: `install.ps1` copies the whole mod there, tests and check included, and a later install overwrites local edits (change the repo, not the live copy).
+- The pane counts as open for the status line only while the mod refreshes its state file (every 15 s, `at`); an `open: true` older than 45 s is ignored, so a reloaded mod never leaves the line hidden.
+- The status line caches the git results per folder for 5 s under `~/.claude/.cache/` and writes its rate-limit cache only when a value changes, so a short `refreshInterval` stays cheap.
+- `statusline.js` works without the mod: no state file means no cockpit segments and the line never hides.
+- Check: `claude plugin test mods/cockpit`, `claude plugin validate mods/cockpit` and `node mods/cockpit/statusline/check.js` (renders the status line on a sample payload in each cockpit state).
 
 ## MCP servers
 

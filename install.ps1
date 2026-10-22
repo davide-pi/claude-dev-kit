@@ -15,7 +15,7 @@
   Every asset is user-level. The kit is opinionated on technique and anonymous only on identity
   (Azure DevOps org and project names, absolute machine paths, e-mail addresses), so nothing is
   project-scoped any more: agents/, hooks/ and skills/ are installed whole, plus the root-level
-  CLAUDE.md, settings.json and statusline.js. rules/, workflows/, scripts/ and output-styles/ are
+  CLAUDE.md, settings.json and statusline.js. rules/, workflows/, scripts/, mods/ and output-styles/ are
   installed the same way.
 
   Assets are discovered, never listed: whatever the repo contains under those directories is
@@ -62,7 +62,7 @@ if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
 
 # The directories Claude Code loads assets from. Discovery recurses into them, so a new skill
 # folder, hook, agent or reference file is picked up without touching this file.
-$AssetDirs = @('agents', 'hooks', 'output-styles', 'rules', 'scripts', 'skills', 'workflows')
+$AssetDirs = @('agents', 'hooks', 'mods', 'output-styles', 'rules', 'scripts', 'skills', 'workflows')
 
 # Repo-only root files: they configure the repo itself, not Claude Code. Every other file at the
 # root is a user-level asset, so a new repo-only file at the root belongs in this list.
@@ -76,10 +76,11 @@ $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 
 # Live-config-only paths, relative to the config root, file or folder: personal identity (my-voice),
 # what Claude Code itself manages (skills synced from the claude.ai account, the trash), and
-# machine data (workspaces.json, db-targets.json). Neither side owns them as an asset: -Pull never
+# machine data (workspaces.json, db-targets.json), and the type declarations the plugin engine generates
+# inside a mod (mods/<name>/.claude-plugin/types). Neither side owns them as an asset: -Pull never
 # imports them, install never writes them, and -Check reports them as expected.
 $LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json',
-               'settings.overlay.json')
+               'settings.overlay.json', 'mods/cockpit/.claude-plugin/types')
 
 # Assets the kit used to ship and no longer does, relative to the config root, file or folder. Install
 # copies but never deletes, so on a machine that had an older kit they linger: a retired skill keeps

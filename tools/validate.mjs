@@ -34,7 +34,7 @@ function walk(dir = '', out = []) {
   return out;
 }
 const allFiles = walk();
-const textFiles = allFiles.filter((f) => /\.(md|json|js|mjs|ps1|yml|yaml)$/.test(f));
+const textFiles = allFiles.filter((f) => /\.(md|json|js|mjs|ts|tsx|ps1|yml|yaml)$/.test(f));
 
 /** Minimal front-matter reader: the `---` block at the top of a markdown file. */
 function frontMatter(rel) {

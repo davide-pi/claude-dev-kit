@@ -16,3 +16,7 @@
 Thumbs.db
 .DS_Store
 /settings.overlay.json
+
+# Engine-generated declarations and the check's scratch dir inside a mod
+/mods/*/.claude-plugin/types/
+/mods/*/statusline/tmp-config/

@@ -1,10 +1,13 @@
 // Claude Code Status Line — statusline.js (Node.js CJS)
 // Requires: Node.js 18+, git in PATH. No external npm dependencies.
 //
-// Segments:
-//   line 1: folder (+ worktree) · git branch + dirty badges · context bar + tokens
-//           cache-cold badge · rate limits + weekly pacing + session cost · worklog badge · vim mode
-//   line 2: model · effort level
+// Segments (no brackets, joined by a dim middle dot, as the cockpit pane reads):
+//   line 1: model + effort · folder (+ worktree) · git branch + dirty badges · context bar + tokens
+//           5h window · 7d window + weekly pacing · session cost · agents badge · tasks done/total
+//   line 2 (only when any): worklog badge · cache-cold badge · vim mode
+// Optional cockpit state file (mods/cockpit writes ~/.claude/.cache/cockpit-<session>.json): when present,
+// line 1 gains the last turn's cost, the agents badge and the tasks badge, and the whole output is silent
+// while the cockpit pane is open (the pane carries the same data). Without the mod the line is unchanged.
 // ─────────────────────────────────────────────────────────────────────────────
 
 
@@ -13,6 +16,7 @@ const { execFileSync } = require("node:child_process");
 const fs   = require("node:fs");
 const os   = require("node:os");
 const path = require("node:path");
+const crypto = require("node:crypto");
 
 // ── ANSI helpers ──────────────────────────────────────────────────────────────
 const esc = (code) => `\x1b[${code}m`;
@@ -25,16 +29,21 @@ const BLD = esc("1");   // bold
 // escape sequences carry zero display width — stripAnsi/truncateAnsi skip them.
 const link = (url, label) => (url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label);
 
+// The cockpit mod's palette (hooks/format.ts COLORS), so the status line and the pane read as one.
 const C = {
   gray:     esc("38;2;140;140;140"),
-  yellow:   esc("33"),
-  green:    esc("32"),
-  red:      esc("31"),
-  orange:   esc("38;5;208"),
+  dim:      esc("38;2;154;160;170"),
+  yellow:   esc("38;2;255;207;138"),
+  amber:    esc("38;2;232;163;90"),
+  green:    esc("38;2;126;198;153"),
+  red:      esc("38;2;240;122;111"),
+  orange:   esc("38;2;255;158;94"),
+  blue:     esc("38;2;127;180;255"),
   violet:   esc("38;2;125;91;166"),
   lavender: esc("38;2;160;130;200"),
   sky:      esc("38;2;100;180;220"),
-  sep:      esc("38;2;70;70;70"),
+  sep:      esc("38;2;74;79;89"),
+  empty:    esc("38;2;51;54;60"),
   teal:     esc("38;2;80;200;180"),
   pink:     esc("38;2;220;100;160"),
 };
@@ -151,6 +160,24 @@ function worktreeInfo(cwd) {
   } catch { return null; }
 }
 
+// With `refreshInterval` the line renders every couple of seconds, far more often than a branch or a
+// dirty count moves: the git results are kept per cwd for a few seconds in a small file (the process is
+// new on every render, so memory is no use). Best-effort: any failure just runs `fn`.
+const GIT_CACHE_MS = 5000;
+function cachedByCwd(name, cwd, fn) {
+  const file = path.join(CONFIG_DIR, ".cache", `${name}-${crypto.createHash("sha1").update(String(cwd)).digest("hex").slice(0, 16)}.json`);
+  try {
+    const hit = JSON.parse(fs.readFileSync(file, "utf8"));
+    if (hit && Date.now() - hit.at < GIT_CACHE_MS) return hit.value ?? null;
+  } catch { /* no cache yet */ }
+  const value = fn();
+  try {
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ at: Date.now(), value }));
+  } catch { /* best-effort */ }
+  return value;
+}
+
 // ── Segment builders ──────────────────────────────────────────────────────────
 
 // Nerd Font glyphs used by the segments below. Written as explicit \u escapes
@@ -158,12 +185,11 @@ function worktreeInfo(cwd) {
 // a raw glyph is invisible (or a tofu box) in any editor without the font and
 // survives copy/paste badly. Comments give each icon's Nerd Font class name.
 const ICONS = {
-  folder: "\uF07B", // nf-fa-folder      - cwd, outside a linked worktree
-  tree:   "\uF1BB", // nf-fa-tree        - worktree, replaces cwd inside one
-  branch: "\uF126", // nf-fa-code_branch - git branch
-  brain:  "\uEE9C", // nf-fa-brain       - context window
-  gauge:  "\uEEB2", // nf-fa-gauge       - rate limits
-  bolt:   "\uF0E7", // nf-fa-bolt        - effort level
+  folder: "\u{F024B}", // nf-md-folder          - cwd, outside a linked worktree
+  tree:   "\u{F0253}", // nf-md-folder_multiple - worktree, replaces cwd inside one
+  branch: "\u{F062C}", // nf-md-source_branch  - git branch
+  brain:  "\u{F09D1}", // nf-md-brain    - context window (Material Design set: fa-brain is missing from the font)
+  gauge:  "\u{F029A}", // nf-md-gauge    - rate limits (fa-gauge is missing from the font)
   vim:    "\uF408", // nf-dev-vim        - vim mode
   clock:  "\uF017", // nf-fa-clock_o     - working days whose hours are not logged
   snow:   "\uF2DC", // nf-fa-snowflake_o - prompt cache expired
@@ -212,6 +238,16 @@ function remoteWebUrl(remote, branch) {
   return null;
 }
 
+// Effort level -> battery icon and color, as the cockpit pane draws it. These sit in the supplementary
+// Private Use Area (Material Design set), hence \u{...}. A level this table does not name gets no icon.
+const EFFORT = {
+  low:    { icon: "\u{F12A1}", col: C.gray   },
+  medium: { icon: "\u{F12A2}", col: C.green  },
+  high:   { icon: "\u{F12A3}", col: C.yellow },
+  xhigh:  { icon: "\u{F12A6}", col: C.orange },
+  max:    { icon: "\u{F0083}", col: C.red    },
+};
+
 function segFolder(cwd, worktree) {
   const base = (p) => p.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).at(-1) || p;
   // Inside a linked worktree the worktree replaces the folder segment outright -
@@ -229,7 +265,7 @@ function segGit(git) {
   const badges = [];
   if (git.staged    > 0) badges.push(`${C.green}+${git.staged}${R}`);
   if (git.modified  > 0) badges.push(`${C.yellow}~${git.modified}${R}`);
-  if (git.untracked > 0) badges.push(`${C.gray}?${git.untracked}${R}`);
+  if (git.untracked > 0) badges.push(`${C.dim}?${git.untracked}${R}`);
   if (badges.length) s += " " + badges.join(" ");
   return s;
 }
@@ -254,13 +290,13 @@ function segContext(ctx) {
   const BAR_W  = 8;
   const filled = Math.min(BAR_W, Math.round(pct / 100 * BAR_W));
   const empty  = BAR_W - filled;
-  const col    = pct < 40 ? C.green : pct < 60 ? C.yellow : pct < 80 ? C.orange : C.red;
+  const col    = pct < 40 ? C.green : pct < 80 ? C.yellow : C.red;
   const pctStr = `${Math.round(pct)}%`.padStart(4);
-  const bar    = `${col}${"█".repeat(filled)}${DIM}${"░".repeat(empty)}${R}`;
+  const bar    = `${col}${"█".repeat(filled)}${C.empty}${"█".repeat(empty)}${R}`;
   const used   = abbrevTokens(ctx?.total_input_tokens);
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
-  return `${DIM}[${R} ${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok} ${DIM}]${R}`;
+  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}`;
 }
 
 // Per-session context snapshot for hooks/context-nudge.js, which runs on
@@ -312,7 +348,7 @@ function segCacheCold(cache) {
     (Number.isFinite(cache.expires_at) && cache.expires_at * 1000 <= Date.now());
   if (!expired) return "";
   const tokens = abbrevTokens(cache.recache_tokens_if_cold);
-  return `${DIM}[${R} ${C.sky}${ICONS.snow} cache cold${tokens ? ` ${tokens}` : ""}${R} ${DIM}]${R}`;
+  return `${C.sky}${ICONS.snow} cache cold${tokens ? ` ${tokens}` : ""}${R}`;
 }
 
 function fmtCountdown(epoch) {
@@ -323,9 +359,10 @@ function fmtCountdown(epoch) {
   const d = Math.floor(totalMin / 1440);
   const h = Math.floor((totalMin % 1440) / 60);
   const m = totalMin % 60;
-  if (d > 0) return ` ${DIM}·${d}d${h}h${R}`;
-  if (h > 0) return ` ${DIM}·${h}h${m}m${R}`;
-  return ` ${DIM}·${m}m${R}`;
+  // "↻" is drawn wider than its one counted cell by some terminals: always followed by an explicit space.
+  if (d > 0) return ` ${DIM}↻${R} ${d}d${h}h`;
+  if (h > 0) return ` ${DIM}↻${R} ${h}h${m}m`;
+  return ` ${DIM}↻${R} ${m}m`;
 }
 
 // Color by projected end-of-window usage (constant-burn assumption).
@@ -348,8 +385,8 @@ function rateColor(used, epoch, windowSec) {
 // ahead of pace (green), negative means burning too fast (red). Unlike a
 // whole-day target that jumps 14 points at midnight, the elapsed fraction is
 // continuous, so the delta moves only when consumption does. Both integers are
-// taken from what is actually printed, so the three numbers can never disagree
-// by a rounding step.
+// taken from what is actually printed, so the numbers can never disagree by a
+// rounding step. Printed as the cockpit pane does: `(+5%)` / `(−5%)`, true minus.
 function weeklyPace(remainingPct, epoch, windowSec) {
   if (!epoch) return "";
   const remainSec = (epoch * 1000 - Date.now()) / 1000;
@@ -357,17 +394,24 @@ function weeklyPace(remainingPct, epoch, windowSec) {
   const target = Math.round(remainSec / windowSec * 100);
   const delta  = remainingPct - target;
   const col    = delta >= 0 ? C.green : C.red;
-  const sign   = delta > 0 ? "+" : "";
-  return ` ${DIM}(t:${target}%${R} ${col}${sign}${delta}%${R}${DIM})${R}`;
+  const sign   = delta < 0 ? "\u2212" : "+";
+  return ` ${col}(${sign}${Math.abs(delta)}%)${R}`;
 }
 
-// Session cost. Precision scales down so a short session isn't flattened to
-// "$0.00"; an untouched session (exactly 0) renders nothing rather than "$0.0000".
+// Session cost, always shown as the cockpit pane does (`$0.00` for an untouched or absent cost).
+// Precision scales down so a short session isn't flattened to "$0.00".
 function fmtCost(cost) {
   const n = Number(cost);
-  if (!Number.isFinite(n) || n <= 0) return "";
+  if (!Number.isFinite(n) || n <= 0) return `${C.yellow}$0.00${R}`;
   const s = n < 0.01 ? n.toFixed(4) : n < 1 ? n.toFixed(3) : n.toFixed(2);
   return `${C.yellow}$${s}${R}`;
+}
+
+// The cockpit mod's last-turn cost, appended to the session cost. Omitted when null, 0 or under a cent.
+function fmtTurnCost(usd) {
+  const n = Number(usd);
+  if (usd == null || !Number.isFinite(n) || n < 0.005) return "";
+  return ` ${DIM}+$${n.toFixed(2)}${R}`;
 }
 
 // ── Rate-limit cache ────────────────────────────────────────────────────────
@@ -383,7 +427,11 @@ function saveRateLimitCache(rl) {
     const slim = {};
     if (rl.five_hour != null) slim.five_hour = { used_percentage: rl.five_hour.used_percentage, resets_at: rl.five_hour.resets_at };
     if (rl.seven_day != null) slim.seven_day = { used_percentage: rl.seven_day.used_percentage, resets_at: rl.seven_day.resets_at };
-    fs.writeFileSync(RL_CACHE, JSON.stringify(slim));
+    // Rewritten only when a value changed: the line renders every couple of seconds.
+    const next = JSON.stringify(slim);
+    let current = null;
+    try { current = fs.readFileSync(RL_CACHE, "utf8"); } catch { /* first render */ }
+    if (current !== next) fs.writeFileSync(RL_CACHE, next);
   } catch { /* best-effort: cache write failures are non-fatal */ }
 }
 
@@ -405,32 +453,29 @@ function reconcileCached() {
   return out;
 }
 
-// `stale` marks values sourced from the cache (last-known, not live) with a dim
-// "~" so they aren't mistaken for a fresh reading.
-function segRateLimits(rl, stale, cost) {
+// One segment per rate-limit window, labelled `5h` / `7d` (dim) and, for the first present one, led by the
+// gauge icon. `stale` marks values sourced from the cache (last-known, not live) with a dim "~" so they
+// aren't mistaken for a fresh reading.
+function segRateWindows(rl, stale) {
+  if (!rl) return [];
   const mark = stale ? `${DIM}~${R}` : "";
-  const parts = [];
-  if (rl) {
-    // The countdown already says which window a value belongs to, so the "5h"/"7d"
-    // label is redundant — except when resets_at is missing (a cached entry whose
-    // window has rolled over), where the label is the only thing telling them apart.
-    const win = (w, windowSec, label, pace) => {
-      const { used_percentage: u, resets_at: r } = w;
-      const col = rateColor(u, r, windowSec);
-      const cd  = fmtCountdown(r);
-      const lbl = cd ? "" : `${DIM}${label}${R} `;
-      const rem = Math.round(100 - u);
-      // Pacing is a weekly notion: over five hours the target moves too fast to act on.
-      const pc  = pace ? weeklyPace(rem, r, windowSec) : "";
-      parts.push(`${lbl}${mark}${col}${rem}%${R}${cd}${pc}`);
-    };
-    if (rl.five_hour != null) win(rl.five_hour, 18000,  "5h", false);
-    if (rl.seven_day != null) win(rl.seven_day, 604800, "7d", true);
-  }
-  const cost$ = fmtCost(cost);
-  if (cost$) parts.push(cost$);
-  if (!parts.length) return "";
-  return `${DIM}[${R} ${ICONS.gauge} ${parts.join(` ${DIM}|${R} `)} ${DIM}]${R}`;
+  const win = (w, windowSec, label, pace, icon) => {
+    const { used_percentage: u, resets_at: r } = w;
+    const col = rateColor(u, r, windowSec);
+    const rem = Math.round(100 - u);
+    // Pacing is a weekly notion: over five hours the target moves too fast to act on.
+    const pc  = pace ? weeklyPace(rem, r, windowSec) : "";
+    return `${icon ? `${icon} ` : ""}${DIM}${label}${R} ${mark}${col}${rem}%${R}${fmtCountdown(r)}${pc}`;
+  };
+  const segs = [];
+  if (rl.five_hour != null) segs.push(win(rl.five_hour, 18000,  "5h", false, ICONS.gauge));
+  if (rl.seven_day != null) segs.push(win(rl.seven_day, 604800, "7d", true,  segs.length ? "" : ICONS.gauge));
+  return segs;
+}
+
+// Session cost plus, when the cockpit mod reports one, the last turn's.
+function segCost(cost, turnCost) {
+  return fmtCost(cost) + fmtTurnCost(turnCost);
 }
 
 // Fallback for model and effort when the payload doesn't carry them (cold start,
@@ -450,23 +495,58 @@ function readSettings() {
 
 function segModel(name, stale) {
   if (!name) return "";
+  // A trailing parenthetical (`Opus 5.5 (1M context)`) is dropped: the context segment already says it.
   const short = name
+    .replace(/\s*\([^)]*\)\s*$/, "")
     .replace("Claude ", "").replace(" Sonnet", " Son")
     .replace(" Haiku",  " Hku").replace(" Opus", " Opx");
   const mark = stale ? `${DIM}~${R}` : "";
-  return `${DIM}[${R} ${mark}${C.sky}${short}${R} ${DIM}]${R}`;
+  return `${mark}${C.blue}${short}${R}`;
 }
 
 // Effort level: low | medium | high | xhigh | max
 function segEffort(level, stale) {
   if (!level) return "";
-  const col =
-    level === "max"    ? C.pink   :
-    level === "xhigh"  ? C.orange :
-    level === "high"   ? C.yellow :
-    level === "medium" ? C.green  : C.gray;
+  const { icon, col } = EFFORT[level] ?? { icon: "", col: C.gray };
   const mark = stale ? `${DIM}~${R}` : "";
-  return `${DIM}[${R} ${mark}${col}${ICONS.bolt} ${level.toUpperCase()}${R} ${DIM}]${R}`;
+  return `${mark}${col}${icon ? `${icon} ` : ""}${level.toUpperCase()}${R}`;
+}
+
+// State the cockpit mod writes for this session (see mods/cockpit): whether its pane is open, the last
+// turn's cost, the agent counts. Missing or unreadable means no mod: the line is then exactly what it is
+// without it. The id is validated as saveContextSnapshot does, since it ends up in a path.
+function readCockpit(sessionId) {
+  if (typeof sessionId !== "string" || !/^[\w-]{1,128}$/.test(sessionId)) return null;
+  try {
+    const state = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, ".cache", `cockpit-${sessionId}.json`), "utf8"));
+    return state && typeof state === "object" ? state : null;
+  } catch { return null; }
+}
+
+// Agents running (blue) and agents on another model than asked (yellow); nothing when both are zero.
+// `open:true` counts only while the mod keeps refreshing `at` (its tick does, every 15 s): a leftover from a
+// reloaded mod or a close it never heard of must not hide the line forever.
+const COCKPIT_FRESH_MS = 45 * 1000;
+function cockpitIsOpen(cockpit) {
+  return cockpit?.open === true && Number.isFinite(cockpit.at) && Date.now() - cockpit.at < COCKPIT_FRESH_MS;
+}
+
+function segAgents(cockpit) {
+  const count = (n) => (Number.isFinite(n) && n > 0 ? n : 0);
+  const running = count(cockpit?.agents?.running);
+  const warned  = count(cockpit?.agents?.modelWarnings);
+  const parts = [];
+  if (running) parts.push(`${C.blue}◐${running}${R}`);
+  if (warned)  parts.push(`${C.yellow}⚠${warned}${R}`);
+  if (!parts.length) return "";
+  return parts.join(" ");
+}
+
+// Tasks of the main thread, from the cockpit mod: `☐ done/total`, green once all are done; nothing without tasks.
+function segTasks(cockpit) {
+  const done = cockpit?.tasks?.done, total = cockpit?.tasks?.total;
+  if (!Number.isInteger(done) || !Number.isInteger(total) || total <= 0 || done < 0) return "";
+  return `${DIM}☐${R} ${done === total ? C.green : ""}${done}/${total}${R}`;
 }
 
 // Working days that had real work and never reached a work item. The snapshot is
@@ -494,7 +574,7 @@ function segWorklog() {
     const oldest = snap.pending[0].date;
     const stale  = (Date.now() - Date.parse(`${oldest}T12:00:00`)) > 7 * 864e5;
     const col    = stale ? C.red : C.yellow;
-    return `${DIM}[${R} ${col}${ICONS.clock} ${n}d${R} ${DIM}]${R}`;
+    return `${col}${ICONS.clock} ${n}d${R}`;
   } catch { return ""; }
 }
 
@@ -504,7 +584,7 @@ function segVim(vim) {
   const col =
     vim.mode === "INSERT"      ? C.green  :
     vim.mode.startsWith("VIS") ? C.orange : C.lavender;
-  return `${DIM}[${R} ${col}${ICONS.vim} ${vim.mode}${R} ${DIM}]${R}`;
+  return `${col}${ICONS.vim} ${vim.mode}${R}`;
 }
 
 // ── Main ──────────────────────────────────────────────────────────────────────
@@ -518,6 +598,11 @@ process.stdin.on("end", () => {
 
   const cwd = data.cwd || data.workspace?.current_dir || process.cwd();
   saveContextSnapshot(data.session_id, data.context_window, data.prompt_cache);
+
+  // The cockpit pane carries all of this while it is open: the line stays empty.
+  const cockpit = readCockpit(data.session_id);
+  // A zero-width space, not an empty line: an empty output may leave the previous line on screen.
+  if (cockpitIsOpen(cockpit)) { process.stdout.write("\u200B\n"); return; }
 
   // Live rate-limit data if present (and cache it); otherwise fall back to the
   // last-known snapshot so the 5h/7d readout stays visible from cold start.
@@ -550,20 +635,22 @@ process.stdin.on("end", () => {
     return width > W ? truncateAnsi(line, W - 1) : " ".repeat(W - width) + line;
   };
 
-  // Line 1 is the workspace and the budgets; line 2 is what the session runs as.
+  // Line 1: what the session runs as, the workspace and the budgets. Line 2: badges, printed only when any.
   const line1 = [
-    segFolder(cwd, worktreeInfo(cwd)),
-    segGit(gitInfo(cwd)),
+    [segModel(modelName, modelStale), segEffort(effortLevel, effortStale)].filter(Boolean).join(" "),
+    segFolder(cwd, cachedByCwd("worktree", cwd, () => worktreeInfo(cwd))),
+    segGit(cachedByCwd("git", cwd, () => gitInfo(cwd))),
     segContext(data.context_window),
-    segCacheCold(data.prompt_cache),
-    segRateLimits(rl, rlStale, data.cost?.total_cost_usd),
-    segWorklog(),
-    segVim(data.vim),
+    ...segRateWindows(rl, rlStale),
+    segCost(data.cost?.total_cost_usd, cockpit?.lastTurnUsd),
+    segAgents(cockpit),
+    segTasks(cockpit),
   ].filter(Boolean).join(sepStr);
 
   const line2 = [
-    segModel(modelName, modelStale),
-    segEffort(effortLevel, effortStale),
+    segWorklog(),
+    segCacheCold(data.prompt_cache),
+    segVim(data.vim),
   ].filter(Boolean).join(sepStr);
 
   process.stdout.write([line1, line2].filter(Boolean).map(fit).join("\n") + "\n");
