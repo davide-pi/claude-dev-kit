@@ -63,6 +63,13 @@ failed, retried call · a permission prompt · a fact asked for · a huge output
 Before proposing, grep what exists — `~/.claude/{skills,agents,hooks,rules}`, `~/.claude/CLAUDE.md`,
 the repo's checks: an asset that did not fire, or a check left unwired, *is* the finding.
 
+### Monthly — environment health, once a month
+
+| Step | Source | Fix |
+| --- | --- | --- |
+| Asset usage | the owner's `/skill-doctor` and `/doctor prompt-audit` output, pasted in the arguments (slash commands, a fork cannot run them) | never-invoked or over-budget descriptions → `skill-forge` |
+| Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
+
 ### Report — returned to the caller, ≤ 40 lines
 
 1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`.

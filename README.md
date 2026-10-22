@@ -111,7 +111,7 @@ subagent, so the raw output never reaches the main conversation.
 | `skills/logs/SKILL.md` | `/logs`, forked into `ops-analyst` — tail and filter the current service's logs, whichever way this project produces them. |
 | `skills/docs-sync/SKILL.md` | `/docs-sync` — runs `doc-keeper` on the repository's tech docs or wiki tree, against the working diff, a range or a full audit. |
 | `skills/code-review/SKILL.md` | `/code-review [scope] [effort] [focus]` — reviews the working diff and reports in chat only. |
-| `skills/retro/SKILL.md` | `/retro [session] [focus]`, forked — retrospective on a session: classifies every friction event and proposes the environment fix (an automated check first, then pointer, hook, skill, access). Proposes only. |
+| `skills/retro/SKILL.md` | `/retro [session] [focus]`, forked — retrospective on a session: classifies every friction event and proposes the environment fix (an automated check first, then pointer, hook, skill, access). Proposes only. A monthly step reviews asset usage (`/skill-doctor`, `/doctor prompt-audit`) and the automatic warnings' false-positive rate. |
 | `skills/commit/SKILL.md` | `/commit` — a commit with a generated message, on the current, an existing or a new branch. Never pushes. |
 
 **Workflows** (`workflows/*.js`) are saved scripts that fan a job out over many subagents and merge
@@ -174,6 +174,7 @@ a broken hook must never block work (`worktree-root.js` alone fails loudly: a si
 | `output-styles/owner-80-20.md` | Output style for a senior developer who reads fast: decision first in one bold line, the shortest shape that fits, every item of a multi-ask answered in order, stable `#n` numbering, no narration between tools, ask only before the irreversible. Replaces the built-in `Concise`; the template selects it with `"outputStyle": "owner-80-20"` in `settings.json`. |
 | `tools/instructions-log.js` | Dev-only `InstructionsLoaded` hook, wired in the repo's own `.claude/settings.local.json`: logs which instruction file loaded and why, to confirm a `paths` rule fires. |
 | `settings.json` | Model and fallbacks, environment variables, permission allow/ask/deny rules (`Read` denies on secret-bearing **files** only, never on folders), the hooks, PowerShell as the default shell, workflows (`enableWorkflows`, `workflowSizeGuideline`, `workflowKeywordTriggerEnabled`), the one allow rule for `db-ro.ps1`, `bashOutputMaxChars` (how many characters of one shell result reach the context), enabled plugins, status line, UI preferences. |
+| `loop.md` | Maintenance prompt that a bare `/loop` runs (installed at `~/.claude/loop.md` like any root file): PR status and active threads, the branch's latest pipeline run, `/fix-ci` suggested when red; read-only. Runs only when the owner types `/loop`: the assistant never starts, schedules or suggests it. |
 | `statusline.js` | Folder — or, inside a linked worktree, the worktree under a tree icon — then git branch and dirty badges, context bar with token count, a cache-cold badge, rate limits with weekly pacing, session cost, model, effort, the unlogged-hours clock badge (also for under-target days), vim mode. Names and branch are hyperlinks. Each render writes the context snapshot `context-nudge.js` reads, under `~/.claude/.cache/`. |
 | `scripts/db-ro.ps1` | Read-only access to non-dev databases — SQL Server (go-sqlcmd), PostgreSQL (`psql`), Redis (`redis-cli`): targets from local-only `~/.claude/db-targets.json` (copy `db-targets.example.json`); the client runs native, else in WSL, else through docker (`sqlcmd`: native only); the secret travels in the client's own environment variable for that process only (`WSLENV` forwards it into WSL and is restored afterwards); a permission probe runs first (`-Probe` runs it alone): exit 3 when read-only cannot be proven, exit 4 listing the grants when the credential can write — the user is asked once per target and `-AcceptWriteGrant` then runs on the client-side filter alone (reads only, the header says `readonly=NO`) — and write commands in the query are rejected. `hooks/lib/sql-target.js` denies a raw client at a non-dev host and points here. |
 | `scripts/perimeter.ps1` | Writes (`-Files a,b,c`) or closes (`-Close`) the `deliver` perimeter of the current worktree: `<git dir>/deliver/perimeter.md`, bound to the checked-out branch, UTF-8 without BOM, linked worktrees included. The settings allow exactly this script. |
@@ -359,6 +360,12 @@ item types and states. `azdo-cli` lists each one with the reason.
 Everything `settings.json` sets for the session — the auto-compaction threshold, the debug level, the
 mouse and notification behaviour, the PowerShell tool, OSC 8 hyperlinks — is documented inline in
 that file next to each value.
+
+## Habits
+
+- `/btw` for a side question: it answers without polluting the working context.
+- `/branch` to try an alternative without losing the current conversation.
+- `/rewind` before a risky attempt, so a bad turn is undone rather than argued away.
 
 ## Validation
 
