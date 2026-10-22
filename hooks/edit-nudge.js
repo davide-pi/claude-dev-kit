@@ -43,8 +43,6 @@ const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const COUNTER_FILE = /^edits-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
 
-const silent = () => process.exit(0);
-
 /** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
 function canonical(file, base) {
   const abs = path.resolve(base || process.cwd(), file);
@@ -82,35 +80,45 @@ function readCount(file) {
   }
 }
 
-try {
-  const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+/** The hook's output for one payload, or null when there is nothing to say. */
+function run(payload) {
   const id = payload.session_id;
-  if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) silent();
+  if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) return null;
   const file = path.join(CACHE_DIR, `edits-${id}.json`);
 
   if (payload.hook_event_name === 'UserPromptSubmit') {
     fs.rmSync(file, { force: true });
-    silent();
+    return null;
   }
-  if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) silent();
-  if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) silent();
-  if (isScratch(payload.tool_input?.file_path, payload.cwd)) silent();
+  if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) return null;
+  if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) return null;
+  if (isScratch(payload.tool_input?.file_path, payload.cwd)) return null;
 
   const count = readCount(file) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ count }));
-  if (count !== THRESHOLD) silent();
+  if (count !== THRESHOLD) return null;
 
   prune(Date.now());
-  process.stdout.write(JSON.stringify({
+  return {
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
       additionalContext:
         `Terzo edit in questo turno: se lo scope è deciso, delega a \`implementer\` e rivedi il suo diff `
         + 'invece di scrivere il codice qui.',
     },
-  }));
+  };
+}
+
+module.exports = { run };
+
+// Run as a script; `hooks/nudges.js` requires this file and calls `run` itself.
+if (require.main === module) {
+  try {
+    const output = run(JSON.parse(fs.readFileSync(0, 'utf8') || '{}'));
+    if (output) process.stdout.write(JSON.stringify(output));
+  } catch {
+    /* silence */
+  }
   process.exit(0);
-} catch {
-  silent();
 }

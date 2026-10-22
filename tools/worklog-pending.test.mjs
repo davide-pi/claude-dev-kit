@@ -85,6 +85,18 @@ test('a worked day under a root, with no audit → named in the reminder', { ski
   assert.match(out, new RegExp(`${iso(DAY)} \\(product\\)`));
 });
 
+test('the reminder stays short and keeps the one instruction: hours are written only via /worklog', { skip }, () => {
+  const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+  assert.match(out, /Le ore le scrive solo \/worklog\.$/);
+  assert.ok(out.length < 200, `${out.length} chars`);
+});
+
+test('settings.json runs it on session start only, not on resume, clear or compact', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const group = settings.hooks.SessionStart.find((g) => g.hooks.some((h) => (h.args ?? []).join(' ').includes('worklog-pending.js')));
+  assert.equal(group?.matcher, 'startup');
+});
+
 test('roots match case- and slash-insensitively, trailing separator optional', { skip }, () => {
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: 'd:/WORK' });
   assert.match(out, new RegExp(iso(DAY)));

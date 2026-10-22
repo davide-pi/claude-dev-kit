@@ -47,8 +47,6 @@ const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const CACHE_FILE = /^(?:context|nudge)-[\w-]+\.json$/;
 
-const silent = () => process.exit(0);
-
 function readJson(file) {
   try {
     return JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -72,14 +70,14 @@ function prune(now) {
   }
 }
 
-try {
-  const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+/** The hook's output for one payload, or null when there is nothing to say. */
+function run(payload) {
   const id = payload.session_id;
-  if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) silent();
+  if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) return null;
 
   const now = Date.now();
   const snapshot = readJson(path.join(CACHE_DIR, `context-${id}.json`));
-  if (!Number.isFinite(snapshot?.at) || now - snapshot.at > SNAPSHOT_MAX_AGE_MS) silent();
+  if (!Number.isFinite(snapshot?.at) || now - snapshot.at > SNAPSHOT_MAX_AGE_MS) return null;
 
   const tokens = snapshot.used_tokens;
   const pct = snapshot.used_percentage;
@@ -92,26 +90,36 @@ try {
     band = bandOf(pct, PERCENT_BANDS);
     level = `Contesto al ${Math.round(pct)} %`;
   } else {
-    silent();
+    return null;
   }
 
   const stateFile = path.join(CACHE_DIR, `nudge-${id}.json`);
   const announced = readJson(stateFile)?.band ?? 0;
-  if (band === announced) silent();
+  if (band === announced) return null;
 
   fs.writeFileSync(stateFile, JSON.stringify({ band, at: now }));
-  if (band < announced) silent();                // compacted or cleared: re-arm, say nothing
+  if (band < announced) return null;             // compacted or cleared: re-arm, say nothing
   prune(now);                                    // at most three times a session
 
-  process.stdout.write(JSON.stringify({
+  return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext:
         `${level}. A fine risposta, una riga all'utente: `
         + '`/compact <focus>` (proponi tu il focus del task in corso) oppure `/clear` prima di un argomento nuovo.',
     },
-  }));
+  };
+}
+
+module.exports = { run };
+
+// Run as a script; `hooks/nudges.js` requires this file and calls `run` itself.
+if (require.main === module) {
+  try {
+    const output = run(JSON.parse(fs.readFileSync(0, 'utf8') || '{}'));
+    if (output) process.stdout.write(JSON.stringify(output));
+  } catch {
+    /* silence */
+  }
   process.exit(0);
-} catch {
-  silent();
 }

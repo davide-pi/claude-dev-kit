@@ -263,8 +263,7 @@ function line({ pending, underTarget }) {
     parts.push(`Sotto target su ${days(underTarget.length)}: `
       + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — completali con /worklog <data>.`);
   }
-  return `⏱ ${parts.join(' ')}`
-    + ' (Dillo una volta, in una riga, nella prima risposta; le ore le scrive solo /worklog, mai di tua iniziativa.)';
+  return `⏱ ${parts.join(' ')} Le ore le scrive solo /worklog.`;
 }
 
 const snapshot = compute();
