@@ -257,8 +257,10 @@ node tools/merge-settings.mjs --template settings.json --overlay ~/.claude/setti
 | a key set to `null` | the key is removed from the result |
 
 `--check` exits 1 and prints the differing keys (`~` differs, `+` missing from the live file, `-` only in it).
-`install.ps1 -Check` runs it whenever `settings.overlay.json` exists, so the drift of a template update that
-never reached the live file shows up there.
+With an overlay, `install.ps1` writes the merge instead of copying the template (asking first when the live
+file differs) and `-Pull` never imports `settings.json`; `-Check` runs `--check`, so a template update that
+never reached the live file shows up there. A setting the app writes itself (`/config`, `/plugin`, `/model`)
+lands only in the live file: copy it into the overlay, or the next install drops it.
 
 ## Post-install smoke test
 

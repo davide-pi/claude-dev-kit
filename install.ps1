@@ -490,6 +490,36 @@ function Test-SettingsMerge([string]$Overlay) {
     }
 }
 
+function Install-SettingsMerge([string]$Overlay) {
+    # With an overlay the live settings.json is generated, never copied: the template alone would
+    # drop your choices. A change the app wrote into the live file (/config, /plugin) shows in the
+    # diff below and is lost on Yes unless it is copied into the overlay first.
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { Write-Problem 'settings.json not installed: node is not on PATH to merge template + overlay'; return }
+    $merge = Join-Path $RepoRoot 'tools\merge-settings.mjs'
+    $template = Join-Path $RepoRoot 'settings.json'
+    $live = Join-Path $ClaudeHome 'settings.json'
+    if (Test-Path -LiteralPath $live) {
+        $output = @(& $node.Source $merge --template $template --overlay $Overlay --check $live 2>&1)
+        if ($LASTEXITCODE -eq 0) { Write-Ok 'settings.json (template + overlay)'; return }
+        if ($LASTEXITCODE -ne 1) { Write-Problem "settings.json not installed: $($output -join ' ')"; return }
+        Write-Info 'settings.json differs from template + overlay (~ differs, + missing from the live file, - only in it):'
+        foreach ($line in $output) { Write-Info "  $line" }
+        if (-not $Force) {
+            try {
+                $answer = Read-Host '  Write template + overlay over settings.json? [y/N]'
+            } catch {
+                Write-Info 'settings.json differs, and this host cannot prompt — kept as is (pass -Force to write)'
+                return
+            }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info 'settings.json kept as is'; return }
+        }
+    }
+    $output = @(& $node.Source $merge --template $template --overlay $Overlay --out $live 2>&1)
+    if ($LASTEXITCODE -eq 0) { Write-Change 'settings.json written from template + overlay' }
+    else { Write-Problem "settings.json not written: $($output -join ' ')" }
+}
+
 function Sync-Assets {
     Write-Section $(if ($Check) { 'Assets (repo vs installed)' } elseif ($Pull) { 'Assets (installed -> repo)' } else { 'Assets (repo -> installed)' })
 
@@ -498,10 +528,10 @@ function Sync-Assets {
     # whole skill folder with its reference files included — is exactly what it has to bring back.
     $paths = if ($Pull) { @(@(Get-KitAssets) + @(Get-InstalledAssets) | Sort-Object -Unique) } else { @(Get-KitAssets) }
 
+    $overlay = Join-Path $ClaudeHome 'settings.overlay.json'
     if ($Check) {
         # settings.json is the template you merged your own choices into, so it differs by design, unless
         # the choices live in an overlay: then the live file has to be exactly template + overlay.
-        $overlay = Join-Path $ClaudeHome 'settings.overlay.json'
         if (Test-Path -LiteralPath $overlay) { Test-SettingsMerge $overlay }
         else { Write-Info 'settings.json is not compared: your copy is a personalised merge of the template, by design' }
         Test-AssetDrift @($paths | Where-Object { $_ -ne 'settings.json' })
@@ -509,6 +539,12 @@ function Sync-Assets {
     }
 
     foreach ($rel in $paths) {
+        if ($rel -eq 'settings.json' -and (Test-Path -LiteralPath $overlay)) {
+            # Generated, so neither copied nor pulled: a pull would put your choices into the public repo.
+            if ($Pull) { Write-Info 'settings.json not pulled: it is generated from template + overlay' }
+            else { Install-SettingsMerge $overlay }
+            continue
+        }
         $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
         $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
 
@@ -532,7 +568,7 @@ function Sync-Assets {
                 Write-Info "$rel differs, and this host cannot prompt — kept as is (pass -Force to overwrite)"
                 continue
             }
-            if ($answer -notmatch '^(y|yes)$') { Write-Info "$rel kept as is"; continue }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info "$rel kept as is"; continue }
         }
         Copy-Asset $rel $RepoRoot $ClaudeHome
         Write-Change "$rel installed"
@@ -599,7 +635,7 @@ function Test-RetiredAssets {
                 Write-Info "$rel is retired, and this host cannot prompt — kept (pass -Force to remove)"
                 continue
             }
-            if ($answer -notmatch '^(y|yes)$') { Write-Info "$rel kept"; continue }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info "$rel kept"; continue }
         }
         $source = Join-Path $ClaudeHome $rel.Replace('/', '\')
         $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\$($rel.Replace('/', '\'))"
