@@ -2,15 +2,20 @@
  * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `db-ro.ps1`).
  *
  * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter
- * script) by prefix, so whatever follows the prefix is approved without a prompt. Two things in
- * that tail must still reach the user:
+ * script) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
+ * with an allowlist grammar, not a blacklist: both shells run code in places a list of known
+ * constructs misses (PowerShell argument mode evaluates `(…)`, `@(…)`, `$x.Method()`; Bash runs
+ * `<(…)`, `>(…)`, `$(…)`, backticks). What may pass without a prompt is:
  *
- *   - a command substitution — `$(…)`, and in the Bash tool a backtick — runs arbitrary code
- *     before the script starts (in PowerShell a backtick is only an escape, so it is not one);
- *   - on `db-ro.ps1`, the `-AcceptWriteGrant` switch, which waives the read-only proof of a
- *     credential that holds write grants. Consent to that goes through the permission prompt, so
- *     any parameter that could abbreviate it (`-A…`, the only db-ro parameter starting with `a`)
- *     asks, and so does a splat (`@args`), whose hashtable the check cannot read.
+ *   - single-quoted text, whatever it holds (literal in both shells);
+ *   - double-quoted text without `$` or a backtick (both shells expand there);
+ *   - unquoted text without any of `$ ( ) @ { } < > \ ; & |`, `%` or a backtick.
+ *
+ * Anything else asks, as does an unbalanced quote and a typographic quote (PowerShell reads those
+ * as quotes, the tokenizer here would not). Plus one rule on `db-ro.ps1`: its `-AcceptWriteGrant`
+ * switch waives the read-only proof of a credential that holds write grants, so any argument that
+ * starts with `-a` (the only db-ro parameter starting with `a`) asks, quoted or not: the shell strips
+ * the quotes before pwsh binds it. A `-amount` inside a longer quoted query is data, not a token start.
  *
  * Pure text analysis, no I/O.
  *
@@ -21,29 +26,63 @@
 
 const { splitSegments } = require('./segments');
 
-const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+["']?~[\\/]\.claude[\\/]scripts[\\/](perimeter|db-ro)\.ps1(?=$|[\s"'])/i;
+const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+(["']?)~[\\/]\.claude[\\/]scripts[\\/](perimeter|db-ro)\.ps1(?=$|[\s"'])/i;
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
-const ABBREVIATED_GRANT_SWITCH = /(?:^|\s)[-–—―]a/i;
-const SPLAT = /(?:^|\s)@[\w{(]/;
+const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
+const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
+/** PowerShell reads these as quote characters; the tokenizer below knows only ' and ". */
+const TYPOGRAPHIC_QUOTE = /[‘’‚‛“”„]/;
+
+/**
+ * Walks the argument text with quotes honoured. Returns the tokens (split on unquoted whitespace,
+ * quotes stripped), or the reason it must ask.
+ */
+function tokenize(text) {
+  if (TYPOGRAPHIC_QUOTE.test(text)) return { risk: 'a typographic quote that PowerShell reads as a quote' };
+  const tokens = [];
+  let token = null;
+  let quote = null;
+  for (const c of text) {
+    if (quote) {
+      if (c === quote) quote = null;
+      else if (quote === '"' && (c === '$' || c === '`')) return { risk: `a ${c === '$' ? '$' : 'backtick'} inside double quotes` };
+      else token += c;
+    } else if (c === '"' || c === "'") {
+      quote = c;
+      token ??= '';
+    } else if (c === ' ' || c === '\t') {
+      if (token) { tokens.push(token); token = null; }
+    } else if (UNQUOTED_DANGER.test(c)) {
+      return { risk: `an unquoted ${c === '`' ? 'backtick' : c}` };
+    } else {
+      token = (token ?? '') + c;
+    }
+  }
+  if (quote) return { risk: 'an unbalanced quote' };
+  if (token) tokens.push(token);
+  return { tokens };
+}
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
-function checkScriptArgs(command, toolName) {
+function checkScriptArgs(command) {
   if (!/\.claude[\\/]scripts[\\/](?:perimeter|db-ro)\.ps1/i.test(command)) return null;
-  const bash = toolName !== 'PowerShell';
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
-    const script = `${match[1].toLowerCase()}.ps1`;
-    if (segment.includes('$(') || (bash && segment.includes('`'))) {
-      return `A command substitution in the arguments of ${script} would run before the script starts, `
-        + 'outside the allowed call. Confirm?';
+    const script = `${match[2].toLowerCase()}.ps1`;
+    let tail = segment.trim().slice(match[0].length);
+    if (match[1]) { // the script path was itself quoted: the next character closes it
+      if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;
+      tail = tail.slice(1);
     }
-    if (script === 'db-ro.ps1') {
-      const text = segment.replace(/`/g, ''); // PowerShell: `-Acc`ept… is still one token
-      if (ABBREVIATED_GRANT_SWITCH.test(text) || SPLAT.test(text)) {
-        return 'This db-ro.ps1 call carries -AcceptWriteGrant (or an abbreviation or splat that could): '
-          + 'accepting a credential with write grants needs your explicit consent. Confirm?';
-      }
+    const { tokens, risk } = tokenize(tail);
+    if (risk) {
+      return `The arguments of ${script} hold ${risk}: it could run code before the script starts, `
+        + 'outside the allowed call. Quote text in single quotes. Confirm?';
+    }
+    if (script === 'db-ro.ps1' && tokens.some((t) => ABBREVIATED_GRANT_SWITCH.test(t))) {
+      return 'This db-ro.ps1 call carries -AcceptWriteGrant (or an abbreviation that could): '
+        + 'accepting a credential with write grants needs your explicit consent. Confirm?';
     }
   }
   return null;

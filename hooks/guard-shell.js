@@ -14,8 +14,9 @@
  *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
- *   - lib/script-args.js    — a command substitution in the arguments of the allowed `perimeter.ps1` /
- *                             `db-ro.ps1` calls, or `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation);
+ *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /
+ *                             `db-ro.ps1` calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`…
+ *                             unquoted), or `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation);
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);

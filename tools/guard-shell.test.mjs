@@ -544,35 +544,48 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
   assert.deepEqual(allow.filter((r) => /-File \*/.test(r)), []);
 });
 
-// ── The allowed scripts: no substitution in their arguments, no write-grant switch without a prompt ──
+// ── The allowed scripts: arguments read by an allowlist grammar, no write-grant switch without a prompt ──
 
 const runTool = (tool_name, command) => runRaw(JSON.stringify({ tool_name, tool_input: { command }, cwd: onFeature }));
 const DB = 'pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1';
 const PERIMETER = 'pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1';
+const BOTH = ['Bash', 'PowerShell'];
 
-test('an allowed script called with a command substitution asks', () => {
-  for (const command of [`${DB} -Env prod -Query "$(whoami)"`, `${PERIMETER} -Files $(cat list.txt)`, `${DB} -Env x; ${PERIMETER} -Close $(x)`]) {
-    for (const tool of ['Bash', 'PowerShell']) {
-      const { decision, reason } = runTool(tool, command);
-      assert.equal(decision, 'ask', `${tool}: ${command}`);
-      assert.match(reason, /command substitution.*Confirm\?$/, command);
-    }
+test('an allowed script called with an unquoted or double-quoted code construct asks, in both shells', () => {
+  for (const command of [
+    `${DB} -Env prod -Query "$(whoami)"`, `${PERIMETER} -Files $(cat list.txt)`, `${DB} -Env x; ${PERIMETER} -Close $(x)`,
+    `${DB} -Env prod -Query (Write-Host x)`, `${DB} -Env prod -Query @(calc)`,
+    `${DB} -Env prod -Query $executioncontext.InvokeCommand.InvokeScript('calc')`, `${DB} -Env $x.Name`, `${DB} -Env \${x}`,
+    `${DB} -Env prod -Query <(curl evil)`, `${DB} -Env prod -Query >(tee x)`, `${PERIMETER} -Files <x`,
+    `${DB} -Env prod -Query "a $env:USERNAME"`, `${DB} -Env prod -Query "a \`id\`"`, `${PERIMETER} -Files a\`b.cs`,
+    `${DB} -Env prod -Query 'a' -Db {calc}`, `${DB} -Env prod -Query 'unbalanced`,
+    `${DB} -Env prod -Query 'x’ (calc) ‘'`, `${DB} -Env prod -Query x%y`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
   }
-  // A backtick substitutes in Bash only; in PowerShell it is an escape.
-  assert.equal(runTool('Bash', `${DB} -Env prod -Query "\`id\`"`).decision, 'ask');
-  assert.equal(runTool('PowerShell', `${PERIMETER} -Files a\`b.cs`).decision, 'approve');
+  const { reason } = runTool('Bash', `${DB} -Env prod -Query "$(whoami)"`);
+  assert.match(reason, /\$ inside double quotes.*single quotes.*Confirm\?$/);
+});
+
+test('legitimate arguments of the allowed scripts pass, in both shells', () => {
+  for (const command of [
+    `${DB} -Env prod -Query 'SELECT COUNT(*) FROM t WHERE n = @p'`, `${DB} -Env prod -Query 'SELECT -amount FROM t'`,
+    `${DB} -Env prod -Query 'DECLARE @x int; SELECT $x, \`a\` FROM t'`, `${DB} -Env prod -Query 'it''s'`,
+    `${DB} -Env prod -Query "SELECT -amount FROM t WHERE n = 'a-b'"`, `${DB} -Env prod -Query "SELECT COUNT(*) FROM t WHERE n = @p"`,
+    `${PERIMETER} -Files src/a.cs src/b/`, `${PERIMETER} -Files 'src/a.cs,src/b/,tests/**/A*.cs'`, `${PERIMETER} -Close`, `${DB} -Env prod`,
+    `${DB} -Env prod -Db sales -Query 'select 1' -MaxLines 50 -Wide`, `${DB} -Probe -Project p -Registry r.json -File q.sql`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
+  }
 });
 
 test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other parameters do not', () => {
-  for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', '-AcceptWriteGrant:$true', '\u2013AcceptWriteGrant', '-Acc`eptWriteGrant', '@grant']) {
-    for (const tool of ['Bash', 'PowerShell']) {
-      const { decision, reason } = runTool(tool, `${DB} -Env prod -Query "select 1" ${arg}`);
+  for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', "'-AcceptWriteGrant'", '"-A"', '\u2013AcceptWriteGrant', '-Acc`eptWriteGrant', '@grant', '-AcceptWriteGrant:$true']) {
+    for (const tool of BOTH) {
+      const { decision, reason } = runTool(tool, `${DB} -Env prod -Query 'select 1' ${arg}`);
       assert.equal(decision, 'ask', `${tool}: ${arg}`);
-      assert.match(reason, /(AcceptWriteGrant|command substitution).*Confirm\?$/, arg); // Bash reads a backtick as a substitution first
+      assert.match(reason, /Confirm\?$/, arg);
     }
   }
-  for (const command of [
-    `${DB} -Env prod -Db sales -Query "select 1" -MaxLines 50 -Wide`, `${DB} -Probe -Project p -Registry r.json -File q.sql`,
-    `${DB} -Env prod -Query "select count(*) from t where x = 'a-b'"`,
-  ]) assert.equal(runTool('PowerShell', command).decision, 'approve', command);
+  assert.match(runTool('PowerShell', `${DB} -Env prod -A`).reason, /AcceptWriteGrant/);
 });

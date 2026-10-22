@@ -51,10 +51,12 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
 | --- | --- |
 | dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, not `KEYS` |
 | client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
-| anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Db <name>] -Query "<sql or one redis command>"`; `-Probe` alone reports whether the credential is read-only server-side |
+| anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Db <name>] -Query '<sql or one redis command>'`; `-Probe` alone reports whether the credential is read-only server-side |
 
 Write the `db-ro.ps1` path exactly as above, literal `~` in either shell: the allow rule in
-`settings.json` matches the command text, so `$HOME\...` would prompt.
+`settings.json` matches the command text, so `$HOME\...` would prompt. Pass the SQL or redis command in
+**single quotes**, a quote inside it doubled (`'WHERE n = ''a'''`): the hook asks on any `$`, backtick,
+`(`, `@` or `<` outside single quotes, so a double-quoted or bare query can prompt.
 
 Connection details come from the project's config (`appsettings.Development.json`, compose, `.env`
 names), never guessed; a secret is never echoed into a command line or the report.
