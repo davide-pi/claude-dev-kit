@@ -14,8 +14,7 @@ or edits the PR · Italian on the PR and in chat, identifiers verbatim.
 
 ## When
 
-- The user types `/pr-review`, with or without target, effort and focus.
-- A PR already reviewed needs a second pass after new commits.
+- The user types `/pr-review` (target, effort, focus optional), or a reviewed PR needs a second pass.
 
 Not for: the working diff without a PR (`/code-review`), writing the PR (`pr-create`), merging
 (`branch-flow`).
@@ -49,19 +48,18 @@ Not for: the working diff without a PR (`/code-review`), writing the PR (`pr-cre
 | `[focus]` given | the matching specialist alone — a focus overrides the effort (or the generalist told to hold that axis) |
 
 Same anchor and same defect from both models → `CONFIRMED`, sorted first; one model only →
-`PLAUSIBLE` unless it quotes evidence. "advanced agents" / "agent {model}" from the user set the
-model as `references/report-format.md` says; reviewer B always runs on the other model than A. The
-package each agent gets and the merge rules: `references/effort-and-fanout.md`. 30+ files → offer
-`/review-large`, never launch it unasked.
+`PLAUSIBLE` unless it quotes evidence. "advanced agents" / "agent {model}": the model table in
+`references/report-format.md`; B always runs on the other model than A. The package each agent gets
+and the merge rules: `references/effort-and-fanout.md`. 30+ files → offer `/review-large`, never
+launch it unasked.
 
 ### 4. Triage — every finding into one bucket
 
 **PR**: a question only the author can answer — intent, a correctness doubt, a `CONFIRMED`
 security, regression or completeness finding phrased as that question. **Chat**: everything else;
 when unsure, chat. A PR with no linked work item, or only a Task, is a **chat** finding:
-completeness is then unjudgeable, and the report says so. Rules and phrasing, and the incremental pass
-on a PR that already carries tagged comments (diff from the last reviewed commit, previous findings
-handed to the agents): `references/triage.md`.
+completeness is then unjudgeable, and the report says so. Phrasing and the incremental pass on a PR
+already carrying tagged comments: `references/triage.md`.
 
 ### 5. Report — the mandatory skeleton
 
@@ -71,6 +69,10 @@ One merged report in Italian, in exactly this shape (fields and column meanings:
 ```text
 Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
 Verdetto at most one short question.
+Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
+1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
+2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
+   corrections once in Verdetto.
 Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
 block; the P3s under one "Miglioramenti" block, one line each.
 Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
@@ -98,8 +100,7 @@ gh pr view <id> --json number,title,body,headRefName,baseRefName,headRefOid,url 
 
 1. Resolve the PR (no target → the open PR whose source is the current branch); none → report, stop.
 2. Read the linked items' text (acceptance criteria verbatim) — the intent every agent compares to.
-3. Write the diff **once** to the scratchpad and pass its path; reviewers read the enclosing function
-   of every hunk.
+3. Write the diff **once** to the scratchpad, pass its path; reviewers read each hunk's enclosing function.
 4. Fan out per §3, merge, triage per §4, post the PR bucket (`references/posting.md`).
 5. Report in chat per §5, then the posted vs chat split.
 
@@ -117,4 +118,3 @@ gh pr view <id> --json number,title,body,headRefName,baseRefName,headRefOid,url 
 - `references/effort-and-fanout.md` — the package every agent gets, effort depth, merging, tags.
 - `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
 - `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
-- `references/report-format.md` — fields, model table, sort, table columns, Fix rapidi.

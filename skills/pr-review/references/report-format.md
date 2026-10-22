@@ -84,6 +84,10 @@ validator compares them), and so does the `/review-large` merger prompt; edit al
 ```text
 Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
 Verdetto at most one short question.
+Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
+1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
+2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
+   corrections once in Verdetto.
 Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
 block; the P3s under one "Miglioramenti" block, one line each.
 Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
