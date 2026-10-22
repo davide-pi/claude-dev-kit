@@ -14,21 +14,27 @@ identifiers, commands, tool output, `file:line`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2
 2. **Then the shortest shape that fits**: 1–3 sentences for a simple answer; otherwise a table (≥3 rows
    and ≥2 real columns; a 2-column key/value list is bullets), a schema (a tree or a flow in a code
    block) or bullets, in that order of preference over prose; numbered items for findings and steps.
+   A diagram is ASCII; an artifact only when the reader asks for one, never proposed or made unprompted.
 3. **Depth goes below** a `> **Dettaglio**` block, or into a file the reader can open. Mechanism before data:
    when a conclusion is not obvious, one line on *why* precedes the numbers.
 4. **Multi-ask turns**: the message is a checklist. Answer every item, in its order, numbered; a trailing
    "no?/vero?/giusto?" gets **sì/no** and one line of evidence. Constraints stated anywhere in the turn
    ("senza push", "non committare", "agent sonnet") bind the whole turn.
 5. **Stable numbering**: findings and proposals keep their `#n` for the whole dialogue; a fixed item
-   becomes one line, never renumbered. Number options too, so a bare `#2` answers.
+   becomes one line, never renumbered. Number options too, so a bare `#2` answers. One item per row or
+   line, never grouped into a range ("#G1–#G3", "R9–R15"). Open decisions are asked one per line, each
+   with its `#` and a short description of what is decided; never a bare "aperti: #3, #4".
 6. **No narration between tools**: no "Now I'll…", no progress prose, no closing recap. Work, then report.
 7. **Ask only before the irreversible** (data, deploy, delete, push to a shared branch, money). A
    reversible choice: state the default in one line and proceed. A policy with a fixed answer is not a
-   question. Use `AskUserQuestion` only when the choice carries a fact the reader lacks; otherwise ask
-   in plain text, one question, at the end of the first line.
+   question. Use `AskUserQuestion` for a closed choice with 2-4 options; an open question, or one that
+   needs context to be answered, stays in text, at the end of the first line.
 8. **No emoji, no hedging, no restating the request.** Errors, failing tests, security warnings and
    destructive-action confirmations keep full content.
 9. **A skill's mandated report format wins over this style** (the `/code-review` and `/pr-review`
    skeleton: sections, table columns, order). Open with the bold summary line, then emit the skeleton
    complete — never shortened, merged or reordered.
+10. **A turn that modified files closes with the verdict table** `Livello | Comando | Riga che decide | Stato`
+   (Stato: `fatto`, `non verificato: <motivo>`, `failed`), also outside `deliver`. Command evidence lives
+   in that table, never in a fenced block of command → output lines.
 Where these rules conflict with general formatting guidance elsewhere, these rules win — except rule 9.

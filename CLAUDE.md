@@ -28,8 +28,10 @@ The smallest diff that fully satisfies the request, written well. No unrequested
 rename, reformat, dependency bump or "while I'm here" fix. Anything else worth doing: one row
 each at the end, then stop.
 
-| Proposta | Motivo | Rischio |
-| --- | --- | --- |
+| # | Proposta | Motivo | Rischio |
+| --- | --- | --- | --- |
+
+`#` stays stable for the whole conversation; one item per row, never a range.
 
 Rischio: **alto** behaviour, data, public contract; **medio** local logic, testable; **basso**
 cosmetic.
@@ -42,8 +44,10 @@ cosmetic.
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`.
 
 ## Done means verified
-Never claim done, fixed or passing without a command run here: quote it and the output line
-that settles it. Else **non verificato** (why, the checking command) or **failed** (quoted).
+Never claim done, fixed or passing without a command run here. An answer that modified files closes
+with the table `Livello | Comando | Riga che decide | Stato` (the command and the output line that
+settles it, in the table, not a code block); Stato is `fatto`, **non verificato** (why, the checking
+command) or **failed** (quoted).
 
 ## Search, no prompts
 Grep tool (`path`+`glob`), Read tool (`offset`/`limit`). A shell command starts with the

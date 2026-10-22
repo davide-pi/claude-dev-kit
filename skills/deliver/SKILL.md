@@ -98,11 +98,11 @@ The verdict, a table `done-claim` accepts as evidence (third cell looks like out
 Review: giro 2, 0 P1/P2 aperti. Rischi residui: <elenco, o nessuno>.
 ```
 
-States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with the table of
-everything outside the perimeter (`outOfScope`, `minor`, the implementer's open questions); the user picks:
+States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with everything outside
+the perimeter (`outOfScope`, `minor`, open questions), `#` fixed for the conversation; the user picks:
 
-| Proposta | Motivo | Rischio |
-| --- | --- | --- |
+| # | Proposta | Motivo | Rischio |
+| --- | --- | --- | --- |
 
 ## Traps
 
