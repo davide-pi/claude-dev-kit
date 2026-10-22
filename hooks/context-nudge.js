@@ -1,6 +1,8 @@
 /**
  * UserPromptSubmit hook: one line into the turn when the context crosses 60 % / 100 % / 160 % of
  * an absolute token threshold (default 200k, `CLAUDE_NUDGE_TOKENS` overrides): 120k / 200k / 320k.
+ * `CLAUDE_NUDGE_STEPS` (comma-separated absolute tokens, e.g. `250000` for one nudge at 250k) replaces
+ * that ladder when set and valid; empty or invalid, the ladder above applies.
  *
  * Cost is context size times turns, and with auto-compact off nothing else tells the session the
  * window is filling up. The bands are absolute on purpose: on a 1M window a percentage band of 50 %
@@ -38,6 +40,11 @@ const TOKEN_SHARES = [0.6, 1, 1.6];
 const PERCENT_BANDS = [50, 70, 85];
 /** Above this window a percentage band says little: without a token count, stay silent. */
 const PERCENT_FALLBACK_MAX_WINDOW = 250_000;
+/** `CLAUDE_NUDGE_STEPS`: ascending absolute thresholds that replace the derived ladder; null when unset or invalid. */
+const nudgeSteps = () => {
+  const steps = String(process.env.CLAUDE_NUDGE_STEPS ?? '').split(',').map((s) => Number(s.trim()));
+  return steps.every((n) => Number.isFinite(n) && n > 0) ? steps.sort((a, b) => a - b) : null;
+};
 const nudgeTokens = () => {
   const configured = Number(process.env.CLAUDE_NUDGE_TOKENS);
   return Number.isFinite(configured) && configured > 0 ? configured : 200_000;
@@ -84,7 +91,7 @@ function run(payload) {
   let band;
   let level;                                     // how the context is named in the message
   if (Number.isFinite(tokens)) {
-    band = bandOf(tokens, TOKEN_SHARES.map((s) => s * nudgeTokens()));
+    band = bandOf(tokens, nudgeSteps() ?? TOKEN_SHARES.map((s) => s * nudgeTokens()));
     level = `Contesto a ${Math.round(tokens / 1000)}k token`;
   } else if (Number.isFinite(pct) && !(snapshot.window > PERCENT_FALLBACK_MAX_WINDOW)) {
     band = bandOf(pct, PERCENT_BANDS);

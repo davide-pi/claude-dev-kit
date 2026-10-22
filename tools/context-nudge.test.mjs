@@ -47,7 +47,7 @@ function nudge(config, id = 'sess-1') {
   const r = spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ session_id: id, hook_event_name: 'UserPromptSubmit', prompt: 'x' }),
     encoding: 'utf8',
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
   });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput.additionalContext : '';
@@ -77,7 +77,7 @@ test('CLAUDE_NUDGE_TOKENS moves the bands', () => {
   tokenSnapshot(config, 'sess-1', 70_000);
   const run = (tokens) => spawnSync(process.execPath, [HOOK], {
     input: JSON.stringify({ session_id: 'sess-1' }), encoding: 'utf8',
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_TOKENS: tokens },
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_TOKENS: tokens, CLAUDE_NUDGE_STEPS: '' },
   }).stdout;
   assert.equal(run('200000'), '');
   assert.match(run('100000'), /Contesto a 70k token/);
@@ -152,7 +152,7 @@ test('old cache files are pruned when a nudge fires', () => {
 test('statusline writes the snapshot the hook reads, null-safe', () => {
   const config = sandbox();
   const render = (payload) => spawnSync(process.execPath, [STATUSLINE], {
-    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
   });
   render({ session_id: 'sl-1', cwd: config, context_window: { used_percentage: null } });
   const empty = JSON.parse(readFileSync(join(config, '.cache', 'context-sl-1.json'), 'utf8'));
@@ -177,7 +177,7 @@ test('statusline rewrites the snapshot only when a value changes, or once it is 
   const file = join(config, '.cache', 'context-sl-4.json');
   const render = (used_percentage) => spawnSync(process.execPath, [STATUSLINE], {
     input: JSON.stringify({ session_id: 'sl-4', cwd: config, context_window: { used_percentage, context_window_size: 200000 } }),
-    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
   });
   const stamp = (at) => writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), at }));
   const at = () => JSON.parse(readFileSync(file, 'utf8')).at;
@@ -226,9 +226,30 @@ test('statusline: no cold badge while warm or when caching was never observed', 
   const config = sandbox();
   const render = (prompt_cache) => spawnSync(process.execPath, [STATUSLINE], {
     input: JSON.stringify({ session_id: 'sl-2', cwd: config, prompt_cache }),
-    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '' },
   }).stdout;
   assert.doesNotMatch(render({ warm: true, caching_observed: true, expires_at: Date.now() / 1000 + 300 }), /cache cold/);
   assert.doesNotMatch(render({ warm: false, caching_observed: false }), /cache cold/);
   assert.match(render({ warm: true, caching_observed: true, expires_at: Date.now() / 1000 - 5 }), /cache cold/);
+});
+
+test('CLAUDE_NUDGE_STEPS replaces the ladder: one nudge at 250k, none at 120k or 200k; invalid → the ladder', () => {
+  const run = (config, steps) => spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ session_id: 'sess-1' }), encoding: 'utf8',
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: steps },
+  }).stdout;
+  const config = sandbox();
+  tokenSnapshot(config, 'sess-1', 130_000);
+  assert.equal(run(config, '250000'), '', 'the ladder would fire at 120k');
+  tokenSnapshot(config, 'sess-1', 210_000);
+  assert.equal(run(config, '250000'), '', 'the ladder would fire at 200k');
+  tokenSnapshot(config, 'sess-1', 255_000);
+  assert.match(run(config, '250000'), /Contesto a 255k token/);
+  tokenSnapshot(config, 'sess-1', 280_000);
+  assert.equal(run(config, '250000'), '', 'once');
+  for (const bad of ['abc', '250000,', '0', '-5', '']) {
+    const other = sandbox();
+    tokenSnapshot(other, 'sess-1', 130_000);
+    assert.match(run(other, bad), /Contesto a 130k token/, `"${bad}" falls back to the ladder`);
+  }
 });
