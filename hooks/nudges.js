@@ -17,6 +17,9 @@
 const fs = require('fs');
 const path = require('path');
 
+// Tells the nudges they are being required by this dispatcher, which calls `run` for them.
+global.__nudgesDispatch = true;
+
 const NUDGES = {
   UserPromptSubmit: ['context-nudge.js', 'edit-nudge.js'],
   PostToolUse: ['edit-nudge.js'],

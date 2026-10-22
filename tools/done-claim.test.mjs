@@ -148,3 +148,9 @@ test('missing or unreadable transcript → silent, no log', () => {
   assert.equal(reason, '');
   assert.ok(!existsSync(join(dir, '.cache', 'done-claim.log')));
 });
+
+test('a bold "**fatto** da te" is the participle; "Fatto in due file." is a claim', () => {
+  assert.equal(stop(edited('Il merge **fatto** da te resta da verificare.')).reason, '');
+  assert.equal(stop(edited('**Fatto** da te il merge, ora resta il deploy.')).reason, '');
+  assert.match(stop(edited('Fatto in due file: il totale somma le righe.')).reason, /"Fatto"/);
+});

@@ -90,8 +90,14 @@ export function audit({ projects, days = 30, now = Date.now(), log } = {}) {
     const seenTools = new Set();
     let first = null;
     for (const e of entriesOf(file)) {
-      if (!e.timestamp || !inWindow(e.timestamp)) continue;
+      if (!e.timestamp) continue;
       const main = !sidechainFile && !e.isSidechain;
+      // The baseline is the session's own first message, wherever the window starts: a session that
+      // began before it is left out, not given a mid-session "baseline".
+      if (!first && main && e.type === 'assistant' && e.message?.usage && contextOf(e.message.usage)) {
+        first = { session: basename(file, '.jsonl'), project: basename(dirname(file)), at: e.timestamp, baseline: contextOf(e.message.usage) };
+      }
+      if (!inWindow(e.timestamp)) continue;
 
       if (e.type === 'attachment' && e.attachment?.type === 'hook_additional_context' && main) {
         bump(hooks, hookName(e.attachment));
@@ -112,12 +118,11 @@ export function audit({ projects, days = 30, now = Date.now(), log } = {}) {
       if (key) seenMessages.add(key);
       const context = contextOf(usage);
       if (!context) continue;
-      first ??= { session: basename(file, '.jsonl'), project: basename(dirname(file)), at: e.timestamp, baseline: context };
       share.total += context;
       share.turns += 1;
       THRESHOLDS.forEach((limit, i) => { if (context > limit) share.over[i] += context; });
     }
-    if (first) sessions.push(first);
+    if (first && inWindow(first.at)) sessions.push(first);
   }
 
   const doneClaim = new Map();
@@ -175,10 +180,13 @@ function parseArgs(argv) {
   return args;
 }
 
+const USAGE = 'usage: node cost-audit.mjs [--projects <dir>] [--days <n>] [--top <n>] [--log <done-claim.log>] [--now <ISO date>]';
+
 function main(argv) {
+  if (argv.includes('--help') || argv.includes('-h')) { console.log(USAGE); return 0; }
   let args;
   try { args = parseArgs(argv); } catch (error) {
-    console.error(`${error.message}\nusage: node cost-audit.mjs [--projects <dir>] [--days <n>] [--top <n>] [--log <done-claim.log>] [--now <ISO date>]`);
+    console.error(`${error.message}\n${USAGE}`);
     return 2;
   }
   const days = args.days === undefined ? 30 : Number(args.days);

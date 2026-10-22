@@ -111,3 +111,23 @@ test('the CLI prints the report; a missing directory is exit 2', () => {
   assert.equal(bad.status, 2);
   assert.match(report(audit({ projects, log, now: NOW })), /# Cost audit - last 30 days/);
 });
+
+test('a session that began before the window has no baseline: its first message is outside it', () => {
+  const { projects, log } = fixture();
+  const file = join(projects, 'proj-b.jsonl');
+  writeFileSync(file, [
+    turn('b1', 40, { input: 1, create: 30_000 }),
+    turn('b2', 1, { input: 1, read: 120_000 }),
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = audit({ projects, log, now: NOW });
+  assert.deepEqual(r.sessions.map((s) => s.session), ['sess-1']);
+  assert.equal(r.share.turns, 4, 'its in-window turn still counts towards the context shares');
+});
+
+test('--help prints the usage and exits 0', () => {
+  for (const flag of ['--help', '-h']) {
+    const r = spawnSync(process.execPath, [TOOL, flag], { encoding: 'utf8' });
+    assert.equal(r.status, 0, r.stderr);
+    assert.match(r.stdout, /^usage: node cost-audit\.mjs/);
+  }
+});

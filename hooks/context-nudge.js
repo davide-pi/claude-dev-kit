@@ -113,8 +113,9 @@ function run(payload) {
 
 module.exports = { run };
 
-// Run as a script; `hooks/nudges.js` requires this file and calls `run` itself.
-if (require.main === module) {
+// Run as a script, or required by `node -e` as an older settings.json wires it (`require.main` is then
+// undefined); `hooks/nudges.js` sets the flag and calls `run` itself.
+if (require.main === module || !global.__nudgesDispatch) {
   try {
     const output = run(JSON.parse(fs.readFileSync(0, 'utf8') || '{}'));
     if (output) process.stdout.write(JSON.stringify(output));

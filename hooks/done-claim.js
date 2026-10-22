@@ -53,8 +53,8 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 
 // No bare "passa": "passa per il controller" is the commonest sentence in a dev chat. "fatto" is a claim
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
-// ("il merge fatto da te", "fatto in 3 passi"); the other words claim wherever they stand.
-const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!\s+(?:da|che|in|per|con)\b)|(done|fixed|passano|passing|verificat[oaie])(?![\w-]))/i;
+// ("il merge fatto da te", "**fatto** da te"); the other words claim wherever they stand.
+const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|verificat[oaie])(?![\w-]))/i;
 const HONEST = /non\s+(?:ancora\s+)?(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Dettaglio**` block: the quoted lines that follow it are depth for the reader, not output. */

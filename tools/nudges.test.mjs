@@ -88,3 +88,26 @@ test('an unknown event, a bad payload or an empty one → silent, exit 0', () =>
   assert.equal(fire(config, 'not json'), null);
   assert.equal(fire(config, ''), null);
 });
+
+/** The pattern an older settings.json wires: `node -e "require(<hook>)"`, where `require.main` is undefined. */
+function viaRequire(config, hook, payload) {
+  const file = join(dirname(HOOK), hook);
+  const r = spawnSync(process.execPath, ['-e', `try{require(${JSON.stringify(file)})}catch{process.exit(0)}`], {
+    input: JSON.stringify(payload),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
+}
+
+test('an older settings.json that requires a nudge directly still gets its output', () => {
+  const config = sandbox();
+  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' } };
+  assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
+  assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
+  assert.match(viaRequire(config, 'edit-nudge.js', edit).additionalContext, /\bimplementer\b/);
+  snapshot(config, 'sess-2', 210_000);
+  const out = viaRequire(config, 'context-nudge.js', { session_id: 'sess-2', hook_event_name: 'UserPromptSubmit', prompt: 'x' });
+  assert.match(out.additionalContext, /^Contesto a 210k token/);
+});
