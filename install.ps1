@@ -213,7 +213,7 @@ function Test-Environment {
     elseif ($Check -and ($expected.TrimEnd('\') -ieq (Join-Path $HOME '.claude\hooks').TrimEnd('\'))) {
         Write-Ok 'CLAUDE_HOOKS not set — the hooks fall back to ~/.claude/hooks, which is where they are'
     }
-    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) and the hooks are not in ~/.claude/hooks — they would not be found, and fail silently since they exit 0 by design" }
+    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) and the hooks are not in ~/.claude/hooks — they would not be found: guard-shell and secret-scan block (onFailure: block), the other hooks fail silently since they exit 0 by design" }
     else {
         [Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', $expected, 'User')
         $env:CLAUDE_HOOKS = $expected
@@ -327,6 +327,25 @@ function Test-DbClients {
     }
 }
 
+function Test-HookSyntax([string]$Path) {
+    # Parse only, never run: a hook executed here would act on the live session. `node --check` and the
+    # PowerShell parser read the file and stop.
+    $ErrorActionPreference = 'Continue'
+    $name = Split-Path -Leaf $Path
+    if ($Path -like '*.ps1') {
+        $tokens = $null; $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+        if ($errors) { Write-Problem "$name does not parse — $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))"; return $false }
+        return $true
+    }
+    $out = @(& node --check $Path 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) {
+        Write-Problem "$name fails node --check — $((@($out | Where-Object { $_ -match 'Error' }) + $out)[0])"
+        return $false
+    }
+    return $true
+}
+
 function Test-Hooks {
     Write-Section 'Hooks'
     # Which hooks exist is discovered from the repo, and which ones are wired is discovered from
@@ -371,6 +390,11 @@ function Test-Hooks {
         }
     }
 
+    $parsed = 0
+    $failed = 0
+    $canParse = $Check -and [bool](Get-Command node -ErrorAction SilentlyContinue)
+    if ($Check -and -not $canParse) { Write-Info 'node is not in PATH — the hook scripts are not syntax-checked' }
+
     foreach ($name in ($wired.Keys | Sort-Object)) {
         $events = $wired[$name] -join ', '
         if ($name -notin $shipped) {
@@ -378,8 +402,38 @@ function Test-Hooks {
             continue
         }
         # Wired and shipped is still not enough: the hook is resolved from the hooks directory.
-        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) { Write-Ok "$name ($events)" }
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) {
+            Write-Ok "$name ($events)"
+            if ($canParse) { if (Test-HookSyntax (Join-Path $ClaudeHome "hooks\$name")) { $parsed++ } else { $failed++ } }
+        }
         else { Write-Problem "$name is wired on $events but not installed in $ClaudeHome\hooks — run .\install.ps1" }
+    }
+
+    # The libraries the .js hooks require are part of the same smoke test: a broken one fails every caller.
+    # A lib the repo ships but the install lacks is a failure of its own, whether or not node can parse.
+    $installedLib = Join-Path $ClaudeHome 'hooks\lib'
+    if (-not (Test-Path -LiteralPath $installedLib -PathType Container)) {
+        Write-Problem "$installedLib is missing — the hooks cannot load their libraries; run .\install.ps1"
+        $failed++
+    }
+    else {
+        foreach ($shippedLib in @(Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'hooks\lib') -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+            if (-not (Test-Path -LiteralPath (Join-Path $installedLib $shippedLib.Name))) {
+                Write-Problem "hooks\lib\$($shippedLib.Name) is shipped by the repo but not installed in $installedLib — run .\install.ps1"
+                $failed++
+            }
+        }
+        if ($canParse) {
+            foreach ($lib in @(Get-ChildItem -LiteralPath $installedLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+                if (Test-HookSyntax $lib.FullName) { $parsed++ } else { $failed++ }
+            }
+        }
+    }
+    if ($canParse) {
+        if ($failed -eq 0 -and $parsed -gt 0) {
+            Write-Ok "$parsed installed hook script(s) and librar(ies) parse (node --check / PowerShell parser, nothing executed)"
+        }
+        else { Write-Problem "$failed hook script(s) or librar(ies) failed the smoke test, $parsed parsed" }
     }
 
     foreach ($evt in $unchecked.Keys) {

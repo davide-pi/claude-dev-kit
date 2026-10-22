@@ -136,10 +136,10 @@ test('old counter files are pruned when the nudge fires, recent ones are kept', 
   assert.ok(existsSync(recent));
 });
 
-test('settings.json wires it, through hooks/nudges.js, on PostToolUse (Write|Edit) and on UserPromptSubmit, and the scripts exist', () => {
+test('settings.json wires it, through hooks/nudges.js, on PostToolUse (Write|Edit|MultiEdit) and on UserPromptSubmit, and the scripts exist', () => {
   const settings = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'));
   const wired = (group) => (group?.hooks ?? []).some((h) => (h.args ?? []).join(' ').includes('nudges.js'));
-  assert.ok(settings.hooks.PostToolUse.some((g) => g.matcher === 'Write|Edit' && wired(g)), 'PostToolUse Write|Edit');
+  assert.ok(settings.hooks.PostToolUse.some((g) => g.matcher === 'Write|Edit|MultiEdit' && wired(g)), 'PostToolUse Write|Edit|MultiEdit');
   assert.ok(settings.hooks.UserPromptSubmit.some(wired), 'UserPromptSubmit');
   assert.ok(existsSync(HOOK));
   assert.ok(existsSync(join(ROOT, 'hooks', 'nudges.js')));

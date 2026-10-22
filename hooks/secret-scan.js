@@ -1,5 +1,5 @@
 /**
- * PreToolUse hook for Write / Edit.
+ * PreToolUse hook for Write / Edit / MultiEdit.
  *
  * A credential that reaches a file is already halfway to the remote: the next `git add -A` takes
  * it, and once it is in the history it stays there. This hook is the last cheap moment to stop it,

@@ -17,6 +17,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -115,6 +116,30 @@ test('an Edit is scanned on the text it introduces, not the text it removes', ()
     })).decision,
     'approve',
   );
+});
+
+test('a MultiEdit is scanned on every edits[].new_string, never on old_string', () => {
+  const multi = (edits) => runRaw(JSON.stringify({
+    tool_name: 'MultiEdit',
+    tool_input: { file_path: 'src/App/Program.cs', edits },
+  }));
+  const { decision, reason } = multi([
+    { old_string: 'a', new_string: 'var a = 1;' },
+    { old_string: 'b', new_string: `var token = "${providerToken}";` },
+  ]);
+  assert.equal(decision, 'deny');
+  assert.match(reason, /provider token/);
+  assert.equal(multi([{ old_string: `var token = "${providerToken}";`, new_string: 'var token = Read();' }]).decision, 'approve');
+});
+
+test('settings.json runs it on Write|Edit|MultiEdit and blocks when the script cannot run', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const hook = settings.hooks.PreToolUse
+    .flatMap((g) => (g.hooks ?? []).map((h) => ({ matcher: g.matcher, ...h })))
+    .find((h) => (h.args ?? []).join(' ').includes('secret-scan.js'));
+  assert.equal(hook?.matcher, 'Write|Edit|MultiEdit');
+  assert.equal(hook.onFailure, 'block');
+  assert.ok(!(hook.args ?? []).join(' ').includes('catch'), 'no fail-open wrapper around the require');
 });
 
 test('the message names the pattern and the line, and never echoes the whole secret', () => {

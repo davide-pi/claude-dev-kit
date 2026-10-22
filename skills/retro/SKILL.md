@@ -3,7 +3,7 @@ name: retro
 description: >-
   Use when the user types /retro: mines a session's friction and proposes environment fixes,
   enforceable checks first as backlog items. Proposes only.
-argument-hint: "[session-id | current] [focus]"
+argument-hint: "[session-id | current] [focus | monthly]"
 disable-model-invocation: true
 context: fork
 agent: analyst
@@ -63,7 +63,9 @@ failed, retried call · a permission prompt · a fact asked for · a huge output
 Before proposing, grep what exists — `~/.claude/{skills,agents,hooks,rules}`, `~/.claude/CLAUDE.md`,
 the repo's checks: an asset that did not fire, or a check left unwired, *is* the finding.
 
-### Monthly — environment health, once a month
+### Monthly — environment health
+
+Runs only when the owner asks, or when the focus argument is `monthly`; never on your own.
 
 | Step | Source | Fix |
 | --- | --- | --- |
@@ -77,7 +79,8 @@ the repo's checks: an asset that did not fire, or a check left unwired, *is* the
    `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
 3. `Backlog` — one block per automated check: Italian title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
-4. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
+4. When the Monthly section ran: `Salute: <outcome, one line per step>`.
+5. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
 
 ## Do
 

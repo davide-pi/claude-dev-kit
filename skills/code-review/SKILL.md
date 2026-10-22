@@ -40,6 +40,9 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 
+Every Agent call (A, B, the specialists) passes the requested effort as its `effort` parameter, never only in
+the brief text.
+
 "advanced" / "agent `<model>`" from the user: the model table in
 `skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A and B
 unchanged: diff file path, base, intent (acceptance criteria verbatim), effort, which specialists

@@ -85,10 +85,10 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 2. Analysis by size; ask only what the table says. S: make the edit inline now.
 3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
    `status: OK` → step 4. `status: STALL` → ask the user, relaunch with every resolution so far.
-4. Run the matrix; every failure goes back to step 3 with the failing output as the brief.
+4. Run the matrix; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
-The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded), emitted as a plain markdown table, never inside a code fence:
+The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded), emitted as a plain markdown table, never inside a code fence. Example:
 
 | Livello | Comando | Riga che decide | Stato |
 | --- | --- | --- | --- |

@@ -58,7 +58,7 @@ in the report.
 
 The change type's evidence line (`skills/plan-work/references/evidence-by-stack.md`) seen in this
 session → quote it in the report. Not seen → commit anyway, and the report says
-`**non verificato**: <cosa>. Verifica con: <comando>.` This skill does not build or test.
+`non verificato: <motivo>`, the checking command in the verdict table's Comando cell. This skill does not build or test.
 
 ## Do
 

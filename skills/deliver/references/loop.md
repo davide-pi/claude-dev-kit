@@ -52,3 +52,15 @@ same id is a stall (`why: "no-verdict"`), handled like any other.
 
 If a resume replays a cached null implementer result (`stall.reason` says the implementer returned nothing),
 relaunch WITHOUT `resumeFromRunId`.
+
+## A red test after OK
+
+The loop returned `OK`, then a matrix test fails. A resume does not apply (no stall to resume), and a
+re-`start` taken now would count the change's own edits as the user's dirty files and skip them in review.
+Relaunch WITHOUT `resumeFromRunId`, not inline (the implementer must run to fix it; size S too: `inline`
+stays false), with:
+
+- the original `start` (head and dirty from before the first edit) and `dirtyConfirmed: true`;
+- `brief` = the failing output, then one line per finding already accepted: its id, `path`, title. The
+  run starts with empty state and ids restart at `F1`, so the brief is the only memory; reviewers and the
+  fixer read it as `Intent`, which stops an accepted finding from being reopened. No old `resolutions`.

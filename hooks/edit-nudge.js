@@ -1,5 +1,5 @@
 /**
- * PostToolUse (Write|Edit) + UserPromptSubmit hook: one line into the turn when the main session
+ * PostToolUse (Write|Edit|MultiEdit) + UserPromptSubmit hook: one line into the turn when the main session
  * is hand-writing code that should be delegated.
  *
  * The standing rule is "code beyond a few lines, scope decided -> `implementer`; this session briefs

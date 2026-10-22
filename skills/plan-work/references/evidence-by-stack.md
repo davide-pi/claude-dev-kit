@@ -6,7 +6,7 @@ Every claim maps to output read **in this session**. Three states, and only thre
 | --- | --- |
 | ran it, output confirms | `fatto — dotnet test …: Failed: 0, Passed: 42` |
 | ran it, output does not confirm | not done; fix it and say nothing yet |
-| did not run it | `**non verificato**: <cosa>, perché <motivo>. Verifica con: <comando>.` |
+| did not run it | `non verificato: <motivo>`; the checking command goes in the verdict table's Comando cell |
 
 "Should work", "looks correct" and a subagent's report are the third state. Re-run a delegated
 agent's evidence lines for anything that matters.

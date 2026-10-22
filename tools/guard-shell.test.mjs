@@ -591,3 +591,12 @@ test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other paramete
   }
   assert.match(runTool('PowerShell', `${DB} -Env prod -A`).reason, /AcceptWriteGrant/);
 });
+
+test('settings.json blocks when guard-shell.js cannot run: onFailure block, no fail-open wrapper', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const hook = settings.hooks.PreToolUse
+    .flatMap((g) => g.hooks ?? [])
+    .find((h) => (h.args ?? []).join(' ').includes('guard-shell.js'));
+  assert.equal(hook?.onFailure, 'block');
+  assert.ok(!(hook.args ?? []).join(' ').includes('catch'));
+});

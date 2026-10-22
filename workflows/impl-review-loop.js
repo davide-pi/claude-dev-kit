@@ -424,9 +424,11 @@ while (true) {
   const fixed = await agent([
     'Fix exactly these review findings and nothing else. A "scope" finding means revert that change outside the perimeter: only an edit the change itself made, never the user\'s earlier work.',
     fix,
+    `Intent: ${brief}`,
     resolution?.guidance ? `The user directs: ${resolution.guidance}` : '',
     perimeterText,
     dirtyText,
+    input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
     RULES,
     'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
