@@ -10,8 +10,7 @@ export const meta = {
 }
 
 // args: a range string, or { range, files?, intent?, effort?, modelB?, filesPerReviewer? }.
-// modelB is the session family (the script cannot see it); the caller passes it, default opus, and it
-// is used only at high effort and above: below that one model reviews.
+// modelB is reviewer B's model, default opus; it is used only at high effort and above: below that one model reviews.
 // Cost guard: filesPerReviewer defaults to 6 and the reviewers are capped (MAX_REVIEWERS per model),
 // so a 30-file diff is 5 reviewers (10 with B) instead of 30 (60 with B) before anyone sees a cost line.
 const input = typeof args === 'string' ? { range: args } : (args ?? {})
@@ -175,6 +174,6 @@ ${SKELETON}`,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet${twoModels ? `, B ${modelB}` : ''}.`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',
   `Results (JSON):\n${JSON.stringify(results)}`,
-].join('\n\n'), { label: 'merge', phase: 'Merge', model: 'sonnet' })
+].join('\n\n'), { label: 'merge', phase: 'Merge', model: 'haiku' })
 
 return report ?? `review-large: the merger returned nothing; ${results.length} worker results, ${gaps} gap(s). Relaunch to resume from the merge.`

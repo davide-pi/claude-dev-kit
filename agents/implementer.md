@@ -5,7 +5,7 @@ description: >-
   fixes with a known cause, feature slices.
 tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell, Skill
 model: sonnet
-effort: high
+effort: medium
 memory: project
 maxTurns: 60
 ---

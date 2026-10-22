@@ -17,9 +17,9 @@ so every report **ends** with the summary tables, after all the detail.
 
 | The request says | Reviewer A and specialists | Reviewer B |
 | --- | --- | --- |
-| nothing | omit `model` (frontmatter: sonnet) | the session family (opus \| haiku \| fable); `opus` when the session runs on sonnet |
-| "advanced" agents | the session family, explicitly | sonnet — B always runs on the model A does not |
-| "agent {model}" | that exact model | the session family, or sonnet if that is the same model |
+| nothing | omit `model` (frontmatter: sonnet) | `opus` |
+| "advanced" agents | `opus`, explicitly | sonnet — B always runs on the model A does not |
+| "agent {model}" | that exact model | `opus`, or sonnet if that is the model A runs on |
 
 A and B get **one brief, built once**: the same text, differing only in `model`. A pair on one
 model is a degraded review: say so in the verdict line.

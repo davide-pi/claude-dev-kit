@@ -10,7 +10,7 @@ Spawn a wave in **one message**.
 
 | Job | Agent |
 | --- | --- |
-| code for a decided scope (tests included: the brief names `dotnet-testing`) | `implementer` |
+| code for a decided scope (tests included: the brief names `dotnet-testing`) | `implementer`: effort `medium` by default, the brief says `high` for a delicate change |
 | multi-lens review | `/code-review`, `pr-review` — never a hand-rolled review fan-out |
 | locate code, trace a flow | `investigator` |
 | wide read-only search | `Explore` |

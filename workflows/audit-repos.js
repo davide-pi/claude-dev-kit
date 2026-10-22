@@ -93,6 +93,7 @@ const answers = await pipeline(repos, repo => agent(prompt(repo), {
   label: repo.split(/[\\/]/).filter(Boolean).pop() ?? repo,
   phase: 'Audit',
   agentType: 'Explore',
+  model: 'haiku',
   effort,
   schema: AUDIT,
 }).then(r => settle(r, repo), () => settle(null, repo)))

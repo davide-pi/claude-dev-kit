@@ -36,7 +36,7 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 | Request | Agents |
 | --- | --- |
 | `low`, `medium` | `code-reviewer` (frontmatter model) |
-| `high`, `xhigh`, `max` | `code-reviewer` **A** (`model` omitted → sonnet) + `code-reviewer` **B** (`model`: the session family; `opus` when the session runs on sonnet) + `review-security` + `review-performance` |
+| `high`, `xhigh`, `max` | `code-reviewer` **A** (`model` omitted → sonnet) + `code-reviewer` **B** (`model: opus`) + `review-security` + `review-performance` |
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 

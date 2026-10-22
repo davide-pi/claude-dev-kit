@@ -15,7 +15,7 @@ written down as an assumption.
 
 Whether code already exists changes the verdict more than any line of the request. When a
 repository for the request is reachable (the working directory, or one the user names), send an
-`Explore` subagent (`model: sonnet`, concise report) to answer three questions:
+`Explore` subagent (`model: haiku`, concise report) to answer three questions:
 
 | Question | Weighs as |
 | --- | --- |

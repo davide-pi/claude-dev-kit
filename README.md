@@ -122,7 +122,7 @@ is expected.
 
 | Workflow | Does |
 |---|---|
-| `workflows/review-large.js` | `/review-large` — `{ range, files?, intent, effort, modelB, filesPerReviewer }`: one `code-reviewer` per group of 6 changed files (`filesPerReviewer`) of a diff too big for one reviewer, at most 8 reviewers per model (above that it refuses and says to narrow `files` or raise `filesPerReviewer`), the spawn count logged before the first one starts, a second model alongside it from `high` effort up (`modelB`: the session's family, passed by the caller), one merger that applies the declared agreement rule and writes one Italian report. |
+| `workflows/review-large.js` | `/review-large` — `{ range, files?, intent, effort, modelB, filesPerReviewer }`: one `code-reviewer` per group of 6 changed files (`filesPerReviewer`) of a diff too big for one reviewer, at most 8 reviewers per model (above that it refuses and says to narrow `files` or raise `filesPerReviewer`), the spawn count logged before the first one starts, a second model alongside it from `high` effort up (`modelB`, default `opus`), one merger that applies the declared agreement rule and writes one Italian report. |
 | `workflows/impl-review-loop.js` | `impl-review-loop` — `{ brief, perimeter, size, verify, stackSkill, implementerEffort, touches, resolutions }`: `implementer`, then reviewers by size, a fix of the open P1/P2 inside the perimeter and a re-review of the delta, with no round cap. It stops with `STALL` only when a finding is still open after its fix or a closed one comes back; the round decision is plain code (tested), and a relaunch with `resumeFromRunId` and `resolutions` carries on after the user's answer. Returns status, rounds, open findings, out-of-scope findings and the files changed. |
 | `workflows/audit-repos.js` | `/audit-repos` — `{ question, root?, repos? }`: the same read-only question put to every repository under a workspace root, the answers ranked by a rule declared before the fan-out; a repository that could not be read is a gap, never counted as clean. |
 
@@ -137,11 +137,11 @@ default to Sonnet; the caller can override.
 | `agents/review-security.md` | Works from the exposed surface inward: entry points, trust boundaries, taint paths, authz, secrets. Same output contract, so results merge. |
 | `agents/review-performance.md` | Reasons about cost: complexity, per-item I/O, allocations, blocking, caching, queries. No cost stated, no finding. |
 | `agents/investigator.md` | Two modes: `locate` turns a symptom into the exact `file:line` that owns it; `trace` maps a flow across services over the message bus, hop by hop. Read-only. |
-| `agents/implementer.md` | Writes production code for a scope the caller already decided, at `effort: high`, so an Opus session plans and reviews while Sonnet types. Contained diff, verified, never commits. |
+| `agents/implementer.md` | Writes production code for a scope the caller already decided, at `effort: medium` (the brief may ask for `high`), so an Opus session plans and reviews while Sonnet types. Contained diff, verified, never commits. |
 | `agents/db-analyst.md` | The only holder of database access, and where `/db` runs: a query, plan or schema read through the CLI clients (non-dev hosts only via `db-ro.ps1`), the cause, the index that would change it, and its cost. Applies nothing. |
 | `agents/ops-analyst.md` | Logs, metrics, profiles and traces of a running service, and where `/logs` runs: Grafana through an inline MCP server (`GRAFANA_URL`, `GRAFANA_TOKEN`) that never reaches the main conversation, plus compose, containers, kubectl, Aspire and log files. Read-only, redacts secrets. |
 | `agents/doc-keeper.md` | Maintains code-derived and experience-derived docs against the source. Active only where the repository actually has a docs tree. |
-| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Sonnet at low effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
+| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Haiku at medium effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
 | `agents/analyst.md` | Where `/fix-ci`, `/retro` and `/items-qa` run forked: the whole tool set minus Edit and Write (`disallowedTools`), so the file tools are removed rather than merely forbidden (a shell can still write: the agent's rules say what it may create); the skill supplies the task and the report. |
 
 ## Hooks
@@ -276,7 +276,7 @@ In a new session, started in a directory your `workspaces.json` maps:
 3. `dotnet test` through PowerShell, on a run of over 60 output lines, opens with `[output-filter]` and keeps the run's exit code.
 4. `/db "select 1"` against localhost returns `1`.
 5. A worktree opened by Claude Code lands under `<CLAUDE_WORKTREE_ROOT>`.
-6. `/usage` lists the `Explore` subagent on `sonnet`.
+6. `/usage` lists the `Explore` subagent on `haiku`.
 
 ## Plugins
 
