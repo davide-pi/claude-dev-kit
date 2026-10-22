@@ -536,7 +536,10 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
   const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
   assert.deepEqual(allow.filter((r) => /Select-Object|Sort-Object|ForEach-Object|Where-Object/.test(r)), []);
   for (const shell of ['Bash', 'PowerShell']) {
-    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File */scripts/db-ro.ps1 *)`), shell);
-    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File */scripts/perimeter.ps1 *)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files *)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close)`), shell);
   }
+  // No allow rule may start with a wildcard after -File: that would approve any script.
+  assert.deepEqual(allow.filter((r) => /-File \*/.test(r)), []);
 });

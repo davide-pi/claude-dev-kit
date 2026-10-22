@@ -36,9 +36,10 @@ The perimeter lives per worktree in `$(git rev-parse --git-dir)/deliver/perimete
 it at every triage (it overwrites the previous one, records the branch, works in a linked worktree), close it at
 the verdict, with the kit script, never an ad-hoc shell write:
 ```powershell
-pwsh -NoProfile -File $HOME/.claude/scripts/perimeter.ps1 -Files "src/Orders/OrdersQuery.cs,src/Orders/Dto/,tests/**/Orders*.cs"
-pwsh -NoProfile -File $HOME/.claude/scripts/perimeter.ps1 -Close
+pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files "src/Orders/OrdersQuery.cs,src/Orders/Dto/,tests/**/Orders*.cs"
+pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close
 ```
+Write the path exactly so, literal `~` in either shell: the allow rules in `settings.json` match the command text.
 The file holds `branch:`, `status: active|closed` and one `- <entry>` line per entry.
 
 `scope-guard.js` reads that file only, and ignores it when the branch differs. Tests of the change belong
