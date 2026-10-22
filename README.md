@@ -116,12 +116,13 @@ subagent, so the raw output never reaches the main conversation.
 **Workflows** (`workflows/*.js`) are saved scripts that fan a job out over many subagents and merge
 the result; `enableWorkflows` in `settings.json` turns them on and each installs as `/<name>`. The
 validator compiles each one the way the runtime does (`meta` first, no import, no `Date.now`).
-Both exceed the `workflowSizeGuideline` of five agents on purpose, so the "Large workflow" notice
+All three exceed the `workflowSizeGuideline` of five agents on purpose (`impl-review-loop` by design: one implementer, up to four reviewers a round, no round cap), so the "Large workflow" notice
 is expected.
 
 | Workflow | Does |
 |---|---|
 | `workflows/review-large.js` | `/review-large` — `{ range, files?, intent, effort, modelB, filesPerReviewer }`: one `code-reviewer` per group of 6 changed files (`filesPerReviewer`) of a diff too big for one reviewer, at most 8 reviewers per model (above that it refuses and says to narrow `files` or raise `filesPerReviewer`), the spawn count logged before the first one starts, a second model alongside it from `high` effort up (`modelB`: the session's family, passed by the caller), one merger that applies the declared agreement rule and writes one Italian report. |
+| `workflows/impl-review-loop.js` | `impl-review-loop` — `{ brief, perimeter, size, verify, stackSkill, implementerEffort, touches, resolutions }`: `implementer`, then reviewers by size, a fix of the open P1/P2 inside the perimeter and a re-review of the delta, with no round cap. It stops with `STALL` only when a finding is still open after its fix or a closed one comes back; the round decision is plain code (tested), and a relaunch with `resumeFromRunId` and `resolutions` carries on after the user's answer. Returns status, rounds, open findings, out-of-scope findings and the files changed. |
 | `workflows/audit-repos.js` | `/audit-repos` — `{ question, root?, repos? }`: the same read-only question put to every repository under a workspace root, the answers ranked by a rule declared before the fan-out; a repository that could not be read is a gap, never counted as clean. |
 
 ## Subagents
