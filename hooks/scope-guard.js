@@ -2,21 +2,23 @@
  * PostToolUse (Edit|Write|MultiEdit) hook: one line into the turn when a file outside the active
  * `deliver` perimeter has just been edited.
  *
- * `deliver` writes the perimeter of a change into its plan file, `<repo>/docs/plans/*.md` (where
- * `plan-work` keeps plan files), as a fenced block:
+ * `deliver` writes the perimeter of a change into one file per worktree, inside the git directory:
+ * `$(git rev-parse --git-dir)/deliver/perimeter.md` (never committed; in a linked worktree that is
+ * `<main>/.git/worktrees/<name>/deliver/perimeter.md`):
  *
- *   ```perimeter
+ *   branch: feat/orders-filter
  *   status: active
  *   - src/Orders/OrdersQuery.cs
  *   - src/Orders/Dto/
  *   - tests/**\/Orders*.cs
- *   ```
  *
  * Entries are repo-relative: a file, a directory (trailing `/`) or a glob (`*` inside a segment, `**`
- * across segments), matched case-insensitively on Windows. The perimeter is active while a block says
- * `status: active`; `deliver` sets `status: closed` at the verdict. Several active blocks add up.
- * No active block, no git repository above the file (the session's scratchpad has none), a plan file
- * itself or a file outside the repository: the hook says nothing.
+ * across segments), anchored at the repository root and matched case-insensitively (the same rule as
+ * `workflows/impl-review-loop.js`, which a test holds them to). The perimeter counts only while it says
+ * `status: active` AND its `branch:` is the branch checked out now; `deliver` overwrites the file at
+ * each triage and sets `status: closed` at the verdict. No file, a closed or another branch's
+ * perimeter, no git repository above the file (the session's scratchpad has none), a plan file itself
+ * or a file outside the repository: the hook says nothing.
  *
  * A nudge, never a block: the edit has happened, the line tells the session to note it and ask the
  * user. Inside a subagent (`agent_id` in the payload) the line says to note it under Open questions
@@ -35,8 +37,6 @@ const fs = require('fs');
 const path = require('path');
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
-const WIN = process.platform === 'win32';
-const MAX_PLANS = 50;
 const MAX_BYTES = 64 * 1024;
 
 const slashes = (p) => p.replace(/\\/g, '/');
@@ -58,47 +58,57 @@ function repoRoot(dir) {
   }
 }
 
-/** A perimeter entry as a regex over a repo-relative, slash-separated path. */
+/** A perimeter entry as a regex over a repo-relative, slash-separated path (anchored, case-insensitive). */
 function entryRegex(entry) {
   let e = slashes(entry.trim()).replace(/^\.\//, '');
   if (e.endsWith('/')) e += '**';
   const src = e.replace(/[.+^${}()|[\]]/g, '\\$&')
     .replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*').replace(/\?/g, '[^/]');
-  return new RegExp(`^${src}$`, WIN ? 'i' : '');
+  return new RegExp(`^${src}$`, 'i');
 }
 
-/** The entries of every active `perimeter` block in one plan file's text, and whether any was active. */
+/** The git directory of the worktree at `root`: `.git` itself, or the target of a linked worktree's `.git` file. */
+function gitDir(root) {
+  const dot = path.join(root, '.git');
+  try {
+    if (fs.statSync(dot).isDirectory()) return dot;
+    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dot, 'utf8').slice(0, 1024));
+    return m ? path.resolve(root, m[1]) : null;
+  } catch { return null; }
+}
+
+/** The branch checked out in the git directory `dir` ('' when detached or unreadable). */
+function currentBranch(dir) {
+  try {
+    const m = /^ref:\s*refs\/heads\/(.+?)\s*$/m.exec(fs.readFileSync(path.join(dir, 'HEAD'), 'utf8').slice(0, 1024));
+    return m ? m[1] : '';
+  } catch { return ''; }
+}
+
+/** Parses the perimeter file: its branch, whether it is active, and its entries. */
 function readPerimeter(text) {
   const entries = [];
+  let branch = '';
   let active = false;
-  for (const m of text.matchAll(/```perimeter[ \t]*\r?\n([\s\S]*?)```/g)) {
-    const lines = m[1].split(/\r?\n/).map((l) => l.trim());
-    if (!lines.some((l) => /^status:\s*active\s*$/i.test(l))) continue;
-    active = true;
-    for (const l of lines) if (l.startsWith('- ') && l.slice(2).trim()) entries.push(l.slice(2).trim());
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim();
+    const b = /^branch:\s*(.+)$/i.exec(l);
+    if (b) branch = b[1].trim();
+    else if (/^status:\s*active\s*$/i.test(l)) active = true;
+    else if (l.startsWith('- ') && l.slice(2).trim()) entries.push(l.slice(2).trim());
   }
-  return { active, entries };
+  return { active, branch, entries };
 }
 
-/** The active perimeter under `root`: its entries and the plan files that declare it. */
+/** The active perimeter of the worktree at `root`: its entries and branch, or null (none, closed, another branch). */
 function activePerimeter(root) {
-  const dir = path.join(root, 'docs', 'plans');
-  let names;
-  try { names = fs.readdirSync(dir).filter((n) => n.endsWith('.md')); } catch { return null; }
-  const recent = names
-    .map((n) => { try { return { n, t: fs.statSync(path.join(dir, n)).mtimeMs }; } catch { return null; } })
-    .filter(Boolean).sort((a, b) => b.t - a.t).slice(0, MAX_PLANS);
-  const entries = [];
-  const plans = [];
-  for (const { n } of recent) {
-    let text;
-    try { text = fs.readFileSync(path.join(dir, n), 'utf8').slice(0, MAX_BYTES); } catch { continue; }
-    const p = readPerimeter(text);
-    if (!p.active) continue;
-    entries.push(...p.entries);
-    plans.push(`docs/plans/${n}`);
-  }
-  return plans.length ? { entries, plans } : null;
+  const dir = gitDir(root);
+  if (!dir) return null;
+  let text;
+  try { text = fs.readFileSync(path.join(dir, 'deliver', 'perimeter.md'), 'utf8').slice(0, MAX_BYTES); } catch { return null; }
+  const p = readPerimeter(text);
+  if (!p.active || !p.entries.length || !p.branch || p.branch !== currentBranch(dir)) return null;
+  return { entries: p.entries, branch: p.branch };
 }
 
 /** The hook's output for one payload, or null when there is nothing to say. */
@@ -112,7 +122,7 @@ function run(payload) {
   if (!root) return null;
   const rel = slashes(path.relative(root, abs));
   if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  if (/^docs\/plans\//i.test(rel)) return null;
+  if (/^docs\/plans\//i.test(rel) || /^\.git\//i.test(rel)) return null;
 
   const perimeter = activePerimeter(root);
   if (!perimeter || perimeter.entries.some((e) => entryRegex(e).test(rel))) return null;
@@ -123,7 +133,7 @@ function run(payload) {
   return {
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
-      additionalContext: `Fuori perimetro: \`${rel}\` non è nel perimetro attivo (${perimeter.plans.join(', ')}); ${what}`,
+      additionalContext: `Fuori perimetro: \`${rel}\` non è nel perimetro attivo (branch \`${perimeter.branch}\`); ${what}`,
     },
   };
 }
