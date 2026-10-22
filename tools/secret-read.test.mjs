@@ -36,7 +36,7 @@ function run(command, tool_name = 'Bash') {
 test('a shell read of a secret file is denied, whatever the reader', () => {
   const denied = [
     'Get-Content .env', 'gc ./.env.local', 'type .env.production', 'cat ~/.ssh/id_rsa', 'cat keys/server.pem',
-    'Get-Content -Path D:\\profile\\.claude.json', 'Select-String -Pattern token -Path .env', 'grep KEY .env',
+    'Get-Content -Path D:\\profile\\.claude.json', 'Select-String -Pattern token -Path .env', 'grep KEY .env', 'Select-String -Path .env -Pattern token',
     'head -n 3 ~/.azure-work/msal_token_cache.json', 'cat ~/.config/gh/hosts.yml', 'cat ~/.docker/config.json',
     'cat ~/.git-credentials', 'tail cert.pfx', 'Get-Content ~/.claude/.credentials.json',
     'find . -name .env -exec cat {} +', 'find . -name "*.pem" -exec cat {} \\;',
