@@ -218,7 +218,13 @@ test('dedupeFound: the same finding under a new id (other case, shifted line, re
   assert.equal(decideRound({ tracked: { F1: { status: 'closed' } }, verdicts: same.verdicts, files: FILES }).stalled[0].why, 'reappeared');
   assert.deepEqual(again({ line: 9, title: 'Missing null guard in order lookup' }).rematched, ['F1']);
   assert.equal(again({ line: 40, title: 'Missing null guard in order lookup' }).rematched.length, 0);   // reworded and far away: another finding
-  assert.deepEqual(again({ line: 40 }).rematched, ['F1']);                  // the identical title is the same finding wherever the lines went
+  assert.deepEqual(again({ line: 30 }).rematched, ['F1']);                  // the identical title tolerates 3x the window
+  assert.equal(again({ line: 40 }).rematched.length, 0);                     // ... but not any distance
+  assert.deepEqual(again({ line: undefined }).rematched, ['F1']);            // no line: nothing to measure, the title decides
+  const far = dedupeFound({ found: [f('x', { line: 310, title: NULL_GUARD })], known: { F1: f('F1', { line: 12, title: NULL_GUARD }) },
+    tracked: { F1: { status: 'closed' } }, verdicts: { F1: 'closed' }, root: ROOT });
+  assert.equal(far.rematched.length, 0);                                     // lines 12 and 310: two defects, kept separate
+  assert.equal(far.found.length, 1);
   assert.equal(again({ category: 'security' }).rematched.length, 0);
 });
 

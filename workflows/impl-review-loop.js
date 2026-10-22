@@ -80,8 +80,8 @@ const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '')
 
 // The same finding seen again, possibly on a shifted line or under a reworded title: same file and category
 // and a similar title (Jaccard >= 0.5 on the words left once IT/EN stopwords and words under 3 letters are
-// dropped). A reworded title must also sit within LINE_WINDOW lines; an identical title is the same finding
-// wherever the lines moved to.
+// dropped). A reworded title must also sit within LINE_WINDOW lines, an identical one within 3x that (two
+// distinct defects of one file can share a title); a finding without a line has no distance to check.
 const LINE_WINDOW = 10
 const STOPWORDS = new Set(['non', 'per', 'con', 'del', 'della', 'dei', 'delle', 'nel', 'nella', 'che', 'una', 'uno', 'gli', 'dal', 'alla', 'sul',
   'manca', 'mancano', 'senza', 'the', 'not', 'and', 'for', 'with', 'without', 'missing', 'does', 'from', 'when', 'that', 'this', 'are', 'but'])
@@ -95,8 +95,8 @@ const sameTitle = (a, b) => {
 }
 const sameFinding = (a, b, root) => {
   if (rel(a.path, root) !== rel(b.path, root) || plain(a.category) !== plain(b.category)) return false
-  const near = !Number.isFinite(a.line) || !Number.isFinite(b.line) || Math.abs(a.line - b.line) <= LINE_WINDOW
-  return plain(a.title) === plain(b.title) || (near && sameTitle(a.title, b.title))
+  const gap = Number.isFinite(a.line) && Number.isFinite(b.line) ? Math.abs(a.line - b.line) : 0
+  return gap <= (plain(a.title) === plain(b.title) ? 3 * LINE_WINDOW : LINE_WINDOW) && sameTitle(a.title, b.title)
 }
 const RANK = { P1: 1, P2: 2, P3: 3 }
 const rank = f => RANK[f?.priority] ?? 3
