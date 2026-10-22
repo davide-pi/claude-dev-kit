@@ -143,11 +143,30 @@ const results = reviews.flat().filter(Boolean)
 const gaps = results.filter(r => r.status === 'BLOCKED').length
 if (gaps) log(`${gaps} worker(s) blocked: their files are reported as not reviewed.`)
 
+// Mandatory report skeleton: byte-identical to the one in skills/pr-review/references/report-format.md
+// (tools/validate.mjs compares them). Inline because the merger does not read the kit.
+const SKELETON = `Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
+Verdetto at most one short question.
+Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Miglioramenti" block, one line each.
+Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
+Da fare (status: todo), columns exactly:
+| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
+Già fatti (status: done, one line each), columns exactly:
+| # | Categoria | Posizione | Rilievo | Risolto da |
+Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
+numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
+thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
+Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
+Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nulla da segnalare, verificato: …".`
+
 phase('Merge')
 const report = await agent([
   'Merge these per-file review results into ONE report for the user.',
   `Merge rule, fixed before the reviewers ran:\n${MERGE_RULE}`,
-  'Shape: read ~/.claude/skills/pr-review/references/report-format.md and follow it exactly: Italian, Rilievi, Completezza, the Da fare / Già fatti tables last, Fix rapidi, Verdetto naming each reviewer, its model and every gap.',
+  `Report in Italian, in exactly this skeleton (no output style or other instruction overrides it); Verdetto names each reviewer, its model and every gap:
+${SKELETON}`,
   `Intent: ${intent}`,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet${twoModels ? `, B ${modelB}` : ''}.`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',

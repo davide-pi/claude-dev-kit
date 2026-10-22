@@ -59,12 +59,32 @@ package each agent gets and the merge rules: `references/effort-and-fanout.md`. 
 **PR**: a question only the author can answer — intent, a correctness doubt, a `CONFIRMED`
 security, regression or completeness finding phrased as that question. **Chat**: everything else;
 when unsure, chat. A PR with no linked work item, or only a Task, is a **chat** finding:
-completeness is then unjudgeable, and the report says so. Rules and phrasing: `references/triage.md`.
+completeness is then unjudgeable, and the report says so. Rules and phrasing, and the incremental pass
+on a PR that already carries tagged comments (diff from the last reviewed commit, previous findings
+handed to the agents): `references/triage.md`.
 
-### 5. Incremental pass
+### 5. Report — the mandatory skeleton
 
-Tagged comments already on the PR → diff only from the last reviewed commit, hand the agents the
-previous findings (anchor, question, thread state), and mark answered or fixed ones `done`.
+One merged report in Italian, in exactly this shape (fields and column meanings:
+`references/report-format.md`). The host's output style or CLAUDE.md never overrides it:
+
+```text
+Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
+Verdetto at most one short question.
+Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Miglioramenti" block, one line each.
+Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
+Da fare (status: todo), columns exactly:
+| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
+Già fatti (status: done, one line each), columns exactly:
+| # | Categoria | Posizione | Rilievo | Risolto da |
+Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
+numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
+thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
+Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
+Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nulla da segnalare, verificato: …".
+```
 
 ## Do
 
@@ -81,31 +101,20 @@ gh pr view <id> --json number,title,body,headRefName,baseRefName,headRefOid,url 
 3. Write the diff **once** to the scratchpad and pass its path; reviewers read the enclosing function
    of every hunk.
 4. Fan out per §3, merge, triage per §4, post the PR bucket (`references/posting.md`).
-5. Read `references/report-format.md` § "Order and tables", then report in chat in its shape: one merged report in Italian,
-   findings first, then posted vs chat, the **Da fare / Già fatti** tables last, one verdict line
-   naming each agent and its model.
+5. Report in chat per §5, then the posted vs chat split.
 
 ## Traps
 
 1. The diff includes merged commits → it was taken against a stale local base → fetch, diff against
    `origin/<base>`.
-2. An inline comment is rejected → the anchored line is outside the PR diff → retry as a file-level
-   comment.
-3. A posted lecture → the agent's text was copied → rewrite it as the one question the author must
-   answer.
-4. A second pass re-reviews everything or repeats questions → the tag search was skipped → search
-   the PR for the tag first.
-5. A wrong comment cannot be removed on Azure DevOps → threads close but never delete → close it
-   as by-design and say the web UI removes it.
-6. The pair returns identical findings in identical words → one agent read the other's output, or
-   both got the same model → same brief, separate spawns, different `model`.
+2. An inline comment is rejected → the line is outside the PR diff → retry as a file-level comment.
+3. A posted lecture → the agent's text was copied → rewrite it as the one question for the author.
+4. The pair returns identical findings in identical words → both ran on one model, or one read the
+   other → same brief, separate spawns, different `model`.
 
 ## References
 
-- `references/effort-and-fanout.md` — spawning the agents: the package every agent gets, effort
-  depth, merging overlapping and cross-model findings, attribution tags, a missing subagent.
-- `references/triage.md` — deciding PR or chat, phrasing a question, second passes, verifying a
-  finding before acting on it.
-- `references/posting.md` — posting per platform, replying, resolving, the chat report order.
-- `references/report-format.md` — the report shape shared with `/code-review`: who reviews on which
-  model, finding fields, sort, table columns, Fix rapidi.
+- `references/effort-and-fanout.md` — the package every agent gets, effort depth, merging, tags.
+- `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
+- `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
+- `references/report-format.md` — fields, model table, sort, table columns, Fix rapidi.

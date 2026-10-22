@@ -85,6 +85,10 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 - fix: <minimal change, or omit>
 ```
 
+**One defect per block — hard rule.** A title that needs "and", "also" or `(a) … (b) …` is two blocks,
+each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
+Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
+
 Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `alto` behaviour, data or a public contract · `medio` localized logic · `basso` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
 
 Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`

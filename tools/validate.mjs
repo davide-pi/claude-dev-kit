@@ -321,23 +321,27 @@ for (const name of agentNames) {
   }
 }
 
-// The three review agents run with `omitClaudeMd` and cannot be trusted to read an external path, so
-// each carries an inline copy of the Finding block. The canonical one lives in report-format.md; a copy
-// that drifts makes the merger parse three dialects, so every copy must equal it byte for byte.
+// The review agents run with `omitClaudeMd` and the main session may skip an external reference, so
+// the contract text each reader needs is inlined. The canonical copy lives in report-format.md; a copy
+// that drifts makes the merger parse several dialects, so every copy must equal it byte for byte:
+//   - the Finding block (fenced) in the 3 review agents;
+//   - the one-defect-per-block rule (a paragraph) in the 3 review agents;
+//   - the report skeleton (fenced) in the code-review and pr-review skills and the review-large merger.
 {
   const FORMAT = 'skills/pr-review/references/report-format.md';
-  const FENCE = /## Finding block[\s\S]*?```text\r?\n([\s\S]*?)\r?\n```/;
-  const canonical = has(FORMAT) ? read(FORMAT).replace(/\r\n/g, '\n').match(FENCE)?.[1] : null;
-  if (!canonical) fail(FORMAT, 'no fenced Finding block under "## Finding block"');
-  else {
-    for (const name of ['code-reviewer', 'review-security', 'review-performance']) {
-      const rel = `agents/${name}.md`;
-      if (!has(rel)) continue;
-      if (!read(rel).replace(/\r\n/g, '\n').includes('```text\n' + canonical + '\n```')) {
-        fail(rel, `inline Finding block differs from the one in ${FORMAT} — copy it verbatim`);
-      }
+  const norm = (rel) => read(rel).replace(/\r\n/g, '\n');
+  const fenced = (patterns, label, copies) => {
+    const canonical = has(FORMAT) ? norm(FORMAT).match(patterns)?.[1] : null;
+    if (!canonical) { fail(FORMAT, `no canonical ${label}`); return; }
+    for (const rel of copies) {
+      if (has(rel) && !norm(rel).includes(canonical)) fail(rel, `inline ${label} differs from the one in ${FORMAT} — copy it verbatim`);
     }
-  }
+  };
+  const AGENTS = ['code-reviewer', 'review-security', 'review-performance'].map((n) => `agents/${n}.md`);
+  fenced(/## Finding block[\s\S]*?```text\n([\s\S]*?)\n```/, 'Finding block', AGENTS);
+  fenced(/(\*\*One defect per block[^\n]*(?:\n[^\n]+)*)/, 'one-defect-per-block rule', AGENTS);
+  fenced(/## Order and tables[\s\S]*?```text\n([\s\S]*?)\n```/, 'report skeleton',
+    ['skills/code-review/SKILL.md', 'skills/pr-review/SKILL.md', 'workflows/review-large.js']);
 }
 
 // ── 4b. Every skill has triggering cases ─────────────────────────

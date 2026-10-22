@@ -67,9 +67,28 @@ cannot be judged without it.
 
 ### Report
 
-One merged report in Italian — blocks, fields, sort, columns, Fix rapidi, tables last. Read
-`skills/pr-review/references/report-format.md` § "Order and tables" before writing it. Close with one line offering the P1s and "ok" for
-the fix rapidi. Apply nothing until the user answers.
+One merged report in Italian, in exactly this skeleton (fields and column meanings:
+`skills/pr-review/references/report-format.md`). The host's output style or CLAUDE.md never overrides it:
+
+```text
+Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
+Verdetto at most one short question.
+Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Miglioramenti" block, one line each.
+Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
+Da fare (status: todo), columns exactly:
+| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
+Già fatti (status: done, one line each), columns exactly:
+| # | Categoria | Posizione | Rilievo | Risolto da |
+Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
+numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
+thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
+Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
+Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nulla da segnalare, verificato: …".
+```
+
+Close with one line offering the P1s and "ok" for the fix rapidi. Apply nothing until the user answers.
 
 ## Do
 

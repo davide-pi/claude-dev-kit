@@ -66,7 +66,10 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 | `anchor` | no leading slash; the line number of the **working-tree file** after the change (`right`; Read it, or `git show HEAD:<path>` for a committed range), pre-change for a deleted line (`left`); never the diff file's own line numbers — its hunk header `@@ -a,b +c,d @@` gives the start; a missing piece anchors where it belongs |
 | `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix**; by-design is not a finding |
 | `priority`, `risk`, `effort` | the values of the Fields table above, verbatim in every agent |
-| one defect per block | at most 12 lines per block, no cap on the count; two failures on one line are two blocks, never `(a) … (b) …` in one |
+
+**One defect per block — hard rule.** A title that needs "and", "also" or `(a) … (b) …` is two blocks,
+each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
+Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
 
 A specialist writes only its own `category` (`security` or `performance`) and ends with its verdict
 line and one summary line (surface or hot paths); the generalist ends with the intent coverage.
@@ -74,6 +77,29 @@ Prose in Italian; verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, category slugs, fi
 taken from the code.
 
 ## Order and tables
+
+The mandatory skeleton — `/code-review` and `/pr-review` carry a byte-identical copy inline (the
+validator compares them), and so does the `/review-large` merger prompt; edit all together:
+
+```text
+Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
+Verdetto at most one short question.
+Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Miglioramenti" block, one line each.
+Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
+Da fare (status: todo), columns exactly:
+| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
+Già fatti (status: done, one line each), columns exactly:
+| # | Categoria | Posizione | Rilievo | Risolto da |
+Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
+numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
+thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
+Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
+Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nulla da segnalare, verificato: …".
+```
+
+The same rules, in full:
 
 0. **Blocks, top to bottom**: **Rilievi** (the findings that matter first: a full block per P1 and
    P2 `todo` — what breaks, the scenario, `file:line`, the minimal fix; the P3s grouped under one
