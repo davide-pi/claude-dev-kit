@@ -11,6 +11,9 @@ Every claim maps to output read **in this session**. Three states, and only thre
 "Should work", "looks correct" and a subagent's report are the third state. Re-run a delegated
 agent's evidence lines for anything that matters.
 
+A level blocked for want of an environment, data or a UI is the third state too: run the cheapest
+proxy first, then ask the user once — accept the proxy, prepare the environment, or defer.
+
 A test, hook or check you wrote counts only after it was seen failing on the broken state: a check
 never seen failing proves nothing.
 
@@ -21,6 +24,8 @@ never seen failing proves nothing.
 | backend | build `-warnaserror`, then the tests of every touched test project | 0 errors, 0 warnings; `Failed: 0`; the new test **named** in the run |
 | frontend | build, specs, the changed screen in a real browser | 0 errors; the spec by name; console clean; a screenshot |
 | migration | idempotent script **read** before applying, update on a local database, read-back query | no unintended `DROP`/`ALTER COLUMN`/rewrite; the new shape and the old rows |
+| refactor | the characterization tests green before and after, the public signatures diffed | same tests, `Failed: 0`, none edited; `git diff` on the noted signatures empty |
+| perf | the baseline taken before the change, the same command re-run, 3 runs each (`deliver` `references/perf-baseline.md`) | ratio and spread against the baseline; a result inside the spread is no result |
 | bugfix | the symptom reproduced **before** the fix, a test red before and green after, then the suite | two runs seen: red with the symptom, then green |
 | config / infra | apply, then read the state back from the target | the **running** target reflects it — the file saying so is not evidence |
 | every change | `git diff --stat` and a skim of the diff | no stray file, debug code, secret or commented-out block |
