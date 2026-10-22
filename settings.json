@@ -210,6 +210,7 @@
       "PowerShell(az boards work-item delete*)",
       "PowerShell(az repos delete*)",
       "PowerShell(az pipelines delete*)",
+      "PowerShell(az account set*)",
       "PowerShell(kubectl delete *)",
       "Bash(dotnet ef database drop*)",
       "Bash(dotnet ef migrations remove*)",
@@ -225,6 +226,7 @@
       "Bash(az boards work-item delete*)",
       "Bash(az repos delete*)",
       "Bash(az pipelines delete*)",
+      "Bash(az account set*)",
       "Bash(kubectl delete *)"
     ],
     "ask": [
@@ -350,6 +352,15 @@
             ],
             "timeout": 30,
             "statusMessage": "Formatting the file just written..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/edit-nudge.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
           }
         ]
       }
@@ -404,6 +415,15 @@
             "args": [
               "-e",
               "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/context-nudge.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/edit-nudge.js')}catch{process.exit(0)}"
             ],
             "timeout": 5
           }

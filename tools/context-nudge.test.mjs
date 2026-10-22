@@ -172,6 +172,30 @@ test('statusline writes the snapshot the hook reads, null-safe', () => {
   assert.match(nudge(config, 'sl-1'), /Contesto a 146k token/);
 });
 
+test('statusline rewrites the snapshot only when a value changes, or once it is an hour old', () => {
+  const config = sandbox();
+  const file = join(config, '.cache', 'context-sl-4.json');
+  const render = (used_percentage) => spawnSync(process.execPath, [STATUSLINE], {
+    input: JSON.stringify({ session_id: 'sl-4', cwd: config, context_window: { used_percentage, context_window_size: 200000 } }),
+    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+  });
+  const stamp = (at) => writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), at }));
+  const at = () => JSON.parse(readFileSync(file, 'utf8')).at;
+
+  render(40);
+  const marker = Date.now() - 5000;
+  stamp(marker);
+  render(40);
+  assert.equal(at(), marker, 'same values, fresh file: not rewritten');
+  render(41);
+  assert.ok(at() > marker, 'a changed value is written');
+  assert.equal(JSON.parse(readFileSync(file, 'utf8')).used_percentage, 41);
+  const old = Date.now() - 2 * 60 * 60 * 1000;
+  stamp(old);
+  render(41);
+  assert.ok(at() > old, 'same values but an hour old: refreshed, so the nudge never sees it as stale');
+});
+
 test('statusline: every cache it keeps lives under CLAUDE_CONFIG_DIR, none under the real home', () => {
   const config = sandbox();
   const home = mkdtempSync(join(tmpdir(), 'nudge-home-'));

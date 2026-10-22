@@ -5,7 +5,7 @@ description: >-
   the cause, proposes the fix. Runs forked.
 argument-hint: "[run-id | url | branch] [--current]"
 context: fork
-agent: general-purpose
+agent: analyst
 model: sonnet
 background: false
 ---

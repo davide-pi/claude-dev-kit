@@ -46,7 +46,10 @@ const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|f
 /** A flag cluster carrying `-D`: force-delete. Case-sensitive, because `-d` is the safe form. */
 const DANGER_FLAG = /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/;
 
-const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text);
+/** `az account set` loses no data, but the default it flips is machine-global (see skills/azdo-cli). */
+const AZ_ACCOUNT_SET = /(?<![-\w])az\s+account\s+set\b/i;
+
+const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text) || AZ_ACCOUNT_SET.test(text);
 
 /** Commands that look for a string instead of acting on it: never destructive, whatever they find. */
 const SEARCHERS = new Set([
@@ -238,6 +241,11 @@ const RULES = [
     test: all(has(/(?<![\w-])delete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
     reason: 'This deletes a cloud or Azure DevOps resource. Deletion there is server-side and '
       + 'immediate. Confirm?',
+  },
+  {
+    test: has(AZ_ACCOUNT_SET),
+    reason: 'This switches the Azure CLI default account for the whole machine, so every other session '
+      + 'flips with it mid-command. Pin the identity per command with AZURE_CONFIG_DIR instead. Confirm?',
   },
   {
     test: all(has(/\bdelete\b/i), has(/\bkubectl\b/i)),

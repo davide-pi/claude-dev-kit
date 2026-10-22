@@ -55,7 +55,7 @@ assumed: `git symbolic-ref --short refs/remotes/origin/HEAD`.
 
 Worktrees live under `$env:CLAUDE_WORKTREE_ROOT` as `<repo>-<short-topic>` — a short root keeps deep
 repos under the Windows path limit. The native tools (`EnterWorktree`, `isolation: "worktree"`)
-create under `<repo>\.claude\worktrees\` unless the `worktree-root.js` hook (batch 7) redirects
+create under `<repo>\.claude\worktrees\` unless the `worktree-root.js` hook redirects
 them; without it, use the git fallback in `references/worktrees.md`.
 
 ### 4. Finish — the menu

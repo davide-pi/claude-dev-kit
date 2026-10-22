@@ -40,7 +40,7 @@ GitHub the issue — **never a Task** (a Task carries hours, not intent).
 | parents under different Features | link them all and say so: the branch may be doing two things |
 | link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · GitHub: `Fixes #<n>` / `Closes #<n>`, `Refs #<n>` when it does not close |
 
-Batch 7's `alm-contract.js` hook asks on an `az repos pr create` lacking `--work-items` or the squash
+The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash
 flags: a prompt there means the precondition was skipped.
 
 ### 3. Title and body — Italian, derived from the diff

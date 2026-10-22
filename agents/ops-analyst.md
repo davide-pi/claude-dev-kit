@@ -9,10 +9,10 @@ effort: medium
 mcpServers:
   - grafana-staging:
       type: http
-      url: ${GRAFANA_STAGING_MCP_URL:-http://localhost:8000/mcp}
+      url: http://localhost:8000/mcp
   - grafana-prod:
       type: http
-      url: ${GRAFANA_PROD_MCP_URL:-http://localhost:8001/mcp}
+      url: http://localhost:8001/mcp
 skills:
   - dotnet-diagnostics
 maxTurns: 30

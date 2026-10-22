@@ -6,7 +6,7 @@ description: >-
 argument-hint: "[session-id | current] [focus]"
 disable-model-invocation: true
 context: fork
-agent: general-purpose
+agent: analyst
 model: sonnet
 background: false
 ---

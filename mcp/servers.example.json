@@ -15,6 +15,6 @@
       ]
     }
   },
-  "//grafana": "Grafana is NOT registered here: agents/ops-analyst.md defines grafana-staging and grafana-prod inline, so the servers exist only inside that agent. Run the Grafana MCP server in HTTP mode per environment (its own Grafana URL and service-account token live in that process's environment, never in this file) and point the agent at it with GRAFANA_STAGING_MCP_URL / GRAFANA_PROD_MCP_URL (defaults http://localhost:8000/mcp and http://localhost:8001/mcp).",
+  "//grafana": "Grafana is NOT registered here: agents/ops-analyst.md defines grafana-staging and grafana-prod inline, so the servers exist only inside that agent. Run the Grafana MCP server in HTTP mode per environment (its own Grafana URL and service-account token live in that process's environment, never in this file) and serve them on http://localhost:8000/mcp (staging) and http://localhost:8001/mcp (prod), the URLs written in the agent front matter; another port means editing those two lines.",
   "//databases": "There is no database MCP server: database access is the CLI, scripts/db-ro.ps1 with targets from the local-only ~/.claude/db-targets.json (copy db-targets.example.json)."
 }

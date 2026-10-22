@@ -12,8 +12,8 @@
  * window of 250k tokens or less (or one of unknown size), where a percentage is a real alarm.
  *
  * Once per band per session. The band already announced (its index, 1-3) lives in a separate
- * `<config>/.cache/nudge-<session_id>.json` — never written into the statusline's file, which is
- * rewritten on every render and would race this read-modify-write. When the context drops below
+ * `<config>/.cache/nudge-<session_id>.json` — never written into the statusline's file, which the
+ * statusline rewrites whenever a value moves and would race this read-modify-write. When the context drops below
  * the announced band (`/compact`, `/clear`), the state follows it down, so the next crossing
  * announces again. No usable number (no response yet, just compacted) or no snapshot: silent.
  *

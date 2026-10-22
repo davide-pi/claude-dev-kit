@@ -53,6 +53,9 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
 | client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
 | anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Db <name>] -Query "<sql or one redis command>"`; `-Probe` alone reports whether the credential is read-only server-side |
 
+Write the `db-ro.ps1` path exactly as above, literal `~` in either shell: the allow rule in
+`settings.json` matches the command text, so `$HOME\...` would prompt.
+
 Connection details come from the project's config (`appsettings.Development.json`, compose, `.env`
 names), never guessed; a secret is never echoed into a command line or the report.
 

@@ -88,7 +88,13 @@ az account get-access-token --tenant <tenant-domain> --query accessToken -o tsv
 different tenants flip each other mid-command. Never run `az account set`. Each identity owns a
 private config dir `~/.azure-<identity>` (signed in once into that dir); the SessionStart hook
 `workspace-context.js` reads `workspaces.json` and exports `AZURE_CONFIG_DIR` (Bash) and
-`AZ_IDENTITY` (PowerShell drops values holding `\`). In PowerShell, prefix every az call:
+`AZ_IDENTITY` (PowerShell drops values holding `\`). The shell guard (`guard-shell.js`) then pins the
+identity itself: an `az` command the allow list already covers (the read-only queries), in a mapped
+directory, is rewritten to start with `$env:AZURE_CONFIG_DIR='<dir>'; ` (PowerShell) or
+`AZURE_CONFIG_DIR='<dir>' ` (Bash), unless it already sets one or ends in `# raw`.
+
+**Fallback, by hand.** Every other `az` call — a write, `cd x && az …`, a redirect, a pipe into a tool
+no allow rule names — is not rewritten, so in PowerShell prefix it yourself:
 
 ```powershell
 $env:AZURE_CONFIG_DIR="$HOME\.azure-$env:AZ_IDENTITY"; az boards query --org https://dev.azure.com/<org> ...

@@ -48,6 +48,8 @@ test('plain test and log commands are rewritten through the filter, allowed', ()
     ['npm run test -- --run', 'test'],
     ['npx vitest run src/a.spec.ts', 'test'],
     ['docker compose logs api --since 10m', 'logs'],
+    ['dotnet build', 'build'],
+    ['dotnet build src/Orders.sln -c Release --no-restore', 'build'],
   ]) {
     const out = guard(command);
     assert.equal(out?.permissionDecision, 'allow', command);
@@ -110,7 +112,11 @@ test('never rewritten: opt-out, compound lines, help, listings, watch and follow
     'npx vitest watch',
     'docker compose logs -f api',
     'docker compose logs --follow',
-    'dotnet build',
+    'dotnet build # raw',
+    'dotnet build --help',
+    'dotnet build -v:diag',
+    'dotnet build --verbosity detailed',
+    'dotnet publish',
     'npm install',
   ]) {
     assert.equal(guard(command), null, command);
@@ -190,4 +196,80 @@ test('logs mode keeps errors with context and the tail, always exits 0', () => {
   assert.match(out, /Handler\.cs:line 7/);
   assert.match(out, /request 199 200/);
   assert.doesNotMatch(out, /request 50 200/);
+});
+
+// A failing multi-target build as MSBuild prints it: the restore noise, each diagnostic once per target
+// framework, then the same diagnostics listed again under "Build FAILED.".
+const project = (tfm) => `[/src/Orders.Api/Orders.Api.csproj::TargetFramework=${tfm}]`;
+const warning = (n, tfm) => `/src/Orders.Api/Services/Svc${n}.cs(${n},9): warning CS8618: Non-nullable property 'P${n}' must contain a non-null value when exiting constructor. ${project(tfm)}`;
+const error = (tfm) => `/src/Orders.Api/Controllers/OrdersController.cs(42,17): error CS0103: The name 'total' does not exist in the current context ${project(tfm)}`;
+const TFMS = ['net8.0', 'net9.0'];
+const diagnostics = [1, 2, 3].flatMap((n) => TFMS.map((tfm) => warning(n, tfm))).concat(TFMS.map(error));
+const restore = Array.from({ length: 80 }, (_, i) => `  Restored /src/Orders.Project${i}/Orders.Project${i}.csproj (in ${i + 100} ms).`);
+const failedBuild = [
+  'MSBuild version 17.8.3+195e7f5a3 for .NET',
+  '  Determining projects to restore...',
+  ...restore,
+  ...diagnostics,
+  '  Orders.Domain -> /src/Orders.Domain/bin/Debug/net8.0/Orders.Domain.dll',
+  '',
+  'Build FAILED.',
+  '',
+  ...diagnostics,
+  '    6 Warning(s)',
+  '    2 Error(s)',
+  '',
+  'Time Elapsed 00:00:12.34',
+].join('\n');
+
+test('a failing build keeps each distinct error and warning once with its count, and the summary; exits 1', () => {
+  const { out, status } = filter(failedBuild, 'build');
+  assert.equal(status, 1);
+  assert.match(out, /^\[output-filter\] \d+ of \d+ lines/);
+  const lines = out.split('\n');
+  const count = (re) => lines.filter((l) => re.test(l)).length;
+  assert.equal(count(/error CS0103/), 1, 'the error: once, not once per target framework and once more in the summary');
+  assert.equal(count(/warning CS8618: .*'P1'/), 1);
+  assert.equal(count(/warning CS8618/), 3, 'three distinct warnings');
+  assert.match(out, /error CS0103.* \(x2\)$/m, 'seen under both target frameworks, not counted again in the re-listing');
+  assert.match(out, /warning CS8618: .*'P3'.* \(x2\)$/m);
+  for (const kept of [/^Build FAILED\./m, /^ {4}6 Warning\(s\)/m, /^ {4}2 Error\(s\)/m, /^Time Elapsed 00:00:12\.34/m]) {
+    assert.match(out, kept);
+  }
+  assert.doesNotMatch(out, /Restored \/src/);
+  assert.ok(lines.length < 25, 'most of the noise is gone');
+});
+
+test('a green build with warnings keeps the warnings once and the summary, exits 0', () => {
+  const text = [
+    ...restore,
+    ...TFMS.map((tfm) => warning(1, tfm)),
+    'Build succeeded.',
+    '',
+    ...TFMS.map((tfm) => warning(1, tfm)),
+    '    2 Warning(s)',
+    '    0 Error(s)',
+    '',
+    'Time Elapsed 00:00:03.10',
+  ].join('\n');
+  const { out, status } = filter(text, 'build');
+  assert.equal(status, 0);
+  assert.equal(out.split('\n').filter((l) => /warning CS8618/.test(l)).length, 1);
+  assert.match(out, /^Build succeeded\./m);
+  assert.match(out, /0 Error\(s\)/);
+});
+
+test('a build that never reaches a verdict keeps its tail, and an error in it still exits 1', () => {
+  const text = [...restore, error('net8.0'), ...restore.slice(0, 20), 'Unhandled exception: out of memory'].join('\n');
+  const { out, status } = filter(text, 'build');
+  assert.equal(status, 1);
+  assert.match(out, /error CS0103/);
+  assert.match(out, /Unhandled exception: out of memory/);
+});
+
+test('a build whose output is short passes through untouched', () => {
+  const text = 'Build succeeded.\n    0 Warning(s)\n    0 Error(s)\n\nTime Elapsed 00:00:01.20\n';
+  const { out, status } = filter(text, 'build');
+  assert.equal(out, text);
+  assert.equal(status, 0);
 });

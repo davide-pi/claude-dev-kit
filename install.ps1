@@ -384,6 +384,12 @@ function Test-Hooks {
     if ($wired.ContainsKey('worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
         Write-Problem 'CLAUDE_WORKSPACE_ROOTS is empty in settings.json → env — worklog-pending.js will never report a day'
     }
+
+    # Likewise the ALM line: without the local map the hook prints nothing and the session never learns
+    # its org, project or az identity.
+    if ($wired.ContainsKey('workspace-context.js') -and -not (Test-Path -LiteralPath (Join-Path $ClaudeHome 'workspaces.json'))) {
+        Write-Problem 'workspace-context.js is wired but workspaces.json is missing — no ALM line will appear; copy workspaces.example.json to workspaces.json and edit it'
+    }
 }
 
 function Test-Plugins {
@@ -473,7 +479,12 @@ function Sync-Assets {
     # whole skill folder with its reference files included — is exactly what it has to bring back.
     $paths = if ($Pull) { @(@(Get-KitAssets) + @(Get-InstalledAssets) | Sort-Object -Unique) } else { @(Get-KitAssets) }
 
-    if ($Check) { Test-AssetDrift $paths; return }
+    if ($Check) {
+        # settings.json is the template you merged your own choices into, so it always differs by design.
+        Write-Info 'settings.json is not compared: your copy is a personalised merge of the template, by design'
+        Test-AssetDrift @($paths | Where-Object { $_ -ne 'settings.json' })
+        return
+    }
 
     foreach ($rel in $paths) {
         $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))

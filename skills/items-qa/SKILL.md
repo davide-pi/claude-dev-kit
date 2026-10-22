@@ -5,7 +5,7 @@ description: >-
   a real browser and post verdicts.
 disable-model-invocation: true
 context: fork
-agent: general-purpose
+agent: analyst
 model: sonnet
 background: false
 argument-hint: "<items> <url> [viewport] [username]"

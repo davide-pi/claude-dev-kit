@@ -75,7 +75,7 @@ az boards work-item create --org $org -p $proj --type '<type as listed>' --title
 az boards work-item show --org $org --id <id> --fields System.AssignedTo,System.State,System.Parent -o table
 ```
 
-Batch 7's `alm-contract.js` hook asks on a create without `--assigned-to`: a prompt there means the
+The shell guard's `alm-contract.js` check asks on a create without `--assigned-to`: a prompt there means the
 assignee was dropped. Field safety per type, HTML bodies, creation order, mid-batch failure
 reporting and the read-back: `references/item-content.md`. Report with the final table and the
 manual-attachment checklist (`references/tables.md`).

@@ -276,12 +276,16 @@ function usedTokens(ctx) {
   return Math.round(ctx.used_percentage / 100 * ctx.context_window_size);
 }
 
+// The statusline renders far more often than these numbers move, so the file is written only when a value
+// changed. Unchanged values still refresh it once an hour: the nudge distrusts a snapshot older than six.
+const SNAPSHOT_REFRESH_MS = 60 * 60 * 1000;
+
 function saveContextSnapshot(sessionId, ctx, cache) {
   if (typeof sessionId !== "string" || !/^[\w-]{1,128}$/.test(sessionId)) return;
   try {
     const dir = path.join(CONFIG_DIR, ".cache");
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(path.join(dir, `context-${sessionId}.json`), JSON.stringify({
+    const file = path.join(dir, `context-${sessionId}.json`);
+    const values = {
       used_percentage: Number.isFinite(ctx?.used_percentage) ? ctx.used_percentage : null,
       // Absolute size, for the nudge's token bands: the percentage alone means little on a 1M window.
       // Derived from the percentage, not from `total_input_tokens`, which is cumulative over the session.
@@ -289,8 +293,13 @@ function saveContextSnapshot(sessionId, ctx, cache) {
       window: Number.isFinite(ctx?.context_window_size) ? ctx.context_window_size : null,
       warm: typeof cache?.warm === "boolean" ? cache.warm : null,
       caching_observed: cache?.caching_observed === true,
-      at: Date.now(),
-    }));
+    };
+    let previous = null;
+    try { previous = JSON.parse(fs.readFileSync(file, "utf8")); } catch { /* first render */ }
+    if (previous && Date.now() - previous.at < SNAPSHOT_REFRESH_MS
+        && Object.keys(values).every((k) => previous[k] === values[k])) return;
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(file, JSON.stringify({ ...values, at: Date.now() }));
   } catch { /* best-effort: the nudge simply stays silent */ }
 }
 

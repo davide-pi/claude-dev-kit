@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -236,4 +236,17 @@ test('a tool only named, and db-ro.ps1 itself, pass', () => {
     'pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env prod -Query "SELECT 1"',
     'pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env prod -Query "SET k v"',
   ]);
+});
+
+test('the db-ro.ps1 allow rules match the one invocation form the agent documents, in both shells', () => {
+  const agent = readFileSync(join(ROOT, 'agents', 'db-analyst.md'), 'utf8');
+  const invocation = agent.match(/`(pwsh -NoProfile -File \S*db-ro\.ps1 [^`]*)`/)?.[1];
+  assert.ok(invocation, 'agents/db-analyst.md documents a db-ro.ps1 invocation');
+  const { allow } = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8')).permissions;
+  const toRegExp = (glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+  for (const tool of ['Bash', 'PowerShell']) {
+    const globs = allow.filter((r) => r.startsWith(`${tool}(`) && r.includes('db-ro.ps1')).map((r) => r.slice(tool.length + 1, -1));
+    assert.ok(globs.length, `${tool} has a db-ro.ps1 allow rule`);
+    assert.ok(globs.some((g) => toRegExp(g).test(invocation)), `${tool}: no allow rule matches "${invocation}"`);
+  }
 });

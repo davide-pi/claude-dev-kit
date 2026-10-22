@@ -79,7 +79,7 @@ substitute the nearest. Only the time role (`Task`) carries hours; a PR links th
 | prompts, or "before you can run…" | no credential for that org | `az login`, or `az devops login --org <url>` with a PAT |
 | signed in, yet the org is invisible | the org lives on another Entra tenant | `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in per tenant |
 | "not found" on something that exists | org/project defaulted elsewhere, or PAT scope | re-read the `ALM:` line, pass `--org` / `-p` |
-| wrong account used | the shared az config dir | the hook sets `AZURE_CONFIG_DIR` per root; never `az account set` (machine-global) — `references/auth-and-config.md` |
+| wrong account used | the shared az config dir | the shell guard pins `AZURE_CONFIG_DIR` per root on the `az` commands it can (read-only ones); prefix the rest by hand; never `az account set` (machine-global) — `references/auth-and-config.md` |
 
 ## Do
 

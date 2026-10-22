@@ -17,18 +17,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const { readRoots, resolveDir, matchRoot } = require('./lib/workspaces');
+
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
 const PS_PREFIX = 'PowerShell: anteponi $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; ad az, mai az account set';
-
-function readRoots() {
-  const roots = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'workspaces.json'), 'utf8'))?.roots;
-  if (!Array.isArray(roots)) throw new Error('no roots');
-  return roots
-    .filter((r) => r && typeof r.path === 'string')
-    .map((r) => ({ ...r, root: path.resolve(r.path).toLowerCase() }))
-    .sort((a, b) => b.root.length - a.root.length);
-}
 
 function projectOf(entry, dir) {
   if (entry.projects && typeof entry.projects === 'object') {
@@ -66,8 +58,8 @@ function describe(entry, dir, envFile) {
 
 try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
-  const dir = path.resolve(input.cwd || process.cwd()).toLowerCase();
-  const hit = readRoots().find(({ root }) => dir === root || dir.startsWith(root + path.sep));
+  const dir = resolveDir(input.cwd);
+  const hit = matchRoot(readRoots(), dir);
   const line = hit ? describe(hit, dir, process.env.CLAUDE_ENV_FILE) : 'ALM: non mappato — chiedi';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line },

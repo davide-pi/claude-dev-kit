@@ -276,6 +276,15 @@ test('deleting a cloud, Azure DevOps or Kubernetes resource', () => {
   asks('gh repo delete owner/name --yes', /on the remote host/);
 });
 
+test('switching the machine-global az account', () => {
+  asks('az account set --subscription 00000000-0000-0000-0000-000000000000', /machine/);
+  asks('az account show && az account set -s Sub');
+  asks('Write-Host go; az account set --subscription Sub');
+  approves('az account show --query user.name -o tsv');
+  approves('az account set --help');
+  approves('grep -rn "az account set" skills');
+});
+
 test('force-deleting a git branch', () => {
   asks('git branch -D feature/spike', /force-deletes a branch/);
   asks('git branch --delete --force feature/spike');
@@ -301,7 +310,7 @@ test('a searcher hunting for the danger is not the danger', () => {
 });
 
 test('a comment is not an instruction', () => {
-  approves('dotnet build # then dotnet ef database drop, once the backup is taken');
+  approves('dotnet publish # then dotnet ef database drop, once the backup is taken');
   approves('docker compose up -d   # remember: docker compose down -v wipes the volumes');
   approves('sqlcmd -S localhost -Q "-- DROP TABLE dbo.Orders was reverted"');
   approves('sqlcmd -S localhost -Q "/* DROP DATABASE Sales */ SELECT 1"');
@@ -338,7 +347,7 @@ test('a generated statement is still caught once the read-only part is stripped'
 
 test('the everyday commands stay silent', () => {
   const quiet = [
-    'dotnet build',
+    'dotnet build # raw',             // without `# raw` it is rewritten: tools/output-filter.test.mjs
     'dotnet test --no-build # raw',   // without `# raw` it is rewritten: tools/output-filter.test.mjs
     'npm run build',
     'npm uninstall lodash',
@@ -402,4 +411,11 @@ test('the shell guard wired in settings.json still denies with CLAUDE_HOOKS unse
 
   assert.equal(run({}), 'deny', 'unset: the default directory');
   assert.equal(run({ CLAUDE_HOOKS: dirname(HOOK) }), 'deny', 'set: that directory');
+});
+
+test('settings.json denies `az account set` outright in both shells', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  for (const rule of ['Bash(az account set*)', 'PowerShell(az account set*)']) {
+    assert.ok(settings.permissions.deny.includes(rule), rule);
+  }
 });
