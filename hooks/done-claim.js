@@ -11,7 +11,7 @@
  * Fires when ALL hold:
  *   - `CLAUDE_DONE_CLAIM=1` (set in the kit's settings.json; anything else and the hook exits at once);
  *   - not `stop_hook_active` (it already sent the turn back once: never loop);
- *   - the turn since the last user prompt used an editing tool;
+ *   - the turn since the last user prompt (or message from another session) used an editing tool;
  *   - no Bash / PowerShell tool ran after the last edit: when one did, its output is already in the
  *     context and asking for a rerun would only cost a turn (the log notes it as `shell-ran`);
  *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
@@ -20,7 +20,7 @@
  *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified", and no `deliver` verdict block (a `Livello | Comando | Riga che
  *     decide | Stato` table with a row of four filled cells, the third looking like output (a digit, ok,
- *     passed, failed, exit), ending `fatto` or `failed`).
+ *     verde, green, passed, failed, exit, succeeded), ending `fatto` or `failed`).
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -57,16 +57,16 @@ const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
 // ("il merge fatto da te", "**fatto** da te"); the other words claim wherever they stand.
 const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
-const HONEST = /non\s+(?:ho\s+|è\s+stato\s+)?(?:ancora\s+)?(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
+const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Dettaglio**` block: the quoted lines that follow it are depth for the reader, not output. */
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
-const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit)\b)/i;
+const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
 /** The `deliver` verdict table: its header, then, among the table's own lines, a row with a level, a command, a
- *  deciding line that looks like real output (a digit, ok, passed, failed, exit) and a `fatto` / `failed` state. */
+ *  deciding line that looks like real output (a digit, ok, verde, green, passed, failed, exit, succeeded) and a `fatto` / `failed` state. */
 const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/i;
-const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[^|]*(?:\d|\b(?:ok|passed|failed|exit)\b)[^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/i;
+const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[^|]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)[^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/i;
 
 /** Whether a verdict table (the header, then its contiguous `|` lines) holds a proven row. */
 function verdictProof(message) {
@@ -110,6 +110,16 @@ function isPrompt(entry) {
   return typeof content === 'string' || blocks(entry).some((b) => b?.type === 'text');
 }
 
+/** A message from another Claude session (`<cross-session-message …>`): the harness writes it as a meta user
+ *  entry (`isMeta`, `origin.kind` / `turnOrigin` "peer"), so `isPrompt` skips it, yet it starts a turn. */
+function isPeerMessage(entry) {
+  if (entry?.type !== 'user') return false;
+  if (entry.origin?.kind === 'peer' || entry.turnOrigin === 'peer') return true;
+  const content = entry.message?.content;
+  const text = typeof content === 'string' ? content : blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
+  return /<cross-session-message\b/.test(text);
+}
+
 /** Whether the current turn edited a file, ran a shell command after the last edit, and its final assistant text. */
 function readTurn(entries) {
   let edited = false;
@@ -118,7 +128,7 @@ function readTurn(entries) {
   const finalText = [];
   for (let i = entries.length - 1; i >= 0; i -= 1) {
     const entry = entries[i];
-    if (isPrompt(entry)) break;
+    if (isPrompt(entry) || isPeerMessage(entry)) break;
     if (entry?.type === 'user') pastFinalMessage = true;
     if (entry?.type !== 'assistant') continue;
     // Walking backwards, so the first edit met is the last one made: a shell call seen before it is later.

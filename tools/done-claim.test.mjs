@@ -189,3 +189,36 @@ test('"non ho verificato" / "non è stato verificato" are honest; "va verificato
   assert.equal(stop(edited('Il comportamento va verificato con `worktree-root.js`.')).reason, '');
   assert.match(stop(edited('Il totale è verificato e il resto torna.')).reason, /"verificato"/);
 });
+
+test('"non è verificato" and "non è ancora stato verificato" are honest', () => {
+  assert.equal(stop(edited('Il rendering non è verificato, fatto il resto.')).reason, '');
+  assert.equal(stop(edited('Il rendering non è ancora stato verificato, fatto il resto.')).reason, '');
+});
+
+test('a verdict row whose deciding cell says verde / green / succeeded is proven, like an inline result', () => {
+  const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+  for (const word of ['verde', 'green', 'Build succeeded', 'PASSED']) {
+    assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | ${word} | fatto |`)).reason, '', word);
+  }
+  assert.equal(stop(edited('Fatto: `dotnet build` → succeeded')).reason, '');
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"Fatto"/);
+});
+
+// A message from another Claude session is a meta user entry (isMeta, origin.kind "peer"), not a prompt.
+const peer = (extra = {}) => ({
+  type: 'user', isMeta: true, turnOrigin: 'peer', origin: { kind: 'peer', name: 'improve-cld' },
+  message: { role: 'user', content: 'Another Claude session sent a message:\n<cross-session-message from="uds:x" from-name="improve-cld">\nfai X\n</cross-session-message>' },
+  ...extra,
+});
+
+test('a turn started by a cross-session message is its own turn: the previous turn\'s edit does not arm it', () => {
+  const previous = [prompt('sistema il bug'), tool('Edit'), result(), say('```\nok\n```')];
+  assert.equal(stop([...previous, peer(), say('Fatto, ti ho risposto.')]).reason, '');
+  // recognised by the text alone, or by the origin alone
+  assert.equal(stop([...previous, peer({ isMeta: false, turnOrigin: undefined, origin: undefined }), say('Fatto.')]).reason, '');
+  assert.equal(stop([...previous, peer({ message: { role: 'user', content: 'x' } }), say('Fatto.')]).reason, '');
+  // an edit inside the peer-started turn still counts
+  assert.match(stop([...previous, peer(), tool('Edit'), result(), say('Fatto.')]).reason, /"Fatto"/);
+  // another meta entry is not a boundary
+  assert.match(stop([prompt('a'), tool('Edit'), result(), { type: 'user', isMeta: true, message: { role: 'user', content: 'reminder' } }, say('Fatto.')]).reason, /"Fatto"/);
+});
