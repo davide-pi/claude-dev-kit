@@ -30,6 +30,7 @@ const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+(["']?)~[\\/]\.claude[\\/]scripts[\
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
 const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
 const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
+const NON_ASCII_PRINTABLE = /[^\x21-\x7e]/;
 /** PowerShell reads these as quote characters; the tokenizer below knows only ' and ". */
 const TYPOGRAPHIC_QUOTE = /[‘’‚‛“”„]/;
 
@@ -54,6 +55,9 @@ function tokenize(text) {
       if (token) { tokens.push(token); token = null; }
     } else if (UNQUOTED_DANGER.test(c)) {
       return { risk: `an unquoted ${c === '`' ? 'backtick' : c}` };
+    } else if (NON_ASCII_PRINTABLE.test(c)) {
+      // PowerShell also splits on Unicode spaces (U+00A0, U+2000-U+200A, ...): this tokenizer does not.
+      return { risk: 'an unquoted character outside printable ASCII' };
     } else {
       token = (token ?? '') + c;
     }

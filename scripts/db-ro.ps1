@@ -3,7 +3,7 @@
   Read-only access to non-dev databases - SQL Server (sqlcmd), Postgres (psql), Redis (redis-cli).
 
 .DESCRIPTION
-  pwsh -NoProfile -File db-ro.ps1 -Env <env> [-Db <name>] (-Query "<sql | redis command>" | -File <path.sql> | -Probe)
+  pwsh -NoProfile -File db-ro.ps1 -Env <env> [-Db <name>] (-Query '<sql | redis command>' | -File <path.sql> | -Probe)
                                   [-MaxLines 200] [-Wide] [-AcceptWriteGrant] [-Project <workspace root>] [-Registry <path>]
 
   Targets come from $HOME\.claude\db-targets.json (-Registry overrides the path, for tests); the

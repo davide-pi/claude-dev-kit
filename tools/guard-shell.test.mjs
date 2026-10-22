@@ -560,6 +560,7 @@ test('an allowed script called with an unquoted or double-quoted code construct 
     `${DB} -Env prod -Query "a $env:USERNAME"`, `${DB} -Env prod -Query "a \`id\`"`, `${PERIMETER} -Files a\`b.cs`,
     `${DB} -Env prod -Query 'a' -Db {calc}`, `${DB} -Env prod -Query 'unbalanced`,
     `${DB} -Env prod -Query 'x’ (calc) ‘'`, `${DB} -Env prod -Query x%y`,
+    `${DB} -Env prod -Query 'SELECT 1' -AcceptWriteGrant`, `${DB} -Env prod -Query 'SELECT 1' -Acc`,
   ]) {
     for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
   }
@@ -571,6 +572,7 @@ test('legitimate arguments of the allowed scripts pass, in both shells', () => {
   for (const command of [
     `${DB} -Env prod -Query 'SELECT COUNT(*) FROM t WHERE n = @p'`, `${DB} -Env prod -Query 'SELECT -amount FROM t'`,
     `${DB} -Env prod -Query 'DECLARE @x int; SELECT $x, \`a\` FROM t'`, `${DB} -Env prod -Query 'it''s'`,
+    `${DB} -Env prod -Query 'SELECT * FROM t WHERE città = ''Forlì'''`,
     `${DB} -Env prod -Query "SELECT -amount FROM t WHERE n = 'a-b'"`, `${DB} -Env prod -Query "SELECT COUNT(*) FROM t WHERE n = @p"`,
     `${PERIMETER} -Files src/a.cs src/b/`, `${PERIMETER} -Files 'src/a.cs,src/b/,tests/**/A*.cs'`, `${PERIMETER} -Close`, `${DB} -Env prod`,
     `${DB} -Env prod -Db sales -Query 'select 1' -MaxLines 50 -Wide`, `${DB} -Probe -Project p -Registry r.json -File q.sql`,
