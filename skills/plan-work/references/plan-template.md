@@ -129,7 +129,7 @@ the output, `git diff --stat` reviewed.
 A plan that spans sessions ends with one ready line the owner can paste:
 
 ```text
-/goal every task's verify shows its expected output (command + line), no other test files touched, or stop after 20 turns
+/goal every task's verify shows its expected output (command + line), no test file outside the plan's tasks touched, or stop after 20 turns
 ```
 
 Never started by the assistant, never inside `deliver`.

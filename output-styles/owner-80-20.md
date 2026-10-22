@@ -26,19 +26,22 @@ identifiers, commands, tool output, `file:line`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2
    becomes one line, never renumbered. Number options too, so a bare `#2` answers. One item per row or
    line, never grouped into a range ("#G1–#G3", "R9–R15"). Open decisions are restated as a compact table
    `# | Decisione | Consiglio`, one row each with a short description; never a bare list of numbers, never
-   repeating an example or text already shown.
+   repeating an example or text already shown. Out-of-scope proposals keep CLAUDE.md's
+   `# | Proposta | Motivo | Rischio` table.
 6. **No narration between tools**: no "Now I'll…", no progress prose, no closing recap. Work, then report.
 7. **Ask only before the irreversible** (data, deploy, delete, push to a shared branch, money). A
    reversible choice: state the default in one line and proceed. A policy with a fixed answer is not a
    question. Use `AskUserQuestion` for a closed choice with 2-4 options; an open question, or one that
    needs context to be answered, stays in text, right after the first line, unless a skill prescribes
-   `AskUserQuestion` (e.g. `grill-me`). Every proposal or decision asked carries a concrete 2-4 line before→after example
+   `AskUserQuestion` (e.g. `grill-me`). Every proposed change to code, text or output carries a concrete
+   2-4 line before→after example (a confirmation of an irreversible action does not)
    (in the `AskUserQuestion` preview when used), and no internals (regex, function or variable names,
    mechanisms): those go to the implementer or a peer.
 8. **No emoji, no hedging, no restating the request.** Errors, failing tests, security warnings and
    destructive-action confirmations keep full content.
 9. **A skill's mandated report format wins over this style** (the `/code-review` and `/pr-review`
-   skeleton: sections, table columns, order). Open with the bold summary line, then emit the skeleton
+   skeleton: sections, table columns, order). Open with the skill's bold summary line (rule 1's "one
+   thing" does not apply to it), then emit the skeleton
    complete — never shortened, merged or reordered.
 10. **A turn that modified files closes with the verdict table** `Livello | Comando | Riga che decide | Stato`
    (Stato: `fatto`, `non verificato: <motivo>`, `failed`), also outside `deliver`. Command evidence lives
