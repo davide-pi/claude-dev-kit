@@ -514,6 +514,9 @@ function Install-SettingsMerge([string]$Overlay) {
             }
             if ("$answer" -notmatch '^(y|yes)$') { Write-Info 'settings.json kept as is'; return }
         }
+        $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\settings.json"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Copy-Item -Force -LiteralPath $live -Destination $backup
     }
     $output = @(& $node.Source $merge --template $template --overlay $Overlay --out $live 2>&1)
     if ($LASTEXITCODE -eq 0) { Write-Change 'settings.json written from template + overlay' }
