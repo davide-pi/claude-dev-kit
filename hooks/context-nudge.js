@@ -1,7 +1,7 @@
 /**
  * UserPromptSubmit hook, OFF by default: it runs only when `CLAUDE_NUDGE_STEPS` (comma-separated
  * absolute tokens, e.g. `250000` for one nudge at 250k) is set and valid; unset, empty or invalid,
- * it is silent (auto-compaction handles the window). When on, one line into the turn each time the
+ * it is silent (auto-compaction, on in the template, handles the window). When on, one line into the turn each time the
  * context crosses a step.
  *
  * Cost is context size times turns. The steps are absolute on purpose: on a 1M window a percentage band of 50 %

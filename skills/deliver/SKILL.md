@@ -88,7 +88,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 4. Run the matrix; every failure goes back to step 3 with the failing output as the brief.
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
-The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded):
+The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded), emitted as a plain markdown table, never inside a code fence:
 
 ```text
 | Livello | Comando | Riga che decide | Stato |

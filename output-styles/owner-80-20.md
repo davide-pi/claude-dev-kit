@@ -28,7 +28,8 @@ identifiers, commands, tool output, `file:line`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2
 7. **Ask only before the irreversible** (data, deploy, delete, push to a shared branch, money). A
    reversible choice: state the default in one line and proceed. A policy with a fixed answer is not a
    question. Use `AskUserQuestion` for a closed choice with 2-4 options; an open question, or one that
-   needs context to be answered, stays in text, at the end of the first line.
+   needs context to be answered, stays in text, at the end of the first line, unless a skill prescribes
+   `AskUserQuestion` (e.g. `grill-me`).
 8. **No emoji, no hedging, no restating the request.** Errors, failing tests, security warnings and
    destructive-action confirmations keep full content.
 9. **A skill's mandated report format wins over this style** (the `/code-review` and `/pr-review`

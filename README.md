@@ -235,8 +235,7 @@ name, and retired assets (`dev-loop`, `done-check`, `redis-dotnet`, `test-writer
 prompt). Some settings are personal choices worth reviewing first: `"language": "Italian"`;
 `model` / `effortLevel` / `alwaysThinkingEnabled` / `advisorModel`, which pick a capability *and* a
 cost profile; `voice` and the push notifications; and
-`autoCompactEnabled: false` — auto-compaction is off in the template (the owner's own settings set the threshold); the opt-in `context-nudge.js` can say when to compact
-by hand; `outputStyle: "owner-80-20"`, a communication style the template selects; and the keys of the v3 features — `enableWorkflows`, `workflowSizeGuideline` and `workflowKeywordTriggerEnabled: false` (the saved workflows run when typed by name, not when a prompt merely says "workflow"), `bashOutputMaxChars`, and `CLAUDE_DONE_CLAIM` (`1`, the completion gate is on) / `CLAUDE_WORKTREE_ROOT` under `env`, the latter empty in the template (the short worktree root is opt-in).
+`autoCompactEnabled: true` — auto-compaction manages the window in the template; the opt-in `context-nudge.js` (`CLAUDE_NUDGE_STEPS`) can add a line when the context crosses a step; `outputStyle: "owner-80-20"`, a communication style the template selects; and the keys of the v3 features — `enableWorkflows`, `workflowSizeGuideline` and `workflowKeywordTriggerEnabled: false` (the saved workflows run when typed by name, not when a prompt merely says "workflow"), `bashOutputMaxChars`, and `CLAUDE_DONE_CLAIM` (`1`, the completion gate is on) / `CLAUDE_WORKTREE_ROOT` under `env`, the latter empty in the template (the short worktree root is opt-in).
 
 Then restart Claude Code. `-Check` reports anything that exists only in the live config, which is
 the state where a retired skill keeps firing next to its replacement. Without an overlay, `-Check` does
@@ -351,6 +350,7 @@ item types and states. `azdo-cli` lists each one with the reason.
 | `CLAUDE_WORKSPACE_NESTED` | `hooks/worklog-pending.js` | Folders under a root whose project is the subfolder below them (the per-subfolder shape of the mapping), `;`-separated, so the reminder labels `<root>/<project>`. Optional. |
 | `CLAUDE_WORKTREE_ROOT` | `branch-flow` (worktrees) | A short root for every worktree (`<root>/<repo>-<topic>`), keeping deep repos under the Windows path limit. Empty in the template: worktrees go beside the repo. |
 | `CLAUDE_DONE_CLAIM` | `hooks/done-claim.js` | `1` turns the completion gate on: a turn that edited files and claims success without evidence is sent back once. `1` in the template; empty turns it off. |
+| `CLAUDE_NUDGE_STEPS` | `hooks/context-nudge.js` | Comma-separated absolute token counts (e.g. `250000`) at which the hook adds one line to the turn. Empty in the template: **empty or invalid means the hook is silent** and auto-compaction alone handles the window. |
 | `WSLENV` | `scripts/db-ro.ps1` | Not set by you: the script appends the credential variable to it for the one WSL client process and restores it afterwards. Listed because the script reads and writes it. |
 | `CLAUDE_CONFIG_DIR` | the hooks, `statusline.js` | Claude Code's own variable; the caches and logs follow a relocated config directory. Rarely set. |
 | `COLUMNS` | `statusline.js` | Terminal width for the context bar; falls back to a sane default when unset. |

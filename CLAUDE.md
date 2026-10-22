@@ -44,7 +44,7 @@ cosmetic.
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`.
 
 ## Done means verified
-Never claim done, fixed or passing without a command run here. An answer that modified files closes
+Never claim done, fixed or passing without a command run here. The main session's answer that modified files closes
 with the table `Livello | Comando | Riga che decide | Stato` (the command and the output line that
 settles it, in the table, not a code block); Stato is `fatto`, **non verificato** (why, the checking
 command) or **failed** (quoted).

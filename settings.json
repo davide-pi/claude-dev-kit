@@ -15,7 +15,8 @@
     "CLAUDE_WORKSPACE_ROOTS": "",
     "CLAUDE_WORKSPACE_NESTED": "",
     "CLAUDE_WORKTREE_ROOT": "",
-    "CLAUDE_DONE_CLAIM": "1"
+    "CLAUDE_DONE_CLAIM": "1",
+    "CLAUDE_NUDGE_STEPS": ""
   },
   "bashOutputMaxChars": 15000,
   "attribution": {
@@ -605,7 +606,7 @@
   "theme": "dark",
   "editorMode": "normal",
   "preferredNotifChannel": "auto",
-  "autoCompactEnabled": false,
+  "autoCompactEnabled": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "voiceEnabled": true
