@@ -53,6 +53,18 @@ type World = {
   rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]
   /** The text of `<config>/workspaces.json`; absent, the file answers an empty map. */
   workspaces?: unknown
+  /** True: reading `<config>/workspaces.json` fails (no such file), whatever `workspaces` says. Read at every call. */
+  workspacesFail?: boolean
+  /** The text of this session's state file, as an earlier run left it. */
+  stateFile?: string
+  /** True: every git command fails, as in a folder that is not a repository. */
+  notRepo?: boolean
+  /** The context fill `$.session.usage()` answers (25 when not given). */
+  ctxPercent?: number
+  /** Receives the text of every `$.ui.copy`. */
+  copied?: string[]
+  /** Receives `session.compact` and each command run by name, in order. */
+  calls?: string[]
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -72,7 +84,7 @@ function world(on: On, options: World = {}) {
   on('session.usage', () => ({
     value: {
       startedAt: NOW,
-      context: options.isFresh ? { window: 1_000_000 } : { window: 1_000_000, tokens: 248_000, percent: 25 },
+      context: options.isFresh ? { window: 1_000_000 } : { window: 1_000_000, tokens: 248_000, percent: options.ctxPercent ?? 25 },
       rateLimits: options.rateLimits ?? [
         { kind: 'five_hour', percentUsed: 38, resetsAt: iso((2 * 60 + 14) * 60000) },
         { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
@@ -82,17 +94,23 @@ function world(on: On, options: World = {}) {
   }))
   on('process.run', (_, e) => ({
     value: {
-      exitCode: 0,
+      exitCode: options.notRepo ? 128 : 0,
       stderr: '',
       isStdoutTruncated: false,
       isStderrTruncated: false,
-      stdout: e.argv.includes('rev-parse')
+      stdout: options.notRepo
+        ? ''
+        : e.argv.includes('rev-parse')
         ? '.git\n.git\n/work/example-repo\n'
         : '## feature/x\nM  a.ts\n M b.ts\n?? c.ts\n',
     },
   }))
   on('fs.read', (_, e) => {
-    if (e.path.endsWith('workspaces.json')) return { value: JSON.stringify(options.workspaces ?? {}) }
+    if (e.path.endsWith('workspaces.json')) {
+      if (options.workspacesFail) throw new Error('ENOENT: no such file')
+      return { value: JSON.stringify(options.workspaces ?? {}) }
+    }
+    if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
     return {
       value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
     }
@@ -107,6 +125,18 @@ function world(on: On, options: World = {}) {
   on('ui.close', (_, e) => {
     options.closed?.push(e.origin.kind)
     return { value: undefined }
+  })
+  on('ui.copy', (_, e) => {
+    options.copied?.push(e.text)
+    return { value: { isCopied: true } }
+  })
+  on('session.compact', () => {
+    options.calls?.push('compact')
+    return { skip: 'test' }
+  })
+  on('command.run', { command: 'worklog' }, (_, e) => {
+    options.calls?.push(`command:${e.command}`)
+    return { text: 'ok' }
   })
   on('fs.write', (_, e) => {
     options.writes?.set(e.path, e.text)
@@ -159,21 +189,27 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/25% 248K\/1M/)).toBe(' 25% 248K/1M')
     expect(await text(/^ 62% 5h/)).toMatch(/^ 62% 5h \u21bb 2h14m \(\d\d:\d\d\)$/)
     expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb 3d\dh \((dom|lun|mar|mer|gio|ven|sab) \d\d:\d\d\)$/)
-    expect(await text(/vs atteso/)).toBe('vs atteso 7d \u22125%')
+    expect(await text(/vs atteso/)).toBe('vs atteso 7d  \u22125%')
+    expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
+    // the Sessione view lists running agents only; the finished one is in the Agenti tab
+    expect(await text(/code-reviewer/)).toBeUndefined()
+    await ui.press({ key: 'tab:agents' })
     expect(await text(/code-reviewer/)).toContain('\u2713 code-reviewer')
     expect(await text(/code-reviewer/)).toContain('son 5.5')
     expect(await text(/code-reviewer/)).toContain('38k')
     expect(await text(/chiesto/)).toContain('chiesto fable \u2192 sonnet')
     expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
+    await ui.press({ key: 'tab:session' })
     await ui.unmount()
   }
 })
 
-test('there is no button of our own: the engine close is the only one', async ($, on) => {
+test('the pane has no close button of its own: the tab bar and the Sessione actions are its only buttons', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Button' })).toBeUndefined()
+  const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
+  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:work', 'tab:repo', 'quick:compact', 'quick:worklog', 'quick:branch'])
   await ui.unmount()
 })
 
@@ -260,11 +296,12 @@ test('the state file is written at session start with open:false and the session
     agents: { running: 0, modelWarnings: 0 },
     effort: 'high',
     tasks: null,
+    tab: 'session',
   })
-  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks'])
+  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
 })
 
-const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'session' }
 
 test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
   const writes = new Map<string, string>()
@@ -391,6 +428,7 @@ test('the state file follows the last turn cost and the agent counts, at most on
     agents: { running: 1, modelWarnings: 1 },
     effort: 'high',
     tasks: null,
+    tab: 'session',
   })
   const afterFlush = log.length
 
@@ -450,6 +488,7 @@ const updateTask = ($: Engine, taskId: string, status: 'pending' | 'in_progress'
 
 async function taskRows($: Engine, bodyColumns = 50) {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  await ui.press({ key: 'tab:work' })
   const rows = rowTexts(await ui.drawn())
   await ui.unmount()
   const i = rows.findIndex(r => /^TASK/.test(r))
@@ -487,6 +526,7 @@ test('the bar splits its width by done, in progress and the rest', async ($, on)
     todos: [todo('a', 'completed'), todo('b', 'completed'), todo('c', 'in_progress'), todo('d', 'pending')],
   })
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 40 }, surface: 'terminal' })
+  await ui.press({ key: 'tab:work' })
   const cells: Record<string, number> = {}
   const walk = (el: unknown) => {
     const o = el as { props?: { color?: string }; children?: unknown[] } | null
@@ -630,8 +670,10 @@ const GREEN = '#7ec699'
 const RED = '#f07a6f'
 const MIN = 60_000
 
-async function paneRows($: Engine, bodyColumns = 50) {
+/** The pane's rows with the tab pressed first (the one the mod state already holds when none is given). */
+async function paneRows($: Engine, bodyColumns = 50, tab?: string) {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  if (tab) await ui.press({ key: `tab:${tab}` })
   const root = await ui.drawn()
   await ui.unmount()
   return { root, rows: rowTexts(root) }
@@ -747,19 +789,53 @@ test('cache share: the last main-loop turn, right of CONTESTO; a subagent turn a
   expect(await title()).toBe('CONTESTOcache   5%')
 })
 
+/** The row under the folder row: where the ALM line sits. */
+const belowFolder = (rows: string[]): string | undefined => rows[rows.findIndex(r => /example-repo/.test(r)) + 1]
+
 test('ALM line under the folder row: org / project and identity, resolved for the cwd', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  expect(rows[1]).toMatch(/example-repo/)
-  expect(rows[2]).toBe('ALM org-a / Alpha · id-a')
+  expect(belowFolder(rows)).toBe('ALM org-a / Alpha · id-a')
+})
+
+test('ALM line: a mapped root with no org, project or identity draws no line', async ($, on) => {
+  world(on, { workspaces: { roots: [{ path: '/work', platform: 'github' }] } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($)
+  expect(rows.some(r => /^ALM/.test(r))).toBe(false)
+})
+
+test('ALM line is cut in the middle to the pane width', async ($, on) => {
+  const project = 'A-very-long-project-name-that-cannot-fit-in-a-narrow-pane'
+  world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project, identity: 'id-a' }] } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const row = (await paneRows($, 40)).rows.find(r => /^ALM/.test(r))
+  expect([...(row ?? '')].length).toBe(40)
+  expect(row).toMatch(/^ALM org-a.*….*id-a$/)
+})
+
+test('a workspaces.json that goes missing clears the ALM line; a malformed one too', async ($, on) => {
+  const options: World = { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  options.workspacesFail = true
+  await clock.advance(15_000)
+  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  options.workspacesFail = false
+  await clock.advance(15_000)
+  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  options.workspaces = 'not a map' // valid JSON, no roots
+  await clock.advance(15_000)
+  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
 test('ALM line reads ALM non mappato in red when no root contains the cwd, and is absent without a map', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/elsewhere', platform: 'github', org: 'o' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { root, rows } = await paneRows($)
-  expect(rows[2]).toBe('ALM non mappato')
+  expect(belowFolder(rows)).toBe('ALM non mappato')
   expect(colorOf(root, /^ALM non mappato$/)).toBe(RED)
 })
 
@@ -767,4 +843,243 @@ test('no workspaces map: no ALM line at all', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+})
+
+// ── Tabs ──
+
+const spawnAgent = ($: Engine, subagentType: string) =>
+  $.agent.spawn({
+    tool_use_id: `t-${subagentType}`,
+    prompt: 'go',
+    description: 'go',
+    subagentType,
+    provider: { plugin: 'engine', tier: 'core' },
+    model: 'sonnet',
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+  })
+
+/** `agent.spawn` that answers a new agent id each time: `a1`, `a2`, ... */
+function spawns(on: On) {
+  let n = 0
+  on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `a${++n}` }))
+}
+
+test('tab bar: four buttons, Sessione selected by default; a press on Agenti draws the Agenti view', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
+  expect((await tabs()).map(b => b.text)).toEqual(['Sessione', 'Agenti', 'Lavoro', 'Repo'])
+  const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
+  expect(await selected()).toEqual(['tab:session'])
+  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
+
+  await ui.press({ key: 'tab:agents' })
+  expect(await selected()).toEqual(['tab:agents'])
+  expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^CREDITI/ })).toBeUndefined()
+
+  await ui.press({ key: 'tab:session' })
+  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('tab labels: Agenti counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
+  world(on, { hasWorklog: true })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'code-reviewer')
+  await spawnAgent($, 'implementer')
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Agenti 2')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lavoro ●')
+  expect((await ui.find({ key: 'tab:repo' }))?.text).toBe('Repo')
+  await ui.unmount()
+})
+
+test('tab labels without agents or warnings are the bare names', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sessione', 'Agenti', 'Lavoro', 'Repo'])
+  await ui.unmount()
+})
+
+test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks and worklog warnings, Repo the git grid', async ($, on) => {
+  world(on, { hasWorklog: true })
+  taskTools(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'code-reviewer')
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
+
+  const agents = (await paneRows($, 50, 'agents')).rows
+  expect(agents.some(r => /^◐ code-reviewer/.test(r))).toBe(true)
+  expect(agents.some(r => /^TASK/.test(r) || /worklog/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+
+  const work = (await paneRows($, 50, 'work')).rows
+  expect(work.some(r => /^TASK · 0\/1/.test(r))).toBe(true)
+  expect(work.some(r => /worklog: 1d da registrare/.test(r))).toBe(true)
+  expect(work.some(r => /^AGENTS/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+
+  const repo = (await paneRows($, 50, 'repo')).rows
+  expect(repo.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /\+1 ~1 \?1/.test(r))).toBe(true)
+  expect(repo.some(r => /^AGENTS/.test(r) || /^TASK/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+})
+
+test('the selected tab is written in the state file', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await paneRows($, 50, 'repo')
+  await clock.advance(3000)
+  expect(flagOf(writes)).toMatchObject({ tab: 'repo' })
+})
+
+test('a state file left by an earlier run brings its tab back', async ($, on) => {
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'repo' }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($)
+  expect(rows.some(r => /^CONTESTO/.test(r))).toBe(false)
+  expect(rows.some(r => /feature\/x/.test(r))).toBe(true)
+})
+
+test('an unknown tab in the state file is ignored', async ($, on) => {
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'nope' }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($)).rows.some(r => /^CONTESTO/.test(r))).toBe(true)
+})
+
+test('a state file that is not JSON is ignored', async ($, on) => {
+  world(on, { stateFile: 'not json' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($)).rows.some(r => /^CONTESTO/.test(r))).toBe(true)
+})
+
+test('session.end keeps the tab in the closed file, so a resume finds it', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await paneRows($, 50, 'work')
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(flagOf(writes)).toEqual({ ...CLOSED, tab: 'work' })
+})
+
+// ── Sessione view ──
+
+test('Sessione: the context line at 80% or more is red, with a compatta ora button that compacts the session', async ($, on) => {
+  const calls: string[] = []
+  world(on, { ctxPercent: 87, calls })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ type: 'Text', text: /^⚠ contesto al 87%$/ })).toBeDefined()
+  expect(colorOf(await ui.drawn(), /^⚠ contesto al 87%$/)).toBe(RED)
+  expect(await ui.find({ key: 'compact-now' })).toBeDefined()
+  expect(calls).toEqual([])
+  await ui.press({ key: 'compact-now' })
+  expect(calls).toEqual(['compact'])
+  await ui.unmount()
+})
+
+test('Sessione: below 80% there is no warning and no compatta ora; 80% exactly has both', async ($, on) => {
+  const clock = world(on, { ctxPercent: 79 })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'compact-now' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^⚠/ })).toBeUndefined()
+  await ui.unmount()
+  await clock.advance(1)
+  await $.session.measure({ context: { window: 1_000_000, tokens: 800_000, percent: 80 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'compact-now' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^⚠ contesto al 80%$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Sessione quick buttons: compatta compacts, /worklog runs the command, copia branch copies the branch', async ($, on) => {
+  const calls: string[] = []
+  const copied: string[] = []
+  world(on, { calls, copied })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ui.find({ key: 'quick:compact' }))?.text).toBe('compatta')
+  expect((await ui.find({ key: 'quick:worklog' }))?.text).toBe('/worklog')
+  expect((await ui.find({ key: 'quick:branch' }))?.text).toBe('copia branch')
+
+  await ui.press({ key: 'quick:compact' })
+  await ui.press({ key: 'quick:worklog' })
+  expect(calls).toEqual(['compact', 'command:worklog'])
+  expect(copied).toEqual([])
+  await ui.press({ key: 'quick:branch' })
+  expect(copied).toEqual(['feature/x'])
+  await ui.unmount()
+})
+
+test('Sessione: copia branch is left out when the folder is not a repository', async ($, on) => {
+  world(on, { notRepo: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(await ui.find({ key: 'quick:branch' })).toBeUndefined()
+  expect(await ui.find({ key: 'quick:compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('Sessione: the running agents only, compact, at most 5 rows then … +n', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let n = 1; n <= 7; n++) await spawnAgent($, `agent-${n}`)
+  // the first one ends: it is no longer listed here
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'a1', reason: 'answer' })
+  const { rows } = await paneRows($, 60)
+  const title = rows.findIndex(r => /^AGENTS/.test(r))
+  expect(rows[title]).toMatch(/^AGENTS · 6 in corso/)
+  const listed = rows.filter(r => /^◐ agent-/.test(r))
+  expect(listed.map(r => r.split(' ')[1])).toEqual(['agent-2', 'agent-3', 'agent-4', 'agent-5', 'agent-6'])
+  expect(rows.some(r => /✓ agent-/.test(r))).toBe(false)
+  expect(rows[title + 2 + 5]).toBe('… +1')
+})
+
+// ── Phase 1 follow-ups ──
+
+test('a session start (/clear) forgets the cache share and the 5h readings of the burn rate', async ($, on) => {
+  let id = 's-1'
+  const options: World = { sessionId: () => id }
+  const clock = world(on, options)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(15 * MIN)
+  await $.session.measure({
+    context: { window: 1_000_000, tokens: 260_000, percent: 26 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 41, resetsAt: iso(2 * 60 * MIN) }],
+    cost: { usd: 5.2 },
+    changed: ['rateLimits'],
+  })
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
+  })
+  const before = (await paneRows($)).rows
+  expect(before.some(r => /finisce/.test(r))).toBe(true)
+  expect(before.some(r => /^CONTESTOcache/.test(r))).toBe(true)
+
+  id = 's-2'
+  // The new session reads the same 41% window: without the reset the old samples would still give a rate.
+  options.rateLimits = [{ kind: 'five_hour', percentUsed: 41, resetsAt: iso(2 * 60 * MIN) }]
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const after = (await paneRows($)).rows
+  expect(after.some(r => /finisce/.test(r))).toBe(false)
+  expect(after.find(r => /^CONTESTO/.test(r))).toBe('CONTESTO')
 })

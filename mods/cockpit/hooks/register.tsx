@@ -1,10 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
-import { AGENT_KEEP_MS, parseGitStatus, parseWorktree, recordBurnSample, resolveAlm, worklogDays } from './format'
+import type { CockpitAgent, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
+import { AGENT_KEEP_MS, isTab, parseGitStatus, parseWorktree, recordBurnSample, resolveAlm, worklogDays } from './format'
 import type { WorklogSnapshot } from './format'
 import { INITIAL, PANE } from './state'
+import type { PaneActions } from './view'
 import { PANE_MAX_COLUMNS, agentCounts, paneView, taskCounts } from './view'
 
 const TICK_MS = 15_000
@@ -84,6 +85,7 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       agents: agentCounts(s),
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
+      tab: s.tab ?? 'session',
     }
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
@@ -106,6 +108,21 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
     lastWriteAt = now
   } catch {
     // best-effort: the statusline simply shows what it showed
+  }
+}
+
+/** The tab an earlier run of this session left in its state file; undefined with no file, a broken one or an unknown tab. */
+async function savedTab($: EngineInterface): Promise<CockpitTab | undefined> {
+  try {
+    const dir = await configDir($)
+    const id = await $.session.id()
+    if (!dir || !SESSION_ID.test(id)) return undefined
+    const text = await $.fs.read(`${dir}/.cache/cockpit-${id}.json`)
+    const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
+    const tab = typeof parsed === 'object' && parsed !== null && 'tab' in parsed ? parsed.tab : undefined
+    return isTab(tab) ? tab : undefined
+  } catch {
+    return undefined
   }
 }
 
@@ -134,7 +151,7 @@ async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
   }
 }
 
-/** The ALM target of the cwd from `<config>/workspaces.json`; no file or a malformed one leaves the line out. */
+/** The ALM target of the cwd from `<config>/workspaces.json`; no file or a malformed one clears the line. */
 async function refreshAlm($: EngineInterface): Promise<void> {
   try {
     const dir = await configDir($)
@@ -143,7 +160,8 @@ async function refreshAlm($: EngineInterface): Promise<void> {
     const alm = resolveAlm(JSON.parse(typeof text === 'string' ? text : ''), await $.session.cwd())
     await patch($, s => ({ ...s, alm }))
   } catch {
-    // no map: no line
+    // no readable map: no line, and not the last map's
+    await patch($, s => ({ ...s, alm: undefined })).catch(() => undefined)
   }
 }
 
@@ -230,6 +248,14 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
   return typeof task.id === 'string' && typeof task.subject === 'string' ? { id: task.id, subject: task.subject } : undefined
 }
 
+/** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
+const paneActions = ($: EngineInterface): PaneActions => ({
+  selectTab: tab => void patch($, s => ({ ...s, tab })).catch(() => undefined),
+  compact: () => void $.session.compact().catch(() => undefined),
+  runWorklog: () => void $.command.run({ command: 'worklog' }).catch(() => undefined),
+  copyBranch: (branch, surface) => void $.ui.copy({ text: branch, surface }).catch(() => undefined),
+})
+
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */
@@ -245,9 +271,14 @@ export const register: Register = on => {
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
     const effort = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
+    const tab = await savedTab($)
     await patch($, s => ({
       ...s,
       now,
+      tab: tab ?? s.tab,
+      // a new session (a /clear included) starts its own readings: the last turn's cache share, the 5h samples
+      cacheShare: undefined,
+      fiveHourSamples: [],
       model,
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
@@ -273,7 +304,8 @@ export const register: Register = on => {
     try {
       const dir = await configDir($)
       if (dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
-        const content = { open: false, at: await $.clock.now(), lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
+        const { tab } = await read($, snapshot)
+        const content = { open: false, at: await $.clock.now(), lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: tab ?? 'session' }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
       }
     } catch {
@@ -451,6 +483,6 @@ export const register: Register = on => {
     if (!isOpen) $.clock.after(0, () => void setOpen($, true).catch(() => undefined))
     const ui = $.ui.resolve(e)
     const s = await read($, snapshot)
-    return paneView(ui, s, e.props.bodyColumns)
+    return paneView(ui, s, e.props.bodyColumns, paneActions($))
   })
 }

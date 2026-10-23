@@ -51,6 +51,9 @@ export type CockpitBurnSample = { at: number; used: number }
 /** The ALM target the cwd resolves to in `workspaces.json`; absent from the snapshot when there is no usable map. */
 export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; identity?: string }
 
+/** The view the pane draws: the tab bar's four buttons. */
+export type CockpitTab = 'session' | 'agents' | 'work' | 'repo'
+
 export type CockpitSnapshot = {
   cwd: string
   /** Raw model id or name of the main loop. */
@@ -68,6 +71,8 @@ export type CockpitSnapshot = {
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number
   alm?: CockpitAlm
+  /** The selected tab; absent (a state written before tabs existed) is the Sessione view. */
+  tab?: CockpitTab
   agents: CockpitAgent[]
   git?: CockpitGit
   worklog: CockpitWorklog
