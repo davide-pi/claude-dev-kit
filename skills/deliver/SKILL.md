@@ -53,13 +53,13 @@ perimeter file already dirty → ask the user first; any other dirty file is the
 
 | | S | M | L |
 | --- | --- | --- | --- |
-| analysis | none | the approach in one line | `plan-work`; `grill-me` if the design is argued |
+| analysis | none | the approach in one line, then the doubts pass | `plan-work`, the doubts pass, `grill-me` on the plan |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
 | implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, in steps |
-| review | 1 `code-reviewer`, Sonnet medium | 1 Sonnet high | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
+| review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when touched | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
 
 `implementer` runs at `medium`; `high` when the brief asks (`implementerEffort`). Preparation comes
-before the loop: `references/scenarios.md`.
+before the loop: `references/scenarios.md`; the doubts pass (M, L): `references/loop.md`.
 
 ### 3. Who asks the user
 
@@ -84,7 +84,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size; ask only what the table says. S: make the edit inline now.
 3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
-   `status: OK` → step 4. `status: STALL` → ask the user, relaunch with every resolution so far.
+   `OK` → `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` → ask the user, relaunch with every resolution so far.
 4. Run the matrix; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
@@ -95,10 +95,10 @@ The verdict, a table `done-claim` accepts as evidence (third cell looks like out
 | unit | dotnet test Orders.Tests | Passed: 48, Failed: 0 | fatto |
 | e2e | - | - | non verificato: serve staging |
 
-Review: giro 2, 0 P1/P2 aperti. Rischi residui: <elenco, o nessuno>.
+Review: giro 2, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: <elenco, o nessuno>.
 
 States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with everything outside
-the perimeter (`outOfScope`, `minor`, open questions), `#` fixed for the conversation; the user picks:
+the perimeter (`outOfScope`, with its `noticed` and `scope-revert` items, `minor`, open questions), `#` fixed for the conversation; the user picks:
 
 | # | Proposta | Motivo | Rischio |
 | --- | --- | --- | --- |
@@ -112,8 +112,8 @@ the perimeter (`outOfScope`, `minor`, open questions), `#` fixed for the convers
 
 ## References
 
-- `references/loop.md` — launching the workflow: its args, the start point, size S inline, a `STALL` and the
-  resume with the user's answers.
+- `references/loop.md` — the doubts pass (M, L), launching the workflow: its args, the start point, size S
+  inline, each `STALL` and the resume with the user's answers, the scope check after `OK`.
 - `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
 - `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": the baseline, the runs,
   BenchmarkDotNet and HTTP timing, the result as ratio and spread.

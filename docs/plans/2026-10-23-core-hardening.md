@@ -134,13 +134,13 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 ## Phase 5 — agent, skill, hook text
 
-- [ ] **T13 `agents/implementer.md` (C1, C5, C7, C9, C12).** Ground rule "Preserve existing code: fix the code itself,
+- [x] **T13 `agents/implementer.md` (C1, C5, C7, C9, C12).** Ground rule "Preserve existing code: fix the code itself,
   never wrap a broken path in a new guard or flag; delete dead code rather than wrap it". Verify step: status, command,
   deciding line. End step: run `snapshot.ps1` as the brief gives it. PLAUSIBLE → reproduce first, else `rejected`
   'not reproduced'; judged wrong → `rejected` with reason, no edit. Output gains `## Rejected`, `## Noticed`. Verify:
   validate clean; `script: the implement and fix prompts carry the snapshot command and the reproduce-first rule`.
   Depends: T4, T7, T10.
-- [ ] **T14 reviewer agents (C3, C5, C9, C12).** `code-reviewer.md`, `review-security.md`, `review-performance.md`;
+- [x] **T14 reviewer agents (C3, C5, C9, C12).** `code-reviewer.md`, `review-security.md`, `review-performance.md`;
   never touch the fenced Finding block or the one-defect rule (pinned by validate). Pass B: guard-wrapping instead of
   fixing → `regression`/`correctness`. Line 40: unrequested hunk even inside the perimeter → `scope`; `causedByChange`
   for an outside defect this change causes. All three: Input row for challenged findings (keep/withdraw), Output line
@@ -151,7 +151,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
   active perimeter, prints outside files; exit 0 clean, 1 outside, 2 usage. Without `--check` reads stdin as before.
   Allow rules in `settings.json`. Verify: `outsidePerimeter: …` unit; `--check in a temp repo: an untracked file
   outside the perimeter exits 1 and is printed`. Depends: none.
-- [ ] **T16 `skills/deliver/SKILL.md` (≤ 120 lines, now 119) + `references/loop.md`.** Review cell M = "1 Opus high, +
+- [x] **T16 `skills/deliver/SKILL.md` (≤ 120 lines, now 119) + `references/loop.md`.** Review cell M = "1 Opus high, +
   specialists when touched"; Do 3: `OK` → `scope-guard.js --check <head>`, outside → back to step 3; verdict line
   `Review: giro N, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: …`; `outOfScope` includes `noticed` and
   `scope-revert`. loop.md: size re-derived upward, touches M and L, STALL reasons (`cap` + history, `verify-failed`,

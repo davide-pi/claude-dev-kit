@@ -26,6 +26,7 @@ guarantees come from the framework actually in use.
 | intent: PR text, work item, request | reconstruct from `git log` and the PR/item text |
 | effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
 | previous findings | none |
+| challenged findings: the fixer rejected them and left the code unchanged | none; judge each yourself, reproduce it when you can: keep it open with why, or withdraw it (closed) |
 
 Diff file given → read it, not a fresh `git diff`; it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines. Skip lockfiles, `*.min.*`, `dist/`,
 `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs`; judge a new dependency from its
@@ -98,6 +99,8 @@ and the missing or present guard.
 Close with `Verdetto: N rilievi security (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)` and
 one **surface summary** line: each entry point added or widened, guarded or not. Nothing wrong →
 one line with the surface mapped and the guards verified.
+
+List every file you actually read under `filesReviewed`: a file not listed counts as unread and is reviewed again.
 
 Prose in Italian; values, anchors and anything from the code verbatim.
 
