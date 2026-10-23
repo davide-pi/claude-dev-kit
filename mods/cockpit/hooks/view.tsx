@@ -1,12 +1,15 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitAlm, CockpitSnapshot, CockpitTask } from '../types'
 import {
   AGENT_KEEP_MS,
   COLORS,
   ICONS,
   abbrevTokens,
+  almText,
   barCells,
+  burnRate,
+  burnText,
   baseName,
   countdown,
   ctxColor,
@@ -17,7 +20,9 @@ import {
   fmtCostDelta,
   gridWidths,
   modelFamily,
+  pctCell,
   rateColor,
+  resetClock,
   shortModel,
   signedPct,
   spanWidth,
@@ -73,7 +78,7 @@ const headerEffort = (effort: string | number | undefined): Span[] => {
 
 // ── Data derived from the snapshot ───────────────────────────────────────────
 
-type RateRow = { rem: number; color: string; resetMs: number | undefined; pace?: { target: number; delta: number } }
+type RateRow = { rem: number; used: number; color: string; resetMs: number | undefined; pace?: { target: number; delta: number } }
 
 function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow | undefined {
   const w = s.rateLimits.find(r => r.kind === kind)
@@ -84,6 +89,7 @@ function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow |
   const rem = Math.max(0, Math.min(100, Math.round(100 - w.percentUsed)))
   return {
     rem,
+    used: w.percentUsed,
     resetMs,
     color: rateColor(w.percentUsed, resetMs, windowSec, s.now),
     pace: kind === 'seven_day' ? weeklyPace(rem, resetMs, windowSec, s.now) : undefined,
@@ -166,7 +172,7 @@ export function contextText(s: CockpitSnapshot): Span[] {
   const { tokens, window, percent, startTokens } = s.ctx
   // Before the first response nothing is measured: the fill reads as empty, not as missing.
   const pct = percent ?? 0
-  const out: Span[] = [sp(`${pct}%`, ctxColor(pct), true), sp(` ${abbrevTokens(tokens ?? 0, true)}`)]
+  const out: Span[] = [sp(pctCell(pct), ctxColor(pct), true), sp(` ${abbrevTokens(tokens ?? 0, true)}`)]
   if (window) out.push(dim(`/${abbrevTokens(window, true)}`))
   const grown = delta(tokens, startTokens)
   if (grown !== undefined && grown > 0) out.push(dim(` +${abbrevTokens(grown, true)}`))
@@ -175,7 +181,13 @@ export function contextText(s: CockpitSnapshot): Span[] {
 
 function rateText(label: string, r: RateRow, now: number): Span[] {
   const cd = countdown(r.resetMs, now)
-  return [dim(label), sp(' '), sp(`${r.rem}%`, r.color, true), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
+  const clock = resetClock(r.resetMs, now)
+  return [sp(pctCell(r.rem), r.color, true), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : []), ...(clock ? [sp(' '), dim(clock)] : [])]
+}
+
+/** The ALM row: dim label then the target, or `ALM non mappato` in red. */
+export function almSpans(alm: CockpitAlm): Span[] {
+  return alm.isMapped ? [dim('ALM '), sp(almText(alm).slice('ALM '.length))] : [sp(almText(alm), COLORS.red)]
 }
 
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
@@ -273,26 +285,38 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
     </Box>
   )
 
-  // CONTESTO (the right of the title would carry the cache state: not obtainable, so omitted)
-  const ctxText = contextText(s)
-  const textCol = Math.max(CTX_TEXT_MIN, spanWidth(ctxText))
-  const barW = Math.max(4, width - textCol - 1)
-  const pct = s.ctx.percent ?? 0
-  const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
+  // ALM target of the folder (absent without a workspaces map)
+  const almRow = s.alm && line(ui, almSpans(s.alm))
 
-  // CREDITI RESIDUI
+  // The one bar width of the context and credit rows: what is left of the widest readout.
   const five = rateRow(s, 'five_hour')
   const seven = rateRow(s, 'seven_day')
+  const fiveText = five && rateText('5h', five, s.now)
+  const sevenText = seven && rateText('7d', seven, s.now)
+  const ctxText = contextText(s)
+  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(t => spanWidth(t ?? [])))
+  const barW = Math.max(4, width - textCol - 1)
+
+  // CONTESTO: the cache share of the last main-loop turn sits right of the title
+  const pct = s.ctx.percent ?? 0
+  const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare))]
+
+  // CREDITI RESIDUI
   const paceDelta = seven?.pace?.delta
   const paceSpans: Span[] =
     paceDelta === undefined
       ? []
       : [dim('vs atteso 7d '), sp(signedPct(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
-  const creditRow = (label: string, r: RateRow) => {
+  const creditRow = (r: RateRow, text: Span[]) => {
     const gap = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
     const parts = [{ pct: r.rem, color: r.color }, ...(gap ? [{ pct: gap, color: COLORS.gap }] : [])]
-    return split(line(ui, barCells(barW, parts)), barW, rateText(label, r, s.now))
+    return split(line(ui, barCells(barW, parts)), barW, text)
   }
+
+  // The 5h burn rate: absent until 10 minutes of readings show the credits falling
+  const burn = five && burnRate(s.fiveHourSamples ?? [], s.now, five.used, five.resetMs)
+  const burnRow = burn && line(ui, [sp(burnText(burn), burn.isBeforeReset ? COLORS.red : COLORS.green)])
 
   // AGENTS
   const agents = visibleAgents(s)
@@ -338,18 +362,20 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
     <Box flexDirection="column" width={width} marginLeft={bodyColumns - width}>
       {header}
       {grid}
+      {almRow}
       {rule}
       {gap()}
-      {title('CONTESTO')}
+      {title('CONTESTO', cacheSpans)}
       {gap()}
       {split(ctxBar, barW, ctxText)}
       {rule}
       {gap()}
       {title('CREDITI RESIDUI', paceSpans)}
       {gap()}
-      {five && creditRow('5h', five)}
+      {five && fiveText && creditRow(five, fiveText)}
+      {burnRow}
       {five && seven && gap()}
-      {seven && creditRow('7d', seven)}
+      {seven && sevenText && creditRow(seven, sevenText)}
       {!five && !seven && line(ui, [dim('nessun dato sui limiti')])}
       {rule}
       {gap()}

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
-import { AGENT_KEEP_MS, parseGitStatus, parseWorktree, worklogDays } from './format'
+import { AGENT_KEEP_MS, parseGitStatus, parseWorktree, recordBurnSample, resolveAlm, worklogDays } from './format'
 import type { WorklogSnapshot } from './format'
 import { INITIAL, PANE } from './state'
 import { PANE_MAX_COLUMNS, agentCounts, paneView, taskCounts } from './view'
@@ -19,6 +19,10 @@ async function patch($: EngineInterface, next: (s: CockpitSnapshot) => CockpitSn
   await update($, snapshot, next)
   await writeState($)
 }
+
+/** The 5h window's usage out of the rate limits the engine reported; undefined off a subscription. */
+const fiveHourUsed = (limits: CockpitSnapshot['rateLimits']): number | undefined =>
+  limits.find(r => r.kind === 'five_hour')?.percentUsed
 
 const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
   u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
@@ -130,11 +134,26 @@ async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
   }
 }
 
+/** The ALM target of the cwd from `<config>/workspaces.json`; no file or a malformed one leaves the line out. */
+async function refreshAlm($: EngineInterface): Promise<void> {
+  try {
+    const dir = await configDir($)
+    if (!dir) return
+    const text = await $.fs.read(`${dir}/workspaces.json`)
+    const alm = resolveAlm(JSON.parse(typeof text === 'string' ? text : ''), await $.session.cwd())
+    await patch($, s => ({ ...s, alm }))
+  } catch {
+    // no map: no line
+  }
+}
+
 async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
+    const now = await $.clock.now()
     await patch($, s => ({
       ...s,
+      fiveHourSamples: recordBurnSample(s.fiveHourSamples, now, fiveHourUsed(u.rateLimits)),
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
@@ -162,6 +181,7 @@ async function tick($: EngineInterface): Promise<void> {
   }))
   await refreshGit($)
   await refreshWorklog($, now)
+  await refreshAlm($)
   // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`.
   if (isOpen) await writeState($, true, true)
 }
@@ -236,6 +256,7 @@ export const register: Register = on => {
     await refreshUsage($)
     await refreshGit($)
     await refreshWorklog($, now)
+    await refreshAlm($)
     // Every start, `/clear` included, has its own session id and so its own file.
     await writeState($, true)
 
@@ -275,8 +296,10 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
+    const now = await $.clock.now()
     await patch($, s => ({
       ...s,
+      fiveHourSamples: recordBurnSample(s.fiveHourSamples, now, fiveHourUsed(e.rateLimits)),
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
@@ -401,7 +424,14 @@ export const register: Register = on => {
     const agentId = e.agentId
     const usage = e.usage
     const now = await $.clock.now()
-    if (agentId !== undefined) {
+    if (agentId === undefined) {
+      // The main loop's turn: how much of its input the prompt cache served. An empty turn leaves the last share.
+      const total = usage ? usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens : 0
+      if (usage && total > 0) {
+        const cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
+        await patch($, s => ({ ...s, cacheShare }))
+      }
+    } else {
       await patch($, s => ({
         ...s,
         agents: upsertAgent(s.agents, agentId, now, a => ({
