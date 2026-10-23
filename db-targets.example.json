@@ -1,31 +1,39 @@
 {
-  "_comment": "Copy to ~/.claude/db-targets.json (local-only, never committed). devHosts: hosts any client may reach directly (hooks/lib/sql-target.js) - add the compose service names you use as -h. targets: <workspace root> -> <env> -> one non-dev database, read only through scripts/db-ro.ps1 (/db), longest root wins. engine: sqlserver (default) | postgres | redis. server: host,port (sqlserver) or host:port. Secrets: user + password, or auth (a connection-string fragment); any value may be a literal, env:NAME or envfile:<path>#KEY. databases: the allowed names (redis: indexes, default 0). Optional: encrypt, trustServerCertificate, applicationIntent (sqlserver); sslmode (postgres); tls (redis); clientImage (postgres, redis: the docker route's image); readOnlyAttested (redis only, used only when the server hides its ACL so the probe cannot prove read-only: who verified the access policy, and when). The probe stops (exit 4, grants listed) on a credential with a write grant until the user accepts and the caller re-runs with -AcceptWriteGrant; it refuses (exit 3) when read-only cannot be proven.",
+  "_comment": "Copy to ~/.claude/db-targets.json (local-only, never committed). devHosts: hosts any client may reach directly (hooks/lib/sql-target.js, which reads only this key) and the only hosts a readOnly:false environment may use - add the compose service names you use as -h. projects: <project> -> root (a path or a list; the longest prefix of -Project or the cwd wins), envFile (optional dotenv file), then one key per environment (local, stg, prod, any name) holding one block per engine: sql (alias sqlserver), postgres, redis. Any string value may embed ${NAME}, also mid-string: it is read from the project's envFile, then the process environment, then the user environment; an unset name stops the run. sql: server host,port; auth (a connection-string fragment) or user + password; encrypt, trustServerCertificate, applicationIntent. postgres: server host:port or url (postgres://user:pwd@host:port/db?sslmode=...; explicit keys win over the url's parts); user, password, sslmode. redis: server host:port, tls, user, password, readOnlyAttested (used only when the server hides its ACL so the probe cannot prove read-only: who verified the access policy, and when). databases: the allowed names (redis: indexes, default 0). clientImage (postgres, redis): the docker route's image. readOnly (environment or engine block, default true): false is honoured only when the host is a dev host and then runs without probe or read filter. Otherwise the probe stops (exit 4, grants listed) on a credential with a write grant until the user accepts and the caller re-runs with -AcceptWriteGrant; it refuses (exit 3) when read-only cannot be proven.",
   "devHosts": ["localhost", "127.0.0.1", "::1", "(local)", "(localdb)", ".", "host.docker.internal", "sqlserver", "postgres", "redis"],
-  "targets": {
-    "C:\\workspaces\\<product-root>": {
+  "projects": {
+    "<project>": {
+      "root": "C:\\workspaces\\<product-root>",
+      "envFile": "~/<secrets-dir>/<product>.env",
       "prod": {
-        "server": "<sql-host>,1433",
-        "auth": "envfile:~/<secrets-dir>/<product>.env#DB_READONLY_CONNECTION",
-        "databases": ["<Database>"],
-        "encrypt": true,
-        "trustServerCertificate": false,
-        "applicationIntent": "ReadOnly"
+        "sql": {
+          "server": "${PROD_SQL_HOST},1433",
+          "auth": "${PROD_SQL_RO_AUTH}",
+          "databases": ["<Database>"],
+          "encrypt": true,
+          "trustServerCertificate": false,
+          "applicationIntent": "ReadOnly"
+        },
+        "postgres": {
+          "url": "${PROD_PG_RO_URL}",
+          "password": "${PROD_PG_RO_PWD}",
+          "sslmode": "require"
+        },
+        "redis": {
+          "server": "<cache-host>:6380",
+          "tls": true,
+          "user": "<readonly-acl-user>",
+          "password": "${PROD_REDIS_RO_PWD}"
+        }
       },
-      "prod-pg": {
-        "engine": "postgres",
-        "server": "<pg-host>:5432",
-        "user": "<readonly-role>",
-        "password": "env:<PG_READONLY_PASSWORD>",
-        "databases": ["<database>"],
-        "sslmode": "require"
-      },
-      "prod-cache": {
-        "engine": "redis",
-        "server": "<cache-host>:6380",
-        "tls": true,
-        "user": "<readonly-acl-user>",
-        "password": "env:<REDIS_READONLY_SECRET>",
-        "databases": ["0"]
+      "local": {
+        "readOnly": false,
+        "sql": {
+          "server": "localhost,1433",
+          "user": "sa",
+          "password": "${LOCAL_SA_PWD}",
+          "databases": ["<Database>"]
+        }
       }
     }
   }

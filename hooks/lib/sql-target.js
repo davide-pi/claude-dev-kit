@@ -23,9 +23,9 @@
  *   - Redis: `-h`, a `redis://` / `rediss://` URI in `-u`, `-s` (a socket is local); none at all is
  *     redis-cli's own default, 127.0.0.1.
  *
- * A host must be in `devHosts` of `~/.claude/db-targets.json` (compose service names belong there
- * too) or be a loopback / local-instance name (`localhost`, `127.0.0.1`, `::1`, `(local)`, `.`,
- * `(localdb)`, `host.docker.internal`). A variable or expression is never a known host, so it is
+ * A host must be in `devHosts` (a top-level key of `~/.claude/db-targets.json`, next to `projects`;
+ * compose service names belong there too) or be a loopback / local-instance name (`localhost`,
+ * `127.0.0.1`, `::1`, `(local)`, `.`, `(localdb)`, `host.docker.internal`). A variable or expression is never a known host, so it is
  * denied: the guard cannot see where it points. No host at all is the client's own local default
  * (the local socket for psql, the local instance for sqlcmd, 127.0.0.1 for redis-cli) and passes;
  * only a `PGHOST` / `PGSERVICE` the line itself names, or an `--env-file`, is looked at.

@@ -15,6 +15,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -24,9 +26,10 @@ const skip = hasPwsh ? false : 'pwsh 7 not on PATH';
 
 /**
  * Calls function `fn` of db-ro.ps1 once per entry of `calls` (each an array of arguments), after the
- * PowerShell `prelude`. Returns `{ ok, value }` or `{ ok: false, error }` for each call.
+ * PowerShell `prelude`. Returns `{ ok, value }` or `{ ok: false, error }` for each call. `deps` names the
+ * functions `fn` calls, lifted the same way; an argument wrapped in `hash()` reaches a [hashtable] parameter.
  */
-function call(fn, calls, prelude = '') {
+function call(fn, calls, prelude = '', deps = []) {
   const driver = `
     ${prelude}
     $Fn = $env:DBRO_FN
@@ -34,19 +37,32 @@ function call(fn, calls, prelude = '') {
     $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $Fn }, $true)
     function Stop-Wrapper([string]$Message, [int]$Code = 2) { throw "[$Code] $Message" }
     . ([scriptblock]::Create($def.Extent.Text))
+    foreach ($name in ($env:DBRO_DEPS -split ',' | Where-Object { $_ })) {
+      $dep = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq $name }, $true)
+      . ([scriptblock]::Create($dep.Extent.Text))
+    }
     $out = foreach ($c in ($env:DBRO_JSON | ConvertFrom-Json)) {
-      $arguments = @($c.a)
+      $arguments = [System.Collections.Generic.List[object]]::new()
+      foreach ($a in @($c.a)) {
+        if ($a -is [pscustomobject] -and $a.PSObject.Properties['__hashtable']) {
+          $table = @{}
+          foreach ($p in $a.__hashtable.PSObject.Properties) { $table[$p.Name] = $p.Value }
+          $a = $table
+        }
+        $arguments.Add($a)
+      }
       try { @{ ok = $true; value = (& $Fn @arguments) } } catch { @{ ok = $false; error = [string]$_.Exception.Message } }
     }
-    ConvertTo-Json -InputObject @($out) -Compress -Depth 5`;
+    ConvertTo-Json -InputObject @($out) -Compress -Depth 8`;
   const r = spawnSync('pwsh', ['-NoProfile', '-Command', driver], {
     encoding: 'utf8',
-    env: { ...process.env, DBRO_SCRIPT: SCRIPT, DBRO_FN: fn, DBRO_JSON: JSON.stringify(calls.map((a) => ({ a }))) },
+    env: { ...process.env, DBRO_SCRIPT: SCRIPT, DBRO_FN: fn, DBRO_DEPS: deps.join(','), DBRO_JSON: JSON.stringify(calls.map((a) => ({ a }))) },
   });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout);
 }
 
+const hash = (table) => ({ __hashtable: table });
 const verdicts = (fn, texts, prelude) => call(fn, texts.map((t) => [t]), prelude);
 
 test('Assert-PlainPgSql rejects what turns the read-only session off: SET ROLE, RESET, DISCARD', { skip }, () => {
@@ -120,4 +136,390 @@ test('Assert-ReadStatements (write grants accepted): only plain SELECT / WITH st
     assert.equal(r.ok, false, refused[i]);
     assert.match(r.error, /write grants were accepted/, refused[i]);
   });
+});
+
+// ---- registry v2 ------------------------------------------------------------------------------
+
+/** A temp directory holding `db-targets.json` with `registry`; returns the file's path. */
+function writeRegistry(registry) {
+  const dir = mkdtempSync(join(tmpdir(), 'db-ro-'));
+  const path = join(dir, 'db-targets.json');
+  writeFileSync(path, typeof registry === 'string' ? registry : JSON.stringify(registry));
+  return path;
+}
+
+test('Expand-Value: envFile first, then environment; unknown name is exit 2', { skip }, () => {
+  const prelude = "$env:DBRO_T_PROC = 'from-process'; $env:DBRO_T_BOTH = 'from-process'; Remove-Item Env:DBRO_T_MISSING -ErrorAction SilentlyContinue";
+  const file = hash({ DBRO_T_BOTH: 'from-file', DBRO_T_FILE: 'host-a', DBRO_T_EMPTY: '' });
+  const [mid, both, fromProcess, twice, plain, emptyFile, noFile] = call('Expand-Value', [
+    ['${DBRO_T_FILE},1433', file, 'server'],           // mid-string
+    ['${DBRO_T_BOTH}', file, 'server'],                // the envFile wins over the process environment
+    ['${DBRO_T_PROC}', file, 'server'],                // not in the file: the process environment
+    ['${DBRO_T_PROC}/${DBRO_T_FILE}/${DBRO_T_PROC}', file, 'server'],
+    ['no variable, 100$ and {braces}', file, 'server'],
+    ['${DBRO_T_EMPTY}', hash({ DBRO_T_EMPTY: '', DBRO_T_PROC: 'x' }), 'server'],   // an empty entry counts as unset
+    ['${DBRO_T_PROC}', null, 'server'],
+  ], prelude);
+  assert.equal(mid.value, 'host-a,1433');
+  assert.equal(both.value, 'from-file');
+  assert.equal(fromProcess.value, 'from-process');
+  assert.equal(twice.value, 'from-process/host-a/from-process');
+  assert.equal(plain.value, 'no variable, 100$ and {braces}');
+  assert.equal(emptyFile.ok, false);
+  assert.equal(noFile.value, 'from-process');
+
+  const [unknown] = call('Expand-Value', [['${DBRO_T_FILE}:${DBRO_T_MISSING}', file, "'password' of prod/sql"]], prelude);
+  assert.equal(unknown.ok, false);
+  assert.match(unknown.error, /^\[2\]/);
+  assert.match(unknown.error, /'password' of prod\/sql references \$\{DBRO_T_MISSING\}/);
+  assert.doesNotMatch(unknown.error, /host-a|from-file|from-process/, 'a message names the variable, never a value');
+});
+
+test('Expand-Target: every string and string array expands, other values stay', { skip }, () => {
+  const prelude = "$env:DBRO_T_DB = 'Sales'; $env:DBRO_T_HOST = 'h.example.com'";
+  const block = { server: '${DBRO_T_HOST},1433', databases: ['${DBRO_T_DB}', 'Other'], encrypt: true, port: 5, tls: false };
+  const [r] = call('Expand-Target', [[block, hash({}), 'prod/sql']], prelude, ['Expand-Value']);
+  assert.deepEqual(r.value, { server: 'h.example.com,1433', databases: ['Sales', 'Other'], encrypt: true, port: 5, tls: false });
+});
+
+const SHOP = {
+  root: 'C:\\ws\\shop',
+  envFile: '~/secrets/shop.env',
+  prod: {
+    sql: { server: '${SHOP_SQL_HOST},1433', databases: ['Shop'] },
+    postgres: { url: '${SHOP_PG_URL}' },
+    redis: { server: 'cache.example.com:6380', readOnly: false },
+  },
+  local: { readOnly: false, sql: { server: 'localhost,1433', user: 'sa', password: '${LOCAL_SA_PWD}' } },
+  cache: { redis: { server: 'cache.example.com:6380' } },
+};
+const resolve = (registry, ...args) => {
+  const path = writeRegistry(registry);
+  return call('Resolve-Target', args.map((a) => [...a, path]), '', ['Get-RegistryHelp', 'ConvertTo-PlainPath']);
+};
+
+test('Resolve-Target: by name, by longest root, single-engine default, ambiguous engine, rabbit refused, old shape refused', { skip }, () => {
+  const registry = {
+    devHosts: ['sqlserver'],
+    projects: {
+      shop: SHOP,
+      'shop-admin': { root: ['C:\\ws\\shop\\admin', 'D:\\other'], prod: { sql: { server: 'admin.example.com' } } },
+    },
+  };
+
+  // by name (case-insensitive) and by path
+  const [byName, byPath, deep, second, sqlKey] = resolve(registry,
+    ['prod', 'sql', 'SHOP', 'C:\\elsewhere'],
+    ['prod', 'sqlserver', 'C:\\ws\\shop\\src\\api', 'C:\\elsewhere'],
+    ['prod', 'sql', '', 'c:/ws/shop/admin/deep/dir'],        // the cwd; the longest root wins; slashes and case are free
+    ['prod', 'sql', 'D:\\other\\x', 'C:\\elsewhere'],        // the second root of an array
+    ['prod', 'sqlserver', 'shop', 'C:\\x']);                 // `sql` is the key, `sqlserver` the alias
+  assert.equal(byName.value.Project, 'shop');
+  assert.equal(byName.value.Engine, 'sqlserver');
+  assert.equal(byName.value.Root, 'C:\\ws\\shop');
+  assert.equal(byName.value.Target.server, '${SHOP_SQL_HOST},1433');   // returned as written: the caller expands it
+  assert.equal(byName.value.ReadOnly, true);
+  assert.match(byName.value.EnvFile, /secrets[\\/]shop\.env$/);
+  assert.doesNotMatch(byName.value.EnvFile, /^~/);
+  assert.ok(byName.value.DevHosts.includes('sqlserver') && byName.value.DevHosts.includes('localhost'), 'registry devHosts + loopback');
+  assert.equal(byPath.value.Project, 'shop');
+  assert.equal(deep.value.Project, 'shop-admin');
+  assert.equal(deep.value.Target.server, 'admin.example.com');
+  assert.equal(second.value.Project, 'shop-admin');
+  assert.equal(sqlKey.value.Engine, 'sqlserver');
+
+  // a single-engine environment needs no -Engine; several do; readOnly: engine over environment
+  const [single, ambiguous, missing, local, engineFalse] = resolve(registry,
+    ['cache', '', 'shop', 'C:\\x'],
+    ['prod', '', 'shop', 'C:\\x'],
+    ['cache', 'postgres', 'shop', 'C:\\x'],
+    ['local', '', 'shop', 'C:\\x'],
+    ['prod', 'redis', 'shop', 'C:\\x']);
+  assert.equal(single.value.Engine, 'redis');
+  assert.equal(ambiguous.ok, false);
+  assert.match(ambiguous.error, /^\[2\].*Pass -Engine.*sqlserver, postgres, redis/);
+  assert.equal(missing.ok, false);
+  assert.match(missing.error, /no postgres engine.*redis/);
+  assert.equal(local.value.ReadOnly, false, 'readOnly on the environment');
+  assert.equal(engineFalse.value.ReadOnly, false, 'readOnly on the engine block');
+
+  // rabbit, unknown names, bad readOnly
+  const [rabbit, unknownEngine, unknownProject, unknownEnv] = resolve(registry,
+    ['prod', 'rabbit', 'shop', 'C:\\x'],
+    ['prod', 'mongo', 'shop', 'C:\\x'],
+    ['prod', 'sql', 'nothing', 'C:\\nowhere'],
+    ['dev', 'sql', 'shop', 'C:\\x']);
+  assert.match(rabbit.error, /^\[2\].*rabbit.*not supported yet/);
+  assert.match(unknownEngine.error, /^\[2\].*Unknown engine 'mongo'/);
+  assert.match(unknownProject.error, /^\[2\].*No project is named or rooted.*shop: prod, local, cache/s);
+  assert.match(unknownEnv.error, /^\[2\].*Environment 'dev' is not registered for project 'shop'.*shop: prod, local, cache/s);
+  assert.doesNotMatch(unknownEnv.error, /secrets|envFile/, 'root and envFile are not environments');
+
+  const badFlag = resolve({ projects: { p: { root: 'C:\\p', prod: { readOnly: 'false', sql: {} } } } }, ['prod', '', 'p', 'C:\\x']);
+  assert.match(badFlag[0].error, /^\[2\].*readOnly.*true or false/);
+  const [rabbitOnly] = resolve({ projects: { p: { root: 'C:\\p', prod: { rabbit: {} } } } }, ['prod', '', 'p', 'C:\\x']);
+  assert.match(rabbitOnly.error, /^\[2\].*not supported yet/, 'an environment with only rabbit');
+  const badKey = resolve({ projects: { p: { root: 'C:\\p', prod: { sqll: {} } } } }, ['prod', '', 'p', 'C:\\x']);
+  assert.match(badKey[0].error, /^\[2\].*unknown key 'sqll'/);
+
+  // the old shape, and a file with neither
+  const oldShape = resolve({ devHosts: ['x'], targets: { 'C:\\ws\\shop': { prod: { server: 'h' } } } }, ['prod', '', '', 'C:\\ws\\shop']);
+  assert.equal(oldShape[0].ok, false);
+  assert.match(oldShape[0].error, /^\[2\].*old 'targets' shape.*db-targets\.example\.json/);
+  const empty = resolve({ devHosts: [] }, ['prod', '', '', 'C:\\ws\\shop']);
+  assert.match(empty[0].error, /^\[2\].*no 'projects'.*db-targets\.example\.json/);
+  const [notJson] = resolve('{ not json', ['prod', '', '', 'C:\\x']);
+  assert.match(notJson.error, /^\[2\].*not valid JSON/);
+});
+
+test('ConvertFrom-PgUrl: user, encoded password, default port, query sslmode, IPv6 host; non-postgres scheme is exit 2', { skip }, () => {
+  const [full, plainUrl, ipv6, noDb, upper] = verdicts('ConvertFrom-PgUrl', [
+    'postgres://app:p%40ss%3Aw%2Frd%23@example.com:6543/orders%20db?sslmode=require&application_name=x',
+    'postgresql://reader@example.com/orders',
+    'postgres://u:pwd@[::1]:5433/db',
+    'postgres://u:pwd@example.com',
+    'POSTGRES://u:pwd@example.com/db?SSLMODE=verify-full',
+  ]);
+  assert.deepEqual(full.value, { Host: 'example.com', Port: '6543', User: 'app', Secret: 'p@ss:w/rd#', Database: 'orders db', SslMode: 'require' });
+  assert.deepEqual(plainUrl.value, { Host: 'example.com', Port: '5432', User: 'reader', Secret: null, Database: 'orders', SslMode: null });
+  assert.deepEqual(ipv6.value, { Host: '::1', Port: '5433', User: 'u', Secret: 'pwd', Database: 'db', SslMode: null });
+  assert.equal(noDb.value.Database, null);
+  assert.equal(upper.value.SslMode, 'verify-full');
+
+  const refused = [
+    'mysql://u:hunter2@h/db',
+    'http://u:hunter2@h/db',
+    'u:hunter2@h/db',
+    'postgres://u:hunter2@/db',
+    'postgres://u:hunter2@h:port/db',
+  ];
+  verdicts('ConvertFrom-PgUrl', refused).forEach((r, i) => {
+    assert.equal(r.ok, false, refused[i]);
+    assert.match(r.error, /^\[2\] Registry: the postgres url/, refused[i]);
+    assert.doesNotMatch(r.error, /hunter2/, 'a message never repeats the url');
+  });
+});
+
+test('Merge-PgUrl: the url fills in what the block does not set; explicit keys win', { skip }, () => {
+  const url = 'postgres://u:urlpwd@example.com:6000/urldb?sslmode=require';
+  const [bare, explicit, noUrl] = call('Merge-PgUrl', [
+    [{ url }],
+    [{ url, server: 'own.example.com:5432', user: 'own', password: 'ownpwd', databases: ['owndb'], sslmode: 'prefer' }],
+    [{ server: 'h:5432', user: 'x' }],
+  ], '', ['ConvertFrom-PgUrl']);
+  assert.deepEqual(bare.value, { url, server: 'example.com:6000', user: 'u', password: 'urlpwd', databases: ['urldb'], sslmode: 'require' });
+  assert.deepEqual(explicit.value, { url, server: 'own.example.com:5432', user: 'own', password: 'ownpwd', databases: ['owndb'], sslmode: 'prefer' });
+  assert.deepEqual(noUrl.value, { server: 'h:5432', user: 'x' });
+  const [v6] = call('Merge-PgUrl', [[{ url: 'postgres://u:p@[::1]:5433/d' }]], '', ['ConvertFrom-PgUrl']);
+  assert.equal(v6.value.server, '[::1]:5433');
+});
+
+// ---- readOnly: false ----------------------------------------------------------------------------
+
+test('readOnly false: allowed on dev hosts, exit 2 on any other host', { skip }, () => {
+  const dev = ['sqlserver', 'postgres'];
+  const [loopback, composeName, caseFree, prod, lookalike, empty] = call('Assert-DevHostForWrite', [
+    ['localhost', ['localhost', '127.0.0.1']],
+    ['sqlserver', dev],
+    ['LocalHost', ['localhost']],
+    ['db.example.com', ['localhost', ...dev]],
+    ['localhost.example.com', ['localhost']],
+    ['db.example.com', []],
+  ]);
+  assert.equal(loopback.ok, true);
+  assert.equal(composeName.ok, true);
+  assert.equal(caseFree.ok, true);
+  for (const r of [prod, lookalike, empty]) {
+    assert.equal(r.ok, false);
+    assert.match(r.error, /^\[2\].*write access is only for dev hosts/);
+  }
+});
+
+test('readOnly false keeps the escape filters: `\\! ls`, `:!! dir`, a Redis option are rejected', { skip }, () => {
+  // Postgres: the backslash check runs with ReadOnly false; only the read-only-setting check is skipped.
+  const pg = [['\\! ls', false], ['select 1\n\\copy t to \'/tmp/x\'', false], ['\\o /tmp/x', false], ['\\c other', false]];
+  call('Assert-PlainPgSql', pg).forEach((r, i) => {
+    assert.equal(r.ok, false, pg[i][0]);
+    assert.match(r.error, /backslash/);
+  });
+  const [turnedOff, describe, stillRefused] = call('Assert-PlainPgSql', [
+    ['SET default_transaction_read_only = off', false],
+    ['\\dt', false],
+    ['SET default_transaction_read_only = off', true],
+  ]);
+  assert.equal(turnedOff.ok, true, 'the read-only-setting check is skipped when readOnly is false');
+  assert.equal(describe.ok, true);
+  assert.equal(stillRefused.ok, false, 'and it stays on by default');
+
+  // SQL Server: Assert-PlainSql has no off switch.
+  const sql = [':!! dir', ':r c:\\x.sql', '!! dir', 'EXIT'];
+  verdicts('Assert-PlainSql', sql).forEach((r, i) => assert.equal(r.ok, false, sql[i]));
+
+  // Redis: one command, whose first word is a command name; the read allow-list is what readOnly false lifts.
+  const [write, del, quoted, readOnlyWrite] = call('ConvertTo-RedisArgs', [
+    ['SET greeting "hello world"', false],
+    ['DEL a b', false],
+    ["HSET h f 'two words'", false],
+    ['SET a b', true],
+  ]);
+  assert.deepEqual(write.value, ['SET', 'greeting', 'hello world']);
+  assert.deepEqual(del.value, ['DEL', 'a', 'b']);
+  assert.deepEqual(quoted.value, ['HSET', 'h', 'f', 'two words']);
+  assert.equal(readOnlyWrite.ok, false);
+  assert.match(readOnlyWrite.error, /not a read command/);
+  const redis = [['-h other.example.com PING', false], ['--rdb /tmp/x', false], ['-u redis://other PING', false], ['SET a b\nFLUSHALL', false], ['SET a "b', false], ['', false], ['"-h" x', false]];
+  call('ConvertTo-RedisArgs', redis).forEach((r, i) => {
+    assert.equal(r.ok, false, JSON.stringify(redis[i][0]));
+    assert.match(r.error, /^\[2\]/);
+  });
+});
+
+test('Get-ReadOnlyLabel: NO(local) in write mode, verified otherwise', { skip }, () => {
+  const [local] = call('Get-ReadOnlyLabel', [[]], '$script:WriteMode = $true; $script:WriteGrantsAccepted = $false');
+  assert.equal(local.value, 'NO(local)');
+  const [proven] = call('Get-ReadOnlyLabel', [[]], '$script:WriteMode = $false; $script:WriteGrantsAccepted = $false');
+  assert.equal(proven.value, 'verified');
+});
+
+test('Split-Server: sqlserver host without instance, port or IPv6 brackets', { skip }, () => {
+  const [plain, tcp, v6, v6Port, v6Bare] = call('Split-Server', [
+    ['sqlserver', 'db.example.com,1433', null],
+    ['sqlserver', 'tcp:db.example.com\\inst,1433', null],
+    ['sqlserver', '[::1]', null],
+    ['sqlserver', '[2001:db8::1],1433', null],
+    ['sqlserver', '::1', null],
+  ]);
+  assert.equal(plain.value.Host, 'db.example.com');
+  assert.equal(tcp.value.Host, 'db.example.com');
+  assert.equal(v6.value.Host, '::1');
+  assert.equal(v6Port.value.Host, '2001:db8::1');
+  assert.equal(v6Bare.value.Host, '::1');
+});
+
+test('Assert-PgDatabaseName: = and a postgres:// prefix are exit 2, plain names pass', { skip }, () => {
+  const names = ['host=other.example.com dbname=x', 'a=b', 'postgres://u@h/db', 'PostgreSQL://h/db', 'sales', 'my-db_2'];
+  const results = call('Assert-PgDatabaseName', names.map((n) => [n]));
+  for (const i of [0, 1, 2, 3]) {
+    assert.equal(results[i].ok, false, names[i]);
+    assert.match(results[i].error, /^\[2\].*connection string/);
+    assert.doesNotMatch(results[i].error, /other\.example|postgres:\/\/u/, 'the message never repeats the name');
+  }
+  assert.equal(results[4].ok, true);
+  assert.equal(results[5].ok, true);
+});
+
+test('Get-RawDatabaseList: the registry strings as written, never expanded values', { skip }, () => {
+  const prelude = "$env:DBRO_T_DB = 'resolved-value'";
+  const [raw, none, redis] = call('Get-RawDatabaseList', [
+    [{ databases: ['${DBRO_T_DB}', 'Other'] }, 'sqlserver'],
+    [{ url: 'x' }, 'postgres'],
+    [{ server: 'h' }, 'redis'],
+  ], prelude, ['Get-Setting']);
+  assert.equal(raw.value, '${DBRO_T_DB}, Other');
+  assert.doesNotMatch(none.value, /x/);
+  assert.equal(redis.value, '0');
+});
+
+// ---- the script as a process: wiring that the lifted functions cannot show ---------------------------
+
+/**
+ * Runs a copy of db-ro.ps1 installed as <dir>/scripts/db-ro.ps1, with the registry at <dir>/db-targets.json: the
+ * only place the script reads. Nothing here may reach a database.
+ */
+function run(registry, args, env = {}) {
+  const dir = dirname(writeRegistry(registry));
+  mkdirSync(join(dir, 'scripts'));
+  copyFileSync(SCRIPT, join(dir, 'scripts', 'db-ro.ps1'));
+  const r = spawnSync('pwsh', ['-NoProfile', '-File', join(dir, 'scripts', 'db-ro.ps1'), ...args], {
+    encoding: 'utf8',
+    env: { ...process.env, ...env },
+  });
+  return { status: r.status, out: r.stdout, err: r.stderr };
+}
+
+const ENDPOINTS = {
+  sql: (host) => ({ server: `${host},1433`, user: 'u', password: '${DBRO_T_PWD}', databases: ['Db'] }),
+  postgres: (host) => ({ url: `postgres://u:\${DBRO_T_PWD}@${host}:5432/db` }),
+  redis: (host) => ({ server: `${host}:6379`, password: '${DBRO_T_PWD}' }),
+};
+const CANARY = 'canary-Secret-4711';
+
+test('db-ro.ps1: readOnly false on a non-dev host is exit 2 before any client runs, and no secret is printed', { skip }, () => {
+  for (const engine of ['sql', 'postgres', 'redis']) {
+    const registry = { projects: { p: { root: 'C:\\p', local: { readOnly: false, [engine]: ENDPOINTS[engine]('db.example.com') } } } };
+    const r = run(registry, ['-Env', 'local', '-Project', 'p', '-Query', engine === 'redis' ? 'SET a b' : 'select 1'], { DBRO_T_PWD: CANARY });
+    assert.equal(r.status, 2, `${engine}: ${r.err}`);
+    assert.match(r.err, /write access is only for dev hosts/, engine);
+    assert.ok(!(r.out + r.err).includes(CANARY), `${engine}: the secret reached the output`);
+  }
+});
+
+test('db-ro.ps1: escape filters hold on a dev host with readOnly false', { skip }, () => {
+  const cases = [
+    ['sql', ':!! dir', /sqlcmd command|shell escape/],
+    ['postgres', '\\! ls', /backslash/],
+    ['redis', '-h other.example.com PING', /command name/],
+  ];
+  for (const [engine, query, expected] of cases) {
+    const registry = { projects: { p: { root: 'C:\\p', local: { readOnly: false, [engine]: ENDPOINTS[engine]('localhost') } } } };
+    const r = run(registry, ['-Env', 'local', '-Project', 'p', '-Query', query], { DBRO_T_PWD: CANARY });
+    assert.equal(r.status, 2, `${engine}: ${r.err}`);
+    assert.match(r.err, expected, engine);
+    assert.ok(!(r.out + r.err).includes(CANARY), `${engine}: the secret reached the output`);
+  }
+});
+
+test('db-ro.ps1: no -Registry parameter, and no home folder or variable moves the registry', { skip }, () => {
+  // The registry the script reads sits at <dir>/db-targets.json: read-only on a non-dev host. A hostile file in a
+  // fake home (USERPROFILE, HOME) declares that host a dev host with readOnly false: it must not be read.
+  // `SET a b` is refused by the Redis read allow-list before any connection; write mode would not refuse it.
+  const real = { projects: { p: { root: 'C:\\p', local: { redis: ENDPOINTS.redis('db.example.com') } } } };
+  const hostile = { devHosts: ['db.example.com'], projects: { p: { root: 'C:\\p', local: { readOnly: false, redis: ENDPOINTS.redis('db.example.com') } } } };
+  const home = mkdtempSync(join(tmpdir(), 'db-ro-home-'));
+  mkdirSync(join(home, '.claude'));
+  writeFileSync(join(home, '.claude', 'db-targets.json'), JSON.stringify(hostile));
+  const args = ['-Env', 'local', '-Project', 'p', '-Query', 'SET a b'];
+  const moved = run(real, args, { USERPROFILE: home, HOME: home, DBRO_T_PWD: CANARY });
+  assert.equal(moved.status, 2, moved.err);
+  assert.match(moved.err, /not a read command/);
+  assert.doesNotMatch(moved.err, /write access is only for dev hosts/);
+  assert.ok(!(moved.out + moved.err).includes(CANARY), 'the secret reached the output');
+
+  // -Registry is gone: the script has no CmdletBinding, so the unknown name lands in $args and the file is never read.
+  const dir = mkdtempSync(join(tmpdir(), 'db-ro-reg-'));
+  const other = join(dir, 'other.json');
+  writeFileSync(other, JSON.stringify(hostile));
+  const named = run(real, ['-Registry', other, ...args], { DBRO_T_PWD: CANARY });
+  assert.equal(named.status, 2, named.err);
+  assert.match(named.err, /not a read command/);
+  assert.doesNotMatch(named.err, /write access is only for dev hosts/);
+});
+
+test('db-ro.ps1: a database error lists the registry strings as written, never a resolved value', { skip }, () => {
+  const registry = { projects: { p: { root: 'C:\\p', prod: { sql: { server: 'db.example.com,1433', user: 'u', password: 'x', databases: ['${DBRO_T_SECRET_DB}'] } } } } };
+  const r = run(registry, ['-Env', 'prod', '-Project', 'p', '-Db', 'zzz', '-Query', 'select 1'], { DBRO_T_SECRET_DB: CANARY });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /Allowed: \$\{DBRO_T_SECRET_DB\}/);
+  assert.ok(!(r.out + r.err).includes(CANARY), 'the resolved value reached the output');
+});
+
+test('db-ro.ps1: a Postgres database name that is a connection string is exit 2 before any client runs', { skip }, () => {
+  for (const name of ['host=other.example.com', 'postgres://u@example.com/db']) {
+    const registry = { projects: { p: { root: 'C:\\p', prod: { postgres: { server: 'db.example.com', user: 'u', password: '${DBRO_T_PWD}', databases: [name] } } } } };
+    const r = run(registry, ['-Env', 'prod', '-Project', 'p', '-Query', 'select 1'], { DBRO_T_PWD: CANARY });
+    assert.equal(r.status, 2, r.err);
+    assert.match(r.err, /connection string/);
+    assert.ok(!(r.out + r.err).includes(CANARY), 'the secret reached the output');
+  }
+});
+
+test('db-ro.ps1: an old-shape registry is exit 2 pointing at the example; an unset ${NAME} names the variable only', { skip }, () => {
+  const old = run({ targets: { 'C:\\p': { prod: { server: 'h' } } } }, ['-Env', 'prod', '-Probe']);
+  assert.equal(old.status, 2);
+  assert.match(old.err, /old 'targets' shape.*db-targets\.example\.json/);
+
+  const registry = { projects: { p: { root: 'C:\\p', prod: { sql: ENDPOINTS.sql('db.example.com') } } } };
+  const r = run(registry, ['-Env', 'prod', '-Project', 'p', '-Probe'], { DBRO_T_PWD: '' });
+  assert.equal(r.status, 2);
+  assert.match(r.err, /'password' of prod\/sqlserver references \$\{DBRO_T_PWD\}, which is not set/);
 });

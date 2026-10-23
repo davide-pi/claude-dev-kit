@@ -38,7 +38,7 @@ Not for: plan or index analysis on a slow query (your analysis mode, spawned by 
 | `"<sql>"` (quoted, reads as SQL) | run it |
 | a bare identifier | table → columns (type, nullability), primary key, foreign keys in and out, indexes, row count; schema → its tables with row counts |
 | `--db <name>` | override the database resolved from the project's config |
-| `--env <target>` | a named target in the local `db-targets.json` → `db-ro.ps1 -Env <target>`; absent → the project's dev connection |
+| `--env <env> [--engine <e>]` | an environment of the project in the local `db-targets.json` → `db-ro.ps1 -Env <env> [-Engine <e>]` (`--engine` `sql`, `postgres` or `redis` when the environment holds several); absent → the project's dev connection |
 
 ### Engine and connection — first match wins
 
@@ -58,9 +58,10 @@ Integrated security → `-E`. A password in a connection string is masked before
 | --- | --- |
 | `SELECT`, `WITH … SELECT`, catalog views, `sp_help*`, `EXPLAIN` without `ANALYZE`, Redis read commands | run |
 | DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements, Redis writes | refuse: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is the user's to type |
-| `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead (`KEYS` blocks the server); `db-ro.ps1` refuses them |
+| `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead (`KEYS` blocks the server); `db-ro.ps1` refuses them on a read-only target |
 | a read on a table of unknown size | `COUNT(*)` first, then `TOP 50` / `LIMIT 50`, projected to the columns that answer |
 | a non-dev host | only `db-ro.ps1`, the statement in single quotes (`-Query 'SELECT …'`, a quote doubled): `$`, `(`, `@` or a backtick outside them prompts; exit `3` = read-only could not be proven → stop, report its message; exit `4` = the credential holds write grants → return the grant list and ask the caller **once per target**; on a yes re-run with `-AcceptWriteGrant` (the permission prompt asks the user, the hook never auto-approves it; the filter is then the only layer: say so in the report); never another route |
+| header `readonly=NO(local)` | a dev target opened for writes: run no writing statement the request did not ask for |
 
 ### Report — returned to the caller, ≤ 55 lines
 

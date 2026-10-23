@@ -38,6 +38,7 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
   grant list to the caller and ask **once per target per session**; on a yes, re-run with
   `-AcceptWriteGrant`, which leaves only the client-side filter (reads only) and says so in its
   header: say so in your report too. Never look for another login, client or path around it.
+- **`readonly=NO(local)` in the header** = a dev target opened for writes: run no writing statement the request did not ask for.
 - **The hook denies anything else** (a raw client at a non-dev host, a destructive statement): read
   the reason, do not retry around it.
 - **Estimated plan first**; an actual plan only on a statement proven to be a pure read, and only
@@ -51,7 +52,7 @@ string shape, migration provider, dialect) and use that engine's vocabulary.
 | --- | --- |
 | dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, not `KEYS` |
 | client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
-| anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Db <name>] -Query '<sql or one redis command>'`; `-Probe` alone reports whether the credential is read-only server-side |
+| anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Engine <e>] [-Db <name>] -Query '<sql or one redis command>'`; `-Probe` alone reports whether the credential is read-only server-side |
 
 Write the `db-ro.ps1` path exactly as above, literal `~` in either shell: the allow rule in
 `settings.json` matches the command text, so `$HOME\...` would prompt. Pass the SQL or redis command in
