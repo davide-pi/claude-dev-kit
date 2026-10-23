@@ -167,10 +167,11 @@ for (const rel of allFiles.filter((f) => f.startsWith('commands/'))) {
 // grill-me is not here: it fires on natural phrasing ("poke holes in this").
 // Named with a slash in the description on purpose, yet invocable by the model: `/code-review` is also
 // what "review this" resolves to (CLAUDE.md routes every review through it). `grill-me` is meant to
-// trigger from natural language (owner decision, eval r2), so it stays model-invocable too.
-const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me']);
+// trigger from natural language (owner decision, eval r2), so it stays model-invocable too. `worklog`
+// fires when the owner asks in prose to log hours (owner decision): its two confirmation gates guard the write.
+const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me', 'worklog']);
 const EXPLICIT_TRIGGER = [
-  'worklog', 'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard',
+  'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard',
   'docs-sync', 'retro', 'estimate',
 ];
 for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
