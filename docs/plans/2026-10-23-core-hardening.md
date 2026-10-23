@@ -105,24 +105,28 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
   inline: first fixer `-Since` = startHead. Verify: `snapshot.ps1: a new untracked file and an edit appear in files;
   the real index is unchanged; churn counts the lines since -Since`; `script: round 2 reviewers get git diff t1 t2`.
   Depends: T3.
-- [ ] **T8 soft cap + history + continue.** `capLimit(resolutions) = 3 * (1 + count(continue))`; a FIX decision when
-  the number of fix cycles already run `>= capLimit` → STALL `cap` (RECHECK/coverage reruns not counted) + `history = findingHistory(roundLog)`; every STALL carries `history`. Resume text
-  lists `continue?`, `widen?`; header comment "soft cap 3, +3 per continue". Verify: `capLimit: 3, 6, 9`; `script:
-  three rounds each finding a new P2 → STALL "cap" with history; resume { round: 3, continue: true } runs up to
-  round 6`. Depends: T7.
-- [ ] **T9 churn early stall.** `fixChurns` from fixer snapshots (nulls skipped); `churnGrowing(churns)` = last 3
-  strictly increasing → STALL `churn`; `roundLog[i].churn`. Verify: `churnGrowing: 10,20,30 true; 10,30,20 false;
-  <3 or null false`; script test. Depends: T3, T10.
+- [x] **T8 soft cap + history + continue.** `capLimit(extensions) = 3 * (1 + extensions)`, `extensions` = the `continue: true` resolutions
+  given on a round that stalled on the cap; a FIX decision when the number of fix cycles already run `>= capLimit` → STALL `cap`
+  (RECHECK/coverage reruns not counted) + `history = findingHistory(roundLog)` (only the ids that were tracked); every STALL carries
+  `history`. Resume text lists `continue?`, `widen?`; header comment "soft cap 3, +3 per continue". Verify: `capLimit: 3, 6, 9`; `script:
+  four rounds each finding a new P2 → STALL "cap" at round 4 (three fix cycles run) with history; resume { round: 4, continue: true }
+  runs up to the next cap STALL at round 7 (six fix cycles)`. Depends: T7.
+- [x] **T9 churn stall.** `fixChurns` from fixer snapshots (nulls skipped); `churnGrowing(churns)` = last 3 strictly increasing.
+  The churn is judged at a round's decision, after its reviewers read the last fix, and only while that decision is still FIX: STALL
+  `churn`; `roundLog[i].churn`. A resolution on that round works as on any other: `accept` closes the open ids (the fix was read),
+  guidance/retry go to the fixer, `continue` only restarts the churn count (3 more fix cycles only when the cap was hit on that
+  round too, reported then as `cap`). Verify: `churnGrowing: 10,20,30 true; 10,30,20 false; <3 or null false`; `script: churns 30,10,20,30
+  with continue at round 4 → STALL "churn" at round 5; accept on round 5 ends OK after reviewers read git diff t4 t5`. Depends: T3, T10.
 
 ## Phase 4 — coverage and recheck (C3, C11)
 
-- [ ] **T11 coverage.** `unreviewedFiles(answers, reviewers, groups, pending, root, changed)`: group reviewer clears
+- [x] **T11 coverage.** `unreviewedFiles(answers, reviewers, groups, pending, root, changed)`: group reviewer clears
   only assigned files listed in `filesReviewed`; whole reviewer clears listed `changed` files; specialist clears
   nothing; null = all unread. Pure `coverageAction({ unread, retried }) → ok|rerun|stall`; rerun only the owners of
   unread files, in full; stall `gap` + `stall.files`. Specialist null → STALL `gap` naming it. `gaps` entries per
   unread file. Verify: `unreviewedFiles: a group reviewer that omits a file from filesReviewed leaves it unread`;
   `script: a specialist that returns nothing is a STALL "gap"`; flip 584/568. Depends: T3, T10.
-- [ ] **T12 targeted RECHECK, closed re-asks (C11).** `mergeReviews` returns `answeredBy`; pure
+- [x] **T12 targeted RECHECK, closed re-asks (C11).** `mergeReviews` returns `answeredBy`; pure
   `recheckReviewers({ answers, reviewers, asked })` → keys to rerun; pure `idsToAsk({ tracked, known, lastFixFiles,
   skipped, root })` → open ids + closed ids only on files the last fix touched; accepted never. Verify:
   `recheckReviewers: L round where only B skipped F2 → only B reruns`; `idsToAsk: a closed finding on a file the last
