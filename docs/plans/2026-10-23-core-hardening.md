@@ -23,7 +23,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 - **One source of git truth (C7; feeds C2, C3, C6, C10).** Every implementer/fixer run ends with
   `snapshot.ps1 -Since <previous tree | start head>` → `tree`, `files` (vs start.head + untracked − start.dirty),
-  `churn` (shortstat lines vs `-Since`). The workflow uses `snapshot.files` as `changed`; reviewers from round 2 run
+  `churn` (insertions + deletions from `git diff --numstat <-Since> <tree>`; the shortstat text is localized). The workflow uses `snapshot.files` as `changed`; reviewers from round 2 run
   `git diff <prevTree> <tree>`.
 - **New pure functions** (between `// --- pure:begin` / `// --- pure:end`, added to the test's destructure list in the
   same task): `reviewersFor`, `sizeFor`, `readReport`, `verifyGate`, `capLimit`, `findingHistory`, `churnGrowing`,
@@ -76,19 +76,19 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 ## Phase 2 — classification
 
-- [ ] **T5 style never blocks; widen (C5 partial, C6).** `classify(f, files, { dirty, root, touched })`: `clean-code`,
+- [x] **T5 style never blocks; widen (C5 partial, C6).** `classify(f, files, { dirty, root, touched })`: `clean-code`,
   `convention` never blocking (`isNeverBlocking`); P1/P2 outside, non-scope, path in `touched` or `causedByChange` →
   `'widen'`. `decideRound` returns `widen`, any → STALL `why: 'widen'`. `accept` on widen → outOfScope accepted;
   `widenedFiles(files, resolutions, round)` applies widen from that round. Verify: classify unit test; `script: widen
   STALL, resumed with { round, widen } reaches OK and round-1 prompts are byte-identical`. Depends: T3 (T10 for
   `touched`; until then declared `changed`).
-- [ ] **T6 hunk-level scope + noticed (C12).** Reviewer perimeter rule gains "any hunk the brief does not require, even
+- [x] **T6 hunk-level scope + noticed (C12).** Reviewer perimeter rule gains "any hunk the brief does not require, even
   inside a perimeter file, is category `scope`". `decideRound` returns `scopeReverts`; recorded as
   `{ source: 'scope-revert', title, path, why }` proposals; `noticed` pushed as `{ source: 'noticed', … }`;
   `result().outOfScope = [...notes, ...noticed, ...outOfScope, ...proposals]`. Fixer prompt: revert scope hunks.
   Verify: `script: an unrequested hunk inside the perimeter is reverted by the fixer and listed as a scope-revert
   proposal; noticed items reach outOfScope`. Depends: T3.
-- [ ] **T7 false positives (C5).** Pure `rejectionLedger({ rejected, counts }) → { counts, challenge, notReproduced }`.
+- [x] **T7 false positives (C5).** Pure `rejectionLedger({ rejected, counts }) → { counts, challenge, notReproduced }`.
   Rejected id not counted fixed; next round CHALLENGE block (open = keep + why, closed = withdraw). `decideRound`
   inputs `challenged`, `rejections`, `notReproduced`: withdrawn → closed; kept not-reproduced → STALL
   `not-reproduced`; kept with count ≥ 2 → STALL `disputed`; kept count 1 → back to toFix with the reviewer's note.

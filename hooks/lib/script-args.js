@@ -1,8 +1,8 @@
 /**
- * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `db-ro.ps1`).
+ * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`).
  *
- * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter
- * script) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
+ * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter and snapshot
+ * scripts) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
  * with an allowlist grammar, not a blacklist: both shells run code in places a list of known
  * constructs misses (PowerShell argument mode evaluates `(…)`, `@(…)`, `$x.Method()`; Bash runs
  * `<(…)`, `>(…)`, `$(…)`, backticks). What may pass without a prompt is:
@@ -26,7 +26,7 @@
 
 const { splitSegments } = require('./segments');
 
-const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+(["']?)~[\\/]\.claude[\\/]scripts[\\/](perimeter|db-ro)\.ps1(?=$|[\s"'])/i;
+const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+(["']?)~[\\/]\.claude[\\/]scripts[\\/](perimeter|snapshot|db-ro)\.ps1(?=$|[\s"'])/i;
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
 const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
 const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
@@ -69,7 +69,7 @@ function tokenize(text) {
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
 function checkScriptArgs(command) {
-  if (!/\.claude[\\/]scripts[\\/](?:perimeter|db-ro)\.ps1/i.test(command)) return null;
+  if (!/\.claude[\\/]scripts[\\/](?:perimeter|snapshot|db-ro)\.ps1/i.test(command)) return null;
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;

@@ -13,7 +13,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, realpathSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, existsSync, rmSync, realpathSync, renameSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -103,4 +103,10 @@ test('snapshot.ps1: usage errors exit 2: no -Since, outside a repository, an unk
   assert.equal(snapshot(repo, '-Since', head, '-Start', 'no-such-rev').status, 2);
   assert.equal(snapshot(sandbox, '-Since', head).status, 2);
   assert.match(snapshot(repo).stderr, /snapshot\.ps1: /);
+});
+
+test('snapshot.ps1: a moved file lists both its old and its new path', { skip }, () => {
+  const { repo, head } = repoWith('main5');
+  renameSync(join(repo, 'a.txt'), join(repo, 'moved.txt'));             // an exact rename: git would fold it into one path
+  assert.deepEqual([...json(snapshot(repo, '-Since', head, '-Start', head)).files].sort(), ['a.txt', 'moved.txt']);
 });

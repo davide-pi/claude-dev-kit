@@ -8,7 +8,7 @@
   Prints one line: {"tree":"<sha>","files":["a.cs",...],"churn":<n>}
     tree   the working tree now, untracked files included (ignored ones are not), as a tree object
     files  repo-relative paths that differ between -Start and that tree (new untracked files are in it),
-           minus the -Dirty entries
+           minus the -Dirty entries; a moved file lists both paths (--no-renames)
     churn  insertions + deletions of `git diff --numstat <Since> <tree>` (binary files count 0)
 
   -Since  the tree (or commit) the change is measured from: the previous snapshot, or the start head the first time.
@@ -79,7 +79,7 @@ function IsDirty([string]$Path) {
   return $false
 }
 
-$files = @(& git -c core.quotepath=off diff --name-only $Start $tree | Where-Object { $_ } | Where-Object { -not (IsDirty $_) })
+$files = @(& git -c core.quotepath=off diff --no-renames --name-only $Start $tree | Where-Object { $_ } | Where-Object { -not (IsDirty $_) })
 # numstat, not --shortstat: the shortstat text is localized ("inserzioni", "cancellazione") and would count 0; a binary file is "-"
 $churn = 0
 foreach ($line in (& git diff --numstat $Since $tree)) {

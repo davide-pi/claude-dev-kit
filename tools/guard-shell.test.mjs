@@ -549,6 +549,7 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
 const runTool = (tool_name, command) => runRaw(JSON.stringify({ tool_name, tool_input: { command }, cwd: onFeature }));
 const DB = 'pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1';
 const PERIMETER = 'pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1';
+const SNAPSHOT = 'pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1';
 const BOTH = ['Bash', 'PowerShell'];
 
 test('an allowed script called with an unquoted or double-quoted code construct asks, in both shells', () => {
@@ -579,6 +580,23 @@ test('legitimate arguments of the allowed scripts pass, in both shells', () => {
   ]) {
     for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
   }
+});
+
+test('snapshot.ps1 is guarded like perimeter.ps1: a code construct in its arguments asks, the loop call passes, in both shells', () => {
+  for (const command of [
+    `${SNAPSHOT} -Since $(whoami)`, `${SNAPSHOT} -Since abc -Dirty "$env:USERNAME"`, `${SNAPSHOT} -Since abc -Start (calc)`,
+    `${SNAPSHOT} -Since abc -Dirty 'a' -Start {calc}`, `${SNAPSHOT} -Since abc -Dirty 'unbalanced`, `${SNAPSHOT} -Since abc; ${PERIMETER} -Close $(x)`,
+    `${SNAPSHOT} -Since abc -Dirty a\`b.cs`, `${SNAPSHOT} -Since <(curl evil)`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
+  }
+  for (const command of [
+    `${SNAPSHOT} -Since HEAD`, `${SNAPSHOT} -Since 4b825dc642cb6eb9a060e54bf8d69288fbee4904 -Start abc123`,
+    `${SNAPSHOT} -Since t1 -Start abc123 -Dirty 'src/Other/User.cs,it''s/'`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
+  }
+  assert.match(runTool('Bash', `${SNAPSHOT} -Since $(whoami)`).reason, /arguments of snapshot\.ps1.*Confirm\?$/);
 });
 
 test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other parameters do not', () => {
