@@ -329,7 +329,7 @@ silently do not exist.
 - The pane counts as open for the status line only while the mod refreshes its state file (every 15 s, `at`); an `open: true` older than 45 s is ignored, so a reloaded mod never leaves the line hidden.
 - The status line caches the git results per folder for 5 s under `~/.claude/.cache/` and writes its rate-limit cache only when a value changes, so a short `refreshInterval` stays cheap.
 - `statusline.js` works without the mod: no state file means no cockpit segments and the line never hides.
-- Check: `claude plugin test mods/cockpit`, `claude plugin validate mods/cockpit` and `node mods/cockpit/statusline/check.js` (renders the status line on a sample payload in each cockpit state).
+- Check: `claude plugin test mods/cockpit`, `claude plugin validate mods/cockpit` and `node --test tools/statusline-cockpit.test.mjs` (the status line on a sample payload in each cockpit state).
 
 ## MCP servers
 

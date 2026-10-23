@@ -19,4 +19,3 @@ Thumbs.db
 
 # Engine-generated declarations and the check's scratch dir inside a mod
 /mods/*/.claude-plugin/types/
-/mods/*/statusline/tmp-config/
