@@ -19,7 +19,8 @@
  * announces again. No usable number (no response yet, just compacted) or no snapshot: silent.
  *
  * Both cache families are pruned after a few days whenever a nudge fires (once per step at most, per
- * session), so one file per session never accumulates for good.
+ * session), so one file per session never accumulates for good. The statusline prunes the snapshots
+ * (`context-*`) sooner, after 6 h, past which this hook distrusts them anyway.
  *
  * Always exits 0; any error is silence.
  *
