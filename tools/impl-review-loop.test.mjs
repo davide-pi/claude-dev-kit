@@ -596,6 +596,11 @@ test('script: every implementer, reviewer and fixer prompt carries the tool-call
   assert.match(calls.find(c => c.opts.label === 'implement').prompt, /at most 120 tool calls/);
 });
 
+test('script: every implementer, reviewer and fixer prompt names the repository to work in', async () => {
+  const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
+  for (const c of calls) assert.ok(c.prompt.includes(`REPOSITORY: ${ROOT}.`), c.opts.label);
+});
+
 test('script: more than 8 changed files, reviewer A fans out per group; B stays whole; the budget is on each', async () => {
   const { out, calls } = await run(manyArgs(), [review([]), review([]), review([])], [manyImpl]);
   assert.equal(out.status, 'OK');

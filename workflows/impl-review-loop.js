@@ -562,7 +562,9 @@ const IMPL_BUDGET = budgetText(120)
 const REVIEW_BUDGET = budgetText(35)
 const FIX_BUDGET = budgetText(80)
 
-const RULES = 'You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.'
+// The agents start in the session's folder, which may be another repo or no repo at all: the repo is named in
+// every prompt, or relative paths, the verify command and snapshot.ps1 land in the wrong place.
+const RULES = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
 const REPORT_TEXT = 'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.'
 
 // The last step of every implementer and fixer run: scripts/snapshot.ps1 snapshots the working tree (throwaway index,
