@@ -66,7 +66,10 @@ Minutes changed → re-round, reprint, ask again — until confirmed.
 - **Always a link with the title, never a bare number** — parent, Task and recap alike. Text
   `<Tipo> #<id> — <titolo>` read at runtime; URL from the item's HTML link or `_workitems/edit/<id>`
   with the org host and project discovered at runtime.
-- Below the table, row by row, the **PRs** and **commits** to link (or "nessuno").
+- Below the table, row by row, the **PRs** and **commits** to link, as a table `| # | PR | Commit |`
+  ("nessuno" in the cell), never a bulleted list.
+- Choices made or to confirm (rows merged, hours split between Tasks, why an item was picked): a table
+  `| # | Scelta | Motivo |`, never bullets.
 - 0h rows are omitted but recalled in a note, so the measured total still adds up.
 
 Then ask for changes (item, project, create or not, hours, PRs, commits). A change → redo the affected
