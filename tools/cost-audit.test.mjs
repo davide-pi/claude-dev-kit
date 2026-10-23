@@ -131,3 +131,16 @@ test('--help prints the usage and exits 0', () => {
     assert.match(r.stdout, /^usage: node cost-audit\.mjs/);
   }
 });
+
+test('the unproven-row and tail-truncated done-claim rules are counted with the row state as word', () => {
+  const { projects, log } = fixture();
+  const day = at(1);
+  writeFileSync(log, [
+    { at: day, rule: 'unproven-row', word: 'fatto' },
+    { at: day, rule: 'unproven-row', word: 'fatto' },
+    { at: day, rule: 'tail-truncated', word: 'failed' },
+  ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+  const r = audit({ projects, log, now: NOW });
+  assert.deepEqual(Object.fromEntries(r.doneClaim), { 'unproven-row / fatto': 2, 'tail-truncated / failed': 1 });
+  assert.match(report(r), /2\s+unproven-row \/ fatto/);
+});

@@ -129,8 +129,8 @@ test('MultiEdit and Write count; Read and other events do not', () => {
   assert.equal(edit(root, 'src/Other.cs', { hook_event_name: 'UserPromptSubmit' }), '');
 });
 
-test('inside a subagent the line says Open questions, since a subagent never asks', () => {
-  assert.match(edit(repo(), 'src/Other.cs', { agent_id: 'a1' }), /Open questions/);
+test('inside a subagent the line says Noticed, since a subagent never asks', () => {
+  assert.match(edit(repo(), 'src/Other.cs', { agent_id: 'a1' }), /Noticed/);
 });
 
 test('through nudges.js the same line comes out as additionalContext', () => {

@@ -75,11 +75,12 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 ```text
 ### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
-- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code
+- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
 - risk: alto | medio | basso        (todo only)
 - effort: S | M | L                 (todo only)
+- causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
 - for the author: yes — "<short Italian question>" | no

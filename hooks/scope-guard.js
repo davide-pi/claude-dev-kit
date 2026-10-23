@@ -21,7 +21,7 @@
  * or a file outside the repository: the hook says nothing.
  *
  * A nudge, never a block: the edit has happened, the line tells the session to note it and ask the
- * user. Inside a subagent (`agent_id` in the payload) the line says to note it under Open questions
+ * user. Inside a subagent (`agent_id` in the payload) the line says to note it under Noticed
  * instead, because a subagent never asks the user.
  *
  * Wired through `nudges.js` (one node process for every PostToolUse nudge); run alone
@@ -135,7 +135,7 @@ function run(payload) {
   if (!perimeter || perimeter.entries.some((e) => entryRegex(e).test(rel))) return null;
 
   const what = payload.agent_id
-    ? 'annotalo tra le Open questions e non toccarlo: un subagent non chiede all\'utente.'
+    ? 'annotalo sotto Noticed e non toccarlo: un subagent non chiede all\'utente.'
     : 'annotalo come proposta e chiedi all\'utente prima di tenere la modifica.';
   return {
     hookSpecificOutput: {
