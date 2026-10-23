@@ -20,6 +20,7 @@ import {
   fmtCostDelta,
   gridWidths,
   modelFamily,
+  parseReset,
   pctCell,
   rateColor,
   resetClock,
@@ -42,9 +43,17 @@ const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
 const MAX_AGENT_ROWS = 10
+const MAX_HISTORY_ROWS = 10
 const MAX_LIVE_ROWS = 5
+/** Below this pane width the tab bar uses the short labels: the full bar is 48 cells at its widest. */
+const TAB_SHORT_BELOW = 48
+/** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
+const BUTTON_CHROME = 4
+const BUTTON_GAP = 1
 /** The context fill from which the Sessione view warns and offers to compact. */
 const CTX_WARN_PCT = 80
+const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Agenti', work: 'Lavoro', repo: 'Repo' }
+const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Agen', work: 'Lav', repo: 'Repo' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const TASK_TIME_W = 6
@@ -54,17 +63,23 @@ const TASK_TIME_W = 6
 const dim = (t: string): Span => ({ t, dim: true })
 const sp = (t: string, c?: string, bold?: boolean): Span => ({ t, c, bold })
 
-function line({ Text }: Ui, spans: readonly Span[]): RenderElement {
-  return (
-    <Text wrap="truncate">
-      {spans.map(s => (
-        <Text color={s.c} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
-          {s.t}
-        </Text>
-      ))}
+/** One `Text` per span: the children of a row and of a pressable row. */
+function spanNodes({ Text }: Ui, spans: readonly Span[]): RenderElement[] {
+  return spans.map(s => (
+    <Text color={s.c} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
+      {s.t}
     </Text>
-  )
+  ))
 }
+
+function line(ui: Ui, spans: readonly Span[]): RenderElement {
+  const { Text } = ui
+  return <Text wrap="truncate">{spanNodes(ui, spans)}</Text>
+}
+
+/** Cells a row of terminal Buttons takes with these labels. */
+const buttonRowWidth = (labels: readonly string[]): number =>
+  labels.reduce((n, l) => n + [...l].length + BUTTON_CHROME, 0) + BUTTON_GAP * Math.max(0, labels.length - 1)
 
 const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
 const padStart = (s: string, n: number) => ' '.repeat(Math.max(0, n - [...s].length)) + s
@@ -87,8 +102,7 @@ type RateRow = { rem: number; used: number; color: string; resetMs: number | und
 function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow | undefined {
   const w = s.rateLimits.find(r => r.kind === kind)
   if (!w) return undefined
-  const parsed = w.resetsAt ? Date.parse(w.resetsAt) : Number.NaN
-  const resetMs = Number.isNaN(parsed) ? undefined : parsed
+  const resetMs = parseReset(w.resetsAt)
   const windowSec = kind === 'five_hour' ? FIVE_HOURS : SEVEN_DAYS
   const rem = Math.max(0, Math.min(100, Math.round(100 - w.percentUsed)))
   return {
@@ -203,7 +217,7 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
   const isRunning = a.status === 'running'
   const end = a.endedAt ?? now
   return [
-    isRunning ? sp('◐', COLORS.blue) : sp('✓', COLORS.green),
+    isRunning ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green),
     sp(' '),
     depth > 0 ? sp(pad(truncMiddle(prefix + a.type, nameW), nameW), COLORS.dim) : sp(pad(truncMiddle(a.type, nameW), nameW)),
     sp(' '),
@@ -249,6 +263,9 @@ export type PaneActions = {
   runWorklog: () => void
   /** Copies `branch` on the surface the press came from. */
   copyBranch: (branch: string, surface: RenderSurface) => void
+  /** Puts the agent's transcript in the main view. */
+  openAgent: (agentId: string) => void
+  toggleHistory: () => void
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, actions: PaneActions): RenderElement {
@@ -270,6 +287,13 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
 
   // Breathing room: an empty row between sections and under a title.
   const gap = () => <Text> </Text>
+
+  // An agent row is a Button: a press puts the agent's transcript in the main view.
+  const agentButton = (key: string, a: CockpitAgent, depth: number) => (
+    <Button key={key} plain onPress={() => actions.openAgent(a.id)}>
+      {spanNodes(ui, agentRow(a, depth, s.now, width))}
+    </Button>
+  )
 
   const tab = s.tab ?? 'session'
   const agents = visibleAgents(s)
@@ -293,12 +317,13 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
       <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />
     )
   }
+  const names = width < TAB_SHORT_BELOW ? TAB_NAMES_SHORT : TAB_NAMES
   const tabBar = (
     <Box columnGap={1}>
-      {tabButton('session', 'Sessione')}
-      {tabButton('agents', running.length > 0 ? `Agenti ${running.length}` : 'Agenti')}
-      {tabButton('work', 'Lavoro', wlRows.length > 0)}
-      {tabButton('repo', 'Repo')}
+      {tabButton('session', names.session)}
+      {tabButton('agents', running.length > 0 ? `${names.agents} ${running.length}` : names.agents)}
+      {tabButton('work', names.work, wlRows.length > 0)}
+      {tabButton('repo', names.repo)}
     </Box>
   )
 
@@ -385,20 +410,27 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     gap(),
     title(`AGENTS · ${running.length} in corso`, modelCounts(running)),
     liveRows.length > 0 && gap(),
-    liveRows.slice(0, MAX_LIVE_ROWS).map(({ agent, depth }) => line(ui, agentRow(agent, depth, s.now, width))),
+    liveRows.slice(0, MAX_LIVE_ROWS).map(({ agent, depth }) => agentButton(`agent:${agent.id}`, agent, depth)),
     liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
   ]
 
+  // A detached HEAD has no branch to copy. The row stacks when its buttons do not fit the pane side by side.
+  const branch = g && !g.isDetached ? g.branch : undefined
+  const quickLabels = ['compatta', '/worklog', ...(branch ? ['copia branch'] : [])]
   const quickButtons = (
-    <Box columnGap={1}>
+    <Box
+      flexDirection={buttonRowWidth(quickLabels) <= width ? 'row' : 'column'}
+      alignItems="flex-start"
+      columnGap={BUTTON_GAP}
+    >
       <Button key="quick:compact" onPress={() => actions.compact()}>
         compatta
       </Button>
       <Button key="quick:worklog" onPress={() => actions.runWorklog()}>
         /worklog
       </Button>
-      {g && (
-        <Button key="quick:branch" onPress={press => actions.copyBranch(g.branch, press.surface)}>
+      {branch && (
+        <Button key="quick:branch" onPress={press => actions.copyBranch(branch, press.surface)}>
           copia branch
         </Button>
       )}
@@ -426,11 +458,29 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
   const rows = orderAgents(agents)
   const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }) => {
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    const out = [line(ui, agentRow(agent, depth, s.now, width))]
+    const out = [agentButton(`agent:${agent.id}`, agent, depth)]
     if (warn) out.push(line(ui, [sp(`${'  '.repeat(depth + 1)}⚠ ${warn}`, COLORS.yellow)]))
     return out
   })
-  const agentBlocks = [
+  // STORICO: the agents that left the list, newest first, behind a toggle (collapsed by default)
+  const history = s.history ?? []
+  const isHistoryOpen = s.isHistoryOpen === true
+  const historyBlock: Block[] =
+    history.length === 0
+      ? []
+      : [
+          [
+            gap(),
+            <Button key="history" plain onPress={() => actions.toggleHistory()}>
+              <Text color={COLORS.title}>{`STORICO · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
+            </Button>,
+            isHistoryOpen && gap(),
+            isHistoryOpen &&
+              history.slice(0, MAX_HISTORY_ROWS).map(h => agentButton(`history:${h.id}`, { ...h, status: 'done' }, 0)),
+            isHistoryOpen && history.length > MAX_HISTORY_ROWS && line(ui, [dim(`… +${history.length - MAX_HISTORY_ROWS}`)]),
+          ],
+        ]
+  const agentBlocks: Block[] = [
     [
       gap(),
       title(`AGENTS · ${running.length} in corso`, modelCounts(agents)),
@@ -438,6 +488,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
       agentRows,
       rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)]),
     ],
+    ...historyBlock,
   ]
 
   // ── Lavoro: the tasks (omitted with none) and the worklog warnings ──

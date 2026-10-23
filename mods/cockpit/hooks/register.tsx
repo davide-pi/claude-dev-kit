@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
-import { AGENT_KEEP_MS, isTab, parseGitStatus, parseWorktree, recordBurnSample, resolveAlm, worklogDays } from './format'
+import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
+import { AGENT_KEEP_MS, addHistory, isTab, parseGitStatus, parseHistory, parseReset, parseWorktree, recordBurnSample, resolveAlm, toHistory, worklogDays } from './format'
 import type { WorklogSnapshot } from './format'
 import { INITIAL, PANE } from './state'
 import type { PaneActions } from './view'
@@ -15,15 +15,19 @@ const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
 /** Writes `next(current)`, unless it equals the current value: a no-op must not redraw the readers. */
 async function patch($: EngineInterface, next: (s: CockpitSnapshot) => CockpitSnapshot): Promise<void> {
+  // After a session's end (a /clear, a resume) no session start follows: the first change under another id adopts it.
+  await adoptSession($).catch(() => undefined)
   const current = await read($, snapshot)
   if (JSON.stringify(next(current)) === JSON.stringify(current)) return
   await update($, snapshot, next)
   await writeState($)
 }
 
-/** The 5h window's usage out of the rate limits the engine reported; undefined off a subscription. */
-const fiveHourUsed = (limits: CockpitSnapshot['rateLimits']): number | undefined =>
-  limits.find(r => r.kind === 'five_hour')?.percentUsed
+/** The 5h samples after a reading of the rate limits the engine reported at `now`; the window's usage and reset time are absent off a subscription. */
+function withBurnSample(samples: CockpitSnapshot['fiveHourSamples'], now: number, limits: CockpitSnapshot['rateLimits']) {
+  const w = limits.find(r => r.kind === 'five_hour')
+  return recordBurnSample(samples, now, w?.percentUsed, parseReset(w?.resetsAt))
+}
 
 const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
   u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
@@ -77,6 +81,8 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
     const id = await $.session.id()
     if (!dir || !SESSION_ID.test(id)) return
     const s = await read($, snapshot)
+    // The snapshot belongs to another session (or none yet): its history is not this id's to write.
+    if (s.sessionId !== id) return
     const { usd, startUsd } = s.cost
     const counts = taskCounts(s)
     const content = {
@@ -86,6 +92,7 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
       tab: s.tab ?? 'session',
+      history: s.history ?? [],
     }
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
@@ -111,23 +118,50 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
   }
 }
 
-/** The tab an earlier run of this session left in its state file; undefined with no file, a broken one or an unknown tab. */
-async function savedTab($: EngineInterface): Promise<CockpitTab | undefined> {
+/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one) and the agent history. */
+async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[] }> {
   try {
     const dir = await configDir($)
-    const id = await $.session.id()
-    if (!dir || !SESSION_ID.test(id)) return undefined
+    if (!dir || !SESSION_ID.test(id)) return { history: [] }
     const text = await $.fs.read(`${dir}/.cache/cockpit-${id}.json`)
     const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
-    const tab = typeof parsed === 'object' && parsed !== null && 'tab' in parsed ? parsed.tab : undefined
-    return isTab(tab) ? tab : undefined
+    if (typeof parsed !== 'object' || parsed === null) return { history: [] }
+    const tab = 'tab' in parsed ? parsed.tab : undefined
+    return { tab: isTab(tab) ? tab : undefined, history: parseHistory('history' in parsed ? parsed.history : undefined) }
   } catch {
-    return undefined
+    return { history: [] }
   }
+}
+
+/** The snapshot between two sessions: its agents went to the ending session's history, the per-session readings start over, no session owns it. */
+const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
+  ...s,
+  sessionId: undefined,
+  agents: [],
+  history: [],
+  tasks: [],
+  cacheShare: undefined,
+  fiveHourSamples: [],
+})
+
+/**
+ * Makes the snapshot the session the engine answers now: the same id (a reload, an enable, a respawn) changes nothing;
+ * another loads that session's saved tab and history. The id of the session that just ended is skipped (the engine
+ * answers it until it switches), unless `isStart`: a session start of that same id is a resume.
+ */
+async function adoptSession($: EngineInterface, isStart = false): Promise<void> {
+  const id = await $.session.id()
+  const current = await read($, snapshot)
+  if (current.sessionId === id || (!isStart && current.endedSessionId === id)) return
+  const saved = await savedState($, id)
+  await update($, snapshot, s =>
+    s.sessionId === id ? s : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history },
+  )
 }
 
 async function setOpen($: EngineInterface, value: boolean): Promise<void> {
   isOpen = value
+  await adoptSession($).catch(() => undefined)
   await writeState($, true)
 }
 
@@ -171,7 +205,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
     const now = await $.clock.now()
     await patch($, s => ({
       ...s,
-      fiveHourSamples: recordBurnSample(s.fiveHourSamples, now, fiveHourUsed(u.rateLimits)),
+      fiveHourSamples: withBurnSample(s.fiveHourSamples, now, u.rateLimits),
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
@@ -181,22 +215,25 @@ async function refreshUsage($: EngineInterface): Promise<void> {
   }
 }
 
-/** Ticks: the clock the countdowns and durations count from, finished agents pruned, the rest re-read. */
+/** Ticks: the clock the countdowns and durations count from, finished agents moved to the history, the rest re-read. */
 async function tick($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const listed = await $.agent.list().catch(() => undefined)
-  await patch($, s => ({
-    ...s,
-    now,
-    agents: s.agents
-      .map((a): CockpitAgent => {
-        // An agent the engine no longer lists as active has ended without a turn.complete we saw.
-        const info = listed?.find(l => l.id === a.id)
-        const isEnded = listed !== undefined && a.status === 'running' && (!info || ['completed', 'failed', 'killed'].includes(info.status))
-        return isEnded ? { ...a, status: 'done', endedAt: now } : a
-      })
-      .filter(a => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)),
-  }))
+  await patch($, s => {
+    const agents = s.agents.map((a): CockpitAgent => {
+      // An agent the engine no longer lists as active has ended without a turn.complete we saw.
+      const info = listed?.find(l => l.id === a.id)
+      const isEnded = listed !== undefined && a.status === 'running' && (!info || ['completed', 'failed', 'killed'].includes(info.status))
+      return isEnded ? { ...a, status: 'done', endedAt: now, isFailed: info?.status === 'failed' || info?.status === 'killed' } : a
+    })
+    const isListed = (a: CockpitAgent) => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)
+    const left = agents
+      .filter(a => !isListed(a))
+      .map(toHistory)
+      .filter((h): h is CockpitHistoryEntry => h !== undefined)
+      .sort((a, b) => b.endedAt - a.endedAt)
+    return { ...s, now, agents: agents.filter(isListed), history: left.length > 0 ? addHistory(s.history, left) : s.history }
+  })
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshAlm($)
@@ -254,6 +291,8 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   compact: () => void $.session.compact().catch(() => undefined),
   runWorklog: () => void $.command.run({ command: 'worklog' }).catch(() => undefined),
   copyBranch: (branch, surface) => void $.ui.copy({ text: branch, surface }).catch(() => undefined),
+  openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
+  toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
 })
 
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
@@ -271,24 +310,19 @@ export const register: Register = on => {
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
     const effort = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
-    const tab = await savedTab($)
+    // The same session id (an enable, a respawn, a reload) keeps what the snapshot holds; another one starts its own.
+    await adoptSession($, true)
     await patch($, s => ({
       ...s,
       now,
-      tab: tab ?? s.tab,
-      // a new session (a /clear included) starts its own readings: the last turn's cache share, the 5h samples
-      cacheShare: undefined,
-      fiveHourSamples: [],
       model,
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
-      tasks: [],
     }))
     await refreshUsage($)
     await refreshGit($)
     await refreshWorklog($, now)
     await refreshAlm($)
-    // Every start, `/clear` included, has its own session id and so its own file.
     await writeState($, true)
 
     await $.command.register({ name: 'cockpit', description: 'Apre il pannello cockpit' })
@@ -297,15 +331,33 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The ending session's file is left closed and empty, so the statusline drops its segments at once; the
-  // statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot delete). Best-effort: skipped when
-  // the exit's short budget is nearly spent, and any failure is swallowed.
+  // The ending session's file is left closed and empty, so the statusline drops its segments at once, with every
+  // finished agent in its history; the statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot
+  // delete). Best-effort: the write is skipped when the exit's short budget is nearly spent, and any failure is swallowed.
+  // The snapshot lets go of the session first (any reason), from the reading taken here, so a write cut short cannot
+  // leave it in the atom: its agents go to its own history (the ones still running as `interrotto`), and the ended id
+  // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
+    let s: CockpitSnapshot | undefined
+    try {
+      s = await read($, snapshot)
+      if (s.sessionId === e.sessionId || s.sessionId === undefined) {
+        await update($, snapshot, x => ({ ...withoutSession(x), endedSessionId: e.sessionId }))
+      }
+    } catch {
+      // the snapshot keeps the old id: writeState writes nothing for another one
+    }
     try {
       const dir = await configDir($)
-      if (dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
-        const { tab } = await read($, snapshot)
-        const content = { open: false, at: await $.clock.now(), lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: tab ?? 'session' }
+      if (s && dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
+        const own = s.sessionId === e.sessionId ? s : undefined
+        const at = await $.clock.now()
+        const left = (own?.agents ?? [])
+          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a))
+          .filter((h): h is CockpitHistoryEntry => h !== undefined)
+          .sort((a, b) => b.endedAt - a.endedAt)
+        const history = addHistory(own?.history, left)
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
       }
     } catch {
@@ -331,7 +383,7 @@ export const register: Register = on => {
     const now = await $.clock.now()
     await patch($, s => ({
       ...s,
-      fiveHourSamples: recordBurnSample(s.fiveHourSamples, now, fiveHourUsed(e.rateLimits)),
+      fiveHourSamples: withBurnSample(s.fiveHourSamples, now, e.rateLimits),
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
@@ -470,6 +522,7 @@ export const register: Register = on => {
           ...a,
           status: 'done',
           endedAt: now,
+          isFailed: e.reason !== 'answer',
           tokens: a.tokens + (usage ? sumUsage(usage) : 0),
         })),
       }))

@@ -1,7 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
+  HISTORY_KEEP,
   abbrevTokens,
+  addHistory,
   almText,
   burnRate,
   burnText,
@@ -21,6 +23,8 @@ import {
   fmtCostDelta,
   gridWidths,
   parseGitStatus,
+  parseHistory,
+  parseReset,
   parseWorktree,
   rateColor,
   shortModel,
@@ -28,6 +32,7 @@ import {
   signedPctCell,
   spanText,
   spanWidth,
+  toHistory,
   truncMiddle,
   truncateSpans,
   weeklyPace,
@@ -131,8 +136,10 @@ test('barCells fills the width exactly, gap after fill', () => {
 
 test('parseGitStatus counts staged, modified, untracked', () => {
   const out = '## feature/x...origin/feature/x [ahead 1]\nM  a.ts\n M b.ts\nMM c.ts\n?? d.ts\n'
-  expect(parseGitStatus(out)).toEqual({ branch: 'feature/x', staged: 2, modified: 2, untracked: 1 })
+  expect(parseGitStatus(out)).toEqual({ branch: 'feature/x', isDetached: false, staged: 2, modified: 2, untracked: 1 })
   expect(parseGitStatus('## No commits yet on main\n')?.branch).toBe('main')
+  // a detached HEAD has no branch: git says `HEAD (no branch)`
+  expect(parseGitStatus('## HEAD (no branch)\n M a.ts\n')).toEqual({ branch: 'HEAD', isDetached: true, staged: 0, modified: 1, untracked: 0 })
   expect(parseGitStatus('')).toBeUndefined()
 })
 
@@ -244,6 +251,70 @@ test('burnRate: rate, exhaustion time and the verdict against the reset; nothing
   expect(burnRate([{ at: 0, used: 38 }], 40 * min, 38, 40 * min + 134 * min)).toBeUndefined()
   // a rate that rounds to zero is not shown
   expect(burnRate([{ at: 0, used: 38 }], 30 * min, 38.1, 30 * min + 134 * min)).toBeUndefined()
+})
+
+test('a reading from before the current 5h window opened is never the start of the burn rate', () => {
+  const min = 60000
+  const now = 400 * min
+  const resetsAt = now + 100 * min // the window opened at minute 200
+  expect(burnRate([{ at: 100 * min, used: 5 }], now, 38, resetsAt)).toBeUndefined()
+  // the same reading inside the window counts: 33 points in 30 minutes = 66 %/h
+  expect(burnRate([{ at: 250 * min, used: 5 }], now, 38, resetsAt)?.perHour).toBe(66)
+  // an older one before a newer one is not the anchor either
+  expect(burnRate([{ at: 100 * min, used: 1 }, { at: 250 * min, used: 5 }], now, 38, resetsAt)?.perHour).toBe(66)
+  // recorded: the old reading is dropped, so no anchor is kept across the reset
+  expect(recordBurnSample([{ at: 100 * min, used: 5 }], now, 38, resetsAt)).toEqual([{ at: now, used: 38 }])
+  expect(recordBurnSample([{ at: 250 * min, used: 5 }], now, 38, resetsAt)).toEqual([{ at: now - 30 * min, used: 5 }, { at: now, used: 38 }])
+  // no reset time known: no bound
+  expect(recordBurnSample([{ at: 100 * min, used: 5 }], now, 38)).toEqual([{ at: now - 30 * min, used: 5 }, { at: now, used: 38 }])
+})
+
+test('parseReset reads the engine reset text; absent or not a date is undefined', () => {
+  expect(parseReset('2026-10-22T10:00:00Z')).toBe(NOW)
+  expect(parseReset(undefined)).toBeUndefined()
+  expect(parseReset('soon')).toBeUndefined()
+})
+
+const finished = (id: string, endedAt: number, extra: object = {}) => ({
+  id,
+  type: 'code-reviewer',
+  model: 'claude-sonnet-5-5',
+  status: 'done' as const,
+  startedAt: endedAt - 60_000,
+  endedAt,
+  tokens: 1200,
+  ...extra,
+})
+
+test('toHistory keeps a finished agent with its outcome; an agent seen only through its events is left out', () => {
+  expect(toHistory(finished('a1', 5000))).toEqual({ id: 'a1', type: 'code-reviewer', model: 'claude-sonnet-5-5', startedAt: -55_000, endedAt: 5000, tokens: 1200, isFailed: false })
+  expect(toHistory(finished('a2', 5000, { isFailed: true }))?.isFailed).toBe(true)
+  expect(toHistory(finished('a2', 5000, { isInterrupted: true }))?.isInterrupted).toBe(true)
+  expect(toHistory(finished('a3', 5000, { type: '?' }))).toBeUndefined()
+  expect(toHistory({ ...finished('a4', 5000), endedAt: undefined })).toBeUndefined()
+})
+
+test('addHistory puts the new entries first, replaces an id it already has and keeps HISTORY_KEEP of them', () => {
+  const entry = (id: string) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens: 0, isFailed: false })
+  expect(addHistory(undefined, [entry('a')]).map(e => e.id)).toEqual(['a'])
+  expect(addHistory([entry('a'), entry('b')], [entry('c'), entry('b')]).map(e => e.id)).toEqual(['c', 'b', 'a'])
+  const many = Array.from({ length: HISTORY_KEEP }, (_, i) => entry(`old${i}`))
+  const next = addHistory(many, [entry('new')])
+  expect(next.length).toBe(HISTORY_KEEP)
+  expect(next[0]?.id).toBe('new')
+  expect(next.at(-1)?.id).toBe(`old${HISTORY_KEEP - 2}`)
+})
+
+test('parseHistory takes the entries with their fields from a parsed state file and drops the rest', () => {
+  const ok = { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', startedAt: 1, endedAt: 2, tokens: 30, isFailed: true }
+  expect(parseHistory([ok, { id: 'a2', type: 'x', startedAt: 1, endedAt: 2 }])).toEqual([
+    ok,
+    { id: 'a2', type: 'x', model: undefined, startedAt: 1, endedAt: 2, tokens: 0, isFailed: false },
+  ])
+  expect(parseHistory([{ ...ok, isInterrupted: true }])).toEqual([{ ...ok, isInterrupted: true }])
+  expect(parseHistory([{ id: 'a3', type: 'x', startedAt: 'now', endedAt: 2 }, null, 'text', { type: 'x' }])).toEqual([])
+  expect(parseHistory('not a list')).toEqual([])
+  expect(parseHistory(undefined)).toEqual([])
 })
 
 /** A Windows spelling of a path written with slashes. */
