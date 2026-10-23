@@ -3,7 +3,7 @@
 ## Phase 1 — the period
 
 The argument is natural language and must become two concrete dates (`yyyy-MM-dd`) before the
-engine runs:
+engine runs (a `sessione <id>` with no period is the one exception, last row):
 
 | Argument | `From` / `To` |
 | --- | --- |
@@ -11,6 +11,7 @@ engine runs:
 | `ieri`, `yesterday` | the day before |
 | `yyyy-MM-dd` | that day |
 | `yyyy-MM-dd..yyyy-MM-dd` | the two ends |
+| `sessione <id>` with no period | **omit** `-From`/`-To`: the engine derives them (first day of the session → today) |
 | "questa settimana", "settimana scorsa", "ultimi N giorni", "10-15 lug" | compute the ends from today's date |
 
 Still ambiguous → **ask**: a wrong period puts hours on the wrong item. A range runs the engine
@@ -48,6 +49,17 @@ Stdout, the authoritative numbers:
 - **Attese lunghe**: every wait above 45 minutes counted active. A permission prompt left pending
   over lunch looks exactly like a long build: show them in Table 1 and let the user drop them;
 - the paths of the raw digest, the audit and `targets.json`.
+
+**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): only a selection. Timeline,
+active time and topic minutes are the global ones, parallel sessions counted once — the session's own
+minutes are never computed, they would double-count parallel chats and re-runs. A **Sessione** section
+lists each (day, project / branch) with at least one main-session event of that session and the topic's
+whole-day minutes; the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
+only those topics in Phases 3-7. A topic flagged `[anche altre sessioni]` (typically the default branch)
+holds other chats' work too: its minutes are not the chat's alone, so never log it whole unasked — ask in
+Table 2 which item(s) it belongs to, telling the chat's share from the `[S]` lines.
+Without `-From` the engine finds the session's first day itself (first event of its transcript) and runs to today, printing `Sessione <id>: dal <data>`.
+`nessun evento` → the id is not in the period: say so, ask for the right period or id (do not go to the gap prompt).
 
 **Targets**: `~/.claude/worklog/targets.json` — `{ "targetHours": 8, "days": { "<yyyy-MM-dd>": { "hours": 6, "note": "corso 4h + straordinario 2h" } } }`.
 Missing file or date → `targetHours` Monday-Friday, 0 at weekends. Only `worklog-push.ps1` writes it

@@ -17,6 +17,14 @@ unconfirmed · Italian chat, tables and board text; field names, WIQL and engine
 - **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text>`, or "segna le ore di questo item/PR": only
   the topics whose branch, PR, item or label match go through Phases 3–7; the day's target, COPERTURA, gap
   prompt and close/target rows are skipped (the rest of the day stays for a full run). Nothing matches → say so.
+  `sessione <id>` (also "segna le ore di questa chat", id = `${CLAUDE_SESSION_ID}`; unsubstituted →
+  ask the user, never take the newest `.jsonl`): Phase 2 runs the engine with `-SessionId <id>` over the
+  session's days (the engine finds the first day itself, prints `Sessione <id>: dal <data>`, runs to today unless a period is given); Phases 3–7 keep only the topics
+  its **Sessione** section lists, with their full-day minutes, items from that chat's branch, PRs, commits
+  and `AB#` mentions; a topic whose item cannot be told, or flagged `[anche altre sessioni]` (shared
+  branch: the minutes are not the chat's alone), goes to Table 2 as a question (candidates plus "altro"),
+  the `[S]` digest lines showing the chat's share, never guessed. The push and the audit stay as they
+  are: a row carries the item's day total, so re-runs and other chats stay idempotent.
 - The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
 - A day already logged is re-run: only the delta reaches the board.
 
@@ -76,7 +84,7 @@ pwsh -NoProfile -File "$wl\worklog-push.ps1" -Rows "<rows.json>"
 
 The engine's header says how much the waits and the continuity recovered; the **Attese lunghe**
 list (> 45 min counted active) goes into Table 1 for the user to keep or drop. `Nessuna attivita'`
-on a weekday → gap prompt or close at zero, after asking. Read the digest for topics and decisions;
+on a weekday → gap prompt or close at zero, after asking (scope `sessione`: `Sessione <id>: nessun evento` → ask period or id, no gap prompt). Read the digest for topics and decisions;
 open a transcript only for a missing detail.
 
 ## Traps
