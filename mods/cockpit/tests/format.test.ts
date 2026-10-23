@@ -25,6 +25,7 @@ import {
   rateColor,
   shortModel,
   signedPct,
+  signedPctCell,
   spanText,
   spanWidth,
   truncMiddle,
@@ -197,15 +198,20 @@ test('resetClock: the clock time within 24 hours, the weekday and time beyond', 
   expect(resetClock(undefined, now)).toBe('')
 })
 
-test('recordBurnSample keeps the last 30 minutes, skips an unchanged reading and starts over when the window resets', () => {
+test('recordBurnSample keeps the last 30 minutes, anchors the value that held at their start, skips an unchanged reading and starts over when the window resets', () => {
   const min = 60000
   const first = recordBurnSample(undefined, 0, 38)
   expect(first).toEqual([{ at: 0, used: 38 }])
   expect(recordBurnSample(first, 5 * min, 38)).toEqual(first)
   const grown = recordBurnSample(first, 12 * min, 41)
   expect(grown).toEqual([{ at: 0, used: 38 }, { at: 12 * min, used: 41 }])
-  expect(recordBurnSample(grown, 35 * min, 45)).toEqual([{ at: 12 * min, used: 41 }, { at: 35 * min, used: 45 }])
-  expect(recordBurnSample(grown, 40 * min, 3)).toEqual([{ at: 40 * min, used: 3 }])
+  // the reading that fell out of the window still says what the credits stood at when it opened: kept, clamped to its start
+  expect(recordBurnSample(grown, 35 * min, 45)).toEqual([{ at: 5 * min, used: 38 }, { at: 12 * min, used: 41 }, { at: 35 * min, used: 45 }])
+  expect(recordBurnSample(grown, 60 * min, 41)).toEqual([{ at: 30 * min, used: 41 }])
+  expect(recordBurnSample([{ at: 0, used: 38 }], 50 * min, 38)).toEqual([{ at: 20 * min, used: 38 }])
+  expect(recordBurnSample([{ at: 0, used: 38 }], 50 * min, 40)).toEqual([{ at: 20 * min, used: 38 }, { at: 50 * min, used: 40 }])
+  expect(recordBurnSample([{ at: 0, used: 38 }, { at: 20 * min, used: 40 }], 30 * min, undefined)).toEqual([{ at: 0, used: 38 }, { at: 20 * min, used: 40 }])
+  expect(recordBurnSample(grown, 40 * min, 3)).toEqual([{ at: 40 * min, used: 3 }]) // a fall is a window reset: no anchor
   expect(recordBurnSample(grown, 20 * min, undefined)).toEqual(grown)
 })
 
@@ -231,8 +237,11 @@ test('burnRate: rate, exhaustion time and the verdict against the reset; nothing
   expect(burnRate(samples, now, 38, now - 1)).toBeUndefined()
   expect(burnRate(samples, now, 100, now + 134 * min)).toBeUndefined()
   expect(burnRate([], now, 38, now + 134 * min)).toBeUndefined()
-  // a sample older than 30 minutes is not counted
-  expect(burnRate([{ at: 0, used: 10 }], 40 * min, 38, 40 * min + 134 * min)).toBeUndefined()
+  // the last sample older than 30 minutes counts as the reading at the window's start: 28 points in 30 min = 56 %/h
+  expect(burnRate([{ at: 0, used: 10 }], 40 * min, 38, 40 * min + 134 * min)?.perHour).toBe(56)
+  // ... but an older one before it does not, and a flat value says nothing
+  expect(burnRate([{ at: 0, used: 1 }, { at: 5 * min, used: 10 }], 40 * min, 38, 40 * min + 134 * min)?.perHour).toBe(56)
+  expect(burnRate([{ at: 0, used: 38 }], 40 * min, 38, 40 * min + 134 * min)).toBeUndefined()
   // a rate that rounds to zero is not shown
   expect(burnRate([{ at: 0, used: 38 }], 30 * min, 38.1, 30 * min + 134 * min)).toBeUndefined()
 })
@@ -271,8 +280,17 @@ test('resolveAlm resolves a directory like the workspaces hook: longest root win
   expect(resolveAlm({}, '/w')).toBeUndefined()
 })
 
-test('almText: org / project and the identity; unmapped says so', () => {
-  expect(almText({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })).toBe('ALM org-a / Alpha · id-a')
-  expect(almText({ isMapped: true, org: 'gh-org' })).toBe('ALM gh-org')
-  expect(almText({ isMapped: false })).toBe('ALM non mappato')
+test('almText: the target only, org / project and the identity; unmapped says so; mapped with nothing is empty', () => {
+  expect(almText({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })).toBe('org-a / Alpha · id-a')
+  expect(almText({ isMapped: true, org: 'gh-org' })).toBe('gh-org')
+  expect(almText({ isMapped: true, identity: 'id-a' })).toBe('id-a')
+  expect(almText({ isMapped: true })).toBe('')
+  expect(almText({ isMapped: false })).toBe('non mappato')
+})
+
+test('signedPctCell pads the pace delta to the width of the other percentages', () => {
+  expect(signedPctCell(-5)).toBe(' −5%')
+  expect(signedPctCell(5)).toBe(' +5%')
+  expect(signedPctCell(-12)).toBe('−12%')
+  expect(signedPctCell(100)).toBe('+100%')
 })

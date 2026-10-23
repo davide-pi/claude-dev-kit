@@ -1,7 +1,7 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
-import type { CockpitAlm, CockpitBurnSample } from '../types'
+import type { CockpitAlm, CockpitBurnSample, CockpitTab } from '../types'
 
 export const COLORS = {
   text: '#d6d8dc',
@@ -136,6 +136,9 @@ export function weeklyPace(
 
 /** `+5%` / `−5%` (true minus sign, as the mockup). */
 export const signedPct = (delta: number): string => `${delta < 0 ? '−' : '+'}${Math.abs(delta)}%`
+
+/** A signed percentage in the 4-cell column of the other percentages (` −5%`, `−12%`); a wider one keeps its width. */
+export const signedPctCell = (delta: number): string => signedPct(delta).padStart(4)
 
 /** Cost with precision that scales down; `$0.00` for an untouched session. */
 export function fmtCost(usd: number | undefined): string {
@@ -362,14 +365,19 @@ const BURN_MIN_SPAN_MS = 10 * 60_000
 
 /**
  * Appends the 5h usage reading `used` taken at `now`, keeping the last 30 minutes. A reading equal to the last one
- * adds nothing (the rate counts from the oldest reading to the present); a lower one means the window reset: start over.
+ * adds nothing (the rate counts from the oldest reading to the present), so the reading that fell out of the window
+ * is what the credits stood at when it opened: it stays as the first sample, clamped to the window's start. A lower
+ * reading means the window reset: start over.
  */
 export function recordBurnSample(
   samples: readonly CockpitBurnSample[] | undefined,
   now: number,
   used: number | undefined,
 ): CockpitBurnSample[] {
-  const kept = (samples ?? []).filter(s => s.at >= now - BURN_WINDOW_MS)
+  const start = now - BURN_WINDOW_MS
+  const inWindow = (samples ?? []).filter(s => s.at >= start)
+  const before = (samples ?? []).filter(s => s.at < start).at(-1)
+  const kept = before && inWindow[0]?.at !== start ? [{ at: start, used: before.used }, ...inWindow] : inWindow
   if (used === undefined) return kept
   const last = kept.at(-1)
   if (last && used < last.used) return [{ at: now, used }]
@@ -377,7 +385,8 @@ export function recordBurnSample(
 }
 
 /**
- * How fast the 5h credits fall, from the oldest reading of the last 30 minutes to `used` now: the rate in points
+ * How fast the 5h credits fall, from the reading at the start of the last 30 minutes (the last one before it, when
+ * none lies on it: the value held since) to `used` now: the rate in points
  * per hour, when they run out, and whether that is before the reset. Undefined with under 10 minutes of readings,
  * a rate that rounds to under 1 %/h, a window already spent or no reset ahead.
  */
@@ -387,7 +396,9 @@ export function burnRate(
   used: number,
   resetsAtMs: number | undefined,
 ): { perHour: number; etaMs: number; isBeforeReset: boolean } | undefined {
-  const oldest = samples.find(s => s.at >= now - BURN_WINDOW_MS)
+  const start = now - BURN_WINDOW_MS
+  const before = samples.filter(s => s.at < start).at(-1)
+  const oldest = before ? { at: start, used: before.used } : samples.find(s => s.at >= start)
   if (!oldest || resetsAtMs === undefined || resetsAtMs <= now || used >= 100) return undefined
   const span = now - oldest.at
   if (span < BURN_MIN_SPAN_MS) return undefined
@@ -453,9 +464,14 @@ function projectOf(entry: Record<string, unknown>, firstSubfolder: string): stri
   return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
 }
 
-/** `ALM <org> / <project> · <identity>`, each part only when known; `ALM non mappato` when no root matches. */
+/** The target alone, `<org> / <project> · <identity>`, each part only when known (empty when none is); `non mappato` when no root matches. */
 export function almText(alm: CockpitAlm): string {
-  if (!alm.isMapped) return 'ALM non mappato'
+  if (!alm.isMapped) return 'non mappato'
   const target = [alm.org, alm.project].filter(Boolean).join(' / ')
-  return `ALM ${[target, alm.identity].filter(Boolean).join(' \u00b7 ')}`.trimEnd()
+  return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
+
+/** The cockpit's tabs, in the order the bar draws them. */
+export const TABS: readonly CockpitTab[] = ['session', 'agents', 'work', 'repo']
+
+export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)

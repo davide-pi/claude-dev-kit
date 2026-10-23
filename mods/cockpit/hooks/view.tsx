@@ -1,6 +1,6 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { CockpitAgent, CockpitAlm, CockpitSnapshot, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitAlm, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
 import {
   AGENT_KEEP_MS,
   COLORS,
@@ -24,7 +24,7 @@ import {
   rateColor,
   resetClock,
   shortModel,
-  signedPct,
+  signedPctCell,
   spanWidth,
   padCells,
   taskBarCells,
@@ -36,12 +36,16 @@ import {
 import type { ModelFamily, Span } from './format'
 
 /** The elements the views draw with; every surface's table has them. */
-export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text'>
+export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button'>
 
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
 const MAX_AGENT_ROWS = 10
+const MAX_LIVE_ROWS = 5
+/** The context fill from which the Sessione view warns and offers to compact. */
+const CTX_WARN_PCT = 80
+const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const TASK_TIME_W = 6
 
@@ -185,9 +189,12 @@ function rateText(label: string, r: RateRow, now: number): Span[] {
   return [sp(pctCell(r.rem), r.color, true), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : []), ...(clock ? [sp(' '), dim(clock)] : [])]
 }
 
-/** The ALM row: dim label then the target, or `ALM non mappato` in red. */
-export function almSpans(alm: CockpitAlm): Span[] {
-  return alm.isMapped ? [dim('ALM '), sp(almText(alm).slice('ALM '.length))] : [sp(almText(alm), COLORS.red)]
+/** The ALM row cut to `width`: dim label then the target, or `ALM non mappato` in red; empty for a root that names nothing. */
+export function almSpans(alm: CockpitAlm, width: number): Span[] {
+  const text = almText(alm)
+  if (text === '') return []
+  const target = truncMiddle(text, Math.max(0, width - ALM_LABEL.length))
+  return alm.isMapped ? [dim(ALM_LABEL), sp(target)] : [sp(ALM_LABEL + target, COLORS.red)]
 }
 
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
@@ -232,8 +239,20 @@ export function modelCounts(list: readonly CockpitAgent[]): Span[] {
 /** The pane's content stops here; a wider dock leaves the rest empty on the left. */
 export const PANE_MAX_COLUMNS = 60
 
-export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): RenderElement {
-  const { Box, Text } = ui
+type Node = RenderElement | false | undefined
+type Block = (Node | readonly Node[])[]
+
+/** What a press does; the register module holds the engine, the view only names the acts. */
+export type PaneActions = {
+  selectTab: (tab: CockpitTab) => void
+  compact: () => void
+  runWorklog: () => void
+  /** Copies `branch` on the surface the press came from. */
+  copyBranch: (branch: string, surface: RenderSurface) => void
+}
+
+export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, actions: PaneActions): RenderElement {
+  const { Box, Text, Button } = ui
   const width = Math.min(bodyColumns, PANE_MAX_COLUMNS)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
   const title = (label: string, right: Span[] = []) => (
@@ -252,16 +271,38 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
   // Breathing room: an empty row between sections and under a title.
   const gap = () => <Text> </Text>
 
-  // Header: model + effort | session cost (always: `$0.00` before the first turn) and the last turn's delta
-  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
-  const header = (
-    <Box justifyContent="space-between">
-      {line(ui, [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort)])}
-      {line(ui, [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])])}
+  const tab = s.tab ?? 'session'
+  const agents = visibleAgents(s)
+  const running = agents.filter(a => a.status === 'running')
+
+  const wl = s.worklog
+  const wlRows = [
+    ...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []),
+    ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : []),
+  ]
+
+  // ── Tab bar: the selected tab is the primary button ──
+  const tabButton = (id: CockpitTab, label: string, hasDot = false) => {
+    const variant = tab === id ? 'primary' : 'secondary'
+    return hasDot ? (
+      <Button key={`tab:${id}`} variant={variant} onPress={() => actions.selectTab(id)}>
+        {label}
+        <Text color={COLORS.yellow}> ●</Text>
+      </Button>
+    ) : (
+      <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />
+    )
+  }
+  const tabBar = (
+    <Box columnGap={1}>
+      {tabButton('session', 'Sessione')}
+      {tabButton('agents', running.length > 0 ? `Agenti ${running.length}` : 'Agenti')}
+      {tabButton('work', 'Lavoro', wlRows.length > 0)}
+      {tabButton('repo', 'Repo')}
     </Box>
   )
 
-  // Folder · branch · diffs grid
+  // ── Folder · branch · diffs grid ──
   const g = s.git
   const diffs: Span[] = []
   if (g && g.staged > 0) diffs.push(sp(`+${g.staged}`, COLORS.green))
@@ -285,8 +326,20 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
     </Box>
   )
 
-  // ALM target of the folder (absent without a workspaces map)
-  const almRow = s.alm && line(ui, almSpans(s.alm))
+  // ALM target of the folder (absent without a workspaces map, or a mapped root that names nothing)
+  const almLine = s.alm ? almSpans(s.alm, width) : []
+  const almRow = almLine.length > 0 && line(ui, almLine)
+
+  // ── Sessione ──
+
+  // Header: model + effort | session cost (always: `$0.00` before the first turn) and the last turn's delta
+  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
+  const header = (
+    <Box justifyContent="space-between">
+      {line(ui, [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort)])}
+      {line(ui, [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])])}
+    </Box>
+  )
 
   // The one bar width of the context and credit rows: what is left of the widest readout.
   const five = rateRow(s, 'five_hour')
@@ -297,17 +350,25 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
   const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(t => spanWidth(t ?? [])))
   const barW = Math.max(4, width - textCol - 1)
 
-  // CONTESTO: the cache share of the last main-loop turn sits right of the title
+  // CONTESTO: the cache share of the last main-loop turn sits right of the title; from 80% a red line and the way out
   const pct = s.ctx.percent ?? 0
   const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
   const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare))]
+  const ctxWarning = pct >= CTX_WARN_PCT && (
+    <Box justifyContent="space-between">
+      {line(ui, [sp(`⚠ contesto al ${Math.round(pct)}%`, COLORS.red)])}
+      <Button key="compact-now" variant="primary" onPress={() => actions.compact()}>
+        compatta ora
+      </Button>
+    </Box>
+  )
 
   // CREDITI RESIDUI
   const paceDelta = seven?.pace?.delta
   const paceSpans: Span[] =
     paceDelta === undefined
       ? []
-      : [dim('vs atteso 7d '), sp(signedPct(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
+      : [dim('vs atteso 7d '), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
   const creditRow = (r: RateRow, text: Span[]) => {
     const gap = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
     const parts = [{ pct: r.rem, color: r.color }, ...(gap ? [{ pct: gap, color: COLORS.gap }] : [])]
@@ -318,75 +379,106 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
   const burn = five && burnRate(s.fiveHourSamples ?? [], s.now, five.used, five.resetMs)
   const burnRow = burn && line(ui, [sp(burnText(burn), burn.isBeforeReset ? COLORS.red : COLORS.green)])
 
-  // AGENTS
-  const agents = visibleAgents(s)
+  // Running agents, compact
+  const liveRows = orderAgents(running)
+  const liveAgents = [
+    gap(),
+    title(`AGENTS · ${running.length} in corso`, modelCounts(running)),
+    liveRows.length > 0 && gap(),
+    liveRows.slice(0, MAX_LIVE_ROWS).map(({ agent, depth }) => line(ui, agentRow(agent, depth, s.now, width))),
+    liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
+  ]
+
+  const quickButtons = (
+    <Box columnGap={1}>
+      <Button key="quick:compact" onPress={() => actions.compact()}>
+        compatta
+      </Button>
+      <Button key="quick:worklog" onPress={() => actions.runWorklog()}>
+        /worklog
+      </Button>
+      {g && (
+        <Button key="quick:branch" onPress={press => actions.copyBranch(g.branch, press.surface)}>
+          copia branch
+        </Button>
+      )}
+    </Box>
+  )
+
+  const sessionBlocks = [
+    [header, grid, almRow],
+    [gap(), title('CONTESTO', cacheSpans), gap(), split(ctxBar, barW, ctxText), ctxWarning],
+    [
+      gap(),
+      title('CREDITI RESIDUI', paceSpans),
+      gap(),
+      five && fiveText && creditRow(five, fiveText),
+      burnRow,
+      five && seven && gap(),
+      seven && sevenText && creditRow(seven, sevenText),
+      !five && !seven && line(ui, [dim('nessun dato sui limiti')]),
+    ],
+    liveAgents,
+    [gap(), quickButtons],
+  ]
+
+  // ── Agenti: every agent listed, finished ones for two minutes ──
   const rows = orderAgents(agents)
-  const running = agents.filter(a => a.status === 'running').length
   const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }) => {
     const warn = agentWarning(agent, s.isSubagentModelForced)
     const out = [line(ui, agentRow(agent, depth, s.now, width))]
     if (warn) out.push(line(ui, [sp(`${'  '.repeat(depth + 1)}⚠ ${warn}`, COLORS.yellow)]))
     return out
   })
+  const agentBlocks = [
+    [
+      gap(),
+      title(`AGENTS · ${running.length} in corso`, modelCounts(agents)),
+      rows.length > 0 && gap(),
+      agentRows,
+      rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)]),
+    ],
+  ]
 
-  // TASK (omitted with no tasks)
+  // ── Lavoro: the tasks (omitted with none) and the worklog warnings ──
   const counts = taskCounts(s)
   const open = openTasks(s)
-  const taskSection =
+  const taskBlock =
     counts === null
       ? []
       : [
-          rule,
-          gap(),
-          title(`TASK · ${counts.done}/${counts.total}`, [
-            sp(`◐ ${counts.inProgress}`, COLORS.blue),
-            sp('  '),
-            dim(`○ ${counts.pending}`),
-            sp('  '),
-            sp(`✓ ${counts.done}`, COLORS.green),
-          ]),
-          gap(),
-          line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
-          ...open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
-          ...(open.length > MAX_TASK_ROWS ? [line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)])] : []),
-          ...(counts.done > 0 ? [line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} completati`)])] : []),
+          [
+            gap(),
+            title(`TASK · ${counts.done}/${counts.total}`, [
+              sp(`◐ ${counts.inProgress}`, COLORS.blue),
+              sp('  '),
+              dim(`○ ${counts.pending}`),
+              sp('  '),
+              sp(`✓ ${counts.done}`, COLORS.green),
+            ]),
+            gap(),
+            line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
+            open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
+            open.length > MAX_TASK_ROWS && line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)]),
+            counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} completati`)]),
+          ],
         ]
+  const worklogBlock =
+    wlRows.length > 0 ? [[gap(), wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))]] : []
+  const workBlocks = [...taskBlock, ...worklogBlock]
 
-  const wl = s.worklog
-  const wlRows = [
-    ...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []),
-    ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : []),
-  ]
+  // ── Repo: the git grid ──
+  const repoBlocks = [[gap(), grid, almRow]]
+
+  // Blocks are told apart by a rule; an empty tab says so.
+  const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, work: workBlocks, repo: repoBlocks }[tab]
+  const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim('niente da mostrare')])]
 
   return (
     <Box flexDirection="column" width={width} marginLeft={bodyColumns - width}>
-      {header}
-      {grid}
-      {almRow}
+      {tabBar}
       {rule}
-      {gap()}
-      {title('CONTESTO', cacheSpans)}
-      {gap()}
-      {split(ctxBar, barW, ctxText)}
-      {rule}
-      {gap()}
-      {title('CREDITI RESIDUI', paceSpans)}
-      {gap()}
-      {five && fiveText && creditRow(five, fiveText)}
-      {burnRow}
-      {five && seven && gap()}
-      {seven && sevenText && creditRow(seven, sevenText)}
-      {!five && !seven && line(ui, [dim('nessun dato sui limiti')])}
-      {rule}
-      {gap()}
-      {title(`AGENTS · ${running} in corso`, modelCounts(agents))}
-      {rows.length > 0 && gap()}
-      {agentRows}
-      {rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)])}
-      {taskSection}
-      {wlRows.length > 0 && rule}
-      {wlRows.length > 0 && gap()}
-      {wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))}
+      {body}
     </Box>
   )
 }
