@@ -26,6 +26,7 @@
   },
   "permissions": {
     "allow": [
+      "Workflow(impl-review-loop)",
       "Read(**)",
       "Grep(**)",
       "PowerShell(tsc *)",
@@ -564,6 +565,7 @@
   },
   "enableWorkflows": true,
   "workflowSizeGuideline": "small",
+  "skipWorkflowUsageWarning": true,
   "workflowKeywordTriggerEnabled": false,
   "defaultShell": "powershell",
   "statusLine": {
