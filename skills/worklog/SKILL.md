@@ -1,9 +1,8 @@
 ---
 name: worklog
 description: >-
-  Use when the user types /worklog [period] to reconstruct the work from the transcripts, cover each
-  day's target and log the hours on Azure DevOps.
-disable-model-invocation: true
+  Use when the user asks to log hours ("segna le ore", "registra le ore", /worklog [period]): hours
+  per day from the transcripts, onto Azure DevOps.
 ---
 
 # worklog — what was done, each day against its target, the hours on the board
