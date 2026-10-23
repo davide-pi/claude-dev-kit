@@ -21,8 +21,8 @@ import { createRequire } from 'node:module';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -124,6 +124,9 @@ test('mergeReviews: open wins over closed, duplicates collapse, a scope finding 
 const AsyncFunction = (async () => {}).constructor;
 const BODY = SOURCE.replace(/^export /, '');
 
+const PASS = { status: 'pass', command: 'node --test', line: '# fail 0' };
+const snapshot = (files) => ({ tree: 't1', files, churn: 0 });
+
 /** Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed. */
 async function run(args, reviews, implementers = []) {
   const calls = [];
@@ -133,7 +136,7 @@ async function run(args, reviews, implementers = []) {
     calls.push({ prompt, opts });
     // an Error in a queue is an agent() that throws (turn cap, no StructuredOutput)
     const answer = opts.agentType === 'implementer'
-      ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', openQuestions: [] })
+      ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : queue.shift();
     if (answer instanceof Error) throw answer;
     return answer;
@@ -145,7 +148,7 @@ async function run(args, reviews, implementers = []) {
 }
 
 const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'M' };
-const review = (previous, found = []) => ({ previous, found, checked: 'read' });
+const review = (previous, found = []) => ({ previous, found, checked: 'read', filesReviewed: [] });
 const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', ...extra });
 
 test('script: new findings, fix, then all closed → OK in 2 rounds, out-of-scope finding listed', async () => {
@@ -188,12 +191,43 @@ test('script: a closed finding that reappears → STALL', async () => {
 test('script: reviewers by size, effort and model', async () => {
   const sizes = {};
   for (const size of ['S', 'M', 'L']) {
-    const { calls } = await run({ ...ARGS, size, touches: ['security', 'performance'] }, size === 'L' ? [review([]), review([]), review([]), review([])] : [review([])]);
+    const { calls } = await run({ ...ARGS, size, touches: ['security', 'performance'] }, size === 'S' ? [review([])] : size === 'M' ? [review([]), review([]), review([])] : [review([]), review([]), review([]), review([])]);
     sizes[size] = calls.filter((c) => c.opts.label?.startsWith('R1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
   assert.deepEqual(sizes.S, ['code-reviewer:sonnet:medium']);
-  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high']);
+  assert.deepEqual(sizes.M, ['code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:high']);
   assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:high']);
+});
+
+test('script: M without touches is one Opus reviewer at high', async () => {
+  const { calls } = await run(ARGS, [review([])]);
+  assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('R1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:opus:high']);
+});
+
+test('script: an S change that grows to 5 files is reviewed as L from the next round', async () => {
+  const grown = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/A.cs', 'src/Orders/Dto/B.cs', 'src/Orders/Dto/C.cs', 'src/Orders/Dto/D.cs'];
+  const { out, calls } = await run({ ...ARGS, size: 'S' }, [
+    review([], [finding()]),
+    review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }]),
+  ], [
+    { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' },
+    { scope: 'fixed', files: grown, evidence: 'ok' },
+  ]);
+  assert.equal(out.status, 'OK');
+  const models = (round) => calls.filter((c) => c.opts.label?.startsWith(`R${round} `)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
+  assert.deepEqual(models(1), ['R1 A:sonnet:medium']);
+  assert.deepEqual(models(2), ['R2 A:sonnet:high', 'R2 B:opus:high']);
+  assert.deepEqual(out.roundLog.map((r) => r.size), ['S', 'L']);
+  assert.match(calls.find((c) => c.opts.label === 'R2 A').prompt, /do not soften for agreement/);
+});
+
+test('script: the carried fields are in the schemas, a report without them is still read', async () => {
+  const { out, calls } = await run(ARGS, [review([])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(['verify', 'snapshot', 'rejected', 'noticed', 'evidence'].filter((k) => !calls[0].opts.schema.required.includes(k)), []);
+  const reviewer = calls.find((c) => c.opts.label === 'R1 A').opts.schema;
+  assert.ok(reviewer.required.includes('filesReviewed'));
+  assert.deepEqual(Object.keys(reviewer.properties.found.items.properties).filter((k) => ['causedByChange', 'confidence'].includes(k)), ['causedByChange', 'confidence']);
 });
 
 test('script: the implementer runs at medium unless the brief asks for high', async () => {
@@ -229,7 +263,24 @@ test('dedupeFound: the same finding under a new id (other case, shifted line, re
     tracked: { F1: { status: 'closed' } }, verdicts: { F1: 'closed' }, root: ROOT });
   assert.equal(far.rematched.length, 0);                                     // lines 12 and 310: two defects, kept separate
   assert.equal(far.found.length, 1);
-  assert.equal(again({ category: 'security' }).rematched.length, 0);
+  assert.deepEqual(again({ category: 'security' }).rematched, ['F1']);       // a re-categorised finding is the same finding
+});
+
+test('sameFinding: a re-categorised finding (correctness → regression) on the same spot is the same finding', () => {
+  const at = (category) => ({ path: 'a.cs', category, line: 5, title: NULL_GUARD });
+  assert.equal(sameFinding(at('correctness'), at('regression'), ROOT), true);
+  assert.equal(sameFinding(at('correctness'), { ...at('regression'), path: 'b.cs' }, ROOT), false);
+});
+
+test('sameFinding: a scope finding never merges with a non-scope one on the same spot, two scope findings do', () => {
+  const at = (category) => ({ path: 'a.cs', category, line: 5, priority: 'P2', title: NULL_GUARD });
+  assert.equal(sameFinding(at('scope'), at('regression'), ROOT), false);
+  assert.equal(sameFinding(at('security'), at('scope'), ROOT), false);
+  assert.equal(sameFinding(at('scope'), at('scope'), ROOT), true);
+  const merged = mergeReviews([{ found: [at('regression')] }, { found: [at('scope')] }], ROOT);
+  assert.deepEqual(merged.found.map(x => x.category).sort(), ['regression', 'scope']);   // the revert request is not lost
+  const d = dedupeFound({ found: [{ ...at('scope'), id: 'n' }], known: { F1: { ...at('regression'), id: 'F1' } }, root: ROOT });
+  assert.deepEqual(d.found.map(x => x.id), ['n']);                                       // not dropped as a known out-of-scope one
 });
 
 test('sameFinding: stopwords and accents do not make two defects the same', () => {
@@ -492,6 +543,44 @@ test('groupOf: a path goes to the group listing it (root, case and slashes ignor
   assert.equal(groupOf('src/stray.cs', groups, ROOT), 1);
 });
 
+test('reviewersFor: S one Sonnet at medium, M one Opus at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
+  const spec = (size, touches) => reviewersFor(size, touches).map((r) => `${r.key}:${r.agentType}:${r.model}:${r.effort}${r.whole ? ':whole' : ''}`);
+  assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:medium:whole']);
+  assert.deepEqual(spec('M', []), ['A:code-reviewer:opus:high:whole']);
+  assert.deepEqual(spec('L', []), ['A:code-reviewer:sonnet:high:whole', 'B:code-reviewer:opus:high:whole']);
+  assert.deepEqual(spec('S', ['security', 'performance']), ['A:code-reviewer:sonnet:medium:whole']);
+  assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:opus:high:whole', 'security:review-security:sonnet:high']);
+  assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:high']);
+  assert.deepEqual(spec('M', undefined), ['A:code-reviewer:opus:high:whole']);
+});
+
+test('sizeFor: 1 file keeps S, 3 files lifts S to M, 6 lifts M to L, never downgrades L', () => {
+  assert.equal(sizeFor('S', 1), 'S');
+  assert.equal(sizeFor('S', 0), 'S');
+  assert.equal(sizeFor('S', 3), 'M');
+  assert.equal(sizeFor('S', 4), 'M');
+  assert.equal(sizeFor('S', 5), 'L');
+  assert.equal(sizeFor('M', 6), 'L');
+  assert.equal(sizeFor('M', 1), 'M');
+  assert.equal(sizeFor('M', 3), 'M');
+  assert.equal(sizeFor('L', 1), 'L');
+  assert.equal(sizeFor('L', 3), 'L');
+});
+
+test('readReport: a report without verify is not-run, without rejected/noticed empty, without snapshot null', () => {
+  const r = readReport({ scope: 's', files: ['a.cs'], evidence: 'ok' });
+  assert.deepEqual(r.verify, { status: 'not-run' });
+  assert.deepEqual(r.rejected, []);
+  assert.deepEqual(r.noticed, []);
+  assert.deepEqual(r.filesReviewed, []);
+  assert.equal(r.snapshot, null);
+  assert.deepEqual(r.files, ['a.cs']);
+  const full = { verify: { status: 'fail', command: 'dotnet test', line: 'Failed: 2' }, snapshot: { tree: 't', files: ['a.cs'], churn: 4 }, rejected: [{ id: 'F1', reason: 'not reproduced' }], noticed: [{ title: 't', path: 'p', why: 'w' }], filesReviewed: ['a.cs'] };
+  assert.deepEqual(readReport(full), full);
+  assert.deepEqual(readReport({ verify: { status: 'green', command: 'x' } }).verify, { status: 'not-run', command: 'x' });
+  assert.equal(readReport(null), null);
+});
+
 const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
 const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
 const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
@@ -570,7 +659,7 @@ test('script: a reviewer that throws is a gap; a whole reviewer covers its group
   const partial = await run(manyArgs(), [boom, review([]), review([])], [manyImpl]);
   assert.equal(partial.out.status, 'OK');
   assert.match(partial.out.gaps.join('\n'), /round 1: reviewer A1 returned nothing: subagent completed without calling StructuredOutput/);
-  const uncovered = await run(manyArgs({ size: 'M' }), [boom, review([])], [manyImpl]);
+  const uncovered = await run(manyArgs(), [boom, review([]), boom], [manyImpl]);
   assert.equal(uncovered.out.status, 'STALL');
   assert.match(uncovered.out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
   assert.doesNotMatch(uncovered.out.stall.reason, /F8\.cs/);
@@ -591,9 +680,9 @@ test('script: size L with a specialist: A1 and B throw, A2 and the specialist an
 
 test('script: a group whose reviewer threw in round 1 reads its files in full in round 2, even after a fix', async () => {
   const boom = new Error('subagent completed without calling StructuredOutput');
-  const { out, calls } = await run(manyArgs({ size: 'M' }), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]),                         // R1: A1 throws, A2 has a P2
-    review([]), review([{ id: 'F1', status: 'closed' }]),                              // R2: both answer, nothing new
+  const { out, calls } = await run(manyArgs(), [
+    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,                   // R1: A1 and B throw, A2 has a P2
+    review([]), review([{ id: 'F1', status: 'closed' }]), boom,                        // R2: A1 and A2 answer, nothing new, B throws again
   ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
   assert.equal(out.status, 'OK');
   const r = Object.fromEntries(calls.filter(c => c.opts.label?.startsWith('R')).map(c => [c.opts.label, c.prompt]));
@@ -619,9 +708,9 @@ test('script: a whole reviewer that answers after a fix is asked for the files l
 
 test('script: a group that threw in round 1 and again in round 2 is a STALL naming its files, never OK', async () => {
   const boom = new Error('max turns');
-  const { out } = await run(manyArgs({ size: 'M' }), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]),
-    boom, review([{ id: 'F1', status: 'closed' }]),
+  const { out } = await run(manyArgs(), [
+    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,
+    boom, review([{ id: 'F1', status: 'closed' }]), boom,
   ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
   assert.equal(out.status, 'STALL');
   assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);

@@ -82,8 +82,8 @@ const isDirty = (path, dirty, root) => {
 const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '').trim()
   .split(' -> ').map(x => x.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean)
 
-// The same finding seen again, possibly on a shifted line or under a reworded title: same file and category
-// and a similar title (Jaccard >= 0.5 on the words left once IT/EN stopwords and words under 3 letters are
+// The same finding seen again, possibly on a shifted line, re-categorised or under a reworded title: same file
+// (a `scope` finding only matches another `scope` one) and a similar title (Jaccard >= 0.5 on the words left once IT/EN stopwords and words under 3 letters are
 // dropped). A reworded title must also sit within LINE_WINDOW lines, an identical one within 3x that (two
 // distinct defects of one file can share a title); a finding without a line has no distance to check.
 const LINE_WINDOW = 10
@@ -98,7 +98,8 @@ const sameTitle = (a, b) => {
   return shared / (x.size + y.size - shared) >= 0.5
 }
 const sameFinding = (a, b, root) => {
-  if (rel(a.path, root) !== rel(b.path, root) || plain(a.category) !== plain(b.category)) return false
+  if (rel(a.path, root) !== rel(b.path, root)) return false
+  if ((a.category === 'scope') !== (b.category === 'scope')) return false   // a revert request never folds into another finding
   const gap = Number.isFinite(a.line) && Number.isFinite(b.line) ? Math.abs(a.line - b.line) : 0
   return gap <= (plain(a.title) === plain(b.title) ? 3 * LINE_WINDOW : LINE_WINDOW) && sameTitle(a.title, b.title)
 }
@@ -120,6 +121,43 @@ const groupOf = (path, groups, root) => {
   const p = rel(path, root)
   const i = groups.findIndex(g => g.some(x => rel(x, root) === p))
   return i < 0 ? groups.length - 1 : i
+}
+
+// Reviewers by size: S one Sonnet at medium, M one Opus at high, L Sonnet and Opus at high; at M and L also the
+// specialists for what the change touches. Only a reviewer flagged `whole` reads the whole change.
+const reviewersFor = (size, touches = []) => {
+  const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
+  const list = size === 'S' ? [code('A', 'sonnet', 'medium')]
+    : size === 'M' ? [code('A', 'opus', 'high')]
+    : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  if (size !== 'S' && touches.includes('security')) list.push({ key: 'security', agentType: 'review-security', model: 'sonnet', effort: 'high' })
+  if (size !== 'S' && touches.includes('performance')) list.push({ key: 'performance', agentType: 'review-performance', model: 'sonnet', effort: 'high' })
+  return list
+}
+
+// The size the change has now, from the files it is known to touch: one file keeps the given size, 2-4 are at
+// least M, 5 or more are L. Only upward: a change that shrinks again is not reviewed lighter.
+const SIZES = ['S', 'M', 'L']
+const sizeFor = (given, changedCount) => {
+  const floor = changedCount >= 5 ? 'L' : changedCount >= 2 ? 'M' : 'S'
+  return SIZES[Math.max(SIZES.indexOf(given), SIZES.indexOf(floor))]
+}
+
+// An agent report as the loop reads it, the fields a report may lack filled with their default: no verify is
+// not-run, no snapshot is null, no rejected / noticed / filesReviewed is empty. null (an agent that returned
+// nothing) stays null.
+const VERIFY_STATUSES = ['pass', 'fail', 'not-run']
+const readReport = r => {
+  if (!r || typeof r !== 'object') return null
+  const list = v => (Array.isArray(v) ? v : [])
+  return {
+    ...r,
+    verify: VERIFY_STATUSES.includes(r.verify?.status) ? r.verify : { ...r.verify, status: 'not-run' },
+    snapshot: r.snapshot && typeof r.snapshot === 'object' ? r.snapshot : null,
+    rejected: list(r.rejected),
+    noticed: list(r.noticed),
+    filesReviewed: list(r.filesReviewed),
+  }
 }
 
 // The files nobody has read yet, carried between rounds: a group whose reviewer returned nothing adds its files, a
@@ -169,7 +207,7 @@ const mergeReviews = (reviews, root) => {
   return { verdicts, found }
 }
 
-// A finding listed again under a new id is the known finding (same file and category, a line within
+// A finding listed again under a new id is the known finding (same file, a line within
 // LINE_WINDOW, a similar title): when that one is tracked its verdict becomes open (a closed one back is a
 // STALL); when it was only recorded as minor / out of scope it is dropped. A new one MORE severe than the
 // known one (a P2 on a known P3, a P1 on an accepted P2) is fresh, tracked or not. A different defect on the
@@ -269,21 +307,11 @@ const dirtyInPerimeter = dirty.filter(d => inPerimeter(d, files, repoRoot))
 if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
   return `impl-review-loop: perimeter file(s) already modified before the start: ${dirtyInPerimeter.join(', ')}. Ask the user, then relaunch with dirtyConfirmed: true (or change the perimeter).`
 }
-const size = ['S', 'M', 'L'].includes(input.size) ? input.size : 'M'
+const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const implEffort = EFFORTS.includes(input.implementerEffort) ? input.implementerEffort : 'medium'
 const touches = Array.isArray(input.touches) ? input.touches : []
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
-
-// Reviewers by size: S one Sonnet at medium, M one Sonnet at high, L Sonnet and Opus at high plus the
-// specialists for what the change touches.
-// Reviewer A fans out per round (see reviewersForRound) when the change touched more than MAX_REVIEW_FILES files.
-const REVIEWERS = [{ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: size === 'S' ? 'medium' : 'high', whole: true }]
-if (size === 'L') {
-  REVIEWERS.push({ key: 'B', agentType: 'code-reviewer', model: 'opus', effort: 'high', whole: true })
-  if (touches.includes('security')) REVIEWERS.push({ key: 'security', agentType: 'review-security', model: 'sonnet', effort: 'high' })
-  if (touches.includes('performance')) REVIEWERS.push({ key: 'performance', agentType: 'review-performance', model: 'sonnet', effort: 'high' })
-}
 
 const perimeterText = [
   `PERIMETER (the only files you may change): ${files.join(', ')}`,
@@ -305,11 +333,39 @@ const RULES = 'You are a subagent: never ask the user anything. A decision you c
 
 const IMPLEMENTATION = {
   type: 'object',
-  required: ['scope', 'files', 'evidence'],
+  required: ['scope', 'files', 'evidence', 'verify', 'snapshot', 'rejected', 'noticed'],
   properties: {
     scope: { type: 'string' },
     files: { type: 'array', items: { type: 'string', description: 'absolute or repo-relative path of a file you changed' } },
     evidence: { type: 'string', description: 'the verify command and the output line that settles it, quoted; or why not run' },
+    verify: {
+      type: 'object',
+      required: ['status'],
+      properties: {
+        status: { type: 'string', enum: ['pass', 'fail', 'not-run'] },
+        command: { type: 'string', description: 'the verify command that ran' },
+        line: { type: 'string', description: 'the output line that settles it, quoted' },
+      },
+    },
+    snapshot: {
+      type: 'object',
+      required: ['tree', 'files'],
+      properties: {
+        tree: { type: 'string' },
+        files: { type: 'array', items: { type: 'string' } },
+        churn: { type: 'integer' },
+      },
+    },
+    rejected: {
+      type: 'array',
+      description: 'review findings you judged wrong or could not reproduce, left unchanged',
+      items: { type: 'object', required: ['id', 'reason'], properties: { id: { type: 'string' }, reason: { type: 'string' } } },
+    },
+    noticed: {
+      type: 'array',
+      description: 'defects seen outside the perimeter, not touched',
+      items: { type: 'object', required: ['title', 'path', 'why'], properties: { title: { type: 'string' }, path: { type: 'string' }, why: { type: 'string' } } },
+    },
     notVerified: { type: 'string' },
     openQuestions: { type: 'array', items: { type: 'string', description: 'out-of-perimeter finding or guess, one line' } },
   },
@@ -329,12 +385,14 @@ const FINDING_IN = {
     priority: { type: 'string', enum: ['P1', 'P2', 'P3'] },
     failure: { type: 'string', description: 'inputs or state, then the wrong outcome' },
     fix: { type: 'string' },
+    causedByChange: { type: 'boolean', description: 'true when the change itself causes this defect, even outside the perimeter' },
+    confidence: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
   },
 }
 
 const REVIEW = {
   type: 'object',
-  required: ['previous', 'found', 'checked'],
+  required: ['previous', 'found', 'checked', 'filesReviewed'],
   properties: {
     previous: {
       type: 'array',
@@ -347,6 +405,7 @@ const REVIEW = {
     },
     found: { type: 'array', description: 'NEW defects only, never one that matches a previous id', items: FINDING_IN },
     checked: { type: 'string', description: 'passes run and what was read' },
+    filesReviewed: { type: 'array', items: { type: 'string' }, description: 'every file you actually read' },
   },
 }
 
@@ -391,7 +450,7 @@ const result = extra => ({
 
 if (!inline) {
   phase('Implement')
-  const impl = await ask([
+  const implRaw = await ask([
     brief,
     perimeterText,
     dirtyText,
@@ -400,6 +459,7 @@ if (!inline) {
     RULES,
     'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
   ].filter(Boolean).join('\n\n'), { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
+  const impl = readReport(implRaw)
   if (!impl) {
     return result({ status: 'STALL', stall: { round: 0, findings: [], reason: `the implementer returned nothing (stopped or failed${why('implement')})` }, resume: RESUME_AGAIN })
   }
@@ -425,15 +485,18 @@ const previousBlock = (mine = () => true) => {
 // The files the change touched come from git, not from what the implementer declared: that list is a hint.
 const touchedByGit = (declared) => `Find the files the change touched yourself: \`git diff ${startHead || 'HEAD'} --name-only\` plus the untracked files (\`git ls-files -o --exclude-standard\`)${dirty.length ? `, minus the files already modified before the start (${dirty.join(', ')}; an entry ending with "/" is a whole directory), except that a file in both is reviewed for the change's own edit only` : ''}. The list ${inline ? 'the session' : 'the implementer'} declared (${declared || 'none'}) is a hint, never the limit of the review.`
 
-// Reviewer A as one reviewer per group of at most MAX_REVIEW_FILES of the files the change is known to touch.
+// The reviewers of this round, by the size the change has now (sizeFor), reviewer A as one reviewer per group of at
+// most MAX_REVIEW_FILES of the files the change is known to touch.
 const reviewersForRound = () => {
   // One entry per file however it was declared (absolute or relative, any case): the first spelling, at its first place.
   const seen = new Map()
   for (const f of changed) { const k = rel(f, repoRoot); if (!seen.has(k)) seen.set(k, f) }
   const groups = groupFiles([...seen.values()])
-  const [first, ...rest] = REVIEWERS
-  if (groups.length < 2) return { groups, list: REVIEWERS }
-  return { groups, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
+  const size = sizeFor(givenSize, seen.size)
+  const reviewers = reviewersFor(size, touches)
+  const [first, ...rest] = reviewers
+  if (groups.length < 2) return { size, groups, list: reviewers }
+  return { size, groups, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
 }
 const shareText = (r, groups) => (r.group === undefined ? '' : [
   `Your share: review ONLY these files, the other reviewers hold the rest (this overrides the "hint" rule above): ${groups[r.group].join(', ')}.`,
@@ -454,7 +517,7 @@ const scopeOfDelta = () => (lastFix
 while (true) {
   round += 1
   phase('Review')
-  const { groups, list: reviewers } = reviewersForRound()
+  const { size, groups, list: reviewers } = reviewersForRound()
   const answers = await parallel(reviewers.map(r => () => ask([
     scopeOfReview(r, groups),
     shareText(r, groups),
@@ -467,7 +530,7 @@ while (true) {
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart.`,
     REVIEW_BUDGET,
   ].filter(Boolean).join('\n\n'), { label: `R${round} ${r.key}`, phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
-  const alive = answers.filter(Boolean)
+  const alive = answers.filter(Boolean).map(readReport)
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(`R${round} ${reviewers[i].key}`)}`) })
   if (!alive.length) {
     return result({ status: 'STALL', stall: { round, findings: [], reason: 'no reviewer answered: nothing can be concluded' }, resume: RESUME_AGAIN })
@@ -485,7 +548,7 @@ while (true) {
   decision.minor.forEach(id => minor.push(known[id]))
   decision.outOfScope.forEach(id => outOfScope.push({ source: 'review', ...known[id] }))
   if (decision.unanswered.length) gaps.push(`round ${round}: no verdict for ${decision.unanswered.join(', ')}, asked again`)
-  rounds.push({ round, reviewers: alive.length, new: found.map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: decision.toFix, stalled: decision.stalled, unanswered: decision.unanswered })
+  rounds.push({ round, size, reviewers: alive.length, new: found.map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: decision.toFix, stalled: decision.stalled, unanswered: decision.unanswered })
   log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${decision.toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
   unread = unreviewedFiles(answers, reviewers, groups, unread)
@@ -504,7 +567,7 @@ while (true) {
 
   phase('Fix')
   const fix = decision.toFix.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}`).join('\n')
-  const fixed = await ask([
+  const fixedRaw = await ask([
     'Fix exactly these review findings and nothing else. A "scope" finding means revert that change outside the perimeter: only an edit the change itself made, never the user\'s earlier work.',
     fix,
     `Intent: ${brief}`,
@@ -517,6 +580,7 @@ while (true) {
     FIX_BUDGET,
     'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
   ].filter(Boolean).join('\n\n'), { label: `fix R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
+  const fixed = readReport(fixedRaw)
   if (!fixed) {
     return result({ status: 'STALL', stall: { round, findings: [], reason: `the implementer returned nothing on the fix (stopped or failed${why(`fix R${round}`)})` }, resume: RESUME_AGAIN })
   }

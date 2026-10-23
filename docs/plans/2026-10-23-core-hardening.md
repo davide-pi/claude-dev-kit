@@ -47,17 +47,17 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 ## Phase 0 — groundwork
 
-- [ ] **T1 `sameFinding` without category (C2).** Files: `workflows/impl-review-loop.js`, `tools/impl-review-loop.test.mjs`.
-  Drop the category comparison; update header comment (85–88) and `dedupeFound` comment. Interface unchanged.
+- [x] **T1 `sameFinding` without category (C2).** Files: `workflows/impl-review-loop.js`, `tools/impl-review-loop.test.mjs`.
+  Drop the category comparison, except that a `scope` finding only matches another `scope` one (a revert request never folds into another finding); update header comment (85–88) and `dedupeFound` comment. Interface unchanged.
   Verify: new test `sameFinding: a re-categorised finding (correctness → regression) on the same spot is the same finding`
   fails first; flip line 232. Depends: none.
-- [ ] **T2 reviewers by size, size re-derived (C4, C10).** Same files. Pure `reviewersFor(size, touches)`: S = A Sonnet
+- [x] **T2 reviewers by size, size re-derived (C4, C10).** Same files. Pure `reviewersFor(size, touches)`: S = A Sonnet
   medium; M = A Opus high; L = A Sonnet high + B Opus high; security/performance specialists at M and L when `touches`.
   Pure `sizeFor(given, changedCount)`: 1 file keeps, 2–4 ≥ M, 5+ → L, only upward. Called each round; log
   `roundLog[i].size`. Verify: `sizeFor: 1 file keeps S, 3 files lifts S to M, 6 lifts M to L, never downgrades L`;
   `script: an S change that grows to 5 files is reviewed as L from the next round`; update the reviewers-by-size test.
   Depends: none.
-- [ ] **T3 schema fields + helpers (C1, C3, C5, C6, C7, C12).** Same files. IMPLEMENTATION: required
+- [x] **T3 schema fields + helpers (C1, C3, C5, C6, C7, C12).** Same files. IMPLEMENTATION: required
   `verify: { status: pass|fail|not-run, command, line }`, `snapshot: { tree, files[], churn }`,
   `rejected: [{ id, reason }]`, `noticed: [{ title, path, why }]` (evidence stays required). REVIEW: required
   `filesReviewed: string[]`. FINDING_IN: `causedByChange: boolean`, `confidence: CONFIRMED|PLAUSIBLE`. Pure
@@ -99,7 +99,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 - [ ] **T10 `scripts/snapshot.ps1` + delta from snapshots (C7.1).** New `scripts/snapshot.ps1 -Since <tree|sha> [-Dirty 'a,b']`
   (throwaway index, real index/worktree untouched, temp index removed, exit 2 on usage error), new
-  `tools/snapshot.test.mjs` (skipped without pwsh, like `perimeter.test.mjs`), allow rules in `settings.json` next to
+  `snapshot.test.mjs` under tools (skipped without pwsh, like `perimeter.test.mjs`), allow rules in `settings.json` next to
   the perimeter ones (PowerShell + Bash). Workflow: IMPL/FIX prompts end with the exact command (`SNAPSHOT_TEXT`);
   `changed` from `snapshot.files`; delta scope ``git diff <prevTree> <tree>`` via pure `deltaCommand(prevTree, tree, startHead)`;
   inline: first fixer `-Since` = startHead. Verify: `snapshot.ps1: a new untracked file and an edit appear in files;
