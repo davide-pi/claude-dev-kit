@@ -1,7 +1,7 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
-import type { CockpitAgent, CockpitAlm, CockpitBurnSample, CockpitHistoryEntry, CockpitTab } from '../types'
+import type { CockpitAgent, CockpitAlm, CockpitBurnSample, CockpitGit, CockpitHistoryEntry, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
 
 export const COLORS = {
   text: '#d6d8dc',
@@ -527,6 +527,73 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
     })
   }
   return out
+}
+
+// ── Buttons: what `compatta` tells the summary to keep, and what `segna ore` asks the worklog for ──
+
+/** The open tasks the pane lists: in progress first, then pending, each in the order it arrived. */
+export const openTasks = (s: Pick<CockpitSnapshot, 'tasks'>): CockpitTask[] => {
+  const tasks = s.tasks ?? []
+  return [...tasks.filter(t => t.status === 'in_progress'), ...tasks.filter(t => t.status === 'pending')]
+}
+
+const COMPACT_KEEP =
+  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+const COMPACT_MAX = 400
+const COMPACT_ITEM_MAX = 40
+const COMPACT_LIST_MAX = 3
+
+/**
+ * What the summary of `compatta` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
+ * snapshot knows (the open task titles, the deliver perimeter, the running workflow), each part only when it fits.
+ */
+export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimeter' | 'workflow'>): string {
+  const cut = (items: readonly string[]) => items.slice(0, COMPACT_LIST_MAX).map(i => truncEnd(i, COMPACT_ITEM_MAX))
+  const perimeter = s.perimeter ?? []
+  const parts = [
+    { head: 'Task aperti: ', items: cut(openTasks(s).map(t => t.subject)), sep: '; ' },
+    { head: `Perimetro deliver (${perimeter.length} ${perimeter.length === 1 ? 'voce' : 'voci'}): `, items: cut(perimeter), sep: ', ' },
+    { head: 'Workflow in corso: ', items: s.workflow ? [truncEnd(s.workflow.name, COMPACT_ITEM_MAX)] : [], sep: '' },
+  ]
+  let out = COMPACT_KEEP
+  for (const { head, items, sep } of parts) {
+    // as many items as fit; none fitting leaves the part out
+    for (let n = items.length; n > 0; n--) {
+      const next = `${out} ${head}${items.slice(0, n).join(sep)}.`
+      if ([...next].length <= COMPACT_MAX) {
+        out = next
+        break
+      }
+    }
+  }
+  return out
+}
+
+/**
+ * The scope `/worklog` takes for the work in hand: `AB#<id>` when the branch name carries a work item id
+ * (`AB#1234`, `/1234-`, `feature/1234`), else `PR <n>` when a pull request is known, else `topic <branch>`;
+ * none on a detached HEAD or without git, where nothing names the work.
+ */
+export function worklogScope(git: CockpitGit | undefined, prNumber?: number): string | undefined {
+  if (!git || git.isDetached) return undefined
+  const id = /AB#(\d+)/i.exec(git.branch)?.[1] ?? /(?:^|\/)(\d{3,})(?=$|[-_/])/.exec(git.branch)?.[1]
+  if (id) return `AB#${id}`
+  return prNumber !== undefined ? `PR ${prNumber}` : `topic ${git.branch}`
+}
+
+/** `deliver`'s perimeter file -> its entries, when it is active and for `branch` (as `hooks/scope-guard.js` reads it); else undefined. */
+export function parsePerimeter(text: string, branch: string): string[] | undefined {
+  const entries: string[] = []
+  let fileBranch = ''
+  let isActive = false
+  for (const raw of text.split(/\r?\n/)) {
+    const l = raw.trim()
+    const b = /^branch:\s*(.+)$/i.exec(l)
+    if (b) fileBranch = (b[1] ?? '').trim()
+    else if (/^status:\s*active\s*$/i.test(l)) isActive = true
+    else if (l.startsWith('- ') && l.slice(2).trim()) entries.push(l.slice(2).trim())
+  }
+  return isActive && entries.length > 0 && fileBranch !== '' && fileBranch === branch ? entries : undefined
 }
 
 /** The cockpit's tabs, in the order the bar draws them. */

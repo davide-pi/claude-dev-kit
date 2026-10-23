@@ -71,10 +71,16 @@ type World = {
   viewed?: (string | undefined)[]
   /** The context fill `$.session.usage()` answers (25 when not given). */
   ctxPercent?: number
-  /** Receives the text of every `$.ui.copy`. */
-  copied?: string[]
-  /** Receives `session.compact` and each command run by name, in order. */
+  /** Receives `session.compact`, in order. */
   calls?: string[]
+  /** Receives the `instructions` of every `session.compact`. */
+  instructions?: (string | undefined)[]
+  /** Receives the line of every `command.run` (`/<command> <args>`). */
+  commands?: string[]
+  /** The text of this branch's deliver perimeter file (`<git-dir>/deliver/perimeter.md`). */
+  perimeter?: string
+  /** The branch `git status` reports (`feature/x` when not given). */
+  branch?: string
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -112,7 +118,7 @@ function world(on: On, options: World = {}) {
         ? ''
         : e.argv.includes('rev-parse')
         ? '.git\n.git\n/work/example-repo\n'
-        : `## ${options.detached ? 'HEAD (no branch)' : 'feature/x'}\nM  a.ts\n M b.ts\n?? c.ts\n`,
+        : `## ${options.detached ? 'HEAD (no branch)' : (options.branch ?? 'feature/x')}\nM  a.ts\n M b.ts\n?? c.ts\n`,
     },
   }))
   on('fs.read', (_, e) => {
@@ -121,6 +127,7 @@ function world(on: On, options: World = {}) {
       return { value: options.workspacesRaw ?? JSON.stringify(options.workspaces ?? {}) }
     }
     if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
+    if (options.perimeter !== undefined && /deliver[\\/]perimeter\.md$/.test(e.path)) return { value: options.perimeter }
     return {
       value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
     }
@@ -140,16 +147,13 @@ function world(on: On, options: World = {}) {
     options.closed?.push(e.origin.kind)
     return { value: undefined }
   })
-  on('ui.copy', (_, e) => {
-    options.copied?.push(e.text)
-    return { value: { isCopied: true } }
-  })
-  on('session.compact', () => {
+  on('session.compact', (_, e) => {
     options.calls?.push('compact')
+    options.instructions?.push(e.instructions)
     return { skip: 'test' }
   })
   on('command.run', { command: 'worklog' }, (_, e) => {
-    options.calls?.push(`command:${e.command}`)
+    options.commands?.push(`/${e.command} ${e.args}`)
     return { text: 'ok' }
   })
   on('fs.write', (_, e) => {
@@ -221,12 +225,12 @@ test('the pane shows header, context, credits and an agent that finished before 
   }
 })
 
-test('the pane has no close button of its own: the tab bar and the Sessione actions are its only buttons', async ($, on) => {
+test('the pane has no close button of its own: the tab bar and the buttons row are its only buttons', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:work', 'tab:repo', 'quick:compact', 'quick:worklog', 'quick:branch'])
+  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:work', 'tab:repo', 'bar:compact', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -997,62 +1001,139 @@ test('session.end keeps the tab in the closed file, so a resume finds it', async
 
 // ── Sessione view ──
 
-test('Sessione: the context line at 80% or more is red, with a compatta ora button that compacts the session', async ($, on) => {
-  const calls: string[] = []
-  world(on, { ctxPercent: 87, calls })
+test('Sessione: the context line at 80% or more is red, with no button of its own', async ($, on) => {
+  world(on, { ctxPercent: 87 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect(await ui.find({ type: 'Text', text: /^⚠ contesto al 87%$/ })).toBeDefined()
   expect(colorOf(await ui.drawn(), /^⚠ contesto al 87%$/)).toBe(RED)
-  expect(await ui.find({ key: 'compact-now' })).toBeDefined()
-  expect(calls).toEqual([])
-  await ui.press({ key: 'compact-now' })
-  expect(calls).toEqual(['compact'])
+  expect(await ui.find({ key: 'compact-now' })).toBeUndefined()
+  expect((await ui.findAll({ type: 'Button' })).some(b => /compatta ora/.test(b.text ?? ''))).toBe(false)
   await ui.unmount()
 })
 
-test('Sessione: below 80% there is no warning and no compatta ora; 80% exactly has both', async ($, on) => {
+test('Sessione: below 80% there is no warning; 80% exactly has it', async ($, on) => {
   const clock = world(on, { ctxPercent: 79 })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ key: 'compact-now' })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^⚠/ })).toBeUndefined()
   await ui.unmount()
   await clock.advance(1)
   await $.session.measure({ context: { window: 1_000_000, tokens: 800_000, percent: 80 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ key: 'compact-now' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^⚠ contesto al 80%$/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('Sessione quick buttons: compatta compacts, /worklog runs the command, copia branch copies the branch', async ($, on) => {
+// ── Buttons row: compatta and segna ore, the last row of every tab ──
+
+test('buttons row: compatta compacts with the instructions, segna ore submits the scoped /worklog', async ($, on) => {
   const calls: string[] = []
-  const copied: string[] = []
-  world(on, { calls, copied })
+  const instructions: (string | undefined)[] = []
+  const commands: string[] = []
+  world(on, { calls, instructions, commands, branch: 'feature/1234-orders' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ key: 'quick:compact' }))?.text).toBe('compatta')
-  expect((await ui.find({ key: 'quick:worklog' }))?.text).toBe('/worklog')
-  expect((await ui.find({ key: 'quick:branch' }))?.text).toBe('copia branch')
+  expect((await ui.find({ key: 'bar:compact' }))?.text).toBe('compatta')
+  expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('segna ore')
+  // the quick row's buttons are gone
+  for (const key of ['quick:compact', 'quick:worklog', 'quick:branch']) expect(await ui.find({ key })).toBeUndefined()
 
-  await ui.press({ key: 'quick:compact' })
-  await ui.press({ key: 'quick:worklog' })
-  expect(calls).toEqual(['compact', 'command:worklog'])
-  expect(copied).toEqual([])
-  await ui.press({ key: 'quick:branch' })
-  expect(copied).toEqual(['feature/x'])
+  await ui.press({ key: 'bar:compact' })
+  expect(calls).toEqual(['compact'])
+  expect(instructions).toEqual([KEEP_DROP])
+  expect(commands).toEqual([])
+  await ui.press({ key: 'bar:worklog' })
+  expect(commands).toEqual(['/worklog oggi AB#1234'])
+  expect(calls).toEqual(['compact'])
   await ui.unmount()
 })
 
-test('Sessione: copia branch is left out when the folder is not a repository', async ($, on) => {
-  world(on, { notRepo: true })
+const KEEP_DROP =
+  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+
+test('buttons row: the instructions name the open tasks and the active deliver perimeter of the branch', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  world(on, {
+    instructions,
+    branch: 'feat/x',
+    perimeter: 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n',
+  })
+  taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ key: 'quick:branch' })).toBeUndefined()
-  expect(await ui.find({ key: 'quick:compact' })).toBeDefined()
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('Scrivere i test', 'in_progress'), todo('Poi il codice', 'pending'), todo('Fatto', 'completed')] })
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:compact' })
   await ui.unmount()
+  expect(instructions).toHaveLength(1)
+  expect(instructions[0]?.startsWith(KEEP_DROP)).toBe(true)
+  expect(instructions[0]).toContain('Task aperti: Scrivere i test; Poi il codice.')
+  expect(instructions[0]).toContain('Perimetro deliver (2 voci): src/a.ts, src/b/.')
+  expect(instructions[0]).not.toContain('Fatto')
+})
+
+test('buttons row: a perimeter of another branch, or a closed one, is not named', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  world(on, { instructions, branch: 'feat/x', perimeter: 'branch: feat/other\nstatus: active\n- src/a.ts\n' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:compact' })
+  await ui.unmount()
+  expect(instructions).toEqual([KEEP_DROP])
+})
+
+for (const [branch, scope] of [
+  ['feature/AB#512-reports', 'AB#512'],
+  ['users/me/4711-fix-login', 'AB#4711'],
+  ['main', 'topic main'],
+] as const) {
+  test(`buttons row: segna ore on ${branch} submits the scope ${scope}`, async ($, on) => {
+    const commands: string[] = []
+    world(on, { commands, branch })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await mountPane($)
+    await ui.press({ key: 'bar:worklog' })
+    await ui.unmount()
+    expect(commands).toEqual([`/worklog oggi ${scope}`])
+  })
+}
+
+for (const [name, options] of [
+  ['a detached HEAD', { detached: true }],
+  ['no git', { notRepo: true }],
+] as const) {
+  test(`buttons row: segna ore is hidden on ${name}; compatta stays`, async ($, on) => {
+    world(on, options)
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await mountPane($)
+    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+    expect(await ui.find({ key: 'bar:compact' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+/** The keys of the Buttons in the last row of the drawn pane. */
+const lastRowKeys = (root: unknown): string[] => {
+  const keys = (el: unknown): string[] => {
+    const o = el as { props?: { key?: string }; type?: string; children?: unknown[] } | null
+    const own = o?.type === 'Button' && o.props?.key ? [o.props.key] : []
+    return [...own, ...(o?.children ?? []).flatMap(keys)]
+  }
+  return keys(((root as { children?: unknown[] }).children ?? []).at(-1))
+}
+
+test('buttons row: the very last row of every tab', async ($, on) => {
+  world(on, { hasWorklog: true })
+  taskTools(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('Uno', 'pending')] })
+  for (const tab of ['session', 'agents', 'work', 'repo']) {
+    const { root, rows } = await paneRows($, 50, tab)
+    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:worklog'])
+    // a rule sets it apart from the tab's content
+    expect(rows.at(-2)).toMatch(/^─+$/)
+  }
 })
 
 test('Sessione: the running agents only, compact, at most 5 rows then … +n', async ($, on) => {
@@ -1204,7 +1285,8 @@ test('STORICO lists at most ten rows, then … +n', async ($, on) => {
   expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 12 ▾')
   expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(10)
   const rows = rowTexts(await ui.drawn())
-  expect(rows.at(-1)).toBe('… +2')
+  // the buttons row closes the pane, under a rule
+  expect(rows.at(-3)).toBe('… +2')
   await ui.unmount()
 })
 
@@ -1436,15 +1518,6 @@ test('burn rate: a reading from before the current 5h window opened is not carri
   expect((await paneRows($)).rows.some(r => /finisce/.test(r))).toBe(false)
 })
 
-test('Sessione: copia branch is left out on a detached HEAD', async ($, on) => {
-  world(on, { detached: true })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
-  expect(await ui.find({ key: 'quick:branch' })).toBeUndefined()
-  expect(await ui.find({ key: 'quick:compact' })).toBeDefined()
-  await ui.unmount()
-})
-
 test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   world(on, { workspacesRaw: '{ "roots": [ { "path": "/work", "org": ' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -1483,26 +1556,22 @@ const directionAround = (root: unknown, key: string): string | undefined => {
   return undefined
 }
 
-test('quick buttons: side by side where they fit the pane, stacked at 40 columns', async ($, on) => {
-  const options: World = {}
-  world(on, options)
+test('buttons row: side by side, and the row fits 40 columns', async ($, on) => {
+  world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  // compatta + /worklog + copia branch: 12 + 12 + 16 cells and two gaps
-  expect(directionAround((await paneRows($, 50)).root, 'quick:compact')).toBe('row')
-  expect(directionAround((await paneRows($, 42)).root, 'quick:compact')).toBe('row')
-  expect(directionAround((await paneRows($, 40)).root, 'quick:compact')).toBe('column')
-})
-
-test('quick buttons: without copia branch the two left fit 40 columns side by side', async ($, on) => {
-  world(on, { detached: true })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(directionAround((await paneRows($, 40)).root, 'quick:compact')).toBe('row')
+  // compatta + segna ore: 12 + 13 cells and one gap
+  for (const columns of [60, 50, 40]) expect(directionAround((await paneRows($, columns)).root, 'bar:compact')).toBe('row')
+  const ui = await mountPane($, 40)
+  const labels = (await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('bar:')).map(b => b.text ?? '')
+  await ui.unmount()
+  expect(labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1).toBeLessThanOrEqual(40)
 })
 
 test('Lavoro with no tasks and no worklog warnings says niente da mostrare', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 50, 'work')
-  expect(rows.at(-1)).toBe('niente da mostrare')
+  // the buttons row closes the pane, under a rule
+  expect(rows.at(-3)).toBe('niente da mostrare')
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })

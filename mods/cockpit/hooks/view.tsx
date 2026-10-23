@@ -20,6 +20,7 @@ import {
   fmtCostDelta,
   gridWidths,
   modelFamily,
+  openTasks,
   parseReset,
   pctCell,
   rateColor,
@@ -33,6 +34,7 @@ import {
   truncMiddle,
   weeklyPace,
   worklogLabel,
+  worklogScope,
 } from './format'
 import type { ModelFamily, Span } from './format'
 
@@ -50,7 +52,7 @@ const TAB_SHORT_BELOW = 48
 /** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
 const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
-/** The context fill from which the Sessione view warns and offers to compact. */
+/** The context fill from which the Sessione view warns. */
 const CTX_WARN_PCT = 80
 const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Agenti', work: 'Lavoro', repo: 'Repo' }
 const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Agen', work: 'Lav', repo: 'Repo' }
@@ -141,12 +143,6 @@ export function taskCounts(s: CockpitSnapshot): { inProgress: number; pending: n
   if (tasks.length === 0) return null
   const n = (status: CockpitTask['status']) => tasks.filter(t => t.status === status).length
   return { inProgress: n('in_progress'), pending: n('pending'), done: n('completed'), total: tasks.length }
-}
-
-/** The open tasks the pane lists: in progress first, then pending, each in the order it arrived. */
-export const openTasks = (s: CockpitSnapshot): CockpitTask[] => {
-  const tasks = s.tasks ?? []
-  return [...tasks.filter(t => t.status === 'in_progress'), ...tasks.filter(t => t.status === 'pending')]
 }
 
 /** One task row: icon, subject cut with `…` to fit, and for a task in progress the time since it started. */
@@ -260,9 +256,8 @@ type Block = (Node | readonly Node[])[]
 export type PaneActions = {
   selectTab: (tab: CockpitTab) => void
   compact: () => void
-  runWorklog: () => void
-  /** Copies `branch` on the surface the press came from. */
-  copyBranch: (branch: string, surface: RenderSurface) => void
+  /** Asks the worklog for today's hours of `scope` (`AB#<id>`, `PR <n>` or `topic <branch>`). */
+  runWorklog: (scope: string) => void
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
@@ -375,18 +370,11 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
   const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(t => spanWidth(t ?? [])))
   const barW = Math.max(4, width - textCol - 1)
 
-  // CONTESTO: the cache share of the last main-loop turn sits right of the title; from 80% a red line and the way out
+  // CONTESTO: the cache share of the last main-loop turn sits right of the title; from 80% a red line
   const pct = s.ctx.percent ?? 0
   const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
   const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare))]
-  const ctxWarning = pct >= CTX_WARN_PCT && (
-    <Box justifyContent="space-between">
-      {line(ui, [sp(`⚠ contesto al ${Math.round(pct)}%`, COLORS.red)])}
-      <Button key="compact-now" variant="primary" onPress={() => actions.compact()}>
-        compatta ora
-      </Button>
-    </Box>
-  )
+  const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(`⚠ contesto al ${Math.round(pct)}%`, COLORS.red)])
 
   // CREDITI RESIDUI
   const paceDelta = seven?.pace?.delta
@@ -414,24 +402,18 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
   ]
 
-  // A detached HEAD has no branch to copy. The row stacks when its buttons do not fit the pane side by side.
-  const branch = g && !g.isDetached ? g.branch : undefined
-  const quickLabels = ['compatta', '/worklog', ...(branch ? ['copia branch'] : [])]
-  const quickButtons = (
-    <Box
-      flexDirection={buttonRowWidth(quickLabels) <= width ? 'row' : 'column'}
-      alignItems="flex-start"
-      columnGap={BUTTON_GAP}
-    >
-      <Button key="quick:compact" onPress={() => actions.compact()}>
+  // The last row of every tab: compatta always; segna ore when the work in hand has a scope (none on a detached HEAD or
+  // without git). The row stacks when its buttons do not fit the pane side by side.
+  const scope = worklogScope(g, s.prNumber)
+  const barLabels = ['compatta', ...(scope ? ['segna ore'] : [])]
+  const buttonsRow = (
+    <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+      <Button key="bar:compact" onPress={() => actions.compact()}>
         compatta
       </Button>
-      <Button key="quick:worklog" onPress={() => actions.runWorklog()}>
-        /worklog
-      </Button>
-      {branch && (
-        <Button key="quick:branch" onPress={press => actions.copyBranch(branch, press.surface)}>
-          copia branch
+      {scope && (
+        <Button key="bar:worklog" onPress={() => actions.runWorklog(scope)}>
+          segna ore
         </Button>
       )}
     </Box>
@@ -451,7 +433,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
       !five && !seven && line(ui, [dim('nessun dato sui limiti')]),
     ],
     liveAgents,
-    [gap(), quickButtons],
   ]
 
   // ── Agenti: every agent listed, finished ones for two minutes ──
@@ -530,6 +511,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
       {tabBar}
       {rule}
       {body}
+      {rule}
+      {buttonsRow}
     </Box>
   )
 }

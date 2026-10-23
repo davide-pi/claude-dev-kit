@@ -105,6 +105,12 @@ export type CockpitSnapshot = {
   worklog: CockpitWorklog
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
   tasks?: CockpitTask[]
+  /** Entries of the active deliver perimeter of the branch checked out (`<git-dir>/deliver/perimeter.md`); absent without one. */
+  perimeter?: string[]
+  /** A workflow running now; nothing fills it yet (phase 4), the compaction instructions name it when it is there. */
+  workflow?: { name: string }
+  /** The pull request of the branch; nothing fills it yet (phase 5), the `segna ore` scope uses it when it is there. */
+  prNumber?: number
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */
   now: number
 }
