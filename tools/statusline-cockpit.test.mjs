@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -62,4 +62,73 @@ test('pane open but stale (no heartbeat for over 45 s): the normal line', () => 
   const out = render({ ...STATE, open: true, at: Date.now() - 60_000 });
   assert.notEqual(out, '\u200B\n');
   assert.match(out, /\+\$0\.38/);
+});
+
+// ── Cache pruning ────────────────────────────────────────────────────────────
+
+const HOUR = 3600_000;
+const HEX = 'a'.repeat(16);
+
+/** Runs the status line once in `dir` (a CLAUDE_CONFIG_DIR) with the sample payload. */
+function run(dir, payload = SAMPLE) {
+  const r = spawnSync(process.execPath, [STATUSLINE], {
+    input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, COLUMNS: '200' },
+  });
+  assert.equal(r.status, 0, r.stderr);
+}
+
+/** Writes `name` in the cache folder, `ageMs` old. */
+function put(dir, name, ageMs) {
+  const file = join(dir, '.cache', name);
+  writeFileSync(file, '{}');
+  const t = (Date.now() - ageMs) / 1000;
+  utimesSync(file, t, t);
+}
+
+function withCache(fn) {
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-prune-'));
+  mkdirSync(join(dir, '.cache'), { recursive: true });
+  try { fn(dir, (name) => existsSync(join(dir, '.cache', name))); } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test('prune: old files of each kind go, fresh ones stay, the current session and foreign files are untouched', () => {
+  withCache((dir, has) => {
+    const sid = SAMPLE.session_id;
+    put(dir, `git-${HEX}.json`, 2 * HOUR);
+    put(dir, `worktree-${HEX}.json`, 2 * HOUR);
+    put(dir, 'context-old.json', 7 * HOUR);
+    put(dir, 'cockpit-old.json', 4 * 24 * HOUR);
+    put(dir, `git-${'b'.repeat(16)}.json`, 10 * 60_000);
+    put(dir, 'context-fresh.json', 5 * HOUR);
+    put(dir, 'cockpit-fresh.json', 2 * 24 * HOUR);
+    put(dir, `context-${sid}.json`, 30 * HOUR);
+    put(dir, `cockpit-${sid}.json`, 30 * HOUR);
+    put(dir, 'nudge-x.json', 30 * HOUR);
+    put(dir, 'a.log', 30 * HOUR);
+    run(dir);
+    for (const gone of [`git-${HEX}.json`, `worktree-${HEX}.json`, 'context-old.json', 'cockpit-old.json']) assert.equal(has(gone), false, gone);
+    for (const kept of [`git-${'b'.repeat(16)}.json`, 'context-fresh.json', 'cockpit-fresh.json', `cockpit-${sid}.json`, 'nudge-x.json', 'a.log']) assert.equal(has(kept), true, kept);
+    assert.equal(has('.statusline-prune'), true);
+  });
+});
+
+test('prune: throttled to once an hour by the marker file', () => {
+  withCache((dir, has) => {
+    run(dir);
+    put(dir, 'context-old.json', 7 * HOUR);
+    run(dir);
+    assert.equal(has('context-old.json'), true, 'second run within the hour must not prune');
+    put(dir, '.statusline-prune', 2 * HOUR);
+    run(dir);
+    assert.equal(has('context-old.json'), false, 'a marker older than an hour allows a new pass');
+  });
+});
+
+test('prune: a marker dated in the future does not block pruning', () => {
+  withCache((dir, has) => {
+    put(dir, '.statusline-prune', -5 * HOUR);
+    put(dir, 'context-old.json', 7 * HOUR);
+    run(dir);
+    assert.equal(has('context-old.json'), false);
+  });
 });

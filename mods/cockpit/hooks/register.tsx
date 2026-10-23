@@ -245,6 +245,22 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // The ending session's file is left closed and empty, so the statusline drops its segments at once; the
+  // statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot delete). Best-effort: skipped when
+  // the exit's short budget is nearly spent, and any failure is swallowed.
+  on('session.end', async ($, e, next) => {
+    try {
+      const dir = await configDir($)
+      if (dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
+        const content = { open: false, at: await $.clock.now(), lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
+        await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
+      }
+    } catch {
+      // the file ages out on its own
+    }
+    return next(e)
+  })
+
   // `/cockpit` opens the pane; a command-initiated open is placed at any width.
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)

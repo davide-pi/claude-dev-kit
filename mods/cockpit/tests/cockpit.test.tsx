@@ -257,6 +257,30 @@ test('the state file is written at session start with open:false and the session
   expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks'])
 })
 
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
+
+test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
+  const writes = new Map<string, string>()
+  // $.session.id() already answers the new id (a /clear): the file written is the one `e.sessionId` names.
+  world(on, { writes, sessionId: () => 's-2' })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(flagOf(writes)).toEqual(CLOSED)
+})
+
+test('session.end with the pane open still writes open:false for the ending session', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, sessionId: () => 's-2' })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  const current = [...writes.keys()].find(k => /cockpit-s-2\.json$/.test(k))
+  expect(JSON.parse(writes.get(current ?? '') ?? 'null')).toMatchObject({ open: true })
+  await $.session.end({ reason: 'prompt_input_exit', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(flagOf(writes)).toEqual(CLOSED)
+})
+
 test('a new session id (/clear) gets its own file, even with the same content', async ($, on) => {
   const writes = new Map<string, string>()
   let id = 's-1'

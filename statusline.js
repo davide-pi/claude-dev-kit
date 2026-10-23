@@ -339,6 +339,39 @@ function saveContextSnapshot(sessionId, ctx, cache) {
   } catch { /* best-effort: the nudge simply stays silent */ }
 }
 
+// The cache folder collects per-session and per-folder files for good. Once an hour (guarded by the mtime of a
+// marker file: one stat per render otherwise) the ones this script owns are pruned by age; any other file is
+// left alone. The current session's files are never removed.
+const PRUNE_EVERY_MS = 60 * 60 * 1000;
+const PRUNE_RULES = [
+  { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 5 s only
+  { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // the nudge distrusts it past 6 h
+  { re: /^cockpit-[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 },       // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
+];
+
+function pruneCache(currentSessionId) {
+  try {
+    const dir = path.join(CONFIG_DIR, ".cache");
+    const marker = path.join(dir, ".statusline-prune");
+    const now = Date.now();
+    let age = Infinity;  // never pruned
+    try { age = now - fs.statSync(marker).mtimeMs; } catch { /* no marker yet */ }
+    if (age >= 0 && age < PRUNE_EVERY_MS) return;  // a marker from the future (clock moved back) does not block
+    // The folder exists by now (the snapshot and the git caches create it); if the marker cannot be written, skip.
+    try { fs.writeFileSync(marker, ""); } catch { return; }
+    const keep = new Set(typeof currentSessionId === "string"
+      ? [`context-${currentSessionId}.json`, `cockpit-${currentSessionId}.json`] : []);
+    for (const name of fs.readdirSync(dir)) {
+      const rule = PRUNE_RULES.find((r) => r.re.test(name));
+      if (!rule || keep.has(name)) continue;
+      try {
+        const file = path.join(dir, name);
+        if (now - fs.statSync(file).mtimeMs > rule.maxAgeMs) fs.unlinkSync(file);
+      } catch { /* gone already, or locked: next hour */ }
+    }
+  } catch { /* best-effort */ }
+}
+
 // The cached prefix has expired: the next request re-writes the whole context
 // at cache-write price. Shown only once caching has been observed at all, so a
 // provider that never reports cache tokens does not wear a permanent badge.
@@ -598,6 +631,7 @@ process.stdin.on("end", () => {
 
   const cwd = data.cwd || data.workspace?.current_dir || process.cwd();
   saveContextSnapshot(data.session_id, data.context_window, data.prompt_cache);
+  pruneCache(data.session_id);
 
   // The cockpit pane carries all of this while it is open: the line stays empty.
   const cockpit = readCockpit(data.session_id);
