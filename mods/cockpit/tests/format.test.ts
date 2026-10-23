@@ -118,7 +118,7 @@ test('barCells fills the width exactly, gap after fill', () => {
     ['b', 1],
     [COLORS.empty, 5],
   ])
-  expect(spanText(barCells(4, []))).toBe('\u2588\u2588\u2588\u2588')
+  expect(spanText(barCells(4, []))).toBe('\u25b1\u25b1\u25b1\u25b1')
 })
 
 test('parseGitStatus counts staged, modified, untracked', () => {

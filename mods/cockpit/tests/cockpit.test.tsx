@@ -440,7 +440,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   expect(rows[i - 1]).toBe(' ')
   expect(rows[i - 2]).toMatch(/^─+$/)
   expect(rows[i + 1]).toBe(' ')
-  expect(rows[i + 2]).toMatch(/^█{50}$/)
+  expect(rows[i + 2]).toMatch(/^[▰▱]{50}$/)
   // in progress first, with its elapsed time; then pending; then the completed row
   expect(rows[i + 3]).toMatch(/^◐ Working on it +2m00s$/)
   expect(rows[i + 4]).toMatch(/^○ Pending one +$/)
@@ -460,7 +460,7 @@ test('the bar splits its width by done, in progress and the rest', async ($, on)
   const walk = (el: unknown) => {
     const o = el as { props?: { color?: string }; children?: unknown[] } | null
     const [only] = o?.children ?? []
-    if (typeof only === 'string' && /^█+$/.test(only)) cells[o?.props?.color ?? ''] = (cells[o?.props?.color ?? ''] ?? 0) + [...only].length
+    if (typeof only === 'string' && /^[▰▱]+$/.test(only)) cells[o?.props?.color ?? ''] = (cells[o?.props?.color ?? ''] ?? 0) + [...only].length
     for (const c of o?.children ?? []) walk(c)
   }
   walk(await ui.drawn())

@@ -292,7 +292,7 @@ function segContext(ctx) {
   const empty  = BAR_W - filled;
   const col    = pct < 40 ? C.green : pct < 80 ? C.yellow : C.red;
   const pctStr = `${Math.round(pct)}%`.padStart(4);
-  const bar    = `${col}${"█".repeat(filled)}${C.empty}${"█".repeat(empty)}${R}`;
+  const bar    = `${col}${"▰".repeat(filled)}${C.empty}${"▱".repeat(empty)}${R}`;
   const used   = abbrevTokens(ctx?.total_input_tokens);
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";

@@ -237,10 +237,10 @@ export function taskBarCells(width: number, done: number, inProgress: number, to
   const nDone = done >= total ? width : Math.min(width, Math.floor((done / total) * width))
   const nActive = inProgress > 0 ? Math.min(width - nDone, Math.max(1, Math.round((inProgress / total) * width))) : 0
   const out: Span[] = []
-  if (nDone > 0) out.push({ t: '█'.repeat(nDone), c: COLORS.green })
-  if (nActive > 0) out.push({ t: '█'.repeat(nActive), c: COLORS.blue })
+  if (nDone > 0) out.push({ t: '▰'.repeat(nDone), c: COLORS.green })
+  if (nActive > 0) out.push({ t: '▰'.repeat(nActive), c: COLORS.blue })
   const rest = width - nDone - nActive
-  if (rest > 0) out.push({ t: '█'.repeat(rest), c: COLORS.empty })
+  if (rest > 0) out.push({ t: '▱'.repeat(rest), c: COLORS.empty })
   return out
 }
 
@@ -261,10 +261,10 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
   let used = 0
   for (const p of parts) {
     const n = Math.min(width - used, Math.max(0, Math.round((p.pct / 100) * width)))
-    if (n > 0) out.push({ t: '█'.repeat(n), c: p.color })
+    if (n > 0) out.push({ t: '▰'.repeat(n), c: p.color })
     used += n
   }
-  if (used < width) out.push({ t: '█'.repeat(width - used), c: COLORS.empty })
+  if (used < width) out.push({ t: '▱'.repeat(width - used), c: COLORS.empty })
   return out
 }
 
