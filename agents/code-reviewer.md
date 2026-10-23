@@ -6,7 +6,7 @@ description: >-
 tools: Read, Grep, Glob, Bash, PowerShell
 model: sonnet
 omitClaudeMd: true
-maxTurns: 40
+maxTurns: 50
 ---
 
 # code-reviewer — findings on one change, analysis only

@@ -590,9 +590,10 @@ const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
 const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
 const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
 
-test('script: every reviewer and fixer prompt carries the tool-call budget', async () => {
+test('script: every implementer, reviewer and fixer prompt carries the tool-call budget', async () => {
   const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
-  for (const c of calls.filter(x => x.opts.label !== 'implement')) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
+  for (const c of calls) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
+  assert.match(calls.find(c => c.opts.label === 'implement').prompt, /at most 120 tool calls/);
 });
 
 test('script: more than 8 changed files, reviewer A fans out per group; B stays whole; the budget is on each', async () => {

@@ -6,7 +6,7 @@ description: >-
 tools: Read, Grep, Glob, Bash, PowerShell
 model: sonnet
 omitClaudeMd: true
-maxTurns: 30
+maxTurns: 50
 ---
 
 # review-performance — what the change costs, at what scale, how often
