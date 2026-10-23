@@ -166,7 +166,7 @@ test('statusline writes the snapshot the hook reads, null-safe', () => {
     context_window: { used_percentage: 73, total_input_tokens: 146000, context_window_size: 200000 },
     prompt_cache: { warm: false, caching_observed: true, recache_tokens_if_cold: 146000 },
   });
-  assert.match(r.stdout, /cache cold 146k/);
+  assert.match(r.stdout, /cache cold 146K/);
   const snap = JSON.parse(readFileSync(join(config, '.cache', 'context-sl-1.json'), 'utf8'));
   assert.equal(snap.used_percentage, 73);
   assert.equal(snap.used_tokens, 146000, 'derived from the percentage and the window');

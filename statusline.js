@@ -278,7 +278,7 @@ function abbrevTokens(n) {
   const scale = (v, suffix) =>
     (Number.isInteger(v) ? String(v) : v.toFixed(1)) + suffix;
   if (n >= 1e6)  return scale(n / 1e6, "M");
-  if (n >= 1000) return scale(n / 1000, "k");
+  if (n >= 1000) return scale(n / 1000, "K");
   return String(Math.round(n));
 }
 
