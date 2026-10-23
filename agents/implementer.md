@@ -7,7 +7,7 @@ tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell, Skill
 model: sonnet
 effort: medium
 memory: project
-maxTurns: 60
+maxTurns: 150
 ---
 
 # implementer — a decided scope into contained, verified code

@@ -73,7 +73,7 @@ export const meta = {
 // and never reproduced: STALL 'not-reproduced'; kept after two rejections: STALL 'disputed'; kept once: back to the fixer
 // with the reviewer's note.
 //
-// Budget: every reviewer and fixer prompt carries a tool-call cap below the agent's own turn cap and asks for the
+// Budget: every implementer, reviewer and fixer prompt carries a tool-call cap below the agent's own turn cap and asks for the
 // structured result before it runs out. An agent() that throws anyway (turn cap, no StructuredOutput) is caught
 // and read as an empty result, so the gap / no-verdict logic handles it and the run goes on.
 //
@@ -558,10 +558,13 @@ const dirtyText = dirty.length
   : ''
 
 const budgetText = calls => `TOOL BUDGET: at most ${calls} tool calls in total, the structured-output call included. Read selectively, stop exploring after about ${calls - 10} and return the structured result before the budget runs out: a partial result beats none, and a run that ends without it is lost.`
-const REVIEW_BUDGET = budgetText(25)
-const FIX_BUDGET = budgetText(45)
+const IMPL_BUDGET = budgetText(120)
+const REVIEW_BUDGET = budgetText(35)
+const FIX_BUDGET = budgetText(80)
 
-const RULES = 'You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.'
+// The agents start in the session's folder, which may be another repo or no repo at all: the repo is named in
+// every prompt, or relative paths, the verify command and snapshot.ps1 land in the wrong place.
+const RULES = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
 const REPORT_TEXT = 'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.'
 
 // The last step of every implementer and fixer run: scripts/snapshot.ps1 snapshots the working tree (throwaway index,
@@ -776,6 +779,7 @@ if (!inline) {
     input.verify ? `Verify with: ${input.verify}` : '',
     RULES,
     REPORT_TEXT,
+    IMPL_BUDGET,
     snapshotText(lastTree),
   ].filter(Boolean).join('\n\n'), { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
   const impl = readReport(implRaw)
