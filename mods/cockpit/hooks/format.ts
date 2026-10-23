@@ -63,18 +63,21 @@ export function abbrevTokens(n: number | undefined, isUpper = false): string {
   return String(Math.round(n))
 }
 
-/** Time to a reset as `3d6h`, `2h14m`, `14m`; empty when the reset is past or unknown. */
-export function countdown(resetsAtMs: number | undefined, now: number): string {
-  if (resetsAtMs === undefined) return ''
-  const diff = resetsAtMs - now
-  if (diff <= 0) return ''
-  const totalMin = Math.floor(diff / 60000)
+/** A time span in 6 cells, right-aligned: `   45m` under an hour, ` 2h14m` / `13h45m` under a day, ` 3d06h` beyond (minutes and hours in two digits). */
+function fixedSpan(ms: number): string {
+  const totalMin = Math.floor(ms / 60000)
   const d = Math.floor(totalMin / 1440)
   const h = Math.floor((totalMin % 1440) / 60)
   const m = totalMin % 60
-  if (d > 0) return `${d}d${h}h`
-  if (h > 0) return `${h}h${m}m`
-  return `${m}m`
+  const two = (n: number) => String(n).padStart(2, '0')
+  const text = d > 0 ? `${d}d${two(h)}h` : h > 0 ? `${h}h${two(m)}m` : `${m}m`
+  return text.padStart(6)
+}
+
+/** Time to a reset in `fixedSpan`'s 6 cells; empty when the reset is past or unknown. */
+export function countdown(resetsAtMs: number | undefined, now: number): string {
+  if (resetsAtMs === undefined || resetsAtMs - now <= 0) return ''
+  return fixedSpan(resetsAtMs - now)
 }
 
 /** Elapsed time: `41s`, `2m14s`, `1h02m`. */
@@ -351,16 +354,6 @@ export function worklogLabel(kind: 'pending' | 'underTarget', dates: readonly st
 /** A percentage in a 4-cell column (`  7%`, ` 87%`, `100%`) so one-, two- and three-digit values line up. */
 export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
 
-const WEEKDAYS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'] as const
-
-/** The local time of a reset: `(14:30)` within 24 hours, `(dom 09:00)` beyond; empty when past or unknown. */
-export function resetClock(resetsAtMs: number | undefined, now: number): string {
-  if (resetsAtMs === undefined || resetsAtMs <= now) return ''
-  const d = new Date(resetsAtMs)
-  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
-  return resetsAtMs - now <= 864e5 ? `(${clock})` : `(${WEEKDAYS[d.getDay()]} ${clock})`
-}
-
 // ── Burn rate of the 5h window ───────────────────────────────────────────────
 
 const BURN_WINDOW_MS = 30 * 60_000
@@ -427,19 +420,9 @@ export function burnRate(
   return { perHour, etaMs, isBeforeReset: etaMs < resetsAtMs - now }
 }
 
-/** `6h53`, `27m`, `1d4h`: the time to exhaustion. */
-function etaText(ms: number): string {
-  const totalMin = Math.floor(ms / 60_000)
-  const d = Math.floor(totalMin / 1440)
-  const h = Math.floor((totalMin % 1440) / 60)
-  const m = totalMin % 60
-  if (d > 0) return `${d}d${h}h`
-  return h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}m`
-}
-
-/** `−9%/h · finisce tra 6h53: arrivi al reset`, or `…, prima del reset`. */
+/** `−9%/h · finisce tra  6h53m: arrivi al reset`, or `…, prima del reset` (the time in `fixedSpan`'s 6 cells). */
 export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boolean }): string {
-  return `\u2212${Math.round(b.perHour)}%/h \u00b7 finisce tra ${etaText(b.etaMs)}${b.isBeforeReset ? ', prima del reset' : ': arrivi al reset'}`
+  return `\u2212${Math.round(b.perHour)}%/h \u00b7 finisce tra ${fixedSpan(b.etaMs)}${b.isBeforeReset ? ', prima del reset' : ': arrivi al reset'}`
 }
 
 // ── ALM target of the working directory ──────────────────────────────────────
@@ -542,18 +525,20 @@ const COMPACT_KEEP =
 const COMPACT_MAX = 400
 const COMPACT_ITEM_MAX = 40
 const COMPACT_LIST_MAX = 3
+const COMPACT_PERIMETER_MAX = 2
 
 /**
  * What the summary of `compatta` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
- * snapshot knows (the open task titles, the deliver perimeter, the running workflow), each part only when it fits.
+ * snapshot knows (the open task titles, the deliver perimeter: its size and first two entries, the name of the workflow
+ * the last `Stop` reported in flight), each part only when it fits.
  */
 export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimeter' | 'workflow'>): string {
-  const cut = (items: readonly string[]) => items.slice(0, COMPACT_LIST_MAX).map(i => truncEnd(i, COMPACT_ITEM_MAX))
+  const cut = (items: readonly string[], max = COMPACT_LIST_MAX) => items.slice(0, max).map(i => truncEnd(i, COMPACT_ITEM_MAX))
   const perimeter = s.perimeter ?? []
   const parts = [
     { head: 'Task aperti: ', items: cut(openTasks(s).map(t => t.subject)), sep: '; ' },
-    { head: `Perimetro deliver (${perimeter.length} ${perimeter.length === 1 ? 'voce' : 'voci'}): `, items: cut(perimeter), sep: ', ' },
-    { head: 'Workflow in corso: ', items: s.workflow ? [truncEnd(s.workflow.name, COMPACT_ITEM_MAX)] : [], sep: '' },
+    { head: `Perimetro deliver (${perimeter.length} ${perimeter.length === 1 ? 'voce' : 'voci'}): `, items: cut(perimeter, COMPACT_PERIMETER_MAX), sep: ', ' },
+    { head: 'Workflow in corso: ', items: cut(s.workflow ? [s.workflow] : []), sep: '' },
   ]
   let out = COMPACT_KEEP
   for (const { head, items, sep } of parts) {
@@ -569,16 +554,41 @@ export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimete
   return out
 }
 
+const DEFAULT_BRANCHES: readonly string[] = ['main', 'master', 'develop']
+
+/** The branch is a default one: `main`, `master`, `develop` or the repo's own (`defaultBranch`, from `origin/HEAD`). */
+export const isDefaultBranch = (branch: string, defaultBranch?: string): boolean =>
+  DEFAULT_BRANCHES.includes(branch) || branch === defaultBranch
+
 /**
  * The scope `/worklog` takes for the work in hand: `AB#<id>` when the branch name carries a work item id
  * (`AB#1234`, `/1234-`, `feature/1234`), else `PR <n>` when a pull request is known, else `topic <branch>`;
- * none on a detached HEAD or without git, where nothing names the work.
+ * none on a detached HEAD, without git, or on the default branch (`main`, `master`, `develop` or the repo's own,
+ * `defaultBranch`), where no implementation is identifiable.
  */
-export function worklogScope(git: CockpitGit | undefined, prNumber?: number): string | undefined {
-  if (!git || git.isDetached) return undefined
+export function worklogScope(git: CockpitGit | undefined, prNumber?: number, defaultBranch?: string): string | undefined {
+  if (!git || git.isDetached || isDefaultBranch(git.branch, defaultBranch)) return undefined
   const id = /AB#(\d+)/i.exec(git.branch)?.[1] ?? /(?:^|\/)(\d{3,})(?=$|[-_/])/.exec(git.branch)?.[1]
   if (id) return `AB#${id}`
   return prNumber !== undefined ? `PR ${prNumber}` : `topic ${git.branch}`
+}
+
+/** `git symbolic-ref --short refs/remotes/origin/HEAD` -> the repo's default branch (`origin/main` -> `main`); undefined for anything else. */
+export const parseDefaultBranch = (out: string): string | undefined => /^origin\/(.+)$/.exec(out.trim())?.[1]
+
+/** An `origin` URL (ssh or https) that points at github.com. */
+export const isGithubRemote = (url: string): boolean => /(?:^|[@/])github\.com[:/]/i.test(url.trim())
+
+/** `gh pr view --json number,state` -> the number of an open pull request; undefined for any other state or text. */
+export function parsePrNumber(out: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(out)
+    if (!isRecord(parsed)) return undefined
+    const { number, state } = parsed
+    return state === 'OPEN' && typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : undefined
+  } catch {
+    return undefined
+  }
 }
 
 /** `deliver`'s perimeter file -> its entries, when it is active and for `branch` (as `hooks/scope-guard.js` reads it); else undefined. */

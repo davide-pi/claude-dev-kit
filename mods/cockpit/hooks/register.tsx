@@ -6,10 +6,14 @@ import {
   AGENT_KEEP_MS,
   addHistory,
   compactInstructions,
+  isDefaultBranch,
+  isGithubRemote,
   isTab,
+  parseDefaultBranch,
   parseGitStatus,
   parseHistory,
   parsePerimeter,
+  parsePrNumber,
   parseReset,
   parseWorktree,
   recordBurnSample,
@@ -23,6 +27,8 @@ import type { PaneActions } from './view'
 import { PANE_MAX_COLUMNS, agentCounts, paneView, taskCounts } from './view'
 
 const TICK_MS = 15_000
+/** The pull request (and the repo's default branch) of a branch is read again after this long. */
+const PR_EVERY_MS = 5 * 60_000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -46,6 +52,12 @@ function withBurnSample(samples: CockpitSnapshot['fiveHourSamples'], now: number
 const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
   u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
 
+/** Keeps the name of the first workflow among `tasks` (a stop's `background_tasks`) in the snapshot; none clears it. */
+async function setWorkflow($: EngineInterface, tasks: readonly { type: string; name?: string }[] | undefined): Promise<void> {
+  const workflow = tasks?.find(t => t.type === 'workflow' && typeof t.name === 'string' && t.name !== '')?.name
+  await patch($, s => ({ ...s, workflow })).catch(() => undefined)
+}
+
 // ── Collection helpers (each one swallows its own failure: a missing datum stays absent) ──
 
 /** The entries of the deliver perimeter in git directory `gitDir` (relative to `cwd` as rev-parse prints it), when it is active for `branch`. */
@@ -59,18 +71,68 @@ async function readPerimeter($: EngineInterface, cwd: string, gitDir: string, br
   }
 }
 
+// What the PR read last asked about, and when: the read is repeated for another branch or after `PR_EVERY_MS`.
+let lastPrRead: { key: string; at: number } | undefined
+let isPrReading = false
+
+/**
+ * Reads, in the background (never awaited by a refresh or a render), the repo's default branch from `origin/HEAD` and,
+ * off it, the open pull request of `branch`: `gh pr view`, only for a GitHub `origin` (an Azure DevOps one is not
+ * read yet). No `gh`, no PR or a failure leaves both absent. The result is dropped when the branch has moved on.
+ */
+async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
+  const now = await $.clock.now()
+  const key = `${cwd}\n${branch}`
+  if (isPrReading || (lastPrRead?.key === key && now - lastPrRead.at < PR_EVERY_MS)) return
+  isPrReading = true
+  lastPrRead = { key, at: now }
+  try {
+    const base = ['git', '-C', cwd, '--no-optional-locks']
+    const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
+    const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
+    let prNumber: number | undefined
+    if (!isDefaultBranch(branch, defaultBranch)) {
+      const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
+      if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
+        const pr = await $.process.run(['gh', 'pr', 'view', '--json', 'number,state'], { cwd, timeoutMs: 10_000 })
+        prNumber = pr.exitCode === 0 ? parsePrNumber(pr.stdout) : undefined
+      }
+    }
+    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, prNumber } : s))
+  } catch {
+    // gh missing or too slow: no PR, and the next read is in `PR_EVERY_MS`
+  } finally {
+    isPrReading = false
+  }
+}
+
 async function refreshGit($: EngineInterface): Promise<void> {
   try {
     const cwd = await $.session.cwd()
     const base = ['git', '-C', cwd, '--no-optional-locks']
     const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
     const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
-    if (!parsed) return void (await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined })))
+    if (!parsed) {
+      return void (await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined, prNumber: undefined, defaultBranch: undefined })))
+    }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
     const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
     const gitDir = tree.exitCode === 0 ? tree.stdout.split('\n')[0]?.trim() : undefined
     const perimeter = gitDir && !parsed.isDetached ? await readPerimeter($, cwd, gitDir, parsed.branch) : undefined
-    await patch($, s => ({ ...s, cwd, git: { ...parsed, worktreeRoot }, perimeter }))
+    // A PR and a default branch belong to the repository and branch they were read for.
+    await patch($, s => {
+      const isSameRepo = s.cwd === cwd
+      const isSameBranch = isSameRepo && s.git?.branch === parsed.branch
+      return {
+        ...s,
+        cwd,
+        git: { ...parsed, worktreeRoot },
+        perimeter,
+        prNumber: isSameBranch ? s.prNumber : undefined,
+        defaultBranch: isSameRepo ? s.defaultBranch : undefined,
+      }
+    })
+    if (!parsed.isDetached) void refreshPr($, cwd, parsed.branch).catch(() => undefined)
   } catch {
     // git missing or too slow: keep the last reading
   }
@@ -169,6 +231,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   tasks: [],
   cacheShare: undefined,
   fiveHourSamples: [],
+  workflow: undefined,
 })
 
 /**
@@ -320,7 +383,8 @@ const paneActions = ($: EngineInterface): PaneActions => ({
     void read($, snapshot)
       .then(s => $.session.compact({ instructions: compactInstructions(s) }))
       .catch(() => undefined),
-  // `prompt.submit` refuses a text that starts with `/`: a command is run by name, as if the person typed it.
+  // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
+  // `command.run` entry of the engine types).
   runWorklog: scope => void $.command.run({ command: 'worklog', args: `oggi ${scope}` }).catch(() => undefined),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
@@ -559,6 +623,17 @@ export const register: Register = on => {
       }))
     }
     await refreshGit($)
+    return next(e)
+  })
+
+  // The engine's classic Stop and SubagentStop carry the background work in flight: the name of a workflow among it is what
+  // `compatta` names. It is the reading of the last stop, so it is dropped when a stop reports none.
+  on('classic.Stop', async ($, e, next) => {
+    await setWorkflow($, e.background_tasks)
+    return next(e)
+  })
+  on('classic.SubagentStop', async ($, e, next) => {
+    await setWorkflow($, e.background_tasks)
     return next(e)
   })
 

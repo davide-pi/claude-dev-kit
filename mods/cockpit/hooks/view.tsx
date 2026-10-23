@@ -24,7 +24,6 @@ import {
   parseReset,
   pctCell,
   rateColor,
-  resetClock,
   shortModel,
   signedPctCell,
   spanWidth,
@@ -195,8 +194,7 @@ export function contextText(s: CockpitSnapshot): Span[] {
 
 function rateText(label: string, r: RateRow, now: number): Span[] {
   const cd = countdown(r.resetMs, now)
-  const clock = resetClock(r.resetMs, now)
-  return [sp(pctCell(r.rem), r.color, true), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : []), ...(clock ? [sp(' '), dim(clock)] : [])]
+  return [sp(pctCell(r.rem), r.color, true), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
 }
 
 /** The ALM row cut to `width`: dim label then the target, or `ALM non mappato` in red; empty for a root that names nothing. */
@@ -402,9 +400,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
   ]
 
-  // The last row of every tab: compatta always; segna ore when the work in hand has a scope (none on a detached HEAD or
-  // without git). The row stacks when its buttons do not fit the pane side by side.
-  const scope = worklogScope(g, s.prNumber)
+  // The last row of every tab: compatta always; segna ore when the work in hand has a scope (none on a detached HEAD,
+  // without git or on the default branch). The row stacks when its buttons do not fit the pane side by side.
+  const scope = worklogScope(g, s.prNumber, s.defaultBranch)
   const barLabels = ['compatta', ...(scope ? ['segna ore'] : [])]
   const buttonsRow = (
     <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
