@@ -43,6 +43,18 @@ export const meta = {
 // structured result before it runs out. An agent() that throws anyway (turn cap, no StructuredOutput) is caught
 // and read as an empty result, so the gap / no-verdict logic handles it and the run goes on.
 //
+// Snapshots: every implementer and fixer prompt ends with `scripts/snapshot.ps1 -Since <previous tree | start head>
+// -Start <start head> -Dirty <start.dirty>`, which prints { tree, files, churn } from a throwaway git index (the
+// user's index and tree are never touched). The `files` of the report are the changed files (a report without a
+// snapshot falls back to its declared files); from round 2 the reviewers get the delta as `git diff <prev tree> <tree>`
+// (deltaCommand). With `inline: true` the first fixer measures from the start head.
+//
+// Verify gate (verifyGate): the report's `verify` { status, command, line } decides. A failing verify is a synthetic P1
+// finding `V<n>` (category 'verify', always blocking, never asked to a reviewer) that heads the fixer's list and keeps
+// the loop from ending until a verify passes. STALL reasons: 'verify-failed' (the fixer could not make it pass),
+// 'green-to-red' (a pass, then a fail), 'verify-not-run' (args.verify is set and the run did not do it, or it left a V
+// open). The reviewers are told the verify result; `result()` carries `verify`, `evidence` and `notVerified`.
+//
 // The pure functions sit between the markers below. tools/impl-review-loop.test.mjs extracts that block
 // and runs it: keep it free of agent(), log() and phase().
 
@@ -160,6 +172,37 @@ const readReport = r => {
   }
 }
 
+// The command that shows what a fix changed: the diff between two snapshot trees (scripts/snapshot.ps1). Without an
+// earlier snapshot it starts at the start head (HEAD when none was recorded); without a tree there is nothing to show.
+const deltaCommand = (prevTree, tree, startHead) => (tree ? `git diff ${prevTree || startHead || 'HEAD'} ${tree}` : '')
+
+// What a verify result means for the loop, from an implementer or fixer report (readReport'd).
+//   verifyCmd       args.verify: when set, a report that did not run it is a stall
+//   toFixHadVerify  this report is a fixer's and its toFix held a V finding
+//   previous        the verify status before this run ('pass' | 'fail' | 'not-run' | undefined)
+//   next            the number of a new V finding
+// Returns { status, finding?, stall? }. A fail is a synthetic P1 `V<n>` (category 'verify': always blocking, never
+// asked to a reviewer); a fail the fixer could not turn green, or a green turned red, stalls with `why`
+// 'verify-failed' / 'green-to-red'; not-run stalls 'verify-not-run' with a verify command, or when it left a V
+// finding unfixed (it could never be closed). The caller closes the
+// V findings on a pass.
+const verifyGate = ({ report, verifyCmd, toFixHadVerify = false, previous, next = 1 } = {}) => {
+  const v = report?.verify ?? {}
+  const status = VERIFY_STATUSES.includes(v.status) ? v.status : 'not-run'
+  const seen = `\`${v.command ?? verifyCmd ?? '(no command)'}\` → ${status}${v.line ? `: ${v.line}` : ''}`
+  if (status === 'pass') return { status }
+  if (status === 'not-run') return verifyCmd || toFixHadVerify ? { status, stall: { why: 'verify-not-run', reason: `the verify command was not run: ${seen}` } } : { status }
+  if (toFixHadVerify) return { status, stall: { why: 'verify-failed', reason: `the verify still fails after the fix: ${seen}` } }
+  if (previous === 'pass') return { status, stall: { why: 'green-to-red', reason: `the verify was green and is red after the fix: ${seen}` } }
+  return {
+    status,
+    finding: {
+      id: `V${next}`, path: '(verify)', category: 'verify', priority: 'P1',
+      title: 'the verify command fails', failure: seen, fix: 'make the verify command pass without weakening the check',
+    },
+  }
+}
+
 // The files nobody has read yet, carried between rounds: a group whose reviewer returned nothing adds its files, a
 // group reviewer that answers removes them (it is asked for them in full), a whole-change reviewer that answered
 // covers all. A round with a file still here must not conclude DONE.
@@ -176,11 +219,12 @@ const unreviewedFiles = (answers, reviewers, groups, pending = []) => {
   return [...left]
 }
 
-// A finding is blocking when it is P1/P2 and inside the perimeter. A `scope` finding is a diff line the
+// A finding is blocking when it is P1/P2 and inside the perimeter (a `verify` one always is). A `scope` finding is a diff line the
 // implementer put OUTSIDE the perimeter: it is ours to revert, so it blocks (P2 at least) - unless the file
 // was already dirty before the start: that is the user's work, reported and never reverted. Any other finding
 // outside the perimeter is "trovato altro"; P3 inside is minor. Neither blocks, neither is fixed here.
 const classify = (f, files, { dirty = [], root = '' } = {}) => {
+  if (f.category === 'verify') return 'blocking'   // the synthetic finding of a failing verify command
   const inside = inPerimeter(f.path, files, root)
   const scope = f.category === 'scope' && !isDirty(f.path, dirty, root)
   const priority = scope && !BLOCKING.has(f.priority) ? 'P2' : f.priority
@@ -330,6 +374,16 @@ const REVIEW_BUDGET = budgetText(25)
 const FIX_BUDGET = budgetText(45)
 
 const RULES = 'You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.'
+const REPORT_TEXT = 'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.'
+
+// The last step of every implementer and fixer run: scripts/snapshot.ps1 snapshots the working tree (throwaway index,
+// nothing of the user's touched). -Since is the tree of the previous snapshot, the start head the first time;
+// -Start is the start head (the base of `files`), -Dirty the files the user had modified before the start.
+const quote = s => `'${String(s).replace(/'/g, "''")}'`
+const snapshotText = since => [
+  'Last step, after the verify command and before the structured output: run this exactly and return the one JSON line it prints as `snapshot`, unchanged (the loop reads the files you changed from it):',
+  ['pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1', `-Since ${since || startHead || 'HEAD'}`, startHead ? `-Start ${startHead}` : '', dirty.length ? `-Dirty ${quote(dirty.join(','))}` : ''].filter(Boolean).join(' '),
+].join('\n')
 
 const IMPLEMENTATION = {
   type: 'object',
@@ -363,7 +417,7 @@ const IMPLEMENTATION = {
     },
     noticed: {
       type: 'array',
-      description: 'defects seen outside the perimeter, not touched',
+      description: 'things outside the request you saw and deliberately did not do (inside or outside the perimeter)',
       items: { type: 'object', required: ['title', 'path', 'why'], properties: { title: { type: 'string' }, path: { type: 'string' }, why: { type: 'string' } } },
     },
     notVerified: { type: 'string' },
@@ -414,6 +468,11 @@ let tracked = {}
 let nextId = 1
 let round = 0
 let lastFix = null                    // the implementer's last fix report: the delta the next review looks at
+let lastTree = ''                     // the tree of the last snapshot: the next run's -Since (empty until a report brings one)
+let lastDelta = ''                    // `git diff <tree before the last fix> <tree after>`, empty when the fix gave no snapshot
+let lastReport = null                 // the last implementer / fixer report: its verify, evidence and notVerified
+let verifyOpen = []                   // the V finding of a failing verify, open until a verify passes
+let nextV = 1
 let unread = []                       // files whose group reviewer returned nothing and nobody else read: reviewed in full
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = []
@@ -434,16 +493,57 @@ const ask = async (prompt, opts) => {
 const why = label => (failures[label] ? `: ${failures[label]}` : '')
 
 const addFiles = r => (r?.files ?? []).forEach(f => changed.add(f))
+// The files the change touched are the last snapshot's list (against the start point, minus the user's dirty files),
+// plus the declared files that were already dirty: the snapshot leaves exactly those out, and the implementer's edit of
+// the user's file still has to be reviewed. The ones known keep their place (reviewer groups are made in order), the ones
+// gone drop, new ones append; a dirty file already in changed stays. No snapshot list (absent, not empty): the declared files
+// are added and nothing is dropped. A snapshot with no files and no dirty file declared: the declared files.
+const takeFiles = r => {
+  if (!Array.isArray(r.snapshot?.files)) return addFiles(r)
+  const snap = r.snapshot.files.filter(f => typeof f === 'string' && f)
+  const declaredDirty = (r.files ?? []).filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
+  const listed = [...snap, ...declaredDirty]
+  if (!listed.length) return addFiles(r)
+  const keep = new Set(listed.map(f => rel(f, repoRoot)))
+  for (const f of [...changed]) if (!keep.has(rel(f, repoRoot)) && !isDirty(f, dirty, repoRoot)) changed.delete(f)
+  const have = new Set([...changed].map(f => rel(f, repoRoot)))
+  listed.forEach(f => { if (!have.has(rel(f, repoRoot))) { changed.add(f); have.add(rel(f, repoRoot)) } })
+}
+const takeReport = r => {
+  takeFiles(r)
+  if (r.snapshot?.tree) lastTree = r.snapshot.tree
+  lastReport = r
+}
+// The verify gate on a report, before it becomes the last one: a failing verify opens the V finding, a pass closes it.
+// Returns the stall, if any.
+const gateReport = (r, toFixHadVerify) => {
+  const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: lastReport?.verify.status, next: nextV })
+  if (g.finding) { known[g.finding.id] = g.finding; nextV += 1; verifyOpen = [g.finding] }
+  else if (g.status === 'pass') verifyOpen = []
+  return g.stall
+}
 const RESUME_AGAIN = 'Relaunch with the same args and resumeFromRunId, plus every resolution so far: resolutions: [{ round, accept?, guidance?, retry? }].'
+const verifyStall = (at, s) => result({
+  status: 'STALL',
+  stall: { round: at, why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
+  resume: `Ask the user: a different approach, a direction for the fixer, or no verify command. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, guidance: "..." } (retry alone replays the cached fixer report and stalls again); a stall at round 0 replays the cached implementer report: relaunch WITHOUT resumeFromRunId.`,
+})
+// What the implementer or the fixer said about the verify command, for the reviewers.
+const verifyText = () => (lastReport
+  ? `Verify (run by the implementer): \`${lastReport.verify.command ?? input.verify ?? '(no command reported)'}\` → ${lastReport.verify.status}${lastReport.verify.line ? `: ${lastReport.verify.line}` : ''}`
+  : '')
 
 const result = extra => ({
   rounds: round,
-  open: Object.keys(tracked).filter(id => tracked[id].status === 'open').map(id => known[id]),
+  open: [...Object.keys(tracked).filter(id => tracked[id].status === 'open').map(id => known[id]), ...verifyOpen],
   accepted: Object.keys(tracked).filter(id => tracked[id].status === 'accepted').map(id => known[id]),
   outOfScope: [...notes, ...outOfScope],
   minor,
   gaps,
   files: [...changed],
+  verify: lastReport?.verify ?? { status: 'not-run' },
+  evidence: lastReport?.evidence ?? '',
+  notVerified: lastReport?.notVerified ?? '',
   roundLog: rounds,
   ...extra,
 })
@@ -457,14 +557,17 @@ if (!inline) {
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
     RULES,
-    'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
+    REPORT_TEXT,
+    snapshotText(lastTree),
   ].filter(Boolean).join('\n\n'), { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
   const impl = readReport(implRaw)
   if (!impl) {
     return result({ status: 'STALL', stall: { round: 0, findings: [], reason: `the implementer returned nothing (stopped or failed${why('implement')})` }, resume: RESUME_AGAIN })
   }
-  addFiles(impl)
+  const implStall = gateReport(impl, false)
+  takeReport(impl)
   ;(impl.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  if (implStall) return verifyStall(0, implStall)
 }
 
 let skipped = []                      // ids a reviewer gave no verdict for last round: only those are asked next
@@ -511,7 +614,7 @@ const scopeOfReview = (r, groups) => {
   return scopeOfDelta() + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
 }
 const scopeOfDelta = () => (lastFix
-  ? `Review the DELTA of the last fix, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit([...changed].join(', '))}`
+  ? `Review the DELTA of the last fix, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}.${lastDelta ? ` The DELTA of the last fix is \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first.` : ''} What the fix says it did: ${lastFix.scope}\n${touchedByGit([...changed].join(', '))}`
   : `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit([...changed].join(', '))}`)
 
 while (true) {
@@ -522,6 +625,7 @@ while (true) {
     scopeOfReview(r, groups),
     shareText(r, groups),
     `Intent: ${brief}`,
+    verifyText(),
     perimeterText,
     dirtyText,
     'Perimeter rule: every changed line outside the perimeter, in the files the change touched, is a finding with category "scope" (priority P2), except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed.',
@@ -544,32 +648,37 @@ while (true) {
   const decision = decideRound({ tracked, verdicts: deduped.verdicts, found, files, dirty, root: repoRoot, resolution, silent })
   tracked = decision.tracked
   silent = decision.silent
-  skipped = decision.action === 'RECHECK' ? decision.unanswered : []
+  // An open V finding (a failing verify) is always fixed: it turns a DONE or a RECHECK into a FIX, and heads the toFix list.
+  const vIds = verifyOpen.map(v => v.id)
+  const action = vIds.length && (decision.action === 'DONE' || decision.action === 'RECHECK') ? 'FIX' : decision.action
+  const toFix = action === 'FIX' ? [...vIds, ...decision.toFix] : decision.toFix
+  skipped = action === 'RECHECK' ? decision.unanswered : []
   decision.minor.forEach(id => minor.push(known[id]))
   decision.outOfScope.forEach(id => outOfScope.push({ source: 'review', ...known[id] }))
   if (decision.unanswered.length) gaps.push(`round ${round}: no verdict for ${decision.unanswered.join(', ')}, asked again`)
-  rounds.push({ round, size, reviewers: alive.length, new: found.map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: decision.toFix, stalled: decision.stalled, unanswered: decision.unanswered })
-  log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${decision.toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
+  rounds.push({ round, size, reviewers: alive.length, new: found.map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix, stalled: decision.stalled, unanswered: decision.unanswered })
+  log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
   unread = unreviewedFiles(answers, reviewers, groups, unread)
-  if (decision.action === 'DONE' && unread.length) {
+  if (action === 'DONE' && unread.length) {
     return result({ status: 'STALL', stall: { round, findings: [], reason: `no reviewer read these files (their group reviewer returned nothing): ${unread.join(', ')}` }, resume: RESUME_AGAIN })
   }
-  if (decision.action === 'DONE') return result({ status: 'OK' })
-  if (decision.action === 'STALL') {
+  if (action === 'DONE') return result({ status: 'OK' })
+  if (action === 'STALL') {
     return result({
       status: 'STALL',
       stall: { round, findings: decision.stalled.map(s => ({ ...s, ...known[s.id] })) },
       resume: 'Ask the user: accept the risk, one more round, or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far: resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true }].',
     })
   }
-  if (decision.action === 'RECHECK') continue
+  if (action === 'RECHECK') continue
 
   phase('Fix')
-  const fix = decision.toFix.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}`).join('\n')
+  const fix = toFix.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}`).join('\n')
   const fixedRaw = await ask([
     'Fix exactly these review findings and nothing else. A "scope" finding means revert that change outside the perimeter: only an edit the change itself made, never the user\'s earlier work.',
     fix,
+    vIds.length ? 'A finding whose id starts with V (path "(verify)", category verify) is the verify command failing: make it pass without weakening the check or changing what it runs.' : '',
     `Intent: ${brief}`,
     resolution?.guidance ? `The user directs: ${resolution.guidance}` : '',
     perimeterText,
@@ -578,13 +687,19 @@ while (true) {
     input.verify ? `Verify with: ${input.verify}` : '',
     RULES,
     FIX_BUDGET,
-    'Return your report through the structured output: scope, files changed, evidence, not verified, open questions.',
+    REPORT_TEXT,
+    snapshotText(lastTree),
   ].filter(Boolean).join('\n\n'), { label: `fix R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
   const fixed = readReport(fixedRaw)
   if (!fixed) {
     return result({ status: 'STALL', stall: { round, findings: [], reason: `the implementer returned nothing on the fix (stopped or failed${why(`fix R${round}`)})` }, resume: RESUME_AGAIN })
   }
+  // A resolution at this round (guidance, retry) is one more attempt: a fix that fails again then opens a new V finding instead of stalling.
+  const fixStall = gateReport(fixed, vIds.length > 0 && !resolution?.guidance && resolution?.retry !== true)
+  const treeBefore = lastTree
+  takeReport(fixed)
+  lastDelta = deltaCommand(treeBefore, fixed.snapshot?.tree ?? '', startHead)
   lastFix = fixed
-  addFiles(fixed)
   ;(fixed.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  if (fixStall) return verifyStall(round, fixStall)
 }

@@ -66,7 +66,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 ## Phase 1 — execution feedback (C1, C2 green→red)
 
-- [ ] **T4 verify gate.** Pure `verifyGate({ report, verifyCmd, toFixHadVerify, previous }) → { finding?, stall?, status }`:
+- [x] **T4 verify gate.** Pure `verifyGate({ report, verifyCmd, toFixHadVerify, previous }) → { finding?, stall?, status }`:
   implementer `fail` → synthetic P1 `{ id: 'V<n>', path: '(verify)', category: 'verify' }` (always blocking) into
   round-1 `toFix`; fixer `fail` with a V finding in its toFix → STALL `verify-failed`; `pass` then `fail` → STALL
   `green-to-red`; `not-run` with `args.verify` → STALL `verify-not-run`; `pass` closes V findings. Reviewer prompt gets
@@ -97,8 +97,8 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
 
 ## Phase 3 — termination and snapshots (C2, C7)
 
-- [ ] **T10 `scripts/snapshot.ps1` + delta from snapshots (C7.1).** New `scripts/snapshot.ps1 -Since <tree|sha> [-Dirty 'a,b']`
-  (throwaway index, real index/worktree untouched, temp index removed, exit 2 on usage error), new
+- [x] **T10 `scripts/snapshot.ps1` + delta from snapshots (C7.1).** New `scripts/snapshot.ps1 -Since <tree|sha> [-Start <sha>] [-Dirty 'a,b']`
+  (`-Start` = the commit `files` is measured from, default HEAD; the workflow passes the start head; throwaway index, real index/worktree untouched, temp index removed, exit 2 on usage error), new
   `snapshot.test.mjs` under tools (skipped without pwsh, like `perimeter.test.mjs`), allow rules in `settings.json` next to
   the perimeter ones (PowerShell + Bash). Workflow: IMPL/FIX prompts end with the exact command (`SNAPSHOT_TEXT`);
   `changed` from `snapshot.files`; delta scope ``git diff <prevTree> <tree>`` via pure `deltaCommand(prevTree, tree, startHead)`;

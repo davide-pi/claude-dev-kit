@@ -21,8 +21,8 @@ import { createRequire } from 'node:module';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -725,4 +725,199 @@ test('script: an implementer or a fixer that throws is the same resumable STALL 
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.stall.reason, /on the fix.*max turns/);
+});
+
+// ── snapshots and the verify gate (T10, T4) ──────────────────────────────────────────────────────────
+const impl = (extra = {}) => ({ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: { tree: 't1', files: ['src/Orders/OrdersQuery.cs'], churn: 3 }, rejected: [], noticed: [], openQuestions: [], ...extra });
+const FAIL = { status: 'fail', command: 'node --test', line: '# fail 2' };
+const SNAP = 'pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1';
+
+test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {
+  assert.equal(deltaCommand('t1', 't2', 'abc'), 'git diff t1 t2');
+  assert.equal(deltaCommand('', 't2', 'abc'), 'git diff abc t2');
+  assert.equal(deltaCommand('', 't2', ''), 'git diff HEAD t2');
+  assert.equal(deltaCommand('t1', '', 'abc'), '');
+});
+
+test('classify: a verify finding is always blocking, wherever it points', () => {
+  assert.equal(classify({ id: 'V1', path: '(verify)', category: 'verify', priority: 'P1' }, FILES), 'blocking');
+  assert.equal(classify({ id: 'V1', path: '(verify)', category: 'verify', priority: 'P3' }, FILES), 'blocking');
+});
+
+test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → verify-failed; pass then fail → green-to-red; not-run only stalls with a verify command; pass closes', () => {
+  const rep = (verify) => ({ verify });
+  const first = verifyGate({ report: rep(FAIL), verifyCmd: 'node --test' });
+  assert.equal(first.status, 'fail');
+  assert.equal(first.stall, undefined);
+  assert.deepEqual({ id: first.finding.id, path: first.finding.path, category: first.finding.category, priority: first.finding.priority }, { id: 'V1', path: '(verify)', category: 'verify', priority: 'P1' });
+  assert.match(first.finding.failure, /node --test.*# fail 2/);
+  assert.equal(verifyGate({ report: rep(FAIL), next: 3 }).finding.id, 'V3');
+  assert.equal(verifyGate({ report: rep(FAIL), verifyCmd: 'x', toFixHadVerify: true, previous: 'fail' }).stall.why, 'verify-failed');
+  const g2r = verifyGate({ report: rep(FAIL), verifyCmd: 'x', previous: 'pass' });
+  assert.equal(g2r.stall.why, 'green-to-red');
+  assert.match(g2r.stall.reason, /# fail 2/);
+  assert.equal(verifyGate({ report: rep(FAIL), verifyCmd: 'x', previous: 'not-run' }).stall, undefined);
+  assert.equal(verifyGate({ report: rep({ status: 'not-run' }), verifyCmd: 'node --test' }).stall.why, 'verify-not-run');
+  assert.deepEqual(verifyGate({ report: rep({ status: 'not-run' }) }), { status: 'not-run' });
+  assert.equal(verifyGate({ report: rep({ status: 'not-run' }), toFixHadVerify: true }).stall.why, 'verify-not-run');   // an open V can only be closed by a pass
+  assert.deepEqual(verifyGate({ report: {} }), { status: 'not-run' });
+  assert.deepEqual(verifyGate({ report: rep(PASS), verifyCmd: 'x', toFixHadVerify: true, previous: 'fail' }), { status: 'pass' });
+});
+
+test('script: implement and fix prompts end with the snapshot command, -Since the previous tree (the start head the first time), and name every report field', async () => {
+  const dirtyArgs = { ...ARGS, start: { head: 'abc123', dirty: [' M src/Other/User.cs', '?? it\'s/'] } };
+  const { calls } = await run(dirtyArgs, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } })]);
+  const dirtyArg = '-Dirty \'src/Other/User.cs,it\'\'s/\'';
+  const first = calls.find((c) => c.opts.label === 'implement').prompt;
+  const fix = calls.find((c) => c.opts.label === 'fix R1').prompt;
+  assert.ok(first.trimEnd().endsWith(`${SNAP} -Since abc123 -Start abc123 ${dirtyArg}`), first.slice(-300));
+  assert.ok(fix.trimEnd().endsWith(`${SNAP} -Since t1 -Start abc123 ${dirtyArg}`), fix.slice(-300));
+  for (const p of [first, fix]) {
+    assert.match(p, /return the one JSON line it prints as `snapshot`, unchanged/);
+    assert.match(p, /Return your report through the structured output: scope, files, evidence, verify \{status, command, line\}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions\./);
+  }
+  const bare = await run(ARGS, [review([])]);
+  assert.ok(bare.calls[0].prompt.trimEnd().endsWith(`${SNAP} -Since HEAD`));                 // no start recorded: HEAD, no -Start, no -Dirty
+});
+
+test('script: the snapshot files are the changed files, kept in place; a report without a snapshot falls back to its declared files', async () => {
+  const a = 'src/Orders/A.cs', b = 'src/Orders/B.cs', c = 'src/Orders/C.cs';
+  const { out } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
+    impl({ files: ['declared/only.cs'], snapshot: { tree: 't1', files: [a, b], churn: 2 } }),
+    impl({ files: ['x.cs'], snapshot: { tree: 't2', files: [b, a, c], churn: 4 } }),
+  ]);
+  assert.deepEqual(out.files, [a, b, c]);
+  const fell = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
+    impl({ snapshot: { tree: 't1', files: [a, b], churn: 2 } }),
+    { scope: 'fixed', files: [c], evidence: 'ok' },
+  ]);
+  assert.deepEqual(fell.out.files, [a, b, c]);
+});
+
+test('script: a declared file the user already had modified stays in changed although the snapshot leaves it out', async () => {
+  const mine = 'src/Orders/OrdersQuery.cs', other = 'src/Orders/Other.cs';
+  const dirtyArgs = { ...ARGS, start: { head: 'abc123', dirty: [mine] }, dirtyConfirmed: true };
+  const both = await run(dirtyArgs, [review([])], [impl({ files: [mine, other], snapshot: { tree: 't1', files: [other], churn: 2 } })]);
+  assert.deepEqual([...both.out.files].sort(), [mine, other]);
+  const only = await run(dirtyArgs, [review([])], [impl({ files: [mine], snapshot: { tree: 't1', files: [], churn: 2 } })]);
+  assert.deepEqual(only.out.files, [mine]);
+});
+
+test('script: a report without a snapshot adds its declared files, the dirty ones included, and drops none', async () => {
+  const mine = 'src/Orders/OrdersQuery.cs', other = 'src/Orders/Other.cs', a = 'src/Orders/A.cs', b = 'src/Orders/B.cs';
+  const dirtyArgs = { ...ARGS, start: { head: 'abc123', dirty: [mine] }, dirtyConfirmed: true };
+  const noSnap = await run(dirtyArgs, [review([])], [impl({ files: [mine, other], snapshot: null })]);
+  assert.deepEqual([...noSnap.out.files].sort(), [mine, other]);
+  const fixer = await run(dirtyArgs, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
+    impl({ files: [a, b], snapshot: { tree: 't1', files: [a, b], churn: 2 } }),
+    { scope: 'fixed', files: [mine], evidence: 'ok' },
+  ]);
+  assert.deepEqual([...fixer.out.files].sort(), [a, b, mine]);
+});
+
+test('script: round 2 reviewers get git diff t1 t2; a fixer without a snapshot leaves the old wording', async () => {
+  const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
+    impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } }),
+  ]);
+  const r1 = calls.find((c) => c.opts.label === 'R1 A').prompt;
+  const r2 = calls.find((c) => c.opts.label === 'R2 A').prompt;
+  assert.doesNotMatch(r1, /git diff t1/);
+  assert.match(r2, /DELTA of the last fix is `git diff t1 t2`/);
+  const plain = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), { scope: 'f', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
+  assert.doesNotMatch(plain.calls.find((c) => c.opts.label === 'R2 A').prompt, /DELTA of the last fix is/);
+});
+
+test('script: lastTree is kept across rounds: the second fixer measures from the first fixer tree, round 3 reviewers see git diff t2 t3', async () => {
+  const f2 = () => finding({ line: 90, title: 'a second defect elsewhere' });
+  const { out, calls } = await run(ARGS, [
+    review([], [finding()]), review([{ id: 'F1', status: 'closed' }], [f2()]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }]),
+  ], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } }), impl({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } })]);
+  assert.equal(out.status, 'OK');
+  assert.match(calls.find((c) => c.opts.label === 'fix R2').prompt.trimEnd(), /-Since t2$/);
+  assert.match(calls.find((c) => c.opts.label === 'R3 A').prompt, /`git diff t2 t3`/);
+});
+
+test('script: inline, the first fixer measures from the start head and the review delta starts there', async () => {
+  const { calls } = await run({ ...ARGS, inline: true, changed: ['src/Orders/OrdersQuery.cs'], start: { head: 'abc123', dirty: [] } },
+    [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl({ snapshot: { tree: 't9', files: ['src/Orders/OrdersQuery.cs'], churn: 5 } })]);
+  assert.match(calls.find((c) => c.opts.label === 'fix R1').prompt.trimEnd(), /-Since abc123 -Start abc123$/);
+  assert.match(calls.find((c) => c.opts.label === 'R2 A').prompt, /`git diff abc123 t9`/);
+});
+
+test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
+  const { out, calls } = await run({ ...ARGS, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 2);
+  assert.match(calls.find((c) => c.opts.label === 'R1 A').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
+  const fix = calls.find((c) => c.opts.label === 'fix R1').prompt;
+  assert.match(fix, /- V1 \[P1\] \(verify\) - .*node --test.*# fail 2/);
+  assert.match(fix, /category verify/);
+  const r2 = calls.find((c) => c.opts.label === 'R2 A').prompt;
+  assert.match(r2, /Verify \(run by the implementer\): `node --test` → pass: # fail 0/);
+  assert.doesNotMatch(r2, /V1/);
+  assert.doesNotMatch(calls.find((c) => c.opts.label === 'R1 A').prompt, /V1/);
+  assert.deepEqual(out.roundLog[0].toFix, ['V1']);
+  assert.deepEqual(out.open, []);
+  assert.deepEqual(out.verify, PASS);
+  assert.equal(out.evidence, 'ok');
+});
+
+test('script: a V finding is fixed together with the review findings and OK is refused while it is open', async () => {
+  const { out, calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl({ verify: FAIL }), impl()]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.roundLog[0].toFix, ['V1', 'F1']);
+  assert.equal(calls.filter((c) => c.opts.label?.startsWith('fix')).length, 1);
+});
+
+test('script: a fixer whose verify still fails with a V in its toFix is a STALL "verify-failed" listing V1; the result carries verify, evidence, notVerified', async () => {
+  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL, evidence: 'red' }), impl({ verify: FAIL, evidence: 'still red', notVerified: 'the db part' })]);
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.round, 1);
+  assert.equal(out.stall.why, 'verify-failed');
+  assert.deepEqual(out.stall.findings.map((x) => x.id), ['V1']);
+  assert.deepEqual(out.open.map((x) => x.id), ['V1']);
+  assert.deepEqual(out.verify, FAIL);
+  assert.equal(out.evidence, 'still red');
+  assert.equal(out.notVerified, 'the db part');
+  assert.match(out.resume, /guidance/);
+});
+
+test('script: a guided resume after verify-failed runs the fixer again, and a pass closes V1', async () => {
+  const first = [impl({ verify: FAIL }), impl({ verify: FAIL })];
+  const stalled = await run({ ...ARGS, verify: 'node --test' }, [review([])], first);
+  assert.equal(stalled.out.status, 'STALL');
+  const resumed = await run({ ...ARGS, verify: 'node --test', resolutions: [{ round: 1, guidance: 'check the fixture' }] }, [review([]), review([])], [first[0], impl()]);
+  assert.equal(resumed.out.status, 'OK');
+  assert.match(resumed.calls.find((c) => c.opts.label === 'fix R1').prompt, /check the fixture/);
+});
+
+test('script: pass then fail after a fix is a STALL "green-to-red"', async () => {
+  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), impl({ verify: FAIL })]);
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'green-to-red');
+  assert.equal(out.stall.round, 1);
+  assert.match(out.stall.reason, /# fail 2/);
+});
+
+test('script: a report that did not run the verify command is a STALL "verify-not-run" only when args.verify is set', async () => {
+  const none = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'could not run', verify: { status: 'not-run' } };
+  const stalled = await run({ ...ARGS, verify: 'node --test' }, [], [none]);
+  assert.equal(stalled.out.status, 'STALL');
+  assert.equal(stalled.out.stall.why, 'verify-not-run');
+  assert.equal(stalled.out.stall.round, 0);
+  assert.equal(stalled.calls.filter((c) => c.opts.label?.startsWith('R')).length, 0);
+  const fixer = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), none]);
+  assert.equal(fixer.out.stall.why, 'verify-not-run');
+  assert.equal(fixer.out.stall.round, 1);
+  const openV = await run(ARGS, [review([])], [impl({ verify: FAIL }), none]);                    // no args.verify, but a V is open
+  assert.equal(openV.out.stall.why, 'verify-not-run');
+  const free = await run(ARGS, [review([])], [none]);
+  assert.equal(free.out.status, 'OK');
+  assert.deepEqual(free.out.verify, { status: 'not-run' });
+  assert.equal(free.out.evidence, 'could not run');
+});
+
+test('script: the IMPLEMENTATION schema describes noticed as things deliberately not done, inside or outside the perimeter', async () => {
+  const { calls } = await run(ARGS, [review([])]);
+  assert.equal(calls[0].opts.schema.properties.noticed.description, 'things outside the request you saw and deliberately did not do (inside or outside the perimeter)');
 });
