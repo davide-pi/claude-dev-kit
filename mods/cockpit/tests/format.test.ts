@@ -8,11 +8,13 @@ import {
   burnRate,
   burnText,
   compactInstructions,
+  isGithubRemote,
+  parseDefaultBranch,
   parsePerimeter,
+  parsePrNumber,
   worklogScope,
   pctCell,
   recordBurnSample,
-  resetClock,
   resolveAlm,
   taskBarCells,
   textCells,
@@ -55,12 +57,19 @@ test('abbrevTokens scales to k and M', () => {
   expect(abbrevTokens(undefined)).toBe('')
 })
 
-test('countdown reads days, hours, minutes', () => {
-  expect(countdown(NOW + (3 * 1440 + 6 * 60) * 60000, NOW)).toBe('3d6h')
-  expect(countdown(NOW + (2 * 60 + 14) * 60000, NOW)).toBe('2h14m')
-  expect(countdown(NOW + 14 * 60000, NOW)).toBe('14m')
+test('countdown is always 6 cells, right-aligned: minutes, hours and minutes, days and hours', () => {
+  expect(countdown(NOW + 45 * 60000, NOW)).toBe('   45m')
+  expect(countdown(NOW + 5 * 60000, NOW)).toBe('    5m')
+  expect(countdown(NOW + (2 * 60 + 14) * 60000, NOW)).toBe(' 2h14m')
+  expect(countdown(NOW + (13 * 60 + 45) * 60000, NOW)).toBe('13h45m')
+  expect(countdown(NOW + (2 * 60 + 5) * 60000, NOW)).toBe(' 2h05m') // two-digit minutes
+  expect(countdown(NOW + 60 * 60000, NOW)).toBe(' 1h00m')
+  expect(countdown(NOW + (3 * 1440 + 6 * 60) * 60000, NOW)).toBe(' 3d06h') // two-digit hours, unit d
+  expect(countdown(NOW + (6 * 1440 + 23 * 60) * 60000, NOW)).toBe(' 6d23h')
+  expect(countdown(NOW + 1440 * 60000, NOW)).toBe(' 1d00h')
   expect(countdown(NOW - 1, NOW)).toBe('')
   expect(countdown(undefined, NOW)).toBe('')
+  for (const min of [1, 59, 60, 61, 1439, 1440, 1441, 7 * 1440 - 1]) expect([...countdown(NOW + min * 60000, NOW)]).toHaveLength(6)
 })
 
 test('duration reads seconds, minutes, hours', () => {
@@ -195,19 +204,6 @@ test('pctCell pads a percentage to four cells so one, two and three digits align
   expect(pctCell(0)).toBe('  0%')
 })
 
-// Local-time inputs: the expectations hold in any time zone.
-const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).getTime()
-
-test('resetClock: the clock time within 24 hours, the weekday and time beyond', () => {
-  const now = at(22, 10, 0)
-  expect(resetClock(at(22, 14, 30), now)).toBe('(14:30)')
-  expect(resetClock(at(23, 10, 0), now)).toBe('(10:00)') // exactly 24 h: still the clock time
-  expect(resetClock(at(25, 9, 0), now)).toBe('(dom 09:00)') // 2026-10-25 is a Sunday
-  expect(resetClock(at(26, 7, 5), now)).toBe('(lun 07:05)')
-  expect(resetClock(now - 1, now)).toBe('')
-  expect(resetClock(undefined, now)).toBe('')
-})
-
 test('recordBurnSample keeps the last 30 minutes, anchors the value that held at their start, skips an unchanged reading and starts over when the window resets', () => {
   const min = 60000
   const first = recordBurnSample(undefined, 0, 38)
@@ -234,11 +230,13 @@ test('burnRate: rate, exhaustion time and the verdict against the reset; nothing
   expect(slow?.perHour).toBe(9)
   expect(slow?.isBeforeReset).toBe(false)
   expect(Math.round((slow?.etaMs ?? 0) / min)).toBe(413)
-  expect(burnText(slow!)).toBe('−9%/h · finisce tra 6h53: arrivi al reset')
+  expect(burnText(slow!)).toBe('−9%/h · finisce tra  6h53m: arrivi al reset')
   // 30 points in 20 min = 90 %/h; 35 left lasts 23 min, the reset comes in 3 h
   const fast = burnRate([{ at: 0, used: 35 }], now, 65, now + 180 * min)
   expect(fast?.isBeforeReset).toBe(true)
-  expect(burnText(fast!)).toBe('−90%/h · finisce tra 23m, prima del reset')
+  expect(burnText(fast!)).toBe('−90%/h · finisce tra    23m, prima del reset')
+  // the duration is the countdown's 6 cells, days included
+  expect(burnText({ perHour: 3, etaMs: (1440 + 6 * 60) * min, isBeforeReset: false })).toBe('−3%/h · finisce tra  1d06h: arrivi al reset')
   // under 10 minutes of samples, a flat or falling reading, a reset unknown or gone, a spent window: no line
   expect(burnRate([{ at: 15 * min, used: 35 }], now, 38, now + 134 * min)).toBeUndefined()
   expect(burnRate(samples, now, 35, now + 134 * min)).toBeUndefined()
@@ -383,7 +381,7 @@ test('compactInstructions: the keep/drop sentence alone when nothing else is kno
   expect(compactInstructions({ tasks: [task('1', 'fatto', 'completed')] })).toBe(KEEP)
 })
 
-test('compactInstructions: the open tasks (in progress first, at most 3), the perimeter and the running workflow', () => {
+test('compactInstructions: the open tasks (in progress first, at most 3) and the perimeter (its size and first 2 entries)', () => {
   const text = compactInstructions({
     tasks: [
       task('1', 'primo pending', 'pending'),
@@ -393,26 +391,34 @@ test('compactInstructions: the open tasks (in progress first, at most 3), the pe
       task('5', 'chiuso', 'completed'),
     ],
     perimeter: ['src/a.ts', 'src/b/', 'tests/**/a*.ts', 'docs/x.md'],
-    workflow: { name: 'impl-review-loop' },
   })
   expect(text.startsWith(KEEP)).toBe(true)
   expect(text).toContain('Task aperti: in corso; primo pending; terzo.')
   expect(text).not.toContain('quarto')
   expect(text).not.toContain('chiuso')
-  expect(text).toContain('Perimetro deliver (4 voci): src/a.ts, src/b/, tests/**/a*.ts.')
+  expect(text).toContain('Perimetro deliver (4 voci): src/a.ts, src/b/.')
+  expect(text).not.toContain('tests/**/a*.ts')
   expect(text).not.toContain('docs/x.md')
-  expect(text).toContain('Workflow in corso: impl-review-loop.')
+  expect(text).not.toContain('Workflow')
   expect(text.length).toBeLessThanOrEqual(400)
 })
 
+test('compactInstructions: a running workflow is named last, and only when it fits', () => {
+  expect(compactInstructions({ workflow: 'release-notes' })).toBe(`${KEEP} Workflow in corso: release-notes.`)
+  expect(compactInstructions({ tasks: [task('1', 'in corso', 'in_progress')], perimeter: ['a.ts'], workflow: 'wf' })).toBe(
+    `${KEEP} Task aperti: in corso. Perimetro deliver (1 voce): a.ts. Workflow in corso: wf.`,
+  )
+  const text = compactInstructions({ workflow: 'w'.repeat(500) })
+  expect(text.startsWith(KEEP)).toBe(true)
+  expect([...text].length).toBeLessThanOrEqual(400)
+})
+
 test('compactInstructions: each part is optional, and long titles never push it past 400 characters', () => {
-  expect(compactInstructions({ workflow: { name: 'w' } })).toBe(`${KEEP} Workflow in corso: w.`)
   expect(compactInstructions({ perimeter: ['a.ts'] })).toBe(`${KEEP} Perimetro deliver (1 voce): a.ts.`)
   const long = 'x'.repeat(200)
   const text = compactInstructions({
     tasks: [task('1', long, 'in_progress'), task('2', long, 'pending'), task('3', long, 'pending')],
     perimeter: [long, long, long],
-    workflow: { name: long },
   })
   expect(text.length).toBeLessThanOrEqual(400)
   expect(text.startsWith(KEEP)).toBe(true)
@@ -429,10 +435,21 @@ test('worklogScope: the work item id of the branch, else the PR, else the branch
   expect(worklogScope(gitOn('feature/orders-filter'), 42)).toBe('PR 42')
   // else the branch itself
   expect(worklogScope(gitOn('feature/orders-filter'))).toBe('topic feature/orders-filter')
-  expect(worklogScope(gitOn('main'))).toBe('topic main')
   // a number that is not an id (too short, mid-word) is not read as one
   expect(worklogScope(gitOn('feature/v2-ui'))).toBe('topic feature/v2-ui')
   expect(worklogScope(gitOn('release-2026x'))).toBe('topic release-2026x')
+})
+
+test('worklogScope: nothing on the default branch, where no implementation is identifiable', () => {
+  for (const branch of ['main', 'master', 'develop']) {
+    expect(worklogScope(gitOn(branch))).toBeUndefined()
+    expect(worklogScope(gitOn(branch), 42)).toBeUndefined()
+  }
+  // the repo's own default, whatever it is called
+  expect(worklogScope(gitOn('trunk'), undefined, 'trunk')).toBeUndefined()
+  expect(worklogScope(gitOn('trunk'))).toBe('topic trunk')
+  expect(worklogScope(gitOn('feature/trunk'), undefined, 'trunk')).toBe('topic feature/trunk')
+  expect(worklogScope(gitOn('feature/orders'), 42, 'main')).toBe('PR 42')
 })
 
 test('worklogScope: nothing on a detached HEAD or without git', () => {
@@ -447,4 +464,34 @@ test('parsePerimeter: the entries of an active perimeter on the branch checked o
   expect(parsePerimeter(file.replace('active', 'closed'), 'feat/x')).toBeUndefined()
   expect(parsePerimeter('branch: feat/x\nstatus: active\n', 'feat/x')).toBeUndefined()
   expect(parsePerimeter('{}', 'feat/x')).toBeUndefined()
+})
+
+test('parseDefaultBranch: the branch origin/HEAD points at, without the remote', () => {
+  expect(parseDefaultBranch('origin/main\n')).toBe('main')
+  expect(parseDefaultBranch('origin/release/2026\n')).toBe('release/2026')
+  expect(parseDefaultBranch('')).toBeUndefined()
+  expect(parseDefaultBranch('upstream/main')).toBeUndefined()
+})
+
+test('isGithubRemote: ssh and https URLs of github.com, nothing else', () => {
+  const SSH_USER = 'git' // the user part, kept apart so the URLs below are not read as e-mail addresses
+  expect(isGithubRemote(`${SSH_USER}@github.com:example/orders.git\n`)).toBe(true)
+  expect(isGithubRemote('https://github.com/example/orders')).toBe(true)
+  expect(isGithubRemote(`https://${SSH_USER}@github.com/example/orders.git`)).toBe(true)
+  expect(isGithubRemote(`ssh://${SSH_USER}@github.com/example/orders.git`)).toBe(true)
+  expect(isGithubRemote('https://dev.azure.com/<org>/proj/_git/orders')).toBe(false)
+  expect(isGithubRemote(`${SSH_USER}@ssh.dev.azure.com:v3/<org>/proj/orders`)).toBe(false)
+  expect(isGithubRemote('https://notgithub.com/example/orders')).toBe(false)
+  expect(isGithubRemote('')).toBe(false)
+})
+
+test('parsePrNumber: the number of an open pull request from gh pr view --json number,state', () => {
+  expect(parsePrNumber('{"number":42,"state":"OPEN"}')).toBe(42)
+  expect(parsePrNumber('{"number":42,"state":"MERGED"}')).toBeUndefined()
+  expect(parsePrNumber('{"number":42,"state":"CLOSED"}')).toBeUndefined()
+  expect(parsePrNumber('{"number":0,"state":"OPEN"}')).toBeUndefined()
+  expect(parsePrNumber('{"number":"42","state":"OPEN"}')).toBeUndefined()
+  expect(parsePrNumber('{}')).toBeUndefined()
+  expect(parsePrNumber('not json')).toBeUndefined()
+  expect(parsePrNumber('')).toBeUndefined()
 })

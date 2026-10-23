@@ -3,6 +3,8 @@ import type { Engine } from 'claude-code/testing'
 import type { AgentStatus, On } from 'claude-code'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
+/** An ssh `origin` URL of GitHub (joined, so the text is not read as an e-mail address). */
+const GH_SSH = ['git', 'github.com:example/orders.git'].join('@')
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString()
 
 const PANE = {
@@ -81,6 +83,18 @@ type World = {
   perimeter?: string
   /** The branch `git status` reports (`feature/x` when not given). */
   branch?: string
+  /** The URL of remote `origin`; absent, the repository has no remote. */
+  remote?: string
+  /** The repo's default branch, as `origin/HEAD` names it; absent, `origin/HEAD` is not set. */
+  defaultBranch?: string
+  /** The number `gh pr view` answers; absent, gh answers that the branch has no PR. */
+  pr?: number
+  /** The state `gh pr view` answers (`OPEN` when not given). */
+  prState?: string
+  /** True: `gh` is not installed (the process cannot start). */
+  noGh?: boolean
+  /** Receives every `gh` call's argv, joined by spaces. */
+  ghCalls?: string[]
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -108,19 +122,21 @@ function world(on: On, options: World = {}) {
       cost: { usd: options.isFresh ? 0 : 4.82 },
     },
   }))
-  on('process.run', (_, e) => ({
-    value: {
-      exitCode: options.notRepo ? 128 : 0,
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-      stdout: options.notRepo
-        ? ''
-        : e.argv.includes('rev-parse')
-        ? '.git\n.git\n/work/example-repo\n'
-        : `## ${options.detached ? 'HEAD (no branch)' : (options.branch ?? 'feature/x')}\nM  a.ts\n M b.ts\n?? c.ts\n`,
-    },
-  }))
+  on('process.run', (_, e) => {
+    const answer = (stdout: string, exitCode = 0) => ({
+      value: { exitCode, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout },
+    })
+    if (e.argv[0] === 'gh') {
+      options.ghCalls?.push(e.argv.join(' '))
+      if (options.noGh) throw new Error('spawn gh ENOENT')
+      return options.pr === undefined ? answer('', 1) : answer(JSON.stringify({ number: options.pr, state: options.prState ?? 'OPEN' }))
+    }
+    if (options.notRepo) return answer('', 128)
+    if (e.argv.includes('rev-parse')) return answer('.git\n.git\n/work/example-repo\n')
+    if (e.argv.includes('symbolic-ref')) return options.defaultBranch === undefined ? answer('', 128) : answer(`origin/${options.defaultBranch}\n`)
+    if (e.argv.includes('get-url')) return options.remote === undefined ? answer('', 2) : answer(`${options.remote}\n`)
+    return answer(`## ${options.detached ? 'HEAD (no branch)' : (options.branch ?? 'feature/x')}\nM  a.ts\n M b.ts\n?? c.ts\n`)
+  })
   on('fs.read', (_, e) => {
     if (e.path.endsWith('workspaces.json')) {
       if (options.workspacesFail) throw new Error('ENOENT: no such file')
@@ -206,8 +222,8 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/example-repo/)).toContain('example-repo')
     expect(await text(/^\+1 ~1 \?1$/)).toBe('+1 ~1 ?1')
     expect(await text(/25% 248K\/1M/)).toBe(' 25% 248K/1M')
-    expect(await text(/^ 62% 5h/)).toMatch(/^ 62% 5h \u21bb 2h14m \(\d\d:\d\d\)$/)
-    expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb 3d\dh \((dom|lun|mar|mer|gio|ven|sab) \d\d:\d\d\)$/)
+    expect(await text(/^ 62% 5h/)).toBe(' 62% 5h \u21bb  2h14m')
+    expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb  3d\d\dh$/)
     expect(await text(/vs atteso/)).toBe('vs atteso 7d  \u22125%')
     expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
     // the Sessione view lists running agents only; the finished one is in the Agenti tab
@@ -755,12 +771,12 @@ test('burn rate: under the 5h row, green when the credits last to the reset, red
   await measure(41) // 3 points in 15 min = 12 %/h; 59 left lasts 4h55, the reset is in 1h45
   let { root, rows } = await paneRows($)
   const five = rows.findIndex(r => /59% 5h/.test(r))
-  expect(rows[five + 1]).toBe('−12%/h · finisce tra 4h55: arrivi al reset')
+  expect(rows[five + 1]).toBe('−12%/h · finisce tra  4h55m: arrivi al reset')
   expect(colorOf(root, /finisce/)).toBe(GREEN)
 
   await measure(50) // 12 points in 15 min = 48 %/h; 50 left lasts 1h02, before the reset
   ;({ root, rows } = await paneRows($))
-  expect(rows[rows.findIndex(r => /50% 5h/.test(r)) + 1]).toBe('−48%/h · finisce tra 1h02, prima del reset')
+  expect(rows[rows.findIndex(r => /50% 5h/.test(r)) + 1]).toBe('−48%/h · finisce tra  1h02m, prima del reset')
   expect(colorOf(root, /finisce/)).toBe(RED)
 })
 
@@ -1058,7 +1074,7 @@ test('buttons row: the instructions name the open tasks and the active deliver p
   world(on, {
     instructions,
     branch: 'feat/x',
-    perimeter: 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n',
+    perimeter: 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n- docs/c.md\n',
   })
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -1069,8 +1085,29 @@ test('buttons row: the instructions name the open tasks and the active deliver p
   expect(instructions).toHaveLength(1)
   expect(instructions[0]?.startsWith(KEEP_DROP)).toBe(true)
   expect(instructions[0]).toContain('Task aperti: Scrivere i test; Poi il codice.')
-  expect(instructions[0]).toContain('Perimetro deliver (2 voci): src/a.ts, src/b/.')
+  expect(instructions[0]).toContain('Perimetro deliver (3 voci): src/a.ts, src/b/.')
+  expect(instructions[0]).not.toContain('docs/c.md')
+  expect(instructions[0]).not.toContain('Workflow')
   expect(instructions[0]).not.toContain('Fatto')
+  expect([...(instructions[0] ?? '')].length).toBeLessThanOrEqual(400)
+})
+
+test('buttons row: the instructions name the workflow the last Stop reported in flight, until a Stop reports none', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  world(on, { instructions })
+  on('classic.Stop', () => ({}))
+  on('classic.SubagentStop', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const shell = { id: 'b1', type: 'shell', status: 'running', description: 'npm test' }
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell, { id: 'b2', type: 'workflow', status: 'running', description: 'x', name: 'release-notes' }] })
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions[0]).toContain('Workflow in corso: release-notes.')
+  expect([...(instructions[0] ?? '')].length).toBeLessThanOrEqual(400)
+  await $.classic.SubagentStop({ stop_hook_active: false, agent_id: 'a1', agent_transcript_path: '/t', agent_type: 'x', background_tasks: [shell] })
+  await ui.press({ key: 'bar:compact' })
+  await ui.unmount()
+  expect(instructions[1]).toBe(KEEP_DROP)
 })
 
 test('buttons row: a perimeter of another branch, or a closed one, is not named', async ($, on) => {
@@ -1086,7 +1123,7 @@ test('buttons row: a perimeter of another branch, or a closed one, is not named'
 for (const [branch, scope] of [
   ['feature/AB#512-reports', 'AB#512'],
   ['users/me/4711-fix-login', 'AB#4711'],
-  ['main', 'topic main'],
+  ['feature/orders-filter', 'topic feature/orders-filter'],
 ] as const) {
   test(`buttons row: segna ore on ${branch} submits the scope ${scope}`, async ($, on) => {
     const commands: string[] = []
@@ -1112,6 +1149,124 @@ for (const [name, options] of [
     await ui.unmount()
   })
 }
+
+for (const branch of ['main', 'master', 'develop']) {
+  test(`buttons row: segna ore is hidden on ${branch}, the default branch; compatta stays`, async ($, on) => {
+    world(on, { branch })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await mountPane($)
+    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+    expect(await ui.find({ key: 'bar:compact' })).toBeDefined()
+    await ui.unmount()
+  })
+}
+
+/** Lets the background reads a session start leaves running (the repo's default branch, the PR) finish. */
+const settleAll = async () => {
+  for (let i = 0; i < 8; i++) await settle()
+}
+
+test("buttons row: segna ore is hidden on the repo's own default branch, read from origin/HEAD", async ($, on) => {
+  world(on, { branch: 'trunk', defaultBranch: 'trunk' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+  await ui.unmount()
+})
+
+// ── segna ore: the PR of the branch, read in the background ──
+
+test('segna ore: an open GitHub PR of the branch is its scope (gh pr view, once)', async ($, on) => {
+  const commands: string[] = []
+  const ghCalls: string[] = []
+  world(on, { commands, ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:worklog' })
+  await ui.unmount()
+  expect(commands).toEqual(['/worklog oggi PR 42'])
+  expect(ghCalls).toEqual(['gh pr view --json number,state'])
+})
+
+test('segna ore: a work item id in the branch name wins over the PR', async ($, on) => {
+  const commands: string[] = []
+  world(on, { commands, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:worklog' })
+  await ui.unmount()
+  expect(commands).toEqual(['/worklog oggi AB#77'])
+})
+
+for (const [name, options] of [
+  ['an Azure DevOps remote (skipped for now)', { remote: 'https://dev.azure.com/<org>/proj/_git/orders', pr: 42 }],
+  ['no remote', { pr: 42 }],
+  ['gh not installed', { remote: GH_SSH, pr: 42, noGh: true }],
+  ['no PR for the branch', { remote: GH_SSH }],
+  ['a PR that is not open', { remote: GH_SSH, pr: 42, prState: 'MERGED' }],
+] as const) {
+  test(`segna ore: with ${name} the scope stays the topic`, async ($, on) => {
+    const commands: string[] = []
+    const ghCalls: string[] = []
+    world(on, { commands, ghCalls, branch: 'feature/orders-filter', ...options })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await settleAll()
+    const ui = await mountPane($)
+    await ui.press({ key: 'bar:worklog' })
+    await ui.unmount()
+    expect(commands).toEqual(['/worklog oggi topic feature/orders-filter'])
+    // gh is only asked for a GitHub remote
+    if (name.startsWith('an Azure') || name === 'no remote') expect(ghCalls).toEqual([])
+  })
+}
+
+test('segna ore: the PR is read at most every 5 minutes, and again for another branch; the default branch is never asked', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(ghCalls).toHaveLength(1)
+  for (let i = 0; i < 4; i++) await clock.advance(15_000) // four ticks, a minute: no new read
+  await settleAll()
+  expect(ghCalls).toHaveLength(1)
+  await clock.advance(5 * MIN)
+  await settleAll()
+  expect(ghCalls).toHaveLength(2)
+
+  options.branch = 'feature/other' // another branch is another question, asked at the next tick
+  options.pr = 43
+  await clock.advance(15_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(3)
+  const ui = await mountPane($)
+  expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('segna ore')
+  await ui.unmount()
+
+  options.branch = 'main'
+  await clock.advance(15_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(3)
+})
+
+test('segna ore: the PR of a branch left behind is not the scope of the next one', async ($, on) => {
+  const commands: string[] = []
+  const options: World = { commands, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  options.branch = 'feature/other'
+  options.pr = undefined
+  await clock.advance(15_000)
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:worklog' })
+  await ui.unmount()
+  expect(commands).toEqual(['/worklog oggi topic feature/other'])
+})
 
 /** The keys of the Buttons in the last row of the drawn pane. */
 const lastRowKeys = (root: unknown): string[] => {

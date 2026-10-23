@@ -107,10 +107,12 @@ export type CockpitSnapshot = {
   tasks?: CockpitTask[]
   /** Entries of the active deliver perimeter of the branch checked out (`<git-dir>/deliver/perimeter.md`); absent without one. */
   perimeter?: string[]
-  /** A workflow running now; nothing fills it yet (phase 4), the compaction instructions name it when it is there. */
-  workflow?: { name: string }
-  /** The pull request of the branch; nothing fills it yet (phase 5), the `segna ore` scope uses it when it is there. */
+  /** The open GitHub pull request of the branch checked out, read in the background (`gh pr view`); the `segna ore` scope uses it. Absent without one. */
   prNumber?: number
+  /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
+  workflow?: string
+  /** The repo's default branch, as `origin/HEAD` names it; `segna ore` is hidden on it. Absent when `origin/HEAD` is not set. */
+  defaultBranch?: string
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */
   now: number
 }
