@@ -1,6 +1,8 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
+import type { CockpitAlm, CockpitBurnSample } from '../types'
+
 export const COLORS = {
   text: '#d6d8dc',
   dim: '#9aa0aa',
@@ -338,4 +340,122 @@ export const shortDate = (iso: string): string => `${iso.slice(8, 10)}/${iso.sli
 export function worklogLabel(kind: 'pending' | 'underTarget', dates: readonly string[]): string {
   const what = kind === 'pending' ? 'da registrare' : 'sotto target'
   return `worklog: ${dates.length}d ${what} (${dates.map(shortDate).join(', ')})`
+}
+
+/** A percentage in a 4-cell column (`  7%`, ` 87%`, `100%`) so one-, two- and three-digit values line up. */
+export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
+
+const WEEKDAYS = ['dom', 'lun', 'mar', 'mer', 'gio', 'ven', 'sab'] as const
+
+/** The local time of a reset: `(14:30)` within 24 hours, `(dom 09:00)` beyond; empty when past or unknown. */
+export function resetClock(resetsAtMs: number | undefined, now: number): string {
+  if (resetsAtMs === undefined || resetsAtMs <= now) return ''
+  const d = new Date(resetsAtMs)
+  const clock = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return resetsAtMs - now <= 864e5 ? `(${clock})` : `(${WEEKDAYS[d.getDay()]} ${clock})`
+}
+
+// ── Burn rate of the 5h window ───────────────────────────────────────────────
+
+const BURN_WINDOW_MS = 30 * 60_000
+const BURN_MIN_SPAN_MS = 10 * 60_000
+
+/**
+ * Appends the 5h usage reading `used` taken at `now`, keeping the last 30 minutes. A reading equal to the last one
+ * adds nothing (the rate counts from the oldest reading to the present); a lower one means the window reset: start over.
+ */
+export function recordBurnSample(
+  samples: readonly CockpitBurnSample[] | undefined,
+  now: number,
+  used: number | undefined,
+): CockpitBurnSample[] {
+  const kept = (samples ?? []).filter(s => s.at >= now - BURN_WINDOW_MS)
+  if (used === undefined) return kept
+  const last = kept.at(-1)
+  if (last && used < last.used) return [{ at: now, used }]
+  return last && used === last.used ? kept : [...kept, { at: now, used }]
+}
+
+/**
+ * How fast the 5h credits fall, from the oldest reading of the last 30 minutes to `used` now: the rate in points
+ * per hour, when they run out, and whether that is before the reset. Undefined with under 10 minutes of readings,
+ * a rate that rounds to under 1 %/h, a window already spent or no reset ahead.
+ */
+export function burnRate(
+  samples: readonly CockpitBurnSample[],
+  now: number,
+  used: number,
+  resetsAtMs: number | undefined,
+): { perHour: number; etaMs: number; isBeforeReset: boolean } | undefined {
+  const oldest = samples.find(s => s.at >= now - BURN_WINDOW_MS)
+  if (!oldest || resetsAtMs === undefined || resetsAtMs <= now || used >= 100) return undefined
+  const span = now - oldest.at
+  if (span < BURN_MIN_SPAN_MS) return undefined
+  const perHour = ((used - oldest.used) * 3_600_000) / span
+  if (Math.round(perHour) < 1) return undefined
+  const etaMs = ((100 - used) * 3_600_000) / perHour
+  return { perHour, etaMs, isBeforeReset: etaMs < resetsAtMs - now }
+}
+
+/** `6h53`, `27m`, `1d4h`: the time to exhaustion. */
+function etaText(ms: number): string {
+  const totalMin = Math.floor(ms / 60_000)
+  const d = Math.floor(totalMin / 1440)
+  const h = Math.floor((totalMin % 1440) / 60)
+  const m = totalMin % 60
+  if (d > 0) return `${d}d${h}h`
+  return h > 0 ? `${h}h${String(m).padStart(2, '0')}` : `${m}m`
+}
+
+/** `−9%/h · finisce tra 6h53: arrivi al reset`, or `…, prima del reset`. */
+export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boolean }): string {
+  return `\u2212${Math.round(b.perHour)}%/h \u00b7 finisce tra ${etaText(b.etaMs)}${b.isBeforeReset ? ', prima del reset' : ': arrivi al reset'}`
+}
+
+// ── ALM target of the working directory ──────────────────────────────────────
+
+// A directory in the form the roots are compared in: forward slashes, no trailing one, lowercase.
+const normDir = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
+
+const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/**
+ * The ALM target of `cwd` from the parsed `workspaces.json`, by the rules of hooks/lib/workspaces.js: the longest
+ * root whose path contains the directory, case-insensitively (a port: the mod cannot require a Node module). A root
+ * names its `project`, or maps the first subfolder through `projects`; `"ask"`, an unlisted subfolder and a GitHub
+ * root leave the project out. Undefined when there is no usable map: the hook is silent then, and so is the line.
+ */
+export function resolveAlm(map: unknown, cwd: string): CockpitAlm | undefined {
+  const rawRoots = isRecord(map) ? map.roots : undefined
+  if (!Array.isArray(rawRoots)) return undefined
+  const roots = rawRoots
+    .filter((r): r is Record<string, unknown> & { path: string } => isRecord(r) && typeof r.path === 'string')
+    .map(r => ({ entry: r, root: normDir(r.path) }))
+    .sort((a, b) => b.root.length - a.root.length)
+  const dir = normDir(cwd)
+  const hit = roots.find(({ root }) => dir === root || dir.startsWith(`${root}/`))
+  if (!hit) return { isMapped: false }
+  const { entry, root } = hit
+  const alm: CockpitAlm = { isMapped: true }
+  if (typeof entry.org === 'string') alm.org = entry.org
+  const project = projectOf(entry, dir.slice(root.length + 1).split('/')[0] ?? '')
+  if (project && entry.platform !== 'github') alm.project = project
+  if (typeof entry.identity === 'string' && /^[\w.-]+$/.test(entry.identity)) alm.identity = entry.identity
+  return alm
+}
+
+function projectOf(entry: Record<string, unknown>, firstSubfolder: string): string | undefined {
+  if (isRecord(entry.projects)) {
+    const key = Object.keys(entry.projects).find(k => k.toLowerCase() === firstSubfolder)
+    const name = key === undefined ? undefined : entry.projects[key]
+    return typeof name === 'string' ? name : undefined
+  }
+  return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
+}
+
+/** `ALM <org> / <project> · <identity>`, each part only when known; `ALM non mappato` when no root matches. */
+export function almText(alm: CockpitAlm): string {
+  if (!alm.isMapped) return 'ALM non mappato'
+  const target = [alm.org, alm.project].filter(Boolean).join(' / ')
+  return `ALM ${[target, alm.identity].filter(Boolean).join(' \u00b7 ')}`.trimEnd()
 }

@@ -2,6 +2,13 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   abbrevTokens,
+  almText,
+  burnRate,
+  burnText,
+  pctCell,
+  recordBurnSample,
+  resetClock,
+  resolveAlm,
   taskBarCells,
   textCells,
   truncEnd,
@@ -168,4 +175,104 @@ test('truncEnd counts terminal cells, not characters', () => {
   expect(truncEnd('漢字漢字漢字', 7)).toBe('漢字漢…')
   expect(textCells(truncEnd('漢字漢字漢字', 7))).toBeLessThanOrEqual(7)
   expect(truncEnd('short', 9)).toBe('short')
+})
+
+test('pctCell pads a percentage to four cells so one, two and three digits align', () => {
+  expect(pctCell(7)).toBe('  7%')
+  expect(pctCell(87)).toBe(' 87%')
+  expect(pctCell(100)).toBe('100%')
+  expect(pctCell(0)).toBe('  0%')
+})
+
+// Local-time inputs: the expectations hold in any time zone.
+const at = (day: number, h: number, m: number) => new Date(2026, 9, day, h, m).getTime()
+
+test('resetClock: the clock time within 24 hours, the weekday and time beyond', () => {
+  const now = at(22, 10, 0)
+  expect(resetClock(at(22, 14, 30), now)).toBe('(14:30)')
+  expect(resetClock(at(23, 10, 0), now)).toBe('(10:00)') // exactly 24 h: still the clock time
+  expect(resetClock(at(25, 9, 0), now)).toBe('(dom 09:00)') // 2026-10-25 is a Sunday
+  expect(resetClock(at(26, 7, 5), now)).toBe('(lun 07:05)')
+  expect(resetClock(now - 1, now)).toBe('')
+  expect(resetClock(undefined, now)).toBe('')
+})
+
+test('recordBurnSample keeps the last 30 minutes, skips an unchanged reading and starts over when the window resets', () => {
+  const min = 60000
+  const first = recordBurnSample(undefined, 0, 38)
+  expect(first).toEqual([{ at: 0, used: 38 }])
+  expect(recordBurnSample(first, 5 * min, 38)).toEqual(first)
+  const grown = recordBurnSample(first, 12 * min, 41)
+  expect(grown).toEqual([{ at: 0, used: 38 }, { at: 12 * min, used: 41 }])
+  expect(recordBurnSample(grown, 35 * min, 45)).toEqual([{ at: 12 * min, used: 41 }, { at: 35 * min, used: 45 }])
+  expect(recordBurnSample(grown, 40 * min, 3)).toEqual([{ at: 40 * min, used: 3 }])
+  expect(recordBurnSample(grown, 20 * min, undefined)).toEqual(grown)
+})
+
+test('burnRate: rate, exhaustion time and the verdict against the reset; nothing without 10 minutes or a positive rate', () => {
+  const min = 60000
+  const now = 20 * min
+  const samples = [{ at: 0, used: 35 }]
+  // 3 points in 20 min = 9 %/h; 62 left lasts 6h53, the reset comes in 2h14
+  const slow = burnRate(samples, now, 38, now + 134 * min)
+  expect(slow?.perHour).toBe(9)
+  expect(slow?.isBeforeReset).toBe(false)
+  expect(Math.round((slow?.etaMs ?? 0) / min)).toBe(413)
+  expect(burnText(slow!)).toBe('−9%/h · finisce tra 6h53: arrivi al reset')
+  // 30 points in 20 min = 90 %/h; 35 left lasts 23 min, the reset comes in 3 h
+  const fast = burnRate([{ at: 0, used: 35 }], now, 65, now + 180 * min)
+  expect(fast?.isBeforeReset).toBe(true)
+  expect(burnText(fast!)).toBe('−90%/h · finisce tra 23m, prima del reset')
+  // under 10 minutes of samples, a flat or falling reading, a reset unknown or gone, a spent window: no line
+  expect(burnRate([{ at: 15 * min, used: 35 }], now, 38, now + 134 * min)).toBeUndefined()
+  expect(burnRate(samples, now, 35, now + 134 * min)).toBeUndefined()
+  expect(burnRate(samples, now, 30, now + 134 * min)).toBeUndefined()
+  expect(burnRate(samples, now, 38, undefined)).toBeUndefined()
+  expect(burnRate(samples, now, 38, now - 1)).toBeUndefined()
+  expect(burnRate(samples, now, 100, now + 134 * min)).toBeUndefined()
+  expect(burnRate([], now, 38, now + 134 * min)).toBeUndefined()
+  // a sample older than 30 minutes is not counted
+  expect(burnRate([{ at: 0, used: 10 }], 40 * min, 38, 40 * min + 134 * min)).toBeUndefined()
+  // a rate that rounds to zero is not shown
+  expect(burnRate([{ at: 0, used: 38 }], 30 * min, 38.1, 30 * min + 134 * min)).toBeUndefined()
+})
+
+/** A Windows spelling of a path written with slashes. */
+const win = (p: string) => p.split('/').join(String.fromCharCode(92))
+
+const WORKSPACES = {
+  roots: [
+    { path: win('/ws/Product'), platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' },
+    { path: win('/ws/clients'), platform: 'azure-devops', org: 'org-b', projects: { acme: 'Acme' }, identity: 'id-b' },
+    { path: win('/ws/gh'), platform: 'github', org: 'gh-org' },
+    { path: win('/ws/gh/moved'), platform: 'azure-devops', org: 'org-b', project: 'Moved', identity: 'id-b' },
+  ],
+}
+
+test('resolveAlm resolves a directory like the workspaces hook: longest root wins, case-insensitive, sub-project map', () => {
+  expect(resolveAlm(WORKSPACES, '/WS/product/api')).toEqual({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })
+  expect(resolveAlm(WORKSPACES, win('/ws/Product'))).toEqual({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })
+  // a nested root beats the plain root it sits in
+  expect(resolveAlm(WORKSPACES, win('/ws/gh/moved/x'))).toEqual({ isMapped: true, org: 'org-b', project: 'Moved', identity: 'id-b' })
+  // GitHub: no project, no identity
+  expect(resolveAlm(WORKSPACES, win('/ws/gh/other'))).toEqual({ isMapped: true, org: 'gh-org' })
+  // first subfolder picks the project; an unlisted or missing one leaves it out
+  expect(resolveAlm(WORKSPACES, win('/ws/clients/Acme/web'))).toEqual({ isMapped: true, org: 'org-b', project: 'Acme', identity: 'id-b' })
+  expect(resolveAlm(WORKSPACES, win('/ws/clients/other'))).toEqual({ isMapped: true, org: 'org-b', identity: 'id-b' })
+  expect(resolveAlm(WORKSPACES, win('/ws/clients'))).toEqual({ isMapped: true, org: 'org-b', identity: 'id-b' })
+  // a sibling that only shares the prefix is not inside the root
+  expect(resolveAlm(WORKSPACES, win('/ws/Product-old'))).toEqual({ isMapped: false })
+  expect(resolveAlm(WORKSPACES, win('/elsewhere'))).toEqual({ isMapped: false })
+  // project "ask" and an identity that is not a plain name are left out
+  expect(resolveAlm({ roots: [{ path: '/w', org: 'o', project: 'ask', identity: '../x' }] }, '/w/a')).toEqual({ isMapped: true, org: 'o' })
+  // no map or a malformed one: undefined, the line is absent
+  expect(resolveAlm(undefined, '/w')).toBeUndefined()
+  expect(resolveAlm({ roots: 'x' }, '/w')).toBeUndefined()
+  expect(resolveAlm({}, '/w')).toBeUndefined()
+})
+
+test('almText: org / project and the identity; unmapped says so', () => {
+  expect(almText({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })).toBe('ALM org-a / Alpha · id-a')
+  expect(almText({ isMapped: true, org: 'gh-org' })).toBe('ALM gh-org')
+  expect(almText({ isMapped: false })).toBe('ALM non mappato')
 })

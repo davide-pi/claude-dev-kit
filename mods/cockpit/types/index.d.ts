@@ -45,6 +45,12 @@ export type CockpitTask = {
   startedAt?: number
 }
 
+/** One reading of the 5h window's usage, `at` in `$.clock.now()` milliseconds. */
+export type CockpitBurnSample = { at: number; used: number }
+
+/** The ALM target the cwd resolves to in `workspaces.json`; absent from the snapshot when there is no usable map. */
+export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; identity?: string }
+
 export type CockpitSnapshot = {
   cwd: string
   /** Raw model id or name of the main loop. */
@@ -57,6 +63,11 @@ export type CockpitSnapshot = {
   /** Session cost in USD; `startUsd` is the total when the last turn began. */
   cost: { usd?: number; startUsd?: number }
   rateLimits: CockpitRateLimit[]
+  /** 5h usage readings of the last 30 minutes, the burn rate's input. */
+  fiveHourSamples?: CockpitBurnSample[]
+  /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
+  cacheShare?: number
+  alm?: CockpitAlm
   agents: CockpitAgent[]
   git?: CockpitGit
   worklog: CockpitWorklog

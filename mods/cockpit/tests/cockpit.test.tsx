@@ -49,6 +49,10 @@ type World = {
   sessionId?: () => string
   /** Receives the path of every `$.fs.write`, one entry per write. */
   log?: string[]
+  /** The rate-limit windows `$.session.usage()` answers (a 5h and a 7d one when not given). */
+  rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]
+  /** The text of `<config>/workspaces.json`; absent, the file answers an empty map. */
+  workspaces?: unknown
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -69,7 +73,7 @@ function world(on: On, options: World = {}) {
     value: {
       startedAt: NOW,
       context: options.isFresh ? { window: 1_000_000 } : { window: 1_000_000, tokens: 248_000, percent: 25 },
-      rateLimits: [
+      rateLimits: options.rateLimits ?? [
         { kind: 'five_hour', percentUsed: 38, resetsAt: iso((2 * 60 + 14) * 60000) },
         { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
       ],
@@ -87,9 +91,12 @@ function world(on: On, options: World = {}) {
         : '## feature/x\nM  a.ts\n M b.ts\n?? c.ts\n',
     },
   }))
-  on('fs.read', () => ({
-    value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
-  }))
+  on('fs.read', (_, e) => {
+    if (e.path.endsWith('workspaces.json')) return { value: JSON.stringify(options.workspaces ?? {}) }
+    return {
+      value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
+    }
+  })
   on('fs.stat', () => ({ value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }))
   on('agent.list', () => ({ value: [] }))
   on('ui.open', (_, e) => {
@@ -149,9 +156,9 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
     expect(await text(/example-repo/)).toContain('example-repo')
     expect(await text(/^\+1 ~1 \?1$/)).toBe('+1 ~1 ?1')
-    expect(await text(/25% 248K\/1M/)).toBe('25% 248K/1M')
-    expect(await text(/^5h/)).toContain('62% \u21bb 2h14m')
-    expect(await text(/^7d/)).toContain('41%')
+    expect(await text(/25% 248K\/1M/)).toBe(' 25% 248K/1M')
+    expect(await text(/^ 62% 5h/)).toMatch(/^ 62% 5h \u21bb 2h14m \(\d\d:\d\d\)$/)
+    expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb 3d\dh \((dom|lun|mar|mer|gio|ven|sab) \d\d:\d\d\)$/)
     expect(await text(/vs atteso/)).toBe('vs atteso 7d \u22125%')
     expect(await text(/code-reviewer/)).toContain('\u2713 code-reviewer')
     expect(await text(/code-reviewer/)).toContain('son 5.5')
@@ -177,7 +184,7 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$0\.00$/)).toBe('$0.00')
-  expect(await text(/^0% /)).toBe('0% 0/1M')
+  expect(await text(/^ {2}0% /)).toBe('  0% 0/1M')
   await ui.unmount()
 })
 
@@ -419,7 +426,7 @@ test('deltas count from the turn start', async ($, on) => {
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$5\.20/)).toContain('$5.20')
   expect(await text(/^\+0\.38/)).toBe('+0.38')
-  expect(await text(/^26% /)).toBe('26% 260K/1M +12K')
+  expect(await text(/^ 26% /)).toBe(' 26% 260K/1M +12K')
   await ui.unmount()
 })
 
@@ -603,4 +610,161 @@ test('the list is empty again at session start (a /clear included)', async ($, o
   expect((await taskRows($)).i).toBe(-1)
   const second = [...writes.entries()].find(([k]) => /cockpit-s-2\.json$/.test(k))
   expect((JSON.parse(second?.[1] ?? 'null') as { tasks: unknown }).tasks).toBeNull()
+})
+
+// ── Credits, cache share, ALM ──
+
+/** The color of the first leaf Text whose content matches `re`. */
+const colorOf = (root: unknown, re: RegExp): string | undefined => {
+  const o = root as { props?: { color?: string }; children?: unknown[] } | null
+  const [only] = o?.children ?? []
+  if (typeof only === 'string' && re.test(only)) return o?.props?.color
+  for (const c of o?.children ?? []) {
+    const found = colorOf(c, re)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+const GREEN = '#7ec699'
+const RED = '#f07a6f'
+const MIN = 60_000
+
+async function paneRows($: Engine, bodyColumns = 50) {
+  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  const root = await ui.drawn()
+  await ui.unmount()
+  return { root, rows: rowTexts(root) }
+}
+
+test('percentages are right-aligned: 87% and 7% start their label in the same column, context included', async ($, on) => {
+  world(on, {
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 13, resetsAt: iso(2 * 60 * MIN) },
+      { kind: 'seven_day', percentUsed: 93, resetsAt: iso(2 * 24 * 60 * MIN) },
+    ],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($)
+  const five = rows.find(r => /87% 5h/.test(r))
+  const seven = rows.find(r => /7% 7d/.test(r))
+  const context = rows.find(r => /25% 248K/.test(r))
+  expect(five).toMatch(/^[▰▱]+ 87% 5h/)
+  expect(seven).toMatch(/^[▰▱]+ {2}7% 7d/)
+  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
+  expect(context?.indexOf('%')).toBe(five?.indexOf('%'))
+})
+
+test('percentages are right-aligned with three digits too: 100% and 87% start their label in the same column', async ($, on) => {
+  world(on, {
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 0, resetsAt: iso(5 * 60 * MIN) },
+      { kind: 'seven_day', percentUsed: 13, resetsAt: iso(2 * 24 * 60 * MIN) },
+    ],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($)
+  const five = rows.find(r => /100% 5h/.test(r))
+  const seven = rows.find(r => /87% 7d/.test(r))
+  expect(five).toMatch(/^[▰▱]+100% 5h/)
+  expect(seven).toMatch(/^[▰▱]+ 87% 7d/)
+  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
+})
+
+test('burn rate: under the 5h row, green when the credits last to the reset, red when they run out before it', async ($, on) => {
+  const clock = world(on)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($)).rows.some(r => /finisce/.test(r))).toBe(false) // one reading: no rate yet
+  await clock.advance(15 * MIN)
+  const measure = (used: number) =>
+    $.session.measure({
+      context: { window: 1_000_000, tokens: 260_000, percent: 26 },
+      rateLimits: [
+        { kind: 'five_hour', percentUsed: used, resetsAt: iso(2 * 60 * MIN) },
+        { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
+      ],
+      cost: { usd: 5.2 },
+      changed: ['rateLimits'],
+    })
+
+  await measure(41) // 3 points in 15 min = 12 %/h; 59 left lasts 4h55, the reset is in 1h45
+  let { root, rows } = await paneRows($)
+  const five = rows.findIndex(r => /59% 5h/.test(r))
+  expect(rows[five + 1]).toBe('−12%/h · finisce tra 4h55: arrivi al reset')
+  expect(colorOf(root, /finisce/)).toBe(GREEN)
+
+  await measure(50) // 12 points in 15 min = 48 %/h; 50 left lasts 1h02, before the reset
+  ;({ root, rows } = await paneRows($))
+  expect(rows[rows.findIndex(r => /50% 5h/.test(r)) + 1]).toBe('−48%/h · finisce tra 1h02, prima del reset')
+  expect(colorOf(root, /finisce/)).toBe(RED)
+})
+
+test('burn rate: no line with under 10 minutes of readings', async ($, on) => {
+  const clock = world(on)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(5 * MIN)
+  await $.session.measure({
+    context: { window: 1_000_000, tokens: 260_000, percent: 26 },
+    rateLimits: [{ kind: 'five_hour', percentUsed: 60, resetsAt: iso(2 * 60 * MIN) }],
+    cost: { usd: 5.2 },
+    changed: ['rateLimits'],
+  })
+  expect((await paneRows($)).rows.some(r => /finisce/.test(r))).toBe(false)
+})
+
+test('cache share: the last main-loop turn, right of CONTESTO; a subagent turn and an empty one do not set it', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const complete = (usage: { input: number; read: number; write: number }, agentId?: string) =>
+    $.turn.complete({
+      answer: '',
+      durationMs: 1,
+      isAborted: false,
+      turnId: 't',
+      reason: 'answer',
+      ...(agentId ? { agentId } : {}),
+      usage: {
+        input_tokens: usage.input,
+        output_tokens: 7,
+        cache_read_input_tokens: usage.read,
+        cache_creation_input_tokens: usage.write,
+        model: 'm',
+      },
+    })
+  const title = async () => (await paneRows($)).rows.find(r => /^CONTESTO/.test(r))
+
+  expect(await title()).toBe('CONTESTO')
+  await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
+  expect(await title()).toBe('CONTESTO')
+  await complete({ input: 0, read: 0, write: 0 })
+  expect(await title()).toBe('CONTESTO')
+  await complete({ input: 600, read: 94_000, write: 5_400 })
+  expect(await title()).toBe('CONTESTOcache  94%')
+  await complete({ input: 9_000, read: 500, write: 500 })
+  expect(await title()).toBe('CONTESTOcache   5%')
+})
+
+test('ALM line under the folder row: org / project and identity, resolved for the cwd', async ($, on) => {
+  world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($)
+  expect(rows[1]).toMatch(/example-repo/)
+  expect(rows[2]).toBe('ALM org-a / Alpha · id-a')
+})
+
+test('ALM line reads ALM non mappato in red when no root contains the cwd, and is absent without a map', async ($, on) => {
+  world(on, { workspaces: { roots: [{ path: '/elsewhere', platform: 'github', org: 'o' }] } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { root, rows } = await paneRows($)
+  expect(rows[2]).toBe('ALM non mappato')
+  expect(colorOf(root, /^ALM non mappato$/)).toBe(RED)
+})
+
+test('no workspaces map: no ALM line at all', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
