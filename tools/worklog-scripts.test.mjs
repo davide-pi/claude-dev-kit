@@ -189,6 +189,17 @@ test('push close and target rows touch only the audit and targets.json', { skip:
   assert.deepEqual(sb.read('wl/targets.json').days['2026-10-13'], { hours: 0, note: 'evento' });
 });
 
+test('push refuses hours or a delta that is not a multiple of 0.5, and writes nothing for that row', { skip: skipWin }, () => {
+  const sb = sandbox();
+  for (const bad of [row({ hours: 1.25 }), row({ hours: 2, delta: 0.3 }), { date: '2026-10-13', itemId: null, hours: 0.75, topic: 'x' }]) {
+    const r = sb.push([bad]);
+    assert.equal(r.code, 1, JSON.stringify(bad));
+    assert.match(r.out, /multipl/);
+  }
+  assert.equal(sb.read('state.json')[101], 2);
+  assert.ok(!existsSync(join(sb.dir, 'wl', 'pushed.json')));
+});
+
 test('push -DryRun calls nothing and writes nothing', { skip: skipWin }, () => {
   const sb = sandbox();
   const r = sb.push([row(), { date: '2026-10-13', targetHours: 0 }], '-DryRun');

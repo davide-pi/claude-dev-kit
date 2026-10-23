@@ -140,6 +140,10 @@ foreach ($row in $rowList) {
     $r.Periodo = if ($pf -eq $pt) { $pf } else { "$pf..$pt" }
     if ($pf -notmatch '^\d{4}-\d{2}-\d{2}$' -or $pt -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "periodo mancante o non yyyy-MM-dd" }
     if (-not (Has $row 'hours')) { throw "'hours' mancante" }
+    # Hours are always whole half-hours (round.ps1): anything else is a hand-made number.
+    foreach ($k in 'hours', 'delta') {
+      if ((Has $row $k) -and ([double]$row.$k * 2) % 1 -ne 0) { throw "'$k' = $($row.$k): non e' un multiplo di 0.5" }
+    }
 
     if (-not (Has $row 'itemId')) {
       # ---- close: audit only ----
