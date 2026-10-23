@@ -101,6 +101,64 @@ test('a background dev server does not stretch a 60-min gap', { skip }, () => {
   assert.equal(activeMinutes(main), 2);
 });
 
+// ── engine: -SessionId only selects the topics, the minutes stay the global ones ────────────────
+
+/** Runs the engine over `main` with extra flags; returns the whole output. */
+function engine(main, ...flags) {
+  const root = tmp();
+  const proj = join(root, 'C--work-api');
+  mkdirSync(proj, { recursive: true });
+  writeFileSync(join(proj, 's1.jsonl'), main.map((e) => JSON.stringify(e)).join('\n'));
+  const r = pwsh('worklog.ps1', ['-From', TODAY, '-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);
+  assert.equal(r.code, 0, r.out);
+  return r.out;
+}
+const total = (out) => out.match(/Tempo attivo totale: ([^|]+)\|/)[1].trim();
+const sessionSection = (out) => (out.match(/^Sessione .*(?:\r?\n(?!\r?\n).*)*/m) || [''])[0];
+
+// s1 works on feature/a, s2 on feature/b at the same time: parallel sessions, one timeline.
+const twoSessions = () => [
+  prompt(0), reply(1), prompt(2, { session: 's2', branch: 'feature/b' }), reply(3, { session: 's2', branch: 'feature/b' }),
+  prompt(5), reply(6), prompt(7, { session: 's2', branch: 'feature/b' }), reply(8, { session: 's2', branch: 'feature/b' }),
+];
+
+test('-SessionId marks only the topics of that session and leaves the active minutes alone', { skip }, () => {
+  const plain = engine(twoSessions());
+  const scoped = engine(twoSessions(), '-SessionId', 's2');
+  assert.doesNotMatch(plain, /^Sessione /m);
+  assert.equal(total(scoped), total(plain));
+  const sec = sessionSection(scoped);
+  assert.match(sec, /feature\/b/);
+  assert.doesNotMatch(sec, /feature\/a/);
+  assert.match(sec, new RegExp(`${TODAY}.*feature/b +4m`));   // the topic's whole-day minutes
+});
+
+test('-SessionId on a branch shared with another chat flags it and marks the digest lines of the session', { skip }, () => {
+  const shared = { branch: 'main' };
+  const main = [
+    prompt(0, shared), reply(1, shared), prompt(2, { ...shared, session: 's2' }), reply(3, { ...shared, session: 's2' }),
+    prompt(5, shared), reply(6, shared),
+  ];
+  const out = engine(main, '-SessionId', 's1');
+  assert.match(sessionSection(out), /main .*\[anche altre sessioni\]/);
+  const digest = readFileSync(out.match(/^Digest: (.+)$/m)[1].trim(), 'utf8');
+  assert.match(digest, /\| sessione: si/);
+  assert.equal(digest.match(/^- \[[^\]]+\] \[S\]/gm).length, 4);   // s1's two prompts and two replies, none of s2's
+  assert.doesNotMatch(sessionSection(engine(twoSessions(), '-SessionId', 's2')), /anche altre sessioni/);
+});
+
+test('-SessionId is compared case-insensitively', { skip }, () => {
+  const sec = sessionSection(engine(twoSessions(), '-SessionId', 'S2'));
+  assert.match(sec, /feature\/b/);
+  assert.doesNotMatch(sec, /feature\/a/);
+});
+
+test('-SessionId with a session absent from the period says so and marks nothing', { skip }, () => {
+  const sec = sessionSection(engine(twoSessions(), '-SessionId', 'nope'));
+  assert.match(sec, /nessun evento/);
+  assert.doesNotMatch(sec, /feature\//);
+});
+
 // ── push: cumulative, idempotent, audited ───────────────────────────────────────────────────────
 
 /** A sandbox: az shim on PATH, CompletedWork state, an empty worklog folder. */

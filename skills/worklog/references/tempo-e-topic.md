@@ -49,6 +49,16 @@ Stdout, the authoritative numbers:
   over lunch looks exactly like a long build: show them in Table 1 and let the user drop them;
 - the paths of the raw digest, the audit and `targets.json`.
 
+**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): only a selection. Timeline,
+active time and topic minutes are the global ones, parallel sessions counted once — the session's own
+minutes are never computed, they would double-count parallel chats and re-runs. A **Sessione** section
+lists each (day, project / branch) with at least one main-session event of that session and the topic's
+whole-day minutes; the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
+only those topics in Phases 3-7. A topic flagged `[anche altre sessioni]` (typically the default branch)
+holds other chats' work too: its minutes are not the chat's alone, so never log it whole unasked — ask in
+Table 2 which item(s) it belongs to, telling the chat's share from the `[S]` lines.
+`nessun evento` → the id is not in the period: say so, ask for the right period or id.
+
 **Targets**: `~/.claude/worklog/targets.json` — `{ "targetHours": 8, "days": { "<yyyy-MM-dd>": { "hours": 6, "note": "corso 4h + straordinario 2h" } } }`.
 Missing file or date → `targetHours` Monday-Friday, 0 at weekends. Only `worklog-push.ps1` writes it
 (a `target` row, `scrittura.md`); the user may edit it by hand for a known event.

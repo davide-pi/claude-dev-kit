@@ -26,6 +26,13 @@
   — written by worklog-push.ps1; missing means targetHours Monday-Friday and 0 at weekends.
   Logged: <OutDir>/pushed.json (the audit); a multi-day entry is split evenly over its weekdays.
 
+  -SessionId <id> (case-insensitive) only SELECTS: the timeline, the active time and the topic minutes
+  are computed exactly as without it (global timeline, parallel sessions counted once); a "Sessione"
+  section lists the (day, topic) pairs with at least one main-session event of that session, each with
+  the topic's whole-day minutes, so the caller keeps only those; a topic that also has events of another
+  session is flagged "[anche altre sessioni]", and the digest lines of the session carry " [S]".
+  Without it nothing changes.
+
   Writes the raw digest to <OutDir>/_raw/<period>.md and prunes digests older than RetentionDays.
   Never prunes the audit, never touches Azure DevOps.
 #>
@@ -33,6 +40,7 @@
 param(
   [string]$From = '',    # '' = today | yyyy-MM-dd | 'yesterday'/'ieri'
   [string]$To   = '',    # '' = same as From
+  [string]$SessionId      = '',  # '' = off | a session id: mark its topics (selection only, minutes unchanged)
   # $HOME also exists off Windows: with USERPROFILE the script found nothing and printed
   # "Nessuna attivita'", indistinguishable from a day without work.
   [string]$ProjectsRoot   = (Join-Path $HOME '.claude/projects'),
@@ -233,7 +241,7 @@ function Covered($u, [datetime]$a, [datetime]$b) {
 
 # ---- active time: one global timeline (parallel sessions count once) ----
 $sorted = @($events | Sort-Object Time)
-$activeByPB = @{}; $activeByDay = @{}; $recoveredByDay = @{}
+$activeByPB = @{}; $activeByPBDay = @{}; $activeByDay = @{}; $recoveredByDay = @{}
 $recovered = @{ wait = 0.0; cont = 0.0 }
 $longWaits = [System.Collections.Generic.List[object]]::new()
 for ($i = 0; $i -lt $sorted.Count - 1; $i++) {
@@ -251,6 +259,7 @@ for ($i = 0; $i -lt $sorted.Count - 1; $i++) {
   $key = "$($a.Project)`n$($a.Branch)"
   $day = $a.Time.ToString('yyyy-MM-dd')
   $activeByPB[$key] = [double]$activeByPB[$key] + $g
+  $activeByPBDay["$day`n$key"] = [double]$activeByPBDay["$day`n$key"] + $g
   $activeByDay[$day] = [double]$activeByDay[$day] + $g
   if ($reason -ne 'base') {
     $recovered[$reason] += $g
@@ -290,6 +299,19 @@ $projReport = foreach ($pg in ($events | Group-Object Project)) {
 $projReport = @($projReport | Where-Object { $_.Prompts -gt 0 -or $_.ActiveMin -ge 1 } | Sort-Object ActiveMin -Descending)
 $totalMin = ($projReport | Measure-Object ActiveMin -Sum).Sum
 
+# ---- the session's topics: (day, project, branch) with a main-session event of -SessionId ----
+$sessionTopics = @(); $sharedTopics = @{}; $sid = ''
+if ($SessionId.Trim()) {
+  $sid = $SessionId.Trim()
+  # a (day, topic) that also has events of another session: its minutes are not the chat's alone
+  foreach ($e in $events) { if ($e.Session -ine $sid) { $sharedTopics["$($e.Time.ToString('yyyy-MM-dd'))`n$($e.Project)`n$($e.Branch)"] = $true } }
+  $sessionTopics = @($events | Where-Object { $_.Session -ieq $sid } | ForEach-Object {
+    [pscustomobject]@{ Day = $_.Time.ToString('yyyy-MM-dd'); Project = $_.Project; Branch = $_.Branch }
+  } | Sort-Object Day, Project, Branch -Unique)
+}
+$sessionBranches = @{}
+foreach ($t in $sessionTopics) { $sessionBranches["$($t.Project)`n$($t.Branch)"] = $true }
+
 # ---- per-day target and hours already logged ----
 $targets = ReadJson $targetsPath
 $defaultTarget = if ($null -ne $targets.targetHours) { [double]$targets.targetHours } else { 8.0 }
@@ -326,6 +348,18 @@ foreach ($p in $projReport) {
     Write-Output ("  |- {0,-29} {1,10} {2,-17} {3,6}" -f (Trunc $b.Branch 29), (FmtMin $b.ActiveMin), ("{0}-{1}" -f (FmtStamp $b.First), (FmtStamp $b.Last)), $b.Prompts)
   }
 }
+if ($SessionId.Trim()) {
+  Write-Output ""
+  if ($sessionTopics.Count -eq 0) {
+    Write-Output "Sessione $($SessionId.Trim()): nessun evento in questo periodo."
+  } else {
+    Write-Output "Sessione $($SessionId.Trim()): topic con almeno un evento della sessione (minuti = totale del topic nel giorno, tutte le sessioni)"
+    foreach ($t in $sessionTopics) {
+      $shared = if ($sharedTopics["$($t.Day)`n$($t.Project)`n$($t.Branch)"]) { '  [anche altre sessioni]' } else { '' }
+      Write-Output ("  {0}  {1} / {2}  {3}{4}" -f $t.Day, (Split-Path $t.Project -Leaf), $t.Branch, (FmtMin ([double]$activeByPBDay["$($t.Day)`n$($t.Project)`n$($t.Branch)"])), $shared)
+    }
+  }
+}
 Write-Output ""
 Write-Output ("{0,-11} {1,9} {2,11} {3,7} {4,8} {5,8}" -f 'GIORNO', 'ATTIVO', 'RECUPERATI', 'TARGET', 'LOGGATO', 'MANCANO')
 for ($d = $fromD; $d -le $toD; $d = $d.AddDays(1)) {
@@ -354,11 +388,12 @@ foreach ($p in $projReport) {
   $projLines = 0; $projTrunc = $false
   foreach ($b in $p.Branches) {
     if ($projLines -ge $MaxLinesPerProj) { $projTrunc = $true; break }
-    [void]$sb.AppendLine("### topic (branch): $($b.Branch)  -  ~$(FmtMin $b.ActiveMin) | $($b.Prompts) prompt | $(FmtStamp $b.First)-$(FmtStamp $b.Last)")
+    [void]$sb.AppendLine("### topic (branch): $($b.Branch)  -  ~$(FmtMin $b.ActiveMin) | $($b.Prompts) prompt | $(FmtStamp $b.First)-$(FmtStamp $b.Last)$(if ($sessionBranches["$($p.Project)`n$($b.Branch)"]) { ' | sessione: si' })")
     foreach ($e in @($b.Events | Where-Object { $_.Text -ne '' })) {
       if ($projLines -ge $MaxLinesPerProj) { $projTrunc = $true; break }
-      if ($e.Type -eq 'user') { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)] **TU:** $(Trunc $e.Text $MaxPromptChars)") }
-      else                    { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)] CC: $(Trunc $e.Text $MaxAsstChars)") }
+      $mine = if ($sid -and $e.Session -ieq $sid) { ' [S]' } else { '' }
+      if ($e.Type -eq 'user') { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)]$mine **TU:** $(Trunc $e.Text $MaxPromptChars)") }
+      else                    { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)]$mine CC: $(Trunc $e.Text $MaxAsstChars)") }
       $projLines++
     }
     [void]$sb.AppendLine("")
