@@ -5,13 +5,15 @@ import type {
   CockpitAgent,
   CockpitAlm,
   CockpitBurnSample,
+  CockpitChange,
   CockpitDoneClaim,
-  CockpitGit,
   CockpitHistoryEntry,
   CockpitPerimeterCheck,
+  CockpitPr,
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
+  CockpitWorktree,
 } from '../types'
 
 export const COLORS = {
@@ -291,10 +293,10 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
 
-/** `git status --porcelain -b` -> branch and dirty counts; undefined outside a repository. */
+/** `git status --porcelain -b` -> branch, dirty counts and the upstream with the commits ahead and behind it (none for a branch without one, or whose upstream is gone); undefined outside a repository. */
 export function parseGitStatus(
   out: string,
-): { branch: string; isDetached: boolean; staged: number; modified: number; untracked: number } | undefined {
+): { branch: string; isDetached: boolean; staged: number; modified: number; untracked: number; upstream?: string; ahead?: number; behind?: number } | undefined {
   const lines = out.split('\n').filter(l => l.length > 0)
   const header = lines[0]?.startsWith('## ') ? (lines.shift() ?? '').slice(3) : ''
   const isDetached = / \(no branch\)$/.test(header)
@@ -313,7 +315,12 @@ export function parseGitStatus(
     if (y !== ' ' && y !== '?') modified++
     if (line.startsWith('??')) untracked++
   }
-  return { branch, isDetached, staged, modified, untracked }
+  const tracking = /\.\.\.(\S+)(?: \[([^\]]*)\])?\s*$/.exec(header)
+  const upstream = tracking?.[2] === 'gone' ? undefined : tracking?.[1]
+  const range = tracking?.[2] ?? ''
+  const ahead = Number(/ahead (\d+)/.exec(range)?.[1] ?? 0)
+  const behind = Number(/behind (\d+)/.exec(range)?.[1] ?? 0)
+  return { branch, isDetached, staged, modified, untracked, ...(upstream !== undefined && { upstream, ahead, behind }) }
 }
 
 /** `rev-parse --git-dir --git-common-dir --show-toplevel` -> the worktree root inside a linked worktree. */
@@ -441,6 +448,9 @@ export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boo
 // A directory in the form the roots are compared in: forward slashes, no trailing one, lowercase.
 const normDir = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
 
+/** Two paths name the same folder, whatever their slashes, trailing slash or case. */
+export const isSameDir = (a: string, b: string): boolean => normDir(a) === normDir(b)
+
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
 /**
@@ -565,28 +575,11 @@ export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimete
   return out
 }
 
-/** The work item id a branch name carries (`AB#1234`, `/1234-`, `feature/1234`); undefined when it carries none. */
-export const branchWorkItemId = (branch: string): string | undefined =>
-  /AB#(\d+)/i.exec(branch)?.[1] ?? /(?:^|\/)(\d{3,})(?=$|[-_/])/.exec(branch)?.[1]
-
 const DEFAULT_BRANCHES: readonly string[] = ['main', 'master', 'develop']
 
 /** The branch is a default one: `main`, `master`, `develop` or the repo's own (`defaultBranch`, from `origin/HEAD`). */
 export const isDefaultBranch = (branch: string, defaultBranch?: string): boolean =>
   DEFAULT_BRANCHES.includes(branch) || branch === defaultBranch
-
-/**
- * The scope `/worklog` takes for the work in hand: `AB#<id>` when the branch name carries a work item id
- * (`AB#1234`, `/1234-`, `feature/1234`), else `PR <n>` when a pull request is known, else `topic <branch>`;
- * none on a detached HEAD, without git, or on the default branch (`main`, `master`, `develop` or the repo's own,
- * `defaultBranch`), where no implementation is identifiable.
- */
-export function worklogScope(git: CockpitGit | undefined, prNumber?: number, defaultBranch?: string): string | undefined {
-  if (!git || git.isDetached || isDefaultBranch(git.branch, defaultBranch)) return undefined
-  const id = branchWorkItemId(git.branch)
-  if (id) return `AB#${id}`
-  return prNumber !== undefined ? `PR ${prNumber}` : `topic ${git.branch}`
-}
 
 /** `git symbolic-ref --short refs/remotes/origin/HEAD` -> the repo's default branch (`origin/main` -> `main`); undefined for anything else. */
 export const parseDefaultBranch = (out: string): string | undefined => /^origin\/(.+)$/.exec(out.trim())?.[1]
@@ -594,16 +587,180 @@ export const parseDefaultBranch = (out: string): string | undefined => /^origin\
 /** An `origin` URL (ssh or https) that points at github.com. */
 export const isGithubRemote = (url: string): boolean => /(?:^|[@/])github\.com[:/]/i.test(url.trim())
 
-/** `gh pr view --json number,state` -> the number of an open pull request; undefined for any other state or text. */
-export function parsePrNumber(out: string): number | undefined {
+/** An `origin` URL (ssh or https, the old `visualstudio.com` host too) that points at Azure DevOps. */
+export const isAzureRemote = (url: string): boolean => /(?:^|[@/])(?:ssh\.)?dev\.azure\.com[:/]|\.visualstudio\.com[:/]/i.test(url.trim())
+
+/** The project (absent when the remote names none: the project's default repository) and repository of an Azure DevOps remote; undefined for any other URL. */
+export function azureRepo(url: string): { project?: string; repo: string } | undefined {
+  const u = url.trim()
+  if (!isAzureRemote(u)) return undefined
+  const decode = (s: string | undefined): string | undefined => {
+    if (s === undefined || s === '') return undefined
+    try {
+      return decodeURIComponent(s)
+    } catch {
+      return s
+    }
+  }
+  // scheme and user dropped, then host and path segments: `dev.azure.com/<org>/<project>/_git/<repo>`, `ssh.dev.azure.com:v3/<org>/<project>/<repo>`
+  const [host = '', ...segs] = u
+    .replace(/^[a-z+]+:\/\//i, '')
+    .replace(/^[^@/]*@/, '')
+    .replace(/[?#].*$/, '')
+    .split(/[/:]/)
+    .filter(s => s !== '')
+  if (segs[0] === 'v3') {
+    const repo = decode(segs[3])
+    return repo === undefined ? undefined : { project: decode(segs[2]), repo }
+  }
+  const g = segs.indexOf('_git')
+  const repo = g < 0 ? undefined : decode(segs[g + 1])
+  if (repo === undefined) return undefined
+  // on dev.azure.com the organization comes first, on visualstudio.com it is the host
+  const project = decode(segs[g - 1])
+  const isOrgOnly = host.endsWith('dev.azure.com') ? g < 2 : g < 1
+  return isOrgOnly ? { repo } : { project, repo }
+}
+
+const CHECK_PASSED: readonly string[] = ['SUCCESS', 'NEUTRAL', 'SKIPPED']
+const CHECK_FAILED: readonly string[] = ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']
+
+/** The checks of a `statusCheckRollup` told passed, failed or not decided yet; undefined without any. */
+function summarizeChecks(rollup: unknown): CockpitPr['checks'] {
+  if (!Array.isArray(rollup)) return undefined
+  const out = { passed: 0, failed: 0, pending: 0 }
+  for (const c of rollup) {
+    if (!isRecord(c)) continue
+    // a check run says `conclusion` once it completed, a status context says `state`
+    const verdict = typeof c.conclusion === 'string' && c.conclusion !== '' ? c.conclusion : typeof c.state === 'string' ? c.state : ''
+    if (CHECK_PASSED.includes(verdict)) out.passed++
+    else if (CHECK_FAILED.includes(verdict)) out.failed++
+    else out.pending++
+  }
+  return out.passed + out.failed + out.pending > 0 ? out : undefined
+}
+
+/** `gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup` -> the open pull request; undefined for any other state or text. */
+export function parseGithubPr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
     if (!isRecord(parsed)) return undefined
-    const { number, state } = parsed
-    return state === 'OPEN' && typeof number === 'number' && Number.isInteger(number) && number > 0 ? number : undefined
+    const { number, state, title, isDraft, reviewDecision, statusCheckRollup } = parsed
+    if (state !== 'OPEN' || typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
+    const review: CockpitPr['review'] =
+      reviewDecision === 'APPROVED' ? 'approved' : reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : reviewDecision === 'REVIEW_REQUIRED' ? 'pending' : undefined
+    return { number, title: typeof title === 'string' ? title : '', isDraft: isDraft === true, review, checks: summarizeChecks(statusCheckRollup) }
   } catch {
     return undefined
   }
+}
+
+/**
+ * `az repos pr list --output json` -> the first active pull request. The review comes from the reviewers' votes (10 and 5
+ * approve, -5 and -10 ask for changes); the list carries no checks, so none are claimed.
+ */
+export function parseAzurePr(out: string): CockpitPr | undefined {
+  try {
+    const parsed: unknown = JSON.parse(out)
+    const pr = Array.isArray(parsed) ? parsed[0] : undefined
+    if (!isRecord(pr) || pr.status !== 'active') return undefined
+    const { pullRequestId: number, title, isDraft, reviewers } = pr
+    if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
+    const votes = Array.isArray(reviewers) ? reviewers.flatMap(r => (isRecord(r) && typeof r.vote === 'number' ? [r.vote] : [])) : []
+    const review: CockpitPr['review'] = votes.length === 0 ? undefined : votes.some(v => v < 0) ? 'changes' : votes.some(v => v > 0) ? 'approved' : 'pending'
+    return { number, title: typeof title === 'string' ? title : '', isDraft: isDraft === true, review }
+  } catch {
+    return undefined
+  }
+}
+
+// ── The Repo tab: changed files, worktrees, the diff of one ──
+
+/** `git diff --numstat --no-renames -z HEAD --` then the untracked paths -> the changed files; a binary file has `-` counts. */
+export function parseNumstat(out: string, untracked: readonly string[]): CockpitChange[] {
+  const tracked = out.split('\0').flatMap((entry): CockpitChange[] => {
+    const m = /^(\d+|-)\t(\d+|-)\t([\s\S]+)$/.exec(entry)
+    const [, added, deleted, path] = m ?? []
+    if (added === undefined || deleted === undefined || path === undefined) return []
+    return [added === '-' || deleted === '-' ? { path, isBinary: true } : { path, added: Number(added), deleted: Number(deleted) }]
+  })
+  return [...tracked, ...untracked.map((path): CockpitChange => ({ path, isUntracked: true }))]
+}
+
+/** `git worktree list --porcelain` -> each checkout's path and branch (absent when detached); a bare repository is no checkout. */
+export function parseWorktrees(out: string): CockpitWorktree[] {
+  return out.split(/\r?\n\r?\n/).flatMap((block): CockpitWorktree[] => {
+    const lines = block.split(/\r?\n/)
+    const path = lines.find(l => l.startsWith('worktree '))?.slice('worktree '.length)
+    if (!path || lines.includes('bare')) return []
+    const ref = lines.find(l => l.startsWith('branch '))?.slice('branch '.length)
+    return [{ path, branch: ref?.replace(/^refs\/heads\//, '') }]
+  })
+}
+
+/** What one drawing of `Code` takes (100000 characters in all), with room to spare. */
+export const DIFF_MAX = 90_000
+
+/** The control characters `Code` refuses (tab and newline are its only ones): carriage returns and the like go. */
+const CONTROL = /[\0-\x08\x0b-\x1f\x7f]/g
+
+/** A `git diff` without the lines before its `---` (the engine's parser starts at the file pair); empty when there is no hunk to draw (a binary file). */
+export function diffHunks(raw: string): string {
+  const text = raw.replace(CONTROL, '')
+  if (text.startsWith('--- ')) return text
+  const at = text.indexOf('\n--- ')
+  return at < 0 ? '' : text.slice(at + 1)
+}
+
+/** `kept`, cut at a line inside its last hunk, with that hunk's `@@ -a,b +c,d @@` counts rewritten to the lines kept (a hunk that claims more lines than it has does not parse). */
+function recountLastHunk(kept: string): string {
+  const lines = kept.split('\n')
+  let at = lines.length - 1
+  while (at >= 0 && !lines[at]?.startsWith('@@ ')) at--
+  const head = at < 0 ? undefined : /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@(.*)$/.exec(lines[at] ?? '')
+  if (!head) return kept
+  let before = 0
+  let after = 0
+  for (const l of lines.slice(at + 1)) {
+    if (l.startsWith('-')) before++
+    else if (l.startsWith('+')) after++
+    else if (l.startsWith(' ')) {
+      before++
+      after++
+    }
+  }
+  lines[at] = `@@ -${head[1]},${before} +${head[2]},${after} @@${head[3]}`
+  return lines.join('\n')
+}
+
+/** What `cmd` reads as text: letters, digits, spaces and the punctuation of a URL, a ref or a name (`&`, `|`, `%`, `^`, quotes and the like are left out). */
+const CMD_SAFE = /^[\p{L}\p{N} _./@+=,:#-]*$/u
+
+/**
+ * The argument vector that runs the Azure CLI with `args`. `$.process.run` starts a command with no shell, and on Windows
+ * the CLI is `az.cmd`, which cannot be started by name: it goes through `cmd /d /s /c`. Then an argument `cmd` would read
+ * as more than text (a branch named `a&b`) is never handed to it: undefined, and the call is not made.
+ */
+export function azArgv(args: readonly string[], isWindows: boolean): string[] | undefined {
+  if (!isWindows) return ['az', ...args]
+  return args.every(a => CMD_SAFE.test(a)) ? ['cmd', '/d', '/s', '/c', 'az', ...args] : undefined
+}
+
+/** `text` cut to `max` characters before a hunk when it has one before the limit, else at a line of its first hunk, whose header is recounted: a diff cut mid-hunk does not parse. */
+export function capDiff(text: string, max: number = DIFF_MAX): { text: string; isCut: boolean } {
+  if (text.length <= max) return { text, isCut: false }
+  const hunk = text.lastIndexOf('\n@@', max)
+  if (hunk > text.indexOf('@@')) return { text: text.slice(0, hunk + 1), isCut: true }
+  const line = text.lastIndexOf('\n', max - 1)
+  return { text: recountLastHunk(line < 0 ? text.slice(0, max) : text.slice(0, line + 1)), isCut: true }
+}
+
+/** An untracked file as a diff of added lines (empty for an empty file: git shows no hunk for it either). */
+export function additionsDiff(file: string, raw: string): string {
+  const lines = raw.replace(CONTROL, '').split('\n')
+  if (lines.at(-1) === '') lines.pop()
+  if (lines.length === 0) return ''
+  return `--- /dev/null\n+++ b/${file}\n@@ -0,0 +1,${lines.length} @@\n${lines.map(l => `+${l}`).join('\n')}\n`
 }
 
 /** `deliver`'s perimeter file -> its entries, when it is active and for `branch` (as `hooks/scope-guard.js` reads it); else undefined. */

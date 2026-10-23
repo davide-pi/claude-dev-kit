@@ -1,37 +1,58 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitHistoryEntry, CockpitPerimeterCheck, CockpitSnapshot, CockpitTab, CockpitTask, CockpitWorkflowRun } from '../types'
+import type {
+  CockpitAgent,
+  CockpitAlm,
+  CockpitChange,
+  CockpitHistoryEntry,
+  CockpitPerimeterCheck,
+  CockpitPr,
+  CockpitSnapshot,
+  CockpitTab,
+  CockpitTask,
+  CockpitWorkflowRun,
+} from '../types'
 import {
   AGENT_KEEP_MS,
   addHistory,
-  branchWorkItemId,
+  additionsDiff,
+  azArgv,
+  azureRepo,
+  capDiff,
   checkPerimeter,
   compactInstructions,
+  diffHunks,
+  isAzureRemote,
   isDefaultBranch,
   isGithubRemote,
   isTab,
+  parseAzurePr,
   parseDefaultBranch,
   parseDoneClaims,
   parseGitStatus,
+  parseGithubPr,
   parseHistory,
+  parseNumstat,
   parsePerimeter,
-  parsePrNumber,
   parseReset,
   parseWorktree,
+  parseWorktrees,
   recordBurnSample,
   resolveAlm,
   toHistory,
   worklogDays,
 } from './format'
 import type { WorklogSnapshot } from './format'
-import { INITIAL, PANE } from './state'
-import type { PaneActions } from './view'
-import { PANE_MAX_COLUMNS, agentCounts, paneView, taskCounts } from './view'
+import { DIFF_PANE, INITIAL, PANE } from './state'
+import type { DiffActions, PaneActions } from './view'
+import { PANE_MAX_COLUMNS, agentCounts, diffView, paneView, taskCounts } from './view'
 
 const TICK_MS = 15_000
 /** The pull request (and the repo's default branch) of a branch is read again after this long. */
 const PR_EVERY_MS = 5 * 60_000
+/** The Repo tab keeps this many changed files; it draws 8 of them. */
+const REPO_FILES_KEEP = 50
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -62,7 +83,25 @@ const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creati
  */
 async function setWorkflow($: EngineInterface, tasks: readonly { type: string; name?: string }[] | undefined, isMainStop = false): Promise<void> {
   const workflow = tasks?.find(t => t.type === 'workflow' && typeof t.name === 'string' && t.name !== '')?.name
-  await patch($, s => ({ ...s, workflow, workflowRun: isMainStop && workflow === undefined ? undefined : s.workflowRun })).catch(() => undefined)
+  const isRunEnd = isMainStop && workflow === undefined
+  try {
+    const now = await $.clock.now()
+    // The run's end is the other way a workflow's agents end, besides their own turn: the engine never lists them.
+    await patch($, s => ({
+      ...s,
+      workflow,
+      workflowRun: isRunEnd ? undefined : s.workflowRun,
+      agents: isRunEnd ? endRunAgents(s.agents, s.workflowRun, now) : s.agents,
+    }))
+  } catch {
+    // observing must never break the stop
+  }
+}
+
+/** The agents of `run` still running, finished at `now`. */
+function endRunAgents(agents: CockpitAgent[], run: CockpitWorkflowRun | undefined, now: number): CockpitAgent[] {
+  const ids = new Set(run?.agents.map(a => a.id))
+  return agents.map((a): CockpitAgent => (ids.has(a.id) && a.status === 'running' ? { ...a, status: 'done', endedAt: now } : a))
 }
 
 /** `id` joins the run `runId`; an agent of another run than the one kept starts a new count. */
@@ -106,18 +145,60 @@ async function readPerimeterCheck($: EngineInterface, root: string, entries: rea
   }
 }
 
-// What the PR read last asked about, and when: the read is repeated for another branch or after `PR_EVERY_MS`.
+// What the PR read last asked about, and when: the read is repeated for another branch (or ALM target) or after `PR_EVERY_MS`.
 let lastPrRead: { key: string; at: number } | undefined
 let isPrReading = false
 
+/** A file the Repo tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
+const DIFF_FILE_MAX = 4 * 1024 * 1024
+
+/** The private config folder of the ALM `identity` (`~/.azure-<identity>`, as hooks/lib/az-pin.js picks it), when it exists. */
+async function azConfigDir($: EngineInterface, identity: string | undefined): Promise<string | undefined> {
+  if (!identity) return undefined
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (!home) return undefined
+  const dir = `${home.replace(/\\/g, '/')}/.azure-${identity}`
+  const stat = await $.fs.stat(dir).catch(() => undefined)
+  return stat?.kind === 'dir' ? dir : undefined
+}
+
+/**
+ * Runs the Azure CLI with `args`, the way the platform can start it (`azArgv`), against the config folder of the ALM identity
+ * when there is one, never the machine-global config. Undefined when the call cannot be made safely.
+ */
+async function runAz($: EngineInterface, args: readonly string[], cwd: string, alm: CockpitAlm | undefined) {
+  // The engine reports no platform: Windows sets `OS` and `ComSpec`.
+  const isWindows = (await $.env.get('OS')) === 'Windows_NT' || (await $.env.get('ComSpec')) !== undefined
+  const argv = azArgv(args, isWindows)
+  if (!argv) return undefined
+  const dir = await azConfigDir($, alm?.identity)
+  return $.process.run(argv, { cwd, timeoutMs: 20_000, ...(dir && { env: { AZURE_CONFIG_DIR: dir } }) })
+}
+
+/**
+ * The open pull request of `branch` on Azure DevOps: `az repos pr list`, aimed at the org of the ALM line and the project of the remote,
+ * never at the CLI's configured default. Undefined without an org, a repository or a project to ask about.
+ */
+async function readAzurePr($: EngineInterface, cwd: string, branch: string, url: string, alm: CockpitAlm | undefined): Promise<CockpitPr | undefined> {
+  const repo = azureRepo(url)
+  // The repository lives in the project the remote URL names; the ALM project (where the work items are) is only the fallback.
+  const project = repo?.project ?? alm?.project
+  if (!alm?.org || !repo || !project) return undefined
+  const organization = /^https?:\/\//i.test(alm.org) ? alm.org : `https://dev.azure.com/${alm.org}`
+  const args = ['repos', 'pr', 'list', '--organization', organization, '--project', project, '--repository', repo.repo]
+  const list = await runAz($, [...args, '--source-branch', `refs/heads/${branch}`, '--status', 'active', '--top', '1', '--output', 'json'], cwd, alm)
+  return list?.exitCode === 0 ? parseAzurePr(list.stdout) : undefined
+}
+
 /**
  * Reads, in the background (never awaited by a refresh or a render), the repo's default branch from `origin/HEAD` and,
- * off it, the open pull request of `branch`: `gh pr view`, only for a GitHub `origin` (an Azure DevOps one is not
- * read yet). No `gh`, no PR or a failure leaves both absent. The result is dropped when the branch has moved on.
+ * off it, the open pull request of `branch`: `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure DevOps
+ * one. No CLI, no PR or a failure leaves both absent. The result is dropped when the branch has moved on.
  */
 async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
   const now = await $.clock.now()
-  const key = `${cwd}\n${branch}`
+  const { alm } = await read($, snapshot)
+  const key = `${cwd}\n${branch}\n${alm?.org ?? ''}\n${alm?.project ?? ''}`
   if (isPrReading || (lastPrRead?.key === key && now - lastPrRead.at < PR_EVERY_MS)) return
   isPrReading = true
   lastPrRead = { key, at: now }
@@ -125,21 +206,92 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     const base = ['git', '-C', cwd, '--no-optional-locks']
     const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
     const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
-    let prNumber: number | undefined
-    // A branch that carries a work item id has its scope in its name: the PR is not asked.
-    if (!isDefaultBranch(branch, defaultBranch) && branchWorkItemId(branch) === undefined) {
+    let pr: CockpitPr | undefined
+    // The default branch has no pull request of its own to look for.
+    if (!isDefaultBranch(branch, defaultBranch)) {
       const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
       if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
-        const pr = await $.process.run(['gh', 'pr', 'view', '--json', 'number,state'], { cwd, timeoutMs: 10_000 })
-        prNumber = pr.exitCode === 0 ? parsePrNumber(pr.stdout) : undefined
+        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup'], { cwd, timeoutMs: 10_000 })
+        pr = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
+      } else if (remote.exitCode === 0 && isAzureRemote(remote.stdout)) {
+        pr = await readAzurePr($, cwd, branch, remote.stdout, alm)
       }
     }
-    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, prNumber } : s))
+    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, pr } : s))
   } catch {
-    // gh missing or too slow: the branch has no PR we know of, and the next read is in `PR_EVERY_MS`
-    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, prNumber: undefined } : s)).catch(() => undefined)
+    // the CLI is missing or too slow: the branch has no PR we know of, and the next read is in `PR_EVERY_MS`
+    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, pr: undefined } : s)).catch(() => undefined)
   } finally {
     isPrReading = false
+  }
+}
+
+/**
+ * The Repo tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
+ * then untracked and not ignored), the commits on HEAD that the default branch lacks, the worktrees. A read that fails
+ * leaves its part out; every read failing keeps the last reading.
+ */
+async function refreshRepo($: EngineInterface): Promise<void> {
+  try {
+    const s = await read($, snapshot)
+    const { cwd, git } = s
+    if (s.tab !== 'repo' || !git?.root) return
+    const base = ['git', '-C', git.root, '--no-optional-locks']
+    const run = (args: string[]) => $.process.run([...base, ...args], { timeoutMs: 3000 })
+    const [tracked, untracked, worktrees] = await Promise.all([
+      run(['diff', '--numstat', '--no-renames', '-z', 'HEAD', '--']),
+      run(['ls-files', '--others', '--exclude-standard', '-z']),
+      run(['worktree', 'list', '--porcelain']),
+    ])
+    const commits =
+      s.defaultBranch !== undefined && !isDefaultBranch(git.branch, s.defaultBranch) ? await run(['rev-list', '--count', `origin/${s.defaultBranch}..HEAD`]) : undefined
+    const isRead = (r: { exitCode: number; isStdoutTruncated: boolean }) => r.exitCode === 0 && !r.isStdoutTruncated
+    if (!isRead(tracked) && !isRead(untracked)) return
+    const names = isRead(untracked) ? untracked.stdout.split('\0').filter(Boolean) : []
+    const files = parseNumstat(isRead(tracked) ? tracked.stdout : '', names)
+    const count = commits && isRead(commits) ? Number.parseInt(commits.stdout, 10) : Number.NaN
+    const repo = {
+      files: files.slice(0, REPO_FILES_KEEP),
+      total: files.length,
+      commits: Number.isInteger(count) && count >= 0 ? count : undefined,
+      worktrees: isRead(worktrees) ? parseWorktrees(worktrees.stdout) : [],
+    }
+    await patch($, x => (x.cwd === cwd && x.git?.branch === git.branch ? { ...x, repo } : x))
+  } catch {
+    // git missing or too slow: keep the last reading
+  }
+}
+
+/**
+ * The hunks of `change` to draw: `git diff HEAD -- <file>`, or the whole file as additions when it is untracked.
+ * Undefined when they cannot be had: a file over `DIFF_FILE_MAX` or unreadable, a git that failed, was cut or too slow.
+ */
+async function readHunks($: EngineInterface, root: string, change: CockpitChange): Promise<string | undefined> {
+  try {
+    if (change.isUntracked) {
+      const file = `${root}/${change.path}`
+      if ((await $.fs.stat(file)).size > DIFF_FILE_MAX) return undefined
+      const text = await $.fs.read(file)
+      return typeof text === 'string' ? additionsDiff(change.path, text) : undefined
+    }
+    const out = await $.process.run(['git', '-C', root, '--no-optional-locks', 'diff', '--no-color', '--no-ext-diff', '--no-renames', 'HEAD', '--', change.path], { timeoutMs: 5000 })
+    return out.exitCode === 0 && !out.isStdoutTruncated ? diffHunks(out.stdout) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/** Draws the diff of `change` in the second pane; a file that cannot be had opens it saying so. */
+async function showDiff($: EngineInterface, change: CockpitChange): Promise<void> {
+  try {
+    const { git } = await read($, snapshot)
+    if (!git?.root) return
+    const hunks = await readHunks($, git.root, change)
+    const { text, isCut } = capDiff(hunks ?? '')
+    await patch($, s => ({ ...s, diff: { file: change.path, text, ...(isCut && { isCut }), ...(hunks === undefined && { isUnreadable: true }) } }))
+    await $.ui.open({ id: DIFF_PANE, title: `diff · ${change.path}`, closeOnEscape: true })
+  } catch {
+    // the snapshot or the pane failed: the pane stays as it was
   }
 }
 
@@ -150,33 +302,35 @@ async function refreshGit($: EngineInterface): Promise<void> {
     const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
     const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
     if (!parsed) {
-      lastPrRead = undefined
-      return void (
-        await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, prNumber: undefined, defaultBranch: undefined }))
-      )
+      return void (await patch($, s => {
+        lastPrRead = undefined
+        return { ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, pr: undefined, defaultBranch: undefined, repo: undefined }
+      }))
     }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
     const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
     const [gitDir, , topLevel] = tree.exitCode === 0 ? tree.stdout.split('\n').map(l => l.trim()) : []
     const perimeter = gitDir && !parsed.isDetached ? await readPerimeter($, cwd, gitDir, parsed.branch) : undefined
     const perimeterCheck = perimeter && topLevel ? await readPerimeterCheck($, topLevel, perimeter) : undefined
-    // A PR and a default branch belong to the repository and branch they were read for: leaving them forgets the read too.
-    const before = await read($, snapshot)
-    if (before.cwd !== cwd || before.git?.branch !== parsed.branch) lastPrRead = undefined
     await patch($, s => {
       const isSameRepo = s.cwd === cwd
       const isSameBranch = isSameRepo && s.git?.branch === parsed.branch
+      // A PR and a default branch belong to the repository and branch they were read for: leaving them forgets the read too,
+      // decided here, in the patch that clears them, from the state it applies to.
+      if (!isSameBranch) lastPrRead = undefined
       return {
         ...s,
         cwd,
-        git: { ...parsed, worktreeRoot },
+        git: { ...parsed, worktreeRoot, root: topLevel || undefined },
         perimeter,
         perimeterCheck,
-        prNumber: isSameBranch ? s.prNumber : undefined,
+        pr: isSameBranch ? s.pr : undefined,
         defaultBranch: isSameRepo ? s.defaultBranch : undefined,
+        repo: isSameRepo ? s.repo : undefined,
       }
     })
     if (!parsed.isDetached) void refreshPr($, cwd, parsed.branch).catch(() => undefined)
+    await refreshRepo($)
   } catch {
     // git missing or too slow: keep the last reading
   }
@@ -334,15 +488,23 @@ async function refreshAlm($: EngineInterface): Promise<void> {
   }
 }
 
-/** The last entries of the done-claim hook's log; no readable log clears them. */
+// The size and modification time of `done-claim.log` as last read: the log is read again only when either changed.
+let lastClaimsStat: { size: number; mtimeMs: number } | undefined
+
+/** The last entries of the done-claim hook's log, read when its size or mtime changed; no readable log clears them. */
 async function refreshDoneClaims($: EngineInterface): Promise<void> {
   try {
     const dir = await configDir($)
     if (!dir) return
-    const text = await $.fs.read(`${dir}/.cache/done-claim.log`)
+    const file = `${dir}/.cache/done-claim.log`
+    const { size, mtimeMs } = await $.fs.stat(file)
+    if (lastClaimsStat?.size === size && lastClaimsStat.mtimeMs === mtimeMs) return
+    const text = await $.fs.read(file)
     const claims = parseDoneClaims(typeof text === 'string' ? text : '')
     await patch($, s => ({ ...s, doneClaims: claims.length > 0 ? claims : undefined }))
+    lastClaimsStat = { size, mtimeMs }
   } catch {
+    lastClaimsStat = undefined
     await patch($, s => ({ ...s, doneClaims: undefined })).catch(() => undefined)
   }
 }
@@ -368,10 +530,13 @@ async function tick($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   const listed = await $.agent.list().catch(() => undefined)
   await patch($, s => {
+    const inRun = new Set(s.workflowRun?.agents.map(a => a.id))
     const agents = s.agents.map((a): CockpitAgent => {
-      // An agent the engine no longer lists as active has ended without a turn.complete we saw.
+      // An agent the engine no longer lists as active has ended without a turn.complete we saw. A workflow's agents are never
+      // listed: theirs end by their own turn, an explicit failed or killed listing, or the end of their run.
       const info = listed?.find(l => l.id === a.id)
-      const isEnded = listed !== undefined && a.status === 'running' && (!info || ['completed', 'failed', 'killed'].includes(info.status))
+      const endedBy = inRun.has(a.id) ? ['failed', 'killed'] : ['completed', 'failed', 'killed']
+      const isEnded = listed !== undefined && a.status === 'running' && (info ? endedBy.includes(info.status) : !inRun.has(a.id))
       return isEnded ? { ...a, status: 'done', endedAt: now, isFailed: info?.status === 'failed' || info?.status === 'killed' } : a
     })
     const isListed = (a: CockpitAgent) => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)
@@ -382,9 +547,10 @@ async function tick($: EngineInterface): Promise<void> {
       .sort((a, b) => b.endedAt - a.endedAt)
     return { ...s, now, agents: agents.filter(isListed), history: left.length > 0 ? addHistory(s.history, left) : s.history }
   })
+  // The ALM line first: an Azure DevOps pull request is asked about with its org.
+  await refreshAlm($)
   await refreshGit($)
   await refreshWorklog($, now)
-  await refreshAlm($)
   await refreshDoneClaims($)
   // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`.
   if (isOpen) await writeState($, true, true)
@@ -436,7 +602,11 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  selectTab: tab => void patch($, s => ({ ...s, tab })).catch(() => undefined),
+  // The Repo tab's git reads are made while it is selected: the press starts them.
+  selectTab: tab =>
+    void patch($, s => ({ ...s, tab }))
+      .then(() => (tab === 'repo' ? refreshRepo($) : undefined))
+      .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
     void read($, snapshot)
@@ -444,9 +614,26 @@ const paneActions = ($: EngineInterface): PaneActions => ({
       .catch(() => undefined),
   // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
   // `command.run` entry of the engine types).
-  runWorklog: scope => void $.command.run({ command: 'worklog', args: `oggi ${scope}` }).catch(() => undefined),
+  // The hours of this chat: the worklog skill's `sessione <id>` scope.
+  runWorklog: () =>
+    void $.session
+      .id()
+      .then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
+      .catch(() => undefined),
+  openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
+})
+
+/**
+ * What the diff pane's button does: forgets the diff, then closes the pane. A plugin's own `$.ui.close` does not reach its
+ * own `ui.close` hook, which is what forgets the diff when the person closes the pane instead.
+ */
+const diffActions = ($: EngineInterface): DiffActions => ({
+  close: () =>
+    void patch($, s => ({ ...s, diff: undefined }))
+      .then(() => $.ui.close({ id: DIFF_PANE }))
+      .catch(() => undefined),
 })
 
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
@@ -474,9 +661,9 @@ export const register: Register = on => {
       isSubagentModelForced: Boolean(forced),
     }))
     await refreshUsage($)
+    await refreshAlm($)
     await refreshGit($)
     await refreshWorklog($, now)
-    await refreshAlm($)
     await refreshDoneClaims($)
     await writeState($, true)
 
@@ -525,6 +712,19 @@ export const register: Register = on => {
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)
     return { text: opened.isPlaced ? 'cockpit aperto' : `cockpit in attesa: ${opened.reason}` }
+  })
+
+  // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
+  on('ui.render', { component: 'Pane', requestId: DIFF_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const s = await read($, snapshot)
+    return diffView(ui, s.diff, e.props.bodyColumns, diffActions($))
+  })
+
+  on('ui.close', { id: DIFF_PANE }, async ($, e, next) => {
+    const closed = await next(e)
+    await patch($, s => ({ ...s, diff: undefined })).catch(() => undefined)
+    return closed
   })
 
   // Any close, whoever asked for it: the pane stays closed until `/cockpit`.
@@ -643,8 +843,8 @@ export const register: Register = on => {
     const { agentId, tool } = e
     if (agentId !== undefined) {
       try {
-        const now = await $.clock.now()
-        await patch($, s => ({ ...s, agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, lastTool: tool })) }))
+        // Only an agent the mod already knows: a call that outran the spawn makes no stub the spawn would later fill.
+        await patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool } : a)) }))
       } catch {
         // observing must never break the call
       }
