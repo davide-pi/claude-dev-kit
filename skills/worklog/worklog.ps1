@@ -31,14 +31,17 @@
   section lists the (day, topic) pairs with at least one main-session event of that session, each with
   the topic's whole-day minutes, so the caller keeps only those; a topic that also has events of another
   session is flagged "[anche altre sessioni]", and the digest lines of the session carry " [S]".
-  Without it nothing changes.
+  Without it nothing changes. With -SessionId and no -From the period starts at the first day of the
+  session (first timestamp of <ProjectsRoot>/*/<id>.jsonl) and ends today (or at -To); the script
+  prints "Sessione <id>: dal <yyyy-MM-dd>". The session's own [S] lines and its branches' headers
+  are never cut by -MaxLinesPerProj (they do not count toward it).
 
   Writes the raw digest to <OutDir>/_raw/<period>.md and prunes digests older than RetentionDays.
   Never prunes the audit, never touches Azure DevOps.
 #>
 [CmdletBinding()]
 param(
-  [string]$From = '',    # '' = today | yyyy-MM-dd | 'yesterday'/'ieri'
+  [string]$From = '',    # '' = today | yyyy-MM-dd | 'yesterday'/'ieri' (with -SessionId: the session's first day)
   [string]$To   = '',    # '' = same as From
   [string]$SessionId      = '',  # '' = off | a session id: mark its topics (selection only, minutes unchanged)
   # $HOME also exists off Windows: with USERPROFILE the script found nothing and printed
@@ -66,11 +69,32 @@ function Resolve-Day([string]$s) {
   else   { throw "Data non valida: '$s'. Usa yyyy-MM-dd, 'yesterday'/'ieri' o vuoto (=oggi)." }
 }
 $fromD = Resolve-Day $From
-$toD   = if ($To -match '^\s*$') { $fromD } else { Resolve-Day $To }
+$sid = $SessionId.Trim()
+$sessionFirstDay = $null
+if ($sid -and $From -match '^\s*$') {
+  # the session's first day: the first timestamp of its transcript(s), id compared case-insensitively
+  $tsFirst = [regex]::new('"timestamp":"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"')
+  $firsts = foreach ($dir in Get-ChildItem $ProjectsRoot -Directory -ErrorAction SilentlyContinue) {
+    foreach ($f in Get-ChildItem $dir.FullName -Filter *.jsonl -File -ErrorAction SilentlyContinue | Where-Object { $_.Name -ieq "$sid.jsonl" }) {
+      # opened and closed explicitly: a foreach over ReadLines abandoned by break keeps the handle (and the
+      # running chat's transcript unwritable) until the GC; ReadWrite share lets Claude Code keep appending
+      $sr = [System.IO.StreamReader]::new([System.IO.FileStream]::new($f.FullName, 'Open', 'Read', 'ReadWrite'))
+      try {
+        while ($null -ne ($line = $sr.ReadLine())) {
+          $m = $tsFirst.Match($line)
+          if ($m.Success) { [datetime]::Parse($m.Groups[1].Value, [cultureinfo]::InvariantCulture, 'RoundtripKind').ToLocalTime().Date; break }
+        }
+      } finally { $sr.Dispose() }
+    }
+  }
+  if ($firsts) { $sessionFirstDay = ($firsts | Sort-Object | Select-Object -First 1); $fromD = $sessionFirstDay }
+}
+$toD   = if ($To -match '^\s*$') { if ($sessionFirstDay) { (Get-Date).Date } else { $fromD } } else { Resolve-Day $To }
 if ($toD -lt $fromD) { $tmp = $fromD; $fromD = $toD; $toD = $tmp }
 $isRange = $fromD -ne $toD
 $fromStr = $fromD.ToString('yyyy-MM-dd')
 $toStr   = $toD.ToString('yyyy-MM-dd')
+$sessionDal = if ($sessionFirstDay) { "Sessione ${sid}: dal $($sessionFirstDay.ToString('yyyy-MM-dd'))" } else { $null }
 $slug    = if ($isRange) { "${fromStr}_${toStr}" } else { $fromStr }
 
 # ---- folders and retention (lazy delete, at launch; no scheduler) ----
@@ -210,6 +234,10 @@ foreach ($id in $toolStart.Keys) {
 $rangeLabel = if ($isRange) { "$fromStr -> $toStr" } else { $fromStr }
 if ($events.Count -eq 0) {
   Write-Output "=== WORKLOG $rangeLabel ==="
+  if ($sid) {
+    if ($sessionDal) { Write-Output $sessionDal }
+    Write-Output "Sessione ${sid}: nessun evento in questo periodo."
+  }
   Write-Output "Nessuna attivita' registrata in questo periodo."
   Set-Content -Path (Join-Path $rawDir "$slug.md") -Value "# Digest grezzo $rangeLabel`n`n_Nessuna attivita'._`n" -Encoding utf8
   return
@@ -300,9 +328,8 @@ $projReport = @($projReport | Where-Object { $_.Prompts -gt 0 -or $_.ActiveMin -
 $totalMin = ($projReport | Measure-Object ActiveMin -Sum).Sum
 
 # ---- the session's topics: (day, project, branch) with a main-session event of -SessionId ----
-$sessionTopics = @(); $sharedTopics = @{}; $sid = ''
-if ($SessionId.Trim()) {
-  $sid = $SessionId.Trim()
+$sessionTopics = @(); $sharedTopics = @{}
+if ($sid) {
   # a (day, topic) that also has events of another session: its minutes are not the chat's alone
   foreach ($e in $events) { if ($e.Session -ine $sid) { $sharedTopics["$($e.Time.ToString('yyyy-MM-dd'))`n$($e.Project)`n$($e.Branch)"] = $true } }
   $sessionTopics = @($events | Where-Object { $_.Session -ieq $sid } | ForEach-Object {
@@ -348,12 +375,13 @@ foreach ($p in $projReport) {
     Write-Output ("  |- {0,-29} {1,10} {2,-17} {3,6}" -f (Trunc $b.Branch 29), (FmtMin $b.ActiveMin), ("{0}-{1}" -f (FmtStamp $b.First), (FmtStamp $b.Last)), $b.Prompts)
   }
 }
-if ($SessionId.Trim()) {
+if ($sid) {
   Write-Output ""
+  if ($sessionDal) { Write-Output $sessionDal }
   if ($sessionTopics.Count -eq 0) {
-    Write-Output "Sessione $($SessionId.Trim()): nessun evento in questo periodo."
+    Write-Output "Sessione ${sid}: nessun evento in questo periodo."
   } else {
-    Write-Output "Sessione $($SessionId.Trim()): topic con almeno un evento della sessione (minuti = totale del topic nel giorno, tutte le sessioni)"
+    Write-Output "Sessione ${sid}: topic con almeno un evento della sessione (minuti = totale del topic nel giorno, tutte le sessioni)"
     foreach ($t in $sessionTopics) {
       $shared = if ($sharedTopics["$($t.Day)`n$($t.Project)`n$($t.Branch)"]) { '  [anche altre sessioni]' } else { '' }
       Write-Output ("  {0}  {1} / {2}  {3}{4}" -f $t.Day, (Split-Path $t.Project -Leaf), $t.Branch, (FmtMin ([double]$activeByPBDay["$($t.Day)`n$($t.Project)`n$($t.Branch)"])), $shared)
@@ -387,14 +415,17 @@ foreach ($p in $projReport) {
   [void]$sb.AppendLine("")
   $projLines = 0; $projTrunc = $false
   foreach ($b in $p.Branches) {
-    if ($projLines -ge $MaxLinesPerProj) { $projTrunc = $true; break }
+    $mineBranch = [bool]$sessionBranches["$($p.Project)`n$($b.Branch)"]
+    # the session's own lines and branch headers are never cut and do not count toward the limit
+    if (-not $mineBranch -and $projLines -ge $MaxLinesPerProj) { $projTrunc = $true; continue }
     [void]$sb.AppendLine("### topic (branch): $($b.Branch)  -  ~$(FmtMin $b.ActiveMin) | $($b.Prompts) prompt | $(FmtStamp $b.First)-$(FmtStamp $b.Last)$(if ($sessionBranches["$($p.Project)`n$($b.Branch)"]) { ' | sessione: si' })")
     foreach ($e in @($b.Events | Where-Object { $_.Text -ne '' })) {
-      if ($projLines -ge $MaxLinesPerProj) { $projTrunc = $true; break }
-      $mine = if ($sid -and $e.Session -ieq $sid) { ' [S]' } else { '' }
+      $isMine = $sid -and $e.Session -ieq $sid
+      if (-not $isMine -and $projLines -ge $MaxLinesPerProj) { $projTrunc = $true; continue }
+      $mine = if ($isMine) { ' [S]' } else { '' }
       if ($e.Type -eq 'user') { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)]$mine **TU:** $(Trunc $e.Text $MaxPromptChars)") }
       else                    { [void]$sb.AppendLine("- [$(FmtStamp $e.Time)]$mine CC: $(Trunc $e.Text $MaxAsstChars)") }
-      $projLines++
+      if (-not $isMine) { $projLines++ }
     }
     [void]$sb.AppendLine("")
   }

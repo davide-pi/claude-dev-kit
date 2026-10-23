@@ -159,6 +159,78 @@ test('-SessionId with a session absent from the period says so and marks nothing
   assert.doesNotMatch(sec, /feature\//);
 });
 
+// ── engine: -SessionId scope: first day, empty period, digest truncation ────────────────────────
+
+/** `e` moved back by `days` whole days (same local time of day, give or take a DST hour). */
+const back = (days, e) => ({ ...e, timestamp: new Date(new Date(e.timestamp).getTime() - days * 86400000).toISOString() });
+const dayStr = (days) => {
+  const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+};
+/** Runs the engine with no -From over `files` ({ 'project-dir/file.jsonl': [events] }). */
+function engineAt(files, ...flags) {
+  const root = tmp();
+  for (const [rel, events] of Object.entries(files)) {
+    mkdirSync(dirname(join(root, rel)), { recursive: true });
+    writeFileSync(join(root, rel), events.map((e) => JSON.stringify(e)).join('\n'));
+  }
+  const r = pwsh('worklog.ps1', ['-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);
+  assert.equal(r.code, 0, r.out);
+  return r.out;
+}
+const digestOf = (out) => readFileSync(out.match(/^Digest: (.+)$/m)[1].trim(), 'utf8');
+
+test('-SessionId without -From starts at the first day of the session and runs to today', { skip }, () => {
+  const mine = { session: 'AbC-1' };
+  const out = engineAt({
+    'C--work-api/AbC-1.jsonl': [back(2, prompt(0, mine)), back(2, reply(1, mine)), prompt(0, mine), reply(1, mine)],
+    'C--work-web/other.jsonl': [back(5, prompt(0, { session: 'o1', branch: 'main' })), back(5, reply(1, { session: 'o1', branch: 'main' }))],
+  }, '-SessionId', 'abc-1');   // the id differs in case from the file name and the events
+  assert.match(out, new RegExp(`^Sessione abc-1: dal ${dayStr(2)}\\r?$`, 'm'));
+  assert.match(out, new RegExp(`^=== WORKLOG ${dayStr(2)} -> ${TODAY} ===`, 'm'));
+  assert.match(sessionSection(out), new RegExp(`${dayStr(2)}  api / feature/a`));
+  assert.match(sessionSection(out), new RegExp(`${TODAY}  api / feature/a`));
+  assert.doesNotMatch(out, /web \/ main/);   // the other chat's earlier day is outside the period
+});
+
+test('-SessionId with an explicit -From keeps it and prints no derived first day', { skip }, () => {
+  const out = engineAt({ 'C--work-api/s1.jsonl': [back(2, prompt(0)), back(2, reply(1)), prompt(0), reply(1)] },
+    '-SessionId', 's1', '-From', TODAY);
+  assert.doesNotMatch(out, /: dal /);
+  assert.doesNotMatch(out, new RegExp(dayStr(2)));
+});
+
+test('-SessionId with no events in the period says so, not only "Nessuna attivita\'"', { skip }, () => {
+  const out = engineAt({ 'C--work-api/s1.jsonl': [prompt(0), reply(1)] }, '-SessionId', 's1', '-From', '2020-01-01');
+  assert.match(out, /^Sessione s1: nessun evento in questo periodo\.\r?$/m);
+  assert.match(out, /Nessuna attivita/);
+  const unknown = engineAt({}, '-SessionId', 'nope');   // no file for the id: nothing to derive, today only
+  assert.match(unknown, /^Sessione nope: nessun evento in questo periodo\.\r?$/m);
+  assert.doesNotMatch(engineAt({}, '-From', '2020-01-01'), /^Sessione /m);
+});
+
+test('-MaxLinesPerProj never drops the [S] lines nor the "sessione: si" header of the session', { skip }, () => {
+  const b = { session: 's2', branch: 'feature/b' };
+  const main = [
+    prompt(0), reply(1), prompt(2), reply(3), prompt(4), reply(5),   // feature/a, the busier branch, listed first
+    prompt(6, b), reply(7, b), prompt(8, b), reply(9, b),
+  ];
+  const out = engine(main, '-SessionId', 's2', '-MaxLinesPerProj', '2');
+  const digest = digestOf(out);
+  assert.match(digest, /^### topic \(branch\): feature\/b .*\| sessione: si\r?$/m);
+  assert.equal(digest.match(/^- \[[^\]]+\] \[S\]/gm).length, 4);   // all of s2's lines, none counted toward the limit
+  assert.equal(digest.match(/^- \[[^\]]+\] (?!\[S\])/gm).length, 2);   // feature/a stops at the limit
+  assert.match(digest, /righe successive troncate/);
+});
+
+test('the raw digest marks "sessione: si" on the branch of the session only', { skip }, () => {
+  const digest = digestOf(engine(twoSessions(), '-SessionId', 's2'));
+  const headers = digest.match(/^### topic \(branch\): .*$/gm);
+  assert.equal(headers.length, 2);
+  assert.deepEqual(headers.filter((h) => h.includes('sessione: si')).map((h) => h.match(/branch\): (\S+)/)[1]), ['feature/b']);
+  assert.doesNotMatch(digestOf(engine(twoSessions())), /sessione: si/);   // no -SessionId, no marker
+});
+
 // ── push: cumulative, idempotent, audited ───────────────────────────────────────────────────────
 
 /** A sandbox: az shim on PATH, CompletedWork state, an empty worklog folder. */
