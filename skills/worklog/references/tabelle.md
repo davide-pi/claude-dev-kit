@@ -11,12 +11,12 @@ One block per day (a range prints one per day). Only this in chat; the timeline 
 ```markdown
 **Lunedì 12/10** — target 8h · già sul board 0h
 
-| # | Topic | Descrizione breve | Attivo | Da | A | Arrotondato | Fonte |
-|---|-------|-------------------|--------|----|---|-------------|-------|
-| 1 | import nuovi mercati | Import e mappatura dei nuovi mercati | 1h20m | 09:08 | 10:16 | 1.5h | transcript |
-| 2 | cache traduzioni | Fix invalidazione cache traduzioni | 25m | 11:40 | 12:05 | 0.5h | transcript |
-| 3 | tooling worklog | Fix engine worklog | 40m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
-| | **Totale** | | **2h25m** | | | **2h loggabili** | |
+| # | Progetto | Topic | Descrizione breve | Attivo | Da | A | Arrotondato | Fonte |
+|---|----------|-------|-------------------|--------|----|---|-------------|-------|
+| 1 | <Project> | import nuovi mercati | Import e mappatura dei nuovi mercati | 1h20m | 09:08 | 10:16 | 1.5h | transcript |
+| 2 | <Project> | cache traduzioni | Fix invalidazione cache traduzioni | 25m | 11:40 | 12:05 | 0.5h | transcript |
+| 3 | interno | tooling worklog | Fix engine worklog | 40m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
+| | | **Totale** | | **2h25m** | | | **2h loggabili** | |
 
 Non fatturato: 40m (interni 40m, arrotondamento 0m)
 Attese lunghe contate: 10:45-12:04 (1h18m, <repo>) — tienile o toglile
@@ -25,6 +25,7 @@ Attese lunghe contate: 10:45-12:04 (1h18m, <repo>) — tienile o toglile
 
 | Column / line | Source |
 | --- | --- |
+| `Progetto` | **every row, gap rows included**: the board project from `workspaces.json` (the topic's path), `interno` for internal rows; unmapped or unsure → `?` and ask in the same message |
 | `Attivo` | the engine's minutes for the topic (after a split of the default branch, say it is an estimate) |
 | `Da` / `A` | the topic's window |
 | `Arrotondato` | `round.ps1`, never by hand; mark `0h (non loggato)` and `interno` rows |
