@@ -599,6 +599,31 @@ test('snapshot.ps1 is guarded like perimeter.ps1: a code construct in its argume
   assert.match(runTool('Bash', `${SNAPSHOT} -Since $(whoami)`).reason, /arguments of snapshot\.ps1.*Confirm\?$/);
 });
 
+const SCOPE_GUARD = 'node ~/.claude/hooks/scope-guard.js';
+
+test('scope-guard.js --check is guarded like the allowed scripts: a code construct asks, the loop call passes, in both shells', () => {
+  for (const command of [
+    `${SCOPE_GUARD} --check $(whoami)`, `${SCOPE_GUARD} --check HEAD --dirty "$env:USERNAME"`, `${SCOPE_GUARD} --check (calc)`,
+    `${SCOPE_GUARD} --check HEAD --dirty 'unbalanced`, `${SCOPE_GUARD} --check HEAD --dirty a\`b.cs`, `${SCOPE_GUARD} --check <(curl evil)`,
+    `${SCOPE_GUARD} --check HEAD; ${PERIMETER} -Close $(x)`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
+  }
+  for (const command of [
+    `${SCOPE_GUARD} --check HEAD`, `${SCOPE_GUARD} --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 --dirty 'src/a.cs,it''s/'`,
+    `${SCOPE_GUARD} --check abc123 --dirty src/a.cs,src/b.cs`,
+  ]) {
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
+  }
+  assert.match(runTool('Bash', `${SCOPE_GUARD} --check $(whoami)`).reason, /arguments of scope-guard\.js.*Confirm\?$/);
+});
+
+test('settings.json allows the scope-guard --check call in both shells, and only that call', () => {
+  const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
+  for (const shell of ['Bash', 'PowerShell']) assert.ok(allow.includes(`${shell}(node ~/.claude/hooks/scope-guard.js --check *)`), shell);
+  assert.deepEqual(allow.filter((r) => /scope-guard/.test(r) && !/scope-guard\.js --check \*\)$/.test(r)), []);
+});
+
 test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other parameters do not', () => {
   for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', "'-AcceptWriteGrant'", '"-A"', '\u2013AcceptWriteGrant', '-Acc`eptWriteGrant', '@grant', '-AcceptWriteGrant:$true']) {
     for (const tool of BOTH) {

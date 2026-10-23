@@ -146,7 +146,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
   for an outside defect this change causes. All three: Input row for challenged findings (keep/withdraw), Output line
   "list every file you actually read under `filesReviewed`". Verify: validate clean; `script: reviewer prompts ask for
   filesReviewed and carry the CHALLENGE block`. Depends: T3, T7, T11.
-- [ ] **T15 `scope-guard.js --check` (C7.2).** Export pure `outsidePerimeter(paths, entries, dirty)`; CLI `--check <head>
+- [x] **T15 `scope-guard.js --check` (C7.2).** Export pure `outsidePerimeter(paths, entries, dirty)`; CLI `--check <head>
   [--dirty a,b]`: `git diff --name-only <head>` + `git ls-files --others --exclude-standard` (execFileSync, no shell),
   active perimeter, prints outside files; exit 0 clean, 1 outside, 2 usage. Without `--check` reads stdin as before.
   Allow rules in `settings.json`. Verify: `outsidePerimeter: …` unit; `--check in a temp repo: an untracked file
@@ -157,8 +157,10 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
   `scope-revert`. loop.md: size re-derived upward, touches M and L, STALL reasons (`cap` + history, `verify-failed`,
   `green-to-red`, `verify-not-run`, `churn`, `gap`, `widen`, `disputed`, `not-reproduced`), full resolutions shape,
   widen = `perimeter.ps1 -Files` after the user's yes, section "After OK: the mechanical scope check", snapshot allow
-  rule. Verify: validate (SKILL ≤ 120). Depends: T5, T8, T11, T15.
-- [ ] **T17 `hooks/done-claim.js` (C8).** `readTurn` arms on `Workflow`, `Agent`, `Task` tool_use (`DELEGATE_TOOLS`,
+  rule. C13 (approved): on M and L, between analysis and the loop, list implicit requirements, edge cases and ambiguities;
+  only a doubt that changes behaviour becomes a question, batched, each with a recommendation; on L `grill-me` runs on the
+  plan by default (not only when the design is argued); S unchanged. Verify: validate (SKILL ≤ 120). Depends: T5, T8, T11, T15.
+- [x] **T17 `hooks/done-claim.js` (C8).** `readTurn` arms on `Workflow`, `Agent`, `Task` tool_use (`DELEGATE_TOOLS`,
   count as an edit for ordering); collects `results` (all tool_result text, string or text blocks); `turnComplete`.
   Pure `verdictRows(message)`, `unprovenRows(rows, resultsText)`: a `fatto`/`failed` row's deciding line (normalised:
   whitespace collapsed, backslashes/backticks stripped, lowercase) must be a substring of the results; `non verificato`

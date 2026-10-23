@@ -11,16 +11,27 @@
  * Fires when ALL hold:
  *   - `CLAUDE_DONE_CLAIM=1` (set in the kit's settings.json; anything else and the hook exits at once);
  *   - not `stop_hook_active` (it already sent the turn back once: never loop);
- *   - the turn since the last user prompt (or message from another session) used an editing tool;
+ *   - the turn since the last human prompt used an editing tool, or delegated (`Workflow`, `Agent`, `Task`:
+ *     a delegate counts as an edit, its work is a change made now). The turn ends at the last genuine human
+ *     prompt only: a workflow result or an agent hand-back arrives as a user entry holding a
+ *     `<task-notification>` (or a cross-session message after a delegate), not as a `tool_result` block, and
+ *     belongs to the turn, whether or not a delegate ran before it;
  *   - no Bash / PowerShell tool ran after the last edit: when one did, its output is already in the
  *     context and asking for a rerun would only cost a turn (the log notes it as `shell-ran`);
  *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
  *     inline code;
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
  *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
- *     "non verificato" / "not verified", and no `deliver` verdict block (a `Livello | Comando | Riga che
- *     decide | Stato` table with a row of four filled cells, the third looking like output (a digit, ok,
- *     verde, green, passed, failed, exit, succeeded), ending `fatto` or `failed`).
+ *     "non verificato" / "not verified".
+ *
+ * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table) is judged row by row
+ * instead: a row ending `fatto` or `failed` is proven only when its deciding line (normalised: whitespace
+ * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
+ * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
+ * A `non verificato` row passes alone and excuses no other row; one unproven row blocks, even after a
+ * shell command ran. When the transcript tail is cut before the turn's start the proof may be missing from
+ * the part read: the log notes `tail-truncated` and nothing is blocked.
+ *
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -52,6 +63,8 @@ const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
 const TAIL_BYTES = 512 * 1024;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** Tools that hand work to a workflow or an agent: they arm the hook like an edit and their results come back as notifications. */
+const DELEGATE_TOOLS = new Set(['Workflow', 'Agent', 'Task']);
 
 // No bare "passa": "passa per il controller" is the commonest sentence in a dev chat. "fatto" is a claim
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
@@ -63,24 +76,46 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
-/** The `deliver` verdict table: its header, then, among the table's own lines, a row with a level, a command, a
- *  deciding line that looks like real output (a digit, ok, verde, green, passed, failed, exit, succeeded) and a `fatto` / `failed` state. */
+/** The `deliver` verdict table's header; its rows are the contiguous `|` lines that follow. */
 const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/i;
-const VERDICT_ROW = /^[ \t]*\|[ \t]*[^|\s-][^|]*\|[ \t]*[^|\s-][^|]*\|[^|]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)[^|]*\|[ \t]*(?:fatto|failed)[ \t]*\|[ \t]*$/i;
+/** A row's state that claims a result and so needs proof (`non verificato: …` does not). */
+const PROOF_STATE = /^(?:fatto|failed)$/i;
 
-/** Whether a verdict table (the header, then its contiguous `|` lines) holds a proven row. */
-function verdictProof(message) {
+/** Lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
+const normalise = (text) => text.replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+
+/** The rows of the verdict table(s) in `message`: `{ level, command, line, state }`, the cells as written. */
+function verdictRows(message) {
   const lines = message.split(/\r?\n/);
+  const rows = [];
   for (let i = 0; i < lines.length; i += 1) {
     if (!VERDICT_HEAD.test(lines[i])) continue;
-    for (let j = i + 1; j < lines.length && /^[ \t]*\|/.test(lines[j]); j += 1) if (VERDICT_ROW.test(lines[j])) return true;
+    for (let j = i + 1; j < lines.length && /^[ \t]*\|/.test(lines[j]); j += 1) {
+      // An escaped pipe (`\|`) is cell text, not a separator.
+      const cells = lines[j].trim().replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+      if (cells.length < 4 || cells.every((c) => /^:?-+:?$/.test(c))) continue;
+      rows.push({ level: cells[0], command: cells[1], line: cells[2], state: cells[cells.length - 1].replace(/[*_`]/g, '').trim() });
+    }
   }
-  return false;
+  return rows;
+}
+
+/** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
+function unprovenRows(rows, resultsText) {
+  const printed = normalise(resultsText);
+  return rows.filter((r) => {
+    if (!PROOF_STATE.test(r.state)) return false;
+    const line = normalise(r.line);
+    if (!/[\p{L}\p{N}]/u.test(line)) return true;
+    // Whole words only: a short line ("ok", "0") is not proven by "token" or "10".
+    const escaped = line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return !new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(printed);
+  });
 }
 
 const allow = () => process.exit(0);
 
-/** The JSON lines at the end of the transcript (the first, probably partial, line dropped). */
+/** The JSON lines at the end of the transcript (the first, probably partial, line dropped), and whether the file was cut. */
 function tailEntries(file) {
   const fd = fs.openSync(file, 'r');
   try {
@@ -95,7 +130,7 @@ function tailEntries(file) {
       if (!line.trim()) continue;
       try { entries.push(JSON.parse(line)); } catch { /* a torn line */ }
     }
-    return entries;
+    return { entries, truncated: start > 0 };
   } finally {
     fs.closeSync(fd);
   }
@@ -103,52 +138,87 @@ function tailEntries(file) {
 
 const blocks = (entry) => (Array.isArray(entry?.message?.content) ? entry.message.content : []);
 
-/** A user entry the human typed (not a tool result, not injected meta). */
+/** The text of a user or assistant entry: its string content, or its text blocks. */
+function entryText(entry) {
+  const content = entry?.message?.content;
+  return typeof content === 'string' ? content : blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
+}
+
+/** The result of a background workflow or agent: a user entry (`origin.kind` "task-notification", or just its
+ *  `<task-notification>` text), written as a prompt-shaped entry, not as a `tool_result` block. */
+const isNotification = (entry) => entry?.type === 'user'
+  && (entry.origin?.kind === 'task-notification' || /^\s*<task-notification\b/.test(entryText(entry)));
+
+/** A message from another Claude session (`<cross-session-message …>`): the harness writes it as a meta user
+ *  entry (`isMeta`, `origin.kind` / `turnOrigin` "peer"). */
+function isPeerMessage(entry) {
+  if (entry?.type !== 'user') return false;
+  if (entry.origin?.kind === 'peer' || entry.turnOrigin === 'peer') return true;
+  // Anchored: a human prompt that quotes the tag mid-text is still a prompt.
+  return /^\s*(?:Another Claude session sent a message:\s*)?<cross-session-message\b/.test(entryText(entry));
+}
+
+/** A user entry the human typed (not a tool result, not a notification or peer message, not injected meta). */
 function isPrompt(entry) {
-  if (entry?.type !== 'user' || entry.isMeta) return false;
+  if (entry?.type !== 'user' || entry.isMeta || isNotification(entry) || isPeerMessage(entry)) return false;
   const content = entry.message?.content;
   return typeof content === 'string' || blocks(entry).some((b) => b?.type === 'text');
 }
 
-/** A message from another Claude session (`<cross-session-message …>`): the harness writes it as a meta user
- *  entry (`isMeta`, `origin.kind` / `turnOrigin` "peer"), so `isPrompt` skips it, yet it starts a turn. */
-function isPeerMessage(entry) {
-  if (entry?.type !== 'user') return false;
-  if (entry.origin?.kind === 'peer' || entry.turnOrigin === 'peer') return true;
-  const content = entry.message?.content;
-  const text = typeof content === 'string' ? content : blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
-  return /<cross-session-message\b/.test(text);
+/** What a user entry carries for the proof: its `tool_result` text, or a notification's or peer message's text. */
+function printedBy(entry) {
+  const out = [];
+  for (const b of blocks(entry)) {
+    if (b?.type !== 'tool_result') continue;
+    if (typeof b.content === 'string') out.push(b.content);
+    else if (Array.isArray(b.content)) for (const part of b.content) if (typeof part?.text === 'string') out.push(part.text);
+  }
+  if (isNotification(entry) || isPeerMessage(entry)) out.push(entryText(entry));
+  return out;
 }
 
-/** Whether the current turn edited a file, ran a shell command after the last edit, and its final assistant text. */
-function readTurn(entries) {
-  let edited = false;
+/**
+ * The current turn: whether it edited or delegated (`armed`), ran a shell command after the last of those, its
+ * final assistant text, everything its tools printed (`results`), and whether the whole turn is in `entries`
+ * (`complete`: its human prompt was found, or the transcript was read from the start).
+ *
+ * The turn starts at the last genuine human prompt and nowhere else: a notification or a cross-session
+ * message (a delegate's hand-back, or a peer's reply) belongs to the turn it arrives in.
+ */
+function readTurn(entries, truncated = false) {
+  let start = entries.length - 1;
+  while (start >= 0 && !isPrompt(entries[start])) start -= 1;
+  const complete = start >= 0 || !truncated;
+
+  let armed = false;
   let shellAfterEdit = false;
   let pastFinalMessage = false;                  // walked back over a tool result
   const finalText = [];
-  for (let i = entries.length - 1; i >= 0; i -= 1) {
+  const results = [];
+  for (let i = entries.length - 1; i > start; i -= 1) {
     const entry = entries[i];
-    if (isPrompt(entry) || isPeerMessage(entry)) break;
-    if (entry?.type === 'user') pastFinalMessage = true;
+    if (entry?.type === 'user') {
+      pastFinalMessage = true;
+      results.push(...printedBy(entry));
+    }
     if (entry?.type !== 'assistant') continue;
     // Walking backwards, so the first edit met is the last one made: a shell call seen before it is later.
     for (const b of [...blocks(entry)].reverse()) {
-      if (b?.type !== 'tool_use' || edited) continue;
-      if (EDIT_TOOLS.has(b.name)) edited = true;
+      if (b?.type !== 'tool_use' || armed) continue;
+      if (EDIT_TOOLS.has(b.name) || DELEGATE_TOOLS.has(b.name)) armed = true;
       else if (SHELL_TOOLS.has(b.name)) shellAfterEdit = true;
     }
     if (!pastFinalMessage) {
-      const text = blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
+      const text = entryText(entry);
       if (text) finalText.unshift(text);
     }
   }
-  return { edited, shellAfterEdit, text: finalText.join('\n') };
+  return { armed, shellAfterEdit, text: finalText.join('\n'), results: results.join('\n'), complete };
 }
 
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  if (verdictProof(message)) return null;
   if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ');
   const found = prose.match(CLAIM);
@@ -177,10 +247,30 @@ try {
   const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
   if (payload.stop_hook_active === true || typeof payload.transcript_path !== 'string') allow();
 
-  const turn = readTurn(tailEntries(payload.transcript_path));
-  if (!turn.edited) allow();
+  const { entries, truncated } = tailEntries(payload.transcript_path);
+  const turn = readTurn(entries, truncated);
+  if (!turn.armed) allow();
 
   const message = typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message : turn.text;
+  const rows = verdictRows(message);
+  if (rows.some((r) => PROOF_STATE.test(r.state))) {
+    // A verdict table is judged row by row against what the turn printed; the rest of the message does not excuse a row.
+    const unproven = unprovenRows(rows, turn.results);
+    if (!unproven.length) allow();
+    if (!turn.complete) {
+      log(payload, 'tail-truncated', unproven[0].state, message);   // the proof may be in the part not read
+      allow();
+    }
+    log(payload, 'unproven-row', unproven[0].state, message);
+    const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
+    process.stdout.write(JSON.stringify({
+      decision: 'block',
+      reason: `${unproven.length} righe del verdetto dicono "${unproven[0].state}" ma la riga che decide non compare in nessun output del turno: ${shown}. `
+        + 'Cita l\'output vero del comando (rieseguilo se non l\'hai visto), oppure scrivi "non verificato: <motivo>" nello Stato di quella riga.',
+    }));
+    process.exit(0);
+  }
+
   const word = unprovenClaim(message);
   if (!word) allow();
 
