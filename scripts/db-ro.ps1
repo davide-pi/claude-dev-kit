@@ -31,7 +31,7 @@
   The project is -Project when it names one, else the one whose root is the longest prefix of -Project
   (a path) or of the current directory. -Engine is optional when the environment holds one engine.
   Any string value of an engine block may embed ${NAME}, also mid-string ("${HOST},1433"): the
-  project's envFile first, then the process environment, then the user environment. `auth` is a
+  project's envFile first (skipped when missing), then the process environment, then the user environment. `auth` is a
   connection-string fragment: only its user and secret keys (User Id / UID, and the secret under
   either of its two usual names) are read.
 
@@ -376,7 +376,8 @@ function Resolve-Target([string]$EnvName, [string]$EngineName, [string]$ProjectA
   if ($project.Value.PSObject.Properties['envFile'] -and $project.Value.envFile) {
     $envFile = [string]$project.Value.envFile
     if ($envFile -eq '~' -or $envFile.StartsWith('~/') -or $envFile.StartsWith('~\')) {
-      $envFile = Join-Path $HOME $envFile.Substring(1).TrimStart('/', '\')
+      # The profile folder, not $HOME / USERPROFILE: a caller-set variable must not pick the dotenv file.
+      $envFile = Join-Path ([Environment]::GetFolderPath('UserProfile')) $envFile.Substring(1).TrimStart('/', '\')
     }
   }
 
@@ -1013,11 +1014,13 @@ try {
   $script:WriteMode = -not $resolved.ReadOnly
 
   $envFileValues = @{}
+  # A missing envFile is skipped: the ${NAME} values then come from the environment alone.
   if ($resolved.EnvFile) {
-    if (-not (Test-Path -LiteralPath $resolved.EnvFile -PathType Leaf)) {
-      Stop-Wrapper "Registry: the envFile of project '$($resolved.Project)' does not exist: $($resolved.EnvFile)"
+    if (Test-Path -LiteralPath $resolved.EnvFile -PathType Leaf) {
+      $envFileValues = Read-DotEnv $resolved.EnvFile
+    } else {
+      [Console]::Error.WriteLine("db-ro: envFile of project '$($resolved.Project)' not found, using the environment only: $($resolved.EnvFile)")
     }
-    $envFileValues = Read-DotEnv $resolved.EnvFile
   }
   $target = Expand-Target $resolved.Target $envFileValues "$Env/$engineName"
   if ($engineName -eq 'postgres') { $target = Merge-PgUrl $target }

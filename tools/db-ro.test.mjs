@@ -495,6 +495,32 @@ test('db-ro.ps1: no -Registry parameter, and no home folder or variable moves th
   assert.doesNotMatch(named.err, /write access is only for dev hosts/);
 });
 
+test('db-ro.ps1: a missing envFile is skipped and the values come from the environment', { skip }, () => {
+  // `SET a b` is refused by the Redis read allow-list after the values are expanded: reaching it proves the run went on.
+  const registry = { projects: { p: { root: 'C:\\p', envFile: '~/db-ro-no-such-dir/none.env', prod: { redis: ENDPOINTS.redis('db.example.com') } } } };
+  const r = run(registry, ['-Env', 'prod', '-Project', 'p', '-Query', 'SET a b'], { DBRO_T_PWD: CANARY });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /envFile of project 'p' not found, using the environment only/);
+  assert.match(r.err, /not a read command/);
+  assert.ok(!(r.out + r.err).includes(CANARY), 'the secret reached the output');
+
+  // Missing envFile and the name unset everywhere: exit 2 naming the variable.
+  const unset = run(registry, ['-Env', 'prod', '-Project', 'p', '-Query', 'PING'], {});
+  assert.equal(unset.status, 2, unset.err);
+  assert.match(unset.err, /\$\{DBRO_T_PWD\}, which is not set/);
+});
+
+test('db-ro.ps1: the ~ of envFile is the profile folder, never HOME or USERPROFILE', { skip }, () => {
+  // A dotenv in a fake home turns the host into a dev host; read, it would unlock write mode. The real profile has no
+  // such file, so the host comes from the process environment and the write is refused.
+  const home = mkdtempSync(join(tmpdir(), 'db-ro-envhome-'));
+  writeFileSync(join(home, 'db-ro-fake.env'), 'DBRO_T_HOST=localhost\n');
+  const registry = { projects: { p: { root: 'C:\\p', envFile: '~/db-ro-fake.env', local: { readOnly: false, redis: { server: '${DBRO_T_HOST}:6379' } } } } };
+  const r = run(registry, ['-Env', 'local', '-Project', 'p', '-Query', 'SET a b'], { USERPROFILE: home, HOME: home, DBRO_T_HOST: 'db.example.com' });
+  assert.equal(r.status, 2, r.err);
+  assert.match(r.err, /write access is only for dev hosts/);
+});
+
 test('db-ro.ps1: a database error lists the registry strings as written, never a resolved value', { skip }, () => {
   const registry = { projects: { p: { root: 'C:\\p', prod: { sql: { server: 'db.example.com,1433', user: 'u', password: 'x', databases: ['${DBRO_T_SECRET_DB}'] } } } } };
   const r = run(registry, ['-Env', 'prod', '-Project', 'p', '-Db', 'zzz', '-Query', 'select 1'], { DBRO_T_SECRET_DB: CANARY });
