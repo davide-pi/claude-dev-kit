@@ -13,12 +13,15 @@ unconfirmed · Italian chat, tables and board text; field names, WIQL and engine
 
 ## When
 
-- `/worklog`, `/worklog ieri`, `/worklog <data>`, a range (default: today).
+- `/worklog`, `/worklog ieri`, `/worklog <data>`, a range (default: today); or asked in prose ("segna le ore").
+- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text>`, or "segna le ore di questo item/PR": only
+  the topics whose branch, PR, item or label match go through Phases 3–7; the day's target, COPERTURA, gap
+  prompt and close/target rows are skipped (the rest of the day stays for a full run). Nothing matches → say so.
 - The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
 - A day already logged is re-run: only the delta reaches the board.
 
 Not for: creating backlog items (`workitem-create`), Azure DevOps verbs, auth and identity
-(`azdo-cli`), PR links (`pr-create`). Never fires without the explicit trigger.
+(`azdo-cli`), PR links (`pr-create`). Asked by the user only, never on Claude's own initiative.
 
 ## Decide
 
