@@ -62,13 +62,17 @@ far, one per stalled round:
 | --- | --- |
 | `cap` | 3 fix cycles run (RECHECK and coverage reruns do not count): `continue` for 3 more, `accept`, or `guidance` |
 | `churn` | the last 3 fixes each changed more lines: not converging. `continue` restarts the count; `accept` closes the ids the reviewers already read |
-| `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction for the fixer, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, and `accept` is not offered. At `stall.round` 0 (the implementer's verify, before any fix) no fixer exists and a resume replays the cached implementer report: relaunch WITHOUT `resumeFromRunId`, the direction in the brief or no `verify` |
+| `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction for the fixer, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, and `accept` is not offered |
 | `green-to-red` | the verify passed, then a fix broke it: same question and answers as `verify-failed` |
-| `verify-not-run` | `verify` was given and the run did not execute it: same question and answers as `verify-failed`; at `stall.round` 0 (the implementer did not run it) relaunch WITHOUT `resumeFromRunId` |
+| `verify-not-run` | `verify` was given and the run did not execute it: same question and answers as `verify-failed`; at `stall.round` 0 (the implementer did not run it) a resume replays the cached implementer report: relaunch WITHOUT `resumeFromRunId` |
+| `still-open` | a finding is still open after its fix: `accept` the risk, `guidance` with a direction for the fixer, or `retry` for one more round |
+| `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same question and answers as `still-open` |
 | `gap` | no reviewer read `stall.files`, or a specialist returned nothing: relaunch with the same resolutions (that reviewer runs again), or name the gap in the verdict |
 | `widen` | a P1/P2 outside the perimeter in a file the change touched or causes: add the file (below) or `accept` it as out of scope |
 | `disputed` | the fixer rejected the finding twice and the reviewer kept it |
 | `not-reproduced` | the fixer could not reproduce it and the reviewer kept it with steps; never goes back to the fixer |
+
+A red implementer verify at round 0 is not a stall: it becomes a synthetic P1 `V<n>` that heads the fixer's list; only `verify-not-run` can stall at round 0, and a round-0 stall replays the cached implementer report, so relaunch WITHOUT `resumeFromRunId`.
 
 A `widen` is answered only on the user's yes: write the widened list (all entries, old and new) with
 `perimeter.ps1 -Files`, then resume with `{ round, widen: [the new entries] }`; it applies from that round on. Without
@@ -115,5 +119,5 @@ Write `~` literally: the allow rules in `settings.json` match the command text, 
 | Exit | Meaning |
 | --- | --- |
 | 0 | every changed file is inside the perimeter: go on to the matrix |
-| 1 | the files printed are outside: back to step 3 with them as the brief (revert, or widen with the user's yes); relaunch as in "A red test after OK": the original `start`, `dirtyConfirmed: true`, no `resumeFromRunId` |
+| 1 | the files printed are outside. To revert them: back to step 3 with them as the brief, relaunched as in "A red test after OK" (the original `start`, `dirtyConfirmed: true`, no `resumeFromRunId`). To keep one the user wants: `perimeter.ps1 -Files` with all entries, old and new, then a NEW run with the updated `perimeter.files` (no resolution: there is no stalled round) |
 | 2 | usage error, git failure, or no active perimeter: nothing was checked, never read it as clean. Fix the cause (write the perimeter file) and run again |

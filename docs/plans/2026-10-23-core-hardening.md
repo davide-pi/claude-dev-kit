@@ -172,7 +172,7 @@ Gates for every task: `node --test tools/*.test.mjs` (bash, repo root) and `node
   assistant verdict. Verify: `a Workflow-only turn with a verdict row whose deciding line is not in any tool_result
   is blocked; the same line inside the Workflow result (JSON-escaped) is silent`; `a "non verificato" row does not
   excuse a fatto row without proof`; update 165–168, 180, 198–205. Depends: none.
-- [ ] **T18 README + full gate.** README lines 46, 120, 126, 190 (soft cap, verify gate, coverage, snapshots, widen,
+- [x] **T18 README + full gate.** README lines 46, 120, 126, 190 (soft cap, verify gate, coverage, snapshots, widen,
   challenge flow, M = Opus; `snapshot.ps1` beside `perimeter.ps1`); workflow header/`meta.whenToUse` resolutions.
   Verify: full tests + validate green; no hits for "no round cap", "touches.*L only". Depends: T1–T17.
 

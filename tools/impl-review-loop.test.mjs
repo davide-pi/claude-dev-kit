@@ -1674,3 +1674,21 @@ test('script: a scope finding the fixer rejected, the reviewer kept and the fixe
   assert.equal(guided.out.status, 'OK');
   assert.equal(guided.out.outOfScope.filter(o => o.source === 'scope-revert').length, 1);
 });
+
+test('script: a noticed item the implementer also wrote under openQuestions is listed once; the writer prompt sends proposals to noticed, openQuestions holds guesses', async () => {
+  const dto = { title: 'rename the DTO', path: 'src/Orders/Dto/A.cs', why: 'not asked' };
+  const other = { title: 'dead branch', path: 'src/Orders/OrdersQuery.cs', why: 'left alone' };
+  const { out, calls } = await run(ARGS, [review([])], [impl({ noticed: [dto, other], openQuestions: ['Rename the DTO ', 'which tenant?'] })]);
+  assert.deepEqual(out.outOfScope, [
+    { source: 'implementer', text: 'which tenant?' },
+    { source: 'noticed', ...dto }, { source: 'noticed', ...other },
+  ]);
+  assert.match(calls[0].prompt, /list it under noticed .*Open questions holds only a guess/);
+  assert.match(calls[0].opts.schema.properties.openQuestions.items.description, /guess.*proposals go under noticed/);
+  assert.doesNotMatch(calls.find(c => c.opts.label === 'R1 A').prompt, /Anything worth doing outside the perimeter/);
+});
+
+test('script: the reviewer prompt names filesReviewed explicitly', async () => {
+  const { calls } = await run(ARGS, [review([])]);
+  assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /under filesReviewed list every file you actually read/);
+});

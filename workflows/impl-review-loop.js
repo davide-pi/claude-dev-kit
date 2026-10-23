@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, resolutions? }',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, resolutions?: [{ round, accept?, guidance?, retry?, continue?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -56,6 +56,9 @@ export const meta = {
 // 'widen' STALL, from that round on (widenedFiles: the reviewers of that round and the earlier prompts keep the old perimeter,
 // so the replay is byte-identical). If the resume replays a cached null implementer
 // result (a STALL on "the implementer returned nothing"), relaunch WITHOUT resumeFromRunId.
+//
+// After an OK the caller (deliver) runs `hooks/scope-guard.js --check <start.head>` as the mechanical scope check; the loop
+// itself never runs it. Reviewers by size: see reviewersFor (the size is re-derived upward every round from the files changed).
 //
 // Classification (classify): clean-code and convention never block. A P1/P2 outside the perimeter in a file the change touched
 // (the snapshot's `files`), or that the reviewer says the change causes (`causedByChange`), is a 'widen': a STALL the fixer never
@@ -541,11 +544,11 @@ const touches = Array.isArray(input.touches) ? input.touches : []
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
 // The perimeter as a prompt block, for a list of entries: the declared files, or those widened by the user's resolutions.
-const perimeterTextFor = list => [
+const perimeterTextFor = (list, forWriter = true) => [
   `PERIMETER (the only files you may change): ${list.join(', ')}`,
   perimeter.behaviour ? `Behaviour in scope: ${perimeter.behaviour}` : '',
   perimeter.exclusions ? `Explicitly out of scope: ${perimeter.exclusions}` : '',
-  'Anything worth doing outside the perimeter is not touched: report it under Open questions, one line each.',
+  forWriter ? 'Anything worth doing outside the perimeter is not touched: list it under noticed (title, path, why), one line each; Open questions holds only a guess you had to make and its alternative.' : '',
 ].filter(Boolean).join('\n')
 const perimeterText = perimeterTextFor(files)
 
@@ -614,7 +617,7 @@ const IMPLEMENTATION = {
       items: { type: 'object', required: ['title', 'path', 'why'], properties: { title: { type: 'string' }, path: { type: 'string' }, why: { type: 'string' } } },
     },
     notVerified: { type: 'string' },
-    openQuestions: { type: 'array', items: { type: 'string', description: 'out-of-perimeter finding or guess, one line' } },
+    openQuestions: { type: 'array', items: { type: 'string', description: 'a guess you had to make and its alternative, one line (out-of-perimeter proposals go under noticed)' } },
   },
 }
 
@@ -745,11 +748,14 @@ const verifyText = () => (lastReport
 
 // Every STALL carries the history of the findings so far (what each was and what happened to it).
 const withHistory = r => (r.stall ? { ...r, stall: { ...r.stall, history: findingHistory(rounds) } } : r)
+// A `noticed` item the implementer also wrote under openQuestions (same text as its title or why) is listed once,
+// as the structured item: it keeps the path and the why.
+const sameText = (a, b) => String(a ?? '').trim().toLowerCase() === String(b ?? '').trim().toLowerCase() && !!String(a ?? '').trim()
 const result = extra => withHistory({
   rounds: round,
   open: [...Object.keys(tracked).filter(id => tracked[id].status === 'open').map(id => known[id]), ...verifyOpen],
   accepted: Object.keys(tracked).filter(id => tracked[id].status === 'accepted').map(id => known[id]),
-  outOfScope: [...notes, ...noticed, ...outOfScope, ...proposals],
+  outOfScope: [...notes.filter(q => !noticed.some(n => sameText(q.text, n.title) || sameText(q.text, n.why))), ...noticed, ...outOfScope, ...proposals],
   minor,
   gaps,
   files: [...changed],
@@ -868,7 +874,7 @@ while (true) {
   const reviewers = picked.length ? picked : everyone
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
   // The reviewers are asked with the perimeter as it was BEFORE this round's resolution (a resume replays identical prompts).
-  const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1))
+  const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
   const answers = await parallel(reviewers.map(r => () => ask([
     scopeOfReview(r, groups),
     shareText(r, groups),
@@ -880,7 +886,7 @@ while (true) {
     `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(r, groups),
     challengeBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
-    `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart.`,
+    `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     REVIEW_BUDGET,
   ].filter(Boolean).join('\n\n'), { label: `R${round} ${r.key}`, phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
