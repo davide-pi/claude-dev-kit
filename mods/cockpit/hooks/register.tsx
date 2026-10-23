@@ -2,7 +2,21 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
-import { AGENT_KEEP_MS, addHistory, isTab, parseGitStatus, parseHistory, parseReset, parseWorktree, recordBurnSample, resolveAlm, toHistory, worklogDays } from './format'
+import {
+  AGENT_KEEP_MS,
+  addHistory,
+  compactInstructions,
+  isTab,
+  parseGitStatus,
+  parseHistory,
+  parsePerimeter,
+  parseReset,
+  parseWorktree,
+  recordBurnSample,
+  resolveAlm,
+  toHistory,
+  worklogDays,
+} from './format'
 import type { WorklogSnapshot } from './format'
 import { INITIAL, PANE } from './state'
 import type { PaneActions } from './view'
@@ -34,16 +48,29 @@ const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creati
 
 // ── Collection helpers (each one swallows its own failure: a missing datum stays absent) ──
 
+/** The entries of the deliver perimeter in git directory `gitDir` (relative to `cwd` as rev-parse prints it), when it is active for `branch`. */
+async function readPerimeter($: EngineInterface, cwd: string, gitDir: string, branch: string): Promise<string[] | undefined> {
+  try {
+    const dir = /^([A-Za-z]:)?[\\/]/.test(gitDir) ? gitDir : `${cwd}/${gitDir}`
+    const text = await $.fs.read(`${dir}/deliver/perimeter.md`)
+    return typeof text === 'string' ? parsePerimeter(text, branch) : undefined
+  } catch {
+    return undefined
+  }
+}
+
 async function refreshGit($: EngineInterface): Promise<void> {
   try {
     const cwd = await $.session.cwd()
     const base = ['git', '-C', cwd, '--no-optional-locks']
     const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
     const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
-    if (!parsed) return void (await patch($, s => ({ ...s, cwd, git: undefined })))
+    if (!parsed) return void (await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined })))
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
     const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
-    await patch($, s => ({ ...s, cwd, git: { ...parsed, worktreeRoot } }))
+    const gitDir = tree.exitCode === 0 ? tree.stdout.split('\n')[0]?.trim() : undefined
+    const perimeter = gitDir && !parsed.isDetached ? await readPerimeter($, cwd, gitDir, parsed.branch) : undefined
+    await patch($, s => ({ ...s, cwd, git: { ...parsed, worktreeRoot }, perimeter }))
   } catch {
     // git missing or too slow: keep the last reading
   }
@@ -288,9 +315,13 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
   selectTab: tab => void patch($, s => ({ ...s, tab })).catch(() => undefined),
-  compact: () => void $.session.compact().catch(() => undefined),
-  runWorklog: () => void $.command.run({ command: 'worklog' }).catch(() => undefined),
-  copyBranch: (branch, surface) => void $.ui.copy({ text: branch, surface }).catch(() => undefined),
+  // The instructions are built from the snapshot as it is at the press.
+  compact: () =>
+    void read($, snapshot)
+      .then(s => $.session.compact({ instructions: compactInstructions(s) }))
+      .catch(() => undefined),
+  // `prompt.submit` refuses a text that starts with `/`: a command is run by name, as if the person typed it.
+  runWorklog: scope => void $.command.run({ command: 'worklog', args: `oggi ${scope}` }).catch(() => undefined),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
 })

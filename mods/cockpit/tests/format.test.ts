@@ -7,6 +7,9 @@ import {
   almText,
   burnRate,
   burnText,
+  compactInstructions,
+  parsePerimeter,
+  worklogScope,
   pctCell,
   recordBurnSample,
   resetClock,
@@ -364,4 +367,84 @@ test('signedPctCell pads the pace delta to the width of the other percentages', 
   expect(signedPctCell(5)).toBe(' +5%')
   expect(signedPctCell(-12)).toBe('−12%')
   expect(signedPctCell(100)).toBe('+100%')
+})
+
+// ── Compaction instructions, the worklog scope, the deliver perimeter ──
+
+const KEEP =
+  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+
+const task = (id: string, subject: string, status: 'pending' | 'in_progress' | 'completed') => ({ id, subject, status })
+
+test('compactInstructions: the keep/drop sentence alone when nothing else is known', () => {
+  expect(compactInstructions({})).toBe(KEEP)
+  expect(compactInstructions({ tasks: [], perimeter: [] })).toBe(KEEP)
+  // finished tasks are not "in corso"
+  expect(compactInstructions({ tasks: [task('1', 'fatto', 'completed')] })).toBe(KEEP)
+})
+
+test('compactInstructions: the open tasks (in progress first, at most 3), the perimeter and the running workflow', () => {
+  const text = compactInstructions({
+    tasks: [
+      task('1', 'primo pending', 'pending'),
+      task('2', 'in corso', 'in_progress'),
+      task('3', 'terzo', 'pending'),
+      task('4', 'quarto', 'pending'),
+      task('5', 'chiuso', 'completed'),
+    ],
+    perimeter: ['src/a.ts', 'src/b/', 'tests/**/a*.ts', 'docs/x.md'],
+    workflow: { name: 'impl-review-loop' },
+  })
+  expect(text.startsWith(KEEP)).toBe(true)
+  expect(text).toContain('Task aperti: in corso; primo pending; terzo.')
+  expect(text).not.toContain('quarto')
+  expect(text).not.toContain('chiuso')
+  expect(text).toContain('Perimetro deliver (4 voci): src/a.ts, src/b/, tests/**/a*.ts.')
+  expect(text).not.toContain('docs/x.md')
+  expect(text).toContain('Workflow in corso: impl-review-loop.')
+  expect(text.length).toBeLessThanOrEqual(400)
+})
+
+test('compactInstructions: each part is optional, and long titles never push it past 400 characters', () => {
+  expect(compactInstructions({ workflow: { name: 'w' } })).toBe(`${KEEP} Workflow in corso: w.`)
+  expect(compactInstructions({ perimeter: ['a.ts'] })).toBe(`${KEEP} Perimetro deliver (1 voce): a.ts.`)
+  const long = 'x'.repeat(200)
+  const text = compactInstructions({
+    tasks: [task('1', long, 'in_progress'), task('2', long, 'pending'), task('3', long, 'pending')],
+    perimeter: [long, long, long],
+    workflow: { name: long },
+  })
+  expect(text.length).toBeLessThanOrEqual(400)
+  expect(text.startsWith(KEEP)).toBe(true)
+})
+
+const gitOn = (branch: string, isDetached = false) => ({ branch, isDetached, staged: 0, modified: 0, untracked: 0 })
+
+test('worklogScope: the work item id of the branch, else the PR, else the branch as a topic', () => {
+  expect(worklogScope(gitOn('feature/AB#1234-orders'))).toBe('AB#1234')
+  expect(worklogScope(gitOn('users/me/1234-orders-filter'))).toBe('AB#1234')
+  expect(worklogScope(gitOn('feature/1234'))).toBe('AB#1234')
+  expect(worklogScope(gitOn('fix/AB#77'), 9)).toBe('AB#77')
+  // no id in the name: the PR when known
+  expect(worklogScope(gitOn('feature/orders-filter'), 42)).toBe('PR 42')
+  // else the branch itself
+  expect(worklogScope(gitOn('feature/orders-filter'))).toBe('topic feature/orders-filter')
+  expect(worklogScope(gitOn('main'))).toBe('topic main')
+  // a number that is not an id (too short, mid-word) is not read as one
+  expect(worklogScope(gitOn('feature/v2-ui'))).toBe('topic feature/v2-ui')
+  expect(worklogScope(gitOn('release-2026x'))).toBe('topic release-2026x')
+})
+
+test('worklogScope: nothing on a detached HEAD or without git', () => {
+  expect(worklogScope(gitOn('HEAD', true), 42)).toBeUndefined()
+  expect(worklogScope(undefined, 42)).toBeUndefined()
+})
+
+test('parsePerimeter: the entries of an active perimeter on the branch checked out, else nothing', () => {
+  const file = 'branch: feat/x\r\nstatus: active\r\n- src/a.ts\r\n- src/b/\r\n-   \r\nnote\r\n'
+  expect(parsePerimeter(file, 'feat/x')).toEqual(['src/a.ts', 'src/b/'])
+  expect(parsePerimeter(file, 'feat/y')).toBeUndefined()
+  expect(parsePerimeter(file.replace('active', 'closed'), 'feat/x')).toBeUndefined()
+  expect(parsePerimeter('branch: feat/x\nstatus: active\n', 'feat/x')).toBeUndefined()
+  expect(parsePerimeter('{}', 'feat/x')).toBeUndefined()
 })
