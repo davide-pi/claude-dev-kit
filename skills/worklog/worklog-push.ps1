@@ -170,7 +170,7 @@ foreach ($row in $rowList) {
     if ($dir) { $env:AZURE_CONFIG_DIR = $dir }
     try {
       $org = OrgUrl $row.org
-      $show = @('boards', 'work-item', 'show', '--id', "$($row.itemId)", '--org', $org, '--fields', "System.State,$cwField")
+      $show = @('boards', 'work-item', 'show', '--id', "$($row.itemId)", '--org', $org)
       $before = CompletedWorkOf (Invoke-Az $show)
       $after = [math]::Round($before + $delta, 2)
       if ($after -lt 0) { throw "CompletedWork diventerebbe negativo ($(Num $before) $(Signed $delta))" }
