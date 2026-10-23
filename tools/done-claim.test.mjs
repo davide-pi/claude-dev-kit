@@ -29,7 +29,8 @@ process.on('exit', () => {
 const prompt = (text) => ({ type: 'user', message: { role: 'user', content: text } });
 const say = (text) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
 const tool = (name) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name, input: {} }] } });
-const result = () => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: 'ok' }] } });
+/** A tool result; `text` is what the tool printed (a string, or `[{ type: 'text', text }]` blocks). */
+const result = (text = 'ok') => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } });
 
 /** Run the hook on a transcript; returns the block reason or '' and the sandbox config dir. */
 function stop(entries, { env = { CLAUDE_DONE_CLAIM: '1' }, extra = {} } = {}) {
@@ -48,7 +49,8 @@ function stop(entries, { env = { CLAUDE_DONE_CLAIM: '1' }, extra = {} } = {}) {
   return { reason: out?.reason ?? '', dir };
 }
 
-const edited = (final) => [prompt('sistema il bug'), tool('Edit'), result(), say(final)];
+/** An edit turn ending in `final`; `printed` is what the tool results of the turn showed (the proof of a verdict row). */
+const edited = (final, printed = 'ok') => [prompt('sistema il bug'), tool('Edit'), result(printed), say(final)];
 
 test('an edit turn ending "fatto" with no evidence is blocked and logged', () => {
   const { reason, dir } = stop(edited('Fatto: il totale ora somma le righe.'));
@@ -162,22 +164,25 @@ const VERDICT = [
   '| e2e | - | - | non verificato: serve staging |',
 ].join('\n');
 
-test('a deliver verdict block with a filled "fatto" row is evidence → silent', () => {
-  assert.equal(stop(edited(`Fatto.\n\n${VERDICT}\nReview: giro 2, 0 P1/P2 aperti.`)).reason, '');
-  assert.equal(stop(edited(`Fatto.\n\n${VERDICT.replace('non verificato: serve staging', 'failed')}`.replace(/\n/g, '\r\n'))).reason, '');
+const PRINTED = 'Passed: 48, Failed: 0';
+
+test('a deliver verdict block whose "fatto" row quotes a line the turn printed is evidence → silent', () => {
+  assert.equal(stop(edited(`Fatto.\n\n${VERDICT}\nReview: giro 2, 0 P1/P2 aperti.`, PRINTED)).reason, '');
+  const both = VERDICT.replace('| e2e | - | - | non verificato: serve staging |', '| e2e | npm run e2e | 3 failed | failed |');
+  assert.equal(stop(edited(`Fatto.\n\n${both}`.replace(/\n/g, '\r\n'), `${PRINTED}\n3 failed`)).reason, '');
 });
 
 test('a verdict block with no filled row, or a placeholder row, is not evidence → blocked', () => {
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
   assert.match(stop(edited(`Fatto.\n\n${head}`)).reason, /"Fatto"/);
-  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | - | - | fatto |`)).reason, /"Fatto"/);
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | - | - | fatto |`)).reason, /"fatto"/);
   assert.match(stop(edited(`Fatto.\n\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
 });
 
 test('a verdict row counts only inside the verdict table, with a deciding cell that looks like output', () => {
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
-  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"Fatto"/);
-  assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | exit 0 | fatto |`)).reason, '');
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"fatto"/);
+  assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | exit 0 | fatto |`, 'exit 0')).reason, '');
   // a row that sits in another table, after prose, is not the verdict's
   assert.match(stop(edited(`Fatto.\n\n${head}\n\nAltro:\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
 });
@@ -195,13 +200,13 @@ test('"non è verificato" and "non è ancora stato verificato" are honest', () =
   assert.equal(stop(edited('Il rendering non è ancora stato verificato, fatto il resto.')).reason, '');
 });
 
-test('a verdict row whose deciding cell says verde / green / succeeded is proven, like an inline result', () => {
+test('a verdict row whose deciding cell says verde / green / succeeded is proven when the turn printed it, like an inline result', () => {
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
   for (const word of ['verde', 'green', 'Build succeeded', 'PASSED']) {
-    assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | ${word} | fatto |`)).reason, '', word);
+    assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | ${word} | fatto |`, word)).reason, '', word);
   }
   assert.equal(stop(edited('Fatto: `dotnet build` → succeeded')).reason, '');
-  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"Fatto"/);
+  assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"fatto"/);
 });
 
 // A message from another Claude session is a meta user entry (isMeta, origin.kind "peer"), not a prompt.
@@ -211,14 +216,137 @@ const peer = (extra = {}) => ({
   ...extra,
 });
 
-test('a turn started by a cross-session message is its own turn: the previous turn\'s edit does not arm it', () => {
-  const previous = [prompt('sistema il bug'), tool('Edit'), result(), say('```\nok\n```')];
-  assert.equal(stop([...previous, peer(), say('Fatto, ti ho risposto.')]).reason, '');
+test('a cross-session message is not a turn boundary: the turn ends at the last human prompt only', () => {
+  // human prompt -> Edit -> message to a peer -> its reply -> unproven claim: the Edit still arms the hook
+  const edit = [prompt('sistema il bug'), tool('Edit'), result()];
+  assert.match(stop([...edit, tool('SendMessage'), result(), peer(), say('Fatto.')]).reason, /"Fatto"/);
   // recognised by the text alone, or by the origin alone
-  assert.equal(stop([...previous, peer({ isMeta: false, turnOrigin: undefined, origin: undefined }), say('Fatto.')]).reason, '');
-  assert.equal(stop([...previous, peer({ message: { role: 'user', content: 'x' } }), say('Fatto.')]).reason, '');
-  // an edit inside the peer-started turn still counts
-  assert.match(stop([...previous, peer(), tool('Edit'), result(), say('Fatto.')]).reason, /"Fatto"/);
-  // another meta entry is not a boundary
+  assert.match(stop([...edit, peer({ isMeta: false, turnOrigin: undefined, origin: undefined }), say('Fatto.')]).reason, /"Fatto"/);
+  assert.match(stop([...edit, peer({ message: { role: 'user', content: 'x' } }), say('Fatto.')]).reason, /"Fatto"/);
+  // a table whose deciding line nobody printed is blocked after a peer reply too
+  const table = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n| unit | dotnet test | Passed: 48 | fatto |';
+  assert.match(stop([...edit, peer(), say(`Fatto.\n\n${table}`)]).reason, /"fatto"/);
+  // a human prompt that quotes the tag mid-text is a boundary: the earlier Edit no longer arms the hook
+  assert.equal(stop([...edit, prompt('perché questo <cross-session-message from="x"> è arrivato?'), say('Fatto.')]).reason, '');
+  // another meta entry is not a boundary either
   assert.match(stop([prompt('a'), tool('Edit'), result(), { type: 'user', isMeta: true, message: { role: 'user', content: 'reminder' } }, say('Fatto.')]).reason, /"Fatto"/);
+});
+
+// ── Per-row proof against what the turn printed (T17) ──
+
+const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+const row = (line, state = 'fatto', level = 'unit') => `| ${level} | dotnet test | ${line} | ${state} |`;
+const verdict = (...rows) => `Fatto.\n\n${head}\n${rows.join('\n')}`;
+
+/** What the harness writes when a background workflow or agent finishes: a user entry, string content, no tool_result. */
+const notification = (body, extra = {}) => ({
+  type: 'user', promptSource: 'system', origin: { kind: 'task-notification', producer: 'session-task', runId: 'r1' },
+  message: {
+    role: 'user',
+    content: `<task-notification>\n<task-id>w1</task-id>\n<status>completed</status>\n<summary>Workflow finished</summary>\n<result>${body}</result>\n</task-notification>`,
+  },
+  ...extra,
+});
+
+test('a "fatto" row whose deciding line the turn never printed is blocked; the line printed by the tool is silent', () => {
+  const claim = verdict(row('Passed: 48, Failed: 0'));
+  assert.match(stop(edited(claim, 'ok')).reason, /"fatto"/);
+  assert.equal(stop(edited(claim, 'Total tests: 48\nPassed: 48, Failed: 0\nDone')).reason, '');
+  // normalised: case, runs of whitespace, backticks and backslashes do not matter
+  assert.equal(stop(edited(verdict(row('`PASSED:   48,  Failed: 0`')), 'passed: 48,\tfailed: 0')).reason, '');
+  assert.equal(stop(edited(claim, [{ type: 'text', text: 'Passed: 48, Failed: 0' }])).reason, '');
+  assert.match(stop(edited(claim, 'Passed: 47, Failed: 1')).reason, /"fatto"/);
+});
+
+test('an escaped pipe in a cell is cell text: the deciding line is read from the right column', () => {
+  const piped = verdict(row('Passed: 48').replace('dotnet test', 'dotnet test \\| tail -1'));
+  assert.equal(stop(edited(piped, 'Passed: 48')).reason, '');
+  assert.match(stop(edited(piped, 'tail -1')).reason, /"fatto"/);
+  // a pipe inside the deciding line is not cut short: the fragment before it is not enough
+  const inside = verdict(row('a \\| b: 5 passed'));
+  assert.equal(stop(edited(inside, 'a | b: 5 passed')).reason, '');
+  assert.match(stop(edited(inside, 'a')).reason, /"fatto"/);
+});
+
+test('a short deciding line is proven by whole words only', () => {
+  assert.match(stop(edited(verdict(row('ok')), 'token book')).reason, /"fatto"/);
+  assert.equal(stop(edited(verdict(row('ok')), 'build: ok.')).reason, '');
+  assert.match(stop(edited(verdict(row('exit 0')), 'exit 10')).reason, /"fatto"/);
+});
+
+test('a placeholder deciding line ("-", empty) is never proven, whatever the results hold', () => {
+  assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('')), 'anything')).reason, /"fatto"/);
+});
+
+test('a "non verificato" row does not excuse a "fatto" row without proof; alone it passes', () => {
+  const unproven = verdict(row('Passed: 48, Failed: 0'), row('-', 'non verificato: serve staging', 'e2e'));
+  assert.match(stop(edited(unproven, 'ok')).reason, /"fatto"/);
+  assert.equal(stop(edited(unproven, 'Passed: 48, Failed: 0')).reason, '');
+  assert.equal(stop(edited(`Fatto in parte.\n\n${head}\n${row('-', 'non verificato: serve staging', 'e2e')}`)).reason, '');
+});
+
+test('one unproven row blocks even when the other rows are proven, and even after a shell command ran', () => {
+  const two = verdict(row('Passed: 48, Failed: 0'), row('3 passed', 'fatto', 'e2e'));
+  assert.match(stop(edited(two, 'Passed: 48, Failed: 0')).reason, /"fatto"/);
+  const shell = [prompt('x'), tool('Edit'), result(), tool('Bash'), result('Passed: 48, Failed: 0'), say(two)];
+  const { reason, dir } = stop(shell);
+  assert.match(reason, /3 passed/);
+  const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
+  assert.equal(JSON.parse(log[0]).rule, 'unproven-row');
+  assert.equal(stop([...shell.slice(0, 4), result('Passed: 48, Failed: 0\n3 passed'), say(two)]).reason, '');
+});
+
+test('a Workflow-only turn with a verdict row whose deciding line is not in any tool_result is blocked; the line inside the Workflow result (JSON-escaped) is silent', () => {
+  const claim = verdict(row('Passed: "48", Failed: 0'));
+  assert.match(stop([prompt('rifattorizza'), tool('Workflow'), result(JSON.stringify({ summary: 'ok' })), say(claim)]).reason, /"fatto"/);
+  const printed = JSON.stringify({ verify: { output: 'Passed: "48", Failed: 0' } });
+  assert.ok(printed.includes('\\"48\\"'));
+  assert.equal(stop([prompt('rifattorizza'), tool('Workflow'), result(printed), say(claim)]).reason, '');
+});
+
+test('a Workflow result that arrives as a task-notification entry is the turn\'s result, not a new prompt', () => {
+  const claim = verdict(row('Passed: 48, Failed: 0'));
+  const ran = (body, extra) => [prompt('rifattorizza'), tool('Workflow'), result('Workflow started in background'), say('Lancio il workflow.'), notification(body, extra), say(claim)];
+  assert.equal(stop(ran(JSON.stringify({ verify: 'Passed: 48, Failed: 0' }))).reason, '');
+  assert.match(stop(ran(JSON.stringify({ verify: 'Passed: 1, Failed: 9' }))).reason, /"fatto"/);
+  // recognised by its text alone, with no origin
+  assert.equal(stop(ran('Passed: 48, Failed: 0', { origin: undefined, promptSource: undefined })).reason, '');
+  // the notification is the only thing after the launch
+  assert.match(stop([prompt('x'), tool('Workflow'), notification('nothing printed'), say(claim)]).reason, /"fatto"/);
+  assert.equal(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ verify: 'Passed: 48, Failed: 0' })), say(claim)]).reason, '');
+});
+
+test('an Agent or Task hand-back (notification or cross-session message) carries the proof; the delegate alone arms the hook', () => {
+  const claim = verdict(row('Passed: 48, Failed: 0'));
+  const handBack = peer({ message: { role: 'user', content: '<cross-session-message from="uds:x" from-name="agent">\nPassed: 48, Failed: 0\n</cross-session-message>' } });
+  for (const name of ['Agent', 'Task']) {
+    assert.equal(stop([prompt('x'), tool(name), result('launched'), handBack, say(claim)]).reason, '', name);
+    assert.match(stop([prompt('x'), tool(name), result('launched'), say(claim)]).reason, /"fatto"/, name);
+    assert.equal(stop([prompt('x'), tool(name), notification('Passed: 48, Failed: 0'), say(claim)]).reason, '', name);
+  }
+  // a turn with no delegate and no edit stays unarmed
+  assert.equal(stop([prompt('x'), tool('Read'), result(), say(claim)]).reason, '');
+});
+
+test('a delegate counts as an edit for ordering: a shell command after it excuses a claim without a table, before it does not', () => {
+  assert.equal(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, '');
+  assert.match(stop([prompt('x'), tool('Bash'), result(), tool('Workflow'), result(), say('Fatto.')]).reason, /"Fatto"/);
+});
+
+test('a truncated tail cannot prove a row absent: logged as tail-truncated, not blocked', () => {
+  const filler = Array.from({ length: 8 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 800 KB: the prompt falls out of the 512 KB tail
+  const tail = [...filler, tool('Edit'), result('ok'), say(verdict(row('Passed: 48, Failed: 0')))];
+  const { reason, dir } = stop([prompt('x'), ...tail]);
+  assert.equal(reason, '');
+  const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
+  assert.equal(JSON.parse(log[0]).rule, 'tail-truncated');
+  // the same turn, short enough to be read whole, is blocked
+  assert.match(stop([prompt('x'), tool('Edit'), result('ok'), say(verdict(row('Passed: 48, Failed: 0')))]).reason, /"fatto"/);
+});
+
+test('a later human prompt ends the turn a delegate armed', () => {
+  const claim = verdict(row('Passed: 48, Failed: 0'));
+  assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), say(claim)]).reason, '');
+  assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), tool('Agent'), notification('Passed: 48, Failed: 0'), say(claim)]).reason, '');
 });

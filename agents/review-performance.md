@@ -27,6 +27,7 @@ call) and the scale at which it bites; no number → micro-optimization, drop it
 | intent: PR text, work item, request | reconstruct from `git log` and the PR/item text |
 | effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
 | previous findings | none |
+| challenged findings: the fixer rejected them and left the code unchanged | none; judge each yourself, reproduce it when you can: keep it open with why, or withdraw it (closed) |
 
 Diff file given → read it to locate the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; read call sites and schema from the working tree. Skip lockfiles,
 `*.min.*`, `dist/`, `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs` — never the
@@ -99,6 +100,8 @@ schema or index, the caller sizing the input.
 Close with `Verdetto: N rilievi performance (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)`
 and one **hot-path summary** line: which changed code runs per request, message or item, at what
 assumed scale. Nothing wrong → one line with the hot paths checked and the scale assumed.
+
+List every file you actually read under `filesReviewed`: a file not listed counts as unread and is reviewed again.
 
 Prose in Italian; values, anchors, anything from the code and cost notation (`O(n²)`, `1 + N`) verbatim.
 

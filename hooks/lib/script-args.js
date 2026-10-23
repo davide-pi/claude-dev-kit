@@ -1,8 +1,9 @@
 /**
- * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `db-ro.ps1`).
+ * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`, and
+ * `node ~/.claude/hooks/scope-guard.js --check`).
  *
- * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter
- * script) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
+ * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter, snapshot and
+ * scope-guard calls) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
  * with an allowlist grammar, not a blacklist: both shells run code in places a list of known
  * constructs misses (PowerShell argument mode evaluates `(…)`, `@(…)`, `$x.Method()`; Bash runs
  * `<(…)`, `>(…)`, `$(…)`, backticks). What may pass without a prompt is:
@@ -26,7 +27,7 @@
 
 const { splitSegments } = require('./segments');
 
-const SCRIPT = /^pwsh\s+-NoProfile\s+-File\s+(["']?)~[\\/]\.claude[\\/]scripts[\\/](perimeter|db-ro)\.ps1(?=$|[\s"'])/i;
+const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](perimeter|snapshot|db-ro)\.ps1|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
 const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
 const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
@@ -69,11 +70,11 @@ function tokenize(text) {
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
 function checkScriptArgs(command) {
-  if (!/\.claude[\\/]scripts[\\/](?:perimeter|db-ro)\.ps1/i.test(command)) return null;
+  if (!/\.claude[\\/](?:scripts[\\/](?:perimeter|snapshot|db-ro)\.ps1|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
-    const script = `${match[2].toLowerCase()}.ps1`;
+    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : 'scope-guard.js';
     let tail = segment.trim().slice(match[0].length);
     if (match[1]) { // the script path was itself quoted: the next character closes it
       if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;

@@ -15,7 +15,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { spawnSync, execFileSync } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -140,4 +141,128 @@ test('garbage on stdin → silence, exit 0', () => {
   const r = spawnSync(process.execPath, [GUARD], { input: 'not json', encoding: 'utf8' });
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
+});
+
+// ── `--check <head> [--dirty a,b]`: the mechanical post-OK scope check ──
+
+// The module reads stdin and exits when required outside the nudges dispatcher; the flag is what nudges.js sets.
+globalThis.__nudgesDispatch = true;
+const { outsidePerimeter } = createRequire(import.meta.url)(GUARD);
+const ENTRIES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
+
+test('outsidePerimeter: files outside the entries are returned, matched like the hook (anchored, case-insensitive)', () => {
+  assert.deepEqual(outsidePerimeter(['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/Deep/Line.cs', 'tests/unit/OrdersTests.cs'], ENTRIES, []), []);
+  assert.deepEqual(outsidePerimeter(['SRC/orders/ordersquery.cs', 'src\\Orders\\Dto\\A.cs'], ENTRIES, []), []);
+  assert.deepEqual(outsidePerimeter(['src/Other.cs', 'other/src/Orders/OrdersQuery.cs', './src/Orders/OrdersQuery.cs'], ENTRIES, []),
+    ['src/Other.cs', 'other/src/Orders/OrdersQuery.cs']);
+});
+
+test('outsidePerimeter: a file dirty before the change started is not the change\'s; duplicates collapse', () => {
+  assert.deepEqual(outsidePerimeter(['src/Other.cs', 'src/User.cs', 'src/Other.cs'], ENTRIES, ['src/User.cs']), ['src/Other.cs']);
+  assert.deepEqual(outsidePerimeter(['SRC/user.cs'], ENTRIES, ['src\\User.cs']), []);
+  assert.deepEqual(outsidePerimeter([], ENTRIES, []), []);
+});
+
+test('outsidePerimeter: a dirty entry ending in "/" is a collapsed untracked directory and protects every file under it', () => {
+  assert.deepEqual(outsidePerimeter(['src/Gen/A.cs', 'src/Gen/Deep/B.cs'], ENTRIES, ['src/Gen/']), []);
+  assert.deepEqual(outsidePerimeter(['SRC/gen/A.cs'], ENTRIES, ['src\\Gen\\']), []);
+  // the prefix is a directory, not a name prefix; other dirty entries stay exact matches
+  assert.deepEqual(outsidePerimeter(['src/Generated.cs', 'src/Gen/A.cs', 'src/Other/C.cs'], ENTRIES, ['src/Gen/']), ['src/Generated.cs', 'src/Other/C.cs']);
+  assert.deepEqual(outsidePerimeter(['src/Gen/A.cs'], ENTRIES, ['src/Gen']), ['src/Gen/A.cs']);
+});
+
+/** A real repository (one commit on BRANCH) with the perimeter in its git directory; returns its root. */
+function gitRepo(perimeter = PERIMETER) {
+  const root = mkdtempSync(join(tmpdir(), 'scopecheck-'));
+  created.push(root);
+  const git = (...args) => execFileSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], { cwd: root, stdio: 'pipe' });
+  git('init', '-q');
+  git('symbolic-ref', 'HEAD', `refs/heads/${BRANCH}`);
+  mkdirSync(join(root, 'src', 'Orders'), { recursive: true });
+  writeFileSync(join(root, 'src', 'Orders', 'OrdersQuery.cs'), 'a\n');
+  writeFileSync(join(root, 'src', 'Keep.cs'), 'a\n');
+  git('add', '-A');
+  git('commit', '-q', '-m', 'init');
+  if (perimeter !== null) {
+    mkdirSync(join(root, '.git', 'deliver'), { recursive: true });
+    writeFileSync(join(root, '.git', 'deliver', 'perimeter.md'), perimeter);
+  }
+  return root;
+}
+
+/** Runs `scope-guard.js --check …` in `root`. */
+function check(root, ...args) {
+  const r = spawnSync(process.execPath, [GUARD, '--check', ...args], { cwd: root, encoding: 'utf8' });
+  return { status: r.status, out: r.stdout.split('\n').filter(Boolean), err: r.stderr };
+}
+
+test('--check in a temp repo: an untracked file outside the perimeter exits 1 and is printed', () => {
+  const root = gitRepo();
+  writeFileSync(join(root, 'src', 'Orders', 'OrdersQuery.cs'), 'b\n');
+  writeFileSync(join(root, 'src', 'Stray.cs'), 'x\n');
+  const r = check(root, 'HEAD');
+  assert.equal(r.status, 1);
+  assert.deepEqual(r.out, ['src/Stray.cs']);
+});
+
+test('--check: a tracked file edited or deleted outside is outside too; a file under a perimeter directory passes', () => {
+  const root = gitRepo();
+  writeFileSync(join(root, 'src', 'Keep.cs'), 'b\n');
+  assert.deepEqual(check(root, 'HEAD').out, ['src/Keep.cs']);
+  writeFileSync(join(root, 'src', 'Keep.cs'), 'a\n');
+  assert.equal(check(root, 'HEAD').status, 0);
+  mkdirSync(join(root, 'src', 'Orders', 'Dto'));
+  writeFileSync(join(root, 'src', 'Orders', 'Dto', 'Line.cs'), 'x\n');
+  assert.equal(check(root, 'HEAD').status, 0);
+  rmSync(join(root, 'src', 'Keep.cs'));
+  const r = check(root, 'HEAD');
+  assert.equal(r.status, 1);
+  assert.deepEqual(r.out, ['src/Keep.cs']);
+});
+
+test('--check: --dirty lists the files that were already dirty when the change started', () => {
+  const root = gitRepo();
+  writeFileSync(join(root, 'src', 'User.cs'), 'x\n');
+  writeFileSync(join(root, 'src', 'Keep.cs'), 'b\n');
+  assert.deepEqual(check(root, 'HEAD', '--dirty', 'src/User.cs').out, ['src/Keep.cs']);
+  const r = check(root, 'HEAD', '--dirty', 'src/User.cs,src/Keep.cs');
+  assert.equal(r.status, 0);
+  assert.deepEqual(r.out, []);
+});
+
+test('--check: nothing outside → exit 0 and no output; no active perimeter → exit 2 (not checked) with a note on stderr', () => {
+  const root = gitRepo();
+  writeFileSync(join(root, 'src', 'Orders', 'OrdersQuery.cs'), 'b\n');
+  assert.deepEqual(check(root, 'HEAD'), { status: 0, out: [], err: '' });
+  const none = gitRepo(PERIMETER.replace('status: active', 'status: closed'));
+  writeFileSync(join(none, 'src', 'Stray.cs'), 'x\n');
+  const r = check(none, 'HEAD');
+  assert.equal(r.status, 2);
+  assert.deepEqual(r.out, []);
+  assert.match(r.err, /no active perimeter/);
+});
+
+test('--check: a plan file under docs/plans is never outside, as for the hook', () => {
+  const root = gitRepo();
+  mkdirSync(join(root, 'docs', 'plans'), { recursive: true });
+  writeFileSync(join(root, 'docs', 'plans', '2026-10-23-x.md'), 'plan\n');
+  assert.deepEqual(check(root, 'HEAD'), { status: 0, out: [], err: '' });
+});
+
+test('--check: usage errors exit 2 (no head, a head that is an option, a stray argument, an unknown revision, no repository)', () => {
+  const root = gitRepo();
+  for (const args of [[], ['--dirty', 'a'], ['-x'], ['HEAD', 'extra'], ['HEAD', '--dirty'], ['HEAD', '--other', 'a'], ['no-such-rev']]) {
+    assert.equal(check(root, ...args).status, 2, args.join(' '));
+  }
+  const loose = mkdtempSync(join(tmpdir(), 'scopecheck-loose-'));
+  created.push(loose);
+  assert.equal(check(loose, 'HEAD').status, 2);
+});
+
+test('--check: the head is never a shell fragment (execFileSync, no shell)', () => {
+  const root = gitRepo();
+  const marker = join(root, 'pwned');
+  assert.equal(check(root, `HEAD; echo x > "${marker}"`).status, 2);
+  assert.equal(check(root, '$(touch pwned)').status, 2);
+  assert.equal(spawnSync(process.execPath, ['-e', `process.exit(require('fs').existsSync(${JSON.stringify(marker)}) ? 1 : 0)`]).status, 0);
 });
