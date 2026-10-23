@@ -1,7 +1,7 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
-import type { CockpitAlm, CockpitBurnSample, CockpitTab } from '../types'
+import type { CockpitAgent, CockpitAlm, CockpitBurnSample, CockpitHistoryEntry, CockpitTab } from '../types'
 
 export const COLORS = {
   text: '#d6d8dc',
@@ -278,9 +278,12 @@ export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
 
 /** `git status --porcelain -b` -> branch and dirty counts; undefined outside a repository. */
-export function parseGitStatus(out: string): { branch: string; staged: number; modified: number; untracked: number } | undefined {
+export function parseGitStatus(
+  out: string,
+): { branch: string; isDetached: boolean; staged: number; modified: number; untracked: number } | undefined {
   const lines = out.split('\n').filter(l => l.length > 0)
   const header = lines[0]?.startsWith('## ') ? (lines.shift() ?? '').slice(3) : ''
+  const isDetached = / \(no branch\)$/.test(header)
   const branch = (header.replace(/^(?:No commits yet|Initial commit) on /, '').split('...')[0] ?? '')
     .replace(/ \(no branch\)$/, '')
     .trim()
@@ -296,7 +299,7 @@ export function parseGitStatus(out: string): { branch: string; staged: number; m
     if (y !== ' ' && y !== '?') modified++
     if (line.startsWith('??')) untracked++
   }
-  return { branch, staged, modified, untracked }
+  return { branch, isDetached, staged, modified, untracked }
 }
 
 /** `rev-parse --git-dir --git-common-dir --show-toplevel` -> the worktree root inside a linked worktree. */
@@ -362,21 +365,35 @@ export function resetClock(resetsAtMs: number | undefined, now: number): string 
 
 const BURN_WINDOW_MS = 30 * 60_000
 const BURN_MIN_SPAN_MS = 10 * 60_000
+const FIVE_HOURS_MS = 5 * 3_600_000
+
+/** A reset time as the engine reports it (ISO text) in milliseconds; undefined when absent or not a date. */
+export function parseReset(resetsAt: string | undefined): number | undefined {
+  const ms = resetsAt ? Date.parse(resetsAt) : Number.NaN
+  return Number.isNaN(ms) ? undefined : ms
+}
+
+/** The readings taken inside the current 5h window, which opened five hours before its reset: an older one belongs to the last window. */
+const sinceWindowOpen = (samples: readonly CockpitBurnSample[], resetsAtMs: number | undefined): CockpitBurnSample[] =>
+  resetsAtMs === undefined ? [...samples] : samples.filter(s => s.at >= resetsAtMs - FIVE_HOURS_MS)
 
 /**
  * Appends the 5h usage reading `used` taken at `now`, keeping the last 30 minutes. A reading equal to the last one
  * adds nothing (the rate counts from the oldest reading to the present), so the reading that fell out of the window
  * is what the credits stood at when it opened: it stays as the first sample, clamped to the window's start. A lower
- * reading means the window reset: start over.
+ * reading means the window reset: start over. Given the window's reset time, a reading older than the window's opening
+ * is dropped: the credits were not counting from it.
  */
 export function recordBurnSample(
   samples: readonly CockpitBurnSample[] | undefined,
   now: number,
   used: number | undefined,
+  resetsAtMs?: number,
 ): CockpitBurnSample[] {
   const start = now - BURN_WINDOW_MS
-  const inWindow = (samples ?? []).filter(s => s.at >= start)
-  const before = (samples ?? []).filter(s => s.at < start).at(-1)
+  const current = sinceWindowOpen(samples ?? [], resetsAtMs)
+  const inWindow = current.filter(s => s.at >= start)
+  const before = current.filter(s => s.at < start).at(-1)
   const kept = before && inWindow[0]?.at !== start ? [{ at: start, used: before.used }, ...inWindow] : inWindow
   if (used === undefined) return kept
   const last = kept.at(-1)
@@ -387,7 +404,8 @@ export function recordBurnSample(
 /**
  * How fast the 5h credits fall, from the reading at the start of the last 30 minutes (the last one before it, when
  * none lies on it: the value held since) to `used` now: the rate in points
- * per hour, when they run out, and whether that is before the reset. Undefined with under 10 minutes of readings,
+ * per hour, when they run out, and whether that is before the reset. A reading from before the current window opened
+ * (five hours before the reset) is never the start. Undefined with under 10 minutes of readings,
  * a rate that rounds to under 1 %/h, a window already spent or no reset ahead.
  */
 export function burnRate(
@@ -397,8 +415,9 @@ export function burnRate(
   resetsAtMs: number | undefined,
 ): { perHour: number; etaMs: number; isBeforeReset: boolean } | undefined {
   const start = now - BURN_WINDOW_MS
-  const before = samples.filter(s => s.at < start).at(-1)
-  const oldest = before ? { at: start, used: before.used } : samples.find(s => s.at >= start)
+  const current = sinceWindowOpen(samples, resetsAtMs)
+  const before = current.filter(s => s.at < start).at(-1)
+  const oldest = before ? { at: start, used: before.used } : current.find(s => s.at >= start)
   if (!oldest || resetsAtMs === undefined || resetsAtMs <= now || used >= 100) return undefined
   const span = now - oldest.at
   if (span < BURN_MIN_SPAN_MS) return undefined
@@ -469,6 +488,45 @@ export function almText(alm: CockpitAlm): string {
   if (!alm.isMapped) return 'non mappato'
   const target = [alm.org, alm.project].filter(Boolean).join(' / ')
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
+}
+
+// ── History of finished agents ───────────────────────────────────────────────
+
+/** Entries the history keeps (the state file persists them); the pane lists the newest ten of them. */
+export const HISTORY_KEEP = 50
+
+/** What the history keeps of a finished agent; undefined for one the mod only saw through its events (type `?`). */
+export function toHistory(a: CockpitAgent): CockpitHistoryEntry | undefined {
+  if (a.type === '?' || a.endedAt === undefined) return undefined
+  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(a.isInterrupted === true && { isInterrupted: true }) }
+}
+
+/** `entries` go in front (newest first), an id already there replaced; the list is cut to `HISTORY_KEEP`. */
+export const addHistory = (history: readonly CockpitHistoryEntry[] | undefined, entries: readonly CockpitHistoryEntry[]): CockpitHistoryEntry[] => {
+  const ids = new Set(entries.map(e => e.id))
+  return [...entries, ...(history ?? []).filter(h => !ids.has(h.id))].slice(0, HISTORY_KEEP)
+}
+
+/** The history out of a parsed state file: the entries that have every field, in order; none for anything else. */
+export function parseHistory(value: unknown): CockpitHistoryEntry[] {
+  if (!Array.isArray(value)) return []
+  const out: CockpitHistoryEntry[] = []
+  for (const v of value.slice(0, HISTORY_KEEP)) {
+    if (!isRecord(v)) continue
+    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted } = v
+    if (typeof id !== 'string' || typeof type !== 'string' || typeof startedAt !== 'number' || typeof endedAt !== 'number') continue
+    out.push({
+      id,
+      type,
+      model: typeof model === 'string' ? model : undefined,
+      startedAt,
+      endedAt,
+      tokens: typeof tokens === 'number' ? tokens : 0,
+      isFailed: isFailed === true,
+      ...(isInterrupted === true && { isInterrupted: true }),
+    })
+  }
+  return out
 }
 
 /** The cockpit's tabs, in the order the bar draws them. */

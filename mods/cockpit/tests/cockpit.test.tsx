@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { On } from 'claude-code'
+import type { AgentStatus, On } from 'claude-code'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
 const iso = (offsetMs: number) => new Date(NOW + offsetMs).toISOString()
@@ -47,18 +47,28 @@ type World = {
   writes?: Map<string, string>
   /** What `$.session.id()` answers (`s-1` when not given). */
   sessionId?: () => string
+  /** True: every `$.fs.write` fails, as one the exit's short budget cuts off. Read at every call. */
+  failWrites?: () => boolean
   /** Receives the path of every `$.fs.write`, one entry per write. */
   log?: string[]
   /** The rate-limit windows `$.session.usage()` answers (a 5h and a 7d one when not given). */
   rateLimits?: { kind: string; percentUsed: number; resetsAt?: string }[]
   /** The text of `<config>/workspaces.json`; absent, the file answers an empty map. */
   workspaces?: unknown
+  /** The raw text of `<config>/workspaces.json`, answered as is (a malformed file): wins over `workspaces`. */
+  workspacesRaw?: string
   /** True: reading `<config>/workspaces.json` fails (no such file), whatever `workspaces` says. Read at every call. */
   workspacesFail?: boolean
   /** The text of this session's state file, as an earlier run left it. */
   stateFile?: string
   /** True: every git command fails, as in a folder that is not a repository. */
   notRepo?: boolean
+  /** True: git is on a detached HEAD (`## HEAD (no branch)`). */
+  detached?: boolean
+  /** The agents `$.agent.list()` answers, read at every call (none when not given). */
+  listed?: { id: string; status: AgentStatus }[]
+  /** Receives the `agentId` of every `$.ui.view`. */
+  viewed?: (string | undefined)[]
   /** The context fill `$.session.usage()` answers (25 when not given). */
   ctxPercent?: number
   /** Receives the text of every `$.ui.copy`. */
@@ -102,13 +112,13 @@ function world(on: On, options: World = {}) {
         ? ''
         : e.argv.includes('rev-parse')
         ? '.git\n.git\n/work/example-repo\n'
-        : '## feature/x\nM  a.ts\n M b.ts\n?? c.ts\n',
+        : `## ${options.detached ? 'HEAD (no branch)' : 'feature/x'}\nM  a.ts\n M b.ts\n?? c.ts\n`,
     },
   }))
   on('fs.read', (_, e) => {
     if (e.path.endsWith('workspaces.json')) {
       if (options.workspacesFail) throw new Error('ENOENT: no such file')
-      return { value: JSON.stringify(options.workspaces ?? {}) }
+      return { value: options.workspacesRaw ?? JSON.stringify(options.workspaces ?? {}) }
     }
     if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
     return {
@@ -116,7 +126,11 @@ function world(on: On, options: World = {}) {
     }
   })
   on('fs.stat', () => ({ value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }))
-  on('agent.list', () => ({ value: [] }))
+  on('agent.list', () => ({ value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }))
+  on('ui.view', (_, e) => {
+    options.viewed?.push(e.agentId)
+    return { value: {} }
+  })
   on('ui.open', (_, e) => {
     options.opened?.push(e.id)
     options.openedColumns?.push(e.columns)
@@ -139,6 +153,7 @@ function world(on: On, options: World = {}) {
     return { text: 'ok' }
   })
   on('fs.write', (_, e) => {
+    if (options.failWrites?.()) throw new Error('timed out')
     options.writes?.set(e.path, e.text)
     options.log?.push(e.text)
     return { value: undefined }
@@ -192,11 +207,13 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/vs atteso/)).toBe('vs atteso 7d  \u22125%')
     expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
     // the Sessione view lists running agents only; the finished one is in the Agenti tab
-    expect(await text(/code-reviewer/)).toBeUndefined()
+    expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
     await ui.press({ key: 'tab:agents' })
-    expect(await text(/code-reviewer/)).toContain('\u2713 code-reviewer')
-    expect(await text(/code-reviewer/)).toContain('son 5.5')
-    expect(await text(/code-reviewer/)).toContain('38k')
+    // the row is one pressable Button: its text is the whole row
+    const row = (await ui.find({ key: 'agent:a1' }))?.text
+    expect(row).toContain('\u2713 code-reviewer')
+    expect(row).toContain('son 5.5')
+    expect(row).toContain('38k')
     expect(await text(/chiesto/)).toContain('chiesto fable \u2192 sonnet')
     expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
     await ui.press({ key: 'tab:session' })
@@ -297,11 +314,12 @@ test('the state file is written at session start with open:false and the session
     effort: 'high',
     tasks: null,
     tab: 'session',
+    history: [],
   })
-  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
+  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab', 'history'])
 })
 
-const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'session' }
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'session', history: [] }
 
 test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
   const writes = new Map<string, string>()
@@ -829,6 +847,13 @@ test('a workspaces.json that goes missing clears the ALM line; a malformed one t
   options.workspaces = 'not a map' // valid JSON, no roots
   await clock.advance(15_000)
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  // text that is not JSON at all: cut in the middle, as a half-written file is
+  options.workspaces = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
+  await clock.advance(15_000)
+  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  options.workspacesRaw = '{ "roots": [ { "path": "/work", "org": '
+  await clock.advance(15_000)
+  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
 test('ALM line reads ALM non mappato in red when no root contains the cwd, and is absent without a map', async ($, on) => {
@@ -1082,4 +1107,402 @@ test('a session start (/clear) forgets the cache share and the 5h readings of th
   const after = (await paneRows($)).rows
   expect(after.some(r => /finisce/.test(r))).toBe(false)
   expect(after.find(r => /^CONTESTO/.test(r))).toBe('CONTESTO')
+})
+
+// ── Agenti: history and open an agent ──
+
+/** The end of agent `agentId`'s turn, as the engine raises it. */
+const finishAgent = ($: Engine, agentId: string, reason: 'answer' | 'aborted' | 'error' = 'answer') =>
+  $.turn.complete({ answer: '', durationMs: 1, isAborted: reason === 'aborted', turnId: `${agentId}-t`, agentId, reason })
+
+const mountPane = ($: Engine, bodyColumns = 50) => $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+
+/** A history entry as the state file holds it. */
+const entry = (id: string, type: string, endedAt: number, isFailed = false) => ({
+  id,
+  type,
+  model: 'claude-sonnet-5-5',
+  startedAt: endedAt - 60_000,
+  endedAt,
+  tokens: 5400,
+  isFailed,
+})
+
+test('Agenti: a finished agent leaves the list after 2 minutes for STORICO, collapsed by default, newest first, with its outcome', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, listed: [{ id: 'a3', status: 'running' }] })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
+  await finishAgent($, 'a1')
+  await clock.advance(5_000)
+  await finishAgent($, 'a2', 'error')
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  // inside the two minutes the finished agents are listed as before, and there is no history yet
+  expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
+  expect(await ui.find({ key: 'agent:a2' })).toBeDefined()
+  expect(await ui.find({ key: 'history' })).toBeUndefined()
+
+  await clock.advance(130_000)
+  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
+  expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
+  expect(await ui.find({ key: 'agent:a3' })).toBeDefined()
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 2 ▸')
+  expect(await ui.find({ key: 'history:a1' })).toBeUndefined()
+
+  await ui.press({ key: 'history' })
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 2 ▾')
+  const keys = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('history:'))
+  expect(await keys()).toEqual(['history:a2', 'history:a1'])
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✗ two +son 5\.5 +5s +0$/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ one +son 5\.5 +0s +0$/)
+  await ui.press({ key: 'history' })
+  expect(await keys()).toEqual([])
+  await ui.unmount()
+
+  // the state file carries it, so a resume or a reload finds it
+  await clock.advance(3000)
+  expect((flagOf(writes) as { history: unknown }).history).toEqual([
+    { id: 'a2', type: 'two', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW + 5000, tokens: 0, isFailed: true },
+    { id: 'a1', type: 'one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
+  ])
+})
+
+test('Agenti: an agent the engine lists as killed or failed ends with ✗, one it no longer lists with ✓', async ($, on) => {
+  const clock = world(on, {
+    listed: [
+      { id: 'a1', status: 'killed' },
+      { id: 'a2', status: 'failed' },
+    ],
+  })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
+  await clock.advance(15_000)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✗ one/)
+  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^✗ two/)
+  expect((await ui.find({ key: 'agent:a3' }))?.text).toMatch(/^✓ three/)
+  await ui.unmount()
+})
+
+test('STORICO lists at most ten rows, then … +n', async ($, on) => {
+  const clock = world(on)
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let n = 1; n <= 12; n++) await spawnAgent($, `agent-${n}`)
+  for (let n = 1; n <= 12; n++) await finishAgent($, `a${n}`)
+  await clock.advance(135_000)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'history' })
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 12 ▾')
+  expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(10)
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.at(-1)).toBe('… +2')
+  await ui.unmount()
+})
+
+test('STORICO survives a reload: the session id reads its history from its state file; another id starts empty', async ($, on) => {
+  let id = 's-1'
+  world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, tab: 'agents', history: [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  let ui = await mountPane($)
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 2 ▸')
+  await ui.press({ key: 'history' })
+  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +son 5\.5 +1m00s +5\.4k$/)
+  expect((await ui.find({ key: 'history:a8' }))?.text).toMatch(/^✗ reviewer/)
+  await ui.unmount()
+
+  id = 's-2'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  ui = await mountPane($)
+  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  await ui.unmount()
+})
+
+/** The state file of session `id` as last written, parsed; `undefined` when none was written. */
+const fileOfSession = (writes: Map<string, string>, id: string): { history: unknown[] } | undefined => {
+  const path = [...writes.keys()].find(k => k.endsWith(`cockpit-${id}.json`))
+  return path === undefined ? undefined : JSON.parse(writes.get(path) ?? 'null')
+}
+
+test('STORICO: a /clear moves the finished agent still under 2 minutes into the ending session\'s history; the new session starts empty', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  const clock = world(on, { sessionId: () => id, writes })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'old')
+  await finishAgent($, 'a1')
+  id = 's-2'
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(fileOfSession(writes, 's-1')?.history).toEqual([{ id: 'a1', type: 'old', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false }])
+  await clock.advance(135_000)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
+  await ui.unmount()
+  expect(fileOfSession(writes, 's-2')?.history).toEqual([])
+})
+
+test('Agenti: a reload of the same session id keeps the live agents, the finished one too until its 2 minutes pass', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'one')
+  await spawnAgent($, 'two')
+  await finishAgent($, 'a2')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
+  expect(await ui.find({ key: 'agent:a2' })).toBeDefined()
+  await clock.advance(135_000)
+  expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
+  expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 1 ▸')
+  await ui.unmount()
+})
+
+test('a write delayed across a /clear writes nothing to the new session\'s file', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  const clock = world(on, { sessionId: () => id, writes })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'one')
+  await finishAgent($, 'a1')
+  // the change is inside the 3 s window of the start's write: it waits for the timer
+  id = 's-2'
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  await clock.advance(3500)
+  expect(fileOfSession(writes, 's-2')).toBeUndefined()
+})
+
+test('session.end while id() still answers the ending session: a tick in between never re-adopts it, the running agent is interrotto in its file, nothing of it reaches the next', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  const clock = world(on, { sessionId: () => id, writes, listed: [{ id: 'a1', status: 'running' }, { id: 'a2', status: 'running' }] })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'running-one')
+  await spawnAgent($, 'finished-one')
+  await finishAgent($, 'a2')
+  // an open pane makes every tick rewrite the state file of whatever session the snapshot holds
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  // the documented order: the ending id is still the current one while session.end runs
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  const ended = fileOfSession(writes, 's-1')
+  expect(ended?.history).toEqual([
+    { id: 'a1', type: 'running-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, isInterrupted: true },
+    { id: 'a2', type: 'finished-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
+  ])
+  // a tick lands before the engine switches to the next id: it must not take s-1 back
+  await clock.advance(15_000)
+  expect(fileOfSession(writes, 's-1')).toEqual(ended)
+  id = 's-2' // no session.start follows a /clear
+  await clock.advance(135_000)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
+  expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
+  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  await ui.unmount()
+  expect(fileOfSession(writes, 's-2')?.history).toEqual([])
+  expect(fileOfSession(writes, 's-1')).toEqual(ended)
+})
+
+test('STORICO draws an interrupted agent as a dim ■, and a resume of the ended id brings its history back', async ($, on) => {
+  const history = [{ ...entry('a1', 'running-one', NOW - 1000), isInterrupted: true }]
+  world(on, { stateFile: JSON.stringify({ tab: 'agents', history }) })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'resume', sessionId: 's-1', resume: { id: 's-1' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.press({ key: 'history' })
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^■ running-one/)
+  await ui.unmount()
+})
+
+test('a session.end whose file write is cut short still leaves nothing of the ending session in the snapshot', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  let isCut = false
+  world(on, { sessionId: () => id, writes, failWrites: () => isCut })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'running-one')
+  isCut = true
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  id = 's-2'
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('a resume reloads the history of the session it resumes', async ($, on) => {
+  let id = 's-2'
+  const history = [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)]
+  const clock = world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, tab: 'agents', history }) })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  id = 's-1'
+  await $.session.end({ reason: 'resume', sessionId: 's-2', resume: { id: 's-2' } })
+  await clock.advance(15_000)
+  const ui = await mountPane($)
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 2 ▸')
+  await ui.unmount()
+})
+
+test('STORICO: entries a state file holds wrongly are left out, a file with no history means none', async ($, on) => {
+  world(on, { stateFile: JSON.stringify({ tab: 'agents', history: [{ id: 'x' }, 'text', entry('a1', 'ok', NOW - 1000)] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 1 ▸')
+  await ui.unmount()
+})
+
+test('session.end keeps the history in the closed file, so a resume finds it', async ($, on) => {
+  const writes = new Map<string, string>()
+  const history = [entry('a9', 'implementer', NOW - 30_000)]
+  world(on, { writes, stateFile: JSON.stringify({ history }) })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(flagOf(writes)).toEqual({ ...CLOSED, history })
+})
+
+test('pressing an agent row, live or in STORICO, puts that agent in the main view', async ($, on) => {
+  const viewed: (string | undefined)[] = []
+  const clock = world(on, { viewed, listed: [{ id: 'a3', status: 'running' }] })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
+  await finishAgent($, 'a1')
+  await clock.advance(130_000)
+  await finishAgent($, 'a2')
+
+  const ui = await mountPane($)
+  // the Sessione view lists the running agent
+  await ui.press({ key: 'agent:a3' })
+  expect(viewed).toEqual(['a3'])
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'agent:a3' }) // live
+  await ui.press({ key: 'agent:a2' }) // finished, still listed
+  await ui.press({ key: 'history' })
+  await ui.press({ key: 'history:a1' }) // in the history
+  expect(viewed).toEqual(['a3', 'a3', 'a2', 'a1'])
+  await ui.unmount()
+})
+
+// ── Phase 2 follow-ups ──
+
+test('burn rate: a reading from before the current 5h window opened is not carried across the reset', async ($, on) => {
+  const clock = world(on) // 38% at start, in a window that opened before it
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const measure = (used: number, resetsAt: string) =>
+    $.session.measure({
+      context: { window: 1_000_000, tokens: 260_000, percent: 26 },
+      rateLimits: [{ kind: 'five_hour', percentUsed: used, resetsAt }],
+      cost: { usd: 5.2 },
+      changed: ['rateLimits'],
+    })
+  await clock.advance(15 * MIN)
+  await measure(41, iso(2 * 60 * MIN)) // the same window: 3 points in 15 minutes
+  expect((await paneRows($)).rows.some(r => /finisce/.test(r))).toBe(true)
+
+  await clock.advance(75 * MIN)
+  await measure(45, iso(90 * MIN + 5 * 60 * MIN)) // a new window that opened just now: the earlier readings are not its start
+  expect((await paneRows($)).rows.some(r => /finisce/.test(r))).toBe(false)
+})
+
+test('Sessione: copia branch is left out on a detached HEAD', async ($, on) => {
+  world(on, { detached: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'quick:branch' })).toBeUndefined()
+  expect(await ui.find({ key: 'quick:compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
+  world(on, { workspacesRaw: '{ "roots": [ { "path": "/work", "org": ' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+})
+
+test('tab bar: below 48 columns the labels are short and the bar fits the pane; from 48 they are whole', async ($, on) => {
+  world(on, { hasWorklog: true })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'code-reviewer')
+  // a terminal Button draws `[ label ]`: 4 cells of chrome, one cell between two
+  const tabsAt = async (columns: number) => {
+    const ui = await mountPane($, columns)
+    const labels = (await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('tab:')).map(b => b.text ?? '')
+    await ui.unmount()
+    return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1 }
+  }
+  const narrow = await tabsAt(40)
+  expect(narrow.labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
+  expect(narrow.cells).toBeLessThanOrEqual(40)
+  expect((await tabsAt(47)).labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
+  const whole = await tabsAt(48)
+  expect(whole.labels).toEqual(['Sessione', 'Agenti 1', 'Lavoro ●', 'Repo'])
+  expect(whole.cells).toBeLessThanOrEqual(48)
+})
+
+/** The `flexDirection` of the Box that holds the Button keyed `key`. */
+const directionAround = (root: unknown, key: string): string | undefined => {
+  const o = root as { type?: string; props?: { flexDirection?: string }; children?: { props?: { key?: string } }[] } | null
+  if (o?.type === 'Box' && (o.children ?? []).some(c => c?.props?.key === key)) return o.props?.flexDirection
+  for (const c of o?.children ?? []) {
+    const found = directionAround(c, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+test('quick buttons: side by side where they fit the pane, stacked at 40 columns', async ($, on) => {
+  const options: World = {}
+  world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // compatta + /worklog + copia branch: 12 + 12 + 16 cells and two gaps
+  expect(directionAround((await paneRows($, 50)).root, 'quick:compact')).toBe('row')
+  expect(directionAround((await paneRows($, 42)).root, 'quick:compact')).toBe('row')
+  expect(directionAround((await paneRows($, 40)).root, 'quick:compact')).toBe('column')
+})
+
+test('quick buttons: without copia branch the two left fit 40 columns side by side', async ($, on) => {
+  world(on, { detached: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(directionAround((await paneRows($, 40)).root, 'quick:compact')).toBe('row')
+})
+
+test('Lavoro with no tasks and no worklog warnings says niente da mostrare', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const { rows } = await paneRows($, 50, 'work')
+  expect(rows.at(-1)).toBe('niente da mostrare')
+  expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })

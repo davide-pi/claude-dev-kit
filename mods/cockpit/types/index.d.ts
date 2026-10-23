@@ -16,12 +16,31 @@ export type CockpitAgent = {
   status: 'running' | 'done'
   startedAt: number
   endedAt?: number
+  /** True when the agent ended on an error, an interruption or a refusal, or the engine lists it failed or killed. */
+  isFailed?: boolean
+  /** True when the session ended with the agent still running: the history's third outcome, `interrotto`. */
+  isInterrupted?: boolean
   /** New tokens the agent's turns used: input + cache writes + output (cache reads left out). */
   tokens: number
 }
 
+/** A finished agent that left the live list, as the history keeps it (and the state file persists it). */
+export type CockpitHistoryEntry = {
+  id: string
+  type: string
+  model?: string
+  startedAt: number
+  endedAt: number
+  tokens: number
+  isFailed: boolean
+  /** Present (true) only for an agent still running when its session ended. */
+  isInterrupted?: boolean
+}
+
 export type CockpitGit = {
   branch: string
+  /** HEAD points at a commit, not a branch: `branch` then reads `HEAD`. */
+  isDetached?: boolean
   staged: number
   modified: number
   untracked: number
@@ -55,6 +74,10 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
 export type CockpitTab = 'session' | 'agents' | 'work' | 'repo'
 
 export type CockpitSnapshot = {
+  /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
+  sessionId?: string
+  /** The id of the session that ended last: while the engine still answers it, no change takes it back (it answers it until the switch to the next id). */
+  endedSessionId?: string
   cwd: string
   /** Raw model id or name of the main loop. */
   model?: string
@@ -74,6 +97,10 @@ export type CockpitSnapshot = {
   /** The selected tab; absent (a state written before tabs existed) is the Sessione view. */
   tab?: CockpitTab
   agents: CockpitAgent[]
+  /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
+  history?: CockpitHistoryEntry[]
+  /** The STORICO list is expanded; absent is collapsed. */
+  isHistoryOpen?: boolean
   git?: CockpitGit
   worklog: CockpitWorklog
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
