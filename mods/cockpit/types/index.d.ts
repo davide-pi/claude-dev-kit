@@ -13,6 +13,10 @@ export type CockpitAgent = {
   /** What the agent runs on: the resolved id from the spawn, then the latest `turn.step`'s. */
   model?: string
   effort?: string | number
+  /** The spawn's `description` of the task (a few words); absent for an agent only seen through its events. */
+  description?: string
+  /** The last tool the agent called, from the `tool.call` events carrying its id; absent before its first call. */
+  lastTool?: string
   status: 'running' | 'done'
   startedAt: number
   endedAt?: number
@@ -64,6 +68,15 @@ export type CockpitTask = {
   startedAt?: number
 }
 
+/** The changed files of the worktree against HEAD (tracked and untracked) and those the active deliver perimeter does not cover. */
+export type CockpitPerimeterCheck = { files: number; outside: string[] }
+
+/** The agents of the workflow run in flight that the engine let the mod see (its spawns), and which of them finished. */
+export type CockpitWorkflowRun = { runId: string; agents: { id: string; isDone: boolean }[] }
+
+/** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
+export type CockpitDoneClaim = { at: string; rule: string; excerpt: string }
+
 /** One reading of the 5h window's usage, `at` in `$.clock.now()` milliseconds. */
 export type CockpitBurnSample = { at: number; used: number }
 
@@ -107,6 +120,12 @@ export type CockpitSnapshot = {
   tasks?: CockpitTask[]
   /** Entries of the active deliver perimeter of the branch checked out (`<git-dir>/deliver/perimeter.md`); absent without one. */
   perimeter?: string[]
+  /** The changed files outside `perimeter`, checked against HEAD like `hooks/scope-guard.js --check`; absent without a perimeter or when git could not say. */
+  perimeterCheck?: CockpitPerimeterCheck
+  /** The workflow run whose agents the mod saw spawn; cleared by a stop that reports no workflow in flight. */
+  workflowRun?: CockpitWorkflowRun
+  /** The last entries of `done-claim.log`, newest first; absent without a readable log. */
+  doneClaims?: CockpitDoneClaim[]
   /** The open GitHub pull request of the branch checked out, read in the background (`gh pr view`); the `segna ore` scope uses it. Absent without one. */
   prNumber?: number
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */

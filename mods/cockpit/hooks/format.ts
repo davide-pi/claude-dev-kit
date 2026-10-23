@@ -1,7 +1,18 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
-import type { CockpitAgent, CockpitAlm, CockpitBurnSample, CockpitGit, CockpitHistoryEntry, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
+import type {
+  CockpitAgent,
+  CockpitAlm,
+  CockpitBurnSample,
+  CockpitDoneClaim,
+  CockpitGit,
+  CockpitHistoryEntry,
+  CockpitPerimeterCheck,
+  CockpitSnapshot,
+  CockpitTab,
+  CockpitTask,
+} from '../types'
 
 export const COLORS = {
   text: '#d6d8dc',
@@ -554,6 +565,10 @@ export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimete
   return out
 }
 
+/** The work item id a branch name carries (`AB#1234`, `/1234-`, `feature/1234`); undefined when it carries none. */
+export const branchWorkItemId = (branch: string): string | undefined =>
+  /AB#(\d+)/i.exec(branch)?.[1] ?? /(?:^|\/)(\d{3,})(?=$|[-_/])/.exec(branch)?.[1]
+
 const DEFAULT_BRANCHES: readonly string[] = ['main', 'master', 'develop']
 
 /** The branch is a default one: `main`, `master`, `develop` or the repo's own (`defaultBranch`, from `origin/HEAD`). */
@@ -568,7 +583,7 @@ export const isDefaultBranch = (branch: string, defaultBranch?: string): boolean
  */
 export function worklogScope(git: CockpitGit | undefined, prNumber?: number, defaultBranch?: string): string | undefined {
   if (!git || git.isDetached || isDefaultBranch(git.branch, defaultBranch)) return undefined
-  const id = /AB#(\d+)/i.exec(git.branch)?.[1] ?? /(?:^|\/)(\d{3,})(?=$|[-_/])/.exec(git.branch)?.[1]
+  const id = branchWorkItemId(git.branch)
   if (id) return `AB#${id}`
   return prNumber !== undefined ? `PR ${prNumber}` : `topic ${git.branch}`
 }
@@ -604,6 +619,69 @@ export function parsePerimeter(text: string, branch: string): string[] | undefin
     else if (l.startsWith('- ') && l.slice(2).trim()) entries.push(l.slice(2).trim())
   }
   return isActive && entries.length > 0 && fileBranch !== '' && fileBranch === branch ? entries : undefined
+}
+
+const slashes = (p: string): string => p.trim().replace(/\\/g, '/').replace(/^\.\//, '')
+
+/** A perimeter entry as a regex over a repo-relative path: a file, a directory (trailing `/`) or a glob; anchored, case-insensitive (as `hooks/scope-guard.js`). */
+function entryRegex(entry: string): RegExp {
+  let e = slashes(entry)
+  if (e.endsWith('/')) e += '**'
+  const src = e
+    .replace(/[.+^${}()|[\]]/g, '\\$&')
+    .replace(/\*\*/g, '\u0000')
+    .replace(/\*/g, '[^/]*')
+    .replace(/\u0000/g, '.*')
+    .replace(/\?/g, '[^/]')
+  return new RegExp(`^${src}$`, 'i')
+}
+
+/**
+ * How many of the `changed` files (repo-relative, tracked and untracked) there are, and which of them the perimeter `entries`
+ * do not cover: what `hooks/scope-guard.js --check` lists (a plan under `docs/plans/` and `.git/` are never outside).
+ */
+export function checkPerimeter(changed: readonly string[], entries: readonly string[]): CockpitPerimeterCheck {
+  const regexes = entries.map(entryRegex)
+  const seen = new Set<string>()
+  const outside: string[] = []
+  for (const raw of changed) {
+    const p = slashes(raw)
+    if (!p || seen.has(p)) continue
+    seen.add(p)
+    const lower = p.toLowerCase()
+    if (lower.startsWith('docs/plans/') || lower.startsWith('.git/') || regexes.some(r => r.test(p))) continue
+    outside.push(p)
+  }
+  return { files: seen.size, outside }
+}
+
+// ── The done-claim hook's log ────────────────────────────────────────────────
+
+const CLAIMS_SHOWN = 3
+const CLAIM_EXCERPT_MAX = 160
+
+/** The last `CLAIMS_SHOWN` lines of `done-claim.log` (one JSON object each), newest first; a line without `at` and `rule` is skipped. */
+export function parseDoneClaims(text: string): CockpitDoneClaim[] {
+  const out: CockpitDoneClaim[] = []
+  for (const l of text.split(/\r?\n/).reverse()) {
+    if (out.length === CLAIMS_SHOWN) break
+    try {
+      const v: unknown = JSON.parse(l)
+      if (!isRecord(v) || typeof v.at !== 'string' || typeof v.rule !== 'string') continue
+      out.push({ at: v.at, rule: v.rule, excerpt: typeof v.excerpt === 'string' ? v.excerpt.trim().slice(0, CLAIM_EXCERPT_MAX) : '' })
+    } catch {
+      // a torn or foreign line
+    }
+  }
+  return out
+}
+
+/** `22/10 09:05`: the log entry's day and time on the local clock; empty for a date that does not parse. */
+export function claimTime(at: string): string {
+  const d = new Date(at)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
 /** The cockpit's tabs, in the order the bar draws them. */
