@@ -50,7 +50,42 @@ export type CockpitGit = {
   untracked: number
   /** Root of the linked worktree the session runs in; absent in a main checkout. */
   worktreeRoot?: string
+  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Repo tab's git reads run and the paths they list start. */
+  root?: string
+  /** The branch's upstream (`origin/feature/x`) and the commits ahead of it and behind it; absent without an upstream. */
+  upstream?: string
+  ahead?: number
+  behind?: number
 }
+
+/** One changed file of the Repo tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
+export type CockpitChange = { path: string; added?: number; deleted?: number; isBinary?: boolean; isUntracked?: boolean }
+
+/** One checkout of the repository (`git worktree list`); `branch` is absent for a detached one. */
+export type CockpitWorktree = { path: string; branch?: string }
+
+/** What the Repo tab draws beyond the git grid, read only while that tab is selected. */
+export type CockpitRepo = {
+  /** The changed files, tracked first then untracked, kept to a few dozen. */
+  files: CockpitChange[]
+  /** How many files changed in all (`files` may hold fewer). */
+  total: number
+  /** Commits on HEAD that the repo's default branch lacks; absent when the default branch is unknown. */
+  commits?: number
+  worktrees: CockpitWorktree[]
+}
+
+/** The open pull request of the branch checked out. Azure DevOps lists no checks, so `checks` is then absent. */
+export type CockpitPr = {
+  number: number
+  title: string
+  isDraft: boolean
+  review?: 'approved' | 'changes' | 'pending'
+  checks?: { passed: number; failed: number; pending: number }
+}
+
+/** The diff the second pane draws: `text` is what `Code` takes (unified hunks); `isCut` when it was cut to fit; `isUnreadable` when the file is too big or cannot be read (no text). */
+export type CockpitDiff = { file: string; text: string; isCut?: boolean; isUnreadable?: boolean }
 
 export type CockpitWorklog = {
   /** Days with work that never reached a work item (ISO dates). */
@@ -126,11 +161,15 @@ export type CockpitSnapshot = {
   workflowRun?: CockpitWorkflowRun
   /** The last entries of `done-claim.log`, newest first; absent without a readable log. */
   doneClaims?: CockpitDoneClaim[]
-  /** The open GitHub pull request of the branch checked out, read in the background (`gh pr view`); the `segna ore` scope uses it. Absent without one. */
-  prNumber?: number
+  /** The open pull request of the branch checked out, read in the background (`gh pr view` on GitHub, `az repos pr list` on Azure DevOps). Absent without one. */
+  pr?: CockpitPr
+  /** The Repo tab's changed files and worktrees; absent until that tab was selected, and without git. */
+  repo?: CockpitRepo
+  /** The diff of the file pressed on the Repo tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
+  diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
   workflow?: string
-  /** The repo's default branch, as `origin/HEAD` names it; `segna ore` is hidden on it. Absent when `origin/HEAD` is not set. */
+  /** The repo's default branch, as `origin/HEAD` names it: the commits of the Repo tab count from it. Absent when `origin/HEAD` is not set. */
   defaultBranch?: string
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */
   now: number

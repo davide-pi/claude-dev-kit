@@ -105,6 +105,42 @@ type World = {
   gitCalls?: string[]
   /** The text of `<config>/.cache/done-claim.log`; absent, the default answer holds no log line. */
   doneClaims?: string
+  /** The `mtimeMs` `fs.stat` answers for `done-claim.log` (its size is the text's length); read at every call. */
+  claimsMtime?: () => number
+  /** Receives the path of every read of `done-claim.log`. */
+  claimReads?: string[]
+  /** The tail of the `status -b` header after the branch name (`...origin/x [ahead 2, behind 1]`); absent, no upstream. */
+  upstream?: string
+  /** What `git diff --numstat` lists: `[added, deleted, path]` per tracked file (`-` for a binary one). */
+  numstat?: [string, string, string][]
+  /** What `git rev-list --count` answers: the commits since the default branch. */
+  commits?: number
+  /** The raw text of `git worktree list --porcelain`. */
+  worktrees?: string
+  /** What `git diff HEAD -- <file>` prints, by path. */
+  fileDiffs?: Record<string, string>
+  /** The text of the working-tree files `fs.read` answers, by path tail (the untracked files the diff pane reads). */
+  files?: Record<string, string>
+  /** Extra fields of the `gh pr view` answer (title, reviewDecision, statusCheckRollup, isDraft ...). */
+  prExtra?: Record<string, unknown>
+  /** The list `az repos pr list` answers; absent, az answers an empty list. */
+  azPr?: readonly unknown[]
+  /** True: `az` is not installed (the process cannot start). */
+  noAz?: boolean
+  /** Receives every `az` call's argv, joined by spaces. */
+  azCalls?: string[]
+  /** Receives the title of every pane the mod opens. */
+  openedTitles?: (string | undefined)[]
+  /** Receives the `env` each `az` call was started with (undefined when it set none). */
+  azEnvs?: (Record<string, string> | undefined)[]
+  /** The `.azure-<identity>` folders (by path tail) that exist; any other `.azure-*` stat fails. */
+  azDirs?: string[]
+  /** The size `fs.stat` answers for a working-tree file, by path tail. */
+  fileSizes?: Record<string, number>
+  /** The working-tree files (by path tail) whose `fs.read` fails. */
+  unreadable?: string[]
+  /** A promise the first `git rev-parse` waits on: the git read of a refresh that a later one overtakes. */
+  holdRevParse?: Promise<void>
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -132,25 +168,44 @@ function world(on: On, options: World = {}) {
       cost: { usd: options.isFresh ? 0 : 4.82 },
     },
   }))
-  on('process.run', (_, e) => {
+  on('process.run', async (_, e) => {
     const answer = (stdout: string, exitCode = 0) => ({
       value: { exitCode, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout },
     })
     if (e.argv[0] === 'gh') {
       options.ghCalls?.push(e.argv.join(' '))
       if (options.noGh) throw new Error('spawn gh ENOENT')
-      return options.pr === undefined ? answer('', 1) : answer(JSON.stringify({ number: options.pr, state: options.prState ?? 'OPEN' }))
+      return options.pr === undefined
+        ? answer('', 1)
+        : answer(JSON.stringify({ number: options.pr, state: options.prState ?? 'OPEN', title: 'Fix the orders filter', ...options.prExtra }))
+    }
+    // On Windows the mod starts az through cmd, the way a shell would resolve az.cmd.
+    if (e.argv[0] === 'az' || (e.argv.slice(0, 4).join(' ') === 'cmd /d /s /c' && e.argv[4] === 'az')) {
+      options.azCalls?.push(e.argv.join(' '))
+      options.azEnvs?.push(e.init?.env)
+      if (options.noAz) throw new Error('spawn az ENOENT')
+      return answer(JSON.stringify(options.azPr ?? []))
     }
     if (options.notRepo) return answer('', 128)
+    if (e.argv.includes('--numstat')) return answer((options.numstat ?? []).map(([a, d, p]) => `${a}\t${d}\t${p}\0`).join(''))
+    if (e.argv.includes('rev-list')) return options.commits === undefined ? answer('', 128) : answer(`${options.commits}\n`)
+    if (e.argv.includes('worktree')) return answer(options.worktrees ?? '')
+    if (e.argv.includes('diff') && !e.argv.includes('--name-only')) return answer(options.fileDiffs?.[e.argv.at(-1) ?? ''] ?? '')
     if (e.argv.includes('diff') || e.argv.includes('ls-files')) {
       options.gitCalls?.push(e.argv.join(' '))
       if (options.failDiff) return answer('', 128)
       return answer((e.argv.includes('diff') ? (options.changed ?? []) : (options.untracked ?? [])).map(f => `${f}\0`).join(''))
     }
-    if (e.argv.includes('rev-parse')) return answer('.git\n.git\n/work/example-repo\n')
+    if (e.argv.includes('rev-parse')) {
+      const hold = options.holdRevParse
+      options.holdRevParse = undefined
+      await hold
+      return answer('.git\n.git\n/work/example-repo\n')
+    }
     if (e.argv.includes('symbolic-ref')) return options.defaultBranch === undefined ? answer('', 128) : answer(`origin/${options.defaultBranch}\n`)
     if (e.argv.includes('get-url')) return options.remote === undefined ? answer('', 2) : answer(`${options.remote}\n`)
-    return answer(`## ${options.detached ? 'HEAD (no branch)' : (options.branch ?? 'feature/x')}\nM  a.ts\n M b.ts\n?? c.ts\n`)
+    const header = options.detached ? 'HEAD (no branch)' : `${options.branch ?? 'feature/x'}${options.upstream === undefined ? '' : `...${options.upstream}`}`
+    return answer(`## ${header}\nM  a.ts\n M b.ts\n?? c.ts\n`)
   })
   on('fs.read', (_, e) => {
     if (e.path.endsWith('workspaces.json')) {
@@ -159,12 +214,25 @@ function world(on: On, options: World = {}) {
     }
     if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
     if (options.perimeter !== undefined && /deliver[\\/]perimeter\.md$/.test(e.path)) return { value: options.perimeter }
+    if (/done-claim\.log$/.test(e.path)) options.claimReads?.push(e.path)
     if (options.doneClaims !== undefined && /done-claim\.log$/.test(e.path)) return { value: options.doneClaims }
+    if (options.unreadable?.some(k => e.path.endsWith(k))) throw new Error('EACCES: permission denied')
+    const file = Object.keys(options.files ?? {}).find(k => e.path.endsWith(k))
+    if (file !== undefined) return { value: options.files?.[file] ?? '' }
     return {
       value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
     }
   })
-  on('fs.stat', () => ({ value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }))
+  on('fs.stat', (_, e) => {
+    if (/done-claim\.log$/.test(e.path)) return { value: { kind: 'file', size: options.doneClaims?.length ?? 0, mtimeMs: options.claimsMtime?.() ?? 0, isLink: false } }
+    if (/[\\/]\.azure-[\w.-]+$/.test(e.path)) {
+      if (options.azDirs?.some(d => e.path.endsWith(d))) return { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } }
+      throw new Error('ENOENT: no such file or directory')
+    }
+    const sized = Object.keys(options.fileSizes ?? {}).find(k => e.path.endsWith(k))
+    if (sized !== undefined) return { value: { kind: 'file', size: options.fileSizes?.[sized] ?? 0, mtimeMs: 0, isLink: false } }
+    return { value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }
+  })
   on('agent.list', () => ({ value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }))
   on('ui.view', (_, e) => {
     options.viewed?.push(e.agentId)
@@ -173,6 +241,7 @@ function world(on: On, options: World = {}) {
   on('ui.open', (_, e) => {
     options.opened?.push(e.id)
     options.openedColumns?.push(e.columns)
+    options.openedTitles?.push(e.title)
     return { value: options.isPlaced === false ? { isPlaced: false, reason: 'too narrow (80 < 144)' } : { isPlaced: true } }
   })
   on('ui.close', (_, e) => {
@@ -1063,7 +1132,7 @@ test('Sessione: below 80% there is no warning; 80% exactly has it', async ($, on
 
 // ── Buttons row: compatta and segna ore, the last row of every tab ──
 
-test('buttons row: compatta compacts with the instructions, segna ore submits the scoped /worklog', async ($, on) => {
+test('buttons row: compatta compacts with the instructions, segna ore submits the /worklog of this chat', async ($, on) => {
   const calls: string[] = []
   const instructions: (string | undefined)[] = []
   const commands: string[] = []
@@ -1080,7 +1149,7 @@ test('buttons row: compatta compacts with the instructions, segna ore submits th
   expect(instructions).toEqual([KEEP_DROP])
   expect(commands).toEqual([])
   await ui.press({ key: 'bar:worklog' })
-  expect(commands).toEqual(['/worklog oggi AB#1234'])
+  expect(commands).toEqual(['/worklog oggi sessione s-1'])
   expect(calls).toEqual(['compact'])
   await ui.unmount()
 })
@@ -1139,112 +1208,195 @@ test('buttons row: a perimeter of another branch, or a closed one, is not named'
   expect(instructions).toEqual([KEEP_DROP])
 })
 
-for (const [branch, scope] of [
-  ['feature/AB#512-reports', 'AB#512'],
-  ['users/me/4711-fix-login', 'AB#4711'],
-  ['feature/orders-filter', 'topic feature/orders-filter'],
-] as const) {
-  test(`buttons row: segna ore on ${branch} submits the scope ${scope}`, async ($, on) => {
-    const commands: string[] = []
-    world(on, { commands, branch })
-    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-    const ui = await mountPane($)
-    await ui.press({ key: 'bar:worklog' })
-    await ui.unmount()
-    expect(commands).toEqual([`/worklog oggi ${scope}`])
-  })
-}
-
+// segna ore logs the hours of THIS chat, whatever the branch: the button is there whenever the session has an id
 for (const [name, options] of [
+  ['a feature branch', { branch: 'feature/orders-filter' }],
+  ['a branch with a work item id', { branch: 'feature/AB#512-reports' }],
+  ['the default branch', { branch: 'main' }],
   ['a detached HEAD', { detached: true }],
   ['no git', { notRepo: true }],
 ] as const) {
-  test(`buttons row: segna ore is hidden on ${name}; compatta stays`, async ($, on) => {
-    world(on, options)
+  test(`buttons row: segna ore on ${name} runs /worklog oggi sessione with the id of this chat`, async ($, on) => {
+    const commands: string[] = []
+    world(on, { commands, sessionId: () => 'chat-7', ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await settleAll()
     const ui = await mountPane($)
-    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
-    expect(await ui.find({ key: 'bar:compact' })).toBeDefined()
+    expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('segna ore')
+    expect((await ui.find({ key: 'bar:compact' }))?.text).toBe('compatta')
+    await ui.press({ key: 'bar:worklog' })
     await ui.unmount()
+    expect(commands).toEqual(['/worklog oggi sessione chat-7'])
   })
 }
 
-for (const branch of ['main', 'master', 'develop']) {
-  test(`buttons row: segna ore is hidden on ${branch}, the default branch; compatta stays`, async ($, on) => {
-    world(on, { branch })
-    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-    const ui = await mountPane($)
-    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
-    expect(await ui.find({ key: 'bar:compact' })).toBeDefined()
-    await ui.unmount()
-  })
-}
+test('buttons row: between two sessions (no id) segna ore is not offered; compatta stays', async ($, on) => {
+  world(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+  expect(await ui.find({ key: 'bar:compact' })).toBeDefined()
+  await ui.unmount()
+})
+
+// ── Repo: PR and checks, read in the background ──
 
 /** Lets the background reads a session start leaves running (the repo's default branch, the PR) finish. */
 const settleAll = async () => {
   for (let i = 0; i < 8; i++) await settle()
 }
 
-test("buttons row: segna ore is hidden on the repo's own default branch, read from origin/HEAD", async ($, on) => {
-  world(on, { branch: 'trunk', defaultBranch: 'trunk' })
+/** The Repo tab's rows once the git reads its selection started have settled. */
+async function repoRows($: Engine, bodyColumns = 50) {
+  const ui = await mountPane($, bodyColumns)
+  await ui.press({ key: 'tab:repo' })
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  return rows
+}
+
+const GH_PR_ARGS = 'gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup'
+const AZ_REMOTE = 'https://dev.azure.com/<org>/proj/_git/orders'
+const AZ_WORKSPACES = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
+const CHECKS = [
+  { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
+  { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'FAILURE' },
+  { __typename: 'StatusContext', state: 'SUCCESS' },
+  { __typename: 'CheckRun', status: 'IN_PROGRESS', conclusion: '' },
+]
+
+test('PR: a GitHub pull request of the branch with its state, title, reviews and checks (gh pr view, once)', async ($, on) => {
+  const ghCalls: string[] = []
+  world(on, {
+    ghCalls,
+    branch: 'feature/orders-filter',
+    remote: GH_SSH,
+    pr: 42,
+    prExtra: { isDraft: false, reviewDecision: 'APPROVED', statusCheckRollup: CHECKS },
+  })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  const ui = await mountPane($)
-  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
-  await ui.unmount()
+  const rows = await repoRows($)
+  const i = rows.findIndex(r => r === 'PR · #42 · aperta')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows.slice(i + 1, i + 5)).toEqual([' ', 'Fix the orders filter', 'review approvata', 'checks 2/4 · ✗ 1 · ◐ 1'])
+  expect(ghCalls).toEqual([GH_PR_ARGS])
 })
 
-// ── segna ore: the PR of the branch, read in the background ──
-
-test('segna ore: an open GitHub PR of the branch is its scope (gh pr view, once)', async ($, on) => {
-  const commands: string[] = []
-  const ghCalls: string[] = []
-  world(on, { commands, ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 })
+test('PR: a draft says bozza, changes requested and a review still due are told apart, no checks draws no checks row', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { isDraft: true, reviewDecision: 'CHANGES_REQUESTED' } }
+  const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  const ui = await mountPane($)
-  await ui.press({ key: 'bar:worklog' })
-  await ui.unmount()
-  expect(commands).toEqual(['/worklog oggi PR 42'])
-  expect(ghCalls).toEqual(['gh pr view --json number,state'])
+  let rows = await repoRows($)
+  expect(rows).toContain('PR · #42 · bozza')
+  expect(rows).toContain('review modifiche richieste')
+  expect(rows.some(r => /^checks/.test(r))).toBe(false)
+
+  options.prExtra = { reviewDecision: 'REVIEW_REQUIRED' }
+  await clock.advance(5 * MIN)
+  await settleAll()
+  rows = await repoRows($)
+  expect(rows).toContain('PR · #42 · aperta')
+  expect(rows).toContain('review in attesa')
+
+  options.prExtra = { reviewDecision: '' }
+  await clock.advance(5 * MIN)
+  await settleAll()
+  expect((await repoRows($)).some(r => /^review/.test(r))).toBe(false)
 })
 
-test('segna ore: a work item id in the branch name wins over the PR, and gh is not asked', async ($, on) => {
-  const commands: string[] = []
+test('PR: a work item id in the branch name no longer keeps gh from being asked', async ($, on) => {
   const ghCalls: string[] = []
-  world(on, { commands, ghCalls, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
+  world(on, { ghCalls, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  const ui = await mountPane($)
-  await ui.press({ key: 'bar:worklog' })
-  await ui.unmount()
-  expect(commands).toEqual(['/worklog oggi AB#77'])
-  expect(ghCalls).toEqual([])
+  expect(await repoRows($)).toContain('PR · #42 · aperta')
+  expect(ghCalls).toEqual([GH_PR_ARGS])
 })
 
 // `isGhAsked`: whether `gh pr view` is run at all (only for a GitHub remote)
 for (const { name, options, isGhAsked } of [
-  { name: 'an Azure DevOps remote (skipped for now)', options: { remote: 'https://dev.azure.com/<org>/proj/_git/orders', pr: 42 }, isGhAsked: false },
+  { name: 'an unknown remote', options: { remote: 'https://git.example.org/orders.git', pr: 42 }, isGhAsked: false },
   { name: 'no remote', options: { pr: 42 }, isGhAsked: false },
   { name: 'gh not installed', options: { remote: GH_SSH, pr: 42, noGh: true }, isGhAsked: true },
   { name: 'no PR for the branch', options: { remote: GH_SSH }, isGhAsked: true },
   { name: 'a PR that is not open', options: { remote: GH_SSH, pr: 42, prState: 'MERGED' }, isGhAsked: true },
 ] as const) {
-  test(`segna ore: with ${name} the scope stays the topic`, async ($, on) => {
-    const commands: string[] = []
+  test(`PR: with ${name} the Repo tab draws no PR`, async ($, on) => {
     const ghCalls: string[] = []
-    world(on, { commands, ghCalls, branch: 'feature/orders-filter', ...options })
+    world(on, { ghCalls, branch: 'feature/orders-filter', ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    const ui = await mountPane($)
-    await ui.press({ key: 'bar:worklog' })
-    await ui.unmount()
-    expect(commands).toEqual(['/worklog oggi topic feature/orders-filter'])
-    expect(ghCalls).toEqual(isGhAsked ? ['gh pr view --json number,state'] : [])
+    expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+    expect(ghCalls).toEqual(isGhAsked ? [GH_PR_ARGS] : [])
   })
 }
 
-test('segna ore: the PR is read at most every 5 minutes, and again for another branch; the default branch is never asked', async ($, on) => {
+test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM line and the project of the remote, and shows the review without inventing checks', async ($, on) => {
+  const azCalls: string[] = []
+  const ghCalls: string[] = []
+  world(on, {
+    azCalls,
+    ghCalls,
+    branch: 'feature/orders-filter',
+    remote: AZ_REMOTE,
+    workspaces: AZ_WORKSPACES,
+    azPr: [{ pullRequestId: 7, title: 'Faster orders', status: 'active', isDraft: false, reviewers: [{ vote: 10 }, { vote: 0 }] }],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const rows = await repoRows($)
+  const i = rows.findIndex(r => r === 'PR · #7 · aperta')
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', 'Faster orders', 'review approvata'])
+  expect(rows.some(r => /^checks/.test(r))).toBe(false)
+  expect(azCalls).toEqual([
+    // the org is the ALM line's, as a URL (joined, so the text is not read as a real organization's)
+    `az repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status active --top 1 --output json`,
+  ])
+  expect(ghCalls).toEqual([])
+})
+
+test('PR: on Azure DevOps the repository is asked in the project of the remote URL, not the ALM one', async ($, on) => {
+  const azCalls: string[] = []
+  world(on, {
+    azCalls,
+    branch: 'feature/orders-filter',
+    remote: 'https://dev.azure.com/<org>/Beta/_git/orders',
+    workspaces: AZ_WORKSPACES,
+    azPr: [{ pullRequestId: 7, title: 'Faster orders', status: 'active' }],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect((await repoRows($)).some(r => r === 'PR · #7 · aperta')).toBe(true)
+  expect(azCalls).toHaveLength(1)
+  expect(azCalls[0]).toContain('--project Beta --repository orders')
+})
+
+for (const { name, options, workspaces } of [
+  { name: 'az not installed', options: { noAz: true }, workspaces: AZ_WORKSPACES },
+  { name: 'no PR on the branch', options: { azPr: [] }, workspaces: AZ_WORKSPACES },
+  { name: 'a list without a usable PR', options: { azPr: [{ title: 'x' }] }, workspaces: AZ_WORKSPACES },
+  { name: 'no ALM org to ask', options: { azPr: [{ pullRequestId: 7, title: 'x', status: 'active' }] }, workspaces: { roots: [] } },
+] as const) {
+  test(`PR: on Azure DevOps with ${name} the Repo tab draws no PR`, async ($, on) => {
+    const azCalls: string[] = []
+    world(on, { azCalls, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces, ...options })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await settleAll()
+    expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+    // without an org the CLI is not asked at all: never the configured default
+    expect(azCalls.length).toBe(name === 'no ALM org to ask' ? 0 : 1)
+  })
+}
+
+test('PR: read at most every 5 minutes, and again for another branch; the default branch is never asked', async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
@@ -1263,9 +1415,7 @@ test('segna ore: the PR is read at most every 5 minutes, and again for another b
   await clock.advance(15_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
-  const ui = await mountPane($)
-  expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('segna ore')
-  await ui.unmount()
+  expect(await repoRows($)).toContain('PR · #43 · aperta')
 
   options.branch = 'main'
   await clock.advance(15_000)
@@ -1273,20 +1423,17 @@ test('segna ore: the PR is read at most every 5 minutes, and again for another b
   expect(ghCalls).toHaveLength(3)
 })
 
-test('segna ore: the PR of a branch left behind is not the scope of the next one', async ($, on) => {
-  const commands: string[] = []
-  const options: World = { commands, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+test('PR: the PR of a branch left behind is not shown on the next one', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
+  expect(await repoRows($)).toContain('PR · #42 · aperta')
   options.branch = 'feature/other'
   options.pr = undefined
   await clock.advance(15_000)
   await settleAll()
-  const ui = await mountPane($)
-  await ui.press({ key: 'bar:worklog' })
-  await ui.unmount()
-  expect(commands).toEqual(['/worklog oggi topic feature/other'])
+  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
 })
 
 /** The keys of the Buttons in the last row of the drawn pane. */
@@ -1986,7 +2133,7 @@ test('hook triggers: no log (or an empty one) draws no block', async ($, on) => 
 
 // ── PR read follow-ups ──
 
-test('segna ore: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', async ($, on) => {
+test('PR: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
@@ -2009,7 +2156,7 @@ test('segna ore: a detached HEAD or a folder without git forgets the PR read, so
   expect(ghCalls).toHaveLength(3)
 })
 
-test('segna ore: a branch left and come back to is asked again, not served from the read of five minutes ago', async ($, on) => {
+test('PR: a branch left and come back to is asked again, not served from the read of five minutes ago', async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
@@ -2024,22 +2171,405 @@ test('segna ore: a branch left and come back to is asked again, not served from 
   expect(ghCalls).toHaveLength(3)
 })
 
-test('segna ore: a failed gh pr view clears the PR of that branch', async ($, on) => {
-  const commands: string[] = []
-  const options: World = { commands, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+test('PR: a failed gh pr view clears the PR of that branch', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  let ui = await mountPane($)
-  await ui.press({ key: 'bar:worklog' })
-  await ui.unmount()
-  expect(commands).toEqual(['/worklog oggi PR 42'])
+  expect(await repoRows($)).toContain('PR · #42 · aperta')
 
   options.noGh = true // gh is gone: the next read fails
   await clock.advance(5 * MIN)
   await settleAll()
-  ui = await mountPane($)
-  await ui.press({ key: 'bar:worklog' })
+  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+})
+
+// ── Agent lifecycle ──
+
+test('workflow agents: a tick does not end an agent just because the engine does not list it; its own turn does', async ($, on) => {
+  const clock = world(on) // $.agent.list() answers nothing: it never lists a workflow's agents
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await spawnWorkflowAgent($, 'wf_1', 2)
+  await clock.advance(30_000) // two ticks
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^◐ implementer/)
+  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^◐ implementer/)
+  await finishAgent($, 'a1')
+  await clock.advance(15_000)
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✓ implementer/)
+  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^◐ implementer/)
   await ui.unmount()
-  expect(commands).toEqual(['/worklog oggi PR 42', '/worklog oggi topic feature/orders-filter'])
+})
+
+test('workflow agents: an explicit failed or killed listing ends them', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'killed' }] })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await spawnWorkflowAgent($, 'wf_1', 2)
+  await clock.advance(15_000)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✗ implementer/)
+  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^◐ implementer/)
+  await ui.unmount()
+})
+
+test('workflow agents: the end of their run (a main-loop Stop that reports none) ends the ones still running', async ($, on) => {
+  const clock = world(on)
+  spawns(on)
+  on('classic.Stop', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await clock.advance(15_000)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^◐ implementer/)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✓ implementer/)
+  await ui.unmount()
+})
+
+test('subagent blocks: a tool call seen before its agent spawned does not make a stub that the spawn later fills', async ($, on) => {
+  world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
+  const rows = await workRows($)
+  const i = rows.findIndex(r => /^code-reviewer/.test(r))
+  expect(rows[i + 1]).toBe('Review the orders filter')
+  expect(rows.some(r => /ultimo tool/.test(r))).toBe(false)
+  // a call after the spawn is seen as before
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  expect((await workRows($)).some(r => r === 'ultimo tool Grep')).toBe(true)
+})
+
+// ── done-claim.log is read again only when it changed ──
+
+test('hook triggers: the log is read again only when its size or modification time changed', async ($, on) => {
+  const claimReads: string[] = []
+  let mtime = 1
+  const options: World = { claimReads, doneClaims: claim(1, 'unproven-row', 'primo'), claimsMtime: () => mtime }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(claimReads).toHaveLength(1)
+  for (let i = 0; i < 4; i++) await clock.advance(15_000)
+  expect(claimReads).toHaveLength(1)
+  expect((await workRows($)).some(r => /primo/.test(r))).toBe(true)
+
+  mtime = 2 // same size, new time
+  await clock.advance(15_000)
+  expect(claimReads).toHaveLength(2)
+
+  options.doneClaims = `${claim(1, 'unproven-row', 'primo')}\n${claim(2, 'unproven-row', 'secondo')}\n` // another size
+  await clock.advance(15_000)
+  expect(claimReads).toHaveLength(3)
+  expect((await workRows($)).some(r => /secondo/.test(r))).toBe(true)
+  await clock.advance(15_000)
+  expect(claimReads).toHaveLength(3)
+})
+
+
+// ── Repo: branch, changes, worktrees ──
+
+const WORKTREES = [
+  'worktree /work/example-repo',
+  'HEAD 1111111',
+  'branch refs/heads/feature/x',
+  '',
+  'worktree /work/orders-wt',
+  'HEAD 2222222',
+  'branch refs/heads/feat/y',
+  '',
+  'worktree /work/old-wt',
+  'HEAD 3333333',
+  'detached',
+  '',
+].join('\n')
+
+test('Repo: the branch with its upstream and ahead/behind, and the commits since the default branch', async ($, on) => {
+  world(on, { branch: 'feature/x', upstream: 'origin/feature/x [ahead 2, behind 1]', defaultBranch: 'main', commits: 3 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const rows = await repoRows($)
+  const i = rows.findIndex(r => r === 'BRANCH')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', 'origin/feature/x ↑2 ↓1', '3 commit da main'])
+})
+
+test('Repo: a branch without an upstream says so; one commit is singular; no default branch known draws no commits line', async ($, on) => {
+  world(on, { branch: 'feature/x', defaultBranch: 'main', commits: 1 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const rows = await repoRows($)
+  expect(rows).toContain('nessun upstream')
+  expect(rows).toContain('1 commit da main')
+})
+
+test('Repo: nothing is claimed about commits when the default branch is unknown or the branch is the default one', async ($, on) => {
+  world(on, { branch: 'feature/x', commits: 5 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect((await repoRows($)).some(r => /commit da/.test(r))).toBe(false)
+})
+
+test('Repo: on the default branch there are no commits since it', async ($, on) => {
+  world(on, { branch: 'main', defaultBranch: 'main', commits: 0 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect((await repoRows($)).some(r => /commit da/.test(r))).toBe(false)
+})
+
+test('Repo: the changed files with +/- (a binary file bin, an untracked one ?), at most 8 rows, then … +n', async ($, on) => {
+  const numstat: [string, string, string][] = [
+    ['12', '3', 'src/a.ts'],
+    ['0', '5', 'src/b.ts'],
+    ['-', '-', 'img.png'],
+    ['1', '1', 'lib/f0.ts'],
+    ['1', '1', 'lib/f1.ts'],
+    ['1', '1', 'lib/f2.ts'],
+  ]
+  world(on, { numstat, untracked: ['notes.md', 'new.ts', 'x.ts', 'y.ts'] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:repo' })
+  await settleAll()
+  const files = (await ui.findAll({ type: 'Button' })).filter(b => /^file:/.test(b.key ?? ''))
+  expect(files.map(b => b.key)).toEqual(
+    ['src/a.ts', 'src/b.ts', 'img.png', 'lib/f0.ts', 'lib/f1.ts', 'lib/f2.ts', 'notes.md', 'new.ts'].map(f => `file:${f}`),
+  )
+  expect(files[0]?.text).toMatch(/^ +\+12 +-3 src\/a\.ts$/)
+  expect(files[1]?.text).toMatch(/^ +\+0 +-5 src\/b\.ts$/)
+  expect(files[2]?.text).toMatch(/^ +bin +img\.png$/)
+  expect(files[6]?.text).toMatch(/^ +\? +notes\.md$/)
+  const rows = rowTexts(await ui.drawn())
+  const i = rows.findIndex(r => r === 'MODIFICHE · 10')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i + 1]).toBe(' ')
+  expect(rows[i + 10]).toBe('… +2')
+  await ui.unmount()
+})
+
+test('Repo: no changed files says so', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await repoRows($)
+  expect(rows).toContain('MODIFICHE · 0')
+  expect(rows).toContain('nessuna modifica')
+})
+
+test('Repo: the worktrees, the one the session runs in marked', async ($, on) => {
+  world(on, { worktrees: WORKTREES })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await repoRows($)
+  const i = rows.findIndex(r => r === 'WORKTREE · 3')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i + 1]).toBe(' ')
+  expect(rows[i + 2]).toMatch(/^● example-repo +feature\/x$/)
+  expect(rows[i + 3]).toMatch(/^○ orders-wt +feat\/y$/)
+  expect(rows[i + 4]).toMatch(/^○ old-wt +HEAD$/)
+})
+
+test('Repo: git is not read for it while another tab is selected', async ($, on) => {
+  const gitCalls: string[] = []
+  world(on, { gitCalls, numstat: [['1', '1', 'a.ts']], branch: 'feature/x' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(gitCalls).toEqual([])
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:repo' })
+  await settleAll()
+  expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks ls-files --others --exclude-standard -z')
+  await ui.unmount()
+})
+
+// ── Repo: the diff pane ──
+
+const DIFF = ['diff --git a/src/a.ts b/src/a.ts', 'index 1111111..2222222 100644', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' keep', '-old', '+new', '+added', ''].join('\n')
+const HUNKS = DIFF.split('\n').slice(2).join('\n')
+const DIFF_PANE = { ...PANE, requestId: 'cockpit-diff', props: { ...PANE.props, title: 'diff', bodyColumns: 80 } } as const
+
+/** Presses the file `key` of the Repo tab and returns the diff pane drawn afterwards. */
+async function pressFile($: Engine, file: string) {
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:repo' })
+  await settleAll()
+  await ui.press({ key: `file:${file}` })
+  await settleAll()
+  await ui.unmount()
+  return $.ui.mount({ ...DIFF_PANE, surface: 'terminal' })
+}
+
+test('diff pane: pressing a changed file opens `diff · <file>` and draws git diff HEAD -- <file> as diff hunks with Code', async ($, on) => {
+  const opened: string[] = []
+  const openedTitles: (string | undefined)[] = []
+  const gitCalls: string[] = []
+  world(on, { opened, openedTitles, gitCalls, numstat: [['2', '1', 'src/a.ts']], fileDiffs: { 'src/a.ts': DIFF } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const diff = await pressFile($, 'src/a.ts')
+  expect(opened).toEqual(['cockpit-diff'])
+  expect(openedTitles).toEqual(['diff · src/a.ts'])
+  const code = await diff.find({ type: 'Code' })
+  expect(code?.props).toMatchObject({ format: 'diff', source: HUNKS })
+  expect(await diff.find({ type: 'Text', text: 'diff · src/a.ts' })).toBeDefined()
+  await diff.unmount()
+})
+
+test('diff pane: an untracked file is drawn as all additions', async ($, on) => {
+  world(on, { untracked: ['notes.md'], files: { 'notes.md': 'one\r\ntwo\n' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const diff = await pressFile($, 'notes.md')
+  expect((await diff.find({ type: 'Code' }))?.props).toMatchObject({
+    format: 'diff',
+    source: '--- /dev/null\n+++ b/notes.md\n@@ -0,0 +1,2 @@\n+one\n+two\n',
+  })
+  await diff.unmount()
+})
+
+test('diff pane: a diff with no hunks (a binary file) says so instead of drawing nothing', async ($, on) => {
+  world(on, { numstat: [['-', '-', 'img.png']], fileDiffs: { 'img.png': 'diff --git a/img.png b/img.png\nBinary files a/img.png and b/img.png differ\n' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const diff = await pressFile($, 'img.png')
+  expect(await diff.find({ type: 'Code' })).toBeUndefined()
+  expect(await diff.find({ type: 'Text', text: /nessun hunk/ })).toBeDefined()
+  await diff.unmount()
+})
+
+test('diff pane: closable from its own button, which closes the pane and forgets the diff', async ($, on) => {
+  const closed: string[] = []
+  world(on, { closed, numstat: [['2', '1', 'src/a.ts']], fileDiffs: { 'src/a.ts': DIFF } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const diff = await pressFile($, 'src/a.ts')
+  expect((await diff.find({ key: 'diff:close' }))?.text).toBe('chiudi')
+  await diff.press({ key: 'diff:close' })
+  await settleAll()
+  expect(closed).toEqual(['plugin'])
+  await diff.unmount()
+  const again = await $.ui.mount({ ...DIFF_PANE, surface: 'terminal' })
+  expect(await again.find({ type: 'Code' })).toBeUndefined()
+  await again.unmount()
+})
+
+// ── The Azure CLI is started the way the platform can start it, aimed at the identity's own config ──
+
+const AZ_PR = [{ pullRequestId: 7, title: 'Faster orders', status: 'active' }]
+const AZ_LIST = `repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status active --top 1 --output json`
+
+for (const { name, env } of [
+  { name: 'OS is Windows_NT', env: { OS: 'Windows_NT' } },
+  { name: 'ComSpec is set', env: { ComSpec: 'cmd.exe' } },
+]) {
+  test(`az: on Windows (${name}) it runs through cmd, since az.cmd cannot be started by name without a shell`, async ($, on) => {
+    const azCalls: string[] = []
+    world(on, { azCalls, env: { CLAUDE_CONFIG_DIR: '/cfg', ...env }, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await settleAll()
+    expect(azCalls).toEqual([`cmd /d /s /c az ${AZ_LIST}`])
+    expect((await repoRows($)).some(r => r === 'PR · #7 · aperta')).toBe(true)
+  })
+}
+
+test('az: elsewhere it is started by name, with no shell in between', async ($, on) => {
+  const azCalls: string[] = []
+  world(on, { azCalls, env: { CLAUDE_CONFIG_DIR: '/cfg', OS: 'Linux' }, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(azCalls).toEqual([`az ${AZ_LIST}`])
+})
+
+test('az: on Windows an argument cmd would read as more than text (a branch named a&b) is never handed to it', async ($, on) => {
+  const windows: string[] = []
+  world(on, { azCalls: windows, env: { CLAUDE_CONFIG_DIR: '/cfg', OS: 'Windows_NT' }, branch: 'feature/a&b', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(windows).toEqual([])
+  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+})
+
+for (const { name, env, prefix } of [
+  { name: 'elsewhere', env: { HOME: '/home/me' }, prefix: 'az ' },
+  { name: 'on Windows', env: { OS: 'Windows_NT', USERPROFILE: '/home/me' }, prefix: 'cmd /d /s /c az ' },
+]) {
+  test(`az: ${name} the ALM identity's own config folder is selected for the call, when that folder exists`, async ($, on) => {
+    const azCalls: string[] = []
+    const azEnvs: (Record<string, string> | undefined)[] = []
+    world(on, {
+      azCalls,
+      azEnvs,
+      azDirs: ['.azure-id-a'],
+      env: { CLAUDE_CONFIG_DIR: '/cfg', ...env },
+      branch: 'feature/orders-filter',
+      remote: AZ_REMOTE,
+      workspaces: AZ_WORKSPACES,
+      azPr: AZ_PR,
+    })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await settleAll()
+    expect(azCalls).toHaveLength(1)
+    expect(azCalls[0]?.startsWith(prefix)).toBe(true)
+    expect(azEnvs).toEqual([{ AZURE_CONFIG_DIR: `${env.USERPROFILE ?? env.HOME}/.azure-id-a` }])
+  })
+}
+
+test('az: an identity whose config folder does not exist leaves the call with no AZURE_CONFIG_DIR, as hooks/lib/az-pin.js does', async ($, on) => {
+  const azEnvs: (Record<string, string> | undefined)[] = []
+  world(on, { azEnvs, azDirs: [], env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/me' }, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(azEnvs).toEqual([undefined])
+})
+
+// ── Review follow-ups: the diff pane of a file that cannot be drawn, a branch that moves under a refresh ──
+
+for (const { name, options } of [
+  { name: 'over 4 MiB', options: { fileSizes: { 'big.log': 4 * 1024 * 1024 + 1 }, files: { 'big.log': 'x' } } },
+  { name: 'unreadable', options: { unreadable: ['big.log'] } },
+] satisfies { name: string; options: World }[]) {
+  test(`diff pane: an untracked file ${name} opens the pane saying file troppo grande o illeggibile`, async ($, on) => {
+    const opened: string[] = []
+    world(on, { opened, untracked: ['big.log'], ...options })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const diff = await pressFile($, 'big.log')
+    expect(opened).toEqual(['cockpit-diff'])
+    expect(await diff.find({ type: 'Code' })).toBeUndefined()
+    expect(await diff.find({ type: 'Text', text: 'file troppo grande o illeggibile' })).toBeDefined()
+    expect(await diff.find({ type: 'Text', text: 'diff · big.log' })).toBeDefined()
+    expect(await diff.find({ key: 'diff:close' })).toBeDefined()
+    await diff.unmount()
+  })
+}
+
+test('PR: a branch that changes between a refresh\'s git read and its patch is asked again, not served from the read of the branch it left', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(ghCalls).toHaveLength(1)
+
+  // A refresh reads the branch, then waits; meanwhile another one finds HEAD detached and patches that in.
+  let release = () => {}
+  options.holdRevParse = new Promise<void>(resolve => {
+    release = resolve
+  })
+  await clock.advance(15_000)
+  await settleAll()
+  options.detached = true
+  await clock.advance(15_000)
+  await settleAll()
+  options.detached = false
+  release() // the first refresh patches the branch it read, over the one the snapshot now holds
+  await settleAll()
+  expect(ghCalls).toHaveLength(2)
+  expect(await repoRows($)).toContain('PR · #42 · aperta')
 })

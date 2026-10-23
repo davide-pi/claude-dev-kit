@@ -6,7 +6,6 @@ import {
   addHistory,
   almText,
   burnRate,
-  branchWorkItemId,
   burnText,
   checkPerimeter,
   claimTime,
@@ -15,8 +14,16 @@ import {
   parseDoneClaims,
   parseDefaultBranch,
   parsePerimeter,
-  parsePrNumber,
-  worklogScope,
+  parseGithubPr,
+  parseAzurePr,
+  parseNumstat,
+  parseWorktrees,
+  isAzureRemote,
+  azureRepo,
+  diffHunks,
+  capDiff,
+  additionsDiff,
+  isDefaultBranch,
   pctCell,
   recordBurnSample,
   resolveAlm,
@@ -152,7 +159,8 @@ test('barCells fills the width exactly, gap after fill', () => {
 
 test('parseGitStatus counts staged, modified, untracked', () => {
   const out = '## feature/x...origin/feature/x [ahead 1]\nM  a.ts\n M b.ts\nMM c.ts\n?? d.ts\n'
-  expect(parseGitStatus(out)).toEqual({ branch: 'feature/x', isDetached: false, staged: 2, modified: 2, untracked: 1 })
+  expect(parseGitStatus(out)).toEqual({ branch: 'feature/x', isDetached: false, staged: 2, modified: 2, untracked: 1, upstream: 'origin/feature/x', ahead: 1, behind: 0 })
+  expect(parseGitStatus('## feature/x\nM  a.ts\n')).toEqual({ branch: 'feature/x', isDetached: false, staged: 1, modified: 0, untracked: 0 })
   expect(parseGitStatus('## No commits yet on main\n')?.branch).toBe('main')
   // a detached HEAD has no branch: git says `HEAD (no branch)`
   expect(parseGitStatus('## HEAD (no branch)\n M a.ts\n')).toEqual({ branch: 'HEAD', isDetached: true, staged: 0, modified: 1, untracked: 0 })
@@ -428,37 +436,144 @@ test('compactInstructions: each part is optional, and long titles never push it 
   expect(text.startsWith(KEEP)).toBe(true)
 })
 
-const gitOn = (branch: string, isDetached = false) => ({ branch, isDetached, staged: 0, modified: 0, untracked: 0 })
-
-test('worklogScope: the work item id of the branch, else the PR, else the branch as a topic', () => {
-  expect(worklogScope(gitOn('feature/AB#1234-orders'))).toBe('AB#1234')
-  expect(worklogScope(gitOn('users/me/1234-orders-filter'))).toBe('AB#1234')
-  expect(worklogScope(gitOn('feature/1234'))).toBe('AB#1234')
-  expect(worklogScope(gitOn('fix/AB#77'), 9)).toBe('AB#77')
-  // no id in the name: the PR when known
-  expect(worklogScope(gitOn('feature/orders-filter'), 42)).toBe('PR 42')
-  // else the branch itself
-  expect(worklogScope(gitOn('feature/orders-filter'))).toBe('topic feature/orders-filter')
-  // a number that is not an id (too short, mid-word) is not read as one
-  expect(worklogScope(gitOn('feature/v2-ui'))).toBe('topic feature/v2-ui')
-  expect(worklogScope(gitOn('release-2026x'))).toBe('topic release-2026x')
+test('isDefaultBranch: main, master, develop and the repo own default, nothing else', () => {
+  for (const branch of ['main', 'master', 'develop']) expect(isDefaultBranch(branch)).toBe(true)
+  expect(isDefaultBranch('trunk')).toBe(false)
+  expect(isDefaultBranch('trunk', 'trunk')).toBe(true)
+  expect(isDefaultBranch('feature/trunk', 'trunk')).toBe(false)
 })
 
-test('worklogScope: nothing on the default branch, where no implementation is identifiable', () => {
-  for (const branch of ['main', 'master', 'develop']) {
-    expect(worklogScope(gitOn(branch))).toBeUndefined()
-    expect(worklogScope(gitOn(branch), 42)).toBeUndefined()
+test('parseGitStatus: the upstream with the commits ahead and behind it', () => {
+  expect(parseGitStatus('## feature/x...origin/feature/x [ahead 2, behind 1]\n')).toMatchObject({ branch: 'feature/x', upstream: 'origin/feature/x', ahead: 2, behind: 1 })
+  expect(parseGitStatus('## feature/x...origin/feature/x [ahead 3]\n')).toMatchObject({ ahead: 3, behind: 0 })
+  expect(parseGitStatus('## feature/x...origin/feature/x [behind 4]\n')).toMatchObject({ ahead: 0, behind: 4 })
+  expect(parseGitStatus('## feature/x...origin/feature/x\n')).toMatchObject({ upstream: 'origin/feature/x', ahead: 0, behind: 0 })
+  // no upstream, or one that is gone: nothing to count against
+  expect(parseGitStatus('## feature/x\n')?.upstream).toBeUndefined()
+  expect(parseGitStatus('## feature/x...origin/feature/x [gone]\n')?.upstream).toBeUndefined()
+  expect(parseGitStatus('## HEAD (no branch)\n')?.upstream).toBeUndefined()
+})
+
+test('parseNumstat: tracked files with +/-, a binary one, then the untracked ones', () => {
+  expect(parseNumstat('12\t3\tsrc/a.ts\0-\t-\timg.png\0', ['notes.md'])).toEqual([
+    { path: 'src/a.ts', added: 12, deleted: 3 },
+    { path: 'img.png', isBinary: true },
+    { path: 'notes.md', isUntracked: true },
+  ])
+  expect(parseNumstat('0\t5\tdir with space/b c.ts\0', [])).toEqual([{ path: 'dir with space/b c.ts', added: 0, deleted: 5 }])
+  expect(parseNumstat('', [])).toEqual([])
+  expect(parseNumstat('garbage\0', [])).toEqual([])
+})
+
+test('parseWorktrees: the path and branch of each checkout, a detached one without a branch, a bare one left out', () => {
+  const text = 'worktree /w/a\nHEAD 111\nbranch refs/heads/feature/x\n\nworktree /w/b\nHEAD 222\ndetached\n\nworktree /w/c.git\nbare\n'
+  expect(parseWorktrees(text)).toEqual([{ path: '/w/a', branch: 'feature/x' }, { path: '/w/b' }])
+  expect(parseWorktrees('')).toEqual([])
+})
+
+test('parseGithubPr: an open PR with its title, review decision and the checks told passed, failed, pending', () => {
+  const checks = [
+    { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
+    { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SKIPPED' },
+    { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'TIMED_OUT' },
+    { __typename: 'CheckRun', status: 'QUEUED', conclusion: '' },
+    { __typename: 'StatusContext', state: 'SUCCESS' },
+    { __typename: 'StatusContext', state: 'PENDING' },
+    { __typename: 'StatusContext', state: 'ERROR' },
+  ]
+  const json = (o: object) => JSON.stringify({ number: 42, title: 'Fix', state: 'OPEN', isDraft: false, ...o })
+  expect(parseGithubPr(json({ reviewDecision: 'APPROVED', statusCheckRollup: checks }))).toEqual({
+    number: 42,
+    title: 'Fix',
+    isDraft: false,
+    review: 'approved',
+    checks: { passed: 3, failed: 2, pending: 2 },
+  })
+  expect(parseGithubPr(json({ reviewDecision: 'CHANGES_REQUESTED', isDraft: true }))).toEqual({ number: 42, title: 'Fix', isDraft: true, review: 'changes' })
+  expect(parseGithubPr(json({ reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: [] }))?.review).toBe('pending')
+  expect(parseGithubPr(json({ reviewDecision: '' }))?.review).toBeUndefined()
+  expect(parseGithubPr(json({ state: 'MERGED' }))).toBeUndefined()
+  expect(parseGithubPr(json({ state: 'CLOSED' }))).toBeUndefined()
+  expect(parseGithubPr(json({ number: 0 }))).toBeUndefined()
+  expect(parseGithubPr(json({ number: '42' }))).toBeUndefined()
+  expect(parseGithubPr('{}')).toBeUndefined()
+  expect(parseGithubPr('not json')).toBeUndefined()
+  expect(parseGithubPr('')).toBeUndefined()
+})
+
+test('parseAzurePr: the first active PR of az repos pr list, its review from the reviewers votes, no checks', () => {
+  const list = (o: object) => JSON.stringify([{ pullRequestId: 7, title: 'Faster', status: 'active', isDraft: false, ...o }])
+  expect(parseAzurePr(list({ reviewers: [{ vote: 10 }, { vote: 0 }] }))).toEqual({ number: 7, title: 'Faster', isDraft: false, review: 'approved' })
+  expect(parseAzurePr(list({ isDraft: true }))).toEqual({ number: 7, title: 'Faster', isDraft: true })
+  expect(parseAzurePr(list({ reviewers: [{ vote: 10 }, { vote: -10 }] }))?.review).toBe('changes')
+  expect(parseAzurePr(list({ reviewers: [{ vote: -5 }] }))?.review).toBe('changes')
+  expect(parseAzurePr(list({ reviewers: [{ vote: 0 }, { vote: 0 }] }))?.review).toBe('pending')
+  expect(parseAzurePr(list({ reviewers: [] }))?.review).toBeUndefined()
+  expect(parseAzurePr(list({ status: 'completed' }))).toBeUndefined()
+  expect(parseAzurePr(list({ pullRequestId: 'x' }))).toBeUndefined()
+  expect(parseAzurePr('[]')).toBeUndefined()
+  expect(parseAzurePr('{}')).toBeUndefined()
+  expect(parseAzurePr('not json')).toBeUndefined()
+})
+
+test('isAzureRemote and azureRepo: the project and repository an Azure DevOps remote names', () => {
+  const SSH_USER = 'git' // kept apart so the URLs below are not read as e-mail addresses
+  const https = 'https://dev.azure.com/<org>/proj/_git/orders'
+  const ssh = `${SSH_USER}@ssh.dev.azure.com:v3/<org>/proj/orders`
+  const old = 'https://<org>.visualstudio.com/proj/_git/orders'
+  for (const url of [https, ssh, old]) {
+    expect(isAzureRemote(`${url}\n`)).toBe(true)
+    expect(azureRepo(url)).toEqual({ project: 'proj', repo: 'orders' })
   }
-  // the repo's own default, whatever it is called
-  expect(worklogScope(gitOn('trunk'), undefined, 'trunk')).toBeUndefined()
-  expect(worklogScope(gitOn('trunk'))).toBe('topic trunk')
-  expect(worklogScope(gitOn('feature/trunk'), undefined, 'trunk')).toBe('topic feature/trunk')
-  expect(worklogScope(gitOn('feature/orders'), 42, 'main')).toBe('PR 42')
+  expect(azureRepo('https://dev.azure.com/<org>/My%20Proj/_git/my%20repo')).toEqual({ project: 'My Proj', repo: 'my repo' })
+  // the project's default repository carries the project's name
+  expect(azureRepo('https://dev.azure.com/<org>/_git/orders')).toEqual({ repo: 'orders' })
+  expect(isAzureRemote('https://github.com/example/orders')).toBe(false)
+  expect(isAzureRemote('')).toBe(false)
+  expect(azureRepo('https://github.com/example/orders')).toBeUndefined()
 })
 
-test('worklogScope: nothing on a detached HEAD or without git', () => {
-  expect(worklogScope(gitOn('HEAD', true), 42)).toBeUndefined()
-  expect(worklogScope(undefined, 42)).toBeUndefined()
+test('diffHunks: git diff without its header lines; a diff with no hunks is empty; carriage returns go', () => {
+  const raw = 'diff --git a/x b/x\r\nindex 1..2 100644\r\n--- a/x\r\n+++ b/x\r\n@@ -1 +1 @@\r\n-a\r\n+b\r\n'
+  expect(diffHunks(raw)).toBe('--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n')
+  expect(diffHunks('diff --git a/i.png b/i.png\nBinary files a/i.png and b/i.png differ\n')).toBe('')
+  expect(diffHunks('')).toBe('')
+})
+
+test('capDiff: a long diff is cut before a hunk, else at a line, never mid-line', () => {
+  const hunk = (n: number) => `@@ -${n},1 +${n},1 @@\n-${'a'.repeat(30)}\n+${'b'.repeat(30)}\n`
+  const head = '--- a/x\n+++ b/x\n'
+  const text = head + hunk(1) + hunk(2) + hunk(3)
+  expect(capDiff(text, 10_000)).toEqual({ text, isCut: false })
+  const cut = capDiff(text, head.length + hunk(1).length + 20)
+  expect(cut).toEqual({ text: head + hunk(1), isCut: true })
+  const one = capDiff(head + hunk(1), head.length + 30)
+  expect(one.isCut).toBe(true)
+  expect(one.text.endsWith('\n')).toBe(true)
+  expect(one.text.length).toBeLessThanOrEqual(head.length + 30)
+})
+
+test('capDiff: a first hunk over the limit is cut at a line with its header counts rewritten to the lines kept', () => {
+  const body = Array.from({ length: 50 }, (_, i) => `+line ${i}`).join('\n')
+  const added = `--- /dev/null\n+++ b/a\n@@ -0,0 +1,50 @@\n${body}\n`
+  const cut = capDiff(added, 120)
+  expect(cut.isCut).toBe(true)
+  const lines = cut.text.split('\n')
+  lines.pop()
+  const kept = lines.filter(l => l.startsWith('+') && !l.startsWith('+++')).length
+  expect(kept).toBeGreaterThan(0)
+  expect(kept).toBeLessThan(50)
+  expect(lines[2]).toBe(`@@ -0,0 +1,${kept} @@`)
+
+  const mixed = '--- a/x\n+++ b/x\n@@ -1,5 +1,5 @@\n ctx one\n-old one\n+new one\n ctx two\n-old two\n+new two\n'
+  const two = capDiff(mixed, 60)
+  expect(two).toEqual({ text: '--- a/x\n+++ b/x\n@@ -1,2 +1,2 @@\n ctx one\n-old one\n+new one\n', isCut: true })
+})
+
+test('additionsDiff: a whole file as one hunk of added lines', () => {
+  expect(additionsDiff('notes.md', 'one\r\ntwo\n')).toBe('--- /dev/null\n+++ b/notes.md\n@@ -0,0 +1,2 @@\n+one\n+two\n')
+  expect(additionsDiff('a', 'x')).toBe('--- /dev/null\n+++ b/a\n@@ -0,0 +1,1 @@\n+x\n')
+  expect(additionsDiff('empty', '')).toBe('')
 })
 
 test('parsePerimeter: the entries of an active perimeter on the branch checked out, else nothing', () => {
@@ -487,25 +602,6 @@ test('isGithubRemote: ssh and https URLs of github.com, nothing else', () => {
   expect(isGithubRemote(`${SSH_USER}@ssh.dev.azure.com:v3/<org>/proj/orders`)).toBe(false)
   expect(isGithubRemote('https://notgithub.com/example/orders')).toBe(false)
   expect(isGithubRemote('')).toBe(false)
-})
-
-test('parsePrNumber: the number of an open pull request from gh pr view --json number,state', () => {
-  expect(parsePrNumber('{"number":42,"state":"OPEN"}')).toBe(42)
-  expect(parsePrNumber('{"number":42,"state":"MERGED"}')).toBeUndefined()
-  expect(parsePrNumber('{"number":42,"state":"CLOSED"}')).toBeUndefined()
-  expect(parsePrNumber('{"number":0,"state":"OPEN"}')).toBeUndefined()
-  expect(parsePrNumber('{"number":"42","state":"OPEN"}')).toBeUndefined()
-  expect(parsePrNumber('{}')).toBeUndefined()
-  expect(parsePrNumber('not json')).toBeUndefined()
-  expect(parsePrNumber('')).toBeUndefined()
-})
-
-test('branchWorkItemId: the work item id a branch name carries, else nothing', () => {
-  expect(branchWorkItemId('feature/AB#512-reports')).toBe('512')
-  expect(branchWorkItemId('users/me/4711-fix-login')).toBe('4711')
-  expect(branchWorkItemId('feature/1234')).toBe('1234')
-  expect(branchWorkItemId('feature/orders-filter')).toBeUndefined()
-  expect(branchWorkItemId('feature/v2-12')).toBeUndefined()
 })
 
 // ── Lavoro: the deliver perimeter check and the done-claim log ──

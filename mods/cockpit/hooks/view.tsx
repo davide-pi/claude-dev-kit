@@ -1,6 +1,6 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { CockpitAgent, CockpitAlm, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitAlm, CockpitChange, CockpitDiff, CockpitPr, CockpitSnapshot, CockpitTab, CockpitTask, CockpitWorktree } from '../types'
 import {
   AGENT_KEEP_MS,
   COLORS,
@@ -20,6 +20,7 @@ import {
   fmtCost,
   fmtCostDelta,
   gridWidths,
+  isSameDir,
   modelFamily,
   openTasks,
   parseReset,
@@ -34,12 +35,11 @@ import {
   truncMiddle,
   weeklyPace,
   worklogLabel,
-  worklogScope,
 } from './format'
 import type { ModelFamily, Span } from './format'
 
 /** The elements the views draw with; every surface's table has them. */
-export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button'>
+export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code'>
 
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
@@ -61,6 +61,10 @@ const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
 const MAX_SUBAGENT_BLOCKS = 5
 const TASK_TIME_W = 6
+const MAX_FILE_ROWS = 8
+/** Cells before a changed file's path: the added column, the deleted one and their gaps. */
+const CHANGE_COUNTS_W = 12
+const MAX_WORKTREE_NAME_W = 16
 
 // ── Spans ────────────────────────────────────────────────────────────────────
 
@@ -245,6 +249,54 @@ export function modelCounts(list: readonly CockpitAgent[]): Span[] {
   return out
 }
 
+/** One changed file's row: its added and deleted lines (`bin` for a binary file, `?` for an untracked one), then its path cut to fit. */
+export function changeSpans(c: CockpitChange, width: number): Span[] {
+  const counts: Span[] = c.isUntracked
+    ? [dim(padStart('?', 5)), sp(' '.repeat(6))]
+    : c.isBinary
+      ? [dim(padStart('bin', 5)), sp(' '.repeat(6))]
+      : [sp(padStart(`+${c.added ?? 0}`, 5), COLORS.green), sp(' '), sp(padStart(`-${c.deleted ?? 0}`, 5), COLORS.red)]
+  return [...counts, sp(' '), sp(truncMiddle(c.path, Math.max(4, width - CHANGE_COUNTS_W)))]
+}
+
+/** One worktree's row: a mark for the one the session runs in, its folder, its branch (`HEAD` when detached). */
+export function worktreeSpans(t: CockpitWorktree, isHere: boolean, width: number): Span[] {
+  const nameW = Math.min(MAX_WORKTREE_NAME_W, Math.max(6, Math.floor(width / 3)))
+  return [
+    isHere ? sp('●', COLORS.green) : dim('○'),
+    sp(' '),
+    sp(pad(truncMiddle(baseName(t.path), nameW), nameW)),
+    sp(' '),
+    dim(truncMiddle(t.branch ?? 'HEAD', Math.max(4, width - nameW - 3))),
+  ]
+}
+
+const REVIEW_LABELS: Record<NonNullable<CockpitPr['review']>, { text: string; color: string }> = {
+  approved: { text: 'approvata', color: COLORS.green },
+  changes: { text: 'modifiche richieste', color: COLORS.red },
+  pending: { text: 'in attesa', color: COLORS.yellow },
+}
+
+/** The review row of a pull request: `review approvata`; empty when no review is known. */
+export function reviewSpans(pr: CockpitPr): Span[] {
+  const label = pr.review === undefined ? undefined : REVIEW_LABELS[pr.review]
+  return label ? [dim('review '), sp(label.text, label.color)] : []
+}
+
+/** The checks row of a pull request: `checks 2/4 · ✗ 1 · ◐ 1` (passed of all, then the failed and the undecided); empty when none are known. */
+export function checksSpans(pr: CockpitPr): Span[] {
+  const c = pr.checks
+  if (!c) return []
+  const total = c.passed + c.failed + c.pending
+  const color = c.failed > 0 ? COLORS.red : c.pending > 0 ? COLORS.yellow : COLORS.green
+  return [
+    dim('checks '),
+    sp(`${c.passed}/${total}`, color, true),
+    ...(c.failed > 0 ? [dim(' · '), sp(`✗ ${c.failed}`, COLORS.red)] : []),
+    ...(c.pending > 0 ? [dim(' · '), sp(`◐ ${c.pending}`, COLORS.yellow)] : []),
+  ]
+}
+
 // ── Pane ─────────────────────────────────────────────────────────────────────
 
 /** The pane's content stops here; a wider dock leaves the rest empty on the left. */
@@ -257,11 +309,42 @@ type Block = (Node | readonly Node[])[]
 export type PaneActions = {
   selectTab: (tab: CockpitTab) => void
   compact: () => void
-  /** Asks the worklog for today's hours of `scope` (`AB#<id>`, `PR <n>` or `topic <branch>`). */
-  runWorklog: (scope: string) => void
+  /** Asks the worklog for today's hours of this chat (`/worklog oggi sessione <id>`). */
+  runWorklog: () => void
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
+  /** Draws the diff of a changed file in the second pane. */
+  openDiff: (change: CockpitChange) => void
+}
+
+/** What the diff pane's button does. */
+export type DiffActions = { close: () => void }
+
+/** The second pane: the diff of the file pressed on the Repo tab, drawn by the engine's `Code` as unified hunks; empty when none is open. */
+export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: number, actions: DiffActions): RenderElement {
+  const { Box, Text, Button, Code } = ui
+  if (!diff) return <Text dimColor>niente da mostrare</Text>
+  return (
+    <Box flexDirection="column" width={bodyColumns}>
+      <Box justifyContent="space-between">
+        <Text wrap="truncate" color={COLORS.title}>
+          {`diff · ${diff.file}`}
+        </Text>
+        <Button key="diff:close" onPress={() => actions.close()}>
+          chiudi
+        </Button>
+      </Box>
+      {diff.isUnreadable === true ? (
+        <Text dimColor>file troppo grande o illeggibile</Text>
+      ) : diff.text === '' ? (
+        <Text dimColor>nessun hunk da mostrare</Text>
+      ) : (
+        <Code source={diff.text} format="diff" wrap="truncate-end" />
+      )}
+      {diff.isCut === true && <Text dimColor>… diff troncato</Text>}
+    </Box>
+  )
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, actions: PaneActions): RenderElement {
@@ -403,17 +486,17 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
   ]
 
-  // The last row of every tab: compatta always; segna ore when the work in hand has a scope (none on a detached HEAD,
-  // without git or on the default branch). The row stacks when its buttons do not fit the pane side by side.
-  const scope = worklogScope(g, s.prNumber, s.defaultBranch)
-  const barLabels = ['compatta', ...(scope ? ['segna ore'] : [])]
+  // The last row of every tab: compatta always; segna ore (the hours of this chat) whenever the session has an id. The row
+  // stacks when its buttons do not fit the pane side by side.
+  const hasSession = s.sessionId !== undefined
+  const barLabels = ['compatta', ...(hasSession ? ['segna ore'] : [])]
   const buttonsRow = (
     <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
       <Button key="bar:compact" onPress={() => actions.compact()}>
         compatta
       </Button>
-      {scope && (
-        <Button key="bar:worklog" onPress={() => actions.runWorklog(scope)}>
+      {hasSession && (
+        <Button key="bar:worklog" onPress={() => actions.runWorklog()}>
           segna ore
         </Button>
       )}
@@ -560,8 +643,59 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
       : []
   const workBlocks: Block[] = [...principalBlock, ...workflowBlock, ...subagentBlocks, ...claimsBlock]
 
-  // ── Repo: the git grid ──
-  const repoBlocks = [[gap(), grid, almRow]]
+  // ── Repo: the git grid, the branch against its upstream, the changed files, the worktrees, the pull request ──
+  const repo = s.repo
+  const upstreamLine =
+    g?.upstream === undefined
+      ? [dim('nessun upstream')]
+      : [sp(g.upstream), ...(g.ahead ? [sp(' '), sp(`↑${g.ahead}`, COLORS.green)] : []), ...(g.behind ? [sp(' '), sp(`↓${g.behind}`, COLORS.yellow)] : [])]
+  const branchPart: Block = g
+    ? [
+        gap(),
+        title('BRANCH'),
+        gap(),
+        line(ui, upstreamLine),
+        repo?.commits !== undefined && s.defaultBranch !== undefined && line(ui, [sp(`${repo.commits} commit da ${s.defaultBranch}`)]),
+      ]
+    : []
+  // A changed file is a Button: a press draws its diff in the second pane.
+  const changesPart: Block = repo
+    ? [
+        gap(),
+        title(`MODIFICHE · ${repo.total}`),
+        gap(),
+        repo.files.length === 0
+          ? line(ui, [dim('nessuna modifica')])
+          : repo.files.slice(0, MAX_FILE_ROWS).map(c => (
+              <Button key={`file:${c.path}`} plain onPress={() => actions.openDiff(c)}>
+                {spanNodes(ui, changeSpans(c, width))}
+              </Button>
+            )),
+        repo.total > MAX_FILE_ROWS && line(ui, [dim(`… +${repo.total - MAX_FILE_ROWS}`)]),
+      ]
+    : []
+  const trees = repo?.worktrees ?? []
+  const worktreePart: Block =
+    trees.length > 0
+      ? [
+          gap(),
+          title(`WORKTREE · ${trees.length}`),
+          gap(),
+          trees.map(t => line(ui, worktreeSpans(t, g?.root !== undefined && isSameDir(t.path, g.root), width))),
+        ]
+      : []
+  const pr = s.pr
+  const prPart: Block = pr
+    ? [
+        gap(),
+        title(`PR · #${pr.number} · ${pr.isDraft ? 'bozza' : 'aperta'}`),
+        gap(),
+        pr.title !== '' && line(ui, [sp(truncEnd(pr.title, width))]),
+        reviewSpans(pr).length > 0 && line(ui, reviewSpans(pr)),
+        checksSpans(pr).length > 0 && line(ui, checksSpans(pr)),
+      ]
+    : []
+  const repoBlocks: Block[] = [[gap(), grid, almRow], branchPart, changesPart, worktreePart, prPart].filter(b => b.length > 0)
 
   // Blocks are told apart by a rule; an empty tab says so.
   const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, work: workBlocks, repo: repoBlocks }[tab]
