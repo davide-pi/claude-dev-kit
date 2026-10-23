@@ -11,6 +11,7 @@ import {
   burnRate,
   burnText,
   baseName,
+  claimTime,
   countdown,
   ctxColor,
   displayModel,
@@ -57,6 +58,8 @@ const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Ag
 const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Agen', work: 'Lav', repo: 'Repo' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
+const MAX_OUTSIDE_ROWS = 5
+const MAX_SUBAGENT_BLOCKS = 5
 const TASK_TIME_W = 6
 
 // ── Spans ────────────────────────────────────────────────────────────────────
@@ -470,32 +473,92 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     ...historyBlock,
   ]
 
-  // ── Lavoro: the tasks (omitted with none) and the worklog warnings ──
+  // ── Lavoro, per agent: the main one, the workflow in flight, each running subagent, the hooks that fired ──
   const counts = taskCounts(s)
   const open = openTasks(s)
-  const taskBlock =
+  const taskPart: Block =
     counts === null
       ? []
       : [
+          gap(),
+          title(`TASK · ${counts.done}/${counts.total}`, [
+            sp(`◐ ${counts.inProgress}`, COLORS.blue),
+            sp('  '),
+            dim(`○ ${counts.pending}`),
+            sp('  '),
+            sp(`✓ ${counts.done}`, COLORS.green),
+          ]),
+          gap(),
+          line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
+          open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
+          open.length > MAX_TASK_ROWS && line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)]),
+          counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} completati`)]),
+        ]
+  const worklogPart: Block = wlRows.length > 0 ? [gap(), wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))] : []
+
+  // The deliver perimeter: its entries, the files touched since HEAD and the ones outside it (none claimed when git could not say)
+  const check = s.perimeterCheck
+  const outside = check?.outside ?? []
+  const perimeterPart: Block =
+    s.perimeter === undefined
+      ? []
+      : [
+          gap(),
+          line(ui, [
+            dim(`perimetro deliver · ${s.perimeter.length} ${s.perimeter.length === 1 ? 'voce' : 'voci'}`),
+            ...(check ? [dim(` · ${check.files} ${check.files === 1 ? 'file toccato' : 'file toccati'}`)] : []),
+          ]),
+          check && (outside.length === 0
+            ? line(ui, [sp('✓ ', COLORS.green), dim('nessun file fuori perimetro')])
+            : line(ui, [sp(`⚠ ${outside.length} file fuori perimetro`, COLORS.red)])),
+          outside.slice(0, MAX_OUTSIDE_ROWS).map(file => line(ui, [sp(`  ${truncMiddle(file, Math.max(4, width - 2))}`, COLORS.yellow)])),
+          outside.length > MAX_OUTSIDE_ROWS && line(ui, [dim(`  … +${outside.length - MAX_OUTSIDE_ROWS}`)]),
+        ]
+  const principalBlock: Block[] =
+    perimeterPart.length + taskPart.length + worklogPart.length > 0
+      ? [[gap(), title('PRINCIPALE'), ...perimeterPart, ...taskPart, ...worklogPart]]
+      : []
+
+  // The workflow in flight: its name (from the last stop) and the agents of the run finished out of those seen starting. The engine
+  // does not expose a phase, a round or P1/P2 counts: they are not drawn.
+  const runAgents = s.workflowRun?.agents ?? []
+  const isWorkflowActive = s.workflow !== undefined || runAgents.some(a => !a.isDone)
+  const workflowBlock: Block[] = isWorkflowActive
+    ? [
+        [
+          gap(),
+          title(s.workflow === undefined ? 'WORKFLOW' : `WORKFLOW · ${truncMiddle(s.workflow, Math.max(4, width - 11))}`),
+          runAgents.length > 0 && gap(),
+          runAgents.length > 0 && line(ui, [dim('agenti '), sp(`${runAgents.filter(a => a.isDone).length}/${runAgents.length}`, COLORS.blue)]),
+        ],
+      ]
+    : []
+
+  // One block per running subagent (a workflow's agents are the workflow's); the tool line only once a tool call was seen
+  const inWorkflow = new Set(runAgents.map(a => a.id))
+  const workers = running.filter(a => !inWorkflow.has(a.id))
+  const subagentBlocks: Block[] = workers.slice(0, MAX_SUBAGENT_BLOCKS).map((a, i) => [
+    gap(),
+    title(truncMiddle(a.type, Math.max(4, width - 7)), [dim(duration(s.now - a.startedAt))]),
+    a.description ? line(ui, [sp(truncEnd(a.description, width))]) : undefined,
+    a.lastTool ? line(ui, [dim('ultimo tool '), sp(a.lastTool)]) : undefined,
+    i === MAX_SUBAGENT_BLOCKS - 1 && workers.length > MAX_SUBAGENT_BLOCKS && line(ui, [dim(`… +${workers.length - MAX_SUBAGENT_BLOCKS}`)]),
+  ])
+
+  // The hooks that fired: the last done-claim entries
+  const claims = s.doneClaims ?? []
+  const claimsBlock: Block[] =
+    claims.length > 0
+      ? [
           [
             gap(),
-            title(`TASK · ${counts.done}/${counts.total}`, [
-              sp(`◐ ${counts.inProgress}`, COLORS.blue),
-              sp('  '),
-              dim(`○ ${counts.pending}`),
-              sp('  '),
-              sp(`✓ ${counts.done}`, COLORS.green),
-            ]),
+            title('HOOK · done-claim'),
             gap(),
-            line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
-            open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
-            open.length > MAX_TASK_ROWS && line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)]),
-            counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} completati`)]),
+            claims.map(c => line(ui, [dim(`${claimTime(c.at)} `), sp(c.rule, COLORS.yellow), ...(c.excerpt ? [dim(` ${c.excerpt}`)] : [])])),
           ],
         ]
-  const worklogBlock =
-    wlRows.length > 0 ? [[gap(), wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))]] : []
-  const workBlocks = [...taskBlock, ...worklogBlock]
+      : []
+  const workBlocks: Block[] = [...principalBlock, ...workflowBlock, ...subagentBlocks, ...claimsBlock]
 
   // ── Repo: the git grid ──
   const repoBlocks = [[gap(), grid, almRow]]

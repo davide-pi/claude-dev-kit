@@ -6,9 +6,13 @@ import {
   addHistory,
   almText,
   burnRate,
+  branchWorkItemId,
   burnText,
+  checkPerimeter,
+  claimTime,
   compactInstructions,
   isGithubRemote,
+  parseDoneClaims,
   parseDefaultBranch,
   parsePerimeter,
   parsePrNumber,
@@ -494,4 +498,37 @@ test('parsePrNumber: the number of an open pull request from gh pr view --json n
   expect(parsePrNumber('{}')).toBeUndefined()
   expect(parsePrNumber('not json')).toBeUndefined()
   expect(parsePrNumber('')).toBeUndefined()
+})
+
+test('branchWorkItemId: the work item id a branch name carries, else nothing', () => {
+  expect(branchWorkItemId('feature/AB#512-reports')).toBe('512')
+  expect(branchWorkItemId('users/me/4711-fix-login')).toBe('4711')
+  expect(branchWorkItemId('feature/1234')).toBe('1234')
+  expect(branchWorkItemId('feature/orders-filter')).toBeUndefined()
+  expect(branchWorkItemId('feature/v2-12')).toBeUndefined()
+})
+
+// ── Lavoro: the deliver perimeter check and the done-claim log ──
+
+test('checkPerimeter: the changed files no entry covers, as scope-guard --check lists them', () => {
+  const entries = ['src/a.ts', 'src/b/', 'tests/**/Orders*.cs']
+  const changed = ['src/a.ts', 'src/b/x/y.ts', 'tests/unit/OrdersTests.cs', 'SRC/A.ts', 'src/c.ts', 'README.md', 'docs/plans/x.md', '.git/config', 'src/c.ts']
+  // case-insensitive, a directory entry covers its subtree, docs/plans and .git are never outside, a path counts once
+  expect(checkPerimeter(changed, entries)).toEqual({ files: 8, outside: ['src/c.ts', 'README.md'] })
+  expect(checkPerimeter([], entries)).toEqual({ files: 0, outside: [] })
+  expect(checkPerimeter(['a\\b.ts'], ['a/b.ts'])).toEqual({ files: 1, outside: [] })
+})
+
+test('parseDoneClaims: the last three log lines, newest first; a line without time or rule is skipped', () => {
+  const line = (n: number, rule = 'unproven-row') => JSON.stringify({ at: `2026-10-22T0${n}:00:00.000Z`, session: 's', rule, word: 'fatto', excerpt: `claim ${n}` })
+  const text = [line(1), 'not json', line(2, 'tail-truncated'), JSON.stringify({ rule: 'x' }), line(3), line(4), ''].join('\n')
+  expect(parseDoneClaims(text).map(c => c.excerpt)).toEqual(['claim 4', 'claim 3', 'claim 2'])
+  expect(parseDoneClaims(text)[2]).toEqual({ at: '2026-10-22T02:00:00.000Z', rule: 'tail-truncated', excerpt: 'claim 2' })
+  expect(parseDoneClaims('')).toEqual([])
+  expect(parseDoneClaims('{}')).toEqual([])
+})
+
+test('claimTime: day/month and hour:minute of the log entry, in the local clock', () => {
+  expect(claimTime(new Date(2026, 9, 22, 9, 5).toISOString())).toBe('22/10 09:05')
+  expect(claimTime('garbage')).toBe('')
 })

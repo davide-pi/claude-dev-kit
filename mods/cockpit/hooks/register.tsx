@@ -1,15 +1,18 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot, CockpitTab, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitHistoryEntry, CockpitPerimeterCheck, CockpitSnapshot, CockpitTab, CockpitTask, CockpitWorkflowRun } from '../types'
 import {
   AGENT_KEEP_MS,
   addHistory,
+  branchWorkItemId,
+  checkPerimeter,
   compactInstructions,
   isDefaultBranch,
   isGithubRemote,
   isTab,
   parseDefaultBranch,
+  parseDoneClaims,
   parseGitStatus,
   parseHistory,
   parsePerimeter,
@@ -52,10 +55,25 @@ function withBurnSample(samples: CockpitSnapshot['fiveHourSamples'], now: number
 const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
   u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
 
-/** Keeps the name of the first workflow among `tasks` (a stop's `background_tasks`) in the snapshot; none clears it. */
-async function setWorkflow($: EngineInterface, tasks: readonly { type: string; name?: string }[] | undefined): Promise<void> {
+/**
+ * Keeps the name of the first workflow among `tasks` (a stop's `background_tasks`) in the snapshot; none clears it. The
+ * end of the main loop's turn (`isMainStop`) reporting none also ends the run whose agents were counted: a subagent's stop
+ * can report none while the run's other agents still work.
+ */
+async function setWorkflow($: EngineInterface, tasks: readonly { type: string; name?: string }[] | undefined, isMainStop = false): Promise<void> {
   const workflow = tasks?.find(t => t.type === 'workflow' && typeof t.name === 'string' && t.name !== '')?.name
-  await patch($, s => ({ ...s, workflow })).catch(() => undefined)
+  await patch($, s => ({ ...s, workflow, workflowRun: isMainStop && workflow === undefined ? undefined : s.workflowRun })).catch(() => undefined)
+}
+
+/** `id` joins the run `runId`; an agent of another run than the one kept starts a new count. */
+function addWorkflowAgent(run: CockpitWorkflowRun | undefined, runId: string, id: string): CockpitWorkflowRun {
+  const kept = run?.runId === runId ? run.agents : []
+  return { runId, agents: kept.some(a => a.id === id) ? kept : [...kept, { id, isDone: false }] }
+}
+
+/** Marks agent `id` of the run finished; any other id leaves the run as it is. */
+function finishWorkflowAgent(run: CockpitWorkflowRun | undefined, id: string): CockpitWorkflowRun | undefined {
+  return run?.agents.some(a => a.id === id && !a.isDone) ? { ...run, agents: run.agents.map(a => (a.id === id ? { ...a, isDone: true } : a)) } : run
 }
 
 // ── Collection helpers (each one swallows its own failure: a missing datum stays absent) ──
@@ -66,6 +84,23 @@ async function readPerimeter($: EngineInterface, cwd: string, gitDir: string, br
     const dir = /^([A-Za-z]:)?[\\/]/.test(gitDir) ? gitDir : `${cwd}/${gitDir}`
     const text = await $.fs.read(`${dir}/deliver/perimeter.md`)
     return typeof text === 'string' ? parsePerimeter(text, branch) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+/**
+ * The changed files of the worktree at `root` against HEAD (tracked, then untracked and not ignored) and those the
+ * perimeter `entries` do not cover, the way `hooks/scope-guard.js --check HEAD` lists them; undefined when git cannot say.
+ */
+async function readPerimeterCheck($: EngineInterface, root: string, entries: readonly string[]): Promise<CockpitPerimeterCheck | undefined> {
+  try {
+    const base = ['git', '-C', root, '--no-optional-locks']
+    const tracked = await $.process.run([...base, 'diff', '--name-only', '--no-renames', '-z', 'HEAD', '--'], { timeoutMs: 3000 })
+    const untracked = await $.process.run([...base, 'ls-files', '--others', '--exclude-standard', '-z'], { timeoutMs: 3000 })
+    if (tracked.exitCode !== 0 || untracked.exitCode !== 0 || tracked.isStdoutTruncated || untracked.isStdoutTruncated) return undefined
+    const names = (out: string) => out.split('\0').filter(Boolean)
+    return checkPerimeter([...names(tracked.stdout), ...names(untracked.stdout)], entries)
   } catch {
     return undefined
   }
@@ -91,7 +126,8 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
     const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
     let prNumber: number | undefined
-    if (!isDefaultBranch(branch, defaultBranch)) {
+    // A branch that carries a work item id has its scope in its name: the PR is not asked.
+    if (!isDefaultBranch(branch, defaultBranch) && branchWorkItemId(branch) === undefined) {
       const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
       if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
         const pr = await $.process.run(['gh', 'pr', 'view', '--json', 'number,state'], { cwd, timeoutMs: 10_000 })
@@ -100,7 +136,8 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     }
     await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, prNumber } : s))
   } catch {
-    // gh missing or too slow: no PR, and the next read is in `PR_EVERY_MS`
+    // gh missing or too slow: the branch has no PR we know of, and the next read is in `PR_EVERY_MS`
+    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, prNumber: undefined } : s)).catch(() => undefined)
   } finally {
     isPrReading = false
   }
@@ -113,13 +150,19 @@ async function refreshGit($: EngineInterface): Promise<void> {
     const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
     const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
     if (!parsed) {
-      return void (await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined, prNumber: undefined, defaultBranch: undefined })))
+      lastPrRead = undefined
+      return void (
+        await patch($, s => ({ ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, prNumber: undefined, defaultBranch: undefined }))
+      )
     }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
     const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
-    const gitDir = tree.exitCode === 0 ? tree.stdout.split('\n')[0]?.trim() : undefined
+    const [gitDir, , topLevel] = tree.exitCode === 0 ? tree.stdout.split('\n').map(l => l.trim()) : []
     const perimeter = gitDir && !parsed.isDetached ? await readPerimeter($, cwd, gitDir, parsed.branch) : undefined
-    // A PR and a default branch belong to the repository and branch they were read for.
+    const perimeterCheck = perimeter && topLevel ? await readPerimeterCheck($, topLevel, perimeter) : undefined
+    // A PR and a default branch belong to the repository and branch they were read for: leaving them forgets the read too.
+    const before = await read($, snapshot)
+    if (before.cwd !== cwd || before.git?.branch !== parsed.branch) lastPrRead = undefined
     await patch($, s => {
       const isSameRepo = s.cwd === cwd
       const isSameBranch = isSameRepo && s.git?.branch === parsed.branch
@@ -128,6 +171,7 @@ async function refreshGit($: EngineInterface): Promise<void> {
         cwd,
         git: { ...parsed, worktreeRoot },
         perimeter,
+        perimeterCheck,
         prNumber: isSameBranch ? s.prNumber : undefined,
         defaultBranch: isSameRepo ? s.defaultBranch : undefined,
       }
@@ -232,6 +276,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   cacheShare: undefined,
   fiveHourSamples: [],
   workflow: undefined,
+  workflowRun: undefined,
 })
 
 /**
@@ -289,6 +334,19 @@ async function refreshAlm($: EngineInterface): Promise<void> {
   }
 }
 
+/** The last entries of the done-claim hook's log; no readable log clears them. */
+async function refreshDoneClaims($: EngineInterface): Promise<void> {
+  try {
+    const dir = await configDir($)
+    if (!dir) return
+    const text = await $.fs.read(`${dir}/.cache/done-claim.log`)
+    const claims = parseDoneClaims(typeof text === 'string' ? text : '')
+    await patch($, s => ({ ...s, doneClaims: claims.length > 0 ? claims : undefined }))
+  } catch {
+    await patch($, s => ({ ...s, doneClaims: undefined })).catch(() => undefined)
+  }
+}
+
 async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
@@ -327,6 +385,7 @@ async function tick($: EngineInterface): Promise<void> {
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshAlm($)
+  await refreshDoneClaims($)
   // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`.
   if (isOpen) await writeState($, true, true)
 }
@@ -418,6 +477,7 @@ export const register: Register = on => {
     await refreshGit($)
     await refreshWorklog($, now)
     await refreshAlm($)
+    await refreshDoneClaims($)
     await writeState($, true)
 
     await $.command.register({ name: 'cockpit', description: 'Apre il pannello cockpit' })
@@ -578,6 +638,20 @@ export const register: Register = on => {
     return ran
   })
 
+  // The last tool of each subagent, from the tool events carrying its id; the main loop's calls are no agent's.
+  on('tool.call', async ($, e, next) => {
+    const { agentId, tool } = e
+    if (agentId !== undefined) {
+      try {
+        const now = await $.clock.now()
+        await patch($, s => ({ ...s, agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, lastTool: tool })) }))
+      } catch {
+        // observing must never break the call
+      }
+    }
+    return next(e)
+  })
+
   on('agent.spawn', async ($, e, next) => {
     const spawned = await next(e)
     if (spawned.agentId !== undefined) {
@@ -585,10 +659,13 @@ export const register: Register = on => {
       const startedAt = await $.clock.now()
       await patch($, s => ({
         ...s,
+        // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
+        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id) : s.workflowRun,
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
           type: e.subagentType,
+          description: e.description,
           requested: e.model,
           model: spawned.model,
           // events that outran the spawn keep their status, tokens, effort and start
@@ -613,6 +690,7 @@ export const register: Register = on => {
     } else {
       await patch($, s => ({
         ...s,
+        workflowRun: finishWorkflowAgent(s.workflowRun, agentId),
         agents: upsertAgent(s.agents, agentId, now, a => ({
           ...a,
           status: 'done',
@@ -629,7 +707,7 @@ export const register: Register = on => {
   // The engine's classic Stop and SubagentStop carry the background work in flight: the name of a workflow among it is what
   // `compatta` names. It is the reading of the last stop, so it is dropped when a stop reports none.
   on('classic.Stop', async ($, e, next) => {
-    await setWorkflow($, e.background_tasks)
+    await setWorkflow($, e.background_tasks, true)
     return next(e)
   })
   on('classic.SubagentStop', async ($, e, next) => {

@@ -95,6 +95,16 @@ type World = {
   noGh?: boolean
   /** Receives every `gh` call's argv, joined by spaces. */
   ghCalls?: string[]
+  /** What `git diff --name-only HEAD` lists: the tracked files changed since HEAD. */
+  changed?: string[]
+  /** What `git ls-files --others` lists: the untracked, not ignored files. */
+  untracked?: string[]
+  /** True: `git diff` fails (no HEAD yet, say). */
+  failDiff?: boolean
+  /** Receives the argv (joined by spaces) of every `git diff` and `git ls-files` call. */
+  gitCalls?: string[]
+  /** The text of `<config>/.cache/done-claim.log`; absent, the default answer holds no log line. */
+  doneClaims?: string
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -132,6 +142,11 @@ function world(on: On, options: World = {}) {
       return options.pr === undefined ? answer('', 1) : answer(JSON.stringify({ number: options.pr, state: options.prState ?? 'OPEN' }))
     }
     if (options.notRepo) return answer('', 128)
+    if (e.argv.includes('diff') || e.argv.includes('ls-files')) {
+      options.gitCalls?.push(e.argv.join(' '))
+      if (options.failDiff) return answer('', 128)
+      return answer((e.argv.includes('diff') ? (options.changed ?? []) : (options.untracked ?? [])).map(f => `${f}\0`).join(''))
+    }
     if (e.argv.includes('rev-parse')) return answer('.git\n.git\n/work/example-repo\n')
     if (e.argv.includes('symbolic-ref')) return options.defaultBranch === undefined ? answer('', 128) : answer(`origin/${options.defaultBranch}\n`)
     if (e.argv.includes('get-url')) return options.remote === undefined ? answer('', 2) : answer(`${options.remote}\n`)
@@ -144,6 +159,7 @@ function world(on: On, options: World = {}) {
     }
     if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
     if (options.perimeter !== undefined && /deliver[\\/]perimeter\.md$/.test(e.path)) return { value: options.perimeter }
+    if (options.doneClaims !== undefined && /done-claim\.log$/.test(e.path)) return { value: options.doneClaims }
     return {
       value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
     }
@@ -546,7 +562,10 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   const { rows, i } = await taskRows($)
   expect(rows[i]).toMatch(/^TASK · 2\/4◐ 1 {2}○ 1 {2}✓ 2$/)
   expect(rows[i - 1]).toBe(' ')
-  expect(rows[i - 2]).toMatch(/^─+$/)
+  // the tasks belong to the main agent's block
+  expect(rows[i - 2]).toBe('PRINCIPALE')
+  expect(rows[i - 3]).toBe(' ')
+  expect(rows[i - 4]).toMatch(/^─+$/)
   expect(rows[i + 1]).toBe(' ')
   expect(rows[i + 2]).toMatch(/^[▰▱]{50}$/)
   // in progress first, with its elapsed time; then pending; then the completed row
@@ -1190,23 +1209,26 @@ test('segna ore: an open GitHub PR of the branch is its scope (gh pr view, once)
   expect(ghCalls).toEqual(['gh pr view --json number,state'])
 })
 
-test('segna ore: a work item id in the branch name wins over the PR', async ($, on) => {
+test('segna ore: a work item id in the branch name wins over the PR, and gh is not asked', async ($, on) => {
   const commands: string[] = []
-  world(on, { commands, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
+  const ghCalls: string[] = []
+  world(on, { commands, ghCalls, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const ui = await mountPane($)
   await ui.press({ key: 'bar:worklog' })
   await ui.unmount()
   expect(commands).toEqual(['/worklog oggi AB#77'])
+  expect(ghCalls).toEqual([])
 })
 
-for (const [name, options] of [
-  ['an Azure DevOps remote (skipped for now)', { remote: 'https://dev.azure.com/<org>/proj/_git/orders', pr: 42 }],
-  ['no remote', { pr: 42 }],
-  ['gh not installed', { remote: GH_SSH, pr: 42, noGh: true }],
-  ['no PR for the branch', { remote: GH_SSH }],
-  ['a PR that is not open', { remote: GH_SSH, pr: 42, prState: 'MERGED' }],
+// `isGhAsked`: whether `gh pr view` is run at all (only for a GitHub remote)
+for (const { name, options, isGhAsked } of [
+  { name: 'an Azure DevOps remote (skipped for now)', options: { remote: 'https://dev.azure.com/<org>/proj/_git/orders', pr: 42 }, isGhAsked: false },
+  { name: 'no remote', options: { pr: 42 }, isGhAsked: false },
+  { name: 'gh not installed', options: { remote: GH_SSH, pr: 42, noGh: true }, isGhAsked: true },
+  { name: 'no PR for the branch', options: { remote: GH_SSH }, isGhAsked: true },
+  { name: 'a PR that is not open', options: { remote: GH_SSH, pr: 42, prState: 'MERGED' }, isGhAsked: true },
 ] as const) {
   test(`segna ore: with ${name} the scope stays the topic`, async ($, on) => {
     const commands: string[] = []
@@ -1218,8 +1240,7 @@ for (const [name, options] of [
     await ui.press({ key: 'bar:worklog' })
     await ui.unmount()
     expect(commands).toEqual(['/worklog oggi topic feature/orders-filter'])
-    // gh is only asked for a GitHub remote
-    if (name.startsWith('an Azure') || name === 'no remote') expect(ghCalls).toEqual([])
+    expect(ghCalls).toEqual(isGhAsked ? ['gh pr view --json number,state'] : [])
   })
 }
 
@@ -1729,4 +1750,296 @@ test('Lavoro with no tasks and no worklog warnings says niente da mostrare', asy
   // the buttons row closes the pane, under a rule
   expect(rows.at(-3)).toBe('niente da mostrare')
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
+})
+
+// ── Phase 4: Lavoro, per agent ──
+
+const PERIMETER = 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n'
+const workRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'work')).rows
+
+test('PRINCIPALE: the deliver perimeter with its entries and touched files, and the changed files outside it', async ($, on) => {
+  const gitCalls: string[] = []
+  world(on, {
+    gitCalls,
+    branch: 'feat/x',
+    perimeter: PERIMETER,
+    changed: ['src/a.ts', 'src/b/x.ts', 'src/other.ts'],
+    untracked: ['src/new.ts', 'notes.md'],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  const i = rows.findIndex(r => r === 'PRINCIPALE')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows[i + 1]).toBe(' ')
+  expect(rows[i + 2]).toBe('perimetro deliver · 2 voci · 5 file toccati')
+  expect(rows[i + 3]).toBe('⚠ 3 file fuori perimetro')
+  expect(rows.slice(i + 4, i + 7)).toEqual(['  src/other.ts', '  src/new.ts', '  notes.md'])
+  // computed like `scope-guard.js --check HEAD`: tracked changes against HEAD plus the untracked, not ignored files
+  expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks diff --name-only --no-renames -z HEAD --')
+  expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks ls-files --others --exclude-standard -z')
+})
+
+test('PRINCIPALE: nothing outside the perimeter says so; one entry and one file are singular', async ($, on) => {
+  world(on, { branch: 'feat/x', perimeter: 'branch: feat/x\nstatus: active\n- src/a.ts\n', changed: ['src/a.ts'] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows).toContain('perimetro deliver · 1 voce · 1 file toccato')
+  expect(rows).toContain('✓ nessun file fuori perimetro')
+  expect(rows.some(r => /fuori perimetro$/.test(r) && r.startsWith('⚠'))).toBe(false)
+})
+
+test('PRINCIPALE: at most 5 outside files are named, then … +n', async ($, on) => {
+  const changed = Array.from({ length: 7 }, (_, n) => `lib/f${n}.ts`)
+  world(on, { branch: 'feat/x', perimeter: PERIMETER, changed })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  const i = rows.findIndex(r => r.startsWith('⚠'))
+  expect(rows[i]).toBe('⚠ 7 file fuori perimetro')
+  expect(rows.slice(i + 1, i + 6)).toEqual(changed.slice(0, 5).map(f => `  ${f}`))
+  expect(rows[i + 6]).toBe('  … +2')
+})
+
+test("PRINCIPALE: no perimeter for this branch (another branch's, closed): no perimeter rows and no git diff", async ($, on) => {
+  const gitCalls: string[] = []
+  world(on, { gitCalls, branch: 'feat/x', perimeter: PERIMETER.replace('feat/x', 'feat/other'), changed: ['lib/z.ts'] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows.some(r => /perimetro/.test(r))).toBe(false)
+  expect(rows).not.toContain('PRINCIPALE')
+  expect(gitCalls).toEqual([])
+})
+
+test('PRINCIPALE: a failed git diff leaves the entry count alone: no file counts, no claim about the outside', async ($, on) => {
+  world(on, { branch: 'feat/x', perimeter: PERIMETER, failDiff: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows).toContain('perimetro deliver · 2 voci')
+  expect(rows.some(r => /fuori perimetro/.test(r))).toBe(false)
+})
+
+test('PRINCIPALE: the perimeter, the session tasks and the worklog warnings are one block, in that order', async ($, on) => {
+  world(on, { hasWorklog: true, branch: 'feat/x', perimeter: PERIMETER, changed: ['lib/z.ts'] })
+  taskTools(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
+  const rows = await workRows($)
+  const at = (re: RegExp) => rows.findIndex(r => re.test(r))
+  const [main, perimeter, tasks, worklog] = [at(/^PRINCIPALE$/), at(/^perimetro deliver/), at(/^TASK ·/), at(/worklog: 1d da registrare/)]
+  expect(main).toBeLessThan(perimeter)
+  expect(perimeter).toBeLessThan(tasks)
+  expect(tasks).toBeLessThan(worklog)
+  // no rule inside the block
+  expect(rows.slice(main, worklog).some(r => /^─+$/.test(r))).toBe(false)
+  // and the tasks are no longer in the Sessione view
+  expect((await paneRows($, 50, 'session')).rows.some(r => /^TASK/.test(r))).toBe(false)
+})
+
+/** A workflow agent's spawn: `runId` and its place in the run. */
+const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number) =>
+  $.agent.spawn({
+    tool_use_id: 'wf-call',
+    prompt: 'go',
+    description: `step ${agentIndex}`,
+    subagentType: 'implementer',
+    provider: { plugin: 'engine', tier: 'core' },
+    parentModel: 'claude-opus-5-5',
+    background: true,
+    fork: false,
+    workflow: { runId, agentIndex },
+  })
+
+const WORKFLOW_TASK = { id: 'b2', type: 'workflow', status: 'running', description: 'x', name: 'impl-review-loop' }
+
+test('workflow: its name and the agents finished out of the agents started, nothing the engine does not expose', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('classic.Stop', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(await workRows($)).not.toContain('WORKFLOW')
+  for (const n of [1, 2, 3]) await spawnWorkflowAgent($, 'wf_1', n)
+  await finishAgent($, 'a1')
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
+  const rows = await workRows($)
+  const i = rows.findIndex(r => r.startsWith('WORKFLOW'))
+  expect(rows[i]).toBe('WORKFLOW · impl-review-loop')
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows[i + 1]).toBe(' ')
+  expect(rows[i + 2]).toBe('agenti 1/3')
+  // phase, round and P1/P2 counts are not exposed: not drawn
+  expect(rows.some(r => /fase|round|P1|P2/i.test(r))).toBe(false)
+  // the run's agents are the workflow's, not subagent blocks of their own
+  expect(rows.some(r => /^implementer/.test(r))).toBe(false)
+})
+
+test('workflow: a Stop that reports none ends the block; agents seen without a name still make one', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('classic.Stop', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  expect(await workRows($)).toContain('WORKFLOW')
+  expect(await workRows($)).toContain('agenti 0/1')
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
+  expect(await workRows($)).toContain('WORKFLOW · impl-review-loop')
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+  expect((await workRows($)).some(r => r.startsWith('WORKFLOW'))).toBe(false)
+})
+
+test('workflow: a new run starts its own count', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await finishAgent($, 'a1')
+  await spawnWorkflowAgent($, 'wf_2', 1)
+  expect(await workRows($)).toContain('agenti 0/1')
+})
+
+test('subagent blocks: type, the spawn description, the last tool it used and the elapsed time; none for the main loop', async ($, on) => {
+  const clock = world(on, {
+    listed: [
+      { id: 'a1', status: 'running' },
+      { id: 'a2', status: 'running' },
+    ],
+  })
+  spawns(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'Explore', description: 'Find the DTOs' })
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  await $.tool.call({ tool: 'Bash', command: 'dotnet test', agentId: 'a1' })
+  // the main loop's tool calls belong to no subagent
+  await $.tool.call({ tool: 'Grep', pattern: 'x' })
+  await clock.advance(2 * MIN)
+
+  const rows = await workRows($)
+  const i = rows.findIndex(r => /^code-reviewer/.test(r))
+  expect(rows[i]).toBe('code-reviewer2m00s')
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows[i + 1]).toBe('Review the orders filter')
+  expect(rows[i + 2]).toBe('ultimo tool Bash')
+  // the second one has used no tool yet: no line, nothing invented
+  const j = rows.findIndex(r => /^Explore/.test(r))
+  expect(rows[j]).toBe('Explore2m00s')
+  expect(rows[j + 1]).toBe('Find the DTOs')
+  expect(rows[j + 2]).toMatch(/^─+$/)
+})
+
+test('subagent blocks: a finished agent has none, and at most 5 are drawn, then … +n', async ($, on) => {
+  world(on, { listed: Array.from({ length: 7 }, (_, n) => ({ id: `a${n + 1}`, status: 'running' as const })) })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let n = 1; n <= 7; n++) await $.agent.spawn({ ...SPAWN, subagentType: `agent-${n}`, description: `task ${n}` })
+  await finishAgent($, 'a1')
+  const rows = await workRows($)
+  expect(rows.some(r => /^agent-1/.test(r))).toBe(false)
+  expect(rows.filter(r => /^agent-\d/.test(r)).map(r => r.slice(0, 7))).toEqual(['agent-2', 'agent-3', 'agent-4', 'agent-5', 'agent-6'])
+  expect(rows).toContain('… +1')
+})
+
+/** An `agent.spawn` input but for the agent type and its description. */
+const SPAWN = {
+  tool_use_id: 't',
+  prompt: 'go',
+  provider: { plugin: 'engine', tier: 'core' },
+  model: 'sonnet',
+  parentModel: 'claude-opus-5-5',
+  background: true,
+  fork: false,
+} as const
+
+const claim = (n: number, rule: string, excerpt: string) =>
+  JSON.stringify({ at: new Date(2026, 9, 22, 8 + n, 5).toISOString(), session: 's-1', cwd: '/w', rule, word: 'fatto', excerpt })
+
+test('hook triggers: the last three done-claim.log entries, newest first, with time, rule and text', async ($, on) => {
+  const doneClaims = [claim(1, 'unproven-row', 'primo'), claim(2, 'unproven-row', 'secondo'), claim(3, 'tail-truncated', 'terzo'), claim(4, 'unproven-row', 'tutto fatto, test verdi'), ''].join('\n')
+  world(on, { doneClaims })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  const i = rows.findIndex(r => r.startsWith('HOOK'))
+  expect(rows[i]).toBe('HOOK · done-claim')
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  expect(rows[i + 1]).toBe(' ')
+  expect(rows.slice(i + 2, i + 5)).toEqual([
+    '22/10 12:05 unproven-row tutto fatto, test verdi',
+    '22/10 11:05 tail-truncated terzo',
+    '22/10 10:05 unproven-row secondo',
+  ])
+  expect(rows.some(r => /primo/.test(r))).toBe(false)
+})
+
+test('hook triggers: no log (or an empty one) draws no block', async ($, on) => {
+  world(on, { doneClaims: '' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await workRows($)).some(r => r.startsWith('HOOK'))).toBe(false)
+})
+
+// ── PR read follow-ups ──
+
+test('segna ore: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(ghCalls).toHaveLength(1)
+
+  options.detached = true
+  await clock.advance(15_000)
+  options.detached = false
+  await clock.advance(15_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(2)
+
+  options.notRepo = true
+  await clock.advance(15_000)
+  options.notRepo = false
+  await clock.advance(15_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(3)
+})
+
+test('segna ore: a branch left and come back to is asked again, not served from the read of five minutes ago', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  options.branch = 'feature/other'
+  await clock.advance(15_000)
+  await settleAll()
+  options.branch = 'feature/orders-filter'
+  await clock.advance(15_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(3)
+})
+
+test('segna ore: a failed gh pr view clears the PR of that branch', async ($, on) => {
+  const commands: string[] = []
+  const options: World = { commands, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  let ui = await mountPane($)
+  await ui.press({ key: 'bar:worklog' })
+  await ui.unmount()
+  expect(commands).toEqual(['/worklog oggi PR 42'])
+
+  options.noGh = true // gh is gone: the next read fails
+  await clock.advance(5 * MIN)
+  await settleAll()
+  ui = await mountPane($)
+  await ui.press({ key: 'bar:worklog' })
+  await ui.unmount()
+  expect(commands).toEqual(['/worklog oggi PR 42', '/worklog oggi topic feature/orders-filter'])
 })
