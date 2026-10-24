@@ -2,12 +2,20 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   HISTORY_KEEP,
+  ICONS,
   abbrevTokens,
   addHistory,
+  aheadBehindSpans,
   almText,
+  autocompactForecast,
   burnRate,
   burnText,
+  cacheColor,
   checkPerimeter,
+  claudeStateSpans,
+  folderIcon,
+  recordCtxSample,
+  tabNeeds,
   claimTime,
   compactInstructions,
   isGithubRemote,
@@ -627,4 +635,68 @@ test('parseDoneClaims: the last three log lines, newest first; a line without ti
 test('claimTime: day/month and hour:minute of the log entry, in the local clock', () => {
   expect(claimTime(new Date(2026, 9, 22, 9, 5).toISOString())).toBe('22/10 09:05')
   expect(claimTime('garbage')).toBe('')
+})
+
+// ── Cockpit v3, phase 1: the always-visible header ──
+
+test('folderIcon: a plain folder, a repository and a linked worktree each have their own glyph', () => {
+  expect(ICONS.folder).toBe('\u{F024B}')
+  expect(ICONS.repo).toBe('\u{F0CCF}')
+  expect(ICONS.tree).toBe('\u{F0CD0}')
+  expect(folderIcon(undefined)).toBe('\u{F024B}')
+  expect(folderIcon({ root: '/w/orders' })).toBe('\u{F0CCF}')
+  expect(folderIcon({ root: '/w/orders-wt', worktreeRoot: '/w/orders-wt' })).toBe('\u{F0CD0}')
+})
+
+test('cacheColor: green from 80 %, amber from 50 to 79, red below 50', () => {
+  expect([100, 80].map(cacheColor)).toEqual([COLORS.green, COLORS.green])
+  expect([79, 50].map(cacheColor)).toEqual([COLORS.amber, COLORS.amber])
+  expect([49, 0].map(cacheColor)).toEqual([COLORS.red, COLORS.red])
+})
+
+test('claudeStateSpans: an icon and a word per state, the tool by name, a long name cut', () => {
+  expect(spanText(claudeStateSpans(undefined))).toContain('pronto')
+  expect(spanText(claudeStateSpans({ kind: 'idle' }))).toContain('pronto')
+  expect(spanText(claudeStateSpans({ kind: 'working' }))).toContain('lavora')
+  expect(spanText(claudeStateSpans({ kind: 'thinking' }))).toContain('pensa')
+  expect(spanText(claudeStateSpans({ kind: 'waiting' }))).toContain('attesa')
+  expect(spanText(claudeStateSpans({ kind: 'tool', tool: 'Bash' }))).toContain('Bash')
+  const long = spanText(claudeStateSpans({ kind: 'tool', tool: 'mcp__server__a_very_long_tool_name' }))
+  expect(long.endsWith('…')).toBe(true)
+  expect([...long].length).toBeLessThanOrEqual(16)
+})
+
+test('aheadBehindSpans: the commits ahead and behind the upstream, nothing when level or without one', () => {
+  const git = { branch: 'x', staged: 0, modified: 0, untracked: 0 }
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 2, behind: 1 }))).toBe(' ↑2 ↓1')
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 3, behind: 0 }))).toBe(' ↑3')
+  expect(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 0, behind: 0 })).toEqual([])
+  expect(aheadBehindSpans(git)).toEqual([])
+})
+
+test('recordCtxSample: keeps the last six readings and starts over when the context shrinks (a compaction)', () => {
+  expect(recordCtxSample(undefined, 100)).toEqual([100])
+  expect(recordCtxSample([100, 200], 300)).toEqual([100, 200, 300])
+  expect(recordCtxSample([1, 2, 3, 4, 5, 6], 7)).toEqual([2, 3, 4, 5, 6, 7])
+  expect(recordCtxSample([100, 200, 300], 50)).toEqual([50])
+})
+
+test('autocompactForecast: requests left from the average growth; absent without two readings, a threshold or growth', () => {
+  // growth 10k per turn, 60k left to the threshold
+  expect(autocompactForecast([100_000, 110_000, 120_000], 180_000)).toBe(6)
+  expect(autocompactForecast([100_000, 110_000, 121_000], 180_000)).toBe(6)
+  expect(autocompactForecast([100_000], 180_000)).toBeUndefined()
+  expect(autocompactForecast(undefined, 180_000)).toBeUndefined()
+  expect(autocompactForecast([100_000, 110_000], undefined)).toBeUndefined()
+  expect(autocompactForecast([110_000, 110_000], 180_000)).toBeUndefined()
+  // past the threshold already
+  expect(autocompactForecast([170_000, 190_000], 180_000)).toBe(0)
+})
+
+test('tabNeeds: the clock tiers a selected tab asks for', () => {
+  expect(tabNeeds('agents')).toEqual({ fast: true, medium: false })
+  expect(tabNeeds('session')).toEqual({ fast: true, medium: false })
+  expect(tabNeeds('work')).toEqual({ fast: true, medium: true })
+  expect(tabNeeds('repo')).toEqual({ fast: false, medium: true })
+  expect(tabNeeds(undefined)).toEqual({ fast: true, medium: false })
 })

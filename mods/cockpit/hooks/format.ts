@@ -6,7 +6,9 @@ import type {
   CockpitAlm,
   CockpitBurnSample,
   CockpitChange,
+  CockpitClaudeState,
   CockpitDoneClaim,
+  CockpitGit,
   CockpitHistoryEntry,
   CockpitPerimeterCheck,
   CockpitPr,
@@ -40,10 +42,15 @@ export const COLORS = {
 export const AGENT_KEEP_MS = 120_000
 
 export const ICONS = {
-  folder: '\u{F024B}', // nf-md-folder
-  tree: '\u{F0253}', // nf-md-folder_multiple: a worktree, another checkout of the same repo
+  folder: '\u{F024B}', // nf-md-folder: a folder that is not a repository
+  repo: '\u{F0CCF}', // nf-md-source_repository: a repository's own checkout
+  tree: '\u{F0CD0}', // nf-md-source_repository_multiple: a linked worktree, another checkout of the same repo
   branch: '\u{F062C}', // nf-md-source_branch
 } as const
+
+/** The folder glyph by what the folder is: a linked worktree, a repository's checkout, or a plain folder (no git). */
+export const folderIcon = (git: Pick<CockpitGit, 'root' | 'worktreeRoot'> | undefined): string =>
+  git?.worktreeRoot ? ICONS.tree : git ? ICONS.repo : ICONS.folder
 
 // Nerd Font Material Design glyphs (supplementary private use area, hence \u{...}).
 const EFFORT: Record<string, { icon: string; color: string }> = {
@@ -292,6 +299,71 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
 /** Context color by fill: green, yellow, red (no orange: too close to red). */
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
+
+/** The cache hit of the last turn by thresholds: green from 80 %, amber from 50 to 79, red below. */
+export const cacheColor = (pct: number): string => (pct >= 80 ? COLORS.green : pct >= 50 ? COLORS.amber : COLORS.red)
+
+const STATE_LOOK = {
+  idle: { icon: '○', text: 'pronto', color: COLORS.dim },
+  working: { icon: '◐', text: 'lavora', color: COLORS.blue },
+  thinking: { icon: '◌', text: 'pensa', color: COLORS.lavender },
+  tool: { icon: '▸', text: '', color: COLORS.green },
+  waiting: { icon: '◆', text: 'attesa', color: COLORS.yellow },
+} as const
+const STATE_TOOL_MAX = 14
+
+/** The header's Claude state: an icon and a word (the tool's own name while one runs, cut to fit); no state yet reads as idle. */
+export function claudeStateSpans(state: CockpitClaudeState | undefined): Span[] {
+  const look = STATE_LOOK[state?.kind ?? 'idle']
+  const text = state?.kind === 'tool' && state.tool ? truncEnd(state.tool, STATE_TOOL_MAX) : look.text
+  return [{ t: `${look.icon} ${text}`, c: look.color }]
+}
+
+/** ` ↑2 ↓1`: the commits ahead of and behind the upstream; empty when level or without an upstream. */
+export function aheadBehindSpans(g: CockpitGit): Span[] {
+  const parts: Span[] = []
+  if (g.ahead) parts.push({ t: `↑${g.ahead}`, c: COLORS.green })
+  if (g.behind) parts.push({ t: `↓${g.behind}`, c: COLORS.yellow })
+  return parts.flatMap((p): Span[] => [{ t: ' ' }, p])
+}
+
+// ── Context growth and the autocompact forecast ──
+
+const CTX_SAMPLES_KEEP = 6
+
+/** `samples` with this main turn's context size added: the last six kept, and a context that shrank (a compaction) starts over. */
+export function recordCtxSample(samples: readonly number[] | undefined, tokens: number): number[] {
+  const last = samples?.at(-1)
+  const kept = last !== undefined && tokens < last ? [] : (samples ?? [])
+  return [...kept, tokens].slice(-CTX_SAMPLES_KEEP)
+}
+
+/**
+ * Requests left before auto-compaction at `threshold`: the room left from the last reading over the average growth per
+ * turn. Absent with fewer than two readings, no threshold (auto-compaction off) or a context that does not grow.
+ */
+export function autocompactForecast(samples: readonly number[] | undefined, threshold: number | undefined): number | undefined {
+  if (samples === undefined || samples.length < 2 || threshold === undefined) return undefined
+  const first = samples[0] ?? 0
+  const last = samples[samples.length - 1] ?? 0
+  const growth = (last - first) / (samples.length - 1)
+  return growth > 0 ? Math.max(0, Math.ceil((threshold - last) / growth)) : undefined
+}
+
+/**
+ * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws, `medium` (10 s) for git.
+ * The slow tier (30 s) runs whatever the tab; none of them while the pane is closed.
+ */
+export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean; medium: boolean } {
+  switch (tab ?? 'session') {
+    case 'repo':
+      return { fast: false, medium: true }
+    case 'work':
+      return { fast: true, medium: true }
+    default:
+      return { fast: true, medium: false }
+  }
+}
 
 /** `git status --porcelain -b` -> branch, dirty counts and the upstream with the commits ahead and behind it (none for a branch without one, or whose upstream is gone); undefined outside a repository. */
 export function parseGitStatus(
