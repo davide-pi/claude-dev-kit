@@ -1,6 +1,19 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { CockpitAgent, CockpitAlm, CockpitChange, CockpitDiff, CockpitPr, CockpitSnapshot, CockpitTab, CockpitTask, CockpitWorktree } from '../types'
+import type {
+  CockpitAgent,
+  CockpitAlm,
+  CockpitChange,
+  CockpitConsumer,
+  CockpitContext,
+  CockpitContextRow,
+  CockpitDiff,
+  CockpitPr,
+  CockpitSnapshot,
+  CockpitTab,
+  CockpitTask,
+  CockpitWorktree,
+} from '../types'
 import {
   AGENT_KEEP_MS,
   COLORS,
@@ -32,8 +45,10 @@ import {
   pctCell,
   rateColor,
   shortModel,
+  shouldCompact,
   signedPctCell,
   spanWidth,
+  sparkline,
   padCells,
   sessionTokens,
   taskBarCells,
@@ -60,8 +75,8 @@ const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
 /** The context fill from which the Sessione view warns. */
 const CTX_WARN_PCT = 80
-const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Subagenti', work: 'Lavoro', repo: 'Repo' }
-const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Sub', work: 'Lav', repo: 'Repo' }
+const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Agenti', context: 'Contesto', work: 'Lavoro', repo: 'Repo' }
+const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Sub', context: 'Ctx', work: 'Lav', repo: 'Repo' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
@@ -71,6 +86,14 @@ const MAX_FILE_ROWS = 8
 /** Cells before a changed file's path: the added column, the deleted one and their gaps. */
 const CHANGE_COUNTS_W = 12
 const MAX_WORKTREE_NAME_W = 16
+const MAX_SKILL_ROWS = 6
+/** Cells of the Contesto rows: a category's tokens and share of the window, a consumer's kind label. */
+const CTX_TOKENS_W = 6
+const CTX_SHARE_W = 5
+const CONSUMER_KIND_W = 5
+/** The colors of the used categories, in turn; the compaction buffer is dim and the free space empty. */
+const CATEGORY_COLORS = [COLORS.blue, COLORS.lavender, COLORS.amber, COLORS.green, COLORS.yellow, COLORS.orange, COLORS.violet, COLORS.gray]
+const CONSUMER_KINDS: Record<CockpitConsumer['kind'], string> = { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' }
 
 // ── Spans ────────────────────────────────────────────────────────────────────
 
@@ -273,7 +296,8 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
         width,
       )
     : undefined
-  const tool = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim('ultimo tool '), sp(a.lastTool)] : undefined
+  const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim('ultimo tool '), sp(a.lastTool)] : undefined
+  const tool = toolSpans && truncateSpans(toolSpans, width)
   return [counters, tool].filter((r): r is Span[] => r !== undefined)
 }
 
@@ -314,6 +338,40 @@ export function worktreeSpans(t: CockpitWorktree, isHere: boolean, width: number
     sp(' '),
     dim(truncMiddle(t.branch ?? 'HEAD', Math.max(4, width - nameW - 3))),
   ]
+}
+
+/** The bar of the window: a part per used category (each its own color) and the compaction buffer; the rest stays empty. */
+export function contextBar(c: CockpitContext, width: number): Span[] {
+  let n = 0
+  const parts = c.rows.flatMap(r => {
+    if (r.kind !== 'used' && r.kind !== 'buffer') return []
+    const color = r.kind === 'buffer' ? COLORS.dim : (CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray)
+    return [{ pct: c.max > 0 ? (100 * r.tokens) / c.max : 0, color }]
+  })
+  return barCells(width, parts)
+}
+
+/** One category row: a square in the bar color, its name cut to fit, its tokens and its share of the window. */
+export function categorySpans(r: CockpitContextRow, color: string, max: number, width: number): Span[] {
+  const nameW = Math.max(4, width - 2 - CTX_TOKENS_W - CTX_SHARE_W)
+  const share = max > 0 ? `${Math.round((100 * r.tokens) / max)}%` : ''
+  return [sp('■', color), sp(' '), sp(padCells(truncEnd(r.name, nameW), nameW)), sp(padStart(abbrevTokens(r.tokens), CTX_TOKENS_W)), dim(padStart(share, CTX_SHARE_W))]
+}
+
+/** The rows of the table: the categories inside the window (a deferred one is outside it), colored as the bar colors them. */
+export function categoryRows(c: CockpitContext, width: number): Span[][] {
+  let n = 0
+  return c.rows.flatMap(r => {
+    if (r.kind === 'deferred') return []
+    const color = r.kind === 'free' ? COLORS.empty : r.kind === 'buffer' ? COLORS.dim : (CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray)
+    return [categorySpans(r, color, c.max, width)]
+  })
+}
+
+/** A static consumer row: its kind, its name cut to fit, its tokens. */
+export function consumerSpans(c: CockpitConsumer, width: number): Span[] {
+  const nameW = Math.max(4, width - CONSUMER_KIND_W - 1 - CTX_TOKENS_W)
+  return [dim(pad(CONSUMER_KINDS[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
 }
 
 const REVIEW_LABELS: Record<NonNullable<CockpitPr['review']>, { text: string; color: string }> = {
@@ -361,6 +419,8 @@ export type PaneActions = {
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
+  /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests). */
+  countExact: () => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
 }
@@ -449,14 +509,16 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const fullLabels = [
     TAB_NAMES.session,
     running.length > 0 ? `${TAB_NAMES.agents} ${running.length}` : TAB_NAMES.agents,
+    TAB_NAMES.context,
     wlRows.length > 0 ? `${TAB_NAMES.work} ●` : TAB_NAMES.work,
     TAB_NAMES.repo,
   ]
   const names = buttonRowWidth(fullLabels) <= width ? TAB_NAMES : TAB_NAMES_SHORT
   const tabBar = (
-    <Box columnGap={1}>
+    <Box columnGap={1} flexWrap="wrap">
       {tabButton('session', names.session)}
       {tabButton('agents', running.length > 0 ? `${names.agents} ${running.length}` : names.agents)}
+      {tabButton('context', names.context)}
       {tabButton('work', names.work, wlRows.length > 0)}
       {tabButton('repo', names.repo)}
     </Box>
@@ -651,6 +713,49 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     ...historyBlock,
   ]
 
+  // ── Contesto: the breakdown by category, the biggest static consumers, the skills invoked, the rounds ──
+  const context = s.context
+  const rounds = s.ctxRounds ?? []
+  const hint = shouldCompact({ percent: s.ctx.percent, rounds, forecast })
+  const breakdownBlock: Block = [
+    gap(),
+    title(context ? `CONTESTO · ${abbrevTokens(context.total, true)}/${abbrevTokens(context.max, true)}` : 'CONTESTO', context ? [dim(context.isExact ? 'esatto' : 'stima')] : []),
+    gap(),
+    hint && line(ui, [sp('⚠ conviene compattare', COLORS.yellow)]),
+    ...(context ? [line(ui, contextBar(context, width)), ...categoryRows(context, width).map(spans => line(ui, spans))] : [line(ui, [dim('nessuna lettura')])]),
+    gap(),
+    <Button key="ctx:exact" onPress={() => actions.countExact()}>
+      conteggio esatto
+    </Button>,
+  ]
+  const consumersBlock: Block =
+    context && context.consumers.length > 0
+      ? [gap(), title(`CONSUMATORI · top ${context.consumers.length}`), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
+      : []
+  const skillsUsed = s.skillsUsed ?? []
+  const skillsBlock: Block =
+    skillsUsed.length > 0 || context?.skills
+      ? [
+          gap(),
+          title(`SKILL · ${skillsUsed.length} usate`, context?.skills ? [dim(`${context.skills.listed}/${context.skills.total} in elenco`)] : []),
+          skillsUsed.length > 0 && gap(),
+          skillsUsed.slice(0, MAX_SKILL_ROWS).map(name => line(ui, [sp(truncEnd(name, width))])),
+          skillsUsed.length > MAX_SKILL_ROWS && line(ui, [dim(`… +${skillsUsed.length - MAX_SKILL_ROWS}`)]),
+        ]
+      : []
+  const first = rounds[0]
+  const last = rounds.at(-1)
+  const roundsBlock: Block =
+    first !== undefined && last !== undefined
+      ? [
+          gap(),
+          title(`ANDAMENTO · ${rounds.length} ${rounds.length === 1 ? 'giro' : 'giri'}`),
+          gap(),
+          line(ui, [sp(sparkline(rounds), ctxColor(s.ctx.percent ?? 0)), dim(`  ${abbrevTokens(first)} → ${abbrevTokens(last)}`)]),
+        ]
+      : []
+  const contextBlocks: Block[] = [breakdownBlock, consumersBlock, skillsBlock, roundsBlock].filter(b => b.length > 0)
+
   // ── Lavoro, per agent: the main one, the workflow in flight, each running subagent, the hooks that fired ──
   const counts = taskCounts(s)
   const open = openTasks(s)
@@ -793,7 +898,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const repoBlocks: Block[] = [branchPart, changesPart, worktreePart, prPart].filter(b => b.length > 0)
 
   // Blocks are told apart by a rule; an empty tab says so.
-  const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, work: workBlocks, repo: repoBlocks }[tab]
+  const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, context: contextBlocks, work: workBlocks, repo: repoBlocks }[tab]
   const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim('niente da mostrare')])]
 
   return (

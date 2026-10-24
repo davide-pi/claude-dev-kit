@@ -1,12 +1,16 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
+import type { SessionContextBreakdown } from 'claude-code'
+
 import type {
   CockpitAgent,
   CockpitAlm,
   CockpitBurnSample,
   CockpitChange,
   CockpitClaudeState,
+  CockpitConsumer,
+  CockpitContext,
   CockpitDoneClaim,
   CockpitGit,
   CockpitHistoryEntry,
@@ -361,19 +365,76 @@ export function autocompactForecast(samples: readonly number[] | undefined, thre
   return growth > 0 ? Math.max(0, Math.ceil((threshold - last) / growth)) : undefined
 }
 
+// ── The Contesto tab: the breakdown, the sparkline of rounds, when to compact ──
+
+/** Main turns the sparkline keeps. */
+export const ROUNDS_KEEP = 20
+/** The context fill from which the compact hint can show with the rounds' growth, and the growth each of the last rounds needs. */
+export const COMPACT_HINT_PCT = 70
+const COMPACT_GROWTH = 1.05
+const COMPACT_ROUNDS = 3
+/** The hint shows with this many requests (or fewer) left before auto-compaction, whatever the fill. */
+const COMPACT_FORECAST_MAX = 3
+const CONSUMERS_SHOWN = 5
+
+/** `rounds` with this main turn's context size added, the last twenty kept. A shrinking context stays: a compaction is a drop to see. */
+export const recordRound = (rounds: readonly number[] | undefined, tokens: number): number[] => [...(rounds ?? []), tokens].slice(-ROUNDS_KEEP)
+
+const SPARK = '▁▂▃▄▅▆▇█'
+
+/** One block per value, scaled to the tallest of them (a context of 0 is the lowest block); empty without values. */
+export function sparkline(values: readonly number[]): string {
+  const max = Math.max(0, ...values)
+  return values.map(v => SPARK[max > 0 ? Math.round((Math.max(0, v) / max) * (SPARK.length - 1)) : 0]).join('')
+}
+
 /**
- * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws, `medium` (10 s) for the reads of its own.
- * Git is not one of them: it runs at the medium tier whenever the pane is open (the header shows it on every tab). The slow tier
- * (30 s) runs whatever the tab; none of them while the pane is closed.
+ * Whether `conviene compattare` shows: the context is at 70 % or more and each of the last three rounds grew it by more than 5 %
+ * of the round before, or auto-compaction is three requests away or nearer (`forecast`), whatever the fill.
  */
-export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean; medium: boolean } {
+export function shouldCompact(p: { percent?: number; rounds?: readonly number[]; forecast?: number }): boolean {
+  if (p.forecast !== undefined && p.forecast <= COMPACT_FORECAST_MAX) return true
+  const last = (p.rounds ?? []).slice(-(COMPACT_ROUNDS + 1))
+  const isGrowing = last.length === COMPACT_ROUNDS + 1 && last.every((v, i) => i === 0 || v > (last[i - 1] ?? Infinity) * COMPACT_GROWTH)
+  return (p.percent ?? 0) >= COMPACT_HINT_PCT && isGrowing
+}
+
+/**
+ * What the Contesto tab keeps of a breakdown: every row as the engine lists it, the window, and the five biggest static
+ * consumers (memory files, MCP tools inside the window, agents, and the skills listing as one).
+ */
+export function contextOf(
+  b: Pick<SessionContextBreakdown, 'categories' | 'totalTokens' | 'rawMaxTokens' | 'memoryFiles' | 'mcpTools' | 'agents' | 'skills'>,
+  isExact: boolean,
+): CockpitContext {
+  const consumers: CockpitConsumer[] = [
+    ...b.memoryFiles.map((f): CockpitConsumer => ({ name: `${f.type} ${baseName(f.path)}`, kind: 'memory', tokens: f.tokens })),
+    ...b.mcpTools.filter(t => t.isLoaded).map((t): CockpitConsumer => ({ name: t.name, kind: 'mcp', tokens: t.tokens })),
+    ...b.agents.map((a): CockpitConsumer => ({ name: a.agentType, kind: 'agent', tokens: a.tokens })),
+    ...(b.skills ? [{ name: 'skills', kind: 'skill' as const, tokens: b.skills.tokens }] : []),
+  ]
+  return {
+    rows: b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
+    total: b.totalTokens,
+    max: b.rawMaxTokens,
+    consumers: consumers.filter(c => c.tokens > 0).sort((a, c) => c.tokens - a.tokens).slice(0, CONSUMERS_SHOWN),
+    ...(b.skills && { skills: { listed: b.skills.includedSkills, total: b.skills.totalSkills } }),
+    isExact,
+  }
+}
+
+/**
+ * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws. The medium tier (10 s, git) runs
+ * whenever the pane is open, the header shows git on every tab; the slow tier (30 s) runs whatever the tab; none of them
+ * while the pane is closed.
+ */
+export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
   switch (tab ?? 'session') {
     case 'repo':
-      return { fast: false, medium: true }
-    case 'work':
-      return { fast: true, medium: true }
+    case 'context':
+      return { fast: false }
     default:
-      return { fast: true, medium: false }
+      return { fast: true }
   }
 }
 
@@ -578,8 +639,6 @@ export function almText(alm: CockpitAlm): string {
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
 
-// ── History of finished agents ───────────────────────────────────────────────
-
 // ── Tokens: the four counters, live per step, and an agent's share of the session ──
 
 /** The counters of an API usage record (`ModelUsage`). */
@@ -612,9 +671,14 @@ export function settleUsage(total: CockpitUsage | undefined, step: CockpitUsage 
   }
 }
 
-/** New tokens of the whole session: the main loop's, every agent listed and every one in the history. */
-export const sessionTokens = (s: Pick<CockpitSnapshot, 'mainTokens' | 'agents' | 'history'>): number =>
-  (s.mainTokens ?? 0) + s.agents.reduce((n, a) => n + a.tokens, 0) + (s.history ?? []).reduce((n, h) => n + h.tokens, 0)
+/** New tokens of the whole session: the main loop's, every agent listed and the cumulative count of those that left the list. */
+export const sessionTokens = (s: Pick<CockpitSnapshot, 'mainTokens' | 'agents' | 'agentTokens'>): number =>
+  (s.mainTokens ?? 0) + s.agents.reduce((n, a) => n + a.tokens, 0) + (s.agentTokens ?? 0)
+
+/** The cumulative count `total` plus the tokens of the agents `leaving` the live list; absent stays absent until an agent leaves. */
+export function withAgentTokens(total: number | undefined, leaving: readonly { tokens: number }[]): number | undefined {
+  return leaving.length === 0 ? total : (total ?? 0) + leaving.reduce((n, a) => n + a.tokens, 0)
+}
 
 /** `tokens` as a share of `total`, `12%` (`<1%` for a non-empty share that rounds to none); undefined when nothing was used yet. */
 export function tokenShare(tokens: number, total: number): string | undefined {
@@ -622,6 +686,8 @@ export function tokenShare(tokens: number, total: number): string | undefined {
   const pct = Math.min(100, Math.round((100 * tokens) / total))
   return pct === 0 && tokens > 0 ? '<1%' : `${pct}%`
 }
+
+// ── History of finished agents ───────────────────────────────────────────────
 
 /** Entries the history keeps (the state file persists them); the pane lists the newest ten of them. */
 export const HISTORY_KEEP = 50
@@ -969,6 +1035,6 @@ export function claimTime(at: string): string {
 }
 
 /** The cockpit's tabs, in the order the bar draws them. */
-export const TABS: readonly CockpitTab[] = ['session', 'agents', 'work', 'repo']
+export const TABS: readonly CockpitTab[] = ['session', 'agents', 'context', 'work', 'repo']
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)

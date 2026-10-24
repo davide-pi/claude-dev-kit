@@ -1,5 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
+import { spanText, spanWidth } from '../hooks/format'
+import { subagentDetails } from '../hooks/view'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
@@ -153,6 +155,8 @@ type World = {
   autoCompactAt?: number
   /** Receives the `breakdown` argument of every `$.session.usage()` call. */
   usageCalls?: (string | undefined)[]
+  /** Fields of the breakdown `usage({ breakdown })` answers, over the empty fixture (categories, memory files, MCP tools, agents, skills ...). */
+  breakdown?: Partial<SessionContextBreakdown>
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -186,6 +190,7 @@ function world(on: On, options: World = {}) {
       ...(options.autoCompactAt !== undefined && { autoCompactThreshold: options.autoCompactAt }),
       isAutoCompactEnabled: options.autoCompactAt !== undefined,
       apiUsage: null,
+      ...options.breakdown,
     }
     return {
       value: {
@@ -370,7 +375,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:work', 'tab:repo', 'bar:compact', 'bar:worklog'])
+  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:context', 'tab:work', 'tab:repo', 'bar:compact', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -1033,12 +1038,13 @@ function spawns(on: On) {
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `a${++n}` }))
 }
 
-test('tab bar: four buttons, Sessione selected by default; a press on Agenti draws the Agenti view', async ($, on) => {
+test('tab bar: five buttons, Sessione selected by default; a press on Agenti draws the Agenti view', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  expect((await tabs()).map(b => b.text)).toEqual(['Sessione', 'Subagenti', 'Lavoro', 'Repo'])
+  // the five bare names need 56 cells: the 48 of this 50-column pane's content get the short ones
+  expect((await tabs()).map(b => b.text)).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:session'])
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
@@ -1055,15 +1061,15 @@ test('tab bar: four buttons, Sessione selected by default; a press on Agenti dra
   await ui.unmount()
 })
 
-test('tab labels: Subagenti counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
+test('tab labels: Agenti counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
   const ui = await mountPane($, 52)
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Subagenti 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lavoro ●')
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Sub 2')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lav ●')
   expect((await ui.find({ key: 'tab:repo' }))?.text).toBe('Repo')
   await ui.unmount()
 })
@@ -1072,7 +1078,7 @@ test('tab labels without agents or warnings are the bare names', async ($, on) =
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sessione', 'Subagenti', 'Lavoro', 'Repo'])
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
   await ui.unmount()
 })
 
@@ -1881,25 +1887,56 @@ test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
-test('tab bar: the labels are short while the whole bar does not fit the content, and whole from 50 cells of it (a 52-column pane, with a count and a dot)', async ($, on) => {
+/** The `flexWrap` of the Box that holds the Button keyed `key`. */
+const wrapAround = (root: unknown, key: string): string | undefined => {
+  const o = root as { type?: string; props?: { flexWrap?: string }; children?: { props?: { key?: string } }[] } | null
+  if (o?.type === 'Box' && (o.children ?? []).some(c => c?.props?.key === key)) return o.props?.flexWrap
+  for (const c of o?.children ?? []) {
+    const found = wrapAround(c, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** The tab labels of a pane `columns` wide, the cells they take (a terminal Button draws `[ label ]`: 4 cells of chrome, one between two) and the drawn tree. */
+const tabsAt = async ($: Engine, columns: number) => {
+  const ui = await mountPane($, columns)
+  const labels = (await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('tab:')).map(b => b.text ?? '')
+  const root = await ui.drawn()
+  await ui.unmount()
+  return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
+}
+
+const LONG_TABS = ['Sessione', 'Agenti', 'Contesto', 'Lavoro', 'Repo']
+
+test('tab bar: the whole names appear once the bar fits the content (56 cells bare, 58 with the running count), at any pane from 58 columns up', async ($, on) => {
+  world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // 58 columns leave 56 cells of content: exactly the bare bar
+  for (const columns of [58, 60, 80]) {
+    const bare = await tabsAt($, columns)
+    expect(bare.labels).toEqual(LONG_TABS)
+    expect(bare.cells).toBe(56)
+  }
+  expect((await tabsAt($, 57)).labels).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
+  // a running agent adds ` 1`: 58 cells, which only a pane of 60 columns or more holds
+  await spawnAgent($, 'code-reviewer')
+  expect((await tabsAt($, 80)).labels).toEqual(['Sessione', 'Agenti 1', 'Contesto', 'Lavoro', 'Repo'])
+  expect((await tabsAt($, 58)).labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav', 'Repo'])
+})
+
+test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 60 cells, a pane gives 58 at most), and the bar wraps rather than overflow', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
-  // a terminal Button draws `[ label ]`: 4 cells of chrome, one cell between two
-  const tabsAt = async (columns: number) => {
-    const ui = await mountPane($, columns)
-    const labels = (await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('tab:')).map(b => b.text ?? '')
-    await ui.unmount()
-    return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1 }
-  }
-  const narrow = await tabsAt(40)
-  expect(narrow.labels).toEqual(['Sess', 'Sub 1', 'Lav ●', 'Repo'])
-  expect(narrow.cells).toBeLessThanOrEqual(40 - 2)
-  expect((await tabsAt(51)).labels).toEqual(['Sess', 'Sub 1', 'Lav ●', 'Repo'])
-  const whole = await tabsAt(52)
-  expect(whole.labels).toEqual(['Sessione', 'Subagenti 1', 'Lavoro ●', 'Repo'])
-  expect(whole.cells).toBeLessThanOrEqual(52 - 2)
+  const narrow = await tabsAt($, 40)
+  expect(narrow.labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav ●', 'Repo'])
+  // the short bar is 45 cells: wider than a 40-column pane's content, so the row wraps
+  expect(narrow.cells).toBeGreaterThan(40 - 2)
+  expect(wrapAround(narrow.root, 'tab:session')).toBe('wrap')
+  for (const columns of [52, 58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav ●', 'Repo'])
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -3126,9 +3163,9 @@ test('Subagenti: the turn\'s own total replaces what its steps added, a turn tha
   await ui.unmount()
 })
 
-test('Subagenti: after a reload the share keeps the main loop\'s tokens, which the state file persists next to the history', async ($, on) => {
+test('Subagenti: after a reload the share keeps the main loop\'s tokens and the agents\' cumulative count, which the state file persists next to the history', async ($, on) => {
   const writes = new Map<string, string>()
-  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 10_000, history: [entry('a9', 'implementer', NOW - 30_000)] }) })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 10_000, agentTokens: 5400, history: [entry('a9', 'implementer', NOW - 30_000)] }) })
   spawns(on)
   on('turn.step', async function* (_, e) {
     return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
@@ -3148,6 +3185,8 @@ test('Subagenti: after a reload the share keeps the main loop\'s tokens, which t
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
   const file = [...writes.entries()].find(([k]) => /cockpit-s-1\.json$/.test(k))
   expect(JSON.parse(file?.[1] ?? 'null')).toMatchObject({ mainTokens: 11_700 })
+  // the agents' count is written too: the running agent (1700) joins the 5400 that left, as the ended session's file keeps it
+  expect(JSON.parse(file?.[1] ?? 'null')).toMatchObject({ agentTokens: 7100 })
 })
 
 test('Subagenti: the elapsed time is refreshed by the fast tier only while this tab is selected', async ($, on) => {
@@ -3171,4 +3210,221 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await settleAll()
   expect(await elapsed()).toBe('10s')
   await ui.unmount()
+})
+
+// ── Cockpit v3, phase 3: the Contesto tab ──
+
+const breakdownRow = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred' = 'used') => ({ name, tokens, color: 'promptBorder', isDeferred: kind === 'deferred', kind })
+const CONTEXT_ROWS = [breakdownRow('System prompt', 8000), breakdownRow('Messages', 90_000), breakdownRow('Free space', 700_000, 'free')]
+const openCockpit = ($: Engine) => $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+const mainTurnEnd = ($: Engine, agentId?: string) =>
+  $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
+
+test('Contesto: opening the tab reads a summary breakdown and draws the bar and a row per category; the exact count asks for full only on press', async ($, on) => {
+  const usageCalls: (string | undefined)[] = []
+  world(on, { usageCalls, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  const atStart = summaries() // the autocompact threshold's read
+  const ui = await mountPane($, 50)
+  expect(summaries()).toBe(atStart) // nothing is read until the tab opens
+
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  expect(summaries()).toBe(atStart + 1)
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.some(r => /^CONTESTO/.test(r))).toBe(true)
+  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1%$/)
+  expect(rows.find(r => /Messages/.test(r))).toMatch(/^■ Messages +90k +9%$/)
+  expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70%$/)
+  expect((await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text).toBe('stima')
+  expect(usageCalls).not.toContain('full')
+
+  await ui.press({ key: 'ctx:exact' })
+  await settleAll()
+  expect(usageCalls.filter(c => c === 'full')).toHaveLength(1)
+  expect((await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text).toBe('esatto')
+  await ui.unmount()
+})
+
+test('Contesto: a main turn reads the breakdown again, debounced, only while the pane is open on this tab', async ($, on) => {
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(on, { usageCalls, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+
+  // another tab is selected: the end of a turn reads nothing
+  const base = summaries()
+  await mainTurnEnd($)
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(base)
+
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const opened = summaries()
+  expect(opened).toBe(base + 1)
+  // a burst of turns (a subagent turn too) is one read, once the debounce is over
+  await mainTurnEnd($)
+  await mainTurnEnd($)
+  await mainTurnEnd($, 'a1')
+  await settleAll()
+  expect(summaries()).toBe(opened)
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(opened + 1)
+  await ui.unmount()
+})
+
+test('Contesto: the tab has no clock of its own: the fast tier does not run while it is selected', async ($, on) => {
+  const listCalls: string[] = []
+  const clock = world(on, { listCalls })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  listCalls.length = 0
+  await clock.advance(6000)
+  await settleAll()
+  expect(listCalls).toHaveLength(0)
+  await ui.unmount()
+})
+
+test('Contesto: the top five static consumers by tokens, and the skills invoked this session with the listing count', async ($, on) => {
+  world(on, {
+    breakdown: {
+      categories: CONTEXT_ROWS,
+      totalTokens: 98_000,
+      rawMaxTokens: 1_000_000,
+      memoryFiles: [
+        { path: '/home/u/.claude/CLAUDE.md', type: 'User', tokens: 3000 },
+        { path: '/w/proj/CLAUDE.md', type: 'Project', tokens: 900 },
+      ],
+      mcpTools: [
+        { name: 'mcp__a__big', serverName: 'a', tokens: 5000, isLoaded: true },
+        { name: 'mcp__a__off', serverName: 'a', tokens: 9000, isLoaded: false },
+      ],
+      agents: [
+        { agentType: 'code-reviewer', source: 'plugin', tokens: 400 },
+        { agentType: 'tiny', source: 'plugin', tokens: 100 },
+      ],
+      skills: { totalSkills: 60, includedSkills: 41, tokens: 4200, skillFrontmatter: [] },
+    },
+  })
+  on('skill.prompt', (_, e) => ({ text: e.text }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(await $.skill.prompt({ skill: 'commit', text: 'go' })).toEqual({ text: 'go' }) // the hook passes the prompt through
+  await $.skill.prompt({ skill: 'react', text: 'go' })
+  await $.skill.prompt({ skill: 'commit', text: 'go' }) // a skill is listed once
+
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  const consumers = rows.filter(r => /^(file|mcp|agent|skill) /.test(r))
+  expect(consumers).toHaveLength(5)
+  expect(consumers[0]).toMatch(/^mcp +mcp__a__big +5k$/)
+  expect(consumers[1]).toMatch(/^skill +skills +4\.2k$/)
+  expect(consumers[2]).toMatch(/^file +User CLAUDE\.md +3k$/)
+  expect(consumers[3]).toMatch(/^file +Project CLAUDE\.md +900$/)
+  expect(consumers[4]).toMatch(/^agent +code-reviewer +400$/)
+  expect((await ui.find({ type: 'Text', text: /^41\/60 in elenco$/ }))?.text).toBe('41/60 in elenco')
+  expect(rows.some(r => /^SKILL · 2 usate/.test(r))).toBe(true)
+  const at = rows.findIndex(r => /^SKILL ·/.test(r))
+  expect(rows.slice(at + 1).filter(r => r === 'commit' || r === 'react')).toEqual(['commit', 'react'])
+  await ui.unmount()
+})
+
+/** A main turn's end with the context the engine measured, at `percent` of the window. */
+const contextRound = async ($: Engine, tokens: number, percent: number) => {
+  await $.session.measure({ context: { window: 1_000_000, tokens, percent }, rateLimits: [], changed: ['context'] })
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 0, output_tokens: 7, cache_read_input_tokens: tokens, cache_creation_input_tokens: 0, model: 'm' },
+  })
+}
+
+test('Contesto: the sparkline holds the context at each main turn, the last twenty; conviene compattare from 70 % with three rounds each over 5 % up', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const view = async () => (await paneRows($, 50, 'context')).rows
+  expect((await view()).some(r => /^[▁-█]+/.test(r))).toBe(false) // no round yet: no sparkline
+
+  for (let i = 0; i < 20; i++) await contextRound($, 100_000, 10)
+  let rows = await view()
+  expect(rows.find(r => /^[▁-█]{20} /.test(r))).toMatch(/^█{20} {2}100k → 100k$/)
+  expect(rows.some(r => /conviene compattare/.test(r))).toBe(false)
+
+  // 72 % and three rounds up by more than 5 % each: 100k, 106k, 113k, 120k
+  for (const [tokens, percent] of [[106_000, 70], [113_000, 71], [120_000, 72]] as const) await contextRound($, tokens, percent)
+  rows = await view()
+  // the sparkline stays at twenty blocks: the oldest went
+  expect(rows.find(r => /^[▁-█]{20} /.test(r))).toMatch(/^[▁-█]{20} {2}100k → 120k$/)
+  expect(rows.some(r => /conviene compattare/.test(r))).toBe(true)
+})
+
+test('Contesto: conviene compattare also when the autocompact forecast is three requests or fewer, whatever the fill', async ($, on) => {
+  world(on, { autoCompactAt: 150_000 })
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const tokens of [100_000, 110_000]) await contextRound($, tokens, 10)
+  // 40k left at 10k a turn: four requests
+  expect((await paneRows($, 50, 'context')).rows.some(r => /conviene compattare/.test(r))).toBe(false)
+  await contextRound($, 120_000, 10) // 30k left: three requests
+  expect((await paneRows($, 50, 'context')).rows.some(r => /conviene compattare/.test(r))).toBe(true)
+})
+
+// ── Phase 2 follow-ups, third round ──
+
+test('Subagenti: an agent that leaves the list joins a cumulative counter that the state file persists, so the share does not lean on the history (cut at 50)', async ($, on) => {
+  const writes = new Map<string, string>()
+  // 100k new tokens of agents that left earlier, none of them in the (empty) history
+  const clock = world(on, { writes, listed: [{ id: 'a2', status: 'running' }], stateFile: JSON.stringify({ open: false, tab: 'agents', agentTokens: 100_000 }) })
+  spawns(on)
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  await spawnAgent($, 'one') // a1: not listed by the engine, it ends at the next tick
+  await spawnAgent($, 'two') // a2 stays running
+  for (const agentId of ['a1', 'a2']) for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId })) void chunk
+  const flag = () => (flagOf(writes) as { agentTokens?: number }).agentTokens
+  await clock.advance(30_000)
+  await settleAll()
+  expect(flag()).toBe(100_000) // a1 ended but is listed for two more minutes: not counted yet
+  await clock.advance(120_000)
+  await settleAll()
+  await clock.advance(30_000) // the heartbeat after a1 left the list
+  await settleAll()
+  expect(flag()).toBe(101_700)
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  // 1700 of 100000 + 1700 + 1700 (the agent has run for minutes by now)
+  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\S+$/ })).map(n => n.text?.replace(/ {2}\S+$/, ''))).toEqual(['2% token'])
+  await ui.unmount()
+})
+
+test('Subagenti: the tool line (the one running, or the last) is cut to the width with an ellipsis, like the counters', () => {
+  const tool = 'mcp__plugin_browser-use_browser-use__a_very_long_tool_name_indeed'
+  const agent = { id: 'a1', type: 't', status: 'running' as const, startedAt: 0, tokens: 0 }
+  for (const a of [{ ...agent, activeTools: [tool] }, { ...agent, status: 'done' as const, lastTool: tool }]) {
+    const rows = subagentDetails(a, '  ', 30)
+    expect(rows).toHaveLength(1)
+    expect(spanWidth(rows[0] ?? [])).toBe(30)
+    expect(spanText(rows[0] ?? [])).toMatch(/…$/)
+  }
+  // a short one is left whole
+  expect(spanText(subagentDetails({ ...agent, lastTool: 'Read' }, '  ', 30)[0] ?? [])).toBe('  ultimo tool Read')
 })

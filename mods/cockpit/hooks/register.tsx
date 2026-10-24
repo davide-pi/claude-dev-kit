@@ -25,6 +25,7 @@ import {
   capDiff,
   checkPerimeter,
   compactInstructions,
+  contextOf,
   diffHunks,
   isAzureRemote,
   isDefaultBranch,
@@ -44,12 +45,14 @@ import {
   parseWorktrees,
   recordBurnSample,
   recordCtxSample,
+  recordRound,
   resolveAlm,
   settleUsage,
   stateAfterWait,
   tabNeeds,
   toHistory,
   usageOf,
+  withAgentTokens,
   worklogDays,
 } from './format'
 import type { WorklogSnapshot } from './format'
@@ -65,6 +68,8 @@ const SLOW_MS = 30_000
 const PR_EVERY_MS = 5 * 60_000
 /** The Repo tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
+/** A burst of main turns ends in one read of the context breakdown, this long after the first. */
+const CONTEXT_DEBOUNCE_MS = 2000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -391,8 +396,9 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       tasks: counts ? { done: counts.done, total: counts.total } : null,
       tab: s.tab ?? 'session',
       history: s.history ?? [],
-      // the history's tokens survive a reload, so the main loop's must too: the share is a part of their sum
+      // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
       mainTokens: s.mainTokens,
+      agentTokens: s.agentTokens,
     }
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
@@ -418,8 +424,8 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
   }
 }
 
-/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one), the agent history and the main loop's tokens. */
-async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; mainTokens?: number }> {
+/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one), the agent history and the tokens of the main loop and of the agents that left the list. */
+async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; mainTokens?: number; agentTokens?: number }> {
   try {
     const dir = await configDir($)
     if (!dir || !SESSION_ID.test(id)) return { history: [] }
@@ -427,11 +433,12 @@ async function savedState($: EngineInterface, id: string): Promise<{ tab?: Cockp
     const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
     if (typeof parsed !== 'object' || parsed === null) return { history: [] }
     const tab = 'tab' in parsed ? parsed.tab : undefined
-    const mainTokens = 'mainTokens' in parsed ? parsed.mainTokens : undefined
+    const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
     return {
       tab: isTab(tab) ? tab : undefined,
       history: parseHistory('history' in parsed ? parsed.history : undefined),
-      mainTokens: typeof mainTokens === 'number' && Number.isFinite(mainTokens) && mainTokens >= 0 ? mainTokens : undefined,
+      mainTokens: count('mainTokens' in parsed ? parsed.mainTokens : undefined),
+      agentTokens: count('agentTokens' in parsed ? parsed.agentTokens : undefined),
     }
   } catch {
     return { history: [] }
@@ -448,8 +455,12 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   cacheShare: undefined,
   mainTokens: undefined,
   mainStepTokens: undefined,
+  agentTokens: undefined,
   claudeState: undefined,
   ctxSamples: undefined,
+  ctxRounds: undefined,
+  context: undefined,
+  skillsUsed: undefined,
   fiveHourSamples: [],
   workflow: undefined,
   workflowRun: undefined,
@@ -468,7 +479,7 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, mainTokens: saved.mainTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
 }
 
@@ -476,6 +487,8 @@ async function setOpen($: EngineInterface, value: boolean): Promise<void> {
   isOpen = value
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
+  // The Contesto tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment.
+  if (value && (await read($, snapshot)).tab === 'context') await refreshContext($, 'summary')
 }
 
 async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
@@ -563,6 +576,47 @@ async function refreshAutoCompact($: EngineInterface): Promise<void> {
   }
 }
 
+// The breakdown read the Contesto tab waits for, and the exact count in flight (a second press while it runs counts nothing more).
+let isContextScheduled = false
+let isCounting = false
+
+/**
+ * Reads the context breakdown for the Contesto tab. `summary` estimates locally and is free; `full` counts with the token-count
+ * API and so runs only from the button. A failed read leaves the last reading.
+ */
+async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): Promise<void> {
+  try {
+    const u = await $.session.usage({ breakdown: detail })
+    const breakdown = u.context.breakdown
+    if (!breakdown) return
+    const context = contextOf(breakdown, detail === 'full')
+    await patch($, s => ({ ...s, context }))
+  } catch {
+    // not measured: the tab keeps what it drew
+  }
+}
+
+/** The exact count of the button: one at a time. */
+async function countExact($: EngineInterface): Promise<void> {
+  if (isCounting) return
+  isCounting = true
+  try {
+    await refreshContext($, 'full')
+  } finally {
+    isCounting = false
+  }
+}
+
+/** The end of a main turn re-reads the breakdown while the pane is open on the Contesto tab; a burst of turns is one read. */
+async function scheduleContextRead($: EngineInterface): Promise<void> {
+  if (!isOpen || isContextScheduled || (await read($, snapshot)).tab !== 'context') return
+  isContextScheduled = true
+  $.clock.after(CONTEXT_DEBOUNCE_MS, () => {
+    isContextScheduled = false
+    void refreshContext($, 'summary').catch(() => undefined)
+  })
+}
+
 /**
  * Keeps the main loop's state for the header's icon. It is told apart before patching: a thinking chunk repeats many times
  * a second, and a patch costs a session check and a state file check. `only` makes the change conditional on the state now held.
@@ -618,26 +672,33 @@ async function tickClock($: EngineInterface): Promise<number> {
       return isEnded ? { ...a, status: 'done', endedAt: now, isFailed: info?.status === 'failed' || info?.status === 'killed' } : a
     })
     const isListed = (a: CockpitAgent) => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)
-    const left = agents
-      .filter(a => !isListed(a))
+    const gone = agents.filter(a => !isListed(a))
+    const left = gone
       .map(toHistory)
       .filter((h): h is CockpitHistoryEntry => h !== undefined)
       .sort((a, b) => b.endedAt - a.endedAt)
-    return { ...s, now, agents: agents.filter(isListed), history: left.length > 0 ? addHistory(s.history, left) : s.history }
+    return {
+      ...s,
+      now,
+      agents: agents.filter(isListed),
+      history: left.length > 0 ? addHistory(s.history, left) : s.history,
+      // An agent leaving the list (type `?` ones too: they used tokens) joins the count that the share keeps.
+      agentTokens: withAgentTokens(s.agentTokens, gone),
+    }
   })
   return now
 }
 
-/** Whether the pane is open and its selected tab asks for the fast (`fast`) or medium (`!fast`) tier. */
-async function isTierWanted($: EngineInterface, tier: 'fast' | 'medium'): Promise<boolean> {
+/** Whether the pane is open and its selected tab asks for the fast tier. */
+async function isFastWanted($: EngineInterface): Promise<boolean> {
   if (!isOpen) return false
   const { tab } = await read($, snapshot)
-  return tabNeeds(tab)[tier]
+  return tabNeeds(tab).fast
 }
 
 /** Fast tier (2 s): the elapsed times of a tab that draws them. */
 async function fastTick($: EngineInterface): Promise<void> {
-  if (await isTierWanted($, 'fast')) await tickClock($)
+  if (await isFastWanted($)) await tickClock($)
 }
 
 /** Medium tier (10 s): git (and, with the Repo tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
@@ -712,10 +773,10 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Repo tab's git reads are made while it is selected: the press starts them.
+  // The Repo tab's git reads and the Contesto tab's breakdown are made while the tab is selected: the press starts them.
   selectTab: tab =>
     void patch($, s => ({ ...s, tab }))
-      .then(() => (tab === 'repo' ? refreshRepo($) : undefined))
+      .then(() => (tab === 'repo' ? refreshRepo($) : tab === 'context' ? refreshContext($, 'summary') : undefined))
       .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
@@ -733,6 +794,7 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
+  countExact: () => void countExact($).catch(() => undefined),
 })
 
 /**
@@ -812,7 +874,9 @@ export const register: Register = on => {
           .filter((h): h is CockpitHistoryEntry => h !== undefined)
           .sort((a, b) => b.endedAt - a.endedAt)
         const history = addHistory(own?.history, left)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history, mainTokens: own?.mainTokens }
+        // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
+        const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history, mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
       }
     } catch {
@@ -1067,8 +1131,11 @@ export const register: Register = on => {
         ...s,
         mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
         mainStepTokens: undefined,
+        // Every main turn is a round of the Contesto sparkline: the context the engine last measured.
+        ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
       }))
       await setClaudeState($, { kind: 'idle' })
+      await scheduleContextRead($).catch(() => undefined)
     } else {
       await patch($, s => ({
         ...s,
@@ -1089,6 +1156,16 @@ export const register: Register = on => {
       }))
     }
     await refreshGit($)
+    return next(e)
+  })
+
+  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Contesto tab lists them.
+  on('skill.prompt', async ($, e, next) => {
+    try {
+      await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))
+    } catch {
+      // observing must never break the prompt
+    }
     return next(e)
   })
 
