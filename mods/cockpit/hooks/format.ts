@@ -352,7 +352,7 @@ export function aheadBehindSpans(g: CockpitGit): Span[] {
 
 // ── Context growth and the autocompact forecast ──
 
-const CTX_SAMPLES_KEEP = 6
+export const CTX_SAMPLES_KEEP = 6
 
 /** `samples` with this main turn's context size added: the last six kept, and a context that shrank (a compaction) starts over. */
 export function recordCtxSample(samples: readonly number[] | undefined, tokens: number): number[] {
@@ -1092,8 +1092,6 @@ export const recordCall = (calls: readonly CockpitToolCall[] | undefined, call: 
 
 const GH_PR_CREATE = /\bgh\s+pr\s+create\b/
 const AZ_PR_CREATE = /\baz\s+repos\s+pr\s+create\b/
-const PR_TITLE_FLAG = /(?:^|\s)(?:--title|-t)(?:\s+|=)(?:"([^"]*)"|'([^']*)'|(\S+))/
-const PR_DRAFT_FLAG = /(?:^|\s)(?:--draft|-d)(?=\s|$)/
 
 /** The part of `command` from `from` to the next `;`, `|`, `&` or line break outside quotes: the command that starts there, without the rest of a compound one. */
 function commandSegment(command: string, from: number): string {
@@ -1111,6 +1109,56 @@ function commandSegment(command: string, from: number): string {
   return command.slice(from)
 }
 
+/** The words of `segment` as a shell splits them (quotes removed), each with whether it began inside quotes: such a word is an argument's text, never a flag. */
+function shellWords(segment: string): { text: string; isQuoted: boolean }[] {
+  const words: { text: string; isQuoted: boolean }[] = []
+  let text = ''
+  let isQuoted = false
+  let isStarted = false
+  let quote = ''
+  for (const ch of segment) {
+    if (quote !== '') {
+      if (ch === quote) quote = ''
+      else text += ch
+    } else if (ch === '"' || ch === "'") {
+      if (!isStarted) isQuoted = true
+      isStarted = true
+      quote = ch
+    } else if (/\s/.test(ch)) {
+      if (isStarted) words.push({ text, isQuoted })
+      text = ''
+      isQuoted = false
+      isStarted = false
+    } else {
+      isStarted = true
+      text += ch
+    }
+  }
+  if (isStarted) words.push({ text, isQuoted })
+  return words
+}
+
+/** The title and the draft flag of a `gh pr create` command segment: only unquoted words are flags, and a flag's own value is not read as one. */
+function createFlags(segment: string): { title: string; isDraft: boolean } {
+  const words = shellWords(segment)
+  let title: string | undefined
+  let isDraft = false
+  for (let i = 0; i < words.length; i++) {
+    const word = words[i]
+    if (!word || word.isQuoted) continue
+    const inline = /^(?:--title|-t)=([\s\S]*)$/.exec(word.text)
+    if (inline) title ??= inline[1]
+    else if (word.text === '--title' || word.text === '-t') {
+      const value = words[i + 1]
+      if (value) {
+        title ??= value.text
+        i++
+      }
+    } else if (word.text === '--draft' || word.text === '-d') isDraft = true
+  }
+  return { title: title ?? '', isDraft }
+}
+
 /**
  * The pull request that `command` created, from what it printed: `gh pr create` prints the pull request's URL (the title is
  * the one the command gave, none for `--fill`); `az repos pr create` prints the pull request as JSON. Undefined for any
@@ -1123,10 +1171,9 @@ export function parseCreatedPr(command: string, out: string): CockpitPr | undefi
     const number = Number(found?.[1])
     if (!found || !Number.isInteger(number) || number <= 0) return undefined
     // The flags are the create command's own: an `-d` or `-t` of another command of the line is not.
-    const segment = commandSegment(command, gh.index)
-    const title = PR_TITLE_FLAG.exec(segment)
+    const { title, isDraft } = createFlags(commandSegment(command, gh.index))
     const url = safeUrl(found[0])
-    return { number, title: title?.[1] ?? title?.[2] ?? title?.[3] ?? '', state: 'open', isDraft: PR_DRAFT_FLAG.test(segment), ...(url !== undefined && { url }) }
+    return { number, title, state: 'open', isDraft, ...(url !== undefined && { url }) }
   }
   if (AZ_PR_CREATE.test(command)) {
     try {
@@ -1163,12 +1210,13 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
     const { number, title, state, isDraft, url, review, checks } = v
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0 || typeof title !== 'string') continue
     const count = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+    const link = safeUrl(url)
     out.push({
       number,
       title,
       state: state === 'merged' || state === 'closed' ? state : 'open',
       isDraft: isDraft === true,
-      ...(safeUrl(url) !== undefined && { url: safeUrl(url) }),
+      ...(link !== undefined && { url: link }),
       ...((review === 'approved' || review === 'changes' || review === 'pending') && { review }),
       ...(isRecord(checks) && { checks: { passed: count(checks.passed), failed: count(checks.failed), pending: count(checks.pending) } }),
     })
@@ -1194,11 +1242,15 @@ export function fmtBytes(n: number): string {
   const units = ['B', 'K', 'M', 'G', 'T']
   let v = n
   let i = 0
-  while (v >= 1024 && i < units.length - 1) {
+  // The unit is chosen on the rounded value: 1023.6K is 1.0M, never 1024K.
+  while (i < units.length - 1 && Math.round(v) >= 1024) {
     v /= 1024
     i++
   }
-  return i === 0 ? `${Math.round(v)}B` : `${v < 10 ? v.toFixed(1) : Math.round(v)}${units[i]}`
+  if (i === 0) return `${Math.round(v)}B`
+  // A tenth that rounds up to ten reads as a whole number: 10K, not 10.0K.
+  const tenth = Math.round(v * 10) / 10
+  return `${tenth < 10 ? tenth.toFixed(1) : Math.round(v)}${units[i]}`
 }
 
 const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
@@ -1272,3 +1324,38 @@ export function recordSystem(system: CockpitSystem | undefined, line: CockpitSys
   next.off = SYSTEM_PARTS.filter(part => off.has(part))
   return next
 }
+
+// ── Alerts (D4) and the session data file ──
+
+/** The context fill from which the cockpit alerts, and the 5h credits left (percent) at or under which it does. */
+const ALERT_CTX_PCT = 80
+const ALERT_CREDITS_LEFT_PCT = 10
+
+/** One cause the person is told about: `key` names the episode (it ends when the cause is no longer in the list), `text` is the toast. */
+export type CockpitAlert = { key: string; text: string }
+
+/** The causes of an alert in `s` now: context at 80 % or more, 5h credits at 10 % left or less, each failed subagent, each pull request with red checks. */
+export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
+  const out: CockpitAlert[] = []
+  const pct = s.ctx.percent
+  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: `contesto al ${Math.round(pct)}%` })
+  const five = s.rateLimits.find(r => r.kind === 'five_hour')
+  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: `crediti 5h: resta il ${Math.max(0, Math.round(100 - five.percentUsed))}%` })
+  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: `subagent ${a.type} fallito` })
+  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: `PR #${pr.number}: check in errore` })
+  return out
+}
+
+/** The quick note's longest text. */
+export const NOTE_MAX = 2000
+
+/** The numbers of a saved list (the context samples, the rounds): the last `keep` finite non-negative ones; none for anything that is not a list. */
+export function parseCounts(value: unknown, keep: number): number[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const counts = value.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0).slice(-keep)
+  return counts.length > 0 ? counts : undefined
+}
+
+/** The quick note out of a parsed data file: text only, cut to `NOTE_MAX`; a blank one is none. */
+export const parseNote = (value: unknown): string | undefined =>
+  typeof value === 'string' && value.trim() !== '' ? value.slice(0, NOTE_MAX) : undefined

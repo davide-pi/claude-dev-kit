@@ -17,6 +17,10 @@ import type {
 } from '../types'
 import {
   AGENT_KEEP_MS,
+  CTX_SAMPLES_KEEP,
+  NOTE_MAX,
+  ROUNDS_KEEP,
+  activeAlerts,
   addHistory,
   additionsDiff,
   addUsage,
@@ -38,7 +42,9 @@ import {
   parseDoneClaims,
   parseGitStatus,
   parseGithubPr,
+  parseCounts,
   parseHistory,
+  parseNote,
   parseNumstat,
   parsePerimeter,
   parseReset,
@@ -78,6 +84,8 @@ const PR_EVERY_MS = 5 * 60_000
 const REPO_FILES_KEEP = 50
 /** A burst of main turns ends in one read of the context breakdown, this long after the first. */
 const CONTEXT_DEBOUNCE_MS = 2000
+/** An exact count that has not answered after this long is given up on; the Contesto tab reads summaries again, and a late answer older than the summary read since is discarded. */
+const COUNT_TIMEOUT_MS = 60_000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -90,6 +98,28 @@ async function patch($: EngineInterface, next: (s: CockpitSnapshot) => CockpitSn
   if (JSON.stringify(next(current)) === JSON.stringify(current)) return
   await update($, snapshot, next)
   await writeState($)
+  await raiseAlerts($)
+}
+
+// ── Alerts (D4) ──
+// A toast per cause, once per episode: the keys of the causes in force are remembered, and a cause that is gone is forgotten
+// (so it can raise again). What a session was adopted with is not news: the first reading of a session only remembers.
+let alerted = new Set<string>()
+let alertedSession: string | undefined
+
+async function raiseAlerts($: EngineInterface): Promise<void> {
+  try {
+    const s = await read($, snapshot)
+    const active = activeAlerts(s)
+    const isFirst = alertedSession !== s.sessionId
+    const before = alerted
+    alertedSession = s.sessionId
+    alerted = new Set(active.map(a => a.key))
+    if (isFirst) return
+    for (const a of active) if (!before.has(a.key)) $.ui.toast(a.text)
+  } catch {
+    // an alert that cannot be raised is lost; observing must never break the change
+  }
 }
 
 /** The 5h samples after a reading of the rate limits the engine reported at `now`; the window's usage and reset time are absent off a subscription. */
@@ -365,6 +395,7 @@ const SESSION_ID = /^[\w-]{1,128}$/
 // The pane starts closed, `/cockpit` opens it, the person's close shuts it. A reload starts these over.
 let isOpen = false
 let lastWritten = ''
+let lastDataWritten = ''
 let lastWriteAt = 0
 // When the write timer was scheduled: a timer the engine refuses never runs its callback, so the mark lapses by itself after twice the throttle.
 let writeScheduledAt: number | undefined
@@ -372,7 +403,20 @@ let writeScheduledAt: number | undefined
 let mainTools: string[] = []
 
 /**
- * Writes the state file when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
+ * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
+ * chat's pull requests, the quick note and the context samples; the statusline's pruning keeps it while the session's transcript
+ * exists. `history` is the one the file is written with (the session's end adds its running agents).
+ */
+const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => ({
+  history,
+  prs: s.prs ?? [],
+  ...(s.note !== undefined && { note: s.note }),
+  ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
+  ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
+})
+
+/**
+ * Writes the state file (and the session data file) when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
  * written when it ends. `isForced` skips the window (open, close, session start). `isHeartbeat` rewrites unchanged
  * content with a fresh `at`: the statusline trusts `open:true` only while `at` is recent. A failure leaves the file as it was.
  */
@@ -393,16 +437,18 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
       tab: s.tab ?? 'agents',
-      history: s.history ?? [],
-      // the chat's pull requests come back with the session
-      prs: s.prs && s.prs.length > 0 ? s.prs : undefined,
       // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
       mainTokens: s.mainTokens,
       agentTokens: s.agentTokens,
     }
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
-    if (key === lastWritten && !isHeartbeat) return
+    const dataFile = `${dir}/.cache/cockpit-data-${id}.json`
+    const data = JSON.stringify(sessionData(s))
+    const dataKey = `${dataFile} ${data}`
+    const isStateStale = key !== lastWritten || isHeartbeat
+    const isDataStale = dataKey !== lastDataWritten
+    if (!isStateStale && !isDataStale) return
     const now = await $.clock.now()
     const wait = STATE_MIN_MS - (now - lastWriteAt)
     if (!isForced && wait > 0) {
@@ -415,40 +461,69 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       }
       return
     }
-    const { open, ...rest } = content
-    await $.fs.write(file, JSON.stringify({ open, at: now, ...rest }))
-    lastWritten = key
+    if (isStateStale) {
+      const { open, ...rest } = content
+      await $.fs.write(file, JSON.stringify({ open, at: now, ...rest }))
+      lastWritten = key
+    }
+    if (isDataStale) {
+      await $.fs.write(dataFile, data)
+      lastDataWritten = dataKey
+    }
     lastWriteAt = now
   } catch {
     // best-effort: the statusline simply shows what it showed
   }
 }
 
+/** What a saved file holds, as an object; undefined for a missing or unreadable file, or any other JSON. */
+async function readSaved($: EngineInterface, path: string): Promise<Record<string, unknown> | undefined> {
+  try {
+    const text = await $.fs.read(path)
+    const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
+    return typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed)) : undefined
+  } catch {
+    return undefined
+  }
+}
+
+type Saved = {
+  tab?: CockpitTab
+  history: CockpitHistoryEntry[]
+  prs?: CockpitPr[]
+  mainTokens?: number
+  agentTokens?: number
+  note?: string
+  ctxSamples?: number[]
+  ctxRounds?: number[]
+}
+
 /**
- * What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one; the v2 Sessione
- * and Repo tabs map to Agenti and Lavoro), the agent history, the chat's pull requests and the tokens of the main loop and of the
- * agents that left the list (a file from before that count: the history's sum).
+ * What an earlier run of session `id` left: in its state file the tab (none for a missing file or an unknown one; the v2 Sessione
+ * and Repo tabs map to Agenti and Lavoro) and the tokens of the main loop and of the agents that left the list (a file from before
+ * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the note and the context
+ * samples. A state file from before the data file still holds the history and the pull requests: a field the data file does not
+ * have is read from there, once (the next write moves it).
  */
-async function savedState(
-  $: EngineInterface,
-  id: string,
-): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; prs?: CockpitPr[]; mainTokens?: number; agentTokens?: number }> {
+async function savedState($: EngineInterface, id: string): Promise<Saved> {
   try {
     const dir = await configDir($)
     if (!dir || !SESSION_ID.test(id)) return { history: [] }
-    const text = await $.fs.read(`${dir}/.cache/cockpit-${id}.json`)
-    const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
-    if (typeof parsed !== 'object' || parsed === null) return { history: [] }
-    const tab = 'tab' in parsed ? parsed.tab : undefined
+    const state = await readSaved($, `${dir}/.cache/cockpit-${id}.json`)
+    const data = await readSaved($, `${dir}/.cache/cockpit-data-${id}.json`)
     const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
-    const history = parseHistory('history' in parsed ? parsed.history : undefined)
-    const prs = parseSavedPrs('prs' in parsed ? parsed.prs : undefined)
+    const field = (key: 'history' | 'prs') => (data && key in data ? data[key] : state?.[key])
+    const history = parseHistory(field('history'))
+    const prs = parseSavedPrs(field('prs'))
     return {
-      tab: savedTab(tab),
+      tab: savedTab(state?.tab),
       history,
       prs: prs.length > 0 ? prs : undefined,
-      mainTokens: count('mainTokens' in parsed ? parsed.mainTokens : undefined),
-      agentTokens: count('agentTokens' in parsed ? parsed.agentTokens : undefined) ?? historyTokens(history),
+      mainTokens: count(state?.mainTokens),
+      agentTokens: count(state?.agentTokens) ?? historyTokens(history),
+      note: parseNote(data?.note),
+      ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
+      ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
     }
   } catch {
     return { history: [] }
@@ -462,6 +537,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   agents: [],
   history: [],
   prs: undefined,
+  note: undefined,
   calls: undefined,
   tasks: [],
   cacheShare: undefined,
@@ -493,7 +569,7 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, note: saved.note, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
   // The monitor looked for the pid of the session it was started for: another one's gets its own, if the tab is still wanted.
   stopMonitor()
@@ -515,6 +591,8 @@ async function runMonitor($: EngineInterface, m: Monitor): Promise<void> {
   try {
     const id = await $.session.id()
     const dir = await configDir($)
+    // The tab may have been left while the session id and config folder were read: no child is started for a stopped monitor.
+    if (m.isStopped) return
     m.stream = $.process.spawn({
       argv: ['node', `${$.plugin.root}/sysmon/sysmon.mjs`],
       env: { COCKPIT_SESSION_ID: id, ...(dir && { COCKPIT_CONFIG_DIR: dir }) },
@@ -549,14 +627,16 @@ function stopMonitor(): void {
 /** The monitor runs exactly while the pane is open on the Sistema tab: started when it is wanted and not running, stopped (and its readings forgotten) when it runs and is not wanted. */
 async function syncMonitor($: EngineInterface): Promise<void> {
   try {
-    const isWanted = isOpen && (await read($, snapshot)).tab === 'system'
+    const current = await read($, snapshot)
+    const isWanted = isOpen && current.tab === 'system'
     if (isWanted && !monitor) {
       const m: Monitor = { isStopped: false }
       monitor = m
       void runMonitor($, m)
-    } else if (!isWanted && monitor) {
+    } else if (!isWanted) {
+      // Also with no monitor left: one that crashed left the tab reading "non disponibile", which the next visit must not start from.
       stopMonitor()
-      await patch($, s => ({ ...s, system: undefined }))
+      if (current.system !== undefined) await patch($, s => ({ ...s, system: undefined }))
     }
   } catch {
     // the snapshot could not be read: the monitor stays as it is
@@ -661,7 +741,9 @@ async function refreshAutoCompact($: EngineInterface): Promise<void> {
 // When the breakdown read the Contesto tab waits for was scheduled, and the exact count in flight (a second press while it runs counts nothing more).
 // A timer the engine refuses never runs its callback, so a mark the callback clears could stay for ever: it lapses by itself after twice the debounce.
 let contextScheduledAt: number | undefined
-let isCounting = false
+// When the exact count in flight started (none: no count runs) and which count it is: one that outlives `COUNT_TIMEOUT_MS` no longer counts as running.
+let countingSince: number | undefined
+let countRun = 0
 // Every context read takes the next number when it starts; the snapshot keeps the number of the reading it holds.
 let contextSeq = 0
 
@@ -672,7 +754,7 @@ let contextSeq = 0
  * the exact count runs (whoever asks: the tab, the pane opening, a turn), or the count, answering last, would be dropped.
  */
 async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): Promise<void> {
-  if (detail === 'summary' && isCounting) return
+  if (detail === 'summary' && (await isCountRunning($))) return
   const seq = ++contextSeq
   try {
     const u = await $.session.usage({ breakdown: detail })
@@ -685,14 +767,22 @@ async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): P
   }
 }
 
+/** Whether an exact count is in flight and still within `COUNT_TIMEOUT_MS`: a count that never answers does not lock the tab for good. */
+async function isCountRunning($: EngineInterface): Promise<boolean> {
+  return countingSince !== undefined && (await $.clock.now()) - countingSince < COUNT_TIMEOUT_MS
+}
+
 /** The exact count of the button: one at a time. */
 async function countExact($: EngineInterface): Promise<void> {
-  if (isCounting) return
-  isCounting = true
+  const now = await $.clock.now()
+  if (countingSince !== undefined && now - countingSince < COUNT_TIMEOUT_MS) return
+  const run = ++countRun
+  countingSince = now
   try {
     await refreshContext($, 'full')
   } finally {
-    isCounting = false
+    // a count given up on does not release the one that replaced it
+    if (countRun === run) countingSince = undefined
   }
 }
 
@@ -701,13 +791,14 @@ async function countExact($: EngineInterface): Promise<void> {
  * is scheduled or made while an exact count runs: the summary would be the newer reading, and the count, answering last, dropped.
  */
 async function scheduleContextRead($: EngineInterface): Promise<void> {
-  if (!isOpen || isCounting || (await read($, snapshot)).tab !== 'context') return
+  if (!isOpen || (await isCountRunning($)) || (await read($, snapshot)).tab !== 'context') return
   const now = await $.clock.now()
   if (contextScheduledAt !== undefined && now - contextScheduledAt < 2 * CONTEXT_DEBOUNCE_MS) return
   contextScheduledAt = now
   $.clock.after(CONTEXT_DEBOUNCE_MS, () => {
     contextScheduledAt = undefined
-    if (!isCounting) void refreshContext($, 'summary').catch(() => undefined)
+    // a summary is not read while an exact count runs: refreshContext itself skips it
+    void refreshContext($, 'summary').catch(() => undefined)
   })
 }
 
@@ -896,7 +987,20 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
   countExact: () => void countExact($).catch(() => undefined),
+  setNote: text => void patch($, s => ({ ...s, note: text === '' ? undefined : text.slice(0, NOTE_MAX) })).catch(() => undefined),
+  sendNote: text => void sendNote($, text).catch(() => undefined),
 })
+
+/**
+ * Appends the quick note (`typed`, the field's text on Enter; else the one the snapshot holds) to the prompt box and clears it. The
+ * box is only filled, never submitted (D3): the person decides. A box that refuses the text keeps the note.
+ */
+async function sendNote($: EngineInterface, typed?: string): Promise<void> {
+  const note = typed ?? (await read($, snapshot)).note
+  if (note === undefined || note.trim() === '') return
+  const filled = await $.prompt.fill({ text: note, mode: 'append' })
+  await patch($, s => ({ ...s, note: filled.isFilled ? undefined : note.slice(0, NOTE_MAX) }))
+}
 
 /**
  * What the diff pane's button does: forgets the diff, then closes the pane. A plugin's own `$.ui.close` does not reach its
@@ -978,11 +1082,13 @@ export const register: Register = on => {
         const history = addHistory(own?.history, left)
         // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
         const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', history, prs: own?.prs && own.prs.length > 0 ? own.prs : undefined, mainTokens: own?.mainTokens, agentTokens }
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
+        // The history takes the running agents as interrotto; a snapshot that is not this session's has nothing of it to write.
+        if (own) await $.fs.write(`${dir}/.cache/cockpit-data-${e.sessionId}.json`, JSON.stringify(sessionData(own, history)))
       }
     } catch {
-      // the file ages out on its own
+      // the files age out on their own (the data file goes with the transcript)
     }
     return next(e)
   })

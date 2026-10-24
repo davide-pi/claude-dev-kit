@@ -37,7 +37,7 @@ export type CockpitAgent = {
   stepUsage?: CockpitUsage
 }
 
-/** A finished agent that left the live list, as the history keeps it (and the state file persists it). */
+/** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */
 export type CockpitHistoryEntry = {
   id: string
   type: string
@@ -166,6 +166,9 @@ export type CockpitSysProc = { pid: number; name: string; ports: number[] }
 /** Where the machine's power comes from: the wall, or a battery with its charge and whether it is plugged in. */
 export type CockpitPower = { kind: 'wired' } | { kind: 'battery'; percent: number; isCharging: boolean }
 
+/** The free and total bytes of the working directory's drive, and its short name (`D:`, `/`). */
+export type CockpitDisk = { free: number; total: number; label?: string }
+
 /** One JSON line of the system monitor (`sysmon/sysmon.mjs`), narrowed: only the parts it carries; `off` names the parts it cannot read. */
 export type CockpitSysLine = {
   /** CPU busy share, 0-100. */
@@ -174,8 +177,7 @@ export type CockpitSysLine = {
   /** Network bytes per second. */
   net?: { rx: number; tx: number }
   procs?: CockpitSysProc[]
-  /** Free and total bytes of the working directory's drive, and its short name (`D:`, `/`). */
-  disk?: { free: number; total: number; label?: string }
+  disk?: CockpitDisk
   power?: CockpitPower
   off?: CockpitSystemPart[]
 }
@@ -190,7 +192,7 @@ export type CockpitSystem = {
   rx: number[]
   tx: number[]
   procs?: CockpitSysProc[]
-  disk?: { free: number; total: number; label?: string }
+  disk?: CockpitDisk
   power?: CockpitPower
   /** The parts that read "non disponibile": the tool is missing or failed, or the monitor itself could not run. */
   off: CockpitSystemPart[]
@@ -259,7 +261,7 @@ export type CockpitSnapshot = {
   workflowRun?: CockpitWorkflowRun
   /** The last entries of `done-claim.log`, newest first; absent without a readable log. */
   doneClaims?: CockpitDoneClaim[]
-  /** The pull requests of this chat, oldest first, at most ten; kept with the session in its state file. Absent without one. */
+  /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
   prs?: CockpitPr[]
   /** The last eight tool calls of the main loop, oldest first (the subagents' are theirs); per session, not persisted. */
   calls?: CockpitToolCall[]
@@ -267,6 +269,8 @@ export type CockpitSnapshot = {
   repo?: CockpitRepo
   /** The Sistema tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
   system?: CockpitSystem
+  /** The quick note under the tab bar, kept with the session in its data file; `invia` appends it to the prompt box and clears it. Absent when empty. */
+  note?: string
   /** The diff of the file pressed on the Lavoro tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */

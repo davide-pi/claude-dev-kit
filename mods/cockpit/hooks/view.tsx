@@ -66,7 +66,10 @@ import {
 import type { ModelFamily, Span } from './format'
 
 /** The elements the views draw with; every surface's table has them. */
-export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'>
+export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'> & {
+  /** Every surface but the mobile app's draws a text field: there the note is left out. */
+  Input?: Elements['terminal']['Input']
+}
 
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
@@ -537,6 +540,10 @@ export type PaneActions = {
   countExact: () => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
+  /** Keeps the quick note as the person types it. */
+  setNote: (text: string) => void
+  /** Appends the quick note to the prompt box and clears it: the text of the field on Enter, the saved one when none is given. */
+  sendNote: (text?: string) => void
 }
 
 /** What the diff pane's button does. */
@@ -569,7 +576,7 @@ export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: num
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
-  const { Box, Text, Button, Link } = ui
+  const { Box, Text, Button, Link, Input } = ui
   // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
   const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
@@ -720,10 +727,16 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const burn = five && burnRate(s.fiveHourSamples ?? [], s.now, five.used, five.resetMs)
   const burnRow = burn && line(ui, [sp(burnText(burn), burn.isBeforeReset ? COLORS.red : COLORS.green)])
 
-  // The last row of every tab: compatta always; segna ore (the hours of this chat) whenever the session has an id. The row
-  // stacks when its buttons do not fit the pane side by side.
+  // The quick note under the tab bar, on every tab: two rows, saved as it is typed; Enter and `invia` append it to the prompt box.
+  const noteInput = Input && (
+    <Input key="note" rows={2} placeholder="nota rapida" value={s.note ?? ''} submitLabel="invia" onInput={value => actions.setNote(value)} onSubmit={value => actions.sendNote(value)} />
+  )
+
+  // The last row of every tab: compatta always; segna ore (the hours of this chat) whenever the session has an id; invia while
+  // the note holds something to send. The row stacks when its buttons do not fit the pane side by side.
   const hasSession = s.sessionId !== undefined
-  const barLabels = ['compatta', ...(hasSession ? ['segna ore'] : [])]
+  const hasNote = (s.note ?? '').trim() !== ''
+  const barLabels = ['compatta', ...(hasSession ? ['segna ore'] : []), ...(hasNote ? ['invia'] : [])]
   const buttonsRow = (
     <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
       <Button key="bar:compact" onPress={() => actions.compact()}>
@@ -732,6 +745,11 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       {hasSession && (
         <Button key="bar:worklog" onPress={() => actions.runWorklog()}>
           segna ore
+        </Button>
+      )}
+      {hasNote && (
+        <Button key="bar:note" onPress={() => actions.sendNote()}>
+          invia
         </Button>
       )}
     </Box>
@@ -1020,6 +1038,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       {headerRows}
       {rule}
       {tabBar}
+      {noteInput}
       {rule}
       {body}
       {/* The spacer takes what the tab leaves of the pane height: the buttons sit on its last row, or follow a taller tab. */}
