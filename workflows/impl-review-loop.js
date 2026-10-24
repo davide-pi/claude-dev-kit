@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check.',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. When the run ends (OK, or a STALL the owner gives up on; never on a relaunch) the caller appends result.findingsLog to the findings log, one line per run.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -10,14 +10,43 @@ export const meta = {
 }
 
 // This workflow exceeds the kit's `workflowSizeGuideline: "small"` (fewer than 5 agents) by design: one
-// implementer, one to four reviewers per round, and a convergence stop on the fixes. The "Large workflow" notice is expected.
+// implementer, the panel of the size (up to four reviewers, a delta round up to five with the Sonnet), and a convergence stop on the fixes. The "Large workflow" notice is expected.
 //
 // Who runs: `agent({ agentType })` takes the kit's typed agents (implementer, code-reviewer,
 // review-security, review-performance); `model` and `effort` override the agent's own frontmatter per call.
 //
-// One task per run: the loop is sized for one plan task (or one cluster of tasks on the same files); an L change is launched
-// task by task by the caller (deliver), sequentially in the same worktree, committing between runs. The implement prompt carries no
-// tool-call budget for that reason; the reviewers and the fixers do (their work is bounded by the findings).
+// One run per coherent request (P-run): one implementer works through every plan task of the request in order, testing after each one,
+// and the reviewers read the whole diff once. A run costs a fixed ~350k subagent tokens whatever its size, so the caller (deliver) splits only
+// past about 15 files or for areas that share nothing (other reviewers, other verify), sequentially in the same worktree. The implement
+// prompt carries no tool-call budget for that reason; the reviewers and the fixers do (their work is bounded by the findings).
+//
+// Every check scales with the size (P-size): S one Sonnet reviewer, no final full read, no preview; M and L as below. A doubt or a choice
+// reaches the owner only when it weighs (P-weight): what the owner sees or uses, a contract or data, a cost or a risk, an owner decision.
+// The rest is decided by the agents (`defaults` for the non-trivial ones) and not reported. Nothing here adds a hook or a new `stall.why`:
+// every addition is an arg (`request`, `decisions`, `preview`), an output field (`defaults`, `findingsLog`, the reviewers' `questions`), a
+// prompt line, or the existing `question` stall.
+//
+// The owner's words: `request` (the owner's messages, verbatim) goes beside the brief to the round-1 reviewers and the final full read, who
+// judge the change against BOTH; `decisions` (one line each, only those touching the perimeter) go to the implementer, the fixer and every
+// reviewer. A brief that departs from the request, an edit that contradicts a decision, or a hunk the owner asked for that would be reverted
+// as `scope` is no finding: the reviewer lists it under `questions` (REVIEW schema), which is a STALL 'question' at that round (before any
+// fix). The answers of that round (`answers: [{ text, answer }]`, matched by the exact text of the question, trim and case aside: an answer whose text matches no question is ignored; the stall comes back while a question has no answer) go to the fixer, which runs once even with nothing else
+// to fix, and to the later reviewers; a question answered in an earlier round is never asked again. A fixer or implementer that would
+// contradict a decision asks the same way. `accept` of a P1/P2 is the owner's alone: the caller never applies it as a default.
+//
+// Defaults (W4): the implementer and the fixer report `defaults: [{ choice, alternative, path }]` for non-trivial choices the brief did
+// not state; no stall, the result lists them (once each) and the caller shows them in the verdict.
+//
+// Preview (W5): with `args.preview` (the owner-visible surface, named by the caller) an M or L change stops after the implementer with a
+// STALL 'question' at round 0 carrying what to show; the caller takes the screenshot or sample and asks. A bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the
+// review, any other answer runs the implementer once more ('implement (preview)') with it as direction. S and `inline` never stop.
+//
+// Growth (W8): round 1 and the final read tell the reviewers to run `git diff --numstat <start head>` and to propose a split (a P3 finding with
+// `proposal: true`) for a file past 600 lines, or a file of 200+ lines at the start that grew by 30% (a new or small file is no proposal); a proposal never blocks and is never fixed (not a cleanup candidate): it is for the table.
+//
+// Findings log (W12): the workflow cannot write files (and has no clock), so `result().findingsLog` is `{ size, rounds, findings: [{ category,
+// priority, path, closed }] }` (cumulative: every finding ever seen) and the caller appends it, with `at`, `run` and `minutes`, as one line of
+// <git-dir>/deliver/findings.jsonl when the run ends (OK, or a STALL the owner gives up on), never on a relaunch: one line per run.
 //
 // Rounds: there is no cap on them. The loop ends in exactly two ways: no P1/P2 inside the perimeter is open
 // (OK), or a finding stalls (STALL): still open after a fix, closed earlier and open again (a closed finding
@@ -35,7 +64,7 @@ export const meta = {
 // P1/P2 and the reviewers open another never ends by itself. So the count of open P1/P2 (plus the open V finding) is read at the decision after each fix
 // round: STALL 'not-converging' when it did not drop below the lowest count of the fix rounds before it for 3 fix rounds in a row
 // (notConverging; the first fix round only sets the bar; a decision with a finding still without a verdict is not read, the
-// cleanup pass is no fix round). A resolution `guidance` or `accept` on a round restarts that count; `retry` does not; it also restarts when a DONE starts the cleanup pass or a coverage rerun (its 0 is no bar).
+// cleanup pass is no fix round). A resolution `guidance` or `accept` on a round restarts that count; `retry` does not; it also restarts when a DONE starts the final full read, the cleanup pass or a coverage rerun (its 0 is no bar).
 // Every STALL carries `history` (findingHistory): per finding the round it appeared, the fixes it went to, when it closed and
 // when it came back. A fixer whose snapshot churn (lines inserted + deleted) grows strictly over three fixes in a row is a STALL
 // 'churn' (churnGrowing; a report without a snapshot has no churn and is skipped; the cleanup pass is no fix cycle and has none). The churn
@@ -49,9 +78,9 @@ export const meta = {
 // findings it fixed (not rejected) move from `minor` to `cleaned` only once that delta review has read them: a delta finding that matches one
 // leaves it in `minor`. They are never tracked, so they stay out of `history` and `toFix`.
 //
-// Questions: the implementer and the fixer may return `questions: [{ text, default, why }]`, a behaviour choice the owner would see (a
-// contract, a default, an error policy; never an internal one). Any question is a STALL 'question' before review, carrying them (`stall.questions`,
-// at round 0 for the implementer, else at the round the fix belongs to). The caller asks the user (or, when the user said not to be asked,
+// Questions: the implementer, the fixer and (see "The owner's words") the reviewers may return `questions: [{ text, default, why }]`, a behaviour choice the owner would see (a
+// contract, a default, an error policy; never an internal one). Any question is a STALL 'question' before the review (a reviewers' one: before the fix), carrying them (`stall.questions`,
+// at round 0 for the implementer, else at the round the fix or the review belongs to). The caller asks the user (or, when the user said not to be asked,
 // applies each default and lists it as an open decision) and relaunches with `{ round, answers: [{ text, answer }] }` in the entry of that round;
 // the answers reach the implementer as guidance in a second run of it (its first run's edits are already in the tree; its `noticed`, `openQuestions`
 // and `rejected` are kept, see askWithQuestions). Questions that run
@@ -82,6 +111,15 @@ export const meta = {
 //
 // After an OK the caller (deliver) runs `hooks/scope-guard.js --check <start.head>` as the mechanical scope check; the loop
 // itself never runs it. Reviewers by size: see reviewersFor (the size is re-derived upward every round from the files changed).
+//
+// Who reviews which round (W6, W7): round 1 the full panel of the size. A delta round (a round after a fix) only the reviewers that
+// raised the findings still open (raisedBy, a specialist that returned nothing too) plus ONE Sonnet at medium effort (WATCHER, key 'S', a
+// whole-change reviewer: it also reads the files nobody has read, at most MAX_REVIEW_FILES of them in full, the rest is left to the coverage
+// rerun; at S the one reviewer is that Sonnet already). A finder is asked under finderKey: the reviewer it was, whatever key the size gives it now. The first round that would
+// end OK after a review fix ran (not a cleanup pass; never at S) is not the end: once, the full panel (on M the one Opus) reads the
+// cumulative fix diff since round 1, labelled '(final)', with the request and the growth check; its new P1/P2 go through the normal loop,
+// whose later delta rounds are not followed by a second full read. Then comes the cleanup pass, and its delta is read by the Sonnet alone
+// (no finders: the cleanup findings are untracked). A review fix born from that delta (a P1/P2 it found) still schedules the final full read, once per run, after the cleanup. A RECHECK or a coverage rerun names its own reviewers, the Sonnet among them.
 //
 // Classification (classify): clean-code and convention never block. A P1/P2 outside the perimeter in a file the change touched
 // (the snapshot's `files`), or that the reviewer says the change causes (`causedByChange`), is a 'widen': a STALL the fixer never
@@ -216,7 +254,7 @@ const sizeFor = (given, changedCount) => {
 // An agent report as the loop reads it, the fields a report may lack filled with their default: no verify is
 // not-run, no snapshot is null, no rejected / noticed / questions / filesReviewed is empty. null (an agent that returned
 // nothing) stays null. A snapshot counts only when it carries a tree (a non-empty string): without one it is no
-// snapshot, whatever its files say, and the declared files are used.
+// snapshot, whatever its files say, and the declared files are used. `defaults` keeps the entries that name a choice.
 const VERIFY_STATUSES = ['pass', 'fail', 'not-run']
 const readReport = r => {
   if (!r || typeof r !== 'object') return null
@@ -228,6 +266,7 @@ const readReport = r => {
     rejected: list(r.rejected),
     noticed: list(r.noticed),
     questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
+    defaults: list(r.defaults).filter(d => d && typeof d.choice === 'string' && d.choice.trim()),
     filesReviewed: list(r.filesReviewed),
   }
 }
@@ -340,9 +379,10 @@ const stuckFixRounds = counts => {
 }
 const notConverging = counts => stuckFixRounds(counts) >= NOT_CONVERGING_ROUNDS
 
-// Style findings never block, whatever their priority: a reviewer's taste is not a defect.
+// Style findings never block, whatever their priority: a reviewer's taste is not a defect. A split proposal (`proposal: true`, the growth
+// check of the reviewers: only a P3 clean-code finding can be one, on any other the flag is ignored) is a note for the closing table: it never blocks and is never fixed.
 const NEVER_BLOCKING = new Set(['clean-code', 'convention'])
-const isNeverBlocking = f => NEVER_BLOCKING.has(f?.category)
+const isNeverBlocking = f => NEVER_BLOCKING.has(f?.category) || (f?.proposal === true && f.category === 'clean-code' && f.priority === 'P3')
 
 const isTouched = (path, touched, root) => {
   const p = rel(path, root)
@@ -362,14 +402,70 @@ const widenedFiles = (files, resolutions, round) => {
 
 // The minor findings the cleanup pass (one FIX before DONE) may fix: P3 only (a style finding of a higher priority is minor too, and stays so),
 // inside the perimeter, never a `scope` hunk (that is a revert, not a cleanup) and never one the reviewer says the change does not cause in a
-// file the change did not touch.
+// file the change did not touch, nor a split proposal.
 const cleanupCandidates = (minor, files, { root = '', touched = [] } = {}) =>
-  (Array.isArray(minor) ? minor : []).filter(m => m.priority === 'P3' && m.category !== 'scope' && inPerimeter(m.path, files, root) && !(m.causedByChange === false && !isTouched(m.path, touched, root)))
+  (Array.isArray(minor) ? minor : []).filter(m => m.priority === 'P3' && m.category !== 'scope' && m.proposal !== true && inPerimeter(m.path, files, root) && !(m.causedByChange === false && !isTouched(m.path, touched, root)))
 
 // The answers a resolution carries for a 'question' stall: [{ text, answer }], entries without both texts dropped.
 const readAnswers = resolution => (Array.isArray(resolution?.answers) ? resolution.answers : [])
   .filter(a => a && typeof a.text === 'string' && a.text.trim() && typeof a.answer === 'string' && a.answer.trim())
   .map(a => ({ text: a.text.trim(), answer: a.answer.trim() }))
+
+// The questions the reviewers of a round left for the owner (a brief that departs from the request, an edit that contradicts an owner
+// decision, a hunk the owner asked for): one per text, in reviewer order. `answers` are in the resolution of that round; a question the
+// owner answered in an EARLIER round is settled and never asked again, one answered in this round is `answered`, the rest is `pending`.
+const reviewerQuestions = reviews => {
+  const seen = new Set()
+  const out = []
+  for (const r of Array.isArray(reviews) ? reviews : []) {
+    for (const q of r?.questions ?? []) {
+      if (!q || typeof q.text !== 'string' || seen.has(plain(q.text))) continue
+      seen.add(plain(q.text))
+      out.push({ ...q, text: q.text.trim() })
+    }
+  }
+  return out
+}
+const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) => {
+  const entries = (Array.isArray(resolutions) ? resolutions : []).filter(r => Number(r?.round) <= round)
+  const now = readAnswers(entries.find(r => Number(r.round) === round))
+  const pending = []
+  const answered = []
+  for (const q of questions) {
+    const hit = now.find(a => plain(a.text) === plain(q.text))
+    if (hit) answered.push(hit)
+    else if (!entries.some(r => Number(r.round) < round && readAnswers(r).some(a => plain(a.text) === plain(q.text)))) pending.push(q)
+  }
+  return { pending, answered }
+}
+
+// The reviewers of a delta round: the ones that raised the findings still open (`finders`, their keys) plus one Sonnet at medium effort. When
+// the panel already holds a whole-change Sonnet at medium (size S: the one reviewer) that is the Sonnet; else WATCHER is added. A finder key
+// the panel no longer has (reviewer A before it split into one per group) stands for every reviewer of that letter.
+const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium', whole: true }
+const deltaReviewers = (everyone, finders = []) => {
+  const has = new Set(everyone.map(r => r.key))
+  const wanted = new Set(finders.flatMap(k => (has.has(k) ? [k] : everyone.filter(r => r.key[0] === k[0]).map(r => r.key))))
+  const sonnet = everyone.find(r => r.whole && r.model === 'sonnet' && r.effort === 'medium')
+  const list = everyone.filter(r => wanted.has(r.key) || r === sonnet)
+  return sonnet ? list : [...list, WATCHER]
+}
+// The keys of the reviewers whose report holds this finding (the same one, see sameFinding): who raised it.
+const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
+// The key a finder is asked under in a later round. `raised` is { key, agentType, model, effort } as the reviewer was when it raised the finding:
+// the size can change the panel under a key ('A' is the Opus at M and the Sonnet at L), so the key stands only while it names the same reviewer;
+// else the reviewer that is now the same one (model, agent, effort), else the key as it was.
+const finderKey = (raised, everyone) => {
+  const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
+  if (!raised.model || everyone.some(r => r.key[0] === raised.key[0] && same(r))) return raised.key
+  return everyone.find(same)?.key ?? raised.key
+}
+
+// The line the caller appends to <git-dir>/deliver/findings.jsonl (the workflow cannot write files): one entry per finding ever listed but
+// the verify one; `closed` is a finding the reviewers closed or the cleanup pass fixed.
+const findingsLog = ({ known = {}, tracked = {}, cleaned = [] } = {}) => Object.values(known)
+  .filter(k => k.category !== 'verify')
+  .map(k => ({ category: k.category, priority: k.priority, path: k.path, closed: tracked[k.id]?.status === 'closed' || cleaned.some(c => c.id === k.id) }))
 
 // A finding is blocking when it is P1/P2 and inside the perimeter (a `verify` one always is). A `scope` finding is a diff hunk
 // the brief does not require (outside the perimeter, or inside it): it is ours to revert, so it blocks (P2 at least) - unless the file
@@ -571,6 +667,9 @@ const brief = typeof input.brief === 'string' ? input.brief.trim() : ''
 const perimeter = input.perimeter ?? {}
 const strings = v => (Array.isArray(v) ? v.filter(x => typeof x === 'string' && x.trim()) : [])
 const files = strings(perimeter.files)
+const request = typeof input.request === 'string' ? input.request.trim() : ''       // the owner's own messages, verbatim, beside the brief
+const decisions = strings(input.decisions).map(d => d.trim())                       // the owner's decisions that touch the perimeter, one line each
+const previewText = typeof input.preview === 'string' ? input.preview.trim() : ''  // the owner-visible surface to show after the implementer (M, L)
 const repoRoot = typeof input.repoRoot === 'string' ? input.repoRoot.trim() : ''
 const inline = input.inline === true
 const startHead = typeof input.start?.head === 'string' ? input.start.head.trim() : ''
@@ -609,6 +708,29 @@ const REVIEW_BUDGET = budgetText(35)
 const FIX_BUDGET = budgetText(80)
 const TESTS_TEXT = 'Tests: while you work run only the test files your change touches (and the one you saw failing); run the verify command once, at the end, before reporting.'
 const QUESTIONS_TEXT = 'Questions: a behaviour choice the owner would see (a contract, a default, an error policy) is not yours to make and not to guess: list it under `questions` as { text, default: what you would do, why }, and do the rest of the scope. An internal choice (naming, structure) is yours, not a question.'
+const DEFAULTS_TEXT = 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.'
+
+// The owner's own words: the decisions bind every agent; the request is read by the round-1 reviewers and the final full read beside the brief.
+const decisionsText = decisions.length
+  ? `Owner decisions (the owner's own words, binding; an edit of yours that would contradict one is not yours to make: list it under \`questions\`):\n${decisions.map(d => `- ${d}`).join('\n')}`
+  : ''
+const requestText = request
+  ? `Owner request (verbatim):\n${request}\nJudge the change against BOTH the intent and the request: a point of the request that the intent drops or contradicts is a question for the owner, not a finding.`
+  : ''
+const ownerQuestionsText = request || decisions.length
+  ? 'A hunk the owner\'s request or decisions asked for is never a "scope" finding. A brief that departs from the request, or an edit that contradicts one of the owner decisions, is no finding for the fixer: list it under `questions` as { text, default: what you would do, why }, never a finding for the fixer.'
+  : ''
+const REVERT_DECISIONS_TEXT = decisions.length ? 'A hunk an owner decision asked for is not reverted, whatever the finding says: list it under `questions` as { text, default, why }.' : ''
+// What the owner answered to the questions of the rounds before `at` (reviewers' and fixers', in the resolutions): binding, never asked again.
+const answersText = at => {
+  const list = resolutions.filter(r => Number(r?.round) < at).flatMap(readAnswers)
+  return list.length ? `Owner answers so far (the owner's own words, binding; do not ask them again):\n${list.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}` : ''
+}
+// Round 1 and the final full read: a file that grew past 600 lines or by 30% is a split proposal for the closing table, never fixed here.
+const GROWTH_TEXT = `Growth check (pass G): for each file the change touched run \`git diff --numstat ${startHead || 'HEAD'}\` and count its lines now; note lines at start -> now (+%). A file past 600 lines, or one that had 200 lines or more at the start and grew by 30%, is a P3 \`clean-code\` finding with \`proposal: true\` (a new file or a small one is no proposal): a split proposal for the closing table, never fixed here.`
+// A bare confirmation, courtesy words included ("ok grazie", "perfetto", "ok, va bene così"); anything else ("ok ma...") is a direction.
+const CONFIRM = '(?:ok|okay|yes|sì|si|va bene|bene|perfetto|perfect|ottimo|grazie|thanks?|thank you|così|looks good)'
+const PREVIEW_OK = new RegExp(`^\\s*${CONFIRM}(?:[\\s,.;!-]+${CONFIRM})*\\s*[.!]*\\s*$`, 'i')
 
 // The agents start in the session's folder, which may be another repo or no repo at all: the repo is named in
 // every prompt, or relative paths, the verify command and snapshot.ps1 land in the wrong place.
@@ -678,6 +800,15 @@ const IMPLEMENTATION = {
         properties: { text: { type: 'string' }, default: { type: 'string', description: 'what you would do if not told otherwise' }, why: { type: 'string' } },
       },
     },
+    defaults: {
+      type: 'array',
+      description: 'non-trivial choices the brief did not state, with the alternative: the owner reads them in the verdict (no stall)',
+      items: {
+        type: 'object',
+        required: ['choice', 'alternative', 'path'],
+        properties: { choice: { type: 'string' }, alternative: { type: 'string' }, path: { type: 'string' } },
+      },
+    },
   },
 }
 
@@ -697,6 +828,7 @@ const FINDING_IN = {
     fix: { type: 'string' },
     causedByChange: { type: 'boolean', description: 'true when the change itself causes this defect, even outside the perimeter' },
     confidence: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
+    proposal: { type: 'boolean', description: 'true for a split proposal (a file past 600 lines or +30%): a note for the closing table, never fixed' },
   },
 }
 
@@ -716,6 +848,15 @@ const REVIEW = {
     found: { type: 'array', description: 'NEW defects only, never one that matches a previous id', items: FINDING_IN },
     checked: { type: 'string', description: 'passes run and what was read' },
     filesReviewed: { type: 'array', items: { type: 'string' }, description: 'every file you actually read' },
+    questions: {
+      type: 'array',
+      description: 'for the owner, never for the fixer: the brief departs from the request, an edit contradicts an owner decision, or a hunk the owner asked for would be reverted',
+      items: {
+        type: 'object',
+        required: ['text', 'default', 'why'],
+        properties: { text: { type: 'string' }, default: { type: 'string', description: 'what you would do if not told otherwise' }, why: { type: 'string' } },
+      },
+    },
   },
 }
 
@@ -741,7 +882,13 @@ let openCounts = []                   // the open P1/P2 (+ V) count read at the 
 let afterFix = false                  // a fix round ran and its count is not read yet
 let cleanupSent = []                  // the minor findings the cleanup fixer did not reject: cleaned once the delta review has read them
 let missing = new Set()               // specialists whose last answer was nothing
-let nextRound = { only: null, coverage: false }   // the next round's reviewers: only these keys (a RECHECK or a coverage rerun), null = all
+let nextRound = { only: null, coverage: false, final: false }   // the next round's reviewers: only these keys (a RECHECK or a coverage rerun), null = all; final: the full read
+let finalReading = false              // this round is the final full read (the whole panel, on the cumulative fix diff)
+let finalReadDone = false             // the final full read was scheduled (once per run)
+let round1Tree = ''                   // the tree the round-1 reviewers read: the base of the cumulative fix diff
+const fixFiles = new Set()            // the files the review fixes changed (a cleanup pass is no review fix): a final read is owed only when there are some
+const raisedBy = {}                   // id -> { key, agentType, model, effort } of the reviewers that raised it: the delta rounds ask those (finderKey), plus the Sonnet
+const defaults = []                   // what the implementer and fixers chose without being told: { choice, alternative, path }
 let coverageRetried = false           // a coverage rerun was scheduled and the files are still unread
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = []
@@ -785,7 +932,11 @@ const takeNoticed = r => {
     if (n && typeof n === 'object' && !noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
   }
 }
+const takeDefaults = r => {
+  for (const d of r.defaults) if (!defaults.some(x => plain(x.choice) === plain(d.choice) && plain(x.path) === plain(d.path))) defaults.push(d)
+}
 const takeReport = r => {
+  takeDefaults(r)
   takeFiles(r)
   lastReportTree = r.snapshot?.tree ?? ''
   if (lastReportTree) lastTree = lastReportTree
@@ -830,6 +981,9 @@ const result = extra => withHistory({
   evidence: lastReport?.evidence ?? '',
   notVerified: lastReport?.notVerified ?? '',
   roundLog: rounds,
+  defaults,
+  findingsLog: { size: rounds.length ? rounds[rounds.length - 1].size : givenSize, rounds: round, findings: findingsLog({ known, tracked, cleaned }) },
+  ...(previewText ? { preview: previewText } : {}),
   ...extra,
 })
 
@@ -844,17 +998,20 @@ const answersBlock = answers => `The owner answered your questions: apply each a
 const askWithQuestions = async (build, opts, at, resolution) => {
   const first = readReport(await ask(build(''), opts))
   if (!first?.questions.length) return { report: first }
-  const answers = readAnswers(resolution)
-  if (!answers.length) {
+  // Only the answers to THESE questions count: the entry of a round may also hold the answers to a reviewer's question or to the preview.
+  const answers = readAnswers(resolution).filter(a => first.questions.some(q => plain(q.text) === plain(a.text)))
+  const pending = first.questions.filter(q => !answers.some(a => plain(a.text) === plain(q.text)))
+  if (pending.length) {
     return {
       stall: result({
         status: 'STALL',
-        stall: { round: at, why: 'question', findings: [], questions: first.questions, reason: `${opts.label} left ${first.questions.length} behaviour question(s) for the owner: ${first.questions.map(q => q.text).join(' | ')}` },
-        resume: `Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any): ${RESOLUTIONS}.`,
+        stall: { round: at, why: 'question', findings: [], questions: pending, reason: `${opts.label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}` },
+        resume: `Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any), each text being the question's text unchanged (an answer whose text matches no question is ignored; while a question has no answer this stall comes back, so keep the answers already given in that entry): ${RESOLUTIONS}.`,
       }),
     }
   }
   takeNoticed(first)
+  takeDefaults(first)
   addNotes(first.openQuestions)
   const second = readReport(await ask(build(answersBlock(answers)), { ...opts, label: `${opts.label} (answers)` }))
   ;(second?.questions ?? []).forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
@@ -870,19 +1027,23 @@ const askWithQuestions = async (build, opts, at, resolution) => {
 if (!inline) {
   phase('Implement')
   const implOpts = { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
-  const asked0 = await askWithQuestions(extra => [
+  const buildImpl = extra => [
     brief,
     extra,
+    decisionsText,
     perimeterText,
     dirtyText,
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
     TESTS_TEXT,
     QUESTIONS_TEXT,
+    DEFAULTS_TEXT,
     RULES,
     REPORT_TEXT,
     snapshotText(lastTree),
-  ].filter(Boolean).join('\n\n'), implOpts, 0, resolutions.find(r => Number(r?.round) === 0))
+  ].filter(Boolean).join('\n\n')
+  const resolution0 = resolutions.find(r => Number(r?.round) === 0)
+  const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
   if (asked0.stall) return asked0.stall
   const impl = asked0.report
   if (!impl) {
@@ -892,6 +1053,35 @@ if (!inline) {
   takeReport(impl)
   addNotes(impl.openQuestions)
   if (implStall) return verifyStall(0, implStall)
+
+  // Preview (M, L, an owner-visible output named in `args.preview`): the run stops with a `question` stall before the review. The caller
+  // shows the surface (screenshot, sample) and asks; "ok" goes on, any other answer is a direction for one more implementer pass.
+  if (previewText && sizeFor(givenSize, changed.size) !== 'S') {
+    const previewQuestion = {
+      text: `Preview: show the owner ${previewText} (a screenshot or a sample of the output) and ask whether it is right; "ok" goes on to the review, any other answer is a direction for one more implementer pass`,
+      default: 'ok',
+      why: 'the owner sees or uses this output: better to confirm it before the review spends its tokens',
+    }
+    const said = readAnswers(resolution0).find(a => plain(a.text) === plain(previewQuestion.text))
+    if (!said) {
+      return result({
+        status: 'STALL',
+        stall: { round: 0, why: 'question', findings: [], questions: [previewQuestion], reason: `the implementer is done: ${previewText} is to be shown to the owner before the review` },
+        resume: `Take the screenshot or sample of ${previewText}, show it to the user with the question (text, default, why) and relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: 0, answers: [{ text, answer }] } (in the same entry as that round's other answers, if any): ${RESOLUTIONS}. a bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the review; any other answer runs the implementer once more with it as its direction. The verdict carries a final screenshot of the same surface.`,
+      })
+    }
+    if (!PREVIEW_OK.test(said.answer)) {
+      const again = readReport(await ask(buildImpl(answersBlock([said])), { ...implOpts, label: 'implement (preview)' }))
+      if (!again) {
+        return result({ status: 'STALL', stall: { round: 0, findings: [], reason: `the implementer returned nothing on the preview pass (stopped or failed${why('implement (preview)')})` }, resume: RESUME_AGAIN })
+      }
+      again.questions.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
+      const againStall = gateReport(again, false)
+      takeReport(again)
+      addNotes(again.openQuestions)
+      if (againStall) return verifyStall(0, againStall)
+    }
+  }
 }
 
 let skipped = []                      // ids a reviewer gave no verdict for last round: only those are asked next
@@ -899,7 +1089,7 @@ let silent = {}                       // id -> rounds in a row without a verdict
 
 // The previous findings a reviewer is asked a verdict for: the ids it skipped last round, else every open one and the closed ones in a
 // file the last fix touched (an accepted one never). A group reviewer gets the ones anchored in its files, a whole reviewer all.
-const everyId = () => idsToAsk({ tracked, known, lastFixFiles: lastFix?.files ?? [], skipped, root: repoRoot })
+const everyId = () => idsToAsk({ tracked, known, lastFixFiles: finalReading ? [...fixFiles] : (lastFix?.files ?? []), skipped, root: repoRoot })
 const askedIds = (r, groups) => (r.group === undefined ? everyId() : everyId().filter(id => groupOf(known[id].path, groups, repoRoot) === r.group))
 const previousBlock = (r, groups) => {
   const mineIds = askedIds(r, groups)
@@ -953,16 +1143,22 @@ const shareText = (r, groups) => (r.group === undefined ? '' : [
 
 // What each review reads: round 1 the files the change touched since the start point, later rounds the delta of the last fix.
 // A group reviewer that owns files never read in full (its reviewer returned nothing earlier) reviews them whole; a
-// whole-change reviewer does the same for every unread file, since its answer clears them all.
+// whole-change reviewer does the same for the unread files, at most MAX_REVIEW_FILES of them (the rest stays unread: the coverage rerun
+// asks the group reviewers that own it, so no single reviewer is given more than it can read).
 const scopeOfReview = (r, groups) => {
   // A specialist whose last answer was nothing never read its area: it reviews the whole change, not the delta of a fix.
   if (missing.has(r.key) && r.group === undefined && !r.whole) return scopeOfChange()
-  const full = r.group !== undefined ? groups[r.group].filter(f => unread.includes(f)) : r.whole ? unread : []
-  return scopeOfDelta() + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
+  const full = r.group !== undefined ? groups[r.group].filter(f => unread.includes(f)) : r.whole ? unread.slice(0, MAX_REVIEW_FILES) : []
+  return (finalReading ? scopeOfFinal() : scopeOfDelta()) + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
 }
 // A delta that starts before the report that preceded the fix (that report had no snapshot of its own, or the session edited inline) is
 // every change since then, the fix among them: it is not "the DELTA of the last fix".
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit([...changed].join(', '))}`
+// The final full read: the whole panel reads what the review fixes changed since round 1, as one change.
+const scopeOfFinal = () => {
+  const cmd = deltaCommand(round1Tree || startHead || 'HEAD', lastTree, startHead)
+  return `FINAL FULL READ: the fixes of this run are done and the panel reads everything they changed since round 1, as one change, judging each previous finding by reading the code as it is now. Files the fixes changed: ${[...fixFiles].join(', ') || '(none reported)'}.${cmd ? ` ${round1Tree ? `The cumulative fix diff is \`${cmd}\`` : `No tree of round 1 exists (no snapshot before the first fix): \`${cmd}\` is the WHOLE change since the start, not only the fixes`} (the trees are snapshots of the working tree, untracked files included): run it first.` : ''}\n${touchedByGit([...changed].join(', '))}`
+}
 const scopeOfDelta = () => {
   if (!lastFix) return scopeOfChange()
   const since = `changes since ${lastDeltaBase || startHead || 'HEAD'}`
@@ -974,10 +1170,18 @@ while (true) {
   round += 1
   phase('Review')
   const { size, groups, list: everyone, expected } = reviewersForRound()
-  const { only, coverage } = nextRound
-  nextRound = { only: null, coverage: false }
-  const picked = only ? everyone.filter(r => only.includes(r.key)) : everyone
+  const { only, coverage, final } = nextRound
+  nextRound = { only: null, coverage: false, final: false }
+  finalReading = final
+  if (round === 1) round1Tree = lastTree
+  // Round 1 and the final read: the whole panel. A delta round: the reviewers that raised the open findings (and a specialist that returned
+  // nothing) plus one Sonnet at medium; the delta of a cleanup pass: that Sonnet alone. A RECHECK or a coverage rerun names its own reviewers.
+  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => (raisedBy[id] ?? []).map(r => finderKey(r, everyone))))]
+  const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
+    : round === 1 || final ? everyone
+    : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
+  const labelOf = r => `R${round} ${r.key}${final ? ' (final)' : ''}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
   // The reviewers are asked with the perimeter as it was BEFORE this round's resolution (a resume replays identical prompts).
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
@@ -985,6 +1189,11 @@ while (true) {
     scopeOfReview(r, groups),
     shareText(r, groups),
     `Intent: ${brief}`,
+    round === 1 || final ? requestText : '',
+    decisionsText,
+    answersText(round),
+    ownerQuestionsText,
+    round === 1 || final ? GROWTH_TEXT : '',
     verifyText(),
     reviewPerimeter,
     dirtyText,
@@ -994,11 +1203,11 @@ while (true) {
     challengeBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     REVIEW_BUDGET,
-  ].filter(Boolean).join('\n\n'), { label: `R${round} ${r.key}`, phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
+  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
-  answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(`R${round} ${reviewers[i].key}`)}`) })
+  answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
   // The files this round's review had to read: round 1 every changed file, later the files of the last fix, a rerun none new.
-  const owedNow = round === 1 ? expected : only ? [] : (lastFix?.files ?? [])
+  const owedNow = round === 1 ? expected : only ? [] : final ? [...fixFiles] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
   unread = unreviewedFiles(answers, reviewers, groups, unread, repoRoot, owedNow)
   unread.filter(f => !wasUnread.has(rel(f, repoRoot))).forEach(f => gaps.push(`round ${round}: ${f} was not read by its reviewer (not in filesReviewed)`))
@@ -1017,6 +1226,16 @@ while (true) {
   }
 
   const merged = mergeReviews(alive, repoRoot)
+  // A question of the reviewers (the brief departs from the request, an edit contradicts an owner decision, a hunk the owner asked for) is for
+  // the owner, never for the fixer: STALL 'question' at this round until it is answered; the answers of this round reach the fixer below.
+  const routed = routeQuestions({ questions: reviewerQuestions(alive), resolutions, round })
+  if (routed.pending.length) {
+    return result({
+      status: 'STALL',
+      stall: { round, why: 'question', findings: [], questions: routed.pending, reason: `the reviewers left ${routed.pending.length} question(s) for the owner: ${routed.pending.map(q => q.text).join(' | ')}` },
+      resume: `Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any): ${RESOLUTIONS}. The answers go to the fixer and to the later reviewers.`,
+    })
+  }
   // The delta review of the cleanup pass has read what the cleanup changed: a finding it reports again (never tracked, so it comes back as a
   // new one) is still there and stays in `minor`; the rest is cleaned.
   // An id whose file is still unread waits for the round that reads it.
@@ -1030,7 +1249,7 @@ while (true) {
   cleanupSent = cleanupWait
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
-  found.forEach(f => { known[f.id] = f })
+  found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot).map(k => { const r = reviewers.find(x => x.key === k); return { key: k, agentType: r?.agentType, model: r?.model, effort: r?.effort } }) })
   const resolution = resolutions.find(r => Number(r.round) === round)
   const roundFiles = widenedFiles(files, resolutions, round)
   const asked = challenged
@@ -1043,7 +1262,8 @@ while (true) {
   challenged = Object.fromEntries(Object.entries(asked).filter(([id]) => decision.unanswered.includes(id)))   // answered: the challenge is over
   // An open V finding (a failing verify) is always fixed: it turns a DONE or a RECHECK into a FIX, and heads the toFix list.
   const vIds = verifyOpen.map(v => v.id)
-  const action = vIds.length && (decision.action === 'DONE' || decision.action === 'RECHECK') ? 'FIX' : decision.action
+  // An answer of the owner to a reviewers' question also turns a DONE or a RECHECK into a FIX: the fixer applies it (nothing else to fix needed).
+  const action = (vIds.length || routed.answered.length) && (decision.action === 'DONE' || decision.action === 'RECHECK') ? 'FIX' : decision.action
   const toFix = action === 'FIX' ? [...vIds, ...decision.toFix] : decision.toFix
   skipped = action === 'RECHECK' ? decision.unanswered : []
   decision.minor.forEach(id => minor.push(known[id]))
@@ -1061,7 +1281,7 @@ while (true) {
   const stopWhy = churnHit ? 'churn' : stuckHit ? 'not-converging' : ''
   const stopped = !!stopWhy && !redirected
   let cleanupIds = []                 // the minor findings the P3 cleanup pass sends to the fixer this round (only on a DONE decision)
-  rounds.push({ round, size, reviewers: alive.length, new: found.filter(f => tracked[f.id]).map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: stopped ? [] : toFix, stalled: decision.stalled, unanswered: decision.unanswered, churn: null })
+  rounds.push({ round, size, reviewers: alive.length, new: found.filter(f => tracked[f.id]).map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: stopped ? [] : toFix, stalled: decision.stalled, unanswered: decision.unanswered, churn: null, ...(final ? { final: true } : {}) })
   log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
   if (action === 'DONE') {
@@ -1077,6 +1297,14 @@ while (true) {
       nextRound = { only: coverageOwners(unread, everyone, groups, repoRoot), coverage: true }
       coverageRetried = true
       openCounts = []
+      continue
+    }
+    // A review fix ran and the panel has not read the whole of it: once, the full panel reads the cumulative fix diff since round 1 (never at S,
+    // whose one reviewer reads every round). It comes before the cleanup pass, which has its own delta review.
+    if (!finalReadDone && fixFiles.size && size !== 'S') {
+      finalReadDone = true
+      nextRound = { only: null, coverage: false, final: true }
+      openCounts = []                 // the 0 of this DONE is no bar for the fix cycles after the final read
       continue
     }
     // One P3 cleanup pass on the minor findings inside the perimeter, then one review of its delta: the Fix phase below runs it.
@@ -1129,19 +1357,26 @@ while (true) {
   const asked1 = await askWithQuestions(extra => [
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with the reason, no code change. No other edit.'
-      : 'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.',
+      : sending.length
+        ? 'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.'
+        : 'No review finding is open: Apply the owner\'s answers below and nothing else.',
     fix,
+    routed.answered.length ? `The owner answered the reviewers' questions: apply each answer; an answer that keeps the code as it is needs no edit, say so in \`scope\`.\n${routed.answered.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}` : '',
     extra,
     sending.some(id => unproven(id)) ? 'A finding marked PLAUSIBLE is not proven: REPRODUCE FIRST (a failing test or a run that shows the failure) before any edit. If you cannot reproduce it, change no code for it and list it under `rejected` with the reason "not reproduced"; a finding you judge wrong goes under `rejected` with your reason, no code change either. Mark each `rejected` entry with `kind`: "not-reproduced" when you could not make the failure happen, "wrong" when you judge the finding incorrect.' : '',
     vIds.length ? 'A finding whose id starts with V (path "(verify)", category verify) is the verify command failing: make it pass without weakening the check or changing what it runs.' : '',
     `Intent: ${brief}`,
     resolution?.guidance ? `The user directs: ${resolution.guidance}` : '',
+    decisionsText,
+    answersText(round),
+    REVERT_DECISIONS_TEXT,
     perimeterTextFor(roundFiles),
     dirtyText,
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
     TESTS_TEXT,
     QUESTIONS_TEXT,
+    DEFAULTS_TEXT,
     RULES,
     FIX_BUDGET,
     REPORT_TEXT,
@@ -1170,6 +1405,7 @@ while (true) {
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
+  if (!cleaning) (Array.isArray(fixed.files) ? fixed.files : []).forEach(f => fixFiles.add(f))
   addNotes(fixed.openQuestions)
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (fixStall) return verifyStall(round, fixStall)

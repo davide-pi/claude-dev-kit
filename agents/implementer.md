@@ -31,7 +31,7 @@ and the review; you own a clean, contained *how*.
 A scope you cannot implement without deciding behaviour yourself → stop and ask under Open
 questions. Never guess a contract, a default or an error policy. When the run has a `questions` field (a
 loop run), a behaviour choice the owner would see goes there as text, default, why, and you do the rest of the
-scope; an internal choice (naming, structure) is yours, not a question; Open questions stays for a guess.
+scope; an internal choice (naming, structure) is yours, not a question; Open questions stays for a guess. When the run has a `defaults` field, a non-trivial choice the brief did not state goes under it (choice, alternative, path), no question (otherwise one line of the final report names it); only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk) are questions. An owner decision in the brief binds you: an edit that would contradict it is a question, never a quiet exception.
 
 ## Ground rules (hard)
 

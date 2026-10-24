@@ -29,12 +29,15 @@ or change the perimeter); on a yes, relaunch with `dirtyConfirmed: true`.
 
 `Workflow` with `name: impl-review-loop` and
 
-`{ brief, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, implementerEffort, verify, stackSkill, touches }`
+`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, implementerEffort, verify, stackSkill, touches, preview }`
 
 | Arg | Rule |
 | --- | --- |
+| `request` | the owner's messages for this change, verbatim, beside `brief`: the round-1 reviewers and the final full read judge the change against both; a brief that departs from it comes back as a reviewer `question`, never a fix |
+| `decisions` | the owner's decisions that touch the perimeter, one line each, in their words: every agent gets them; an edit that contradicts one is a `question` |
+| `preview` | M, L with an owner-visible output: what to show (page, endpoint, report). The run stops after the implementer with a `question` stall; show a screenshot or sample, ask; "ok" goes on, anything else is a direction for one more implementer pass. The verdict carries a final screenshot of the same surface |
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
-| `size` | `S`, `M` or `L` from the triage: it picks the reviewers (M one Opus high); re-derived upward every round from the files changed (2–4 M, 5+ L), never down; past 8 changed files reviewer A splits into one per group of 8 |
+| `size` | `S`, `M` or `L` from the triage: it picks the reviewers (M one Opus high), round 1 and the final full read; later rounds read the delta with the reviewers that raised the open findings plus one Sonnet medium; re-derived upward every round from the files changed (2–4 M, 5+ L), never down; past 8 changed files reviewer A splits into one per group of 8 |
 | `implementerEffort` | `high` only when the brief asks; default `medium` |
 | `touches` | `security`, `performance`: M and L, adds the specialist reviewers |
 
@@ -44,20 +47,45 @@ Edit inline (a few lines in one file; larger → `implementer`), then launch wit
 `inline: true, changed: [the files you edited]`. No implementer runs first; a finding is fixed by
 `implementer` inside the loop, and the verdict stays short.
 
-## Size L: one plan task per run
+## One run per coherent request (P-run)
 
-An L change is not one run. Launch `impl-review-loop` once per plan task (or per cluster of tasks that touch the same
-files), sequentially in the same worktree, and commit (`/commit`) between runs: each run gets that task's brief and
-perimeter, and its own `start` taken after the previous commit. The implementer has no tool-call budget (a task-sized
-run does not need one); it runs only the tests the change touches while it works, and `verify` once at the end.
+A run costs a fixed ~350k subagent tokens whatever its size (4 tasks in one run ~160k each, 1 task per run ~470k): launch
+`impl-review-loop` once per coherent request. One implementer works through every plan task in order, testing after each; the
+reviewers read the whole diff once. Split only past ~15 files or for areas that share nothing (other reviewers, other
+verify): sequential runs in the same worktree, `/commit` between them, each with its own `start`. The implementer has no
+tool-call budget; it runs only the tests the change touches while it works, and `verify` once at the end.
+
+## Size, weight, criteria
+
+P-size: every check scales with S/M/L. S keeps "the approach in one line, then go".
+
+| Check | S | M | L |
+| --- | --- | --- | --- |
+| criteria + proof | one line in the approach message, no wait unless it asks | 3–5 lines, owner ok | criteria + proof + questions, owner ok |
+| reviewers round 1 | 1 Sonnet | 1 Opus | Sonnet + Opus (+ specialists when touched) |
+| delta rounds / final full read | the same Sonnet / none | raisers + 1 Sonnet medium / only if a fix ran | same as M |
+| preview, cleanup re-review, proof check | screenshot in the verdict when visible | yes | yes |
+
+P-weight: a doubt or a choice reaches the owner only when it changes what the owner sees or uses, touches a contract (API,
+event, schema) or data, costs or risks something, or goes against an owner decision. The rest (internal names, code
+order, style) the agents decide and do not report; non-trivial choices the brief did not state come back as `defaults`.
+
+Criteria with proof (step 2): per acceptance criterion, the proof and what it asserts: an automated test; else run the
+thing (browser screenshot, HTTP call, read-only query, CLI output); else "the owner tests". The matrix runs on the final code,
+after the review: a fix can change what a proof proved. Proof check (M, L, before the verdict): read only the assertion
+lines of each criterion's test (and the hunks behind `defaults` and any ledger contradiction); a proof that cannot fail on the
+old code is `non verificato`. The verdict ends with "Test locale: proposta <chi/cosa>"; the owner decides.
 
 ## Questions: the `question` stall
 
-The implementer and the fixer may return `questions: [{ text, default, why }]`: a behaviour choice the owner would see
-(never an internal one). Any question stops the run before review: `status: STALL`, `stall.why: "question"`,
-`stall.questions`, `stall.round` (0 for the implementer, else the round of the fix). Ask the user every question in one
-message, each with its default as the recommendation. When the user said not to be asked, apply every default and list
-each one in the closing table as an open decision. Relaunch with `resumeFromRunId`, all the resolutions so far, adding
+The implementer, the fixer and the reviewers may return `questions: [{ text, default, why }]`: a behaviour choice the owner
+would see (never an internal one); a reviewer's are a brief that departs from `request`, an edit that contradicts a
+`decisions` line, a hunk the owner asked for that would be reverted as `scope`. Any question stops the run before the fix
+or the review: `status: STALL`, `stall.why: "question"`, `stall.questions`, `stall.round` (0 for the implementer or the
+preview, else the round of the fix or of the review). Ask the user every question in one message, each with its default as
+the recommendation. When the user said not to be asked, apply every default and list each one in the closing table as an
+open decision: that covers `questions` only, never `accept` of a P1/P2 (the owner's alone) nor a scope revert of a hunk the
+owner asked for. A reviewer's answer reaches the fixer (which runs once for it) and the later reviewers. Relaunch with `resumeFromRunId`, all the resolutions so far, adding
 `{ round, answers: [{ text, answer }] }` (in the same entry as that round's `guidance`, if any): the implementer or
 fixer runs once more with the answers as guidance. Questions it asks again come back in `outOfScope` as open decisions
 (`source: "implementer"`), not as a second stall.
@@ -80,7 +108,7 @@ keeps opening a new P1/P2 for each one it closes is stopped by `not-converging` 
 
 | `stall.why` | Meaning, and the question |
 | --- | --- |
-| `question` | the implementer or fixer left a behaviour question: ask it (above) and resume with `answers` |
+| `question` | the implementer, a fixer or the reviewers left a behaviour question, or the `preview` is waiting: ask it (above) and resume with `answers` (the `text` copied) |
 | `churn` | the last 3 fixes each changed more lines: not converging. `accept` closes the ids the reviewers already read; `guidance` or `retry` for another attempt |
 | `not-converging` | after each of the last 3 fix rounds the open P1/P2 count (plus the open `V` finding) did not drop below its lowest of the fix rounds before: every fix closes one and the reviewers open another. `accept` closes the ids the reviewers already read; `guidance` (a different approach) or `retry` for another attempt |
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction for the fixer, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, and `accept` is not offered |
@@ -116,7 +144,7 @@ relaunch WITHOUT `resumeFromRunId`.
 ## The cleanup pass before OK
 
 A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not one the change
-does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta. Its new
+does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (one Sonnet at medium). Before it, when a review fix ran, the full panel reads the cumulative fix diff once (never at S). Its new
 P1/P2 go through the normal loop; its P3s are only reported, never a second cleanup. The result lists what the pass fixed
 under `cleaned` once the delta review has read it (a finding the delta review reports again stays in `minor`); `minor` keeps
 the rest (and the P3s of the delta, and style findings of a higher priority), and P3s outside the perimeter stay in `outOfScope`,
@@ -151,3 +179,14 @@ Write `~` literally: the allow rules in `settings.json` match the command text, 
 | 0 | every changed file is inside the perimeter: go on to the matrix |
 | 1 | the files printed are outside. To revert them: back to step 3 with them as the brief, relaunched as in "A red test after OK" (the original `start`, `dirtyConfirmed: true`, no `resumeFromRunId`). To keep one the user wants: `perimeter.ps1 -Files` with all entries, old and new, then a NEW run with the updated `perimeter.files` (no resolution: there is no stalled round) |
 | 2 | usage error, git failure, or no active perimeter: nothing was checked, never read it as clean. Fix the cause (write the perimeter file) and run again |
+
+## The findings log and the defaults
+
+The workflow cannot write files: every result (OK or STALL) carries `findingsLog` = `{ size, rounds, findings: [{ category,
+priority, path, closed }] }`, cumulative over every finding the run ever saw. Append ONE line per run, when the run ends: the result of an OK, or of a
+STALL the owner gives up on; never the result of a STALL that is resumed (the resumed run's last result holds its findings). A relaunch
+WITHOUT `resumeFromRunId` (a red test after OK, scope-guard exit 1) is a new run with empty state: append the line of the OK before relaunching. The line adds `at`, `run` (the run id) and `minutes`, one JSON line of
+`$(git rev-parse --git-dir)/deliver/findings.jsonl` (never committed). When the owner settles a `/retro`, append
+`{"retro":"<date>"}`: the SessionStart brief counts only what follows the last such line and adds one line when a category
+recurs 5+ times or a file holds 3+ open P3s. `defaults` ([{ choice, alternative, path }], the agents' non-trivial choices the
+brief did not state) go in the verdict under "Default scelti"; read the hunks behind them in the proof check.

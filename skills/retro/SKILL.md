@@ -3,7 +3,7 @@ name: retro
 description: >-
   Use when the user types /retro: mines a session's friction and proposes environment fixes,
   enforceable checks first as backlog items. Proposes only.
-argument-hint: "[session-id | current] [focus | monthly]"
+argument-hint: "[session-id | current] [focus | monthly | findings]"
 disable-model-invocation: true
 context: fork
 agent: analyst
@@ -20,7 +20,7 @@ report in Italian; paths, tool names and quoted transcript lines verbatim, secre
 Arguments: `$ARGUMENTS`
 
 You start with no conversation history: the session you judge exists only as its transcript on
-disk. You cannot ask the user; the caller relays your report and asks which rows to apply.
+disk (the `findings` mode reads the deliver log instead). You cannot ask the user; the caller relays your report and asks which rows to apply.
 
 ## When
 
@@ -72,15 +72,25 @@ Runs only when the owner asks, or when the focus argument is `monthly`; never on
 | Asset usage | the owner's `/skill-doctor` and `/doctor prompt-audit` output, pasted in the arguments (slash commands, a fork cannot run them) | never-invoked or over-budget descriptions → `skill-forge` |
 | Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
 
+### Findings — implementer rules from the deliver log
+
+Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`): no transcript needed. Read
+`$(git rev-parse --git-dir)/deliver/findings.jsonl` of the cwd (you derive the path; one JSON line per run, `{ "retro": … }` lines mark a settled
+retro): the lines after the last marker, grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
+(`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count, files); a line a
+check could enforce is a backlog item, as above. The owner approves; after the yes the caller appends the marker `{"retro":"<date>"}`: the
+report carries the exact command (Report, row 5).
+
 ### Report — returned to the caller, ≤ 40 lines
 
-1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`.
+1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `findings` mode `Log: <path> · righe dopo l'ultimo retro: N`.
 2. Proposals, most severe first, as a table `Proposta | Categoria | Evento (turno) | Dove | Rischio`;
    `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
 3. `Backlog` — one block per automated check: Italian title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
 4. When the Monthly section ran: `Salute: <outcome, one line per step>`.
-5. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
+5. `findings` mode only: the line for the caller, the command that appends the marker after the owner's yes: `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.
+6. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
 
 ## Do
 
