@@ -12,7 +12,7 @@ import type {
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
-  CockpitWorktree,
+  CockpitToolCall,
 } from '../types'
 import {
   AGENT_KEEP_MS,
@@ -38,7 +38,7 @@ import {
   fmtCostDelta,
   folderIcon,
   gridWidths,
-  isSameDir,
+  hhmm,
   modelFamily,
   openTasks,
   parseReset,
@@ -50,6 +50,7 @@ import {
   spanWidth,
   sparkline,
   padCells,
+  textCells,
   sessionTokens,
   taskBarCells,
   tokenShare,
@@ -62,21 +63,21 @@ import {
 import type { ModelFamily, Span } from './format'
 
 /** The elements the views draw with; every surface's table has them. */
-export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code'>
+export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'>
 
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
 const MAX_AGENT_ROWS = 10
 const MAX_HISTORY_ROWS = 10
-const MAX_LIVE_ROWS = 5
 /** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
 const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
-/** The context fill from which the Sessione view warns. */
+/** The context fill from which the header warns. */
 const CTX_WARN_PCT = 80
-const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Agenti', context: 'Contesto', work: 'Lavoro', repo: 'Repo' }
-const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Sub', context: 'Ctx', work: 'Lav', repo: 'Repo' }
+const TAB_NAMES: Record<CockpitTab, string> = { agents: 'Agenti', context: 'Contesto', work: 'Lavoro', system: 'Sistema' }
+// The names a pane too narrow for the whole bar falls back to (the bar also wraps).
+const TAB_NAMES_SHORT: Record<CockpitTab, string> = { agents: 'Sub', context: 'Ctx', work: 'Lav', system: 'Sys' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
@@ -85,7 +86,10 @@ const TASK_TIME_W = 6
 const MAX_FILE_ROWS = 8
 /** Cells before a changed file's path: the added column, the deleted one and their gaps. */
 const CHANGE_COUNTS_W = 12
-const MAX_WORKTREE_NAME_W = 16
+const MAX_PR_ROWS = 4
+/** Cells of a tool row: the tool's name, and the time at its end. */
+const CALL_TOOL_W = 7
+const CALL_TIME_W = 5
 const MAX_SKILL_ROWS = 6
 /** Cells of the Contesto rows: a category's tokens and share of the window, a consumer's kind label. */
 const CTX_TOKENS_W = 6
@@ -328,16 +332,44 @@ export function changeSpans(c: CockpitChange, width: number): Span[] {
   return [...counts, sp(' '), sp(truncMiddle(c.path, Math.max(4, width - CHANGE_COUNTS_W)))]
 }
 
-/** One worktree's row: a mark for the one the session runs in, its folder, its branch (`HEAD` when detached). */
-export function worktreeSpans(t: CockpitWorktree, isHere: boolean, width: number): Span[] {
-  const nameW = Math.min(MAX_WORKTREE_NAME_W, Math.max(6, Math.floor(width / 3)))
+/** One tool call of the main loop: how it ended, the tool, its short argument cut to fit, the time it started. */
+export function toolCallSpans(c: CockpitToolCall, width: number): Span[] {
+  const argW = Math.max(0, width - 2 - CALL_TOOL_W - 1 - 1 - CALL_TIME_W)
   return [
-    isHere ? sp('●', COLORS.green) : dim('○'),
+    c.isOk ? sp('✓', COLORS.green) : sp('✗', COLORS.red),
     sp(' '),
-    sp(pad(truncMiddle(baseName(t.path), nameW), nameW)),
+    sp(padCells(truncEnd(c.tool, CALL_TOOL_W), CALL_TOOL_W)),
     sp(' '),
-    dim(truncMiddle(t.branch ?? 'HEAD', Math.max(4, width - nameW - 3))),
+    dim(padCells(truncEnd(c.arg ?? '', argW), argW)),
+    sp(' '),
+    dim(hhmm(c.at)),
   ]
+}
+
+const PR_STATES = {
+  open: { text: 'aperta', color: COLORS.green },
+  draft: { text: 'bozza', color: COLORS.yellow },
+  merged: { text: 'unita', color: COLORS.violet },
+  closed: { text: 'chiusa', color: COLORS.red },
+} as const
+
+/** The state word of a pull request, a draft told apart from an open one. */
+const prState = (pr: CockpitPr) => PR_STATES[pr.state === 'open' && pr.isDraft ? 'draft' : pr.state]
+
+/** What follows a pull request's number on its row: its state and its title, cut to fit `width` (the number's own cells included). */
+export function prSpans(pr: CockpitPr, width: number): Span[] {
+  const { text, color } = prState(pr)
+  const head = ` · ${text}`
+  const titleW = width - textCells(`#${pr.number}${head} · `)
+  return [sp(' · ', COLORS.dim), sp(text, color), ...(pr.title !== '' && titleW >= 4 ? [sp(' · ', COLORS.dim), sp(truncEnd(pr.title, titleW))] : [])]
+}
+
+/** The row under a pull request's: its review and its checks, when known; empty when neither is. */
+export function prDetailSpans(pr: CockpitPr, indent: string, width: number): Span[] {
+  const review = reviewSpans(pr)
+  const checks = checksSpans(pr)
+  if (review.length + checks.length === 0) return []
+  return truncateSpans([sp(indent), ...review, ...(review.length > 0 && checks.length > 0 ? [dim(' · ')] : []), ...checks], width)
 }
 
 /** The bar of the window: a part per used category (each its own color) and the compaction buffer; the rest stays empty. */
@@ -428,7 +460,7 @@ export type PaneActions = {
 /** What the diff pane's button does. */
 export type DiffActions = { close: () => void }
 
-/** The second pane: the diff of the file pressed on the Repo tab, drawn by the engine's `Code` as unified hunks; empty when none is open. */
+/** The second pane: the diff of the file pressed on the Lavoro tab, drawn by the engine's `Code` as unified hunks; empty when none is open. */
 export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: number, actions: DiffActions): RenderElement {
   const { Box, Text, Button, Code } = ui
   if (!diff) return <Text dimColor>niente da mostrare</Text>
@@ -455,7 +487,7 @@ export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: num
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
-  const { Box, Text, Button } = ui
+  const { Box, Text, Button, Link } = ui
   // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
   const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
@@ -483,7 +515,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Button>
   )
 
-  const tab = s.tab ?? 'session'
+  const tab = s.tab ?? 'agents'
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
 
@@ -507,20 +539,18 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   }
   // The long labels, with the running count and the dot, when the whole bar fits; else the short ones.
   const fullLabels = [
-    TAB_NAMES.session,
     running.length > 0 ? `${TAB_NAMES.agents} ${running.length}` : TAB_NAMES.agents,
     TAB_NAMES.context,
     wlRows.length > 0 ? `${TAB_NAMES.work} ●` : TAB_NAMES.work,
-    TAB_NAMES.repo,
+    TAB_NAMES.system,
   ]
   const names = buttonRowWidth(fullLabels) <= width ? TAB_NAMES : TAB_NAMES_SHORT
   const tabBar = (
     <Box columnGap={1} flexWrap="wrap">
-      {tabButton('session', names.session)}
       {tabButton('agents', running.length > 0 ? `${names.agents} ${running.length}` : names.agents)}
       {tabButton('context', names.context)}
       {tabButton('work', names.work, wlRows.length > 0)}
-      {tabButton('repo', names.repo)}
+      {tabButton('system', names.system)}
     </Box>
   )
 
@@ -608,16 +638,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const burn = five && burnRate(s.fiveHourSamples ?? [], s.now, five.used, five.resetMs)
   const burnRow = burn && line(ui, [sp(burnText(burn), burn.isBeforeReset ? COLORS.red : COLORS.green)])
 
-  // Running agents, compact
-  const liveRows = orderAgents(running)
-  const liveAgents = [
-    gap(),
-    title(`AGENTS · ${running.length} in corso`, modelCounts(running)),
-    liveRows.length > 0 && gap(),
-    liveRows.slice(0, MAX_LIVE_ROWS).map(({ agent, depth }) => agentButton(`agent:${agent.id}`, agent, depth)),
-    liveRows.length > MAX_LIVE_ROWS && line(ui, [dim(`… +${liveRows.length - MAX_LIVE_ROWS}`)]),
-  ]
-
   // The last row of every tab: compatta always; segna ore (the hours of this chat) whenever the session has an id. The row
   // stacks when its buttons do not fit the pane side by side.
   const hasSession = s.sessionId !== undefined
@@ -649,8 +669,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     !five && !seven && line(ui, [dim('nessun dato sui limiti')]),
     cacheRow,
   ]
-
-  const sessionBlocks = [liveAgents]
 
   // ── Subagenti: every agent listed (finished ones for two minutes), a block each ──
   const rows = orderAgents(agents)
@@ -824,7 +842,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     gap(),
     title(truncMiddle(a.type, Math.max(4, width - 7)), [dim(duration(s.now - a.startedAt))]),
     a.description ? line(ui, [sp(truncEnd(a.description, width))]) : undefined,
-    a.lastTool ? line(ui, [dim('ultimo tool '), sp(a.lastTool)]) : undefined,
+    a.lastTool ? line(ui, truncateSpans([dim('ultimo tool '), sp(a.lastTool)], width)) : undefined,
     i === MAX_SUBAGENT_BLOCKS - 1 && workers.length > MAX_SUBAGENT_BLOCKS && line(ui, [dim(`… +${workers.length - MAX_SUBAGENT_BLOCKS}`)]),
   ])
 
@@ -841,24 +859,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           ],
         ]
       : []
-  const workBlocks: Block[] = [...principalBlock, ...workflowBlock, ...subagentBlocks, ...claimsBlock]
-
-  // ── Repo: the git grid, the branch against its upstream, the changed files, the worktrees, the pull request ──
+  // The changed files (the branch and its upstream are in the header). A changed file is a Button: a press draws its diff in the second pane.
   const repo = s.repo
-  const upstreamLine =
-    g?.upstream === undefined
-      ? [dim('nessun upstream')]
-      : [sp(g.upstream), ...(g.ahead ? [sp(' '), sp(`↑${g.ahead}`, COLORS.green)] : []), ...(g.behind ? [sp(' '), sp(`↓${g.behind}`, COLORS.yellow)] : [])]
-  const branchPart: Block = g
-    ? [
-        gap(),
-        title('BRANCH'),
-        gap(),
-        line(ui, upstreamLine),
-        repo?.commits !== undefined && s.defaultBranch !== undefined && line(ui, [sp(`${repo.commits} commit da ${s.defaultBranch}`)]),
-      ]
-    : []
-  // A changed file is a Button: a press draws its diff in the second pane.
   const changesPart: Block = repo
     ? [
         gap(),
@@ -874,31 +876,36 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         repo.total > MAX_FILE_ROWS && line(ui, [dim(`… +${repo.total - MAX_FILE_ROWS}`)]),
       ]
     : []
-  const trees = repo?.worktrees ?? []
-  const worktreePart: Block =
-    trees.length > 0
+
+  // The pull requests of this chat, the newest first: the number is a link when the CLI gave an address.
+  const prs = [...(s.prs ?? [])].reverse()
+  const prRow = (pr: CockpitPr) => (
+    <Text wrap="truncate">
+      {pr.url !== undefined ? <Link href={pr.url}>{`#${pr.number}`}</Link> : <Text>{`#${pr.number}`}</Text>}
+      {spanNodes(ui, prSpans(pr, width))}
+    </Text>
+  )
+  const prPart: Block =
+    prs.length > 0
       ? [
           gap(),
-          title(`WORKTREE · ${trees.length}`),
+          title(`PR · ${prs.length}`),
           gap(),
-          trees.map(t => line(ui, worktreeSpans(t, g?.root !== undefined && isSameDir(t.path, g.root), width))),
+          prs.slice(0, MAX_PR_ROWS).flatMap(pr => [prRow(pr), ...(prDetailSpans(pr, '  ', width).length > 0 ? [line(ui, prDetailSpans(pr, '  ', width))] : [])]),
+          prs.length > MAX_PR_ROWS && line(ui, [dim(`… +${prs.length - MAX_PR_ROWS}`)]),
         ]
       : []
-  const pr = s.pr
-  const prPart: Block = pr
-    ? [
-        gap(),
-        title(`PR · #${pr.number} · ${pr.isDraft ? 'bozza' : 'aperta'}`),
-        gap(),
-        pr.title !== '' && line(ui, [sp(truncEnd(pr.title, width))]),
-        reviewSpans(pr).length > 0 && line(ui, reviewSpans(pr)),
-        checksSpans(pr).length > 0 && line(ui, checksSpans(pr)),
-      ]
-    : []
-  const repoBlocks: Block[] = [branchPart, changesPart, worktreePart, prPart].filter(b => b.length > 0)
+
+  // The main loop's last tools, the newest first.
+  const calls = [...(s.calls ?? [])].reverse()
+  const toolsPart: Block = calls.length > 0 ? [gap(), title(`TOOL · ${calls.length}`), gap(), calls.map(c => line(ui, toolCallSpans(c, width)))] : []
+  const workBlocks: Block[] = [...principalBlock, changesPart, prPart, toolsPart, ...workflowBlock, ...subagentBlocks, ...claimsBlock].filter(b => b.length > 0)
+
+  // Sistema waits for its monitor (a later phase): the tab says so.
+  const systemBlocks: Block[] = [[gap(), line(ui, [dim('in arrivo')])]]
 
   // Blocks are told apart by a rule; an empty tab says so.
-  const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, context: contextBlocks, work: workBlocks, repo: repoBlocks }[tab]
+  const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks }[tab]
   const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim('niente da mostrare')])]
 
   return (

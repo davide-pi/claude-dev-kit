@@ -19,8 +19,8 @@ import type {
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
+  CockpitToolCall,
   CockpitUsage,
-  CockpitWorktree,
 } from '../types'
 
 export const COLORS = {
@@ -429,9 +429,9 @@ export function contextOf(
  * while the pane is closed.
  */
 export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
-  switch (tab ?? 'session') {
-    case 'repo':
+  switch (tab ?? 'agents') {
     case 'context':
+    case 'system':
       return { fast: false }
     default:
       return { fast: true }
@@ -592,9 +592,6 @@ export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boo
 
 // A directory in the form the roots are compared in: forward slashes, no trailing one, lowercase.
 const normDir = (p: string): string => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-
-/** Two paths name the same folder, whatever their slashes, trailing slash or case. */
-export const isSameDir = (a: string, b: string): boolean => normDir(a) === normDir(b)
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -833,41 +830,60 @@ function summarizeChecks(rollup: unknown): CockpitPr['checks'] {
   return out.passed + out.failed + out.pending > 0 ? out : undefined
 }
 
-/** `gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup` -> the open pull request; undefined for any other state or text. */
+/** `gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup,url` -> the pull request with its state (open, merged or closed); undefined for any other state or text. */
 export function parseGithubPr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
     if (!isRecord(parsed)) return undefined
-    const { number, state, title, isDraft, reviewDecision, statusCheckRollup } = parsed
-    if (state !== 'OPEN' || typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
+    const { number, state, title, isDraft, reviewDecision, statusCheckRollup, url } = parsed
+    const prState: CockpitPr['state'] | undefined = state === 'OPEN' ? 'open' : state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : undefined
+    if (prState === undefined || typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
     const review: CockpitPr['review'] =
       reviewDecision === 'APPROVED' ? 'approved' : reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : reviewDecision === 'REVIEW_REQUIRED' ? 'pending' : undefined
-    return { number, title: typeof title === 'string' ? title : '', isDraft: isDraft === true, review, checks: summarizeChecks(statusCheckRollup) }
+    return {
+      number,
+      title: typeof title === 'string' ? title : '',
+      state: prState,
+      isDraft: isDraft === true,
+      ...(typeof url === 'string' && url !== '' && { url }),
+      review,
+      checks: summarizeChecks(statusCheckRollup),
+    }
   } catch {
     return undefined
   }
 }
 
+/** The `url` of an `az` pull request record: its repository's web address and the pull request's path; nothing when the record names no address. */
+function azureUrl(pr: Record<string, unknown>, number: number): { url?: string } {
+  const webUrl = isRecord(pr.repository) && typeof pr.repository.webUrl === 'string' ? pr.repository.webUrl.replace(/\/+$/, '') : ''
+  return webUrl === '' ? {} : { url: `${webUrl}/pullrequest/${number}` }
+}
+
 /**
- * `az repos pr list --output json` -> the first active pull request. The review comes from the reviewers' votes (10 and 5
- * approve, -5 and -10 ask for changes); the list carries no checks, so none are claimed.
+ * `az repos pr list --output json` -> the first pull request: active is open, completed is merged, abandoned is closed (any other
+ * status is none). The review comes from the reviewers' votes (10 and 5
+ * approve, -5 and -10 ask for changes); the list carries no checks, so none are claimed. The link is the repository's web
+ * address with the pull request's path, when the list names one.
  */
 export function parseAzurePr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
     const pr = Array.isArray(parsed) ? parsed[0] : undefined
-    if (!isRecord(pr) || pr.status !== 'active') return undefined
-    const { pullRequestId: number, title, isDraft, reviewers } = pr
+    if (!isRecord(pr)) return undefined
+    const { pullRequestId: number, title, isDraft, reviewers, status } = pr
+    const state: CockpitPr['state'] | undefined = status === 'active' ? 'open' : status === 'completed' ? 'merged' : status === 'abandoned' ? 'closed' : undefined
+    if (state === undefined) return undefined
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
     const votes = Array.isArray(reviewers) ? reviewers.flatMap(r => (isRecord(r) && typeof r.vote === 'number' ? [r.vote] : [])) : []
     const review: CockpitPr['review'] = votes.length === 0 ? undefined : votes.some(v => v < 0) ? 'changes' : votes.some(v => v > 0) ? 'approved' : 'pending'
-    return { number, title: typeof title === 'string' ? title : '', isDraft: isDraft === true, review }
+    return { number, title: typeof title === 'string' ? title : '', state, isDraft: isDraft === true, ...azureUrl(pr, number), review }
   } catch {
     return undefined
   }
 }
 
-// ── The Repo tab: changed files, worktrees, the diff of one ──
+// ── The Lavoro tab: the changed files, the diff of one ──
 
 /** `git diff --numstat --no-renames -z HEAD --` then the untracked paths -> the changed files; a binary file has `-` counts. */
 export function parseNumstat(out: string, untracked: readonly string[]): CockpitChange[] {
@@ -878,17 +894,6 @@ export function parseNumstat(out: string, untracked: readonly string[]): Cockpit
     return [added === '-' || deleted === '-' ? { path, isBinary: true } : { path, added: Number(added), deleted: Number(deleted) }]
   })
   return [...tracked, ...untracked.map((path): CockpitChange => ({ path, isUntracked: true }))]
-}
-
-/** `git worktree list --porcelain` -> each checkout's path and branch (absent when detached); a bare repository is no checkout. */
-export function parseWorktrees(out: string): CockpitWorktree[] {
-  return out.split(/\r?\n\r?\n/).flatMap((block): CockpitWorktree[] => {
-    const lines = block.split(/\r?\n/)
-    const path = lines.find(l => l.startsWith('worktree '))?.slice('worktree '.length)
-    if (!path || lines.includes('bare')) return []
-    const ref = lines.find(l => l.startsWith('branch '))?.slice('branch '.length)
-    return [{ path, branch: ref?.replace(/^refs\/heads\//, '') }]
-  })
 }
 
 /** What one drawing of `Code` takes (100000 characters in all), with room to spare. */
@@ -1034,7 +1039,110 @@ export function claimTime(at: string): string {
   return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
+/** `ms` as the local `HH:MM`; empty for a time that is no date. */
+export function hhmm(ms: number): string {
+  const d = new Date(ms)
+  if (Number.isNaN(d.getTime())) return ''
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${p(d.getHours())}:${p(d.getMinutes())}`
+}
+
 /** The cockpit's tabs, in the order the bar draws them. */
-export const TABS: readonly CockpitTab[] = ['session', 'agents', 'context', 'work', 'repo']
+export const TABS: readonly CockpitTab[] = ['agents', 'context', 'work', 'system']
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
+
+/** The tab a state file names; the v2 Sessione and Repo tabs went to Agenti and Lavoro, and so does a file that still holds them. */
+export const savedTab = (v: unknown): CockpitTab | undefined => (v === 'session' ? 'agents' : v === 'repo' ? 'work' : isTab(v) ? v : undefined)
+
+// ── Lavoro: the main loop's last tools, the pull requests of the chat ──
+
+/** The main loop's tool calls the Lavoro tab lists. */
+export const CALLS_KEEP = 8
+const ARG_MAX = 120
+// What a tool call shows of itself, first match: a command, a file (by its name), a pattern, an address, a query, a description.
+const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'description', 'skill'] as const
+
+/** The short argument of a tool call: one line of at most 120 characters, a file by its name; undefined when the call carries nothing to show. */
+export function toolArg(input: { readonly [key: string]: unknown }): string | undefined {
+  for (const key of ARG_KEYS) {
+    const value = input[key]
+    if (typeof value !== 'string') continue
+    const one = (key.endsWith('path') ? baseName(value) : value).replace(/\s+/g, ' ').trim()
+    if (one !== '') return [...one].slice(0, ARG_MAX).join('')
+  }
+  return undefined
+}
+
+/** `calls` with `call` last, cut to the last `CALLS_KEEP`. */
+export const recordCall = (calls: readonly CockpitToolCall[] | undefined, call: CockpitToolCall): CockpitToolCall[] => [...(calls ?? []), call].slice(-CALLS_KEEP)
+
+const GH_PR_CREATE = /\bgh\s+pr\s+create\b/
+const AZ_PR_CREATE = /\baz\s+repos\s+pr\s+create\b/
+const PR_TITLE_FLAG = /(?:^|\s)(?:--title|-t)(?:\s+|=)(?:"([^"]*)"|'([^']*)'|(\S+))/
+const PR_DRAFT_FLAG = /(?:^|\s)(?:--draft|-d)(?=\s|$)/
+
+/**
+ * The pull request that `command` created, from what it printed: `gh pr create` prints the pull request's URL (the title is
+ * the one the command gave, none for `--fill`); `az repos pr create` prints the pull request as JSON. Undefined for any
+ * other command, or output that names no pull request.
+ */
+export function parseCreatedPr(command: string, out: string): CockpitPr | undefined {
+  if (GH_PR_CREATE.test(command)) {
+    const found = /https?:\/\/\S+\/pull\/(\d+)/.exec(out)
+    const number = Number(found?.[1])
+    if (!found || !Number.isInteger(number) || number <= 0) return undefined
+    const title = PR_TITLE_FLAG.exec(command)
+    return { number, title: title?.[1] ?? title?.[2] ?? title?.[3] ?? '', state: 'open', isDraft: PR_DRAFT_FLAG.test(command), url: found[0] }
+  }
+  if (AZ_PR_CREATE.test(command)) {
+    try {
+      const pr: unknown = JSON.parse(out.slice(Math.max(0, out.indexOf('{'))))
+      if (!isRecord(pr)) return undefined
+      const { pullRequestId: number, title, isDraft } = pr
+      if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
+      return { number, title: typeof title === 'string' ? title : '', state: 'open', isDraft: isDraft === true, ...azureUrl(pr, number) }
+    } catch {
+      return undefined
+    }
+  }
+  return undefined
+}
+
+/** The pull requests of a chat that the list keeps (the state file persists them). */
+export const PRS_KEEP = 10
+
+/** `pr` joins `list`, or replaces the entry it is a newer reading of (the same url, or the same number when one side has no url); the list keeps the last ten. */
+export function upsertPr(list: readonly CockpitPr[] | undefined, pr: CockpitPr): CockpitPr[] {
+  const prs = list ?? []
+  const isSame = (a: CockpitPr) => (a.url !== undefined && pr.url !== undefined ? a.url === pr.url : a.number === pr.number)
+  const i = prs.findIndex(isSame)
+  const next = i < 0 ? [...prs, pr] : prs.map((a, j) => (j === i ? { ...a, ...pr, url: pr.url ?? a.url } : a))
+  return next.slice(-PRS_KEEP)
+}
+
+/** The pull requests out of a parsed state file: the entries with a number and a title (any other field a guess is made for), in order; none for anything else. */
+export function parseSavedPrs(value: unknown): CockpitPr[] {
+  if (!Array.isArray(value)) return []
+  const out: CockpitPr[] = []
+  for (const v of value.slice(-PRS_KEEP)) {
+    if (!isRecord(v)) continue
+    const { number, title, state, isDraft, url, review, checks } = v
+    if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0 || typeof title !== 'string') continue
+    const count = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
+    out.push({
+      number,
+      title,
+      state: state === 'merged' || state === 'closed' ? state : 'open',
+      isDraft: isDraft === true,
+      ...(typeof url === 'string' && url !== '' && { url }),
+      ...((review === 'approved' || review === 'changes' || review === 'pending') && { review }),
+      ...(isRecord(checks) && { checks: { passed: count(checks.passed), failed: count(checks.failed), pending: count(checks.pending) } }),
+    })
+  }
+  return out
+}
+
+/** The new tokens of the agents a history lists; undefined for an empty one. */
+export const historyTokens = (history: readonly { tokens: number }[] | undefined): number | undefined =>
+  history === undefined || history.length === 0 ? undefined : history.reduce((n, h) => n + h.tokens, 0)

@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { spanText, spanWidth } from '../hooks/format'
+import { TABS, spanText, spanWidth } from '../hooks/format'
 import { subagentDetails } from '../hooks/view'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
@@ -115,8 +115,6 @@ type World = {
   upstream?: string
   /** What `git diff --numstat` lists: `[added, deleted, path]` per tracked file (`-` for a binary one). */
   numstat?: [string, string, string][]
-  /** What `git rev-list --count` answers: the commits since the default branch. */
-  commits?: number
   /** The raw text of `git worktree list --porcelain`. */
   worktrees?: string
   /** What `git diff HEAD -- <file>` prints, by path. */
@@ -157,6 +155,8 @@ type World = {
   usageCalls?: (string | undefined)[]
   /** Fields of the breakdown `usage({ breakdown })` answers, over the empty fixture (categories, memory files, MCP tools, agents, skills ...). */
   breakdown?: Partial<SessionContextBreakdown>
+  /** A promise a `usage({ breakdown })` read waits on, by detail (`summary` or `full`), read at every call: a breakdown read that is slow. */
+  holdUsage?: (detail: string) => Promise<void> | undefined
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -173,8 +173,9 @@ function world(on: On, options: World = {}) {
   on('session.cwd', () => ({ value: '/work/example-repo' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
-  on('session.usage', (_, e) => {
+  on('session.usage', async (_, e) => {
     options.usageCalls?.push(e.breakdown)
+    if (e.breakdown !== undefined) await options.holdUsage?.(e.breakdown)
     const breakdown: SessionContextBreakdown = {
       categories: [],
       totalTokens: 248_000,
@@ -227,7 +228,6 @@ function world(on: On, options: World = {}) {
     }
     if (options.notRepo) return answer('', 128)
     if (e.argv.includes('--numstat')) return answer((options.numstat ?? []).map(([a, d, p]) => `${a}\t${d}\t${p}\0`).join(''))
-    if (e.argv.includes('rev-list')) return options.commits === undefined ? answer('', 128) : answer(`${options.commits}\n`)
     if (e.argv.includes('worktree')) return answer(options.worktrees ?? '')
     if (e.argv.includes('diff') && !e.argv.includes('--name-only')) return answer(options.fileDiffs?.[e.argv.at(-1) ?? ''] ?? '')
     if (e.argv.includes('diff') || e.argv.includes('ls-files')) {
@@ -354,18 +354,13 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/^ 62% 5h/)).toBe(' 62% 5h \u21bb  2h14m')
     expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb  3d\d\dh$/)
     expect(await text(/vs atteso/)).toBe('vs atteso 7d  \u22125%')
-    expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
-    // the Sessione view lists running agents only; the finished one is in the Agenti tab
-    expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
-    await ui.press({ key: 'tab:agents' })
-    // the row is one pressable Button: its text is the whole row
+    // Agenti is the tab the pane opens on: the row is one pressable Button: its text is the whole row
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('\u2713 code-reviewer')
     expect(await text(/son 5\.5/)).toContain('son 5.5')
     expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')
     expect(await text(/chiesto/)).toContain('chiesto fable \u2192 sonnet')
     expect(await text(/SUBAGENTI/)).toBe('SUBAGENTI \u00b7 0 in corso')
-    await ui.press({ key: 'tab:session' })
     await ui.unmount()
   }
 })
@@ -375,7 +370,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:session', 'tab:agents', 'tab:context', 'tab:work', 'tab:repo', 'bar:compact', 'bar:worklog'])
+  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'bar:compact', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -390,13 +385,13 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   await ui.unmount()
 })
 
-test('a rule closes the header and the tab bar, and sets the AGENTS title (after an empty row) apart from them', async ($, on) => {
+test('a rule closes the header and the tab bar, and sets the SUBAGENTI title (after an empty row) apart from them', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
   const [first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
-  const title = rows.findIndex(r => /^AGENTS/.test(r))
+  const title = rows.findIndex(r => /^SUBAGENTI/.test(r))
   // header, rule, tab bar, rule, then the tab's own content: an empty row first
   expect(first).toBe(headerOf(rows).length)
   expect(second).toBe(first + 2)
@@ -457,13 +452,13 @@ test('the state file is written at session start with open:false and the session
     agents: { running: 0, modelWarnings: 0 },
     effort: 'high',
     tasks: null,
-    tab: 'session',
+    tab: 'agents',
     history: [],
   })
   expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab', 'history'])
 })
 
-const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'session', history: [] }
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'agents', history: [] }
 
 test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
   const writes = new Map<string, string>()
@@ -590,7 +585,7 @@ test('the state file follows the last turn cost and the agent counts, at most on
     agents: { running: 1, modelWarnings: 1 },
     effort: 'high',
     tasks: null,
-    tab: 'session',
+    tab: 'agents',
   })
   const afterFlush = log.length
 
@@ -1038,26 +1033,26 @@ function spawns(on: On) {
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `a${++n}` }))
 }
 
-test('tab bar: five buttons, Sessione selected by default; a press on Agenti draws the Agenti view', async ($, on) => {
+test('tab bar: four buttons, Agenti selected by default; a press on Lavoro draws the Lavoro view', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  // the five bare names need 56 cells: the 48 of this 50-column pane's content get the short ones
-  expect((await tabs()).map(b => b.text)).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
+  // the four bare names need 46 cells: the 48 of this 50-column pane's content hold them
+  expect((await tabs()).map(b => b.text)).toEqual(['Agenti', 'Contesto', 'Lavoro', 'Sistema'])
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
-  expect(await selected()).toEqual(['tab:session'])
-  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
-
-  await ui.press({ key: 'tab:agents' })
   expect(await selected()).toEqual(['tab:agents'])
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeDefined()
+
+  await ui.press({ key: 'tab:work' })
+  expect(await selected()).toEqual(['tab:work'])
+  expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined() // the header stays on every tab
   expect(await ui.find({ type: 'Text', text: /^CREDITI/ })).toBeUndefined()
 
-  await ui.press({ key: 'tab:session' })
-  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
+  await ui.press({ key: 'tab:agents' })
+  expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1068,9 +1063,9 @@ test('tab labels: Agenti counts the running agents, Lavoro carries a dot when th
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
   const ui = await mountPane($, 52)
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Sub 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lav ●')
-  expect((await ui.find({ key: 'tab:repo' }))?.text).toBe('Repo')
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Agenti 2')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lavoro ●')
+  expect((await ui.find({ key: 'tab:system' }))?.text).toBe('Sistema')
   await ui.unmount()
 })
 
@@ -1078,11 +1073,11 @@ test('tab labels without agents or warnings are the bare names', async ($, on) =
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Agenti', 'Contesto', 'Lavoro', 'Sistema'])
   await ui.unmount()
 })
 
-test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks and worklog warnings, Repo the git grid', async ($, on) => {
+test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks and worklog warnings, Sistema its placeholder', async ($, on) => {
   world(on, { hasWorklog: true })
   taskTools(on)
   spawns(on)
@@ -1097,40 +1092,40 @@ test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks 
   const work = (await paneRows($, 50, 'work')).rows
   expect(work.some(r => /^TASK · 0\/1/.test(r))).toBe(true)
   expect(work.some(r => /worklog: 1d da registrare/.test(r))).toBe(true)
-  expect(work.some(r => /^AGENTS/.test(r))).toBe(false)
+  expect(work.some(r => /^SUBAGENTI/.test(r))).toBe(false)
 
-  const repo = (await paneRows($, 50, 'repo')).rows
-  expect(repo.some(r => /^BRANCH/.test(r))).toBe(true)
-  expect(repo.some(r => /^AGENTS/.test(r) || /^TASK/.test(r))).toBe(false)
+  const system = (await paneRows($, 50, 'system')).rows
+  expect(system).toContain('in arrivo')
+  expect(system.some(r => /^SUBAGENTI/.test(r) || /^TASK/.test(r))).toBe(false)
 })
 
 test('the selected tab is written in the state file', async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await paneRows($, 50, 'repo')
+  await paneRows($, 50, 'work')
   await clock.advance(3000)
-  expect(flagOf(writes)).toMatchObject({ tab: 'repo' })
+  expect(flagOf(writes)).toMatchObject({ tab: 'work' })
 })
 
 test('a state file left by an earlier run brings its tab back', async ($, on) => {
-  world(on, { stateFile: JSON.stringify({ open: false, tab: 'repo' }) })
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'context' }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  expect(rows.some(r => /^AGENTS/.test(r))).toBe(false)
-  expect(rows.some(r => /^BRANCH/.test(r))).toBe(true)
+  expect(rows.some(r => /^SUBAGENTI/.test(r))).toBe(false)
+  expect(rows.some(r => /^CONTESTO/.test(r))).toBe(true)
 })
 
 test('an unknown tab in the state file is ignored', async ($, on) => {
   world(on, { stateFile: JSON.stringify({ open: false, tab: 'nope' }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^BRANCH/.test(r))).toBe(false)
+  expect((await paneRows($)).rows.some(r => /^SUBAGENTI/.test(r))).toBe(true)
 })
 
 test('a state file that is not JSON is ignored', async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^BRANCH/.test(r))).toBe(false)
+  expect((await paneRows($)).rows.some(r => /^SUBAGENTI/.test(r))).toBe(true)
 })
 
 test('session.end keeps the tab in the closed file, so a resume finds it', async ($, on) => {
@@ -1143,9 +1138,9 @@ test('session.end keeps the tab in the closed file, so a resume finds it', async
   expect(flagOf(writes)).toEqual({ ...CLOSED, tab: 'work' })
 })
 
-// ── Sessione view ──
+// ── The header's context warning ──
 
-test('Sessione: the context line at 80% or more is red, with no button of its own', async ($, on) => {
+test('the context line at 80% or more is red, with no button of its own', async ($, on) => {
   world(on, { ctxPercent: 87 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -1156,7 +1151,7 @@ test('Sessione: the context line at 80% or more is red, with no button of its ow
   await ui.unmount()
 })
 
-test('Sessione: below 80% there is no warning; 80% exactly has it', async ($, on) => {
+test('below 80% there is no warning; 80% exactly has it', async ($, on) => {
   const clock = world(on, { ctxPercent: 79 })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -1281,24 +1276,14 @@ test('buttons row: between two sessions (no id) segna ore is not offered; compat
   await ui.unmount()
 })
 
-// ── Repo: PR and checks, read in the background ──
+// ── Lavoro: the PRs, read in the background ──
 
 /** Lets the background reads a session start leaves running (the repo's default branch, the PR) finish. */
 const settleAll = async () => {
   for (let i = 0; i < 8; i++) await settle()
 }
 
-/** The Repo tab's rows once the git reads its selection started have settled. */
-async function repoRows($: Engine, bodyColumns = 50) {
-  const ui = await mountPane($, bodyColumns)
-  await ui.press({ key: 'tab:repo' })
-  await settleAll()
-  const rows = rowTexts(await ui.drawn())
-  await ui.unmount()
-  return rows
-}
-
-const GH_PR_ARGS = 'gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup'
+const GH_PR_ARGS = 'gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup,url'
 const AZ_REMOTE = 'https://dev.azure.com/<org>/proj/_git/orders'
 const AZ_WORKSPACES = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
 const CHECKS = [
@@ -1319,12 +1304,12 @@ test('PR: a GitHub pull request of the branch with its state, title, reviews and
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  const rows = await repoRows($)
-  const i = rows.findIndex(r => r === 'PR · #42 · aperta')
+  const rows = await lavoroRows($)
+  const i = rows.findIndex(r => r === 'PR · 1')
   expect(i).toBeGreaterThan(0)
   expect(rows[i - 1]).toBe(' ')
   expect(rows[i - 2]).toMatch(/^─+$/)
-  expect(rows.slice(i + 1, i + 5)).toEqual([' ', 'Fix the orders filter', 'review approvata', 'checks 2/4 · ✗ 1 · ◐ 1'])
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', '#42 · aperta · Fix the orders filter', '  review approvata · checks 2/4 · ✗ 1 · ◐ 1'])
   expect(ghCalls).toEqual([GH_PR_ARGS])
 })
 
@@ -1333,22 +1318,22 @@ test('PR: a draft says bozza, changes requested and a review still due are told 
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  let rows = await repoRows($)
-  expect(rows).toContain('PR · #42 · bozza')
-  expect(rows).toContain('review modifiche richieste')
-  expect(rows.some(r => /^checks/.test(r))).toBe(false)
+  let rows = await lavoroRows($)
+  expect(rows).toContain('#42 · bozza · Fix the orders filter')
+  expect(rows).toContain('  review modifiche richieste')
+  expect(rows.some(r => /checks/.test(r))).toBe(false)
 
   options.prExtra = { reviewDecision: 'REVIEW_REQUIRED' }
   await clock.advance(5 * MIN)
   await settleAll()
-  rows = await repoRows($)
-  expect(rows).toContain('PR · #42 · aperta')
-  expect(rows).toContain('review in attesa')
+  rows = await lavoroRows($)
+  expect(rows).toContain('#42 · aperta · Fix the orders filter')
+  expect(rows).toContain('  review in attesa')
 
   options.prExtra = { reviewDecision: '' }
   await clock.advance(5 * MIN)
   await settleAll()
-  expect((await repoRows($)).some(r => /^review/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^ +review/.test(r))).toBe(false)
 })
 
 test('PR: a work item id in the branch name no longer keeps gh from being asked', async ($, on) => {
@@ -1356,7 +1341,7 @@ test('PR: a work item id in the branch name no longer keeps gh from being asked'
   world(on, { ghCalls, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  expect(await repoRows($)).toContain('PR · #42 · aperta')
+  expect(await lavoroRows($)).toContain('#42 · aperta · Fix the orders filter')
   expect(ghCalls).toEqual([GH_PR_ARGS])
 })
 
@@ -1366,17 +1351,30 @@ for (const { name, options, isGhAsked } of [
   { name: 'no remote', options: { pr: 42 }, isGhAsked: false },
   { name: 'gh not installed', options: { remote: GH_SSH, pr: 42, noGh: true }, isGhAsked: true },
   { name: 'no PR for the branch', options: { remote: GH_SSH }, isGhAsked: true },
-  { name: 'a PR that is not open', options: { remote: GH_SSH, pr: 42, prState: 'MERGED' }, isGhAsked: true },
 ] as const) {
-  test(`PR: with ${name} the Repo tab draws no PR`, async ($, on) => {
+  test(`PR: with ${name} Lavoro draws no PR`, async ($, on) => {
     const ghCalls: string[] = []
     world(on, { ghCalls, branch: 'feature/orders-filter', ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^PR ·/.test(r))).toBe(false)
     expect(ghCalls).toEqual(isGhAsked ? [GH_PR_ARGS] : [])
   })
 }
+
+test('PR: a merged or closed PR of the branch is listed with its own state, not as an open one', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prState: 'MERGED' }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('#42 · unita · Fix the orders filter')
+  options.prState = 'CLOSED'
+  await clock.advance(5 * MIN)
+  await settleAll()
+  const rows = await lavoroRows($)
+  expect(rows).toContain('#42 · chiusa · Fix the orders filter')
+  expect(rows.filter(r => /^#42 /.test(r))).toHaveLength(1)
+})
 
 test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM line and the project of the remote, and shows the review without inventing checks', async ($, on) => {
   const azCalls: string[] = []
@@ -1391,14 +1389,14 @@ test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM l
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  const rows = await repoRows($)
-  const i = rows.findIndex(r => r === 'PR · #7 · aperta')
+  const rows = await lavoroRows($)
+  const i = rows.findIndex(r => r === 'PR · 1')
   expect(i).toBeGreaterThan(0)
-  expect(rows.slice(i + 1, i + 4)).toEqual([' ', 'Faster orders', 'review approvata'])
-  expect(rows.some(r => /^checks/.test(r))).toBe(false)
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', '#7 · aperta · Faster orders', '  review approvata'])
+  expect(rows.some(r => /checks/.test(r))).toBe(false)
   expect(azCalls).toEqual([
     // the org is the ALM line's, as a URL (joined, so the text is not read as a real organization's)
-    `az repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status active --top 1 --output json`,
+    `az repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status all --top 1 --output json`,
   ])
   expect(ghCalls).toEqual([])
 })
@@ -1414,7 +1412,7 @@ test('PR: on Azure DevOps the repository is asked in the project of the remote U
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  expect((await repoRows($)).some(r => r === 'PR · #7 · aperta')).toBe(true)
+  expect((await lavoroRows($)).some(r => r === '#7 · aperta · Faster orders')).toBe(true)
   expect(azCalls).toHaveLength(1)
   expect(azCalls[0]).toContain('--project Beta --repository orders')
 })
@@ -1425,12 +1423,12 @@ for (const { name, options, workspaces } of [
   { name: 'a list without a usable PR', options: { azPr: [{ title: 'x' }] }, workspaces: AZ_WORKSPACES },
   { name: 'no ALM org to ask', options: { azPr: [{ pullRequestId: 7, title: 'x', status: 'active' }] }, workspaces: { roots: [] } },
 ] as const) {
-  test(`PR: on Azure DevOps with ${name} the Repo tab draws no PR`, async ($, on) => {
+  test(`PR: on Azure DevOps with ${name} Lavoro draws no PR`, async ($, on) => {
     const azCalls: string[] = []
     world(on, { azCalls, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces, ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^PR ·/.test(r))).toBe(false)
     // without an org the CLI is not asked at all: never the configured default
     expect(azCalls.length).toBe(name === 'no ALM org to ask' ? 0 : 1)
   })
@@ -1455,7 +1453,8 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
-  expect(await repoRows($)).toContain('PR · #43 · aperta')
+  // the PR of the branch left behind stays listed: it is the chat's
+  expect(await lavoroRows($)).toEqual(expect.arrayContaining(['#42 · aperta · Fix the orders filter', '#43 · aperta · Fix the orders filter']))
 
   options.branch = 'main'
   await clock.advance(30_000)
@@ -1463,17 +1462,19 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   expect(ghCalls).toHaveLength(3)
 })
 
-test('PR: the PR of a branch left behind is not shown on the next one', async ($, on) => {
+test('PR: the PR of a branch left behind stays listed on the next one, which adds none of its own', async ($, on) => {
   const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  expect(await repoRows($)).toContain('PR · #42 · aperta')
+  expect(await lavoroRows($)).toContain('#42 · aperta · Fix the orders filter')
   options.branch = 'feature/other'
   options.pr = undefined
   await clock.advance(30_000)
   await settleAll()
-  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+  const rows = await lavoroRows($)
+  expect(rows).toContain('PR · 1')
+  expect(rows).toContain('#42 · aperta · Fix the orders filter')
 })
 
 /** The keys of the Buttons in the last row of the drawn pane. */
@@ -1491,29 +1492,12 @@ test('buttons row: the very last row of every tab', async ($, on) => {
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Uno', 'pending')] })
-  for (const tab of ['session', 'agents', 'work', 'repo']) {
+  for (const tab of TABS) {
     const { root, rows } = await paneRows($, 50, tab)
     expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:worklog'])
     // a rule sets it apart from the tab's content
     expect(rows.at(-2)).toMatch(/^─+$/)
   }
-})
-
-test('Sessione: the running agents only, compact, at most 5 rows then … +n', async ($, on) => {
-  world(on)
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let n = 1; n <= 7; n++) await spawnAgent($, `agent-${n}`)
-  // the first one ends: it is no longer listed here
-  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'x', agentId: 'a1', reason: 'answer' })
-  const { rows } = await paneRows($, 60)
-  const title = rows.findIndex(r => /^AGENTS/.test(r))
-  expect(rows[title]).toMatch(/^AGENTS · 6 in corso/)
-  const listed = rows.filter(r => /^◐ agent-/.test(r))
-  expect(listed.map(r => r.split(' ')[1])).toEqual(['agent-2', 'agent-3', 'agent-4', 'agent-5', 'agent-6'])
-  expect(rows.some(r => /✓ agent-/.test(r))).toBe(false)
-  expect(rows[title + 2 + 5]).toBe('… +1')
 })
 
 // ── Phase 1 follow-ups ──
@@ -1832,7 +1816,8 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  expect(flagOf(writes)).toEqual({ ...CLOSED, history })
+  // a file without agentTokens starts the count from the history it lists
+  expect(flagOf(writes)).toEqual({ ...CLOSED, history, agentTokens: 5400 })
 })
 
 test('pressing an agent row, live or in STORICO, puts that agent in the main view', async ($, on) => {
@@ -1847,7 +1832,7 @@ test('pressing an agent row, live or in STORICO, puts that agent in the main vie
   await finishAgent($, 'a2')
 
   const ui = await mountPane($)
-  // the Sessione view lists the running agent
+  // Agenti is the tab the pane opens on
   await ui.press({ key: 'agent:a3' })
   expect(viewed).toEqual(['a3'])
   await ui.press({ key: 'tab:agents' })
@@ -1907,36 +1892,39 @@ const tabsAt = async ($: Engine, columns: number) => {
   return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
 }
 
-const LONG_TABS = ['Sessione', 'Agenti', 'Contesto', 'Lavoro', 'Repo']
+const LONG_TABS = ['Agenti', 'Contesto', 'Lavoro', 'Sistema']
+const SHORT_TABS = ['Sub', 'Ctx', 'Lav', 'Sys']
 
-test('tab bar: the whole names appear once the bar fits the content (56 cells bare, 58 with the running count), at any pane from 58 columns up', async ($, on) => {
+test('tab bar: the whole names appear once the bar fits the content (46 cells bare, 48 with the running count), at any pane from 48 columns up', async ($, on) => {
   world(on)
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  // 58 columns leave 56 cells of content: exactly the bare bar
-  for (const columns of [58, 60, 80]) {
+  // 48 columns leave 46 cells of content: exactly the bare bar
+  for (const columns of [48, 58, 60, 80]) {
     const bare = await tabsAt($, columns)
     expect(bare.labels).toEqual(LONG_TABS)
-    expect(bare.cells).toBe(56)
+    expect(bare.cells).toBe(46)
   }
-  expect((await tabsAt($, 57)).labels).toEqual(['Sess', 'Sub', 'Ctx', 'Lav', 'Repo'])
-  // a running agent adds ` 1`: 58 cells, which only a pane of 60 columns or more holds
+  expect((await tabsAt($, 47)).labels).toEqual(SHORT_TABS)
+  // a running agent adds ` 1`: 48 cells, which a pane of 50 columns or more holds
   await spawnAgent($, 'code-reviewer')
-  expect((await tabsAt($, 80)).labels).toEqual(['Sessione', 'Agenti 1', 'Contesto', 'Lavoro', 'Repo'])
-  expect((await tabsAt($, 58)).labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav', 'Repo'])
+  expect((await tabsAt($, 80)).labels).toEqual(['Agenti 1', 'Contesto', 'Lavoro', 'Sistema'])
+  expect((await tabsAt($, 50)).labels).toEqual(['Agenti 1', 'Contesto', 'Lavoro', 'Sistema'])
+  expect((await tabsAt($, 49)).labels).toEqual(['Sub 1', 'Ctx', 'Lav', 'Sys'])
 })
 
-test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 60 cells, a pane gives 58 at most), and the bar wraps rather than overflow', async ($, on) => {
+test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 50 cells), and the bar wraps rather than overflow', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
-  const narrow = await tabsAt($, 40)
-  expect(narrow.labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav ●', 'Repo'])
-  // the short bar is 45 cells: wider than a 40-column pane's content, so the row wraps
-  expect(narrow.cells).toBeGreaterThan(40 - 2)
-  expect(wrapAround(narrow.root, 'tab:session')).toBe('wrap')
-  for (const columns of [52, 58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Sess', 'Sub 1', 'Ctx', 'Lav ●', 'Repo'])
+  const narrow = await tabsAt($, 30)
+  expect(narrow.labels).toEqual(['Sub 1', 'Ctx', 'Lav ●', 'Sys'])
+  // the short bar is 35 cells: wider than a 30-column pane's content, so the row wraps
+  expect(narrow.cells).toBeGreaterThan(30 - 2)
+  expect(wrapAround(narrow.root, 'tab:agents')).toBe('wrap')
+  for (const columns of [40, 50]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Lav ●', 'Sys'])
+  for (const columns of [52, 58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Agenti 1', 'Contesto', 'Lavoro ●', 'Sistema'])
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -1961,8 +1949,8 @@ test('buttons row: side by side, and the row fits 40 columns', async ($, on) => 
   expect(labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1).toBeLessThanOrEqual(40)
 })
 
-test('Lavoro with no tasks and no worklog warnings says niente da mostrare', async ($, on) => {
-  world(on)
+test('Lavoro with no tasks, no worklog warnings and no git says niente da mostrare', async ($, on) => {
+  world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 50, 'work')
   // the buttons row closes the pane, under a rule and the spacer
@@ -2026,7 +2014,8 @@ test("PRINCIPALE: no perimeter for this branch (another branch's, closed): no pe
   const rows = await workRows($)
   expect(rows.some(r => /perimetro/.test(r))).toBe(false)
   expect(rows).not.toContain('PRINCIPALE')
-  expect(gitCalls).toEqual([])
+  // the changed files of the tab are listed from git, but no diff against the perimeter is made
+  expect(gitCalls.filter(c => c.includes(' diff '))).toEqual([])
 })
 
 test('PRINCIPALE: a failed git diff leaves the entry count alone: no file counts, no claim about the outside', async ($, on) => {
@@ -2050,8 +2039,8 @@ test('PRINCIPALE: the perimeter, the session tasks and the worklog warnings are 
   expect(tasks).toBeLessThan(worklog)
   // no rule inside the block
   expect(rows.slice(main, worklog).some(r => /^─+$/.test(r))).toBe(false)
-  // and the tasks are no longer in the Sessione view
-  expect((await paneRows($, 50, 'session')).rows.some(r => /^TASK/.test(r))).toBe(false)
+  // and the tasks are not in the Agenti view
+  expect((await paneRows($, 50, 'agents')).rows.some(r => /^TASK/.test(r))).toBe(false)
 })
 
 /** A workflow agent's spawn: `runId` and its place in the run. */
@@ -2242,17 +2231,17 @@ test('PR: a branch left and come back to is asked again, not served from the rea
   expect(ghCalls).toHaveLength(3)
 })
 
-test('PR: a failed gh pr view clears the PR of that branch', async ($, on) => {
+test('PR: a failed gh pr view adds nothing and leaves the PRs already listed', async ($, on) => {
   const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
-  expect(await repoRows($)).toContain('PR · #42 · aperta')
+  expect(await lavoroRows($)).toContain('#42 · aperta · Fix the orders filter')
 
   options.noGh = true // gh is gone: the next read fails
   await clock.advance(5 * MIN)
   await settleAll()
-  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+  expect(await lavoroRows($)).toContain('#42 · aperta · Fix the orders filter')
 })
 
 // ── Agent lifecycle ──
@@ -2348,59 +2337,9 @@ test('hook triggers: the log is read again only when its size or modification ti
 })
 
 
-// ── Repo: branch, changes, worktrees ──
+// ── Lavoro: the changed files ──
 
-const WORKTREES = [
-  'worktree /work/example-repo',
-  'HEAD 1111111',
-  'branch refs/heads/feature/x',
-  '',
-  'worktree /work/orders-wt',
-  'HEAD 2222222',
-  'branch refs/heads/feat/y',
-  '',
-  'worktree /work/old-wt',
-  'HEAD 3333333',
-  'detached',
-  '',
-].join('\n')
-
-test('Repo: the branch with its upstream and ahead/behind, and the commits since the default branch', async ($, on) => {
-  world(on, { branch: 'feature/x', upstream: 'origin/feature/x [ahead 2, behind 1]', defaultBranch: 'main', commits: 3 })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  const rows = await repoRows($)
-  const i = rows.findIndex(r => r === 'BRANCH')
-  expect(i).toBeGreaterThan(0)
-  expect(rows[i - 1]).toBe(' ')
-  expect(rows[i - 2]).toMatch(/^─+$/)
-  expect(rows.slice(i + 1, i + 4)).toEqual([' ', 'origin/feature/x ↑2 ↓1', '3 commit da main'])
-})
-
-test('Repo: a branch without an upstream says so; one commit is singular; no default branch known draws no commits line', async ($, on) => {
-  world(on, { branch: 'feature/x', defaultBranch: 'main', commits: 1 })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  const rows = await repoRows($)
-  expect(rows).toContain('nessun upstream')
-  expect(rows).toContain('1 commit da main')
-})
-
-test('Repo: nothing is claimed about commits when the default branch is unknown or the branch is the default one', async ($, on) => {
-  world(on, { branch: 'feature/x', commits: 5 })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  expect((await repoRows($)).some(r => /commit da/.test(r))).toBe(false)
-})
-
-test('Repo: on the default branch there are no commits since it', async ($, on) => {
-  world(on, { branch: 'main', defaultBranch: 'main', commits: 0 })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  expect((await repoRows($)).some(r => /commit da/.test(r))).toBe(false)
-})
-
-test('Repo: the changed files with +/- (a binary file bin, an untracked one ?), at most 8 rows, then … +n', async ($, on) => {
+test('Lavoro: the changed files with +/- (a binary file bin, an untracked one ?), at most 8 rows, then … +n', async ($, on) => {
   const numstat: [string, string, string][] = [
     ['12', '3', 'src/a.ts'],
     ['0', '5', 'src/b.ts'],
@@ -2413,7 +2352,7 @@ test('Repo: the changed files with +/- (a binary file bin, an untracked one ?), 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const ui = await mountPane($)
-  await ui.press({ key: 'tab:repo' })
+  await ui.press({ key: 'tab:work' })
   await settleAll()
   const files = (await ui.findAll({ type: 'Button' })).filter(b => /^file:/.test(b.key ?? ''))
   expect(files.map(b => b.key)).toEqual(
@@ -2431,49 +2370,37 @@ test('Repo: the changed files with +/- (a binary file bin, an untracked one ?), 
   await ui.unmount()
 })
 
-test('Repo: no changed files says so', async ($, on) => {
+test('Lavoro: no changed files says so', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await repoRows($)
+  const rows = await lavoroRows($)
   expect(rows).toContain('MODIFICHE · 0')
   expect(rows).toContain('nessuna modifica')
 })
 
-test('Repo: the worktrees, the one the session runs in marked', async ($, on) => {
-  world(on, { worktrees: WORKTREES })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await repoRows($)
-  const i = rows.findIndex(r => r === 'WORKTREE · 3')
-  expect(i).toBeGreaterThan(0)
-  expect(rows[i + 1]).toBe(' ')
-  expect(rows[i + 2]).toMatch(/^● example-repo +feature\/x$/)
-  expect(rows[i + 3]).toMatch(/^○ orders-wt +feat\/y$/)
-  expect(rows[i + 4]).toMatch(/^○ old-wt +HEAD$/)
-})
-
-test('Repo: git is not read for it while another tab is selected', async ($, on) => {
+test('Lavoro: git is not read for it while another tab is selected', async ($, on) => {
   const gitCalls: string[] = []
   world(on, { gitCalls, numstat: [['1', '1', 'a.ts']], branch: 'feature/x' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(gitCalls).toEqual([])
   const ui = await mountPane($)
-  await ui.press({ key: 'tab:repo' })
+  await ui.press({ key: 'tab:work' })
   await settleAll()
   expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks ls-files --others --exclude-standard -z')
   await ui.unmount()
 })
 
-// ── Repo: the diff pane ──
+// ── Lavoro: the diff pane ──
 
 const DIFF = ['diff --git a/src/a.ts b/src/a.ts', 'index 1111111..2222222 100644', '--- a/src/a.ts', '+++ b/src/a.ts', '@@ -1,2 +1,3 @@', ' keep', '-old', '+new', '+added', ''].join('\n')
 const HUNKS = DIFF.split('\n').slice(2).join('\n')
 const DIFF_PANE = { ...PANE, requestId: 'cockpit-diff', props: { ...PANE.props, title: 'diff', bodyColumns: 80 } } as const
 
-/** Presses the file `key` of the Repo tab and returns the diff pane drawn afterwards. */
+/** Presses the file `key` of the Lavoro tab and returns the diff pane drawn afterwards. */
 async function pressFile($: Engine, file: string) {
   const ui = await mountPane($)
-  await ui.press({ key: 'tab:repo' })
+  await ui.press({ key: 'tab:work' })
   await settleAll()
   await ui.press({ key: `file:${file}` })
   await settleAll()
@@ -2534,7 +2461,7 @@ test('diff pane: closable from its own button, which closes the pane and forgets
 // ── The Azure CLI is started the way the platform can start it, aimed at the identity's own config ──
 
 const AZ_PR = [{ pullRequestId: 7, title: 'Faster orders', status: 'active' }]
-const AZ_LIST = `repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status active --top 1 --output json`
+const AZ_LIST = `repos pr list --organization ${['https://dev.azure.com', 'org-a'].join('/')} --project proj --repository orders --source-branch refs/heads/feature/orders-filter --status all --top 1 --output json`
 
 for (const { name, env } of [
   { name: 'OS is Windows_NT', env: { OS: 'Windows_NT' } },
@@ -2546,7 +2473,7 @@ for (const { name, env } of [
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
     expect(azCalls).toEqual([`cmd /d /s /c az ${AZ_LIST}`])
-    expect((await repoRows($)).some(r => r === 'PR · #7 · aperta')).toBe(true)
+    expect((await lavoroRows($)).some(r => r === '#7 · aperta · Faster orders')).toBe(true)
   })
 }
 
@@ -2564,7 +2491,7 @@ test('az: on Windows an argument cmd would read as more than text (a branch name
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(windows).toEqual([])
-  expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^PR ·/.test(r))).toBe(false)
 })
 
 for (const { name, env, prefix } of [
@@ -2642,7 +2569,7 @@ test('PR: a branch that changes between a refresh\'s git read and its patch is a
   release() // the first refresh patches the branch it read, over the one the snapshot now holds
   await settleAll()
   expect(ghCalls).toHaveLength(2)
-  expect(await repoRows($)).toContain('PR · #42 · aperta')
+  expect(await lavoroRows($)).toContain('#42 · aperta · Fix the orders filter')
 })
 
 // ── Cockpit v3, phase 1: layout, header, refresh tiers, buttons at the bottom ──
@@ -2680,7 +2607,7 @@ test('header: above the tab bar on every tab, with the model, effort, state, ses
     reason: 'answer',
     usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
   })
-  for (const tab of ['session', 'agents', 'work', 'repo']) {
+  for (const tab of TABS) {
     const header = headerOf((await paneRows($, 50, tab)).rows)
     expect(header[0]).toMatch(/^Opus 5\.5/)
     expect(header[0]).toContain('HIGH')
@@ -2904,14 +2831,14 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
     listCalls.length = 0
   }
   reset()
-  await clock.advance(2000) // t = 6 s: the fast timer ticked once (Sessione has elapsed times)
+  await clock.advance(2000) // t = 6 s: the fast timer ticked once (Agenti has elapsed times)
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
 
-  await ui.press({ key: 'tab:repo' })
+  await ui.press({ key: 'tab:context' })
   await settleAll()
   reset()
-  await clock.advance(3000) // t = 9 s: Repo has no clock and git is not due yet
+  await clock.advance(3000) // t = 9 s: Contesto has no clock and git is not due yet
   expect(listCalls).toHaveLength(0)
   expect(statusCalls).toHaveLength(0)
   await clock.advance(1500) // t = 10.5 s: the medium timer ticked
@@ -2957,7 +2884,8 @@ test('buttons: compatta and segna ore close the pane height, whatever the tab: a
     return root
   }
   // a short tab in a tall pane, and a tall tab (the header alone is taller than 5 rows) in a short one
-  for (const [bodyRows, tab] of [[30, 'agents'], [30, 'session'], [5, 'work']] as const) {
+  // every tab in a tall pane, and the tallest one in a short one
+  for (const [bodyRows, tab] of [...TABS.map(t => [30, t] as const), [5, 'work'] as const]) {
     const root = await mountAt(bodyRows, tab)
     expect(root.props?.flexDirection).toBe('column')
     expect(root.props?.minHeight).toBe(bodyRows)
@@ -3201,8 +3129,8 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await clock.advance(4000)
   await settleAll()
   expect(await elapsed()).toBe('4s')
-  await ui.press({ key: 'tab:repo' })
-  await clock.advance(4000) // Repo has no clock: the agent's time stands where it was
+  await ui.press({ key: 'tab:context' })
+  await clock.advance(4000) // Contesto has no clock: the agent's time stands where it was
   await settleAll()
   await ui.press({ key: 'tab:agents' })
   expect(await elapsed()).toBe('4s')
@@ -3427,4 +3355,361 @@ test('Subagenti: the tool line (the one running, or the last) is cut to the widt
   }
   // a short one is left whole
   expect(spanText(subagentDetails({ ...agent, lastTool: 'Read' }, '  ', 30)[0] ?? [])).toBe('  ultimo tool Read')
+})
+
+// ── Cockpit v3, phase 4: the final tabs and the Lavoro tab ──
+
+/** The Lavoro tab's rows once the reads its selection started have settled. */
+async function lavoroRows($: Engine, bodyColumns = 50) {
+  const ui = await mountPane($, bodyColumns)
+  await ui.press({ key: 'tab:work' })
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  return rows
+}
+
+test('tabs: exactly Agenti, Contesto, Lavoro, Sistema, Agenti selected by default; Sistema says in arrivo', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  const tabs = (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
+  expect(tabs.map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system'])
+  expect(tabs.map(b => b.text)).toEqual(['Agenti', 'Contesto', 'Lavoro', 'Sistema'])
+  expect(tabs.filter(b => b.props.variant === 'primary').map(b => b.key)).toEqual(['tab:agents'])
+  expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeDefined()
+  await ui.press({ key: 'tab:system' })
+  expect(await ui.find({ type: 'Text', text: /^in arrivo$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeUndefined()
+  await ui.unmount()
+})
+
+test('tabs: with four tabs the full labels fit 58 columns again, the running count and the worklog dot included', async ($, on) => {
+  world(on, { hasWorklog: true })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'code-reviewer')
+  for (const columns of [58, 80]) {
+    const { labels, root } = await tabsAt($, columns)
+    expect(labels).toEqual(['Agenti 1', 'Contesto', 'Lavoro ●', 'Sistema'])
+    expect(wrapAround(root, 'tab:agents')).toBe('wrap')
+  }
+})
+
+// A tab a state file of an earlier version holds goes where its content went.
+for (const [saved, shown] of [
+  ['session', 'tab:agents'],
+  ['repo', 'tab:work'],
+  ['system', 'tab:system'],
+  ['context', 'tab:context'],
+] as const) {
+  test(`a saved tab ${saved} brings back ${shown}, and the state file writes it that way`, async ($, on) => {
+    const writes = new Map<string, string>()
+    world(on, { writes, stateFile: JSON.stringify({ open: false, tab: saved }) })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await mountPane($, 58)
+    const selected = (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '') && b.props.variant === 'primary').map(b => b.key)
+    expect(selected).toEqual([shown])
+    expect(flagOf(writes)).toMatchObject({ tab: shown.slice(4) })
+    await ui.unmount()
+  })
+}
+
+test('Lavoro: the changed files with +/-, read only while Lavoro is selected; no branch or worktree block (the header holds the branch)', async ($, on) => {
+  world(on, { numstat: [['3', '1', 'src/a.ts']], untracked: ['notes.md'], worktrees: 'worktree /work/example-repo\nHEAD 1\nbranch refs/heads/feature/x\n' })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect(rowTexts(await ui.drawn()).some(r => /^MODIFICHE/.test(r))).toBe(false)
+  await ui.press({ key: 'tab:work' })
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('MODIFICHE · 2')
+  expect(rows.some(r => /^ +\+3 +-1 src\/a\.ts$/.test(r))).toBe(true)
+  expect(rows.some(r => /^ +\? +notes\.md$/.test(r))).toBe(true)
+  expect(rows.some(r => /^BRANCH|^WORKTREE/.test(r))).toBe(false)
+  await ui.unmount()
+})
+
+test('Lavoro: the last 8 main-loop tools, newest first, each with its short argument, outcome and time; a subagent call is not one', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  on('tool.call', { tool: 'Read' }, () => ({ result: {} }))
+  on('tool.call', { tool: 'Edit' }, () => ({ deny: 'no' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let i = 1; i <= 9; i++) await $.tool.call({ tool: 'Bash', command: `echo ${i}` })
+  await $.tool.call({ tool: 'Read', file_path: '/w/src/orders/Filter.ts' })
+  await $.tool.call({ tool: 'Edit', file_path: '/w/x.ts', old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: 'Bash', command: 'from a subagent', agentId: 'a1' })
+  const rows = await lavoroRows($)
+  const i = rows.findIndex(r => r === 'TOOL · 8')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i - 1]).toBe(' ')
+  expect(rows[i - 2]).toMatch(/^─+$/)
+  const list = rows.slice(i + 2, i + 10)
+  expect(list[0]).toMatch(/^✗ Edit +x\.ts +\d\d:\d\d$/)
+  expect(list[1]).toMatch(/^✓ Read +Filter\.ts +\d\d:\d\d$/)
+  expect(list[2]).toMatch(/^✓ Bash +echo 9 +\d\d:\d\d$/)
+  expect(list[7]).toMatch(/^✓ Bash +echo 4 +\d\d:\d\d$/)
+  expect(rows.some(r => /subagent/.test(r))).toBe(false)
+})
+
+test('Lavoro: a tool row is cut to the width: a long argument ends with an ellipsis and the time stays', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'dotnet test --filter "FullyQualifiedName~Orders.Filter.VeryLongTestName" --no-build' })
+  const row = (await lavoroRows($, 40)).find(r => /^[✓✗] Bash/.test(r)) ?? ''
+  expect([...row].length).toBe(38)
+  expect(row).toMatch(/…\s+\d\d:\d\d$/)
+})
+
+const GH_CREATED = 'https://github.com/example/orders/pull/42'
+const bashResult = (stdout: string) => ({ result: { stdout, stderr: '', interrupted: false } })
+
+test('Lavoro: a PR created in the session (gh pr create) is a Link with its state, and is kept in the state file', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  on('tool.call', { tool: 'Bash' }, () => bashResult(`Creating pull request\n${GH_CREATED}\n`))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter" --body "x"' })
+  await $.tool.call({ tool: 'Bash', command: 'git status' }) // not a create: nothing
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:work' })
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('PR · 1')
+  expect(rows.some(r => /^#42 · aperta · Add filter$/.test(r))).toBe(true)
+  expect((await ui.find({ type: 'Link' }))?.props.href).toBe(GH_CREATED)
+  await ui.unmount()
+  await clock.advance(3000)
+  expect((flagOf(writes) as { prs?: unknown }).prs).toEqual([{ number: 42, title: 'Add filter', state: 'open', isDraft: false, url: GH_CREATED }])
+})
+
+test('Lavoro: a PR created with az repos pr create takes its link from the repository web url', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Bash' }, () =>
+    bashResult(JSON.stringify({ pullRequestId: 9, title: 'Faster orders', status: 'active', isDraft: true, repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } })),
+  )
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'az repos pr create --title "Faster orders" --draft true' })
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:work' })
+  await settleAll()
+  expect(rowTexts(await ui.drawn()).some(r => /^#9 · bozza · Faster orders$/.test(r))).toBe(true)
+  expect((await ui.find({ type: 'Link' }))?.props.href).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/9')
+  await ui.unmount()
+})
+
+test('Lavoro: a create that failed, was refused or printed no url adds no PR', async ($, on) => {
+  world(on)
+  let answer: { deny: string } | { result: object; isError?: true } = { deny: 'no' }
+  on('tool.call', { tool: 'Bash' }, () => answer)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
+  answer = bashResult('error: could not create')
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
+  answer = { ...bashResult(GH_CREATED), isError: true }
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
+  expect((await lavoroRows($)).some(r => /^PR ·/.test(r))).toBe(false)
+})
+
+test('Lavoro: the PRs of a session come back with it (the state file), whatever their state', async ($, on) => {
+  const prs = [
+    { number: 7, title: 'Old work', state: 'merged', isDraft: false, url: 'https://github.com/example/orders/pull/7' },
+    { number: 8, title: 'Checks', state: 'open', isDraft: false, checks: { passed: 1, failed: 1, pending: 0 }, review: 'changes' },
+  ]
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'work', prs }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('PR · 2')
+  expect(rows.some(r => /^#7 · unita · Old work$/.test(r))).toBe(true)
+  expect(rows.some(r => /^#8 · aperta · Checks$/.test(r))).toBe(true)
+  expect(rows.some(r => /^ +review modifiche richieste · checks 1\/2 · ✗ 1$/.test(r))).toBe(true)
+  // a PR without a url is plain text, never a link to nowhere
+  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://github.com/example/orders/pull/7'])
+  await ui.unmount()
+})
+
+test('Lavoro: the read of the branch updates a PR already listed (created, then merged) instead of adding another', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: GH_SSH }
+  const clock = world(on, options)
+  on('tool.call', { tool: 'Bash' }, () => bashResult(GH_CREATED))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
+  options.pr = 42
+  options.prState = 'MERGED'
+  options.prExtra = { url: GH_CREATED }
+  await clock.advance(5 * MIN + 30_000)
+  await settleAll()
+  const rows = await lavoroRows($)
+  expect(rows).toContain('PR · 1')
+  expect(rows.filter(r => /^#42 /.test(r))).toEqual(['#42 · unita · Fix the orders filter'])
+})
+
+test('Lavoro: an Azure PR seen active, then completed or abandoned, is read again and its entry follows the state', async ($, on) => {
+  const options: World = { branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES }
+  const pr = (status: string) => [{ pullRequestId: 7, title: 'Faster orders', status, isDraft: false }]
+  options.azPr = pr('active')
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('#7 · aperta · Faster orders')
+  options.azPr = pr('completed')
+  await clock.advance(5 * MIN + 30_000)
+  await settleAll()
+  let rows = await lavoroRows($)
+  expect(rows).toContain('PR · 1')
+  expect(rows.filter(r => /^#7 /.test(r))).toEqual(['#7 · unita · Faster orders'])
+  options.azPr = pr('abandoned')
+  await clock.advance(5 * MIN + 30_000)
+  await settleAll()
+  rows = await lavoroRows($)
+  expect(rows.filter(r => /^#7 /.test(r))).toEqual(['#7 · chiusa · Faster orders'])
+})
+
+// ── Phase 3 follow-ups ──
+
+test('follow-up: opening the pane on the Contesto tab does not wait for the breakdown read', async ($, on) => {
+  let gate: Promise<void> | undefined
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'context' }), holdUsage: () => gate })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  let release = () => {}
+  gate = new Promise<void>(resolve => (release = resolve))
+  let isOpened = false
+  const opening = openCockpit($).then(() => {
+    isOpened = true
+  })
+  await settleAll()
+  expect(isOpened).toBe(true) // the read is still held
+  release()
+  await opening
+  await settleAll()
+})
+
+/** A held read by detail: `hold('full')` makes the next full read wait until the returned release is called. */
+function holds() {
+  const gates: Record<string, Promise<void> | undefined> = {}
+  return {
+    holdUsage: (detail: string) => gates[detail],
+    hold: (detail: string) => {
+      let release = () => {}
+      gates[detail] = new Promise<void>(resolve => (release = resolve))
+      return () => {
+        gates[detail] = undefined
+        release()
+      }
+    },
+  }
+}
+
+test('follow-up: an older context read never replaces a newer one: the exact count asked after a slow summary wins, whichever answers last', async ($, on) => {
+  const h = holds()
+  world(on, { holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text
+  const releaseSummary = h.hold('summary')
+  await ui.press({ key: 'tab:context' }) // summary read #1, held
+  const releaseFull = h.hold('full')
+  await ui.press({ key: 'ctx:exact' }) // full read #2, held
+  releaseFull()
+  await settleAll()
+  expect(await kind()).toBe('esatto')
+  releaseSummary() // the older read answers last
+  await settleAll()
+  expect(await kind()).toBe('esatto')
+  await ui.unmount()
+})
+
+test('follow-up: a summary read asked after a slow exact count wins over it when the count answers last', async ($, on) => {
+  const h = holds()
+  world(on, { holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const releaseFull = h.hold('full')
+  await ui.press({ key: 'ctx:exact' }) // full read #2, held
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'tab:context' }) // summary read #3, answered at once
+  await settleAll()
+  expect(await kind()).toBe('stima')
+  releaseFull() // the older read answers last
+  await settleAll()
+  expect(await kind()).toBe('stima')
+  await ui.unmount()
+})
+
+test('follow-up: a saved state without agentTokens starts the count from the history it lists', async ($, on) => {
+  const writes = new Map<string, string>()
+  const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', history: [h('x1', 3000), h('x2', 2000)] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((flagOf(writes) as { agentTokens?: number }).agentTokens).toBe(5000)
+})
+
+test('follow-up: a saved agentTokens wins over the history sum', async ($, on) => {
+  const writes = new Map<string, string>()
+  const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', agentTokens: 9000, history: [h('x1', 3000)] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((flagOf(writes) as { agentTokens?: number }).agentTokens).toBe(9000)
+})
+
+/** `on` with the first `clock.after` of the context debounce refused (the hook throws, so the engine skips it and runs nothing): the timer never fires. */
+function refusingFirstAfter(on: On): On {
+  let isRefused = false
+  // `on` is overloaded on its pattern and matcher; this wrapper only forwards, so the loose signature cannot reach a caller
+  const wrapped = (pattern: string, ...rest: unknown[]) => {
+    const hook = rest.pop() as (...args: unknown[]) => unknown
+    const guarded =
+      pattern === 'clock.after'
+        ? (...args: unknown[]) => {
+            // only the context read's debounce (2 s) is refused, once
+            if (isRefused || (args[1] as { ms?: number } | undefined)?.ms !== 2000) return hook(...args)
+            isRefused = true
+            throw new Error('refused')
+          }
+        : hook
+    return (on as unknown as (...a: unknown[]) => unknown)(pattern, ...rest, guarded)
+  }
+  return wrapped as unknown as On
+}
+
+test('follow-up: a context read timer the engine refused does not stop the next turn from scheduling its read', async ($, on) => {
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(refusingFirstAfter(on), { usageCalls, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const opened = summaries()
+  await mainTurnEnd($) // its timer is refused: the read never runs
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(opened)
+  await mainTurnEnd($) // the refused timer must not hold the next one back
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(opened + 1)
+  await ui.unmount()
+})
+
+test('follow-up: the ultimo tool line of a subagent block in Lavoro is cut to the width', async ($, on) => {
+  world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('tool.call', { tool: 'ListMcpResourcesTool' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review' })
+  await $.tool.call({ tool: 'ListMcpResourcesTool', agentId: 'a1' })
+  // 30 columns leave 28 cells: 'ultimo tool ListMcpResourcesTool' needs 32
+  const row = (await lavoroRows($, 30)).find(r => /^ultimo tool/.test(r)) ?? ''
+  expect([...row].length).toBe(28)
+  expect(row).toMatch(/…$/)
 })

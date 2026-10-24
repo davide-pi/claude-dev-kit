@@ -1,7 +1,7 @@
 import type { CockpitSnapshot } from '../types'
 
 export const PANE = 'cockpit'
-/** The second pane: the diff of the file pressed on the Repo tab. */
+/** The second pane: the diff of the file pressed on the Lavoro tab. */
 export const DIFF_PANE = 'cockpit-diff'
 
 export const INITIAL: CockpitSnapshot = {

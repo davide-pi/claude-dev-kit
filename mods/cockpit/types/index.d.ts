@@ -59,7 +59,7 @@ export type CockpitGit = {
   untracked: number
   /** Root of the linked worktree the session runs in; absent in a main checkout. */
   worktreeRoot?: string
-  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Repo tab's git reads run and the paths they list start. */
+  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Lavoro tab's git reads run and the paths they list start. */
   root?: string
   /** The branch's upstream (`origin/feature/x`) and the commits ahead of it and behind it; absent without an upstream. */
   upstream?: string
@@ -67,28 +67,28 @@ export type CockpitGit = {
   behind?: number
 }
 
-/** One changed file of the Repo tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
+/** One changed file of the Lavoro tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
 export type CockpitChange = { path: string; added?: number; deleted?: number; isBinary?: boolean; isUntracked?: boolean }
 
-/** One checkout of the repository (`git worktree list`); `branch` is absent for a detached one. */
-export type CockpitWorktree = { path: string; branch?: string }
-
-/** What the Repo tab draws beyond the git grid, read only while that tab is selected. */
+/** What the Lavoro tab draws of the repository beyond the header, read only while that tab is selected. */
 export type CockpitRepo = {
   /** The changed files, tracked first then untracked, kept to a few dozen. */
   files: CockpitChange[]
   /** How many files changed in all (`files` may hold fewer). */
   total: number
-  /** Commits on HEAD that the repo's default branch lacks; absent when the default branch is unknown. */
-  commits?: number
-  worktrees: CockpitWorktree[]
 }
 
-/** The open pull request of the branch checked out. Azure DevOps lists no checks, so `checks` is then absent. */
+/**
+ * A pull request of this chat: seen for the branch checked out (`gh pr view`, `az repos pr list`) or created in the session
+ * (`gh pr create`, `az repos pr create`). Azure DevOps lists no checks, so `checks` is then absent; `url` is absent when the
+ * CLI named no web address.
+ */
 export type CockpitPr = {
   number: number
   title: string
+  state: 'open' | 'merged' | 'closed'
   isDraft: boolean
+  url?: string
   review?: 'approved' | 'changes' | 'pending'
   checks?: { passed: number; failed: number; pending: number }
 }
@@ -154,8 +154,11 @@ export type CockpitContext = {
   isExact: boolean
 }
 
-/** The view the pane draws: the tab bar's five buttons. */
-export type CockpitTab = 'session' | 'agents' | 'context' | 'work' | 'repo'
+/** One tool call of the main loop, as the Lavoro tab's list keeps it: the tool, its short argument, whether it ran without error or refusal, and when it started. */
+export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at: number }
+
+/** The view the pane draws: the tab bar's four buttons (Sistema is a placeholder until its monitor exists). */
+export type CockpitTab = 'agents' | 'context' | 'work' | 'system'
 
 export type CockpitSnapshot = {
   /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
@@ -191,12 +194,14 @@ export type CockpitSnapshot = {
   ctxRounds?: number[]
   /** The Contesto tab's last reading of the context breakdown; absent until the tab was opened. */
   context?: CockpitContext
+  /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
+  contextSeq?: number
   /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
   autoCompactAt?: number
   alm?: CockpitAlm
-  /** The selected tab; absent (a state written before tabs existed) is the Sessione view. */
+  /** The selected tab; absent is the Agenti view. */
   tab?: CockpitTab
   agents: CockpitAgent[]
   /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
@@ -215,15 +220,17 @@ export type CockpitSnapshot = {
   workflowRun?: CockpitWorkflowRun
   /** The last entries of `done-claim.log`, newest first; absent without a readable log. */
   doneClaims?: CockpitDoneClaim[]
-  /** The open pull request of the branch checked out, read in the background (`gh pr view` on GitHub, `az repos pr list` on Azure DevOps). Absent without one. */
-  pr?: CockpitPr
-  /** The Repo tab's changed files and worktrees; absent until that tab was selected, and without git. */
+  /** The pull requests of this chat, oldest first, at most ten; kept with the session in its state file. Absent without one. */
+  prs?: CockpitPr[]
+  /** The last eight tool calls of the main loop, oldest first (the subagents' are theirs); per session, not persisted. */
+  calls?: CockpitToolCall[]
+  /** The Lavoro tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
-  /** The diff of the file pressed on the Repo tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
+  /** The diff of the file pressed on the Lavoro tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
   workflow?: string
-  /** The repo's default branch, as `origin/HEAD` names it: the commits of the Repo tab count from it. Absent when `origin/HEAD` is not set. */
+  /** The repo's default branch, as `origin/HEAD` names it: no pull request is looked for on it. Absent when `origin/HEAD` is not set. */
   defaultBranch?: string
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */
   now: number
