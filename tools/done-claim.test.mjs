@@ -334,15 +334,34 @@ test('a delegate counts as an edit for ordering: a shell command after it excuse
   assert.match(stop([prompt('x'), tool('Bash'), result(), tool('Workflow'), result(), say('Fatto.')]).reason, /"Fatto"/);
 });
 
-test('a truncated tail cannot prove a row absent: logged as tail-truncated, not blocked', () => {
-  const filler = Array.from({ length: 8 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 800 KB: the prompt falls out of the 512 KB tail
-  const tail = [...filler, tool('Edit'), result('ok'), say(verdict(row('Passed: 48, Failed: 0')))];
-  const { reason, dir } = stop([prompt('x'), ...tail]);
-  assert.equal(reason, '');
-  const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
-  assert.equal(JSON.parse(log[0]).rule, 'tail-truncated');
+test('a turn longer than 512 KB is read back to its start: a proof past the old tail is found, an absent one blocks', () => {
+  const filler = Array.from({ length: 8 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 800 KB: the prompt is beyond the 512 KB chunk
+  const claim = say(verdict(row('Passed: 48, Failed: 0')));
+  // the proof printed right after the prompt, 800 KB before the end: found, nothing blocked, nothing logged as cut
+  const proven = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
+  assert.equal(proven.reason, '');
+  assert.equal(existsSync(join(proven.dir, '.cache', 'done-claim.log')), false);
+  // the proof nowhere in the turn: the row is blocked like in a short turn
+  const unproven = stop([prompt('x'), tool('Edit'), result('ok'), ...filler, claim]);
+  assert.match(unproven.reason, /"fatto"/);
+  const log = readFileSync(join(unproven.dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
+  assert.equal(JSON.parse(log[0]).rule, 'unproven-row');
   // the same turn, short enough to be read whole, is blocked
-  assert.match(stop([prompt('x'), tool('Edit'), result('ok'), say(verdict(row('Passed: 48, Failed: 0')))]).reason, /"fatto"/);
+  assert.match(stop([prompt('x'), tool('Edit'), result('ok'), claim]).reason, /"fatto"/);
+});
+
+test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table is asked for again, logged as tail-cut', () => {
+  const filler = Array.from({ length: 90 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 9 MB
+  const claim = say(verdict(row('Passed: 48, Failed: 0')));
+  const { reason, dir } = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
+  assert.match(reason, /troppo lungo/);
+  assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
+  assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n')[0]).rule, 'tail-cut');
+  // a row whose proof is in the part read is still proven
+  const inTail = stop([prompt('x'), tool('Edit'), result('ok'), ...filler, tool('Bash'), result('Passed: 48, Failed: 0'), claim]);
+  assert.equal(inTail.reason, '');
+  // "non verificato" rows need no proof
+  assert.equal(stop([prompt('x'), tool('Edit'), result('ok'), ...filler, say(verdict(row('-', 'non verificato: serve staging')))]).reason, '');
 });
 
 test('a later human prompt ends the turn a delegate armed', () => {

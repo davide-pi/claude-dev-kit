@@ -53,9 +53,9 @@ perimeter file already dirty → ask the user first; any other dirty file is the
 
 | | S | M | L |
 | --- | --- | --- | --- |
-| analysis | none | the approach in one line, then the doubts pass | `plan-work`, the doubts pass, `grill-me` on the plan |
+| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof, owner ok, then the doubts pass | `plan-work`, criteria + proof + questions, owner ok, the doubts pass, `grill-me` on the plan |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
-| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, one plan task per loop run (`references/loop.md`) |
+| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, every plan task of the request in one run (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when touched | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
 
 `implementer` runs at `medium`; `high` when the brief asks (`implementerEffort`). Preparation comes
@@ -64,7 +64,7 @@ before the loop: `references/scenarios.md`; the doubts pass (M, L): `references/
 ### 3. Who asks the user
 
 Only this session. The workflow and every subagent return their state and stop; a decision they
-cannot make comes back as an open question. Batch the questions, each with a recommendation.
+cannot make comes back as an open question. Batch the questions, each with a recommendation, only the weighty ones (P-weight, `references/loop.md`). `accept` of a P1/P2 comes only from the owner.
 
 ### 4. Tests by level — run here, not delegated
 
@@ -82,10 +82,10 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 ## Do
 
 1. Triage, then the perimeter file and the start point; scenario preparation.
-2. Analysis by size; ask only what the table says. S: make the edit inline now.
-3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`); L: one plan task per run, `/commit` between runs.
-   `OK` → `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
-4. Run the matrix; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`).
+2. Analysis by size, the criteria with their proof (`references/loop.md`); ask only what the table says. S: edit inline now.
+3. Launch `impl-review-loop` once per coherent request (args, `request`, `decisions`, size S inline, `STALL` and resume: `references/loop.md`); split only past ~15 files or areas sharing nothing.
+   `OK` → append `result.findingsLog` (`references/loop.md`), then `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
+4. Run the matrix on the final code; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`). M, L: the proof check (assertion lines of each criterion's test).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
 The verdict, a table `done-claim` accepts as evidence (third cell looks like output: a digit, ok, verde, green, passed, failed, exit, succeeded), emitted as a plain markdown table, never inside a code fence. Example:
@@ -95,7 +95,7 @@ The verdict, a table `done-claim` accepts as evidence (third cell looks like out
 | unit | dotnet test Orders.Tests | Passed: 48, Failed: 0 | fatto |
 | e2e | - | - | non verificato: serve staging |
 
-Review: giro 2, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: <elenco, o nessuno>.
+Review: giro 2, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: <elenco, o nessuno>. Default scelti: <defaults, o nessuno>. Test locale: proposta <chi/cosa>.
 
 States: `fatto`, `non verificato: <motivo>`, `failed`; S gets two or three lines. Close with everything outside
 the perimeter (`outOfScope`, with its `noticed` and `scope-revert` items, `minor`, open questions), `#` fixed for the conversation; the user picks:
@@ -113,7 +113,7 @@ the perimeter (`outOfScope`, with its `noticed` and `scope-revert` items, `minor
 ## References
 
 - `references/loop.md` — the doubts pass (M, L), launching the workflow: its args, the start point, size S
-  inline, each `STALL` and the resume with the user's answers, the scope check after `OK`.
+  inline, each `STALL` and the resume with the user's answers, the scope check after `OK`, the findings log.
 - `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
 - `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": the baseline, the runs,
   BenchmarkDotNet and HTTP timing, the result as ratio and spread.

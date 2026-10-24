@@ -29,14 +29,17 @@
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
  * A `non verificato` row passes alone and excuses no other row; one unproven row blocks, even after a
- * shell command ran. When the transcript tail is cut before the turn's start the proof may be missing from
- * the part read: the log notes `tail-truncated` and nothing is blocked.
+ * shell command ran. The transcript is read backward to the turn's start (cap 8 MB); when the turn is still
+ * cut the proof may be in the part not read, so it fails closed: the log notes `tail-cut` and the turn is sent
+ * back once to rewrite the verdict table with fresh output (or "non verificato"); a cut turn whose message holds
+ * such a table is judged even when no edit is visible in the part read (the edit may be in the part not read).
  *
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
  * The final message comes from `last_assistant_message` when the payload carries it, else from the
- * transcript. Only the transcript's last 512 KB are read: a turn's tail is all this needs.
+ * transcript. The transcript is read from its end in 512 KB chunks until the turn's start (the last human
+ * prompt) is found, at most 8 MB.
  *
  * Tier 2 (only if tier 1 proves too noisy, per the spec): a `type: "prompt"` Stop hook judged by
  * the background model. Not wired in the template; add to settings.json and check the prompt-hook
@@ -60,7 +63,9 @@ const path = require('path');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
-const TAIL_BYTES = 512 * 1024;
+/** The transcript is read backward in chunks of this size, to the start of the turn, up to MAX_BYTES. */
+const CHUNK_BYTES = 512 * 1024;
+const MAX_BYTES = 8 * 1024 * 1024;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 /** Tools that hand work to a workflow or an agent: they arm the hook like an edit and their results come back as notifications. */
@@ -115,22 +120,38 @@ function unprovenRows(rows, resultsText) {
 
 const allow = () => process.exit(0);
 
-/** The JSON lines at the end of the transcript (the first, probably partial, line dropped), and whether the file was cut. */
+/**
+ * The JSON lines of the transcript from the end back to the start of the turn (the last genuine human prompt), read backward in
+ * CHUNK_BYTES chunks (the first, probably partial, line of what is read is dropped until an earlier chunk completes it), and whether the
+ * turn is still cut: `truncated` is true only when MAX_BYTES were read (or the file ended) without finding that prompt.
+ */
 function tailEntries(file) {
   const fd = fs.openSync(file, 'r');
   try {
     const size = fs.fstatSync(fd).size;
-    const start = Math.max(0, size - TAIL_BYTES);
-    const buffer = Buffer.alloc(size - start);
-    fs.readSync(fd, buffer, 0, buffer.length, start);
-    const lines = buffer.toString('utf8').split('\n');
-    if (start > 0) lines.shift();
-    const entries = [];
-    for (const line of lines) {
-      if (!line.trim()) continue;
-      try { entries.push(JSON.parse(line)); } catch { /* a torn line */ }
+    let end = size;
+    let carry = Buffer.alloc(0);                 // the partial first line of what is read so far
+    let entries = [];
+    let found = false;
+    while (end > 0 && !found && size - end < MAX_BYTES) {
+      const start = Math.max(0, end - CHUNK_BYTES);
+      const chunk = Buffer.alloc(end - start);
+      fs.readSync(fd, chunk, 0, chunk.length, start);
+      const data = Buffer.concat([chunk, carry]);
+      const cut = start > 0 ? data.indexOf(0x0a) : -1;
+      carry = start > 0 ? data.subarray(0, Math.max(cut, 0)) : Buffer.alloc(0);
+      const whole = start > 0 ? (cut < 0 ? null : data.subarray(cut + 1)) : data;
+      end = start;
+      if (!whole) { carry = data; continue; }   // not one line end in the chunk: keep reading
+      const fresh = [];
+      for (const line of whole.toString('utf8').split('\n')) {
+        if (!line.trim()) continue;
+        try { fresh.push(JSON.parse(line)); } catch { /* a torn line */ }
+      }
+      entries = [...fresh, ...entries];
+      found = fresh.some(isPrompt);
     }
-    return { entries, truncated: start > 0 };
+    return { entries, truncated: !found && end > 0 };
   } finally {
     fs.closeSync(fd);
   }
@@ -249,17 +270,25 @@ try {
 
   const { entries, truncated } = tailEntries(payload.transcript_path);
   const turn = readTurn(entries, truncated);
-  if (!turn.armed) allow();
-
   const message = typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message : turn.text;
   const rows = verdictRows(message);
-  if (rows.some((r) => PROOF_STATE.test(r.state))) {
+  const claimsRows = rows.some((r) => PROOF_STATE.test(r.state));
+  // A turn cut before its start may have edited in the part not read: a verdict table claiming results is judged anyway.
+  if (!turn.armed && !(claimsRows && !turn.complete)) allow();
+
+  if (claimsRows) {
     // A verdict table is judged row by row against what the turn printed; the rest of the message does not excuse a row.
     const unproven = unprovenRows(rows, turn.results);
     if (!unproven.length) allow();
     if (!turn.complete) {
-      log(payload, 'tail-truncated', unproven[0].state, message);   // the proof may be in the part not read
-      allow();
+      // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
+      log(payload, 'tail-cut', unproven[0].state, message);
+      process.stdout.write(JSON.stringify({
+        decision: 'block',
+        reason: 'Il turno è troppo lungo per verificare le righe del verdetto contro l\'output dei comandi. '
+          + 'Riscrivi il verdetto come tabella "Livello | Comando | Riga che decide | Stato" con l\'output di comandi eseguiti ora, oppure scrivi "non verificato: <motivo>" nello Stato di ogni riga.',
+      }));
+      process.exit(0);
     }
     log(payload, 'unproven-row', unproven[0].state, message);
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
