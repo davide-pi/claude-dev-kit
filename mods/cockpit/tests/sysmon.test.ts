@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cpuPercent, cpuTimes, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, withPorts } from '../sysmon/parse.mjs'
+import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, shapeProcesses, withPorts } from '../sysmon/parse.mjs'
 
 // Recorded outputs of the Windows tools the monitor reads (trimmed to the lines the parsers use).
 
@@ -142,4 +142,59 @@ test('cpuPercent: the busy share of the time between two readings of os.cpus(), 
   expect(cpuPercent(cpuTimes(cpus(100, 50)), cpuTimes(cpus(160, 90)))).toBe(40)
   expect(cpuPercent(cpuTimes(cpus(100, 50)), cpuTimes(cpus(100, 50)))).toBe(0)
   expect(cpuPercent(cpuTimes(cpus(0, 0)), cpuTimes(cpus(0, 10)))).toBe(100)
+})
+
+// ── v3.1: CPU and RAM per process, the order of the table ──
+
+const CIM_WITH_TIMES = JSON.stringify([
+  { ProcessId: 100, ParentProcessId: 4, Name: 'claude.exe', KernelModeTime: 1, UserModeTime: 1, WorkingSetSize: 1 },
+  { ProcessId: 7000, ParentProcessId: 100, Name: 'bash.exe', KernelModeTime: 4_000_000, UserModeTime: 6_000_000, WorkingSetSize: 12_582_912 },
+  { ProcessId: 7240, ParentProcessId: 7000, Name: 'conhost.exe', KernelModeTime: 10, UserModeTime: 5, WorkingSetSize: 2048 },
+  { ProcessId: 7300, ParentProcessId: 7000, Name: 'node.exe', KernelModeTime: 'x', UserModeTime: 5, WorkingSetSize: 4096 },
+])
+
+test('parseProcesses: the CPU time (kernel plus user, 100 ns units) and the working set ride with each process; one that is not a count is left out', () => {
+  expect(parseProcesses(CIM_WITH_TIMES, 100)).toEqual([
+    { pid: 7000, ppid: 100, name: 'bash', cpuTime: 10_000_000, ram: 12_582_912 },
+    { pid: 7240, ppid: 7000, name: 'conhost', cpuTime: 15, ram: 2048 },
+    { pid: 7300, ppid: 7000, name: 'node', ram: 4096 },
+  ])
+})
+
+test('cpuShares: the CPU time spent between two reads over the elapsed time of every core, to a tenth; a new process or a restarted counter has no share', () => {
+  const procs = [
+    { pid: 1, name: 'a', ports: [], cpuTime: 1_000_000_000 + 2_000_000 },
+    { pid: 2, name: 'b', ports: [], cpuTime: 40_000_000 },
+    { pid: 3, name: 'c', ports: [], cpuTime: 500 },
+    { pid: 4, name: 'd', ports: [], cpuTime: 5 },
+    { pid: 5, name: 'e', ports: [] },
+  ]
+  const before = new Map([
+    [1, 1_000_000_000],
+    [2, 0],
+    [3, 9_999],
+  ])
+  // 200 ms of 10 s on 4 cores is 0.5 %, 4 s of it is 10 %
+  expect(cpuShares(procs, before, 10_000, 4).map(p => p.cpu)).toEqual([0.5, 10, undefined, undefined, undefined])
+  expect(cpuShares(procs, before, 0, 4).map(p => p.cpu)).toEqual([undefined, undefined, undefined, undefined, undefined])
+  expect(cpuTimesOf(procs)).toEqual(
+    new Map([
+      [1, 1_002_000_000],
+      [2, 40_000_000],
+      [3, 500],
+      [4, 5],
+    ]),
+  )
+})
+
+test('shapeProcesses: the service helpers (conhost, cmd) are hidden, the rest go by CPU then RAM, a process with no CPU share after those that have one', () => {
+  const p = (pid: number, name: string, cpu?: number, ram?: number) => ({ pid, name, ports: [], ...(cpu !== undefined && { cpu }), ...(ram !== undefined && { ram }) })
+  const shaped = shapeProcesses([p(1, 'conhost', 90, 1), p(2, 'node', 5, 100), p(3, 'CMD', 80), p(4, 'bash', 5, 300), p(5, 'x', undefined, 999), p(6, 'dotnet', 20, 1), p(7, 'y', undefined, 5)], 200)
+  expect(shaped.map(x => x.pid)).toEqual([6, 4, 2, 5, 7])
+  expect(shapeProcesses([p(1, 'a', 1), p(2, 'b', 2), p(3, 'c', 3)], 2).map(x => x.pid)).toEqual([3, 2])
+})
+
+test('withPorts: the CPU share and the working set go on with the ports', () => {
+  const procs = [{ pid: 7000, ppid: 100, name: 'bash', cpu: 3.5, ram: 1024 }]
+  expect(withPorts(procs, [{ pid: 7000, port: 80 }])).toEqual([{ pid: 7000, name: 'bash', ports: [80], cpu: 3.5, ram: 1024 }])
 })

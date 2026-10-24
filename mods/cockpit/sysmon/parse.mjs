@@ -38,9 +38,10 @@ export function listeningPorts(text) {
 }
 
 /**
- * `Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress` -> the descendants of
- * `rootPid`, parents first, without the root and without the subtree of `selfPid` (the monitor and the tools it starts). An
- * empty list when `rootPid` has none; none (undefined) when the text is not the expected JSON.
+ * `Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,KernelModeTime,UserModeTime,WorkingSetSize |
+ * ConvertTo-Json -Compress` -> the descendants of `rootPid`, parents first, without the root and without the subtree of `selfPid`
+ * (the monitor and the tools it starts), each with its CPU time (kernel plus user, in 100-ns units) and working set when the query
+ * gave them as counts. An empty list when `rootPid` has none; none (undefined) when the text is not the expected JSON.
  */
 export function parseProcesses(text, rootPid, selfPid) {
   let parsed
@@ -51,7 +52,15 @@ export function parseProcesses(text, rootPid, selfPid) {
   }
   const rows = (Array.isArray(parsed) ? parsed : [parsed]).flatMap(r =>
     isRecord(r) && isCount(r.ProcessId) && isCount(r.ParentProcessId) && typeof r.Name === 'string'
-      ? [{ pid: r.ProcessId, ppid: r.ParentProcessId, name: r.Name.replace(/\.exe$/i, '') }]
+      ? [
+          {
+            pid: r.ProcessId,
+            ppid: r.ParentProcessId,
+            name: r.Name.replace(/\.exe$/i, ''),
+            ...(isCount(r.KernelModeTime) && isCount(r.UserModeTime) && { cpuTime: r.KernelModeTime + r.UserModeTime }),
+            ...(isCount(r.WorkingSetSize) && { ram: r.WorkingSetSize }),
+          },
+        ]
       : [],
   )
   const out = []
@@ -68,9 +77,43 @@ export function parseProcesses(text, rootPid, selfPid) {
   return out
 }
 
-/** The processes with the ports each one listens on (sorted); `listening` is `listeningPorts`' answer. */
+/** The processes with the ports each one listens on (sorted), their CPU share and their working set; `listening` is `listeningPorts`' answer. */
 export function withPorts(procs, listening) {
-  return procs.map(p => ({ pid: p.pid, name: p.name, ports: listening.filter(l => l.pid === p.pid).map(l => l.port).sort((a, b) => a - b) }))
+  return procs.map(p => ({
+    pid: p.pid,
+    name: p.name,
+    ports: listening.filter(l => l.pid === p.pid).map(l => l.port).sort((a, b) => a - b),
+    ...(p.cpu !== undefined && { cpu: p.cpu }),
+    ...(p.ram !== undefined && { ram: p.ram }),
+  }))
+}
+
+/** The CPU time of each process that has one, by pid: what the next read measures its share against. */
+export function cpuTimesOf(procs) {
+  return new Map(procs.flatMap(p => (p.cpuTime === undefined ? [] : [[p.pid, p.cpuTime]])))
+}
+
+/**
+ * Each process with its CPU share: the CPU time spent since `before` (a `cpuTimesOf` map of the read `elapsedMs` ago, 100-ns units)
+ * over the elapsed time of every core, to a tenth of a percent. A process the last read did not have, one whose counter went back
+ * (a reused pid) or a read with no elapsed time has no share.
+ */
+export function cpuShares(procs, before, elapsedMs, cores) {
+  return procs.map(p => {
+    const last = before.get(p.pid)
+    if (!(elapsedMs > 0) || !(cores > 0) || p.cpuTime === undefined || last === undefined || p.cpuTime < last) return p
+    const cpuMs = (p.cpuTime - last) / 1e4
+    return { ...p, cpu: Math.min(100, Math.round((1000 * cpuMs) / (elapsedMs * cores)) / 10) }
+  })
+}
+
+/** Service helpers of a console (the window host, the shell wrapper): never what the person wants to see in the list. */
+const isHelper = name => /^(conhost|cmd)$/i.test(name)
+
+/** The processes the table lists: helpers hidden, the busiest first (CPU, then RAM; a process with no CPU share after those that have one), at most `keep`. */
+export function shapeProcesses(procs, keep) {
+  const byCpu = (a, b) => (b.cpu ?? -1) - (a.cpu ?? -1) || (b.ram ?? 0) - (a.ram ?? 0) || a.pid - b.pid
+  return procs.filter(p => !isHelper(p.name)).sort(byCpu).slice(0, keep)
 }
 
 // Win32_Battery.BatteryStatus: on AC (2), fully charged (3), charging (6-9), partly charged (11).

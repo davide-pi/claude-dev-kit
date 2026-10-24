@@ -43,10 +43,12 @@ import {
   parseGitStatus,
   parseGithubPr,
   parseCounts,
+  parseCtx,
   parseHistory,
   parseNote,
   parseNumstat,
   parsePerimeter,
+  parseRateCache,
   parseReset,
   parseSavedPrs,
   parseSysLine,
@@ -59,6 +61,7 @@ import {
   resolveAlm,
   savedTab,
   settleUsage,
+  staticOf,
   stateAfterWait,
   systemOff,
   tabNeeds,
@@ -67,6 +70,8 @@ import {
   upsertPr,
   usageOf,
   withAgentTokens,
+  withDeltas,
+  withStatic,
   worklogDays,
 } from './format'
 import type { WorklogSnapshot } from './format'
@@ -80,11 +85,11 @@ const MEDIUM_MS = 10_000
 const SLOW_MS = 30_000
 /** The pull request (and the repo's default branch) of a branch is read again after this long. */
 const PR_EVERY_MS = 5 * 60_000
-/** The Lavoro tab keeps this many changed files; it draws 8 of them. */
+/** The Work tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
 /** A burst of main turns ends in one read of the context breakdown, this long after the first. */
 const CONTEXT_DEBOUNCE_MS = 2000
-/** An exact count that has not answered after this long is given up on; the Contesto tab reads summaries again, and a late answer older than the summary read since is discarded. */
+/** An exact count that has not answered after this long is given up on; the Context tab reads summaries again, and a late answer older than the summary read since is discarded. */
 const COUNT_TIMEOUT_MS = 60_000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -103,9 +108,12 @@ async function patch($: EngineInterface, next: (s: CockpitSnapshot) => CockpitSn
 
 // ── Alerts (D4) ──
 // A toast per cause, once per episode: the keys of the causes in force are remembered, and a cause that is gone is forgotten
-// (so it can raise again). What a session was adopted with is not news: the first reading of a session only remembers.
+// (so it can raise again). What a session was adopted with is not news (D5): its first reading of everything only remembers, and so does
+// the first live reading of the context and of the credits (a resumed session is measured only after its first response).
 let alerted = new Set<string>()
 let alertedSession: string | undefined
+/** The causes that still wait for their first live reading to be seeded. */
+let unseeded = new Set<string>()
 
 async function raiseAlerts($: EngineInterface): Promise<void> {
   try {
@@ -114,9 +122,12 @@ async function raiseAlerts($: EngineInterface): Promise<void> {
     const isFirst = alertedSession !== s.sessionId
     const before = alerted
     alertedSession = s.sessionId
+    if (isFirst) unseeded = new Set(['context', 'credits'])
+    const isLive = (key: string) => (key === 'context' ? s.ctx.percent !== undefined : key === 'credits' && s.rateLimits.some(r => r.kind === 'five_hour'))
+    const seeds = new Set(active.filter(a => isFirst || (unseeded.has(a.key) && isLive(a.key))).map(a => a.key))
+    for (const key of [...unseeded]) if (isLive(key)) unseeded.delete(key)
     alerted = new Set(active.map(a => a.key))
-    if (isFirst) return
-    for (const a of active) if (!before.has(a.key)) $.ui.toast(a.text)
+    for (const a of active) if (!before.has(a.key) && !seeds.has(a.key)) $.ui.toast(a.text)
   } catch {
     // an alert that cannot be raised is lost; observing must never break the change
   }
@@ -201,7 +212,7 @@ async function readPerimeterCheck($: EngineInterface, root: string, entries: rea
 let lastPrRead: { key: string; at: number } | undefined
 let isPrReading = false
 
-/** A file the Lavoro tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
+/** A file the Work tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
 const DIFF_FILE_MAX = 4 * 1024 * 1024
 
 /** The private config folder of the ALM `identity` (`~/.azure-<identity>`, as hooks/lib/az-pin.js picks it), when it exists. */
@@ -279,7 +290,7 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
 }
 
 /**
- * The Lavoro tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
+ * The Work tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
  * then untracked and not ignored). Every read failing keeps the last reading.
  */
 async function refreshRepo($: EngineInterface): Promise<void> {
@@ -404,16 +415,22 @@ let mainTools: string[] = []
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the quick note and the context samples; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the quick note, the context samples and the last measured context; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
-const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => ({
-  history,
-  prs: s.prs ?? [],
-  ...(s.note !== undefined && { note: s.note }),
-  ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
-  ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
-})
+const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
+  const { tokens, window, percent } = s.ctx
+  // the live window when the engine measured it, else the one the session was resumed with
+  const ctx = tokens !== undefined && window !== undefined && percent !== undefined ? { tokens, window, percent } : s.lastCtx
+  return {
+    history,
+    prs: s.prs ?? [],
+    ...(s.note !== undefined && { note: s.note }),
+    ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
+    ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
+    ...(ctx && { ctx }),
+  }
+}
 
 /**
  * Writes the state file (and the session data file) when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
@@ -496,11 +513,12 @@ type Saved = {
   note?: string
   ctxSamples?: number[]
   ctxRounds?: number[]
+  ctx?: { tokens: number; window: number; percent: number }
 }
 
 /**
  * What an earlier run of session `id` left: in its state file the tab (none for a missing file or an unknown one; the v2 Sessione
- * and Repo tabs map to Agenti and Lavoro) and the tokens of the main loop and of the agents that left the list (a file from before
+ * and Repo tabs map to Subagents and Work) and the tokens of the main loop and of the agents that left the list (a file from before
  * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the note and the context
  * samples. A state file from before the data file still holds the history and the pull requests: a field the data file does not
  * have is read from there, once (the next write moves it).
@@ -524,6 +542,7 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       note: parseNote(data?.note),
       ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
+      ctx: parseCtx(data?.ctx),
     }
   } catch {
     return { history: [] }
@@ -547,8 +566,13 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   claudeState: undefined,
   ctxSamples: undefined,
   ctxRounds: undefined,
+  // the window is the next session's own: nothing of this one's reading is left to pass for it
+  ctx: {},
+  lastCtx: undefined,
+  lastRoundMs: undefined,
   context: undefined,
   contextSeq: undefined,
+  contextStatic: undefined,
   skillsUsed: undefined,
   fiveHourSamples: [],
   workflow: undefined,
@@ -569,14 +593,14 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, note: saved.note, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, note: saved.note, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
   // The monitor looked for the pid of the session it was started for: another one's gets its own, if the tab is still wanted.
   stopMonitor()
   await syncMonitor($)
 }
 
-// ── The Sistema tab's monitor: a child process that lives only while the pane is open on that tab ──
+// ── The System tab's monitor: a child process that lives only while the pane is open on that tab ──
 
 /** The running monitor: its stream (ending the loop that reads it kills the child) and whether it was stopped on purpose. */
 type Monitor = { stream?: ReturnType<EngineInterface['process']['spawn']>; isStopped: boolean }
@@ -584,7 +608,7 @@ let monitor: Monitor | undefined
 
 /**
  * Runs `sysmon/sysmon.mjs` and keeps what it prints (one JSON line per reading) in the snapshot until it is stopped or ends. A
- * child that cannot start, or ends by itself, leaves every part unavailable: the tab draws `non disponibile`, nothing throws.
+ * child that cannot start, or ends by itself, leaves every part unavailable: the tab draws `unavailable`, nothing throws.
  */
 async function runMonitor($: EngineInterface, m: Monitor): Promise<void> {
   let pending = ''
@@ -624,7 +648,7 @@ function stopMonitor(): void {
   void m.stream?.return({ code: null, signal: null }).catch(() => undefined)
 }
 
-/** The monitor runs exactly while the pane is open on the Sistema tab: started when it is wanted and not running, stopped (and its readings forgotten) when it runs and is not wanted. */
+/** The monitor runs exactly while the pane is open on the System tab: started when it is wanted and not running, stopped (and its readings forgotten) when it runs and is not wanted. */
 async function syncMonitor($: EngineInterface): Promise<void> {
   try {
     const current = await read($, snapshot)
@@ -634,7 +658,7 @@ async function syncMonitor($: EngineInterface): Promise<void> {
       monitor = m
       void runMonitor($, m)
     } else if (!isWanted) {
-      // Also with no monitor left: one that crashed left the tab reading "non disponibile", which the next visit must not start from.
+      // Also with no monitor left: one that crashed left the tab reading "unavailable", which the next visit must not start from.
       stopMonitor()
       if (current.system !== undefined) await patch($, s => ({ ...s, system: undefined }))
     }
@@ -648,9 +672,9 @@ async function setOpen($: EngineInterface, value: boolean): Promise<void> {
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
   await syncMonitor($)
-  // The Contesto tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment. The
+  // The Context tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment. The
   // read is not waited for: a slow one must not hold the open (or the close) back.
-  if (value && (await read($, snapshot)).tab === 'context') void refreshContext($, 'summary').catch(() => undefined)
+  if (value && (await read($, snapshot)).tab === 'context') void openContext($).catch(() => undefined)
 }
 
 async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
@@ -708,6 +732,19 @@ async function refreshDoneClaims($: EngineInterface): Promise<void> {
   }
 }
 
+/** The rate limits of the status line's cache, kept as the last known ones: drawn with a `~` until the engine reports its own. No readable cache leaves none. */
+async function refreshLastRates($: EngineInterface): Promise<void> {
+  try {
+    const dir = await configDir($)
+    if (!dir) return
+    const text = await $.fs.read(`${dir}/.statusline-rate-limits.json`)
+    const lastRates = parseRateCache(JSON.parse(typeof text === 'string' ? text : ''), await $.clock.now())
+    await patch($, s => ({ ...s, lastRates: lastRates.length > 0 ? lastRates : undefined }))
+  } catch {
+    // no cache yet: nothing to draw until the engine measures
+  }
+}
+
 async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
@@ -716,6 +753,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
       ...s,
       fiveHourSamples: withBurnSample(s.fiveHourSamples, now, u.rateLimits),
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
+      lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
     }))
@@ -738,7 +776,7 @@ async function refreshAutoCompact($: EngineInterface): Promise<void> {
   }
 }
 
-// When the breakdown read the Contesto tab waits for was scheduled, and the exact count in flight (a second press while it runs counts nothing more).
+// When the breakdown read the Context tab waits for was scheduled, and the exact count in flight (a second press while it runs counts nothing more).
 // A timer the engine refuses never runs its callback, so a mark the callback clears could stay for ever: it lapses by itself after twice the debounce.
 let contextScheduledAt: number | undefined
 // When the exact count in flight started (none: no count runs) and which count it is: one that outlives `COUNT_TIMEOUT_MS` no longer counts as running.
@@ -748,23 +786,46 @@ let countRun = 0
 let contextSeq = 0
 
 /**
- * Reads the context breakdown for the Contesto tab. `summary` estimates locally and is free; `full` counts with the token-count
+ * Reads the context breakdown for the Context tab. `summary` estimates locally and is free; `full` counts with the token-count
  * API and so runs only from the button. A failed read leaves the last reading. Reads overlap (an exact count takes seconds): the
  * one asked last wins, so an older answer that arrives after a newer one is dropped; a summary is therefore not read at all while
- * the exact count runs (whoever asks: the tab, the pane opening, a turn), or the count, answering last, would be dropped.
+ * the exact count runs (whoever asks: the tab, the pane opening, a turn), or the count, answering last, would be dropped. An exact count
+ * fixes the static rows for the session and every later summary reuses them; `isRound` (the read a main turn's end asks for) stamps the
+ * rows with their change from the reading before.
  */
-async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): Promise<void> {
+async function refreshContext($: EngineInterface, detail: 'summary' | 'full', isRound = false): Promise<void> {
   if (detail === 'summary' && (await isCountRunning($))) return
   const seq = ++contextSeq
   try {
     const u = await $.session.usage({ breakdown: detail })
     const breakdown = u.context.breakdown
     if (!breakdown) return
-    const context = contextOf(breakdown, detail === 'full')
-    await patch($, s => ((s.contextSeq ?? 0) > seq ? s : { ...s, context, contextSeq: seq }))
+    const fresh = contextOf(breakdown, detail === 'full')
+    await patch($, s => {
+      if ((s.contextSeq ?? 0) > seq) return s
+      const contextStatic = detail === 'full' ? staticOf(fresh) : s.contextStatic
+      const reading = detail === 'summary' && contextStatic ? withStatic(fresh, contextStatic) : fresh
+      return { ...s, context: withDeltas(reading, s.context, isRound && detail === 'summary'), contextSeq: seq, contextStatic }
+    })
   } catch {
     // not measured: the tab keeps what it drew
   }
+}
+
+// The session whose first exact count was started (or tried): one per session, a failed one is not asked again on every open.
+let exactTriedFor: string | undefined
+
+/**
+ * The Context tab opens: a summary now (free) and, the first time in a session while Claude is idle, one exact count whose static rows
+ * every later summary reuses. A tab opened while Claude works reads the summary only: the count waits for an idle opening.
+ */
+async function openContext($: EngineInterface): Promise<void> {
+  await refreshContext($, 'summary')
+  const s = await read($, snapshot)
+  const isIdle = s.claudeState === undefined || s.claudeState.kind === 'idle'
+  if (s.sessionId === undefined || exactTriedFor === s.sessionId || s.contextStatic !== undefined || !isIdle || (await isCountRunning($))) return
+  exactTriedFor = s.sessionId
+  await countExact($)
 }
 
 /** Whether an exact count is in flight and still within `COUNT_TIMEOUT_MS`: a count that never answers does not lock the tab for good. */
@@ -787,7 +848,7 @@ async function countExact($: EngineInterface): Promise<void> {
 }
 
 /**
- * The end of a main turn re-reads the breakdown while the pane is open on the Contesto tab; a burst of turns is one read. No read
+ * The end of a main turn re-reads the breakdown while the pane is open on the Context tab; a burst of turns is one read. No read
  * is scheduled or made while an exact count runs: the summary would be the newer reading, and the count, answering last, dropped.
  */
 async function scheduleContextRead($: EngineInterface): Promise<void> {
@@ -798,7 +859,7 @@ async function scheduleContextRead($: EngineInterface): Promise<void> {
   $.clock.after(CONTEXT_DEBOUNCE_MS, () => {
     contextScheduledAt = undefined
     // a summary is not read while an exact count runs: refreshContext itself skips it
-    void refreshContext($, 'summary').catch(() => undefined)
+    void refreshContext($, 'summary', true).catch(() => undefined)
   })
 }
 
@@ -886,7 +947,7 @@ async function fastTick($: EngineInterface): Promise<void> {
   if (await isFastWanted($)) await tickClock($)
 }
 
-/** Medium tier (10 s): git (and, with the Lavoro tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
+/** Medium tier (10 s): git (and, with the Work tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
 async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
@@ -964,11 +1025,11 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Lavoro tab's git reads, the Contesto tab's breakdown and the Sistema tab's monitor run while the tab is selected: the press starts them.
+  // The Work tab's git reads, the Context tab's breakdown and the System tab's monitor run while the tab is selected: the press starts them.
   selectTab: tab =>
     void patch($, s => ({ ...s, tab }))
       .then(() => syncMonitor($))
-      .then(() => (tab === 'work' ? refreshRepo($) : tab === 'context' ? refreshContext($, 'summary') : undefined))
+      .then(() => (tab === 'work' ? refreshRepo($) : tab === 'context' ? openContext($) : undefined))
       .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
@@ -1037,6 +1098,7 @@ export const register: Register = on => {
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
     }))
+    await refreshLastRates($)
     await refreshUsage($)
     await refreshAutoCompact($)
     await refreshAlm($)
@@ -1045,7 +1107,7 @@ export const register: Register = on => {
     await refreshDoneClaims($)
     await writeState($, true)
 
-    await $.command.register({ name: 'cockpit', description: 'Apre il pannello cockpit' })
+    await $.command.register({ name: 'cockpit', description: 'Opens the cockpit pane' })
     $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
     $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
     $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
@@ -1096,7 +1158,7 @@ export const register: Register = on => {
   // `/cockpit` opens the pane; a command-initiated open is placed at any width.
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)
-    return { text: opened.isPlaced ? 'cockpit aperto' : `cockpit in attesa: ${opened.reason}` }
+    return { text: opened.isPlaced ? 'cockpit open' : `cockpit waiting: ${opened.reason}` }
   })
 
   // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
@@ -1125,6 +1187,8 @@ export const register: Register = on => {
       ...s,
       fiveHourSamples: withBurnSample(s.fiveHourSamples, now, e.rateLimits),
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
+      // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
+      lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
     }))
@@ -1357,7 +1421,8 @@ export const register: Register = on => {
         ...s,
         mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
         mainStepTokens: undefined,
-        // Every main turn is a round of the Contesto sparkline: the context the engine last measured.
+        lastRoundMs: e.durationMs,
+        // Every main turn is a round of the Context sparkline: the context the engine last measured.
         ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
       }))
       await setClaudeState($, { kind: 'idle' })
@@ -1385,7 +1450,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Contesto tab lists them.
+  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Context tab lists them.
   on('skill.prompt', async ($, e, next) => {
     try {
       await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))
@@ -1396,7 +1461,7 @@ export const register: Register = on => {
   })
 
   // The engine's classic Stop and SubagentStop carry the background work in flight: the name of a workflow among it is what
-  // `compatta` names. It is the reading of the last stop, so it is dropped when a stop reports none.
+  // `compact` names. It is the reading of the last stop, so it is dropped when a stop reports none.
   on('classic.Stop', async ($, e, next) => {
     await setWorkflow($, e.background_tasks, true)
     return next(e)
