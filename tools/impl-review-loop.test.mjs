@@ -222,20 +222,17 @@ test('script: M without touches is one Opus reviewer at high', async () => {
 
 test('script: an S change that grows to 5 files is reviewed as L from the next round', async () => {
   const grown = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/A.cs', 'src/Orders/Dto/B.cs', 'src/Orders/Dto/C.cs', 'src/Orders/Dto/D.cs'];
-  const { out, calls } = await run({ ...ARGS, size: 'S' }, [
-    review([], [finding()]),
-    review([{ id: 'F1', status: 'closed' }]),
-  ], [
+  const { out, calls } = await run({ ...ARGS, size: 'S' }, [review([], [finding()])], [
     { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' },
     { scope: 'fixed', files: grown, evidence: 'ok' },
-  ]);
+  ], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
   const models = (round) => calls.filter((c) => c.opts.label?.startsWith(`R${round} `)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
   assert.deepEqual(models(1), ['R1 A:sonnet:medium']);
-  assert.deepEqual(models(2), ['R2 A:sonnet:high', 'R2 S:sonnet:medium']);                  // the delta round: the raiser and the Sonnet
+  assert.deepEqual(models(2), ['R2 S:sonnet:medium']);                                        // the delta round: the Sonnet that raised F1 at S is the watcher
   assert.deepEqual(models(3), ['R3 A (final):sonnet:high', 'R3 B (final):opus:high']);       // the final read: the whole panel of L
   assert.deepEqual(out.roundLog.map((r) => r.size), ['S', 'L', 'L']);
-  assert.match(calls.find((c) => c.opts.label === 'R2 A').prompt, /do not soften for agreement/);
+  assert.match(calls.find((c) => c.opts.label === 'R3 A (final)').prompt, /do not soften for agreement/);
 });
 
 test('script: the carried fields are in the schemas, a report without them is still read', async () => {
@@ -513,11 +510,12 @@ test('script: an implementer that returns nothing is a resumable STALL, on the f
   const first = await run(ARGS, [], [null]);
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.round, 0);
-  assert.match(first.out.resume, /resumeFromRunId/);
-  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, null]);
+  assert.match(first.out.resume, /WITHOUT resumeFromRunId/);   // a resume replays the cached null report
+  const fix =await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, null]);
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.resume, /resumeFromRunId/);
+  assert.doesNotMatch(fix.out.resume, /WITHOUT/);
 });
 
 test('script: inline, the session edited: no implementer on the first step, the changed files are reviewed', async () => {
@@ -1769,6 +1767,20 @@ test('script: a noticed item the implementer also wrote under openQuestions is l
   assert.doesNotMatch(calls.find(c => c.opts.label === 'R1 A').prompt, /Anything worth doing outside the perimeter/);
 });
 
+test('script: the cleanup prompt never asks for questions, even with owner decisions', async () => {
+  const { calls } = await run({ ...ARGS, decisions: ['Comments: the strict minimum.'] }, [review([], [nit(1)])], [], { watcher: review([]) });
+  const prompt = calls.find(c => c.opts.label === 'cleanup R1').prompt;
+  assert.match(prompt, /never ask about it/);
+  assert.doesNotMatch(prompt, /`questions`/);
+});
+
+test('script: questions a cleanup fixer returns anyway never stall the run: they become notes', async () => {
+  const asks = impl({ questions: [{ text: 'Rename the helper?', default: 'no', why: 'naming' }] });
+  const { out } = await run(ARGS, [review([], [nit(1)])], [impl(), asks], { watcher: review([]) });
+  assert.equal(out.status, 'OK');
+  assert.ok(out.outOfScope.some(o => /Rename the helper\?/.test(o.text ?? '')));
+});
+
 test('script: the reviewer prompt names filesReviewed explicitly', async () => {
   const { calls } = await run(ARGS, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /under filesReviewed list every file you actually read/);
@@ -2053,7 +2065,8 @@ test('finderKey: a key stands for the reviewer that raised the finding, also aft
   assert.equal(finderKey(opusM, L), 'B');                                             // M -> L: the Opus is B now, A is a Sonnet
   const grouped = [{ ...L[0], key: 'A1', group: 0, whole: false }, { ...L[0], key: 'A2', group: 1, whole: false }, ...L.slice(1)];
   assert.equal(finderKey({ ...L[0], key: 'A' }, grouped), 'A');                       // the Sonnet before the group split: still A (deltaReviewers fans it out)
-  assert.equal(finderKey({ key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, L), 'S');   // no such reviewer now: the key as it was
+  assert.equal(finderKey({ key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, L), 'S');   // the watcher itself
+  assert.equal(finderKey({ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, M), 'S');   // S -> M: the Sonnet medium that raised it is the watcher, not the Opus A
   assert.equal(finderKey({ key: 'security' }, L), 'security');                        // an entry without a model keeps its key
 });
 
@@ -2098,6 +2111,7 @@ test('readReport (W4): defaults keep the entries with a choice; cleanupCandidate
   assert.equal(isNeverBlocking(f('y', { priority: 'P1', proposal: true })), false);
   assert.equal(isNeverBlocking(f('y', { priority: 'P2', category: 'clean-code', proposal: true })), true);   // clean-code never blocks anyway
   assert.equal(isNeverBlocking(f('y', { priority: 'P3', category: 'correctness', proposal: true })), false);
+  assert.deepEqual(cleanupCandidates([f('F7', { priority: 'P3', proposal: true })], FILES, { root: ROOT }).map(m => m.id), []);   // every proposal is left alone, whatever its category
   assert.equal(classify(f('y', { priority: 'P1', proposal: true }), FILES), 'blocking');
 });
 
@@ -2148,12 +2162,14 @@ test('script (W6, W7): fix, final read, then the cleanup fix and its delta read 
   assert.deepEqual([calls.find(c => c.opts.label === 'R4 S').opts.model, calls.find(c => c.opts.label === 'R4 S').opts.effort], ['sonnet', 'medium']);
 });
 
-test('script (W7): without a fix before it, the cleanup is read by the Sonnet medium alone and no final read follows', async () => {
+test('script (W7): without a fix before it, the cleanup is read by the Sonnet medium alone and no final read follows; S runs no cleanup', async () => {
   const { out, calls } = await run(ARGS, [review([], [nit(1)])]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(reviewerLabels(calls), ['R1 A', 'R2 S']);
-  const s = await run({ ...ARGS, size: 'S' }, [review([], [nit(1)]), review([])]);
-  assert.deepEqual(reviewerLabels(s.calls), ['R1 A', 'R2 A']);                                   // at S the one reviewer is that Sonnet
+  const s = await run({ ...ARGS, size: 'S' }, [review([], [nit(1)])]);
+  assert.deepEqual(reviewerLabels(s.calls), ['R1 A']);
+  assert.equal(s.calls.some(c => c.opts.label === 'cleanup R1'), false);
+  assert.equal(s.out.minor.length, 1);
 });
 
 test('script (W2): the owner request goes to the round-1 reviewers and the final full read beside the brief, never to the implementer or a delta round', async () => {
@@ -2252,6 +2268,10 @@ test('script (W5): with a preview arg an M change stops after the implementer wi
     const polite = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, [review([])]);
     assert.deepEqual(polite.calls.map(c => c.opts.label), ['implement', 'R1 A'], answer);               // a confirmation, not a direction
   }
+  for (const answer of ['così così', 'ok così così', 'va bene così così']) {
+    const mediocre = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, [review([])]);
+    assert.deepEqual(mediocre.calls.map(c => c.opts.label), ['implement', 'implement (preview)', 'R1 A'], answer);   // not a confirmation
+  }
   const but = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'ok ma ordina per data' }] }] }, [review([])]);
   assert.deepEqual(but.calls.map(c => c.opts.label), ['implement', 'implement (preview)', 'R1 A']);
   const change = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'newest first please' }] }] }, [review([])]);
@@ -2300,4 +2320,23 @@ test('script (W12): the result carries the findings log line (size, rounds, find
 test('script (W13): a reviewer never raises a hunk the owner asked for as "scope": it is a question', async () => {
   const { calls } = await run({ ...ARGS, request: 'add the sort', decisions: ['sort by date'] }, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /asked for is never a "scope" finding.*`questions`/s);
+});
+
+test('script: with owner decisions the cleanup prompt does not carry the "hunk not reverted" question line', async () => {
+  const { calls } = await run({ ...ARGS, decisions: ['No soft delete'] }, [review([], [nit(1)])]);
+  const cleanup = calls.find(c => c.opts.label === 'cleanup R1').prompt;
+  assert.match(cleanup, /never ask/);
+  assert.doesNotMatch(cleanup, /not reverted, whatever the finding says/);
+});
+
+test('script: after a resumed reviewer question the cleanup runs, and a question its fixer returns becomes a note, not a stall', async () => {
+  const ask = [{ text: 'Keep the public name?', default: 'yes', why: 'a caller may use it' }];
+  const round1 = () => ({ ...review([], [nit(1), nit(2)]), questions: [{ text: 'Is the sort order a contract?', default: 'no', why: 'callers' }] });
+  const owner = { round: 1, answers: [{ text: 'Is the sort order a contract?', answer: 'no' }] };
+  const { out, calls } = await run({ ...ARGS, resolutions: [owner] }, [round1()], [impl(), impl(), impl({ questions: ask })]);
+  assert.equal(out.status, 'OK');
+  const cleanups = calls.filter(c => c.opts.label?.startsWith('cleanup'));
+  assert.equal(cleanups.length, 1);
+  assert.match(cleanups[0].prompt, /needs a decision.*never ask/s);
+  assert.ok(out.outOfScope.some(o => /Keep the public name?/.test(o.text ?? '')));
 });

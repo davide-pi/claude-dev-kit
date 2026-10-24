@@ -42,7 +42,8 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 - **Ladder before new code.** Is it needed? Already in the codebase? Standard library? Platform feature?
   Existing dependency? Only then the minimal code; the first rung that holds wins.
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming,
-  error handling, logging and comment density.
+  error handling and logging.
+- **Comments: the strict minimum.** Only a non-obvious why, one line; never restate the code.
 - **Load the stack skill the brief names** with the Skill tool before the first edit.
 - **Targeted tests while working.** Run only the test files the change touches (and the one you saw
   failing); the verify command runs once, at the end, before you report.
