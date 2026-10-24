@@ -44,6 +44,24 @@ Edit inline (a few lines in one file; larger → `implementer`), then launch wit
 `inline: true, changed: [the files you edited]`. No implementer runs first; a finding is fixed by
 `implementer` inside the loop, and the verdict stays short.
 
+## Size L: one plan task per run
+
+An L change is not one run. Launch `impl-review-loop` once per plan task (or per cluster of tasks that touch the same
+files), sequentially in the same worktree, and commit (`/commit`) between runs: each run gets that task's brief and
+perimeter, and its own `start` taken after the previous commit. The implementer has no tool-call budget (a task-sized
+run does not need one); it runs only the tests the change touches while it works, and `verify` once at the end.
+
+## Questions: the `question` stall
+
+The implementer and the fixer may return `questions: [{ text, default, why }]`: a behaviour choice the owner would see
+(never an internal one). Any question stops the run before review: `status: STALL`, `stall.why: "question"`,
+`stall.questions`, `stall.round` (0 for the implementer, else the round of the fix). Ask the user every question in one
+message, each with its default as the recommendation. When the user said not to be asked, apply every default and list
+each one in the closing table as an open decision. Relaunch with `resumeFromRunId`, all the resolutions so far, adding
+`{ round, answers: [{ text, answer }] }` (in the same entry as that round's `guidance`, if any): the implementer or
+fixer runs once more with the answers as guidance. Questions it asks again come back in `outOfScope` as open decisions
+(`source: "implementer"`), not as a second stall.
+
 ## STALL
 
 `status: STALL` carries `stall.round`, `stall.why` (or the `why` of each finding), `stall.findings` (or
@@ -52,16 +70,19 @@ when it closed or came back) and `resume`. Show the finding with its history, as
 one more round · change the approach**. Relaunch with `resumeFromRunId`, the same args, and **every** resolution so
 far, one per stalled round:
 
-`resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, continue?: true, widen?: ["path/or/dir/"] }]`
+`resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, answers?: [{ text, answer }], widen?: ["path/or/dir/"] }]`
 
 `accept` takes the risk (it goes in the verdict), `retry: true` is one more round with no direction,
-`guidance` is one more round with the user's direction. `continue: true` grants 3 more fix cycles, only on a
-`cap` stall, and restarts the churn count on a `churn` stall; `widen` adds perimeter entries (below).
+`guidance` is one more round with the user's direction, `answers` answer a `question` stall (above); `widen` adds
+perimeter entries (below). There is no cap on the rounds and no `continue`: an old `continue` is ignored. A loop that
+keeps opening a new P1/P2 for each one it closes is stopped by `not-converging` (below), not by a cap. `guidance` or
+`accept` on that round restarts its count; `retry` does not.
 
 | `stall.why` | Meaning, and the question |
 | --- | --- |
-| `cap` | 3 fix cycles run (RECHECK and coverage reruns do not count): `continue` for 3 more, `accept`, or `guidance` |
-| `churn` | the last 3 fixes each changed more lines: not converging. `continue` restarts the count; `accept` closes the ids the reviewers already read |
+| `question` | the implementer or fixer left a behaviour question: ask it (above) and resume with `answers` |
+| `churn` | the last 3 fixes each changed more lines: not converging. `accept` closes the ids the reviewers already read; `guidance` or `retry` for another attempt |
+| `not-converging` | after each of the last 3 fix rounds the open P1/P2 count (plus the open `V` finding) did not drop below its lowest of the fix rounds before: every fix closes one and the reviewers open another. `accept` closes the ids the reviewers already read; `guidance` (a different approach) or `retry` for another attempt |
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction for the fixer, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, and `accept` is not offered |
 | `green-to-red` | the verify passed, then a fix broke it: same question and answers as `verify-failed` |
 | `verify-not-run` | `verify` was given and the run did not execute it: same question and answers as `verify-failed`; at `stall.round` 0 (the implementer did not run it) a resume replays the cached implementer report: relaunch WITHOUT `resumeFromRunId` |
@@ -91,6 +112,15 @@ the delta of the fix.
 
 If a resume replays a cached null implementer result (`stall.reason` says the implementer returned nothing),
 relaunch WITHOUT `resumeFromRunId`.
+
+## The cleanup pass before OK
+
+A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not one the change
+does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta. Its new
+P1/P2 go through the normal loop; its P3s are only reported, never a second cleanup. The result lists what the pass fixed
+under `cleaned` once the delta review has read it (a finding the delta review reports again stays in `minor`); `minor` keeps
+the rest (and the P3s of the delta, and style findings of a higher priority), and P3s outside the perimeter stay in `outOfScope`,
+all of them for the closing table.
 
 ## A red test after OK
 

@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, resolutions?: [{ round, accept?, guidance?, retry?, continue?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check.',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -10,28 +10,52 @@ export const meta = {
 }
 
 // This workflow exceeds the kit's `workflowSizeGuideline: "small"` (fewer than 5 agents) by design: one
-// implementer, one to four reviewers per round, and a soft cap on fix cycles. The "Large workflow" notice is expected.
+// implementer, one to four reviewers per round, and a convergence stop on the fixes. The "Large workflow" notice is expected.
 //
 // Who runs: `agent({ agentType })` takes the kit's typed agents (implementer, code-reviewer,
 // review-security, review-performance); `model` and `effort` override the agent's own frontmatter per call.
 //
-// Rounds: soft cap 3, +3 per continue. The loop ends in exactly two ways: no P1/P2 inside the perimeter is open
-// (OK), or a finding stalls (STALL): still open after a fix, or closed earlier and open again (a closed finding
-// re-reported under a new id, a shifted line or a reworded title counts). A reviewer that gives no verdict for
+// One task per run: the loop is sized for one plan task (or one cluster of tasks on the same files); an L change is launched
+// task by task by the caller (deliver), sequentially in the same worktree, committing between runs. The implement prompt carries no
+// tool-call budget for that reason; the reviewers and the fixers do (their work is bounded by the findings).
+//
+// Rounds: there is no cap on them. The loop ends in exactly two ways: no P1/P2 inside the perimeter is open
+// (OK), or a finding stalls (STALL): still open after a fix, closed earlier and open again (a closed finding
+// re-reported under a new id, a shifted line or a reworded title counts), or the fixes do not converge (below). A reviewer that gives no verdict for
 // an id is not a stall at first: only that id is asked again the next round, and only by the reviewers that
 // skipped it (recheckReviewers); two rounds in a row without a verdict on it is the same finding unresolved, a
 // STALL ('no-verdict'). `decideRound` makes the call in plain code, never a model. A subagent never
 // asks the user: a stall returns to the caller (the deliver skill), which asks and relaunches with
 // `resumeFromRunId` and `args.resolutions`.
 //
-// Cap and churn: only fix cycles (a round that ends in a fixer run) count. A FIX decision with `capLimit(resolutions)` cycles
-// already run (3, plus 3 for every resolution `continue: true`) is a STALL 'cap'; RECHECK rounds and coverage reruns never count.
+// Convergence and churn: a fix round that closes none of the findings it was sent needs no stall of its own: each sent id that gets a
+// verdict and is still open is already a STALL ('still-open'; after a rejection 'not-reproduced', or 'disputed' once rejected twice; a
+// rejection the reviewers keep once goes back to the fixer with their note), and one with no verdict follows the no-verdict rule. A fix round
+// that closes some and opens others is progress as long as the open count falls: the rounds have no cap, but a loop where every fix closes one
+// P1/P2 and the reviewers open another never ends by itself. So the count of open P1/P2 (plus the open V finding) is read at the decision after each fix
+// round: STALL 'not-converging' when it did not drop below the lowest count of the fix rounds before it for 3 fix rounds in a row
+// (notConverging; the first fix round only sets the bar; a decision with a finding still without a verdict is not read, the
+// cleanup pass is no fix round). A resolution `guidance` or `accept` on a round restarts that count; `retry` does not.
 // Every STALL carries `history` (findingHistory): per finding the round it appeared, the fixes it went to, when it closed and
 // when it came back. A fixer whose snapshot churn (lines inserted + deleted) grows strictly over three fixes in a row is a STALL
-// 'churn' (churnGrowing; a report without a snapshot has no churn and is skipped). The churn is judged at a round's decision, after the
-// reviewers have read the last fix: STALL 'churn' only when the churns are growing AND that decision is still FIX. A resolution on that round
-// works like on any other: `accept` ends the open ids (the fix was read, so OK is honest), guidance / retry send them to the fixer, `continue`
-// restarts the churn count. `continue` grants 3 more fix cycles only when the cap was hit on that round too (then the stall reads 'cap').
+// 'churn' (churnGrowing; a report without a snapshot has no churn and is skipped; the cleanup pass is no fix cycle and has none). The churn
+// is judged at a round's decision, after the reviewers have read the last fix: STALL 'churn' only when the churns are growing AND that
+// decision is still FIX (churn comes first when both stalls apply). A resolution on a churn or not-converging round works like on any other: `accept` ends the open ids (the fix was
+// read, so OK is honest), guidance / retry send them to the fixer. A `continue` from an older caller is ignored.
+//
+// P3 cleanup: a round that would end OK (no gap, nothing unread) with P3 findings inside the perimeter (cleanupCandidates: priority P3, not a `scope`
+// hunk, not one the change does not cause in a file it did not touch) first runs ONE fix pass on them (label `cleanup R<n>`), then one
+// review of that delta. Its new P1/P2 go through the normal loop; its P3s are only reported (`minor`), a second cleanup never runs. The
+// findings it fixed (not rejected) move from `minor` to `cleaned` only once that delta review has read them: a delta finding that matches one
+// leaves it in `minor`. They are never tracked, so they stay out of `history` and `toFix`.
+//
+// Questions: the implementer and the fixer may return `questions: [{ text, default, why }]`, a behaviour choice the owner would see (a
+// contract, a default, an error policy; never an internal one). Any question is a STALL 'question' before review, carrying them (`stall.questions`,
+// at round 0 for the implementer, else at the round the fix belongs to). The caller asks the user (or, when the user said not to be asked,
+// applies each default and lists it as an open decision) and relaunches with `{ round, answers: [{ text, answer }] }` in the entry of that round;
+// the answers reach the implementer as guidance in a second run of it (its first run's edits are already in the tree; its `noticed`, `openQuestions`
+// and `rejected` are kept, see askWithQuestions). Questions that run
+// asks again are not stalled twice: they go to `outOfScope` as open decisions (source 'implementer').
 //
 // Coverage: an answering reviewer clears only the files it lists in `filesReviewed` (a group reviewer its own group's, a general
 // reviewer any listed one, a specialist none). A round that would end in OK with files nobody read reruns, once, only the owners
@@ -48,9 +72,8 @@ export const meta = {
 // edited `changed` itself and only the review loop runs (fixes still go to the implementer).
 //
 // Resume: relaunch with the same script and args plus ALL the resolutions so far,
-// `resolutions: [{ round, accept?, guidance?, retry?, continue?, widen? }]` (round = the one each STALL reported). The agent
-// calls before the decision are cached; the first changed call runs live. `continue: true` adds 3 fix cycles to the soft cap
-// when that round stalled on it, and restarts the churn count when it stalled on a 'churn'. `accept` lists finding ids the
+// `resolutions: [{ round, accept?, guidance?, retry?, answers?, widen? }]` (round = the one each STALL reported). The agent
+// calls before the decision are cached; the first changed call runs live. `answers` ([{ text, answer }]) answer a 'question' stall. `accept` lists finding ids the
 // user takes as a residual risk; `guidance` or `retry: true` sends the stalled findings to the fixer once
 // more (guidance puts the user's direction in the brief). `widen` lists perimeter entries the user adds after a
 // 'widen' STALL, from that round on (widenedFiles: the reviewers of that round and the earlier prompts keep the old perimeter,
@@ -73,8 +96,9 @@ export const meta = {
 // and never reproduced: STALL 'not-reproduced'; kept after two rejections: STALL 'disputed'; kept once: back to the fixer
 // with the reviewer's note.
 //
-// Budget: every implementer, reviewer and fixer prompt carries a tool-call cap below the agent's own turn cap and asks for the
-// structured result before it runs out. An agent() that throws anyway (turn cap, no StructuredOutput) is caught
+// Budget: every reviewer and fixer prompt carries a tool-call cap below the agent's own turn cap and asks for the structured result
+// before it runs out (the implementer's does not: its run is task-sized). The implementer runs only the test files it touches while it
+// works and the verify command once, at the end. An agent() that throws anyway (turn cap, no StructuredOutput) is caught
 // and read as an empty result, so the gap / no-verdict logic handles it and the run goes on.
 //
 // Snapshots: every implementer and fixer prompt ends with `scripts/snapshot.ps1 -Since <previous tree | start head>
@@ -190,7 +214,7 @@ const sizeFor = (given, changedCount) => {
 }
 
 // An agent report as the loop reads it, the fields a report may lack filled with their default: no verify is
-// not-run, no snapshot is null, no rejected / noticed / filesReviewed is empty. null (an agent that returned
+// not-run, no snapshot is null, no rejected / noticed / questions / filesReviewed is empty. null (an agent that returned
 // nothing) stays null. A snapshot counts only when it carries a tree (a non-empty string): without one it is no
 // snapshot, whatever its files say, and the declared files are used.
 const VERIFY_STATUSES = ['pass', 'fail', 'not-run']
@@ -203,6 +227,7 @@ const readReport = r => {
     snapshot: r.snapshot && typeof r.snapshot === 'object' && typeof r.snapshot.tree === 'string' && r.snapshot.tree ? r.snapshot : null,
     rejected: list(r.rejected),
     noticed: list(r.noticed),
+    questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
     filesReviewed: list(r.filesReviewed),
   }
 }
@@ -276,10 +301,6 @@ const coverageOwners = (unread, reviewers, groups, root = '') => {
   return reviewers.filter(r => keys.has(r.key)).map(r => r.key)
 }
 
-// The soft cap on fix cycles: 3, and 3 more for every `continue: true` given on a round that stalled on the cap (`extensions`).
-const FIX_CYCLES = 3
-const capLimit = (extensions = 0) => FIX_CYCLES * (1 + (Number.isInteger(extensions) && extensions > 0 ? extensions : 0))
-
 // What happened to each finding, from the round log (a round's `new`, `closed`, `toFix` and `rematched` ids): the round it first
 // appeared, the rounds it went to the fixer, the round it closed (the last one), the rounds it came back.
 const findingHistory = roundLog => {
@@ -304,6 +325,21 @@ const churnGrowing = churns => {
   return last.length === 3 && last[0] < last[1] && last[1] < last[2]
 }
 
+// The count of open P1/P2 (plus the open V finding) after each fix round, oldest first: a fix round that did not drop below the lowest count of the
+// fix rounds before it made no progress (the first one has none before it and only sets the bar). stuckFixRounds is the length of the
+// run of such rounds that ends the list; notConverging is true from NOT_CONVERGING_ROUNDS of them in a row.
+const NOT_CONVERGING_ROUNDS = 3
+const stuckFixRounds = counts => {
+  let low = Infinity
+  let stuck = 0
+  for (const c of (Array.isArray(counts) ? counts : []).filter(Number.isFinite)) {
+    stuck = c < low ? 0 : stuck + 1
+    low = Math.min(low, c)
+  }
+  return stuck
+}
+const notConverging = counts => stuckFixRounds(counts) >= NOT_CONVERGING_ROUNDS
+
 // Style findings never block, whatever their priority: a reviewer's taste is not a defect.
 const NEVER_BLOCKING = new Set(['clean-code', 'convention'])
 const isNeverBlocking = f => NEVER_BLOCKING.has(f?.category)
@@ -323,6 +359,17 @@ const widenedFiles = (files, resolutions, round) => {
   }
   return list
 }
+
+// The minor findings the cleanup pass (one FIX before DONE) may fix: P3 only (a style finding of a higher priority is minor too, and stays so),
+// inside the perimeter, never a `scope` hunk (that is a revert, not a cleanup) and never one the reviewer says the change does not cause in a
+// file the change did not touch.
+const cleanupCandidates = (minor, files, { root = '', touched = [] } = {}) =>
+  (Array.isArray(minor) ? minor : []).filter(m => m.priority === 'P3' && m.category !== 'scope' && inPerimeter(m.path, files, root) && !(m.causedByChange === false && !isTouched(m.path, touched, root)))
+
+// The answers a resolution carries for a 'question' stall: [{ text, answer }], entries without both texts dropped.
+const readAnswers = resolution => (Array.isArray(resolution?.answers) ? resolution.answers : [])
+  .filter(a => a && typeof a.text === 'string' && a.text.trim() && typeof a.answer === 'string' && a.answer.trim())
+  .map(a => ({ text: a.text.trim(), answer: a.answer.trim() }))
 
 // A finding is blocking when it is P1/P2 and inside the perimeter (a `verify` one always is). A `scope` finding is a diff hunk
 // the brief does not require (outside the perimeter, or inside it): it is ours to revert, so it blocks (P2 at least) - unless the file
@@ -448,8 +495,8 @@ const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root
 // Except when the same round has a blocking scope finding on the same file: the unrequested hunk is reverted, and the P1/P2 is
 // tracked and sent to the fixer with it like any blocking finding (it should disappear with the hunk); the next round's reviewers judge
 // it as a previous id: closed if the revert removed it, still open otherwise (a normal 'still-open' stall).
-// A new blocking finding the user accepts (`resolution.accept`) is accepted at once: not fixed, which is how a cap or churn stall on
-// fresh findings is resolved.
+// A new blocking finding the user accepts (`resolution.accept`) is accepted at once: not fixed, which is how a churn
+// stall on fresh findings is resolved.
 const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', touched = [], resolution, silent = {}, challenged = [], rejections = {}, notReproduced = [] } = {}) => {
   const accept = new Set(resolution?.accept ?? [])
   const guided = !!resolution?.guidance || resolution?.retry === true
@@ -558,9 +605,10 @@ const dirtyText = dirty.length
   : ''
 
 const budgetText = calls => `TOOL BUDGET: at most ${calls} tool calls in total, the structured-output call included. Read selectively, stop exploring after about ${calls - 10} and return the structured result before the budget runs out: a partial result beats none, and a run that ends without it is lost.`
-const IMPL_BUDGET = budgetText(120)
 const REVIEW_BUDGET = budgetText(35)
 const FIX_BUDGET = budgetText(80)
+const TESTS_TEXT = 'Tests: while you work run only the test files your change touches (and the one you saw failing); run the verify command once, at the end, before reporting.'
+const QUESTIONS_TEXT = 'Questions: a behaviour choice the owner would see (a contract, a default, an error policy) is not yours to make and not to guess: list it under `questions` as { text, default: what you would do, why }, and do the rest of the scope. An internal choice (naming, structure) is yours, not a question.'
 
 // The agents start in the session's folder, which may be another repo or no repo at all: the repo is named in
 // every prompt, or relative paths, the verify command and snapshot.ps1 land in the wrong place.
@@ -621,6 +669,15 @@ const IMPLEMENTATION = {
     },
     notVerified: { type: 'string' },
     openQuestions: { type: 'array', items: { type: 'string', description: 'a guess you had to make and its alternative, one line (out-of-perimeter proposals go under noticed)' } },
+    questions: {
+      type: 'array',
+      description: 'a behaviour choice the owner would see (never an internal one), left undecided: the run stops before review until it is answered',
+      items: {
+        type: 'object',
+        required: ['text', 'default', 'why'],
+        properties: { text: { type: 'string' }, default: { type: 'string', description: 'what you would do if not told otherwise' }, why: { type: 'string' } },
+      },
+    },
   },
 }
 
@@ -678,15 +735,18 @@ let lastReport = null                 // the last implementer / fixer report: it
 let verifyOpen = []                   // the V finding of a failing verify, open until a verify passes
 let nextV = 1
 let unread = []                       // files nobody listed in filesReviewed (their reviewer returned nothing or left them out): reviewed in full
-let fixCycles = 0                     // fixer runs so far: what the soft cap counts (never a RECHECK or a coverage rerun)
-let capExtensions = 0                 // continues given on a round that stalled on the cap: each adds FIX_CYCLES to the limit
-let fixChurns = []                    // the churn of each fixer snapshot that had one (a continue on a churn stall empties it)
+let cleanupDone = false               // the one P3 cleanup pass ran (never a second one)
+let fixChurns = []                    // the churn of each fixer snapshot that had one
+let openCounts = []                   // the open P1/P2 (+ V) count read at the decision after each fix round (notConverging)
+let afterFix = false                  // a fix round ran and its count is not read yet
+let cleanupSent = []                  // the minor findings the cleanup fixer did not reject: cleaned once the delta review has read them
 let missing = new Set()               // specialists whose last answer was nothing
 let nextRound = { only: null, coverage: false }   // the next round's reviewers: only these keys (a RECHECK or a coverage rerun), null = all
 let coverageRetried = false           // a coverage rerun was scheduled and the files are still unread
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = []
 const minor = []
+const cleaned = []                    // the minor findings the cleanup pass fixed (it did not reject them)
 const gaps = []
 const notes = []                      // the implementer's "found elsewhere" lines
 const noticed = []                    // what an implementer or fixer saw and deliberately did not do: { source: 'noticed', title, path, why }
@@ -720,14 +780,17 @@ const takeFiles = r => {
   const have = new Set([...changed].map(f => rel(f, repoRoot)))
   listed.forEach(f => { if (!have.has(rel(f, repoRoot))) { changed.add(f); have.add(rel(f, repoRoot)) } })
 }
+const takeNoticed = r => {
+  for (const n of r.noticed) {
+    if (n && typeof n === 'object' && !noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
+  }
+}
 const takeReport = r => {
   takeFiles(r)
   lastReportTree = r.snapshot?.tree ?? ''
   if (lastReportTree) lastTree = lastReportTree
   lastReport = r
-  for (const n of r.noticed) {
-    if (n && typeof n === 'object' && !noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
-  }
+  takeNoticed(r)
 }
 // The verify gate on a report, before it becomes the last one: a failing verify opens the V finding, a pass closes it.
 // Returns the stall, if any.
@@ -737,7 +800,7 @@ const gateReport = (r, toFixHadVerify) => {
   else if (g.status === 'pass') verifyOpen = []
   return g.stall
 }
-const RESOLUTIONS = 'resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, continue?: true, widen?: ["path/or/dir/"] }]'
+const RESOLUTIONS = 'resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, answers?: [{ text, answer }], widen?: ["path/or/dir/"] }]'
 const RESUME_AGAIN = `Relaunch with the same args and resumeFromRunId, plus every resolution so far: ${RESOLUTIONS}.`
 const verifyStall = (at, s) => result({
   status: 'STALL',
@@ -760,6 +823,7 @@ const result = extra => withHistory({
   accepted: Object.keys(tracked).filter(id => tracked[id].status === 'accepted').map(id => known[id]),
   outOfScope: [...notes.filter(q => !noticed.some(n => sameText(q.text, n.title) || sameText(q.text, n.why))), ...noticed, ...outOfScope, ...proposals],
   minor,
+  cleaned,
   gaps,
   files: [...changed],
   verify: lastReport?.verify ?? { status: 'not-run' },
@@ -769,20 +833,51 @@ const result = extra => withHistory({
   ...extra,
 })
 
+// A report that holds questions stops the run before review (STALL 'question'), unless the resolution of that round carries the answers:
+// then the same call runs once more with them as guidance (`build(extra)` is the prompt; the first call is the one a resume replays from the
+// cache). The questioning run is not taken as a report (its tree is the next -Since, so the delta keeps both runs): of it only the `noticed`
+// items and the `openQuestions` are kept (as they are), and its `rejected` ones are merged into the second run's report (the second run's own entry wins for an id).
+// Returns { report } (null: it returned nothing) or { stall } (the result to return).
+const answersBlock = answers => `The owner answered your questions: apply each answer. Your first run's edits are already in the tree: continue from them, do not start over.\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
+const askWithQuestions = async (build, opts, at, resolution) => {
+  const first = readReport(await ask(build(''), opts))
+  if (!first?.questions.length) return { report: first }
+  const answers = readAnswers(resolution)
+  if (!answers.length) {
+    return {
+      stall: result({
+        status: 'STALL',
+        stall: { round: at, why: 'question', findings: [], questions: first.questions, reason: `${opts.label} left ${first.questions.length} behaviour question(s) for the owner: ${first.questions.map(q => q.text).join(' | ')}` },
+        resume: `Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any): ${RESOLUTIONS}.`,
+      }),
+    }
+  }
+  takeNoticed(first)
+  ;(first.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  const second = readReport(await ask(build(answersBlock(answers)), { ...opts, label: `${opts.label} (answers)` }))
+  ;(second?.questions ?? []).forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
+  if (!second) return { report: second }
+  return { report: { ...second, rejected: [...second.rejected, ...first.rejected.filter(r => !second.rejected.some(s => s?.id === r?.id))] } }
+}
+
 if (!inline) {
   phase('Implement')
-  const implRaw = await ask([
+  const implOpts = { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const asked0 = await askWithQuestions(extra => [
     brief,
+    extra,
     perimeterText,
     dirtyText,
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
+    TESTS_TEXT,
+    QUESTIONS_TEXT,
     RULES,
     REPORT_TEXT,
-    IMPL_BUDGET,
     snapshotText(lastTree),
-  ].filter(Boolean).join('\n\n'), { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
-  const impl = readReport(implRaw)
+  ].filter(Boolean).join('\n\n'), implOpts, 0, resolutions.find(r => Number(r?.round) === 0))
+  if (asked0.stall) return asked0.stall
+  const impl = asked0.report
   if (!impl) {
     return result({ status: 'STALL', stall: { round: 0, findings: [], reason: `the implementer returned nothing (stopped or failed${why('implement')})` }, resume: RESUME_AGAIN })
   }
@@ -915,6 +1010,14 @@ while (true) {
   }
 
   const merged = mergeReviews(alive, repoRoot)
+  // The delta review of the cleanup pass has read what the cleanup changed: a finding it reports again (never tracked, so it comes back as a
+  // new one) is still there and stays in `minor`; the rest is cleaned.
+  for (const id of cleanupSent) {
+    if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
+    minor.splice(minor.findIndex(m => m.id === id), 1)
+    cleaned.push(known[id])
+  }
+  cleanupSent = []
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
   found.forEach(f => { known[f.id] = f })
@@ -936,21 +1039,18 @@ while (true) {
   decision.minor.forEach(id => minor.push(known[id]))
   decision.outOfScope.forEach(id => outOfScope.push({ source: 'review', ...known[id], ...(resolution?.accept?.includes(id) ? { accepted: true } : {}) }))
   if (decision.unanswered.length) gaps.push(`round ${round}: no verdict for ${decision.unanswered.join(', ')}, asked again`)
-  // Two conditions can stop a FIX decision, each answered by the resolution of that round. The soft cap counts fix cycles only (a RECHECK or a
-  // coverage rerun is not one): `continue` there grants 3 more. The churn is read HERE, after the reviewers have read the last fix: the last 3
-  // fix churns strictly grow and the decision is still FIX; `continue` there resets the count (and nothing else). Guidance or a retry is the
-  // user's "different approach" for either: it goes to the fixer (a cap stall: that one cycle). Accept ends the findings it names, like any round.
-  // Both true at once: reported as the cap, and `continue` answers both.
-  const limit = capLimit(capExtensions)
-  const capHit = action === 'FIX' && fixCycles >= limit
+  // The churn is read HERE, after the reviewers have read the last fix: the last 3 fix churns strictly grow and the decision is still FIX.
+  // Guidance or a retry is the user's "different approach": it goes to the fixer. Accept ends the findings it names, like any round.
   const churnHit = action === 'FIX' && churnGrowing(fixChurns)
   const redirected = !!resolution?.guidance || resolution?.retry === true
-  const stopped = (capHit || churnHit) && !redirected && resolution?.continue !== true
-  if (resolution?.continue === true) {
-    if (capHit) capExtensions += 1
-    if (churnHit) fixChurns = []
-  }
-  const churnTrend = `the last fixes changed ${fixChurns.slice(-3).join(', ')} lines, more each time`
+  // The open count after the fix, read here too: a guidance or an accept on this round restarts it, a decision with a finding still without a verdict waits.
+  const openNow = Object.values(tracked).filter(t => t.status === 'open').length + verifyOpen.length
+  if (resolution?.guidance || resolution?.accept?.length) { openCounts = []; afterFix = false }
+  if (afterFix && !decision.unanswered.length) { openCounts.push(openNow); afterFix = false }
+  const stuckHit = action === 'FIX' && !churnHit && notConverging(openCounts)
+  const stopWhy = churnHit ? 'churn' : stuckHit ? 'not-converging' : ''
+  const stopped = !!stopWhy && !redirected
+  let cleanupIds = []                 // the minor findings the P3 cleanup pass sends to the fixer this round (only on a DONE decision)
   rounds.push({ round, size, reviewers: alive.length, new: found.filter(f => tracked[f.id]).map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: stopped ? [] : toFix, stalled: decision.stalled, unanswered: decision.unanswered, churn: null })
   log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
@@ -968,27 +1068,23 @@ while (true) {
       coverageRetried = true
       continue
     }
-    return result({ status: 'OK' })
+    // One P3 cleanup pass on the minor findings inside the perimeter, then one review of its delta: the Fix phase below runs it.
+    if (!cleanupDone) cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
+    if (!cleanupIds.length) return result({ status: 'OK' })
+    cleanupDone = true
+    rounds[rounds.length - 1].cleanup = cleanupIds
   }
   if (stopped) {
-    const why = capHit ? 'cap' : 'churn'
-    const findings = toFix.map(id => ({ id, why, ...known[id] }))
-    if (capHit) {
-      return result({
-        status: 'STALL',
-        stall: {
-          round,
-          why,
-          findings,
-          reason: `soft cap: ${fixCycles} fix cycles run, the limit is ${limit} (resume with continue: true for ${FIX_CYCLES} more)${churnHit ? `; ${churnTrend}: they are not converging` : ''}`,
-        },
-        resume: `Ask the user: continue (${FIX_CYCLES} more fix cycles${churnHit ? ', and the churn count restarts' : ''}), accept the risk, or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, continue: true } to go on, { round: ${round}, accept: [ids] } to accept the risk, or { round: ${round}, guidance: "..." } for a different approach (one more fix cycle): ${RESOLUTIONS}.`,
-      })
-    }
+    const findings = toFix.map(id => ({ id, why: stopWhy, ...known[id] }))
     return result({
       status: 'STALL',
-      stall: { round, why, findings, reason: `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging` },
-      resume: `Ask the user: continue, accept the risk, or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, continue: true } to go on (it only restarts the churn count: no extra fix cycles), { round: ${round}, accept: [ids] } to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`,
+      stall: {
+        round, why: stopWhy, findings,
+        reason: stopWhy === 'churn'
+          ? `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging`
+          : `the open P1/P2 count after each fix round (${openCounts.join(', ')}) did not drop below its lowest in ${NOT_CONVERGING_ROUNDS} fix rounds in a row: the fixes are not converging`,
+      },
+      resume: `Ask the user: accept the risk or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, accept: [ids] } to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`,
     })
   }
   if (action === 'STALL') {
@@ -1011,15 +1107,20 @@ while (true) {
   }
 
   phase('Fix')
-  const unproven = id => known[id].confidence === 'PLAUSIBLE'
+  const cleaning = cleanupIds.length > 0
+  const sending = cleaning ? cleanupIds : toFix
+  const unproven = id => !cleaning && known[id].confidence === 'PLAUSIBLE'
   // A P1/P2 outside the perimeter that went to the fixer next to a revert of a hunk of the same file: the revert should remove it.
-  const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && toFix.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
-  const fix = toFix.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
-  fixCycles += 1
-  const fixedRaw = await ask([
-    'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.',
+  const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && sending.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
+  const fix = sending.map(id => `- ${id} [${known[id].priority}] ${known[id].path}${known[id].line ? `:${known[id].line}` : ''} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
+  const fixOpts = { label: `${cleaning ? 'cleanup' : 'fix'} R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const asked1 = await askWithQuestions(extra => [
+    cleaning
+      ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with the reason, no code change. No other edit.'
+      : 'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.',
     fix,
-    toFix.some(id => unproven(id)) ? 'A finding marked PLAUSIBLE is not proven: REPRODUCE FIRST (a failing test or a run that shows the failure) before any edit. If you cannot reproduce it, change no code for it and list it under `rejected` with the reason "not reproduced"; a finding you judge wrong goes under `rejected` with your reason, no code change either. Mark each `rejected` entry with `kind`: "not-reproduced" when you could not make the failure happen, "wrong" when you judge the finding incorrect.' : '',
+    extra,
+    sending.some(id => unproven(id)) ? 'A finding marked PLAUSIBLE is not proven: REPRODUCE FIRST (a failing test or a run that shows the failure) before any edit. If you cannot reproduce it, change no code for it and list it under `rejected` with the reason "not reproduced"; a finding you judge wrong goes under `rejected` with your reason, no code change either. Mark each `rejected` entry with `kind`: "not-reproduced" when you could not make the failure happen, "wrong" when you judge the finding incorrect.' : '',
     vIds.length ? 'A finding whose id starts with V (path "(verify)", category verify) is the verify command failing: make it pass without weakening the check or changing what it runs.' : '',
     `Intent: ${brief}`,
     resolution?.guidance ? `The user directs: ${resolution.guidance}` : '',
@@ -1027,14 +1128,17 @@ while (true) {
     dirtyText,
     input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
     input.verify ? `Verify with: ${input.verify}` : '',
+    TESTS_TEXT,
+    QUESTIONS_TEXT,
     RULES,
     FIX_BUDGET,
     REPORT_TEXT,
     snapshotText(lastTree),
-  ].filter(Boolean).join('\n\n'), { label: `fix R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION })
-  const fixed = readReport(fixedRaw)
+  ].filter(Boolean).join('\n\n'), fixOpts, round, resolution)
+  if (asked1.stall) return asked1.stall
+  const fixed = asked1.report
   if (!fixed) {
-    return result({ status: 'STALL', stall: { round, findings: [], reason: `the implementer returned nothing on the fix (stopped or failed${why(`fix R${round}`)})` }, resume: RESUME_AGAIN })
+    return result({ status: 'STALL', stall: { round, findings: [], reason: `the implementer returned nothing on the fix (stopped or failed${why(fixOpts.label)})` }, resume: RESUME_AGAIN })
   }
   // A resolution at this round (guidance, retry) is one more attempt: a fix that fails again then opens a new V finding instead of stalling.
   const fixStall = gateReport(fixed, vIds.length > 0 && !resolution?.guidance && resolution?.retry !== true)
@@ -1046,19 +1150,21 @@ while (true) {
   // A hunk the brief did not ask for is proposed to the user once the fixer has reverted it, never when it rejected the finding.
   const rejectedIds = new Set(fixed.rejected.map(r => r?.id))
   // Every scope finding the fixer was given counts, fresh, kept after a rejection or sent back with guidance, once per hunk.
-  toFix.filter(id => known[id]?.category === 'scope' && !rejectedIds.has(id)).forEach(id => {
+  sending.filter(id => known[id]?.category === 'scope' && !rejectedIds.has(id)).forEach(id => {
     if (!proposals.some(p => p.path === known[id].path && p.title === known[id].title)) proposals.push({ source: 'scope-revert', title: known[id].title, path: known[id].path, why: known[id].failure })
   })
   // A finding the fixer rejected is not fixed: the next round's reviewers get it as a CHALLENGE (only the ones it was given).
-  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => toFix.includes(r?.id) && tracked[r.id]?.status === 'open'), counts: rejectionCounts })
+  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r?.id) && tracked[r.id]?.status === 'open'), counts: rejectionCounts })
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
   ;(fixed.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (fixStall) return verifyStall(round, fixStall)
-  // The churn of this fix (lines inserted + deleted) is judged at the next round's decision, once the reviewers have read it.
+  // The churn and the open count of this fix are judged at the next round's decision, once the reviewers have read it. The cleanup is no fix cycle.
   const churn = fixed.snapshot?.churn
-  if (Number.isFinite(churn)) {
+  if (!cleaning) afterFix = true
+  if (!cleaning && Number.isFinite(churn)) {
     fixChurns.push(churn)
     rounds[rounds.length - 1].churn = churn
   }
