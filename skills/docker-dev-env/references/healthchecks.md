@@ -107,4 +107,4 @@ from sleep. The connection code needs a bounded retry with backoff regardless â€
 buys a clean *start*, not a guarantee for the rest of the process's life. Where the .NET client has
 built-in resilience (the SQL Server provider's retrying execution strategy, the Redis multiplexer's
 reconnect, the broker client's recovery), turn it on rather than writing a loop; see `ef-core`,
-`redis-dotnet` and `rabbitmq`.
+`dotnet-backend` (its Redis reference) and `rabbitmq`.

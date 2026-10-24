@@ -2,15 +2,16 @@
 
 CLI first, always: config, auth, org/project resolution, WIQL and the boards and repos verbs belong
 to `azdo-cli`. What counts as a real CLI gap — and so may go to the MCP server — is decided only by
-`azdo-cli` `mcp-fallback.md`; the recap states which interface wrote what.
+`azdo-cli` `mcp-fallback.md`; the recap states which interface wrote what. **Hours are the exception
+with no fallback**: they go only through `worklog-push.ps1`.
 
 ## Phase 5 — discovery per topic
 
-Only for **loggable** topics (rounded > 0). For each:
+Only for **loggable** rows (rounded > 0). For each:
 
-1. **Project.** From the workspace→project mapping in the user instructions, by the path of the
-   project the topic came from. Unmapped path, or a topic that could sit on different orgs and
-   cannot be derived → **ask**; never guess.
+1. **Project.** The `workspaces.json` root matching the path the topic came from (the map behind
+   the `ALM:` session line — a topic's path, not the session's cwd). Unmapped path, or a topic that
+   could sit on different orgs and cannot be derived → **ask**; never guess.
 2. **Where the hours go.** WIQL over the user's own items, by branch, area or topic keyword. Two
    outcomes:
    - an **existing Task** to add the hours to, or
@@ -19,8 +20,8 @@ Only for **loggable** topics (rounded > 0). For each:
    Hours go on **Tasks**, never on backlog items: a topic clearly part of an item with no suitable
    Task gets one. A **management** topic — attributable to no product item — is not searched for:
    its destination is the fixed structure in `ore-gestione.md`.
-3. **Hours currently on the Task.** Read completed work. It serves twice: the write is cumulative,
-   and the value is **reconciled** with the audit (step 5).
+3. **Hours currently on the Task.** Read completed work (a read, outside the push): it is shown in
+   Table 2 and **reconciled** with the audit (step 5).
 4. **PRs and commits to link** (best effort, confirmed in Table 2):
    - **PR**: the one whose source branch is the topic's branch;
    - **commits on the default branch**: `git -C "<project-path>" log --since=<From> --until=<To+1d> --author=(git config user.email) --oneline`,
@@ -31,72 +32,90 @@ Only for **loggable** topics (rounded > 0). For each:
 
    | Situation | Action |
    | --- | --- |
-   | item ↔ audit agree | normal idempotence: delta = hours now − hours already written **for this period** |
+   | item ↔ audit agree | normal idempotence: the push computes delta = row hours − hours already audited **for this period** |
    | the item has hours the audit does not know | **do not just add.** Table 2 shows `su item Xh (Yh non da worklog)` and **asks**: same work (the estimate **replaces** them, or covers only the difference) or different work (then it really adds)? |
-   | the item has more hours than the estimate and the user confirms same work | **delta 0**: the user's hours always beat the transcript estimate. Still write the audit entry, so the day is closed |
+   | same work, and their hours cover the estimate | push row with `"delta": 0`: the user's hours beat the transcript estimate; the audit entry is still written, so the day is closed |
+   | same work, the estimate is larger | push row with `"delta": <estimate − their hours>` |
 
-   The safe default is **asking**: the estimate comes from a prompt timeline, their hours from them.
-   Never inflate a Task because the audit did not know about a manual entry.
+   The safe default is **asking**. Never inflate a Task because the audit did not know a manual entry.
 
 No cache between runs: discovery is redone every time, because items, states and PRs change.
 
 ## Phase 7 — writes
 
-Spread the topics over **at most 4 parallel sub-agents**, with **disjoint** items: no item touched
-by two agents. Four topics or fewer → one agent per topic; otherwise four batches. Each agent applies
-the rules below and **reports** item id, hours before and after, links created, state. No agent
-writes the audit.
+In this order, the orchestrator alone (no parallel writers: the audit is one file):
 
-When the agents finish, **the orchestrator** updates the audit **in sequence** — one write at a
-time, no race — then **verifies directly** by reading back the created or updated items: hours,
-parent, state and links actually present. Only then does it print the recap.
+1. **Create the missing Tasks** (CLI, `azdo-cli`): children of the backlog item (they inherit area and
+   iteration), Italian title and description, assignee resolved **against the organization** at
+   runtime — never hardcoded, never `git config user.email`. **No hours at creation.**
+2. **PR links**: the real PR ↔ work item link, never a URL in the text. Commits: no verb for the
+   artifact link → hash and URL in the description or a comment, and say so.
+3. **The rows file** — one JSON array, written to the session scratchpad:
 
-### Write rules
+   ```json
+   [
+     { "date": "2026-10-12", "org": "<org>", "project": "<Project>", "itemId": 105060, "hours": 1.5,
+       "topic": "import nuovi mercati", "state": "Active", "parentId": 105050, "created": true,
+       "prs": [4211], "commits": ["a1b2c3d"] },
+     { "date": "2026-10-12", "org": "<org>", "project": "<Project>", "itemId": 105071, "hours": 3,
+       "delta": 0, "topic": "verifiche (ore gia' sull'item)" },
+     { "date": "2026-10-13", "itemId": null, "hours": 0, "topic": "nulla-da-registrare" },
+     { "date": "2026-10-20", "targetHours": 6, "note": "corso 4h + straordinario 2h" }
+   ]
+   ```
 
-| Rule | Detail |
-| --- | --- |
-| **Cumulative** hours | read the Task's current value, write `current + delta`. **Never** overwrite. New Task → the delta is the topic's whole hours |
-| New Tasks | created as **children** of the backlog item, so they inherit area and iteration. Title and description **in Italian** |
-| Assignee | the user, identity resolved **against the organization** at runtime (`azdo-cli`, "Resolving the identity to assign to"); never a hardcoded account, never `git config user.email` |
-| State | **never** leave an item `New`: `Active` if work is ongoing (open PR, unpushed commit, awaiting validation), `Closed` if done (PR completed, or commit already on the default branch). A type starting at `New` is corrected right after creation |
-| PR link | a **real link** between PR and work item, never a URL in the text: only the real link drives the policies |
-| Commit link | no verb for the commit artifact link → hash and URL in the item's description or a comment, and say so |
-| First write ever | on an org not touched yet this session: write **one** item, show the result, then continue |
+   | Field | Rule |
+   | --- | --- |
+   | `hours` | the **period's total** on that item — what the audit records, never the delta |
+   | `delta` | omit it: the script adds `hours − already audited for (period, item)`; set it only for a reconciled row |
+   | `state` | `Active` work ongoing (open PR, unpushed commit, awaiting validation), `Closed`/`Done` finished; never leave `New` |
+   | `org` | name or URL; the az identity follows the org through `workspaces.json` (or `"identity"`) |
+   | `overtime`, `note`, `sheet` | copied into the audit entry as given |
 
-### Idempotent writes
+4. **Preview**: `worklog-push.ps1 -Rows <file> -DryRun` — no az call, no write; it prints each row's
+   delta against the audit. Show it when it differs from Table 2.
+5. **Write**: `worklog-push.ps1 -Rows <file>`. Per hours row: read CompletedWork, write
+   `current + delta` (never an overwrite) and the state, read it back, then upsert the audit entry —
+   saved after every row. Exit 1 → the failed rows say why; fix and re-run the file: the rows already
+   written now have delta 0.
+6. **Read back** every created or updated item (hours, parent, state, links) and only then print the
+   recap (`tabelle.md`). First write on an org this session → push a file with that one row first.
 
-- The audit already has `(periodFrom, periodTo, itemId)` → apply **only the delta**. Delta 0 →
-  leave the hours alone; at most add the missing links.
-- On success, write or update the entry with: `periodFrom`, `periodTo`, `topic`, `project`,
-  `itemId`, `parentId` (if created), `created` (bool), `hoursLogged` (the **total** for that period
-  on that item, not the delta), `prs`, `commits`, `ts`.
-- `hoursLogged` is the period's total, not the work item's cumulative value: that is what makes the
-  delta computable on a re-run.
-- The audit is **never pruned**: the entry exists months later, so an old re-run always finds its
-  delta. The digest expires, not the audit.
+The shell guard hook asks on any other `az boards work-item update` carrying `CompletedWork`: if it fires
+during `/worklog`, the command was not the push script — stop and use it.
+
+### The audit
+
+- Key `(periodFrom, periodTo, itemId)`; a re-run updates the entry instead of adding one.
+- Fields: `periodFrom`, `periodTo`, `topic`, `mcp`, `project`, `itemId`, `parentId`, `created`,
+  `hoursLogged` (the period's total on the item), `prs`, `commits`, `ts`, and `note`/`sheet`/`overtime`
+  when given. `hoursLogged` is the period total, not the item's cumulative value: that is what makes
+  the delta computable on a re-run.
+- **Never pruned**: an old re-run always finds its delta. The digest expires, not the audit.
 
 ### The closed day
 
-A day is "closed" when **an audit entry covers it** — the only criterion, and the one
-`hooks/worklog-pending.js` reads for the session-start reminder and the statusline badge. So:
+A day is "closed" when **an audit entry covers it**; it is **under target** when its logged hours are
+more than 1h short of its target. `hooks/worklog-pending.js` reads both for the session-start
+reminder and the statusline badge. So:
 
-| Case | Audit entry |
+| Case | Push row |
 | --- | --- |
-| Hours logged | the normal entry, one per item |
-| Hours kept on a **sheet**, not a board (roots the `CLAUDE.md` mapping sends to a sheet, exceptions included) | a closing entry with the real hours: `itemId: null`, `hoursLogged: <hours>`, `project: "<root>/<project>"`, `sheet: "<sheet path>"` — without it a sheet-only day can only be closed by lying with a zero |
-| The day happened but **nothing is loggable** (tooling only, leave, a fully `internal` day) | a closing entry: `topic: "nulla-da-registrare"`, `itemId: null`, `hoursLogged: 0`, `project: null`, plus `periodFrom`/`periodTo`/`ts` |
+| Hours logged | the hours rows |
+| Hours kept on a **sheet**, not a board (roots `workspaces.json` sends to a sheet) | a close row with the real hours: `itemId: null`, `hours: <h>`, `project: "<root>/<project>"`, `sheet: "<sheet path>"` |
+| The day happened but **nothing is loggable** (tooling only, leave, a fully `internal` day) | a close row: `topic: "nulla-da-registrare"`, `itemId: null`, `hours: 0` — a day closed at zero is never under target |
+| A **reduced day** (event, leave, course, part-time) | a `target` row with the real target and a note, plus the day's hours rows |
 | The user postpones ("lo faccio domani") | **nothing**: the day stays pending, which is exactly right |
 
-Without the closing entry a leave-only day stays flagged forever and the reminder becomes noise to
-ignore. Ask explicitly before writing it, in Italian: "il <data> non c'è niente da registrare, lo
-chiudo a zero?"
+Ask before a close row at zero, in Italian: "il <data> non c'è niente da registrare, lo chiudo a zero?"
 
 ## Traps
 
-1. Hours doubled → overwritten, or the delta ignored → read, add, write back.
-2. Hours on a backlog item → they go on Tasks → create the child Task.
-3. New item left `New` → the type starts there → correct the state right after.
-4. Two agents on one item → overlapping batches → disjoint items per agent.
-5. Audit corrupted by concurrent writes → the agents wrote it → only the orchestrator, in sequence.
-6. PR linked as a URL in the description → it drives nothing → the real link.
-7. The recap describes the plan instead of the outcome → nothing was read back → verify first.
+1. Hours doubled → a raw `az boards work-item update` with CompletedWork, or `hours` passed as the
+   delta → only the push script, `hours` is the period total.
+2. Hours on a backlog item → they go on Tasks → create the child Task, then push.
+3. New item left `New` → the type starts there → `state` in the push row.
+4. Audit corrupted → two writers → only the push script, one run at a time.
+5. PR linked as a URL in the description → it drives nothing → the real link.
+6. The recap describes the plan → nothing was read back → push output, then read back.
+7. A Task created with hours, then pushed → the hours count twice → never set CompletedWork at creation.

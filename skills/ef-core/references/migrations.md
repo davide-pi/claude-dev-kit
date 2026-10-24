@@ -152,7 +152,7 @@ development tool and nothing else.
 
 - **`Value cannot be null. (Parameter 'input')`** from any command: a design-time factory is rewriting
   the base connection string from an environment variable and does not guard against a null base
-  value. Such variables are commonly set on machines running a database MCP server. Workaround: set
+  value. Such variables are often left set machine-wide by other database tooling. Workaround: set
   the context's own key for the invocation, or clear the offending variable. Real fix: a null guard in
   the factory.
 

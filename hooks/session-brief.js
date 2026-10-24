@@ -1,9 +1,10 @@
 /**
- * SessionStart hook: at most five lines saying where the work stands.
+ * SessionStart hook: at most four lines saying where the work stands, plus one when the `deliver` findings
+ * log says a retro would pay.
  *
  * The first question of every session is the same one — which branch am I on, is the tree dirty,
  * what did I last commit, am I in step with the remote, what is this branch for — and answering it
- * costs a handful of tool calls and a chunk of context every time. Five lines of orientation,
+ * costs a handful of tool calls and a chunk of context every time. Four lines of orientation,
  * injected once, replace them.
  *
  * The whole design is about not being felt at session start:
@@ -20,15 +21,18 @@
  *   4. No network, ever. Nothing here reaches a remote, so a session on a train starts as fast as
  *      one in the office.
  *
- * That last rule is why the "open PR for this branch" line is not computed: it can only come from
- * the host, and the cheapest honest lookup is still a network round trip. Instead the brief prints
- * it when something else has left it in the cache under `pr` — the documented slot for the ALM
- * commands, which already talk to the host and can afford to. Until then the line is simply
- * absent, which is the rule for every fact here: a line that cannot be determined is not printed,
- * and nothing is ever guessed.
+ * That last rule is why there is no "open PR for this branch" line: it can only come from the host,
+ * and the cheapest honest lookup is still a network round trip. A line that cannot be determined
+ * offline is not printed, which is the rule for every fact here: nothing is ever guessed.
  *
  * The work item is derived offline, from the branch name, because that is where the convention
  * puts it.
+ *
+ * The findings log line (never cached, one small file read): `<git-dir>/deliver/findings.jsonl` holds one JSON
+ * line per `deliver` run ({ at, run, size, rounds, minutes, findings: [{ category, priority, path, closed }] })
+ * and a `{ "retro": <date> }` line each time a retro was settled. Counting only what follows the last retro
+ * line, a category that recurs RECURRING times or a file holding OPEN_P3 open P3 findings adds one line
+ * pointing at /retro. A missing or unreadable log adds nothing.
  *
  * Always exits 0, and prints nothing at all rather than an error.
  *
@@ -54,15 +58,18 @@ const CACHE = path.join(CONFIG_DIR, '.session-brief-cache.json');
 const TTL_MS = 3 * 60 * 1000;
 /** A brief nobody waited for is worth more than a complete one. */
 const STATUS_TIMEOUT_MS = 1500;
-const MAX_LINES = 5;
+const MAX_LINES = 4;
+/** A category seen this many times since the last retro, or a file with this many open P3 findings, is worth a retro. */
+const RECURRING = 5;
+const OPEN_P3 = 3;
 
 /** Print nothing and get out of the way. */
 function silent() {
   process.exit(0);
 }
 
-function emit(lines) {
-  const text = lines.filter(Boolean).slice(0, MAX_LINES).join('\n');
+function emit(lines, extra) {
+  const text = [...lines.filter(Boolean).slice(0, MAX_LINES), extra].filter(Boolean).join('\n');
   if (!text) silent();
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
@@ -232,7 +239,7 @@ function workItemOf(branch) {
   return m ? m[1] : null;
 }
 
-function buildLines(found, cached) {
+function buildLines(found) {
   const { gitDir, root } = found;
 
   const branch = currentBranch(gitDir);
@@ -272,17 +279,47 @@ function buildLines(found, cached) {
     lines.push('no upstream configured — a push needs an explicit remote and branch');
   }
 
-  // 4. An open PR, only if something that can afford the lookup left it in the cache.
-  if (cached?.pr?.number) {
-    const title = cached.pr.title ? ` ${cached.pr.title}` : '';
-    lines.push(`open PR !${cached.pr.number}${title}`);
-  }
-
-  // 5. What this branch is for.
+  // 4. What this branch is for.
   const item = workItemOf(branch);
   if (item) lines.push(`work item #${item} (from the branch name)`);
 
   return lines;
+}
+
+// ── The findings log ─────────────────────────────────────────────────────────────────────────────────────
+
+/** The entries of the log after its last retro marker; a line that is not a JSON object is skipped. */
+function findingsSinceRetro(gitDir) {
+  const raw = readFile(gitDir, 'deliver', 'findings.jsonl');
+  if (!raw) return [];
+  let since = [];
+  for (const line of raw.split('\n')) {
+    let entry;
+    try { entry = JSON.parse(line); } catch { continue; }
+    if (!entry || typeof entry !== 'object') continue;
+    if (entry.retro) since = [];
+    else if (Array.isArray(entry.findings)) since.push(...entry.findings.filter((f) => f && typeof f === 'object'));
+  }
+  return since;
+}
+
+/** The one line the log earns, or null. */
+function findingsNudge(gitDir) {
+  const findings = findingsSinceRetro(gitDir);
+  const count = (key) => {
+    const seen = new Map();
+    for (const f of findings) seen.set(key(f), (seen.get(key(f)) ?? 0) + 1);
+    return seen;
+  };
+  const reasons = [];
+  for (const [category, n] of count((f) => f.category)) {
+    if (category && n >= RECURRING) reasons.push(`${category} came back ${n} times since the last retro`);
+  }
+  const open = count((f) => (f.priority === 'P3' && f.closed !== true ? f.path : null));
+  for (const [file, n] of open) {
+    if (file && n >= OPEN_P3) reasons.push(`${file} holds ${n} open P3 findings`);
+  }
+  return reasons.length ? `findings log: ${reasons.join('; ')} - /retro current findings can propose implementer rules` : null;
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
@@ -316,14 +353,15 @@ try {
   const key = found.gitDir;
   const entry = cache[key];
 
+  const nudge = findingsNudge(found.gitDir);
   if (entry && Date.now() - entry.at < TTL_MS && Array.isArray(entry.lines)) {
-    emit(entry.lines);
+    emit(entry.lines, nudge);
   }
 
-  const lines = buildLines(found, entry);
-  cache[key] = { at: Date.now(), lines, pr: entry?.pr ?? null };
+  const lines = buildLines(found);
+  cache[key] = { at: Date.now(), lines };
   writeCache(cache);
-  emit(lines);
+  emit(lines, nudge);
 } catch {
   // A bug in the hook must never be the first thing a session sees.
   silent();

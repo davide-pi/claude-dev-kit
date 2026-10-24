@@ -1,0 +1,12 @@
+{
+  "session_id": "sample-1",
+  "cwd": "/work/example-repo",
+  "model": { "display_name": "Opus 5.5 (1M context)" },
+  "effort": { "level": "high" },
+  "context_window": { "used_percentage": 25, "context_window_size": 1000000, "total_input_tokens": 248000 },
+  "cost": { "total_cost_usd": 4.82 },
+  "rate_limits": {
+    "five_hour": { "used_percentage": 38, "resets_at": 0 },
+    "seven_day": { "used_percentage": 59, "resets_at": 0 }
+  }
+}

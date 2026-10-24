@@ -1,103 +1,78 @@
 # Effort, fan-out and attribution
 
-## The ladder
+## Effort sets depth, the ladder sets who
 
-`[effort]` is the second argument of the trigger; default **medium**.
+Who is spawned and on which model: `report-format.md` § "Who reviews, on which model" (shared with
+`/code-review`). Effort then tells every agent how deep to go:
 
-| Effort | Agents spawned | Reads as |
-| --- | --- | --- |
-| `low` | `code-reviewer` | a quick pass over a small, low-risk diff |
-| `medium` | `code-reviewer` | the default: defects, regressions, security basics, clean code, completeness |
-| `high` | `code-reviewer` + `review-security` + `review-performance` | three views of the same diff, in parallel |
-| `xhigh` | the same three, told to go deeper and to follow call paths out of the diff | a release-blocking change |
-| `max` | the same three, exhaustive: every touched path, every caller | the rare change nobody can afford to get wrong |
+| Effort | Depth asked of each agent |
+| --- | --- |
+| `low` | a quick pass over a small, low-risk diff |
+| `medium` | the default: defects, regressions, security basics, clean code, completeness |
+| `high` | the full two-model pair plus both specialists, each on its own axis |
+| `xhigh` | the same, told to follow call paths out of the diff |
+| `max` | the same, exhaustive: every touched path, every caller |
 
 `[focus]` overrides the ladder: `security` → `review-security` alone, `performance` →
-`review-performance` alone, anything else (`completeness`, `clean-code`, a subsystem name) → the
-generalist told to concentrate on that axis. Spawn parallel agents **in a single message**, never
-one after another.
+`review-performance` alone, anything else (`completeness`, `clean-code`, a subsystem) → the
+generalist told to concentrate on that axis. Parallel agents go out **in a single message**.
 
 ## The package every agent receives
 
-Identical for all of them, and never trimmed:
+Identical for all of them — the two reviewers of the pair differ **only** in `model`, so they also
+share the prompt-cache prefix:
 
-1. **The scope** — the **path of one diff file** written once to the scratchpad and shared by every
-   agent, the base branch, and the files in play. Generated files are excluded at write time and
-   the package says so ("lockfiles excluded"):
+1. **The scope** — the path of the one diff file in the scratchpad (generated files excluded at
+   write time, and the package says so), the base branch, the files in play. Manifests
+   (`package.json`, `*.csproj`) and migration `.cs` files are never excluded.
+2. **The effort**, so depth is calibrated, not guessed.
+3. **The intent** — PR title and body plus the linked items' text (Azure DevOps through `azdo-cli`;
+   GitHub `gh pr view <n> --json closingIssuesReferences`, then `gh issue view <n> --json title,body`),
+   acceptance criteria **verbatim**. No stated intent → say so in the brief, so the gap shows in the
+   report instead of being filled in by the agent.
+4. **Findings only** — no agent posts, edits or commits.
+5. **Previous findings** on an incremental pass (`triage.md` § "Second passes"): anchor, question,
+   thread state, so each can be marked `done` or re-reported `todo`.
+6. **The specialists running beside it** — told to the generalists only: no dedicated security or
+   performance pass, but they still report what their other passes surface.
+7. For the pair: "you may be one of two reviewers on different models — report what you see, do not
+   soften for agreement".
+8. **The output contract in one line** — Finding blocks in the agent's Output format, Italian prose, anchors
+   on working-tree lines, one defect per block.
 
-   ```powershell
-   git diff "<range>" --output="<scratchpad>/review.diff" -- ':/' ':!*.lock' ':!package-lock.json' `
-     ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'
-   ```
+## Merging
 
-   Manifests (`package.json`, `*.csproj`) and migration `.cs` files are never excluded.
-2. **The effort**, so the agent calibrates depth rather than guessing.
-3. **The intent of the change** — the PR title and body, plus the text of what the PR implements:
-   the linked Azure DevOps work items (through `azdo-cli`) or the linked GitHub issues
-   (`gh pr view <n> --json closingIssuesReferences`, then `gh issue view <n> --json title,body`).
-   Pass the acceptance criteria **verbatim** — the reviewer judges each one on its own line and
-   flags scope creep against them. Fall back to the branch's commit messages when that text is thin.
-4. **The instruction that it returns findings only** — no agent posts, edits, or commits.
-5. **Previous findings** — on an incremental pass only (`triage.md` § "Second passes"): each tagged
-   thread's anchor, question and state (active / resolved / answered), so the agent can mark it
-   `done` or re-report it as `todo`.
-6. **The specialists running beside it** — told to `code-reviewer` only, so it leaves their axis
-   to them instead of reviewing it twice.
+Merge before triage:
 
-The intent is what the completeness pass compares the diff against, so it is the one part that must
-never be omitted. If there genuinely is no stated intent, say so when spawning: the gap then shows
-up in the report instead of being silently filled in by the agent.
-
-## Model selection
-
-Follow the user's review-agent convention, for **every** review subagent:
-
-| The request says | `model` parameter |
-| --- | --- |
-| nothing about a model | omit it — the agent runs on its own default |
-| "advanced agents" | pass the current session model family explicitly |
-| "agent \<model\>" | pass exactly that model |
-
-## Merging overlapping findings
-
-Three agents on one diff will collide. Merge before triage:
-
-1. Same anchor, same defect → keep one: the **more specific category**, the **higher-confidence**
-   verdict, the union of the questions.
-2. Same line, **different** failure → keep both; they are two findings.
-3. Re-sort everything **across** agents in the global `CLAUDE.md` § "Review output" order (`todo`
-   before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`), then number the surviving findings
-   `1..n`. On a conflict keep the **higher** priority. That numbering is what the chat report and
-   the summary tables both use.
-4. Track which agent produced each survivor — it decides the tag.
+1. Same anchor, same defect, **two models** → one finding, `CONFIRMED`, sorted first.
+2. Same anchor, same defect, one model plus a specialist → one finding: the more specific category,
+   the higher-confidence verdict, the union of the questions, the specialist's tag.
+3. One model only → `PLAUSIBLE`, unless it quotes evidence that settles it.
+4. Same line, **different** failure → two findings.
+5. Re-sort across agents in the `report-format.md` order, keep the **higher** priority on a
+   conflict, number the survivors `1..n` — the chat report and the tables use that numbering.
+6. Track which agent (and model) produced each survivor — it decides the tag.
 
 ## Attribution
 
 | Producer | Tag on the PR |
 | --- | --- |
-| `code-reviewer` | `[Claude AI Review]` |
+| `code-reviewer` (either model) | `[Claude AI Review]` |
 | `review-security` | `[Claude AI Review - security]` |
 | `review-performance` | `[Claude AI Review - performance]` |
-| any future distinctly-scoped reviewer | `[Claude AI Review - <its scope>]` |
+| a future distinctly-scoped reviewer | `[Claude AI Review - <its scope>]` |
 
-There is no preset list beyond that: the scope name mirrors the reviewer actually used. When a
-specialist and the generalist found the same defect, the surviving finding keeps the **specialist's**
-tag — it carries more context.
-
-## If a subagent is unavailable
+## A subagent is unavailable
 
 Apply its method inline, using the agent definition as the checklist, and say in chat that it ran
-inline rather than as a subagent. A missing specialist is a degraded review, not a skipped axis —
-never report a high-effort review as if all three had run.
+inline. A missing specialist or a missing second model is a degraded review: never report it as if
+the full ladder had run.
 
 ## Traps
 
-1. Agents spawned sequentially → three round-trips and no parallelism → one message, several calls.
-2. An agent gets the diff but not the intent → completeness cannot be judged → the package is all
-   items 1-4 (plus 5 on an incremental pass, 6 when specialists run) or it is incomplete.
-3. Both a specialist and the generalist report the same line → the report reads as two problems →
-   merge first, triage second.
-4. A specialist's finding is posted with the generic tag → attribution was lost in the merge → track
-   the producer per surviving finding.
-5. The session model is passed by default → cost with no benefit → omit `model` unless the request
-   asked for something else.
+1. Agents spawned one after another → no parallelism, no shared cache → one message, several calls.
+2. An agent gets the diff but not the intent → completeness cannot be judged → items 1–4 always.
+3. The pair's briefs differ in more than `model` → disagreement measures the brief, not the model →
+   build the brief once, pass it twice.
+4. A specialist's finding posted with the generic tag → attribution lost in the merge → track the
+   producer per survivor.

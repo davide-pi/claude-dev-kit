@@ -42,11 +42,14 @@ const { splitSegments } = require('./segments');
  * `purge_queue` / `delete_queue` are listed in full because `_` is a word character, so `\bpurge\b`
  * does not match inside them — the broker CLIs would have slipped straight through the gate.
  */
-const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|down|nuke)\b/i;
+const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|ri|rd|rmdir|del|erase|down|nuke|clear|expire|push|switch)\b/i;
 /** A flag cluster carrying `-D`: force-delete. Case-sensitive, because `-d` is the safe form. */
 const DANGER_FLAG = /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/;
 
-const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text);
+/** `az account set` loses no data, but the default it flips is machine-global (see skills/azdo-cli). */
+const AZ_ACCOUNT_SET = /(?<![-\w])az\s+account\s+set\b/i;
+
+const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text) || AZ_ACCOUNT_SET.test(text);
 
 /** Commands that look for a string instead of acting on it: never destructive, whatever they find. */
 const SEARCHERS = new Set([
@@ -117,7 +120,7 @@ const READ_ONLY_SQL = /^\s*(?:select|with|explain|show|describe|desc|print|use|s
  * comments, file paths, SQL string literals and read-only SQL statements. Offsets are preserved so
  * the result can still be reported against the original text.
  */
-function prepare(segment) {
+function prepare(segment, blankPaths = true) {
   let scan = segment;
 
   // 1. `#` comments outside quotes (bash and PowerShell), from a token boundary to end of line.
@@ -157,7 +160,7 @@ function prepare(segment) {
   }
 
   // 3. Path-shaped tokens *outside* quotes: `scripts/drop-old.sql`, `./teardown.ps1`, `C:\db\x.bak`.
-  {
+  if (blankPaths) {
     const inQuote = new Array(scan.length).fill(false);
     for (const span of quotedSpans(scan)) {
       for (let i = span.start; i < span.end; i += 1) inQuote[i] = true;
@@ -171,9 +174,34 @@ function prepare(segment) {
   return scan;
 }
 
-/** Every rule: a predicate over the prepared segment, and what the user is asked. */
+/**
+ * Every rule: a predicate and what the user is asked. It receives the prepared segment (`scan`, paths
+ * blanked), the same text with its paths kept (`keep`: a refspec like `+feature/x` is a path to `scan`)
+ * and the raw segment.
+ */
 const has = (re) => (scan) => re.test(scan);
-const all = (...tests) => (scan) => tests.every((t) => t(scan));
+const all = (...tests) => (...args) => tests.every((t) => t(...args));
+
+/** The command a segment runs, after `sudo`, `xargs`, `env VAR=x` and their options. */
+function effectiveCommand(segment) {
+  const tokens = segment.trim().split(/\s+/);
+  const wrappers = ['sudo', 'xargs', 'env', 'command', 'nohup', 'time', 'exec'];
+  let i = 0;
+  while (i < tokens.length && (/^[A-Za-z_]\w*=/.test(tokens[i]) || wrappers.includes(tokens[i].toLowerCase()))) {
+    i += 1;
+    while (i < tokens.length && tokens[i].startsWith('-')) i += 1;
+  }
+  return leadingCommand(tokens.slice(i).join(' '));
+}
+
+const DELETERS = new Set(['rm', 'ri', 'del', 'rd', 'rmdir', 'erase', 'remove-item']);
+/** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. */
+function deletesRecursively(scan, keep, segment) {
+  const command = effectiveCommand(segment);
+  if (!DELETERS.has(command)) return false;
+  if (command === 'rm') return /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep);
+  return /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
+}
 
 const RULES = [
   {
@@ -233,9 +261,16 @@ const RULES = [
       + 'consumer bound to it stops receiving. Confirm?',
   },
   {
-    test: all(has(/\bdelete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
+    // `delete` as a command word (`delete`, `delete-batch`), not inside a flag: `--delete-source-branch`
+    // is the house squash-and-delete PR setting, and asking on it made every compliant PR create prompt.
+    test: all(has(/(?<![\w-])delete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
     reason: 'This deletes a cloud or Azure DevOps resource. Deletion there is server-side and '
       + 'immediate. Confirm?',
+  },
+  {
+    test: has(AZ_ACCOUNT_SET),
+    reason: 'This switches the Azure CLI default account for the whole machine, so every other session '
+      + 'flips with it mid-command. Pin the identity per command with AZURE_CONFIG_DIR instead. Confirm?',
   },
   {
     test: all(has(/\bdelete\b/i), has(/\bkubectl\b/i)),
@@ -268,6 +303,36 @@ const RULES = [
     reason: 'This force-deletes a branch, unmerged commits included. If the branch was never '
       + 'pushed, those commits are only in the reflog. Confirm?',
   },
+  {
+    test: all(has(/\bgit\b/i), has(/\bstash\s+(?:drop|clear)\b/i)),
+    reason: 'This drops stashed work. A stash has no branch and no remote: once dropped, it is only '
+      + 'recoverable from an unreachable commit until git collects it. Confirm?',
+  },
+  {
+    test: all(has(/\bworktree\s+remove\b/i), has(/(?<![-\w])(?:--force|-f+)(?![\w-])/)),
+    reason: 'This force-removes a worktree, uncommitted and untracked changes included. Confirm?',
+  },
+  {
+    // Every way `git push` removes or overwrites a remote ref: a flag in any cluster (`-fu`), a `+ref`
+    // (forced) or a `:ref` (delete) refspec.
+    test: (scan, keep) => /\bgit\b/i.test(scan) && /\bpush\b/.test(scan)
+      && (/(?<![-\w])(?:--delete|--force[\w-]*|-[a-zA-Z]*[df][a-zA-Z]*)(?![\w-])/.test(keep) || /(?<=\s)[+:]\S/.test(keep)),
+    reason: 'This push deletes or force-overwrites a remote ref. Other people\'s commits on it can be lost, '
+      + 'and the server has no undo. Confirm?',
+  },
+  {
+    test: deletesRecursively,
+    reason: 'This deletes files recursively or by force, and there is no recycle bin for it. Confirm?',
+  },
+  {
+    // `-f` / `--discard-changes` throw away the uncommitted work in the files the switch touches.
+    test: all(has(/\bgit\b/i), has(/\bswitch\b/), has(/(?<![-\w])(?:--force|--discard-changes|-[a-zA-Z]*f[a-zA-Z]*)(?![\w-])/)),
+    reason: 'This switches branch and discards local changes: whatever was uncommitted is lost. Confirm?',
+  },
+  {
+    test: has(/\breflog\s+expire\b/i),
+    reason: 'This expires reflog entries, the only way back to commits no branch points to. Confirm?',
+  },
 ];
 
 /** The confirmation reason for the first action with no undo in `command`, else null. */
@@ -280,10 +345,11 @@ function checkDestructive(command) {
     if (NOOP_FLAGS.test(segment)) continue;
 
     const scan = prepare(segment);
+    const keep = prepare(segment, false);
     // The preparation may have blanked the only occurrence (a comment, a path, a read-only query).
     if (!isDangerous(scan)) continue;
 
-    const rule = RULES.find((r) => r.test(scan));
+    const rule = RULES.find((r) => r.test(scan, keep, segment));
     if (rule) return rule.reason;
   }
   return null;

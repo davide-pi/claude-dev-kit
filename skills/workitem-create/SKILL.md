@@ -1,25 +1,26 @@
 ---
 name: workitem-create
 description: >-
-  Create Azure DevOps work items — one, a small tree, or a session cart from a client meeting —
-  through Q&A and confirmation tables. Explicit trigger: only when the user types /workitem-create.
+  Use when the user types /workitem-create to turn a description, images or a meeting's points
+  into Azure DevOps work items.
 disable-model-invocation: true
+argument-hint: "[description | sessione]"
 ---
 
 # workitem-create — a description becomes real work items
 
+**Contract.** Items on the board after confirmed tables, assigned to the user and read back · never
+creates before Table 2 is approved, never a test or throwaway item · Italian on the board and in chat.
+
 ## When
 
 - The user types `/workitem-create`, with or without a description and pasted images.
-- A piece of work has to become one item, or a small hierarchy of items, on a board.
-- An existing parent — a grouping item, or a backlog item that needs units of time — takes children.
-- `/workitem-create` after a client meeting, or with "sessione" / several points to draft under one
-  feature: the **session mode** — one point at a time into a cart, recap, bulk create
-  (`references/session-cart.md`).
+- One item, a small tree, or children under an existing parent.
+- After a client meeting, or with "sessione" / several points under one feature: **session mode**,
+  one point at a time into a cart, then a bulk create (`references/session-cart.md`).
 
-Not for: logging hours on an existing item (`worklog`), reading or analysing an item already on the
-board (`/item`, `plan-work`), testing an implemented item (`items-qa`), or Azure DevOps CLI configuration, auth, verbs and
-the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
+Not for: the item's wording and criteria (`user-story-standard` owns them), hours (`worklog`),
+reading or planning an existing item (`/item`, `plan-work`).
 
 ## Decide
 
@@ -27,101 +28,79 @@ the role-to-type mapping (`azdo-cli`). Never fires without the explicit trigger.
 
 | Rule | Detail |
 | --- | --- |
-| Italian | every title, description and criterion written to the board, and every question, table and confirmation the user reads |
-| Nothing hardcoded | project, parent, fields and the type filling each role are **discovered at runtime**, every run |
-| New, assigned to the user | the default for every item created here; another assignee, or none at all, only where the user said so. The identity is resolved **against the organization** at gate 4 (`azdo-cli`) and shown in Table 2 |
-| Gated | Table 1, Table 2 and the optional content preview each need explicit confirmation |
-| Never a throwaway | no "test" item on a real board, ever |
-| Content is not ours | role classification, wording and acceptance criteria come from `user-story-standard`; this skill owns the mechanism |
+| Nothing hardcoded | project, parent, fields and the type filling each role are discovered every run |
+| Assigned to the user | the identity resolved **against the organization** once per org (`azdo-cli` "Resolving the identity to assign to") — never `git config user.email`; shown in Table 2, checked in the read-back; another assignee or none only when the user says so |
+| Gated | Table 1, Table 2 and the optional body preview each need an explicit yes; never two gates in one message |
+| Content is not ours | role, wording and acceptance criteria follow `user-story-standard` |
 
-### 2. The five gates, in order
+### 2. The five gates
 
 | Gate | What happens | Detail |
 | --- | --- | --- |
-| 1. Intake | read the text **and** the images; number them `IMAGE 1..n` with a caption; summarise in 2-4 lines what was understood | — |
-| 2. Q&A | targeted batched questions, escalating to grilling when the work is ambiguous | `questions.md` |
-| 3. Table 1 | the split into items: `#`, role (provisional), title — confirm, edit, reprint until approved | `tables.md` |
-| 4. Discovery | project, which real type fills each role, their field sets, the parent | below |
-| 5. Table 2 | the same rows plus the resolved parent link and the assignee — confirm, then optionally preview the full bodies, then create | `tables.md`, `user-story-standard` |
+| 1. Intake | read the text **and** every image (`IMAGE 1..n`, captioned); 2–4 lines of what was understood | — |
+| 2. Q&A | batched targeted questions; escalate to `grill-me` style rounds when decisions depend on each other | `references/questions.md` |
+| 3. Table 1 | the split: `#`, role (provisional), title — reprint until approved | `references/tables.md` |
+| 4. Discovery | project, the real type per role, field sets, parent, assignee | §3 |
+| 5. Table 2 | Table 1 plus resolved type, parent link and assignee — approve, optional body preview, create | `references/tables.md` |
 
-Never merge two gates into one message, and never move past one without explicit approval.
+After Table 1 is approved only discovery facts change the tables; a material doubt belongs in gate 2.
 
-### 3. Discovery — CLI first
-
-The Azure DevOps CLI is the **first move** for everything in gate 4 and for the creation itself.
-Configuration, auth, org/project resolution, WIQL and the boards verbs all belong to `azdo-cli` —
-call it, do not re-derive it here.
-
-Table 1 carries **roles**, not type names. Gate 4 turns each role into the type that project really
-has; `azdo-cli` owns the role-to-type mapping and the discovery calls.
+### 3. Discovery — CLI first (`azdo-cli`)
 
 | Needed | Source |
 | --- | --- |
-| which project | the workspace-to-project mapping in the user instructions, else list the org's projects via the CLI, else ask |
-| which types exist, and their real field set | CLI: the process/work-item-type metadata for that project |
-| which type fills a role here | the mapping in `azdo-cli`, matched against the types just discovered |
-| which types are actually **in use** | CLI: a WIQL sample, deduped on the type field (WIQL has no `DISTINCT`) |
-| candidate parents | CLI: WIQL by area, title keyword or recent activity; propose the best, let the user confirm or give an id/URL |
-| the identity to assign to | CLI, **once per organization**: the WIQL `@Me` probe in `azdo-cli` — never `git config user.email`, which is the machine's identity and belongs to the wrong tenant as soon as a second org is in play |
-| anything the CLI seems not to reach | the gap list in `azdo-cli` `mcp-fallback.md` decides — never restate it here |
+| project | the session's `ALM:` line; unmapped → list the org's projects and ask |
+| types and their field sets | `invoke --area wit --resource workItemTypes` for that project |
+| which type fills a role | `azdo-cli` `references/work-item-roles.md`, matched against the types just listed |
+| types actually in use | a WIQL sample, deduped on the type (WIQL has no `DISTINCT`) — call the list "in use", not exhaustive |
+| candidate parents | WIQL by area, title keyword or recent activity; propose one, the user confirms or gives an id |
+| the assignee | the `@Me` probe, once per organization |
 
-**No type name is a default.** If the project has no type for a role — a technical activity on a
-process that has none, an analysis item on a process without one — **ask** which type to use and
-list the types found. Never substitute the nearest-looking one, never carry a name over from another
-project. Types never used may not surface from WIQL — say the list is "in use", not exhaustive.
+No type fills a role → **ask**, listing the types found; never the nearest-looking one, never a name
+from another project.
 
 ### 4. Hierarchy
 
-Default: sibling items under one existing parent. On request: a multi-level tree — grouping item →
-backlog item → unit of time, in the types that project resolved — created in the same run, where
-only the **root** hangs off an existing parent and every other link points at an item created in
-this run. Create parents before children, sequentially.
+Default: siblings under one existing parent. On request: grouping item → backlog item → time unit
+in the types this project resolved, created in one run — only the **root** hangs off an existing
+parent. Parents before children, sequentially, each child linked in its create call.
 
 ## Do
 
 ```powershell
-git remote get-url origin        # which repo, hence which project the work belongs to
+$org = 'https://dev.azure.com/<org>'; $proj = '<project>'     # from the ALM: line
+az devops invoke --org $org --area wit --resource workItemTypes --route-parameters project=$proj --query "value[].name" -o tsv
+az boards work-item create --org $org -p $proj --type '<type as listed>' --title '<titolo>' `
+  --assigned-to '<upn from the @Me probe>' --description '<html>' --fields '<Field>=<value>'
+az boards work-item show --org $org --id <id> --fields System.AssignedTo,System.State,System.Parent -o table
 ```
 
-Everything else is Azure DevOps: project listing, type and field metadata, WIQL parent search, the
-creates, the parent links and the read-back verification all run through the CLI as documented in
-`azdo-cli`. Per-call rules — which fields are
-safe to set on which type, HTML bodies, creation order, first-create caution, mid-batch failure
-reporting and the read-back — are in `item-content.md`.
-
-Report the result as the final table plus the manual-attachment checklist (`tables.md`).
+The shell guard's `alm-contract.js` check asks on a create without `--assigned-to`: a prompt there means the
+assignee was dropped. Field safety per type, HTML bodies, creation order, mid-batch failure
+reporting and the read-back: `references/item-content.md`. Report with the final table and the
+manual-attachment checklist (`references/tables.md`).
 
 ## Traps
 
-1. The whole create fails on one field → a field that does not exist on that type was set (acceptance
-   criteria and repro steps do not exist on every type or process) → read the type's field set first
-   and fold unsupported content into the description.
-2. The description renders as raw markup on the board → the field was written as markdown → write
-   description and criteria as HTML; board markdown rendering is inconsistent.
-3. Children land with no parent → the link was left for a second pass that failed → create parent
-   first and link in the same call where the CLI allows it, then verify by reading the item back.
+1. The whole create fails on one field → that field does not exist on the type (criteria and repro
+   steps are not universal) → read the field set first; fold unsupported content into the body.
+2. The body renders as raw markup → it was written as markdown → write description and criteria as HTML.
+3. Children land with no parent → the link was left for a second pass → link in the create call,
+   then read the item back.
 4. A retry duplicates items → a mid-batch failure reported no ids → always report the ids already
    created before stopping.
-5. Items are created in the wrong project → the project was inferred from the conversation, not the
-   path → resolve it from the workspace mapping or ask; state the project in Table 2.
-6. Images silently disappear → they were never attached → attach them over REST with the `az login`
-   token (`azdo-cli`); whatever fails stays a numbered placeholder in the manual-attachment checklist.
-7. An item is created in state New but the type starts elsewhere → the process defines its own
-   initial state → set the state explicitly after the create when it differs.
-8. A type name from the last project is reused → it was remembered instead of discovered → resolve
-   the role against this project's types every run, and ask when no type fills it.
-9. Questions keep coming after Table 1 is approved → the Q&A gate was left open → resolve every
-   material doubt in gate 2; after that, only discovery facts change the tables.
-10. The items are created but nobody owns them → the assignee was left empty, or set from the
-    machine's git identity on an organization whose tenant knows the user under another UPN → resolve
-    the identity per organization, set it in the create call, and check it in the read-back.
+5. Images vanish → they were never attached → REST upload with the `az login` token (`azdo-cli`);
+   what fails stays a numbered placeholder in the attachment checklist.
+6. The item starts in another state than New → the process defines its own initial state → set the
+   state explicitly after the create when it differs.
 
 ## References
 
-- `questions.md` — what the Q&A must cover, how to batch it, when to escalate to grilling, and what
-  to derive from the images instead of asking.
-- `tables.md` — the exact shape of Table 1, Table 2, the final summary and the attachment checklist,
-  with the link and hierarchy formats and the confirmation loops.
-- `item-content.md` — fields and HTML, creation order and parent linking, safeguards, read-back.
-- `session-cart.md` — session mode: focus grouping and feature, one point at a time into a cart,
-  assignee inference, the recap and the bulk create.
+- `references/questions.md` — gate 2: what the Q&A covers, batching, when to escalate, what to read
+  off the images instead of asking.
+- `references/tables.md` — gates 3 and 5: Table 1, Table 2, the final summary, the attachment
+  checklist, link and hierarchy formats.
+- `references/item-content.md` — the create calls: fields and HTML, order and linking, safeguards,
+  read-back.
+- `references/session-cart.md` — session mode: focus and feature, one point at a time, assignee
+  inference, the recap and the bulk create.

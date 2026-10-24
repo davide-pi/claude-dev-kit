@@ -64,9 +64,9 @@ test('a C# file in a project that configures a style is formatted with the .NET 
   });
   const plan = onFile(join(root, 'src/App/Orders/OrderService.cs'));
   assert.match(plan, /^dotnet format whitespace /);
-  assert.match(plan, /App\.csproj/, 'the nearest project scopes the run');
+  assert.match(plan, /whitespace .*[\\/]src[\\/]App --folder/, 'the nearest project directory scopes the run');
   assert.match(plan, /--include .*OrderService\.cs/, 'only the file just touched');
-  assert.match(plan, /--no-restore/, 'a hook must never restore packages mid-session');
+  assert.doesNotMatch(plan, /\.csproj/, 'files, not the project: no MSBuild load and no restore mid-session');
 });
 
 test('a web file in a project that configures a formatter goes through the local package runner', () => {

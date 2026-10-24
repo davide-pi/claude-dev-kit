@@ -1,32 +1,49 @@
-# The two tables and the recap
+# The two tables, coverage and the recap
 
 Two gates, one protocol each: print the table, ask for changes, apply, **reprint**, ask again. The
-next phase starts **only** on explicit confirmation. Tables, headers, short descriptions and
-questions are **Italian** — the short description also seeds the Task title and description, and
-work items are Italian.
+next phase starts **only** on explicit confirmation. Everything here is Italian: the short description
+also seeds the Task title and description.
 
-## Table 1 — activity summary
+## Table 1 — the day, against its target
 
-Print **only** this table in chat. The step-by-step timeline lives in the digest and is shown only
-on request.
+One block per day (a range prints one per day). Only this in chat; the timeline stays in the digest.
 
 ```markdown
-| # | Topic | Descrizione breve | Tempo | Da | A | Arrotondato |
-|---|-------|-------------------|-------|----|---|-------------|
-| 1 | import nuovi mercati | Import e mappatura dei nuovi mercati | 1h20m | 09:08 | 10:16 | 1.5h |
-| 2 | cache traduzioni | Fix invalidazione cache traduzioni | 25m | 11:40 | 12:05 | 0.5h |
-| 3 | tooling worklog | Fix retention engine worklog | 8m | 15:02 | 15:10 | 0h *(non loggato, interno)* |
-| | **Totale** | | **<somma misurata>** | | | **<somma arrotondata>** |
+**Lunedì 12/10** — target 8h · già sul board 0h
+
+| # | Progetto | Topic | Descrizione breve | Attivo | Da | A | Arrotondato | Fonte |
+|---|----------|-------|-------------------|--------|----|---|-------------|-------|
+| 1 | <Project> | import nuovi mercati | Import e mappatura dei nuovi mercati | 1h20m | 09:08 | 10:16 | 1.5h | transcript |
+| 2 | <Project> | cache traduzioni | Fix invalidazione cache traduzioni | 25m | 11:40 | 12:05 | 0.5h | transcript |
+| 3 | interno | tooling worklog | Fix engine worklog | 40m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
+| | | **Totale** | | **2h25m** | | | **2h loggabili** | |
+
+Non fatturato: 40m (interni 40m, arrotondamento 0m)
+Attese lunghe contate: 10:45-12:04 (1h18m, <repo>) — tienile o toglile
+**Copertura: 2h / 8h — mancano 6h**
 ```
 
-- `#` numbers the rows, so the user can say "cambia la 2".
-- `Tempo` = measured by the engine; `Da`/`A` = time window (add the date when the range spans
-  several days); `Arrotondato` = what the helper printed.
-- Mark the **0h (non loggato)** rows and the **internal** ones.
-- `donor` rows do not appear — they were spread. If there were any, say so in one line below.
+| Column / line | Source |
+| --- | --- |
+| `Progetto` | **every row, gap rows included**: the board project from `workspaces.json` (the topic's path), `interno` for internal rows; unmapped or unsure → `?` and ask in the same message |
+| `Attivo` | the engine's minutes for the topic (after a split of the default branch, say it is an estimate) |
+| `Da` / `A` | the topic's window |
+| `Arrotondato` | `round.ps1`, never by hand; mark `0h (non loggato)` and `interno` rows |
+| `Fonte` | `transcript`, or for gap rows `dichiarato`, `Slack`, `calendario`, `board`, `git` |
+| header `già sul board` | the GIORNO table's `LOGGATO` for the day |
+| `Non fatturato` | the helper's NON FATTURATO line, verbatim numbers |
+| `Attese lunghe contate` | the engine's long waits on that day; omit the line when there are none |
+| `Copertura` | the helper's COPERTURA line, recomputed after every change |
 
-Then ask: **"Vuoi modificare qualcosa (topic, descrizioni, tempi, accorpare o dividere righe)?"**
-Changes → apply, **re-round** if minutes changed, reprint, ask again — until confirmed.
+`donor` rows do not appear (they were spread): say so in one line if there were any.
+
+**Under target** (more than 1h short) → the **gap prompt** right after the table — one
+`AskUserQuestion`, shape and follow-ups in `ore-gestione.md`. The answers become new rows with their
+`Fonte`; reprint, recompute the coverage, then the usual question. Not under target → straight to:
+
+**"Vuoi modificare qualcosa (topic, descrizioni, tempi, accorpare o dividere righe, attese lunghe)?"**
+
+Minutes changed → re-round, reprint, ask again — until confirmed.
 
 ## Table 2 — where the hours go
 
@@ -34,46 +51,43 @@ Changes → apply, **re-round** if minutes changed, reprint, ask again — until
 | # | Topic | Descrizione breve | Arrotondato | Progetto | Item |
 |---|-------|-------------------|-------------|----------|------|
 | 1 | import nuovi mercati | Import e mappatura nuovi mercati | 1.5h | <Project> | [Task #<id> — Import e mappatura dei nuovi mercati](https://<org-host>/<project>/_workitems/edit/<id>) (esistente, su item 2h → +1.5h) |
-| 2 | cache traduzioni | Fix invalidazione cache traduzioni | 0.5h | <Project> | padre [US #<id> — Pipeline di localizzazione](https://<org-host>/<project>/_workitems/edit/<id>) → **Task DA CREARE** ("Fix invalidazione cache traduzioni") |
+| 2 | cache traduzioni | Fix invalidazione cache traduzioni | 0.5h | <Project> | padre [US #<id> — Pipeline di localizzazione](<link>) → **Task DA CREARE** ("Fix invalidazione cache traduzioni") |
+| 3 | riunione cliente | Allineamento settimanale | 1h | <Project> | padre [PBI #<id> — Gestione progetto - <titolo Epic>](<link>) → **Task DA CREARE** ("<aaaa/MM/gg> - Allineamento settimanale") |
 ```
 
-- `Progetto`: the Azure DevOps project actually resolved. Below the table state the **interface**
-  used: CLI, or the MCP fallback and why.
+- `Progetto`: the project actually resolved. Below the table, the **interface** used (CLI, or the MCP
+  fallback and why).
 - `Item`:
   - existing Task → `[Task #<id> — <titolo>](<link>) (esistente, su item <T>h → +<delta>h)`. Hours
-    **already on the item are always shown**, zero included — the only way the user sees what is
-    being added to what. If the audit already wrote something for this period, add
-    `già scritto <X>h → delta <±Y>h`; hours the audit does not know are marked
-    `su item <T>h (<Y>h non da worklog)` and **the row stays undecided** until the user says whether
-    they are the same work (`scrittura.md`, Phase 5 step 5);
+    already on the item are **always shown**, zero included. Re-run → add
+    `già scritto <X>h → delta <±Y>h`. Hours the audit does not know → `su item <T>h (<Y>h non da worklog)`
+    and the row stays **undecided** until the user says whether it is the same work (`scrittura.md`);
   - Task to create → `padre [<Tipo> #<id> — <titolo>](<link>) → **Task DA CREARE** ("<titolo previsto>")`.
-- **Always a clickable link with the title, never a bare number** — parent, existing Task and final
-  recap alike. Link text `<Tipo> #<id> — <titolo>`, the title read from the item at runtime; the URL
-  from the item's HTML link, or the `_workitems/edit/<id>` pattern with org host and project
-  **discovered at runtime**.
-- Below the table, row by row, the **PRs** and **commits** to be linked (or "nessuno").
-- Omit the 0h rows but recall them in a note: they make the measured total add up.
+- **Always a link with the title, never a bare number** — parent, Task and recap alike. Text
+  `<Tipo> #<id> — <titolo>` read at runtime; URL from the item's HTML link or `_workitems/edit/<id>`
+  with the org host and project discovered at runtime.
+- Below the table, row by row, the **PRs** and **commits** to link, as a table `| # | PR | Commit |`
+  ("nessuno" in the cell), never a bulleted list.
+- Choices made or to confirm (rows merged, hours split between Tasks, why an item was picked): a table
+  `| # | Scelta | Motivo |`, never bullets.
+- 0h rows are omitted but recalled in a note, so the measured total still adds up.
 
-Then ask for changes: another item, another project, create the Task or not, hours, PRs, commits.
-A change → redo the affected discovery, reprint Table 2, ask again. Write only on explicit
-confirmation.
+Then ask for changes (item, project, create or not, hours, PRs, commits). A change → redo the affected
+discovery, reprint, ask again. Write only on explicit confirmation.
 
 ## Final recap
 
-After the writes and **after** reading the items back: per row, the item touched, hours before and
-after, whether it was created, parent, final state, PRs and commits linked. Every item and parent is
-a **clickable link with its title**.
-
-Close with one Italian line: total hours logged, on which project, and what did **not** happen — a
-0h row not logged, a failed link, a field not written.
+From the push output (`worklog-push.ps1` prints item, before, delta, after, audit, outcome per row) and
+**after** reading the items back: per row, the item touched, hours before and after, created or not,
+parent, final state, PRs and commits linked — every item a **link with its title**. Then one line per
+day: `copertura finale <h>/<target>h`. Close with one Italian line: total logged, on which project,
+and what did **not** happen (a 0h row, a failed row, a failed link).
 
 ## Traps
 
-1. The timeline is printed beside the table → the message becomes unreadable → it lives in the digest.
-2. The rounded total does not match the rows → a row was corrected by hand → rounded numbers come
-   only from the helper.
-3. An item shown as `#105060` → the user cannot check it without searching → link with title.
-4. "Ok procedi" on Table 1 taken for Table 2 as well → only one gate passed → each table has its own
-   confirmation.
-5. The recap repeats Table 2 instead of the outcome → the plan was trusted, not the board → the
-   recap describes what was written and verified.
+1. The timeline printed beside the table → unreadable → it lives in the digest.
+2. The rounded total does not match the rows → a row corrected by hand → numbers only from the helper.
+3. An item shown as `#105060` → the user cannot check it → link with title.
+4. "Ok procedi" on Table 1 taken for Table 2 → one gate passed → each table has its own confirmation.
+5. Coverage computed once and left stale → rows added by the gap prompt → recompute after every change.
+6. The recap repeats Table 2 → the plan was trusted → the recap is the push output, read back.

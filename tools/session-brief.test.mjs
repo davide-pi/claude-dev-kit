@@ -126,16 +126,15 @@ test('the brief names the branch, the last commit, the upstream and the work ite
   assert.equal(lines[3], 'work item #4211 (from the branch name)');
 });
 
-test('never more than five lines', () => {
+test('a PR left in the cache by an older version is ignored: there is no PR line', () => {
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });
-  // Seed a stale entry carrying a PR, so every one of the five lines can be produced at once.
   writeFileSync(join(cfg, '.session-brief-cache.json'), JSON.stringify({
     [join(root, '.git')]: { at: 0, lines: [], pr: { number: 128, title: 'Add the order list' } },
   }));
   const lines = run(root, cfg);
-  assert.equal(lines.length, 5);
-  assert.ok(lines.some((l) => l === 'open PR !128 Add the order list'), lines.join(' | '));
+  assert.equal(lines.length, 4);
+  assert.ok(!lines.some((l) => l.includes('open PR')), lines.join(' | '));
 });
 
 test('the last commit falls back to the reflog once the object is packed away', () => {
@@ -220,4 +219,66 @@ test('a payload with no cwd falls back to the process working directory', () => 
   // Claude Code always sends `cwd`; the fallback is what keeps the hook useful if it ever does not.
   const root = repo({ object: 'Add the order list projection' });
   assert.match(run(null, temp('brief-cfg-'), '{}', root)[0], /^branch feature\/4211-orders/);
+});
+
+// ── the findings log nudge (W12) ─────────────────────────────────────────────────────────────────────────
+
+/** `<git-dir>/deliver/findings.jsonl` of `root`: one JSON line per entry (an object, or a raw string kept as it is). */
+function findingsLog(root, entries) {
+  const dir = join(root, '.git', 'deliver');
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(join(dir, 'findings.jsonl'), entries.map((e) => (typeof e === 'string' ? e : JSON.stringify(e))).join('\n') + '\n');
+}
+const finding = (category, path = 'src/a.cs', priority = 'P2', closed = true) => ({ category, priority, path, closed });
+const runLine = (...findings) => ({ at: '2026-10-20T10:00:00Z', run: 'r', size: 'M', rounds: 3, minutes: 12, findings });
+const nudgeOf = (lines) => lines.filter((l) => l.startsWith('findings log'));
+
+test('a category that recurs 5 times since the last retro adds one line, even beside four lines of brief', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression')), runLine(finding('regression'), finding('regression'), finding('correctness'))]);
+  const lines = run(root);
+  assert.equal(lines.length, 5);
+  assert.equal(nudgeOf(lines).length, 1);
+  assert.match(nudgeOf(lines)[0], /regression.*5 times.*\/retro current findings/);
+  assert.ok(!nudgeOf(lines)[0].includes('correctness'));
+});
+
+test('four findings of a category are no nudge; neither is a missing, empty or unreadable log', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression'), finding('regression'))]);
+  assert.equal(nudgeOf(run(root)).length, 0);
+  assert.equal(run(repo({ object: 'x' })).length, 4);                          // no log at all
+  findingsLog(root, ['', 'not json', '{"findings": 3}', JSON.stringify(runLine(finding('regression')))]);
+  assert.equal(nudgeOf(run(root)).length, 0);
+});
+
+test('a retro marker line restarts the count: only what came after it counts', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  const five = runLine(...Array.from({ length: 5 }, () => finding('regression')));
+  findingsLog(root, [five, { retro: '2026-10-21T09:00:00Z' }, runLine(finding('regression'), finding('regression'))]);
+  assert.equal(nudgeOf(run(root)).length, 0);
+  findingsLog(root, [five, { retro: '2026-10-21T09:00:00Z' }, five]);
+  assert.equal(nudgeOf(run(root)).length, 1);
+});
+
+test('a file with 3 open P3 findings adds the line; closed ones and other priorities do not count', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  const p3 = (path, closed = false) => finding('clean-code', path, 'P3', closed);
+  findingsLog(root, [runLine(p3('src/a.cs'), p3('src/a.cs'), p3('src/a.cs', true), finding('clean-code', 'src/a.cs', 'P2', false))]);
+  assert.equal(nudgeOf(run(root)).length, 0);
+  findingsLog(root, [runLine(p3('src/a.cs'), p3('src/a.cs')), runLine(p3('src/a.cs'), p3('src/b.cs'))]);
+  const lines = run(root);
+  assert.equal(nudgeOf(lines).length, 1);
+  assert.match(nudgeOf(lines)[0], /src\/a\.cs.*3 open P3/);
+  assert.ok(!nudgeOf(lines)[0].includes('src/b.cs'));
+});
+
+test('the nudge is still there when the brief itself is served from the cache', () => {
+  const cfg = temp('brief-cfg-');
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(...Array.from({ length: 5 }, () => finding('regression')))]);
+  const first = run(root, cfg);
+  const second = run(root, cfg);
+  assert.deepEqual(second, first);
+  assert.equal(nudgeOf(second).length, 1);
 });

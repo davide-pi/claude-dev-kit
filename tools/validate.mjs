@@ -27,13 +27,14 @@ function walk(dir = '', out = []) {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
     if (['.git', 'node_modules', '.remember', '.claude'].includes(entry.name)) continue;
     const rel = dir ? `${dir}/${entry.name}` : entry.name;
+    if (rel === 'evals/results') continue; // untracked run output of `claude plugin eval`
     if (entry.isDirectory()) walk(rel, out);
     else out.push(rel);
   }
   return out;
 }
 const allFiles = walk();
-const textFiles = allFiles.filter((f) => /\.(md|json|js|mjs|ps1|yml|yaml)$/.test(f));
+const textFiles = allFiles.filter((f) => /\.(md|json|js|mjs|ts|tsx|ps1|yml|yaml)$/.test(f));
 
 /** Minimal front-matter reader: the `---` block at the top of a markdown file. */
 function frontMatter(rel) {
@@ -107,13 +108,13 @@ if (settings) {
   }
 }
 
-// ── 2. Front matter of agents, commands and skills ────────────────────────────
-// Every description of a skill, command and agent is loaded into every session's listing, so they
-// share one budget: a description that grows pushes the others out of view. Collected below,
-// checked once all three kinds are read.
+// ── 2. Front matter of agents and skills ──────────────────────────────────────
+// Every description of a skill and agent is loaded into every session's listing, so they share one
+// budget: a description that grows pushes the others out of view. Collected below, checked once
+// both kinds are read.
 const descriptionBudget = [];
 const DESCRIPTION_BUDGET_CHARS = 9500;  // ~60% of the total before the audit's cuts
-const SKILL_DESCRIPTION_WORDS = 50;
+const SKILL_DESCRIPTION_WORDS = 25;
 const words = (text) => text.split(/\s+/).filter(Boolean).length;
 
 const AGENT_MODELS = ['sonnet', 'opus', 'haiku', 'fable', 'inherit'];
@@ -134,6 +135,17 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
   if (fm.model && !AGENT_MODELS.includes(fm.model)) fail(rel, `model '${fm.model}' is not one of ${AGENT_MODELS.join(', ')}`);
   if (fm.tools !== undefined && fm.tools.trim() === '') fail(rel, '`tools` is present but empty — the agent would have no tools');
 
+  // The contract line and the output section are what let a caller merge several agents' reports
+  // without reading the prompt; `memory` is a place the agent writes to, so it needs a write tool.
+  const agentText = read(rel);
+  if (!/^\*\*Contract\.\*\*/m.test(agentText)) fail(rel, 'has no `**Contract.**` line after the title');
+  if (!/^(?:## |\*\*)Output\b/m.test(agentText)) {
+    fail(rel, "has no '## Output' section (or '**Output**' line) — the output contract is part of the agent");
+  }
+  if (fm.memory && fm.tools !== undefined && !/\b(?:Write|Edit)\b/.test(fm.tools)) {
+    fail(rel, `declares memory '${fm.memory}' but no Write or Edit tool to keep it with`);
+  }
+
   // A whitelisted MCP tool only exists if its plugin is enabled — otherwise the agent silently
   // loses that capability (Claude Code names plugin tools mcp__plugin_<plugin>_<server>__<tool>).
   const enabled = Object.entries(settings?.enabledPlugins ?? {})
@@ -143,18 +155,25 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
   }
 }
 
-for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith('.md'))) {
-  const fm = frontMatter(rel);
-  if (!fm) { fail(rel, 'has no front matter'); continue; }
-  if (!fm.description) fail(rel, 'front matter has no `description` — the slash command needs one');
-  else descriptionBudget.push([rel, fm.description]);
+// Commands were merged into skills: a `commands/` folder would shadow-collide with them.
+for (const rel of allFiles.filter((f) => f.startsWith('commands/'))) {
+  fail(rel, 'commands/ no longer exists — a slash command is a skills/<name>/SKILL.md');
 }
 
 // Skills whose contract is "explicit trigger only": the description must say so, or the
 // model will fire them on its own.
 // They must also carry `disable-model-invocation: true`, the only switch that really keeps them out
 // of the model's hands — a description saying "explicit trigger only" is a request, not a lock.
-const EXPLICIT_TRIGGER = ['worklog', 'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard'];
+// grill-me is not here: it fires on natural phrasing ("poke holes in this").
+// Named with a slash in the description on purpose, yet invocable by the model: `/code-review` is also
+// what "review this" resolves to (CLAUDE.md routes every review through it). `grill-me` is meant to
+// trigger from natural language (owner decision, eval r2), so it stays model-invocable too. `worklog`
+// fires when the owner asks in prose to log hours (owner decision): its two confirmation gates guard the write.
+const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me', 'worklog']);
+const EXPLICIT_TRIGGER = [
+  'workitem-create', 'pr-review', 'items-qa', 'project-wiki-standard',
+  'docs-sync', 'retro', 'estimate',
+];
 for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
   const fm = frontMatter(rel);
   const dir = rel.split('/')[1];
@@ -168,20 +187,43 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
       fail(rel, `is trigger-only but its description never names /${dir}, so it can fire unasked`);
     }
     if (words(fm.description) > SKILL_DESCRIPTION_WORDS) {
-      warn(rel, `description is ${words(fm.description)} words; keep it under ${SKILL_DESCRIPTION_WORDS} — say when, not what`);
+      fail(rel, `description is ${words(fm.description)} words; keep it to ${SKILL_DESCRIPTION_WORDS} — say when, not what`);
     }
+    if (!/^Use when\b/.test(fm.description)) fail(rel, 'description must open with `Use when` — it is a trigger, not a summary');
     descriptionBudget.push([rel, fm.description]);
   }
   if (EXPLICIT_TRIGGER.includes(dir) && fm['disable-model-invocation'] !== 'true') {
     fail(rel, 'is trigger-only but lacks `disable-model-invocation: true`, so the model can still invoke it');
   }
+  // A description that names `/<name>` reads as "only when typed": without the flag the skill is still
+  // listed on every turn (bytes paid) and still fires on prose. Warn, so a deliberate exception shows.
+  if (fm.description && new RegExp(`/${dir}\\b`).test(fm.description) && fm['disable-model-invocation'] !== 'true'
+      && !EXPLICIT_TRIGGER.includes(dir) && !MODEL_INVOCABLE_BY_DESIGN.has(dir)) {
+    warn(rel, `description names /${dir} but the skill lacks \`disable-model-invocation: true\` — still listed every turn and invocable by the model`);
+  }
+}
+
+// Rules load on touch through `paths`, which Claude Code reads as one comma-separated string: a
+// YAML list was silently ignored on earlier builds, leaving the rule loaded never (or always).
+const RULE_LINES = 25;
+for (const rel of allFiles.filter((f) => /^rules\/[\w.-]+\.md$/.test(f))) {
+  const text = read(rel);
+  const head = text.match(/^---\r?\n([\s\S]*?)\r?\n---/);
+  if (!head) { fail(rel, 'has no front matter — a rule without `paths` loads every session like CLAUDE.md'); continue; }
+  const paths = head[1].match(/^paths:[ \t]*(.*)$/m);
+  if (!paths) fail(rel, 'front matter has no `paths`');
+  else if (!/^"[^"]+"$/.test(paths[1].trim())) {
+    fail(rel, '`paths` must be one quoted comma-separated string ("a,b"), not a YAML list or a bare value');
+  }
+  const lines = text.replace(/\n$/, '').split('\n').length;
+  if (lines > RULE_LINES) fail(rel, `${lines} lines against the ${RULE_LINES}-line cap for a rule — facts only, procedure in the skill`);
 }
 
 const descriptionTotal = descriptionBudget.reduce((sum, [, d]) => sum + d.length, 0);
 if (descriptionTotal > DESCRIPTION_BUDGET_CHARS) {
   const top = [...descriptionBudget].sort((a, b) => b[1].length - a[1].length).slice(0, 5)
     .map(([rel, d]) => `${rel} (${d.length})`).join(', ');
-  fail('descriptions', `skills + commands + agents total ${descriptionTotal} chars against a budget of ${DESCRIPTION_BUDGET_CHARS}. Largest: ${top}`);
+  fail('descriptions', `skills + agents total ${descriptionTotal} chars against a budget of ${DESCRIPTION_BUDGET_CHARS}. Largest: ${top}`);
 }
 
 // ── 3. Nothing machine-specific or secret ────────────────────────────────────
@@ -189,6 +231,11 @@ const LEAKS = [
   // Case-insensitive on purpose: `c:\users\…` must not slip past a capitalised pattern.
   [/[A-Za-z]:[\\/]{1,2}Users[\\/]{1,2}(?!<)[A-Za-z0-9._-]+/gi, 'absolute user path'],
   [/\/(?:home|Users)\/(?!<)[A-Za-z][A-Za-z0-9._-]{2,}/gi, 'absolute home path'],
+  // Any other absolute Windows path names a machine's layout (a workspace root, a worktree root).
+  // System paths are allowed below; a path with a <placeholder> segment is the way to write one.
+  [/\b[A-Za-z]:(?![\\/]{1,2}(?:Program Files|Users)\b)[\\/]{1,2}[A-Za-z_][\w.-]+[^\s"'`|*]*/gi, 'absolute Windows path'],
+  // An MCP server alias is an organization's name: only a placeholder or a wildcard may stand there.
+  [/mcp__azdo-(?![<*{])[A-Za-z0-9]\w*/gi, 'MCP server alias (use <org-alias>)'],
   // `git@host` in a clone URL is not an address; neither is anything at example.*
   [/(?<!git)(?<![\w.+-])[\w.+-]+@(?!example\.|ssh\.)[\w-]+\.[a-z]{2,}/gi, 'e-mail address'],
   // Hyphen-segmented provider keys (sk-ant-api03-…, sk-proj-…) are the ones most likely to be
@@ -205,6 +252,8 @@ const LEAK_ALLOW = [
   /Davide Piccinini/,                                   // the LICENSE holder, on purpose
   /C:\\Program Files\\PowerShell/,                      // documented system path
   /C:\\Users\\<[^>]+>/,                                 // explicit placeholder
+  /^[A-Za-z]:[\\/]{1,2}[^<]*<[^>]+>/,                   // a path with a <placeholder> segment
+  /^C:\\{1,2}db\\{1,2}x/,                                 // the sample in destructive.js's comment
   // A password that is a *reference* to a secret, or an obvious stand-in, is the correct way to
   // write an example — flagging it would push authors towards vaguer, less useful examples.
   /(?:Password|Pwd)\s*=\s*(?:\$env:|\$\{|%[A-Za-z_]+%|\$\()/i,
@@ -213,10 +262,15 @@ const LEAK_ALLOW = [
 // A file whose job is to detect credentials has to carry specimens of them. Only these two, and
 // only because the specimens are the test surface — never widen this to a directory.
 const LEAK_EXEMPT = new Set(['hooks/secret-scan.js', 'tools/secret-scan.test.mjs']);
+// Test fixtures write fake drive paths (a drive letter and a made-up folder) to exercise path matching: for them, and only
+// for the absolute-path rule, a drive path is the subject under test, not a leak.
+const PATH_RULE = 'absolute Windows path';
+const isTestFile = (rel) => /^tools\/[\w.-]+\.test\.mjs$/.test(rel);
 for (const rel of textFiles) {
   if (LEAK_EXEMPT.has(rel)) continue;
   const text = read(rel);
   for (const [pattern, label] of LEAKS) {
+    if (label === PATH_RULE && isTestFile(rel)) continue;
     for (const m of text.matchAll(pattern)) {
       const line = text.slice(0, m.index).split('\n').length;
       const snippet = m[0].length > 60 ? `${m[0].slice(0, 57)}...` : m[0];
@@ -230,9 +284,12 @@ for (const rel of textFiles) {
 const REFERENCE = /\b((?:agents|commands|hooks|tools|mcp)\/[\w.-]+\.(?:md|ps1|mjs|json)|skills\/[\w-]+\/[\w.-]+)\b/g;
 for (const rel of textFiles) {
   const text = read(rel);
+  const textLines = text.split('\n');
   for (const m of text.matchAll(REFERENCE)) {
     if (!has(m[1])) {
       const line = text.slice(0, m.index).split('\n').length;
+      // A deliberate pointer at something that no longer exists (install.ps1's list of retired assets).
+      if (/retired-ok/.test(textLines[line - 1] ?? '')) continue;
       fail(`${rel}:${line}`, `references ${m[1]}, which does not exist`);
     }
   }
@@ -265,21 +322,49 @@ for (const name of agentNames) {
   }
 }
 
-// ── 4b. Every skill and command has triggering cases ─────────────────────────
+// The review agents run with `omitClaudeMd` and the main session may skip an external reference, so
+// the contract text each reader needs is inlined. The canonical copy lives in report-format.md; a copy
+// that drifts makes the merger parse several dialects, so every copy must equal it byte for byte:
+//   - the Finding block (fenced) in the 3 review agents;
+//   - the one-defect-per-block rule (a paragraph) in the 3 review agents;
+//   - the report skeleton (fenced) in the code-review and pr-review skills and the review-large merger.
+{
+  const FORMAT = 'skills/pr-review/references/report-format.md';
+  const norm = (rel) => read(rel).replace(/\r\n/g, '\n');
+  const fenced = (patterns, label, copies) => {
+    const canonical = has(FORMAT) ? norm(FORMAT).match(patterns)?.[1] : null;
+    if (!canonical) { fail(FORMAT, `no canonical ${label}`); return; }
+    for (const rel of copies) {
+      if (has(rel) && !norm(rel).includes(canonical)) fail(rel, `inline ${label} differs from the one in ${FORMAT} — copy it verbatim`);
+    }
+  };
+  const AGENTS = ['code-reviewer', 'review-security', 'review-performance'].map((n) => `agents/${n}.md`);
+  fenced(/## Finding block[\s\S]*?```text\n([\s\S]*?)\n```/, 'Finding block', AGENTS);
+  fenced(/(\*\*One defect per block[^\n]*(?:\n[^\n]+)*)/, 'one-defect-per-block rule', AGENTS);
+  fenced(/## Order and tables[\s\S]*?```text\n([\s\S]*?)\n```/, 'report skeleton',
+    ['skills/code-review/SKILL.md', 'skills/pr-review/SKILL.md', 'workflows/review-large.js']);
+}
+
+// ── 4b. Every skill has triggering cases ─────────────────────────
 // Descriptions are the only thing that decides whether a skill fires, so an untested one is an
-// untested trigger. A warning, not an error: adding the asset should not be blocked by it.
+// untested trigger. A warning, not an error: adding the asset should not be blocked by it. Covered
+// by an automated suite (`evals/<skill>/<case>/prompt.md`, run by `tools/run-evals.ps1`) or by a
+// manual section of `evals/skill-triggering.md`.
 if (has('evals/skill-triggering.md')) {
   const evals = read('evals/skill-triggering.md');
-  const named = [
-    ...allFiles.filter((f) => f.endsWith('/SKILL.md')).map((f) => f.split('/')[1]),
-    ...allFiles.filter((f) => f.startsWith('commands/')).map((f) => basename(f, '.md')),
-  ];
+  const named = allFiles.filter((f) => f.endsWith('/SKILL.md')).map((f) => f.split('/')[1]);
+  const suites = new Set(allFiles.filter((f) => /^evals\/[^/]+\/.+\/prompt\.md$/.test(f)).map((f) => f.split('/')[1]));
   // Look for a heading that names the asset, not a mention anywhere in the file: `/commit` appearing
-  // inside another skill's case row used to count as coverage for the commit command.
+  // inside another skill's case row used to count as coverage for the commit skill.
   for (const name of new Set(named)) {
+    if (suites.has(name)) continue;
     if (!new RegExp(`^#{2,4} .*\\b${name}\\b`, 'm').test(evals)) {
-      warn('evals/skill-triggering.md', `no triggering case section covers '${name}'`);
+      warn('evals/skill-triggering.md', `no triggering case section or evals/${name}/ suite covers '${name}'`);
     }
+  }
+  // A suite for a skill that does not exist is a rename that left its cases behind.
+  for (const suite of suites) {
+    if (!named.includes(suite)) fail(`evals/${suite}`, 'suite has no matching skills/' + suite + '/SKILL.md');
   }
 }
 
@@ -307,9 +392,8 @@ const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.spli
 const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;
 
 const LINE_CAPS = [
-  [(f) => f.endsWith('/SKILL.md'), 150, 'SKILL.md'],
+  [(f) => f.endsWith('/SKILL.md'), 120, 'SKILL.md'],
   [(f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f), 200, 'reference file'],
-  [(f) => f.startsWith('commands/') && f.endsWith('.md'), 100, 'command'],
 ];
 for (const rel of allFiles.filter((f) => f.endsWith('.md'))) {
   for (const [matches, cap, kind] of LINE_CAPS) {
@@ -332,6 +416,11 @@ for (const rel of allFiles.filter((f) => f.endsWith('/SKILL.md'))) {
       fail(rel, `has no '## ${section}' section — the body skeleton is fixed`);
     }
   }
+  // The contract line is what a user-invoked skill has instead of a guardrails section: what it
+  // produces · what it never does · the output language, so it is safe to run without reading it.
+  const contract = text.match(/^\*\*Contract\.\*\*.*(?:\n.+)*/m)?.[0];
+  if (!contract) fail(rel, 'has no `**Contract.**` line after the title');
+  else if (contract.split('·').length < 3) fail(rel, 'the contract line is not `produces · never does · language`');
   // "When" without its exclusions is half a trigger: it says what fires the skill and never what
   // does not, which is how a skill ends up answering questions it has no business answering.
   if (!/Not for:/.test(text)) warn(rel, "the 'When' section states no 'Not for:' exclusions");
@@ -359,7 +448,7 @@ const VERSION_PATTERNS = [
   [/\bv\d+\.\d+(?:\.\d+)?\b/g, 'a version-shaped token'],
   [/\b\d+\.\d+\.\d+\b/g, 'a semantic version'],
 ];
-for (const rel of allFiles.filter((f) => f.endsWith('.md') && (f.startsWith('skills/') || f.startsWith('commands/')))) {
+for (const rel of allFiles.filter((f) => f.endsWith('.md') && f.startsWith('skills/'))) {
   if (isPreV2(rel)) continue;
   const text = read(rel);
   const lines = text.split('\n');
@@ -396,18 +485,29 @@ for (const rel of textFiles) {
   }
 }
 
-// A command acts. What it must never do is the part that keeps it safe to run without reading it
-// first, so every command declares its limits — as a `## Guardrails` section (the house style) or,
-// for a short command, a single `**Never**` line.
-for (const rel of allFiles.filter((f) => f.startsWith('commands/') && f.endsWith('.md'))) {
-  if (!/(?:^|\n)\s*(?:#{2,4}\s+Guardrails\b|\*\*Never\*\*|Never:|#{2,4}\s+Never\b)/i.test(read(rel))) {
-    fail(rel, 'declares no limits — add a `## Guardrails` section or a `**Never**` line');
+// ── 7. Saved workflows ───────────────────────────────────────────────────────
+// The runtime strips `export` and runs the file as the body of an async function whose parameters are
+// the orchestration primitives. So `meta` must be the first statement, the body must compile there,
+// and nothing may be non-deterministic or imported: a workflow is replayed, and `Date.now()` or an
+// `import` would break the replay or the compile, silently, at the first `/<name>`.
+const AsyncFunction = (async () => {}).constructor;
+const WORKFLOW_PARAMS = ['args', 'agent', 'parallel', 'pipeline', 'phase', 'log', 'budget', 'workflow'];
+for (const rel of allFiles.filter((f) => /^workflows\/[\w.-]+\.js$/.test(f))) {
+  const src = read(rel);
+  if (!/^export const meta = \{/.test(src)) { fail(rel, '`export const meta = {` must be the first statement'); continue; }
+  const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  if (/\bDate\.now\s*\(|\bnew Date\s*\(|\bMath\.random\s*\(/.test(code)) fail(rel, 'uses Date.now, new Date or Math.random — a workflow must be deterministic');
+  if (/^\s*import\s/m.test(code)) fail(rel, 'has an import — the body runs inside a function, where imports do not exist');
+  try {
+    new AsyncFunction(...WORKFLOW_PARAMS, src.replace(/^export /, ''));
+  } catch (e) {
+    fail(rel, `does not compile as a workflow body — ${e.message}`);
   }
 }
 
 // ── Report ───────────────────────────────────────────────────────────────────
 const label = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-console.log(`descriptions: ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars across ${descriptionBudget.length} skills, commands and agents`);
+console.log(`descriptions: ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars across ${descriptionBudget.length} skills and agents`);
 
 // In Actions, also emit annotations so findings land on the file and line in the PR view.
 if (process.env.GITHUB_ACTIONS) {

@@ -1,11 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-settings.json",
-  "cleanupPeriodDays": 30,
+  "cleanupPeriodDays": 90,
   "env": {
+    "CLAUDE_CODE_PLUGIN_DIRS": "~/.claude/mods/cockpit",
     "CLAUDE_CODE_DISABLE_GIT_INSTRUCTIONS": "1",
     "MAX_MCP_OUTPUT_TOKENS": "10000",
     "CLAUDE_CODE_SUBAGENT_MODEL": "sonnet",
-    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "70",
     "CLAUDE_CODE_DEBUG_LOG_LEVEL": "warn",
     "CLAUDE_CODE_DISABLE_FAST_MODE": "1",
     "CLAUDE_CODE_DISABLE_MOUSE": "0",
@@ -14,14 +14,19 @@
     "CLAUDE_CODE_USE_POWERSHELL_TOOL": "1",
     "FORCE_HYPERLINK": "1",
     "CLAUDE_WORKSPACE_ROOTS": "",
-    "CLAUDE_WORKSPACE_NESTED": ""
+    "CLAUDE_WORKSPACE_NESTED": "",
+    "CLAUDE_WORKTREE_ROOT": "",
+    "CLAUDE_DONE_CLAIM": "1",
+    "CLAUDE_NUDGE_STEPS": ""
   },
+  "bashOutputMaxChars": 15000,
   "attribution": {
     "commit": "Co-Authored-By: Claude AI",
     "pr": "🤖 Opened with [Claude Code](https://claude.com/claude-code)"
   },
   "permissions": {
     "allow": [
+      "Workflow(impl-review-loop)",
       "Read(**)",
       "Grep(**)",
       "PowerShell(tsc *)",
@@ -144,6 +149,11 @@
       "PowerShell(npx eslint *)",
       "PowerShell(npx prettier *)",
       "PowerShell(npx vitest*)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files *)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "PowerShell(node ~/.claude/hooks/scope-guard.js --check *)",
       "Bash(az account show*)",
       "Bash(gh pr view*)",
       "Bash(gh pr list*)",
@@ -175,22 +185,105 @@
       "Bash(npx eslint *)",
       "Bash(npx prettier *)",
       "Bash(npx vitest*)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files *)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "Bash(node ~/.claude/hooks/scope-guard.js --check *)",
       "Bash(wc *)",
-      "Bash(find * -name *)"
+      "Bash(find * -name *)",
+      "PowerShell(Get-Content *)",
+      "PowerShell(Select-String *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell(Get-Item *)",
+      "PowerShell(Get-Process *)",
+      "PowerShell(Get-CimInstance *)",
+      "PowerShell(Get-NetTCPConnection *)",
+      "PowerShell(Measure-Object*)",
+      "PowerShell(Out-String*)",
+      "PowerShell(Join-Path *)",
+      "PowerShell(Resolve-Path *)",
+      "PowerShell(tasklist*)",
+      "Bash(tasklist*)",
+      "PowerShell(netstat*)",
+      "Bash(netstat*)",
+      "PowerShell(git add *)",
+      "Bash(git add *)",
+      "PowerShell(git switch *)",
+      "Bash(git switch *)",
+      "PowerShell(git stash push*)",
+      "Bash(git stash push*)",
+      "PowerShell(git stash pop*)",
+      "Bash(git stash pop*)",
+      "PowerShell(git stash list*)",
+      "Bash(git stash list*)",
+      "PowerShell(git stash show*)",
+      "Bash(git stash show*)",
+      "PowerShell(git tag *)",
+      "Bash(git tag *)",
+      "PowerShell(git remote *)",
+      "Bash(git remote *)",
+      "PowerShell(git worktree add *)",
+      "Bash(git worktree add *)",
+      "PowerShell(docker cp *)",
+      "Bash(docker cp *)",
+      "PowerShell(dotnet tool restore*)",
+      "Bash(dotnet tool restore*)",
+      "PowerShell(npm ci*)",
+      "Bash(npm ci*)",
+      "PowerShell(az repos pr create*)",
+      "Bash(az repos pr create*)",
+      "PowerShell(az repos pr update*)",
+      "Bash(az repos pr update*)",
+      "PowerShell(az repos pr reviewer add*)",
+      "Bash(az repos pr reviewer add*)",
+      "PowerShell(az repos pr work-item add*)",
+      "Bash(az repos pr work-item add*)",
+      "PowerShell(az boards work-item create*)",
+      "Bash(az boards work-item create*)",
+      "PowerShell(az boards work-item update*)",
+      "Bash(az boards work-item update*)",
+      "PowerShell(az boards work-item relation add*)",
+      "Bash(az boards work-item relation add*)",
+      "PowerShell(az devops wiki page create*)",
+      "Bash(az devops wiki page create*)",
+      "PowerShell(az devops wiki page update*)",
+      "Bash(az devops wiki page update*)",
+      "PowerShell(gh pr create*)",
+      "Bash(gh pr create*)",
+      "PowerShell(gh pr comment*)",
+      "Bash(gh pr comment*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebFetch(domain:learn.microsoft.com)",
+      "WebFetch(domain:code.claude.com)",
+      "WebFetch(domain:platform.claude.com)"
     ],
     "deny": [
       "Read(**/.env)",
-      "Read(**/.env.*)",
       "Read(**/*.pem)",
       "Read(**/*.key)",
+      "Read(//**/.env)",
+      "Read(//**/.env.local)",
+      "Read(//**/.env.*.local)",
+      "Read(//**/.env.production)",
+      "Read(//**/.env.staging)",
+      "Read(//**/.env.development)",
+      "Read(//**/*.pem)",
+      "Read(//**/*.key)",
       "Read(~/.git-credentials)",
       "Read(~/.claude.json)",
       "Read(~/.claude/.credentials.json)",
+      "Read(~/.azure*/msal_token_cache*)",
+      "Read(~/.azure*/service_principal_entries*)",
+      "Read(~/.config/gh/hosts.yml)",
+      "Read(~/.docker/config.json)",
+      "Read(//**/*.pfx)",
+      "Read(//**/*.p12)",
+      "Read(//**/id_rsa*)",
+      "Read(//**/id_ed25519*)",
       "Edit(~/.ssh/**)",
       "Edit(~/.aws/**)",
-      "PowerShell(Remove-Item -Force*)",
-      "Bash(rm -rf *)",
-      "PowerShell(Remove-Item -Recurse*)",
       "PowerShell(dotnet ef database drop*)",
       "PowerShell(dotnet ef migrations remove*)",
       "PowerShell(docker compose down -v*)",
@@ -198,14 +291,8 @@
       "PowerShell(docker system prune*)",
       "PowerShell(docker volume rm*)",
       "PowerShell(git clean -f*)",
-      "PowerShell(git push --delete*)",
-      "PowerShell(git push -d*)",
-      "PowerShell(git push origin :*)",
       "PowerShell(az group delete*)",
-      "PowerShell(az boards work-item delete*)",
-      "PowerShell(az repos delete*)",
-      "PowerShell(az pipelines delete*)",
-      "PowerShell(kubectl delete *)",
+      "PowerShell(az account set*)",
       "Bash(dotnet ef database drop*)",
       "Bash(dotnet ef migrations remove*)",
       "Bash(docker compose down -v*)",
@@ -213,25 +300,20 @@
       "Bash(docker system prune*)",
       "Bash(docker volume rm*)",
       "Bash(git clean -f*)",
-      "Bash(git push --delete*)",
-      "Bash(git push -d*)",
-      "Bash(git push origin :*)",
       "Bash(az group delete*)",
-      "Bash(az boards work-item delete*)",
-      "Bash(az repos delete*)",
-      "Bash(az pipelines delete*)",
-      "Bash(kubectl delete *)"
+      "Bash(az account set*)"
     ],
     "ask": [
-      "PowerShell(git push*)",
-      "Bash(git push*)",
       "PowerShell(git push --force*)",
       "Bash(git push --force*)",
+      "PowerShell(git push -f*)",
+      "Bash(git push -f*)",
+      "PowerShell(git push --force-with-lease*)",
+      "Bash(git push --force-with-lease*)",
       "PowerShell(git reset --hard*)",
       "PowerShell(git rebase*)",
       "PowerShell(git cherry-pick*)",
       "PowerShell(sqlcmd *)",
-      "PowerShell(docker exec *)",
       "PowerShell(docker compose down*)",
       "PowerShell(dotnet ef database update*)",
       "PowerShell(dotnet tool install*)",
@@ -239,14 +321,53 @@
       "Bash(git rebase*)",
       "Bash(git cherry-pick*)",
       "Bash(sqlcmd *)",
-      "Bash(docker exec *)",
       "Bash(docker compose down*)",
       "Bash(dotnet ef database update*)",
       "Bash(dotnet tool install*)",
       "PowerShell(git branch -D*)",
-      "Bash(git branch -D*)"
+      "Bash(git branch -D*)",
+      "PowerShell(git push --delete*)",
+      "Bash(git push --delete*)",
+      "PowerShell(git push -d*)",
+      "Bash(git push -d*)",
+      "PowerShell(git push origin :*)",
+      "Bash(git push origin :*)",
+      "PowerShell(Remove-Item -Recurse*)",
+      "PowerShell(Remove-Item -Force*)",
+      "Bash(rm -rf *)",
+      "Bash(rm -fr *)",
+      "Bash(rm -r *)",
+      "PowerShell(kubectl delete *)",
+      "Bash(kubectl delete *)",
+      "PowerShell(az boards work-item delete*)",
+      "Bash(az boards work-item delete*)",
+      "PowerShell(az repos delete*)",
+      "Bash(az repos delete*)",
+      "PowerShell(az pipelines delete*)",
+      "Bash(az pipelines delete*)"
     ],
     "defaultMode": "auto"
+  },
+  "autoMode": {
+    "environment": [
+      "$defaults",
+      "Solo developer on Windows; Azure DevOps + GitHub; non-dev databases only through ~/.claude/scripts/db-ro.ps1"
+    ],
+    "allow": [
+      "$defaults",
+      "Read-only az devops/boards/repos/pipelines and gh queries",
+      "dotnet build/test, npm test, docker compose ps/logs"
+    ],
+    "soft_deny": [
+      "$defaults",
+      "Any command that writes to a database not on localhost",
+      "git push to the default branch",
+      "Deleting a branch, worktree, volume or cloud resource",
+      "Editing files under ~/.claude without the user's explicit request this turn, except memory, plans, jobs and worklog"
+    ],
+    "hard_deny": [
+      "$defaults"
+    ]
   },
   "model": "opus[1m]",
   "fallbackModel": ["sonnet", "haiku"],
@@ -257,13 +378,13 @@
         "hooks": [
           {
             "type": "command",
-            "command": "C:\\Program Files\\PowerShell\\7\\pwsh.exe",
+            "command": "pwsh",
             "args": [
               "-NoProfile",
               "-ExecutionPolicy",
               "Bypass",
               "-Command",
-              "& \"$env:CLAUDE_HOOKS\\ensure-edge-cdp.ps1\""
+              "$d = if ($env:CLAUDE_HOOKS) { $env:CLAUDE_HOOKS } else { \"$HOME\\.claude\\hooks\" }; & \"$d\\ensure-edge-cdp.ps1\""
             ],
             "timeout": 30,
             "statusMessage": "Checking Edge's CDP port for browser-use..."
@@ -278,24 +399,26 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/guard-shell.js')}catch{process.exit(0)}"
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/guard-shell.js')"
             ],
             "timeout": 15,
+            "onFailure": "block",
             "statusMessage": "Checking the command before it runs..."
           }
         ]
       },
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/secret-scan.js')}catch{process.exit(0)}"
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/secret-scan.js')"
             ],
             "timeout": 15,
+            "onFailure": "block",
             "statusMessage": "Scanning the change for credentials..."
           }
         ]
@@ -303,22 +426,73 @@
     ],
     "PostToolUse": [
       {
-        "matcher": "Write|Edit",
+        "matcher": "Write|Edit|MultiEdit",
         "hooks": [
           {
             "type": "command",
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/format-on-edit.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/format-on-edit.js')}catch{process.exit(0)}"
             ],
             "timeout": 30,
             "statusMessage": "Formatting the file just written..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/nudges.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
           }
         ]
       }
     ],
     "SessionStart": [
+      {
+        "matcher": "startup|resume|clear|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/workspace-context.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Resolving the ALM target and az identity for this workspace..."
+          },
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/session-brief.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Reading the repository state..."
+          }
+        ]
+      },
+      {
+        "matcher": "startup",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worklog-pending.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10,
+            "statusMessage": "Checking for days whose hours were never logged..."
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
       {
         "hooks": [
           {
@@ -326,20 +500,56 @@
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/session-brief.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/nudges.js')}catch{process.exit(0)}"
             ],
-            "timeout": 10,
-            "statusMessage": "Reading the repository state..."
-          },
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
           {
             "type": "command",
             "command": "node",
             "args": [
               "-e",
-              "try{require((process.env.CLAUDE_HOOKS||'')+'/worklog-pending.js')}catch{process.exit(0)}"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/done-claim.js')}catch{process.exit(0)}"
             ],
-            "timeout": 10,
-            "statusMessage": "Checking for days whose hours were never logged..."
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "WorktreeCreate": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worktree-root.js')"
+            ],
+            "timeout": 90,
+            "statusMessage": "Creating the worktree under CLAUDE_WORKTREE_ROOT..."
+          }
+        ]
+      }
+    ],
+    "WorktreeRemove": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/worktree-root.js')"
+            ],
+            "timeout": 60,
+            "statusMessage": "Removing the worktree..."
           }
         ]
       }
@@ -348,18 +558,22 @@
   "worktree": {
     "baseRef": "fresh"
   },
-  "enableWorkflows": false,
+  "enableWorkflows": true,
+  "workflowSizeGuideline": "small",
+  "skipWorkflowUsageWarning": true,
+  "workflowKeywordTriggerEnabled": false,
   "defaultShell": "powershell",
   "statusLine": {
     "type": "command",
-    "command": "node \"$HOME/.claude/statusline.js\""
+    "command": "node \"$HOME/.claude/statusline.js\"",
+    "refreshInterval": 2
   },
   "enabledPlugins": {
     "csharp-lsp@claude-plugins-official": true,
     "frontend-design@claude-plugins-official": true,
     "remember@claude-plugins-official": false,
     "microsoft-docs@claude-plugins-official": true,
-    "skill-creator@claude-plugins-official": true,
+    "skill-creator@claude-plugins-official": false,
     "chrome-devtools-mcp@claude-plugins-official": false,
     "redis-development@claude-plugins-official": false,
     "typescript-lsp@claude-plugins-official": true,
@@ -369,6 +583,7 @@
     "browser-use@claude-plugins-official": true
   },
   "language": "Italian",
+  "outputStyle": "owner-80-20",
   "feedbackDrafts": "notify",
   "alwaysThinkingEnabled": true,
   "effortLevel": "medium",
@@ -382,8 +597,7 @@
   "theme": "dark",
   "editorMode": "normal",
   "preferredNotifChannel": "auto",
-  "autoCompactEnabled": false,
-  "remoteControlAtStartup": true,
+  "autoCompactEnabled": true,
   "inputNeededNotifEnabled": true,
   "agentPushNotifEnabled": true,
   "voiceEnabled": true

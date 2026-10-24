@@ -1,101 +1,73 @@
 ---
 name: grill-me
 description: >-
-  Use when the user wants a plan or design scrutinized rather than executed — "grill me", "poke
-  holes in this", "red-team my design", "play devil's advocate", "what am I missing?" — interviewing
-  round by round until a Decision Summary.
+  Use when a plan or design must be attacked, not built: "grill me", "fammi le pulci", "poke holes",
+  "attack this design", /grill-me.
+argument-hint: "[the plan or design, or nothing to use the one under discussion]"
 ---
 
 # grill-me — interrogate the plan until every branch is decided
 
-**Language.** The interview — questions, options, recommendations, pushback — and the Decision
-Summary are **Italian**. Code, identifiers, paths and commands stay as they are.
+**Contract.** Question rounds until the decision frontier is empty, then a Decision Summary ·
+builds nothing, acts on nothing before the summary is confirmed · Italian; code and paths verbatim.
 
 ## When
 
-- The user asks for scrutiny, not execution: "grill me", "poke holes", "red-team", "devil's advocate".
-- A design is already on the table and the question is whether it holds (`dev-loop` routes here).
-- `workitem-create` escalates its Q&A because the work is ambiguous and decisions depend on each other.
+- The user asks for scrutiny, not execution: `/grill-me`, "grill me", "fammi le pulci", "poke holes", "red-team",
+  "attack this design", "devil's advocate".
+- A design is on the table and the question is whether it holds.
 
-Not for: designing the solution yourself, writing the plan (`plan-work`), or a bug (`debug-systematic`).
+Not for: designing the solution yourself, writing the plan (`plan-work`), a bug (`debug-systematic`).
 
 ## Decide
 
-The plan is a **decision tree**: every decision branches into the decisions that hang off it. The
-**frontier** is every open decision whose prerequisites are already settled — the questions you can
-ask now without guessing at answers you have not heard yet.
+The plan is a **decision tree**; the **frontier** is every open decision whose prerequisites are
+settled — what can be asked now without guessing at answers not yet heard.
 
 | Situation | Move |
 | --- | --- |
-| A fact the environment can answer (code, config, board, logs) | find it yourself — dispatch an `Explore` subagent for anything wider than one read; never ask the user |
-| A fact is still being looked up | only the questions downstream of it wait; ask the rest of the frontier now |
-| A decision | it is the user's — put it to them with your recommended answer, and wait |
-| Question B depends on question A, both open | B belongs to a later round, never the same one |
-| The answer is vague ("it should be fast") | push for the number, the owner, or the failure case in the next round |
-| A round is answered | recompute the frontier: settled decisions unblock the ones that hung off them |
-| An answer shows an earlier round was asked on a wrong premise | reopen that branch in the next round, saying why |
-| A new question appears while resolving | add it to the tree; nothing is closed until it is walked |
-| The user defers a point | record it as open, with what it blocks |
-| The user asked for one question at a time | one question per call, same tool |
+| a fact the environment can answer (code, config, board, logs) | find it yourself — an `Explore` agent for anything wider than one read; never ask the user |
+| a fact still being looked up | only the questions downstream of it wait; ask the rest of the frontier |
+| a decision | the user's: put it with your recommended answer, and wait |
+| B depends on A, both open | B goes to a later round |
+| a vague answer ("it should be fast") | next round: the number, the owner, or the failure case |
+| a round answered | recompute the frontier |
+| an answer breaks an earlier premise | reopen that branch next round, saying why |
+| the user defers a point | record it as open, with what it blocks |
+| the user wants one question at a time | one question per call, same tool |
 
 A recommendation answers one question; it is never a redesign of the plan.
 
+### Asking — `AskUserQuestion`, the whole frontier per round
+
+| Field | Content |
+| --- | --- |
+| `header` | `D<n> <topic>`, ≤ 12 characters — the number survives into the summary |
+| `question` | the full question, ending in `?`, with the context needed to decide |
+| `options` | 2–4 real alternatives; the recommended one **first**, label ending `(Consigliata)`, `description` = the reason in one line; the others' trade-offs in theirs |
+| `multiSelect` | `true` only when the choices genuinely combine |
+| `preview` | only to compare concrete artefacts: code shapes, layouts, configs |
+
+Up to 4 questions per call; a bigger frontier is several calls in the same round. The tool adds a
+free-text "Other" by itself. An open question (a number, a name) still gets 2–4 plausible values.
+Phrase each question so the recommended option is the affirmative one. Tool unavailable → numbered
+questions in chat, recommended answer first, so "sì" accepts it.
+
 ## Do
 
-1. Restate the plan as a decision tree (one line per branch) and confirm it.
-2. Ask the **whole frontier in one round** through the **`AskUserQuestion` tool** — never as text
-   printed in chat, which the user has to answer by retyping. One call holds up to 4 questions;
-   a bigger frontier is several calls in a row, all in the same round.
-
-   | Field | Content |
-   | --- | --- |
-   | `header` | `D<n> <topic>`, ≤ 12 characters — the number survives into the summary |
-   | `question` | the full question, ending in `?`, with the context needed to decide |
-   | `options` | 2–4 real alternatives; **the recommended one first**, its label ending in `(Consigliata)`, its `description` giving the reason in one line; each other option's trade-off in its `description` |
-   | `multiSelect` | `true` only when the choices genuinely combine |
-   | `preview` | only to compare concrete artefacts: code shapes, layouts, configs |
-
-   The tool always adds a free-text "Other": never add one yourself. A genuinely open question
-   (a number, a name) still gets 2–4 plausible values, the recommended one first.
-3. Read the answers, recompute the frontier, ask the next round. Repeat until the frontier is
-   empty: every branch visited, nothing left silently assumed.
-4. Output the **Decision Summary** (Italian):
-   - each decision point (`D<n>`) and its resolution;
-   - dependencies between decisions;
-   - risks and trade-offs explicitly accepted;
-   - open items deferred, and what each blocks.
-5. Act on nothing until the user confirms the summary is the shared understanding — an empty
-   frontier is not that confirmation.
-
-**Tool unavailable** (a subagent, a non-interactive run, a denied call) → fall back to printed
-rounds, worded so "sì" accepts the recommendation:
-
-```markdown
-❓ **D1 — <titolo>**: <la domanda, con le alternative se servono>
-
-➡️ <risposta consigliata, e perché in una riga>
-
----
-
-❓ **D2 — <titolo>**: ...
-```
+1. Restate the plan as a decision tree, one line per branch; confirm it.
+2. Ask the frontier; read the answers; recompute; repeat until the frontier is empty.
+3. Output the **Decision Summary**: each `D<n>` and its resolution; dependencies between decisions;
+   risks and trade-offs explicitly accepted; deferred items and what each blocks.
+4. Act on nothing until the user confirms the summary — an empty frontier is not that confirmation.
 
 ## Traps
 
 1. Questions printed in chat while the tool is available → the user retypes every answer → every
    round goes through `AskUserQuestion`.
-2. A redesign offered instead of an attack → the instinct to help → recommend per question, never
-   rewrite the plan.
-3. A dependent question in the same round as its prerequisite → the user answers it on a guess →
-   it waits for the next round.
-4. Asking what the code already says → wasted turn and credibility → read first, or send a subagent.
-5. No option marked `(Consigliata)` → the user has to think every question through from scratch →
-   every question carries one, listed first.
-6. A recommendation that argues against its own question → agreeing means answering "no" → phrase
-   the question so the recommended option is the affirmative one.
-7. Stopping when the user tires → the summary hides open branches → list them as deferred.
-8. Building as soon as the frontier empties → the confirmation gate skipped → wait for the "ok" on
-   the summary.
+2. A redesign offered instead of an attack → the instinct to help → recommend per question.
+3. Asking what the code already says → wasted turn and credibility → read first, or send an agent.
+4. Stopping when the user tires → the summary hides open branches → list them as deferred.
 
 ## References
 

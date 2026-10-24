@@ -1,150 +1,120 @@
 ---
 name: skill-forge
 description: >-
-  Use when a kit skill, command, agent, hook or reference is added or changed — a skill that
-  misfires or never fires, one over its line cap, choosing between shapes, or before calling an
-  asset finished. The kit's contract on top of skill-creator.
+  Use when a kit skill, agent, hook, rule or reference is added, changed, misfires or exceeds its
+  cap, or before calling one finished.
 ---
 
 # skill-forge — the kit's asset contract, as a procedure
 
-The `skill-creator` plugin already owns generic skill authoring — scaffolding, eval generation,
-description optimization — so use it for the machinery. This skill adds what the plugin cannot
-know: the shape rules, caps, skeleton and checks that make an asset belong to *this* kit. When the
-two disagree, this contract wins.
+**Contract.** Assets that fit the kit contract and pass the validator · never an asset that restates
+a plugin, `CLAUDE.md` or another asset · asset prose English, chat with the user Italian.
 
 ## When
 
-- A new asset is being added to the kit.
-- A skill fires when it should not, or stays silent when it should fire.
-- An asset is over its line cap, or a topic inside it needs its own file.
-- The shape is unclear: skill, command, agent, hook, or reference.
+- A skill, agent, hook, rule or reference is added to the kit or reshaped.
+- A skill never fires, fires unasked, or is over its cap.
+- The shape is unclear: rule, skill, user-invoked or fork skill, agent, hook, settings.
 - An asset is about to be called finished.
 
-Not for: authoring machinery and eval runs, which the `skill-creator` plugin does better; skills
-about a Microsoft technology, where `microsoft-skill-creator` can generate the research; project
-documentation; changing settings, permissions or hook registration (that is `update-config`).
+Not for: generic authoring machinery and eval runs (`skill-creator` plugin); settings, permissions
+and hook registration (`update-config`); a project's own docs (`doc-keeper`).
 
 ## Decide
 
-### Which shape
+### 1. Shape — decided by *when* the content must be present
 
-Picking the wrong shape is the most common mistake in the kit. The question to answer is *when the
-content has to be present*, not what it is about.
+| The need | Shape | Confirming test |
+| --- | --- | --- |
+| A fact or gotcha true of every file of a type | **rule** `rules/<x>.md`, `paths: "a,b"` | ≤ 25 lines; a re-read recovers it after `/compact` |
+| A decision re-made the same way | **skill** (auto) | it answers "which way do we do X here?" |
+| An action the user starts that posts, writes or logs | **user-invoked skill** (`disable-model-invocation: true`) | firing unasked would write something |
+| Noisy work whose value is the conclusion (SQL, logs, browser, CI) | **fork skill** (`context: fork`, `agent:`, `background: false`) | the raw output must never enter the main context |
+| Many reads for a short answer, spawned by the model | **agent** with an output contract | the caller needs the summary, not the files |
+| Must happen whether or not anyone remembers | **hook** (command type first) | forgetting it once already did damage |
+| Depth on one topic, needed by some branches | **reference** in the owning skill | the skill is complete without it |
+| A value, a path, a permission | **settings** | nothing to decide |
+| A plugin already covers it | **one routing line** | the plugin's skill beats a restatement |
 
-| The need | Shape | Test that confirms it |
-|----------|-------|----------------------|
-| A decision I keep re-making the same way | **Skill** | It answers "which way do we do X here?" |
-| A fixed sequence whose decisions are already made | **Command** | It could be a script, except it needs judgement in the middle |
-| Reading many files to produce a short answer | **Agent** | The value is the summary; the file dumps must not enter the main context |
-| It must happen whether or not I remember | **Hook** | Forgetting it once already caused damage |
-| Depth on one topic, needed occasionally | **Reference** inside the owning skill | The skill is complete without it, and better with it on demand |
-| A value, a path, a permission | **Settings**, not an asset | Nothing to decide, only to configure |
-| Something a plugin already covers | **A routing line**, not an asset | The plugin's own skill is better than a restatement |
+Two shapes for one need is duplication: one asset owns it, the others route to it in one line.
 
-Two shapes for one need is duplication: a command may *route to* a skill, never restate it.
-
-### The skill contract
+### 2. The contract — normative copy (`rules/kit-assets.md` is its summary)
 
 | Rule | Value | Enforced by |
-|------|-------|-------------|
-| Folder | `skills/<name>/SKILL.md`, plus `references/*.md` and `*.ps1` beside it | convention |
-| `name` | Identical to the folder | validator, error |
-| `description` | **≤ 50 words**, phrased as **situations and trigger phrases**, never a catalogue of contents — the session skill listing has a character budget, and an overflowing listing drops descriptions so skills never auto-trigger | review (validator: < 1024 chars) |
-| Explicit-trigger skill | Front matter carries `disable-model-invocation: true`; the description is one line naming its slash trigger | validator (trigger), review (flag) |
-| Project shadowing | A project's `.claude/skills/<name>` with a kit skill's name **shadows** the kit skill entirely — a project keeps only its own data there, under a different name, and the kit skill routes to it | review |
-| Body skeleton | `# name — purpose`, `## When` (ending in a "Not for:" line), `## Decide`, `## Do`, `## Traps`, `## References` — in that order | review |
-| `SKILL.md` length | 150 lines maximum | cap |
-| Reference length | 200 lines maximum, one topic each, self-contained | cap |
-| Command length | 100 lines maximum, and a **Never** line in the body | cap |
-| Style | Tables and decision trees; PowerShell examples; no version numbers | review |
-| Language | The asset's prose is **English** and it *says* "produce Italian" for everything a person reads; code, a project's technical docs, plan files and specs stay English | review |
-| Identity | No organization names, no absolute machine paths, no addresses | validator, error |
-| Cross-references | Name other assets by bare name; never link a file that does not exist yet | validator, error |
+| --- | --- | --- |
+| Folder | `skills/<name>/SKILL.md`, `references/*.md`, scripts beside `SKILL.md` | convention |
+| `name` | identical to the folder | validator |
+| Description | ≤ 25 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
+| Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | review |
+| Skeleton | title, contract, `## When` (+ `Not for:`, ≤ 3 items), `## Decide`, `## Do`, `## Traps`, `## References` | validator |
+| Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 | validator |
+| Compaction | an invoked body re-injects capped at ~5 k tokens, cut from the bottom: `## Decide` near the top, nothing load-bearing after `## Do` | review |
+| Phrasing | the outcome, where the model already knows how; procedure only where the house way differs; the body is the 20 % of paths that cover 80 % of cases, rare branches go to a reference — every section earns its tokens | review |
+| Drop | restated `CLAUDE.md` rules (language, 80/20, change scope), version numbers, Traps restating a Decide row, why-prose a row already carries | review |
+| Identity | placeholders (`<org>`, `<project>`) for org, project, address, machine path, token | validator |
+| Cross-refs | bare asset names; never a link to a file not yet committed; a hook not yet shipped is named by its bare file name | validator |
+| Shadowing | no project `.claude/skills/<name>` reuses a kit skill's name — it replaces the kit skill there | review |
 
-Over the cap, content is **split into a reference, never trimmed of substance**. The section that
-earns a skill is `## Decide`; if that section is thin, the skill is not needed.
+Over a cap, split into a reference — never trim substance. A thin `## Decide` means the skill is not
+needed.
 
-### Command, agent and hook contracts
+### 3. Frontmatter that changes cost or behaviour
 
-| Shape | Front matter | Body must contain |
-|-------|-------------|-------------------|
-| Command | `description`, `argument-hint` | The procedure in order with exact CLI calls, then a **Never** line: what it must not do (post, force-push, drop, deploy) |
-| Agent | `name` matching the filename, `description` saying when to spawn it, `tools` at least privilege, `model: sonnet` unless the job needs more | The **output contract** — the exact shape the caller receives — and, when read-only, that it never edits, posts or commits |
-| Hook | — | Node when it runs on every tool call, pwsh when it needs Windows APIs; always exit 0 unless the block is deliberate; git state read from disk; every environment variable it uses documented in the README |
+| Field | Effect | Rule |
+| --- | --- | --- |
+| `disable-model-invocation: true` | not listed (0 bytes per turn); only `/<name>` loads it | every skill that posts, writes or logs; behaviour has varied across builds → keep a `/<name>` eval |
+| `context: fork` + `agent:` | runs in a subagent with **no history**: the body and the arguments only | the body restates every input it needs; `background: false` (a backgrounded fork arrives as a notification and loses `Agent`) |
+| `model:` | non-fork skill: full prompt-cache miss that turn · fork skill: the subagent's model | fork skills only |
+| `effort:` | cache-safe | when the job needs it |
+| `paths:` | hides the skill until a matching file is read, then lists it (smoke test passed) | file-type skills only; one needed before any file is read (`plan-work`, `skill-forge`) has none |
+| `argument-hint`, `allowed-tools` | autocomplete hint; pre-approved tools | user-invoked skills |
 
-An agent no prose ever names is unreachable — the validator warns, and the fix is a routing line in
-the skill or command that should spawn it.
+Agent frontmatter (`tools`, `model`, `memory`, `maxTurns`, `omitClaudeMd`): `references/asset-templates.md`.
 
-### Where the content goes
+### 4. The listing budget
 
-| Symptom | Move |
-|---------|------|
-| `SKILL.md` over 150 lines | Pull the deepest topic into a reference; keep the routing line |
-| A reference over 200 lines | Split by topic, not by size |
-| Two skills answering the same question | Merge, or make one route to the other in a single line |
-| A skill restating a plugin | Delete the restatement, keep one routing line |
-| A skill nobody triggers | The description is the bug, not the body (`references/description-craft.md`) |
-| Prose paragraphs explaining a choice | A table row that keeps the reason; drop only narrative with no rule, reason or gotcha |
+Auto-skill and agent descriptions are paid every turn of every session. Budget: ~1 % of the context
+window in characters (~8 k on a 200 k model), 1,536 characters per description; on overflow the
+least-invoked descriptions drop **silently**. Measure with `/doctor` (listing cost), `/skill-doctor`
+(never-invoked skills) and `/usage` (per-asset attribution). A skill nobody triggers has a
+description bug, not a body bug: `references/description-craft.md`.
 
 ## Do
 
 ```powershell
-# 1. Scaffold. The folder name is the skill name — the validator compares them.
-New-Item -ItemType Directory -Path skills/<name>/references -Force
-# Write SKILL.md with the six-heading skeleton; copy a shape from references/asset-templates.md.
-
-# 2. Stay inside the caps, before anything else.
-Get-ChildItem -Recurse -Path skills/<name> -Filter *.md |
-  ForEach-Object { "{0}`t{1}" -f (Get-Content $_ -ReadCount 0).Count, $_.Name }
-
-# 3. Self-check what the validator rejects. Replace each hit with a placeholder or a detection rule.
-Select-String -Path skills/<name>/*.md, skills/<name>/references/*.md `
-  -Pattern 'Users\\', 'Password\s*=', '\S+@\S+\.\w+', 'version \d' | Format-Table LineNumber, Line
-
-# 4. In the kit's source repo (not the installed ~/.claude copy): run the validator, fix every error.
-node tools/validate.mjs
-
-# 5. Add the two artefacts that make it real:
-#    - a section in evals/skill-triggering.md with at least one MUST and one MUST NOT prompt;
-#    - a row in the README asset table: | `skills/<name>/SKILL.md` | Skill | <one sentence>. |
-
-# 6. Trigger check: paste the MUST prompt in a scratch session and confirm the skill loads, then
-#    the MUST NOT prompt and confirm it stays out. Reworking a description? Use skill-creator.
+New-Item -ItemType Directory -Path skills/<name>/references -Force      # folder = name
+Get-ChildItem -Recurse skills/<name> -Filter *.md |
+  ForEach-Object { "{0}`t{1}" -f (Get-Content $_.FullName).Count, $_.Name }   # caps
+node tools/validate.mjs                    # in the kit repo, not the installed copy; fix every error
+node --test tools/*.test.mjs               # a hook or a lib changed
+claude plugin validate ~/.claude/skills    # bad YAML loads with empty metadata and never fires
 ```
 
-**Finished means all six:** inside the caps, skeleton complete, output language stated, validator
-clean, eval section added, README row added. Five out of six is not finished.
+**Finished** = caps held · skeleton and contract line · validator clean · a section in
+`evals/skill-triggering.md` (one MUST, one MUST NOT, `/<name>` for a user-invoked skill) · a README
+asset row · each new test or hook seen failing once: a check never seen failing proves nothing.
 
 ## Traps
 
-1. **A description written as a summary, or past 50 words** — it says what the skill contains, and
-   it eats the listing budget that silences other skills. Rewrite it around situations.
-2. **A description so broad it fires on everything** — the "Not for:" cases belong in it, in the
-   words a user would actually type.
-3. **A trigger-only skill without `disable-model-invocation: true`, or whose description never
-   names its trigger** — it fires unasked; the validator rejects the missing trigger.
-4. **A project skill named like a kit skill** — it silently replaces the kit skill in that project.
-   Keep project data under its own name.
-5. **Shrinking a long skill instead of splitting it** — the substance that was dropped is exactly
-   why the skill existed.
-6. **A version number in prose** — the asset rots the day the version moves. Say how to detect the
-   version, or route to the docs plugin.
-7. **A markdown link to a file added in a later commit** — the validator fails the whole run. Name
-   assets by bare name in prose.
-8. **A reference file no skill routes to** — it is never read. Every reference gets a line in
-   `## References` with the condition that sends you there.
-9. **An org name, a machine path or an address in an example** — placeholders are allowed only for
-   those three things, and required for them.
-10. **MCP-first, or bash-first, instructions** — the CLI comes first (`az`, `gh`, `dotnet`, `docker`, `sqlcmd`)
-   with the MCP fallback stated, and examples are PowerShell unless the asset says why bash is better.
-11. **A command with no Never line** — nothing stops it from posting, dropping or deploying.
-12. **An asset that duplicates an installed plugin** — check the README plugin coverage table first.
+1. Never fires → the description summarises contents → rewrite it around situations and the words
+   the user types (`references/description-craft.md`).
+2. A user-invoked skill fires unasked → the flag is missing or the description lacks `/<name>` →
+   add both; the validator checks them.
+3. A fork skill asks "which PR?" → it counted on the conversation → restate every input in the body
+   and parse the arguments line (`references/asset-templates.md` § Fork skill).
+4. A fact needed on every `.cs` edit lives in a skill body → bodies load only on invocation → make
+   it a rule; the skill keeps the procedure.
+5. A reference nobody opens → no `## References` line names its condition → add the line, or merge
+   the file away.
+6. A version number in prose → it rots on the next release → say how to detect the version.
+7. MCP-first or bash-first instructions → CLI first (`az`, `gh`, `dotnet`, `docker`), the fallback
+   stated; PowerShell examples unless bash is genuinely better.
 
 ## References
 
-- `references/description-craft.md` — writing a description that fires when it should and stays
-  quiet otherwise, with the false-negative and false-positive patterns and how to test both.
-- `references/asset-templates.md` — copy-paste skeletons for a skill, a command, an agent and a
-  hook, the two-language rule with its exceptions, the eval and README formats, the finish checklist.
-- `references/writing-for-agents.md` — wording an asset: pointers, no-ops, positive phrasing, criteria.
+- `references/asset-templates.md` — writing a new asset: skeletons for auto, user-invoked and fork
+  skills, rule, agent, hook; the eval section; the README row; the finish checklist.
+- `references/description-craft.md` — a skill misfires or never fires, or a description is being
+  written: the shape, false-negative and false-positive patterns, the eval cases.
+- `references/writing-for-agents.md` — wording any asset: pointers, completion criteria, leading
+  words, positive phrasing, pruning no-ops.

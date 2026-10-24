@@ -16,8 +16,9 @@ git log --oneline "origin/$base..HEAD"  # what this branch actually adds
 git diff --stat "origin/$base...HEAD"   # how wide the change is
 ```
 
-Then run the repo's own gates — build, tests, linter, formatter — and read the output. `done-check`
-owns which evidence each kind of change requires; do not restate it here, run it.
+Then run the repo's own gates — build, tests, linter, formatter — and read the output.
+`plan-work`'s `references/evidence-by-stack.md` owns which evidence each kind of change requires;
+do not restate it here, run it.
 
 If a gate is red, the branch is not finished. That is the whole decision.
 
@@ -32,17 +33,13 @@ If a gate is red, the branch is not finished. That is the whole decision.
 | Dead end | delete local and remote branch | a written lesson, not a branch |
 | Wanted later, not now | keep the branch, rebase it while it is cheap, say what blocks it | a named blocker |
 
-The table is the model's decision grid, in English. When the menu is **presented to the user** it is
-written in Italian, one line per option that actually applies — *"Fatto e verificato → push, PR,
-squash-merge, cancello il branch"*, *"Vicolo cieco → cancello il branch e scrivo cosa abbiamo
-imparato"* — with the branch names, the git commands and the platform verbs left exactly as they are.
+Presented to the user: one Italian line per option that actually applies — *"Fatto e verificato →
+push, PR, squash-merge, cancello il branch"*.
 
 Never merge to "keep the work safe". A push already keeps it safe; merging publishes it.
 
-Every route through a PR carries one precondition: the PR links at least one work item and that item
-is the **parent backlog item** — a User Story or PBI, a Bug, an Impediment, a TECH activity — never a
-Task, so if nothing is linkable, ask which item the work belongs to (or `workitem-create`) before the
-push, because `pr-create` will not open an unlinked PR.
+Every route through a PR needs a linkable parent backlog item (never a Task): nothing linkable →
+ask which item the work belongs to before the push (`pr-create` owns the rule).
 
 ## 3. Merging, per platform
 
@@ -75,7 +72,7 @@ Completing the merge is the owner's decision. Prepare it, report it, do not deci
 git switch $base; git pull --ff-only
 git branch -D feature/<name>            # always -D: every merge here is a squash, git sees it unmerged
 git fetch --prune                       # drop the remote-tracking ref
-git worktree remove ../<repo>-<topic>   # if the work lived in a worktree
+git worktree remove <worktree-path>     # if the work lived in a worktree (see worktrees.md)
 ```
 
 A squash-merged branch looks **unmerged** to `git branch --merged`, because its commits never
@@ -97,7 +94,7 @@ deferred forever, and it makes every other branch in the list less trustworthy.
 ## Traps
 
 1. "All tests pass" claimed without running them → memory of the last run → run them and read the
-   output; `done-check` exists for this.
+   output; `evidence-by-stack.md` (`plan-work`) exists for this.
 2. Merged to protect the work → confusing push with merge → push protects, merge publishes.
 3. Squash-merged branch not deleted because `--merged` does not list it → squash rewrites history →
    trust the PR state.

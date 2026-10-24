@@ -1,5 +1,6 @@
 /**
- * SessionStart hook: which working days have activity but no hours on the board.
+ * SessionStart hook: which working days have activity but no hours on the board, and which have
+ * hours but fall short of the day's target.
  *
  * The failure this closes is the only one `/worklog` cannot close by itself: it is a command, and a
  * command that is never typed logs nothing. Hours are forgotten silently — nothing on the board is
@@ -19,6 +20,12 @@
  *   3. Only work under a mapped workspace root counts. A day spent entirely in ~/.claude is
  *      tooling: real, but not billable to anyone, and flagging it would train the reminder away.
  *   4. Weekends and today are never pending — today is still being worked.
+ *   5. A logged day is **under target** when its hours are more than an hour short of the target:
+ *      8h Monday to Friday, 0 at weekends, or the date's own value in `worklog/targets.json` (an
+ *      event, leave, a course — /worklog writes it through worklog-push.ps1). Without this a day
+ *      closed at 0.5h looks as done as a full one, and its meetings and calls are never chased.
+ *      A day closed at exactly zero is a decision /worklog asked for (leave, tooling only), not a
+ *      shortfall: it is never under target.
  *
  * The result is cached in ~/.claude/.worklog-pending.json so statusline.js can render the same
  * count without re-reading anything, and so the badge clears itself: the cache is keyed on the
@@ -38,7 +45,10 @@ const path = require('path');
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
 const AUDIT = path.join(CONFIG_DIR, 'worklog', 'pushed.json');
+const TARGETS = path.join(CONFIG_DIR, 'worklog', 'targets.json');
 const CACHE = path.join(CONFIG_DIR, '.worklog-pending.json');
+/** Hours a logged day may fall short of its target before it is worth naming. */
+const TARGET_SLACK = 1;
 
 /**
  * How far back a day is still worth chasing — the user's rule, not a duration: the current month,
@@ -116,22 +126,41 @@ function readJson(file) {
   }
 }
 
-/** Days already on the board: any audit entry whose period covers them, zero hours included. */
+/**
+ * Days already on the board — any audit entry whose period covers them, zero hours included — with
+ * the hours logged on each. A multi-day entry has no per-day split, so its hours are spread evenly
+ * over the weekdays it covers (over all its days when it covers only a weekend): the same rule the
+ * engine uses for its GIORNO table.
+ */
 function auditedDays() {
   const raw = readJson(AUDIT);
   // The file has been a bare array since the first run; tolerate the { entries: [] } shape too
   // rather than silently reporting every day as pending if it ever changes.
   const entries = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.entries) ? raw.entries : []);
-  const covered = new Set();
+  const logged = new Map();
   for (const e of entries) {
     const from = e.periodFrom || e.period;
     const to = e.periodTo || e.periodFrom || e.period;
     if (!from) continue;
+    const days = [];
     for (let ms = Date.parse(`${from}T12:00:00`); ms <= Date.parse(`${to}T12:00:00`); ms += 864e5) {
-      covered.add(dayOf(ms));
+      days.push(dayOf(ms));
     }
+    const work = days.filter((d) => !isWeekend(d));
+    const over = work.length ? work : days;
+    for (const d of days) if (!logged.has(d)) logged.set(d, 0);
+    for (const d of over) logged.set(d, logged.get(d) + (Number(e.hoursLogged) || 0) / over.length);
   }
-  return covered;
+  return logged;
+}
+
+/** The day's target: its own value in targets.json, else targetHours (8) on weekdays, 0 at weekends. */
+function targetOf(targets, day) {
+  const own = targets && targets.days ? targets.days[day] : undefined;
+  if (own !== undefined && own !== null) return Number(typeof own === 'object' ? own.hours : own) || 0;
+  if (isWeekend(day)) return 0;
+  const base = Number(targets && targets.targetHours);
+  return targets && targets.targetHours != null && Number.isFinite(base) ? base : 8;
 }
 
 /** yyyy-MM-dd → { prompts, workspaces:Set }, for the loggable prompts inside the lookback. */
@@ -166,14 +195,27 @@ function activeDays(since) {
 function compute() {
   const today = dayOf(Date.now());
   const since = cutoff();
-  const covered = auditedDays();
+  const logged = auditedDays();
   const pending = [];
   for (const [day, d] of activeDays(since)) {
-    if (day >= today || isWeekend(day) || covered.has(day) || d.prompts < MIN_PROMPTS) continue;
+    if (day >= today || isWeekend(day) || logged.has(day) || d.prompts < MIN_PROMPTS) continue;
     pending.push({ date: day, prompts: d.prompts, workspaces: [...d.workspaces].sort() });
   }
   pending.sort((a, b) => a.date.localeCompare(b.date));
-  return { day: today, auditMtime: mtime(AUDIT), pending, ts: Date.now() };
+  // Same silence rule as pending: no mapped root, nothing is billable, nothing is short.
+  const underTarget = [];
+  if (WORKSPACE_ROOTS.length) {
+    const targets = readJson(TARGETS);
+    for (const [day, hours] of logged) {
+      if (day >= today || Date.parse(`${day}T12:00:00`) < since) continue;
+      const target = targetOf(targets, day);
+      if (target > 0 && hours > 0 && hours < target - TARGET_SLACK) {
+        underTarget.push({ date: day, logged: Math.round(hours * 100) / 100, target });
+      }
+    }
+    underTarget.sort((a, b) => a.date.localeCompare(b.date));
+  }
+  return { day: today, auditMtime: mtime(AUDIT), pending, underTarget, ts: Date.now() };
 }
 
 function mtime(file) {
@@ -202,24 +244,36 @@ function label(workspaces) {
   return ws.length > 2 ? `${ws.slice(0, 2).join(', ')} +${ws.length - 2}` : ws.join(', ');
 }
 
+/** The first MAX_LISTED items, then a count: naming the days is the point, a long list is not. */
+function list(items, fmt) {
+  const rest = items.length > MAX_LISTED ? `, +${items.length - MAX_LISTED} altri` : '';
+  return items.slice(0, MAX_LISTED).map(fmt).join(', ') + rest;
+}
+
+const days = (n) => `${n} giorn${n === 1 ? 'o' : 'i'}`;
+
 /** One line, naming the days and where they were spent, because a bare count invites postponing. */
-function line(pending) {
-  const shown = pending.slice(0, MAX_LISTED)
-    .map((p) => `${p.date} (${label(p.workspaces)})`)
-    .join(', ');
-  const rest = pending.length > MAX_LISTED ? `, +${pending.length - MAX_LISTED} altri` : '';
-  return `⏱ Ore non registrate su ${pending.length} giorn${pending.length === 1 ? 'o' : 'i'}: `
-    + `${shown}${rest} — chiudili con /worklog <data>.`;
+function line({ pending, underTarget }) {
+  const parts = [];
+  if (pending.length) {
+    parts.push(`Ore non registrate su ${days(pending.length)}: `
+      + `${list(pending, (p) => `${p.date} (${label(p.workspaces)})`)} — chiudili con /worklog <data>.`);
+  }
+  if (underTarget.length) {
+    parts.push(`Sotto target su ${days(underTarget.length)}: `
+      + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — completali con /worklog <data>.`);
+  }
+  return `⏱ ${parts.join(' ')} Le ore le scrive solo /worklog.`;
 }
 
 const snapshot = compute();
 save(snapshot);
-if (!snapshot.pending.length) silent();
+if (!snapshot.pending.length && !snapshot.underTarget.length) silent();
 
 process.stdout.write(JSON.stringify({
   hookSpecificOutput: {
     hookEventName: 'SessionStart',
-    additionalContext: line(snapshot.pending),
+    additionalContext: line(snapshot),
   },
 }));
 process.exit(0);

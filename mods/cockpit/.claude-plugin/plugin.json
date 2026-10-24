@@ -1,0 +1,6 @@
+{
+  "name": "cockpit",
+  "version": "0.1.0",
+  "description": "Side pane: model, cost, git, context, credits and agents in one place",
+  "types": "./types/index.d.ts"
+}

@@ -81,17 +81,16 @@ Four things make it good, and a KO missing any of them is weaker: **what was don
 expects**, **what happened instead**, and **the context it happened in**. "AC05 not satisfied"
 helps nobody.
 
-## The chat report
+## The report returned by the fork
 
-In the user's language. Per item: which viewports ran, the KO detail (the same substance as the
-comment, expanded where it helps), what changed against any earlier test in the thread, and the link
-to the posted comment. Then end with a **summary table as the last block** — one row per AC, in AC
-order, so the table is what stays on screen:
+Italian, ≤ 30 lines: it is all the main thread receives. Per item, one line each: viewports run,
+`Success %`, what changed against an earlier test in the thread, the link to the posted comment.
+Then a **summary table as the last block** — one row per KO, then one row per item for its OKs:
 
 | Item | AC | Esito | Viewport | Rilievo |
 |------|----|-------|----------|---------|
 | 101 | AC03 | KO | desktop | flag in header non cliccabile, nessun menu country |
-| 101 | AC01 | OK | desktop+mobile | indicatore sempre visibile |
+| 101 | AC01, AC02, AC04 | OK | desktop+mobile | — |
 
 After the table: at most a one-line verdict and one short question. Nothing longer, or the table
 scrolls off the screen.

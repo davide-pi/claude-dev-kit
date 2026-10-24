@@ -1,0 +1,35 @@
+{
+  "_comment": "Copy to ~/.claude/workspaces.json (local-only, never committed). hooks/workspace-context.js turns the entry matching the session cwd (longest path wins) into one `ALM:` context line and pins the az identity. Keys: path, platform (azure-devops | github), org, project (a name or \"ask\") or projects (first subfolder -> project; a subfolder not listed is resolved against the org's project list, else asked), identity (suffix of the private Azure CLI config dir ~/.azure-<identity>), account (who items are assigned to), note (appended verbatim).",
+  "roots": [
+    {
+      "path": "C:\\workspaces\\<product-root>",
+      "platform": "azure-devops",
+      "org": "<org-a>",
+      "project": "<Project>",
+      "identity": "<identity-a>",
+      "account": "you@example.com"
+    },
+    {
+      "path": "C:\\workspaces\\<clients-root>",
+      "platform": "azure-devops",
+      "org": "<org-b>",
+      "projects": { "acme": "Acme" },
+      "identity": "<identity-b>",
+      "account": "you@example.org"
+    },
+    {
+      "path": "C:\\workspaces\\<github-root>",
+      "platform": "github",
+      "org": "<github-org>",
+      "note": "no work items, no hours on a board: hours go on <github-root>\\<project>-time.md"
+    },
+    {
+      "path": "C:\\workspaces\\<github-root>\\<moved-project>",
+      "platform": "azure-devops",
+      "org": "<org-b>",
+      "project": "<MovedProject>",
+      "identity": "<identity-b>",
+      "note": "hours before the move stay on <github-root>\\<moved-project>-time.md"
+    }
+  ]
+}

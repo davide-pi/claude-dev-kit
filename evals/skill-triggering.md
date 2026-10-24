@@ -11,34 +11,31 @@ Descriptions are the only thing driving this, so they need to be tested like cod
 covers the static half (a trigger-only skill must name its own trigger, descriptions stay under the
 length limit). This file covers the behavioural half.
 
-## How to run
+## Automated suites
 
-Cases are plain prompts. Two ways to use them, cheapest first:
+Thirteen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
+`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard` and the `paths:` skills (`angular`,
+`react`, `ef-core`, `sql-server`, `rabbitmq`, `pipeline`, `docker-dev-env`, `dotnet-backend`). Their
+MUST / MUST NOT rows moved there, one case folder per row (`prompt.md` + `graders/*.md`); run them with
+`pwsh tools/run-evals.ps1` (only the suites whose skill changed) and see the README row for the flags.
+A case that fails is a description bug: fix the description, do not fix the case.
 
-1. **By hand, in a scratch session.** Paste a prompt, then check with `/context` (or by watching
-   whether the skill's instructions show up) which skills loaded. Fast, no setup, good enough to
-   catch a regression after editing a description.
-2. **With `skill-creator`.** The `skill-creator` plugin can generate and run evals for a skill; feed
-   it the cases below for the skill you are changing and let it score them. Use this when you are
-   reworking a description rather than spot-checking it.
+### Not expressible in a suite
 
-Record what actually happened, not what should have. A case that fails is a description bug: fix the
-description, do not fix the case.
+| Row | Why it stays manual |
+|-----|---------------------|
+| `angular`, `react` and the other `paths:` skills: **hidden until a matching file is read, listed after** | The harness loads a skill folder as a plugin and lists it from the first turn (`angular:angular` is in the `init` skills of a run that never read a file), so the gate is never exercised; `add_dirs` only grants read access, and the only way to put a file in the sandbox is `--scaffold`, which runs shell as you. The suites measure the description; the gate is checked with `tools/instructions-log.js` in a real session. |
+
+## How to run the rest
+
+The skills below have no suite yet. Cases are plain prompts; paste one in a scratch session and check
+with `/context` (or by watching whether the skill's instructions show up) which skills loaded. Record
+what actually happened, not what should have.
 
 ## Cases
 
 `MUST` = the skill has to load. `MUST NOT` = it has to stay out. The parenthetical says why the case
 exists.
-
-### `worklog` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/worklog` | MUST load |
-| `/worklog ieri` | MUST load |
-| "quanto tempo ho passato oggi su questo progetto?" | MUST NOT (asking about time is not asking to log hours) |
-| "registra 3 ore sul task 105060" | MUST NOT (a direct work-item write, not the reconstruct-and-confirm flow) |
-| "cosa ho fatto questa settimana?" | MUST NOT (a question about history, no timesheet intent) |
 
 ### `workitem-create` — explicit trigger only
 
@@ -59,7 +56,7 @@ exists.
 | "commenta tu la PR con i dubbi" | MUST load (that is exactly its contract) |
 | "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load (receiving findings) |
 
-### `code-review` (command) — the local diff
+### `code-review` — the local diff
 
 | Prompt | Expected |
 |--------|----------|
@@ -68,36 +65,24 @@ exists.
 | "rivedi le modifiche che hai appena fatto" | MUST route through the review subagents (per the CLAUDE.md convention), not an inline read-through |
 | "sistema questo bug" | MUST NOT (fixing is not reviewing) |
 
-### `pr-create` — convention skill, ambient
-
-| Prompt | Expected |
-|--------|----------|
-| "apri la PR" | `pr-create` MUST load (title/description conventions) |
-| "fai il commit" | MUST NOT dominate — `/commit` owns this |
-
-### `pipeline` — CI/CD authoring
-
-| Prompt | Expected |
-|--------|----------|
-| "aggiungi uno stage di test a questa pipeline" (file under `.pipelines/`) | MUST load |
-| "modifica il docker-compose per aggiungere redis" | MUST NOT (compose is not a CI/CD pipeline) |
-| "questo YAML di Kubernetes è corretto?" | MUST NOT (manifest, not pipeline) |
-
-
-### `commit` (command)
+### `commit`
 
 | Prompt | Expected |
 |--------|----------|
 | `/commit` | MUST commit on the current branch, message generated from the diff |
 | `/commit -b fix/date-filter` | MUST create the branch and commit there |
 | "committa e pusha" | MUST commit; the push is a separate, explicit act (the command never pushes) — and on the default branch the guard hook asks first |
+| "ok, committa" after an edit turn | MUST load the skill before the first `git commit` |
 | "cosa ho modificato?" | MUST NOT (a question about the diff, not a request to commit) |
 
 ### `grill-me` — scrutiny, not execution
 
 | Prompt | Expected |
 |--------|----------|
+| `/grill-me` | MUST load |
 | "buca il mio piano di refactoring" | MUST load |
+| "fammi le pulci a questo design" | MUST load (natural phrasing, no slash: the skill is auto-invocable) |
+| "attack this design" | MUST load |
 | "che ne pensi di questo approccio?" | MUST NOT necessarily load — answering is fine; grilling is for when scrutiny is asked for |
 | "grill me su questo design" | MUST load, and the first round MUST ask every unblocked question at once, each with a recommended answer |
 
@@ -107,20 +92,8 @@ exists.
 2. Change the **description**, not the body: that is what the model matches on. For a false positive,
    name the boundary explicitly ("only when the user types `/x`", "not for … "). For a false
    negative, add the words a user actually says.
-3. Re-run the affected cases, then `node tools/validate.mjs` (the description limits are enforced
+3. Re-run the affected cases (a suite: `pwsh tools/run-evals.ps1 -Suite <skill>`), then `node tools/validate.mjs` (the description limits are enforced
    there), and note in the PR which case changed behaviour.
-
-### `dev-loop` — the router
-
-| Prompt | Expected |
-|--------|----------|
-| "vorrei aggiungere l'export CSV degli ordini, come procediamo?" | MUST load |
-| "questo va rifatto o si aggiusta?" | MUST load (classification is the whole question) |
-| "qual è la differenza tra `IEnumerable` e `IQueryable`?" | MUST NOT (a knowledge question routes nothing) |
-| "/commit" | MUST NOT (the decision is already made; the command owns it) |
-| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike) |
-| "conviene spezzare questo lavoro su più agent?" | MUST load (parallel fan-out) |
-| "applica le tre migration in ordine" | MUST NOT fan out (sequential by construction) |
 
 ### `plan-work`
 
@@ -132,15 +105,17 @@ exists.
 | "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
 | "prendi in carico la story 4711, da dove parto?" | MUST load (item analysis) |
 | "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike, `references/spike.md`) |
+| "conviene spezzare questo lavoro su più agent?" | MUST load (fan-out, `references/delegation.md`) |
 
-### `done-check`
+### `deliver` — every code change, before the first edit
 
 | Prompt | Expected |
 |--------|----------|
-| "ho finito, confermi che è tutto a posto prima del commit?" | MUST load |
-| "questa feature è pronta per la PR?" | MUST load |
-| "fai una review del diff e dimmi se ci sono bug" | MUST NOT (defect hunting is the review axis, not the completion gate) |
-| "i test passano?" | MUST NOT (run them and answer; no gate to apply) |
+| "l'export degli ordini è lento, rendilo più veloce" | MUST load (perf scenario: baseline first) |
+| "aggiungi il filtro per stato alla lista ordini" | MUST load (feature, perimeter and loop) |
+| "spiegami cosa fa OrdersQuery" | MUST NOT (reading code, no change) |
+| "rivedi il diff che ho in working tree" | MUST NOT (review of an existing diff belongs to code-review) |
 
 ### `debug-systematic`
 
@@ -160,33 +135,6 @@ exists.
 | "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
 | "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
 
-### `angular`
-
-| Prompt | Expected |
-|--------|----------|
-| "questo componente non si aggiorna dopo l'update dello store, e qui ci sono ancora gli NgModule" | MUST load |
-| "conviene passare a signal in questa feature?" | MUST load |
-| "come centro verticalmente questa card?" | MUST NOT (CSS and visual design belong to the plugins) |
-| "il bundle è troppo grande, misuralo" | MUST NOT (runtime measurement belongs to the browser tools) |
-
-### `react`
-
-| Prompt | Expected |
-|--------|----------|
-| "il componente rifà la fetch in loop e lo stato del filtro è duplicato in tre punti" | MUST load |
-| "mi serve una libreria di state management qui?" | MUST load |
-| "misura l'LCP di questa pagina" | MUST NOT (Core Web Vitals belong to modern-web-guidance) |
-| "scegli la palette per questa dashboard" | MUST NOT (belongs to frontend-design) |
-
-### `dotnet-backend`
-
-| Prompt | Expected |
-|--------|----------|
-| "questo service è registrato singleton ma inietta il DbContext, cosa cambio?" | MUST load |
-| "questo handler RPC EasyNetQ ritenta con Polly, la policy è giusta?" | MUST load |
-| "aggiungi un indice sulla colonna Status" | MUST NOT (belongs to sql-server) |
-| "il componente React rifà la fetch" | MUST NOT (wrong stack) |
-
 ### `dotnet-testing`
 
 | Prompt | Expected |
@@ -203,54 +151,16 @@ exists.
 |--------|----------|
 | "il pod va al 100% di CPU in produzione, come capisco cosa fa?" | MUST load |
 | "questo endpoint è lento ma non so dove perde tempo" | MUST load |
+| "mostrami i log di produzione dell'api nelle ultime 2 ore" | MUST load, and the Grafana reads MUST run inside `ops-analyst`, never on the main thread |
 | "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the browser tools) |
 | "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
 
-### `ef-core`
+## One-shot skill cases
 
-| Prompt | Expected |
-|--------|----------|
-| "ho aggiunto la property Email all'entità Customer, allinea il database" | MUST load |
-| "questa query carica 500 righe per ogni ordine" | MUST load |
-| "scrivi la stored procedure per il report mensile" | MUST NOT (raw T-SQL belongs to sql-server) |
-| "il connection pool di Npgsql si esaurisce" | MUST NOT (client behaviour belongs to sql-server, Postgres section) |
-| "aggiungi una migration per la colonna ShippedAt" | MUST load (migration workflow) |
-
-### `sql-server`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa stored procedure va in timeout solo per alcuni clienti, perché?" | MUST load |
-| "che indice serve a questa query?" | MUST load |
-| "aggiungi una migration EF per la colonna Email" | MUST NOT (belongs to ef-core) |
-| "questa query sul database di cache è lenta, guarda l'EXPLAIN" | MUST load (the Postgres half) |
-| "porto questa tabella da SQL Server a Postgres, cosa cambia?" | MUST load (the Postgres half) |
-| "aggiungi il servizio postgres al compose" | MUST NOT (belongs to docker-dev-env) |
-
-### `redis-dotnet`
-
-| Prompt | Expected |
-|--------|----------|
-| "il servizio va in RedisTimeoutException sotto carico" | MUST load |
-| "dove creo il ConnectionMultiplexer?" | MUST load |
-| "che struttura dati Redis uso per una leaderboard?" | MUST NOT (data modelling belongs to the Redis plugin) |
-| "configura le ACL sull'istanza" | MUST NOT (belongs to the Redis plugin) |
-
-### `rabbitmq`
-
-| Prompt | Expected |
-|--------|----------|
-| "questa coda cresce e i messaggi finiscono nell'error queue" | MUST load |
-| "questo consumer riprocessa lo stesso messaggio due volte" | MUST load |
-| "aggiungi il servizio rabbitmq al docker compose" | MUST NOT (belongs to docker-dev-env) |
-| "il DbContext è registrato singleton" | MUST NOT (wrong domain) |
-| "quanti messaggi ci sono nella dead-letter?" | MUST load (broker inspection) |
-
-## Command cases
-
-Commands are invoked by name, so the risk is different from a skill's: the failure mode is the
-model *acting* on a phrasing the command does not own, or reaching for a skill when a command would
-have done it in one shot.
+The ex-commands are invoked by name, so the risk is different from a reference skill's: the failure
+mode is the model *acting* on a phrasing the skill does not own, or doing by hand what the skill would
+have done in one shot. The forked ones (`/db`, `/logs`, `/fix-ci`) add a second check: the raw output
+must stay in the subagent.
 
 ### `/docs-sync`
 
@@ -279,50 +189,23 @@ have done it in one shot.
 
 | Prompt | Expected |
 |--------|----------|
-| "la build su feature/orders è rossa, perché?" | MUST invoke |
+| "la build su feature/orders è rossa, perché?" | MUST invoke, forked: only the failing step's log and the verdict return |
 | "questo test fallisce in locale" | MUST NOT (belongs to debug-systematic) |
 
 ### `/db`
 
 | Prompt | Expected |
 |--------|----------|
-| "quante righe ha Orders con Status = 3?" | MUST invoke |
+| "quante righe ha Orders con Status = 3?" | MUST invoke, forked into `db-analyst` |
+| `/db "SELECT 1"` | MUST return the result in the same turn, from the fork |
 | "come indicizzo questa tabella?" | MUST NOT (belongs to sql-server) |
 
 ### `/logs`
 
 | Prompt | Expected |
 |--------|----------|
-| "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke |
+| "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke, forked into `ops-analyst` |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
-
-### `azdo-cli`
-
-| Prompt | Expected |
-|--------|----------|
-| "leggi il work item 4711 con i suoi criteri di accettazione" | MUST load |
-| "quali stati ha il tipo Bug in questo progetto?" | MUST load |
-| "apri una issue su GitHub per questo bug" | MUST NOT (other platform: gh) |
-| "questa query WIQL è lenta" | MUST NOT (not a thing: WIQL is not tuned here) |
-
-### `branch-flow`
-
-| Prompt | Expected |
-|--------|----------|
-| "creami un branch per questa modifica" | `branch-flow` MUST load (naming + protected-main rules) |
-| "come chiamo il branch per questa fix?" | MUST load |
-| "il lavoro è finito, come lo porto su main?" | MUST load |
-| "voglio lavorare su questa cosa senza toccare il working tree corrente" | MUST load (the worktree half) |
-| "scrivi il messaggio di commit" | MUST NOT (belongs to /commit) |
-
-### `docker-dev-env`
-
-| Prompt | Expected |
-|--------|----------|
-| "il container di sql server non parte, si riavvia in loop" | MUST load |
-| "mi serve un postgres locale per provare questa cosa" | MUST load |
-| "questa query postgres è lenta, leggi l'EXPLAIN" | MUST NOT (belongs to sql-server) |
-| "deploya in staging" | MUST NOT (local environments only) |
 
 ### `items-qa` — explicit trigger only
 
@@ -333,17 +216,16 @@ have done it in one shot.
 | "controlla se questo componente rispetta gli AC" | MUST NOT (no explicit trigger: it drives a real browser and posts a comment) |
 | "apri il sito e fai uno screenshot" | MUST NOT (browser use is not a work-item verdict) |
 
-## Cases for the standards ported from the PM's own skills
-
-### `user-story-standard`
+### `estimate` — explicit trigger only
 
 | Prompt | Expected |
 |--------|----------|
-| "mi serve una story per l'esportazione del report mensile in PDF" | MUST load |
-| "scrivimi i criteri di accettazione di questo item" | MUST load |
-| "il filtro data mostra righe fuori range, ma non so se è un bug" | MUST load (the Impediment branch is exactly this) |
-| "crea questi tre item su Azure DevOps sotto la Feature 1234" | MUST NOT (putting items on the board is workitem-create) |
-| "traduci questa user story in inglese" | MUST NOT (a translation, not the standard) |
+| `/estimate 12345` | MUST load |
+| `/estimate` with a pasted request and "analisi di mercato" | MUST load |
+| "quante ore ci vogliono per questa feature?" | MUST NOT (no explicit trigger; answer from the code or ask) |
+| "dividi questa epica in item" | MUST NOT (splitting items is workitem-create / user-story-standard) |
+
+## Cases for the standards ported from the PM's own skills
 
 ### `project-wiki-standard` — explicit trigger only
 
