@@ -134,8 +134,28 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
  */
 export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string }
 
-/** The view the pane draws: the tab bar's four buttons. */
-export type CockpitTab = 'session' | 'agents' | 'work' | 'repo'
+/** One row of the Contesto tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
+export type CockpitContextRow = { name: string; tokens: number; kind: 'used' | 'free' | 'buffer' | 'deferred' }
+
+/** A static consumer of the window: a memory file, a loaded MCP tool's schema, a custom agent's description, or the skills listing as a whole. */
+export type CockpitConsumer = { name: string; kind: 'memory' | 'mcp' | 'agent' | 'skill'; tokens: number }
+
+/** What the Contesto tab draws from `usage({ breakdown })`: the rows, the window they are measured against, the five biggest static consumers. */
+export type CockpitContext = {
+  rows: CockpitContextRow[]
+  /** Tokens in use and the window measured against (the compaction window), as the breakdown counts them. */
+  total: number
+  max: number
+  /** The five biggest static consumers, biggest first. */
+  consumers: CockpitConsumer[]
+  /** How many skills the listing includes of those the session has; absent when the session lists none. */
+  skills?: { listed: number; total: number }
+  /** True when the breakdown was counted with the token-count API (`full`, on the button); false for the local estimate. */
+  isExact: boolean
+}
+
+/** The view the pane draws: the tab bar's five buttons. */
+export type CockpitTab = 'session' | 'agents' | 'context' | 'work' | 'repo'
 
 export type CockpitSnapshot = {
   /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
@@ -161,10 +181,18 @@ export type CockpitSnapshot = {
   mainTokens?: number
   /** The part of `mainTokens` that the steps of the turn in progress added. */
   mainStepTokens?: number
+  /** New tokens of every agent that left the live list this session: the share's counterpart of `mainTokens`, kept with it in the state file (the history is cut and cannot be summed). Absent until one left. */
+  agentTokens?: number
   /** The main loop's state for the header's icon; absent before any event (read as idle). */
   claudeState?: CockpitClaudeState
   /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
   ctxSamples?: number[]
+  /** The context size at the end of each of the last twenty main turns, newest last: the Contesto sparkline. A shrinking context stays in it (a compaction shows as a drop). */
+  ctxRounds?: number[]
+  /** The Contesto tab's last reading of the context breakdown; absent until the tab was opened. */
+  context?: CockpitContext
+  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
+  skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
   autoCompactAt?: number
   alm?: CockpitAlm

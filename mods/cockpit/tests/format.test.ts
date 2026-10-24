@@ -23,6 +23,11 @@ import {
   stateAfterWait,
   tokenShare,
   usageOf,
+  contextOf,
+  recordRound,
+  shouldCompact,
+  sparkline,
+  withAgentTokens,
   claimTime,
   compactInstructions,
   isGithubRemote,
@@ -700,12 +705,13 @@ test('autocompactForecast: requests left from the average growth; absent without
   expect(autocompactForecast([170_000, 190_000], 180_000)).toBe(0)
 })
 
-test('tabNeeds: the clock tiers a selected tab asks for', () => {
-  expect(tabNeeds('agents')).toEqual({ fast: true, medium: false })
-  expect(tabNeeds('session')).toEqual({ fast: true, medium: false })
-  expect(tabNeeds('work')).toEqual({ fast: true, medium: true })
-  expect(tabNeeds('repo')).toEqual({ fast: false, medium: true })
-  expect(tabNeeds(undefined)).toEqual({ fast: true, medium: false })
+test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
+  expect(tabNeeds('agents')).toEqual({ fast: true })
+  expect(tabNeeds('session')).toEqual({ fast: true })
+  expect(tabNeeds('work')).toEqual({ fast: true })
+  expect(tabNeeds('repo')).toEqual({ fast: false })
+  expect(tabNeeds('context')).toEqual({ fast: false })
+  expect(tabNeeds(undefined)).toEqual({ fast: true })
 })
 
 test('stateAfterWait: a tool still in flight wins (the held one when it is), else what the wait interrupted', () => {
@@ -733,14 +739,95 @@ test('usage counters: summed, new tokens leave the cache reads out, a turn total
   expect(settleUsage(undefined, undefined, step)).toEqual(step)
 })
 
-test('tokenShare and sessionTokens: the share of main, listed agents and history together', () => {
+test('tokenShare and sessionTokens: the share of main, listed agents and the cumulative count of the agents that left the list', () => {
   const agent = (id: string, tokens: number) => ({ id, type: 't', status: 'running' as const, startedAt: 0, tokens })
-  const entry = { id: 'h', type: 't', startedAt: 0, endedAt: 1, tokens: 300, isFailed: false }
-  expect(sessionTokens({ mainTokens: 500, agents: [agent('a', 100), agent('b', 100)], history: [entry] })).toBe(1000)
+  expect(sessionTokens({ mainTokens: 500, agents: [agent('a', 100), agent('b', 100)], agentTokens: 300 })).toBe(1000)
   expect(sessionTokens({ agents: [] })).toBe(0)
   expect(tokenShare(250, 1000)).toBe('25%')
   expect(tokenShare(2, 1000)).toBe('<1%')
   expect(tokenShare(0, 1000)).toBe('0%')
   expect(tokenShare(5, 0)).toBeUndefined()
   expect(tokenShare(1500, 1000)).toBe('100%')
+})
+
+test('withAgentTokens: the cumulative count grows by the tokens of the agents leaving the list, and stays absent until one does', () => {
+  expect(withAgentTokens(undefined, [])).toBeUndefined()
+  expect(withAgentTokens(200, [])).toBe(200)
+  expect(withAgentTokens(undefined, [{ tokens: 100 }, { tokens: 50 }])).toBe(150)
+  expect(withAgentTokens(200, [{ tokens: 50 }])).toBe(250)
+})
+
+test('contextOf: the rows and the window, and the top five static consumers over memory files, loaded MCP tools, agents and the skills listing', () => {
+  const row = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred') => ({ name, tokens, color: 'promptBorder', isDeferred: kind === 'deferred', kind })
+  const context = contextOf(
+    {
+      categories: [row('System prompt', 8000, 'used'), row('Messages', 90_000, 'used'), row('Free space', 700_000, 'free')],
+      totalTokens: 248_000,
+      rawMaxTokens: 1_000_000,
+      memoryFiles: [
+        { path: '/home/u/.claude/CLAUDE.md', type: 'User', tokens: 3000 },
+        { path: '/w/proj/CLAUDE.md', type: 'Project', tokens: 900 },
+      ],
+      mcpTools: [
+        { name: 'mcp__a__big', serverName: 'a', tokens: 5000, isLoaded: true },
+        { name: 'mcp__a__off', serverName: 'a', tokens: 9000, isLoaded: false },
+      ],
+      agents: [
+        { agentType: 'code-reviewer', source: 'plugin', tokens: 400 },
+        { agentType: 'tiny', source: 'plugin', tokens: 100 },
+      ],
+      skills: { totalSkills: 60, includedSkills: 41, tokens: 4200, skillFrontmatter: [] },
+    },
+    false,
+  )
+  expect(context.rows).toEqual([
+    { name: 'System prompt', tokens: 8000, kind: 'used' },
+    { name: 'Messages', tokens: 90_000, kind: 'used' },
+    { name: 'Free space', tokens: 700_000, kind: 'free' },
+  ])
+  expect([context.total, context.max, context.isExact]).toEqual([248_000, 1_000_000, false])
+  // an unloaded MCP schema is outside the window; the sixth and smallest consumer is cut
+  expect(context.consumers).toEqual([
+    { name: 'mcp__a__big', kind: 'mcp', tokens: 5000 },
+    { name: 'skills', kind: 'skill', tokens: 4200 },
+    { name: 'User CLAUDE.md', kind: 'memory', tokens: 3000 },
+    { name: 'Project CLAUDE.md', kind: 'memory', tokens: 900 },
+    { name: 'code-reviewer', kind: 'agent', tokens: 400 },
+  ])
+  expect(context.skills).toEqual({ listed: 41, total: 60 })
+  // no skill listing: none claimed
+  expect(contextOf({ categories: [], totalTokens: 0, rawMaxTokens: 0, memoryFiles: [], mcpTools: [], agents: [] }, true)).toEqual({
+    rows: [],
+    total: 0,
+    max: 0,
+    consumers: [],
+    isExact: true,
+  })
+})
+
+test('recordRound keeps the last twenty main-turn contexts, and a shrinking context stays in the series', () => {
+  const rounds = Array.from({ length: 25 }, (_, i) => i + 1).reduce<number[]>((all, n) => recordRound(all, n * 1000), [])
+  expect(rounds).toHaveLength(20)
+  expect(rounds[0]).toBe(6000)
+  expect(rounds.at(-1)).toBe(25_000)
+  expect(recordRound([200_000], 40_000)).toEqual([200_000, 40_000])
+})
+
+test('sparkline: one block per round, scaled to the tallest; empty without rounds', () => {
+  expect(sparkline([])).toBe('')
+  expect(sparkline([1, 2, 4, 8])).toBe('▂▃▅█')
+  expect(sparkline([0, 8])).toBe('▁█')
+  expect(sparkline([0, 0])).toBe('▁▁')
+})
+
+test('shouldCompact: from 70 % with the last three rounds each growing over 5 %, or with a forecast of 3 requests or fewer', () => {
+  const grown = [100, 106, 113, 120] // +6 %, +6.6 %, +6.2 %
+  expect(shouldCompact({ percent: 70, rounds: grown })).toBe(true)
+  expect(shouldCompact({ percent: 69, rounds: grown })).toBe(false)
+  expect(shouldCompact({ percent: 90, rounds: [100, 106, 113, 118] })).toBe(false) // the last grew 4.4 %
+  expect(shouldCompact({ percent: 90, rounds: grown.slice(1) })).toBe(false) // only two growths seen
+  expect(shouldCompact({ percent: 90, rounds: [100, 100, 100, 100] })).toBe(false)
+  expect(shouldCompact({ percent: 10, forecast: 3 })).toBe(true)
+  expect(shouldCompact({ percent: 10, forecast: 4 })).toBe(false)
+  expect(shouldCompact({})).toBe(false)
 })
