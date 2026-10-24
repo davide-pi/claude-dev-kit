@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import { ICONS, TABS, spanText, spanWidth, textCells } from '../hooks/format'
+import { setLang } from '../hooks/strings'
 import { subagentDetails, toolCallSpans } from '../hooks/view'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
@@ -399,7 +400,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'bar:compact', 'bar:worklog'])
+  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'tab:notes', 'bar:compact', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -419,11 +420,11 @@ test('a rule closes the header and the tab bar, and sets the SUBAGENTS title (af
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  const [first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
+  const [, , first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^SUBAGENTS/.test(r))
-  // header, rule, tab bar, the note's field, rule, then the tab's own content: an empty row first
+  // header, rule, tab bar, rule, then the tab's own content: an empty row first
   expect(first).toBe(headerOf(rows).length)
-  expect(second).toBe(first + 3)
+  expect(second).toBe(first + 2)
   expect(title).toBe(second + 2)
   expect(rows[title - 1]).toBe(' ')
   await ui.unmount()
@@ -1021,13 +1022,13 @@ function spawns(on: On) {
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `a${++n}` }))
 }
 
-test('tab bar: four buttons, Subagents selected by default; a press on Work draws the Work view', async ($, on) => {
+test('tab bar: five buttons, Subagents selected by default; a press on Work draws the Work view', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const ui = await mountPane($, 58)
   const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  // the four bare names need 45 cells: the 48 of this 50-column pane's content hold them
-  expect((await tabs()).map(b => b.text)).toEqual(['Subagents', 'Context', 'Work', 'System'])
+  // the five bare names need 55 cells: the 56 of a 58-column pane's content hold them
+  expect((await tabs()).map(b => b.text)).toEqual(LONG_TABS)
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
@@ -1050,18 +1051,19 @@ test('tab labels: Subagents counts the running agents, Work carries a dot when t
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
-  const ui = await mountPane($, 52)
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Subagents 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Work ●')
-  expect((await ui.find({ key: 'tab:system' }))?.text).toBe('System')
+  const ui = await mountPane($, 80)
+  // the count and the dot together need 59 cells, more than a 60-column pane holds: the short labels
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Sub 2')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Wrk ●')
+  expect((await ui.find({ key: 'tab:system' }))?.text).toBe('Sys')
   await ui.unmount()
 })
 
 test('tab labels without agents or warnings are the bare names', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Subagents', 'Context', 'Work', 'System'])
+  const ui = await mountPane($, 58)
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(LONG_TABS)
   await ui.unmount()
 })
 
@@ -1849,39 +1851,40 @@ const tabsAt = async ($: Engine, columns: number) => {
   return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
 }
 
-const LONG_TABS = ['Subagents', 'Context', 'Work', 'System']
-const SHORT_TABS = ['Sub', 'Ctx', 'Wrk', 'Sys']
+const LONG_TABS = ['Subagents', 'Context', 'Work', 'System', 'Notes']
+const SHORT_TABS = ['Sub', 'Ctx', 'Wrk', 'Sys', 'Nts']
 
-test('tab bar: the whole names appear once the bar fits the content (45 cells bare, 47 with the running count), at any pane from 47 columns up', async ($, on) => {
+test('tab bar: the whole names appear once the bar fits the content (55 cells bare, 57 with the running count), at any pane from 57 columns up', async ($, on) => {
   world(on)
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  // 47 columns leave 45 cells of content: exactly the bare bar
-  for (const columns of [47, 58, 60, 80]) {
+  // 57 columns leave 55 cells of content: exactly the bare bar
+  for (const columns of [57, 58, 60, 80]) {
     const bare = await tabsAt($, columns)
     expect(bare.labels).toEqual(LONG_TABS)
-    expect(bare.cells).toBe(45)
+    expect(bare.cells).toBe(55)
   }
-  expect((await tabsAt($, 46)).labels).toEqual(SHORT_TABS)
-  // a running agent adds ` 1`: 47 cells, which a pane of 49 columns or more holds
+  expect((await tabsAt($, 56)).labels).toEqual(SHORT_TABS)
+  // a running agent adds ` 1`: 57 cells, which a pane of 59 columns or more holds
   await spawnAgent($, 'code-reviewer')
-  expect((await tabsAt($, 80)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System'])
-  expect((await tabsAt($, 49)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System'])
-  expect((await tabsAt($, 48)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk', 'Sys'])
+  expect((await tabsAt($, 80)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
+  expect((await tabsAt($, 59)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
+  expect((await tabsAt($, 58)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk', 'Sys', 'Nts'])
 })
 
-test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 49 cells), and the bar wraps rather than overflow', async ($, on) => {
+test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 59 cells, more than any pane holds), and the bar wraps rather than overflow', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
   const narrow = await tabsAt($, 30)
-  expect(narrow.labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys'])
-  // the short bar is 35 cells: wider than a 30-column pane's content, so the row wraps
+  expect(narrow.labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
+  // the short bar is 43 cells: wider than a 30-column pane's content, so the row wraps
   expect(narrow.cells).toBeGreaterThan(30 - 2)
   expect(wrapAround(narrow.root, 'tab:agents')).toBe('wrap')
-  for (const columns of [40, 50]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys'])
-  for (const columns of [52, 58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Subagents 1', 'Context', 'Work ●', 'System'])
+  for (const columns of [40, 50]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
+  // the count and the dot together are 59 cells: the 58 of a full pane's content do not hold them
+  for (const columns of [58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -2531,8 +2534,8 @@ test('PR: a branch that changes between a refresh\'s git read and its patch is a
 
 // ── Cockpit v3, phase 1: layout, header, refresh tiers, buttons at the bottom ──
 
-/** The rows above the tab bar: the always-visible header. */
-const headerOf = (rows: string[]): string[] => rows.slice(0, rows.findIndex(r => /^─+$/.test(r)))
+/** The rows above the tab bar: the always-visible header (its two inner rules told apart, the third one closes it). */
+const headerOf = (rows: string[]): string[] => rows.slice(0, rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))[2])
 
 test('layout: the content is min(bodyColumns, 60) - 2 wide with one column of margin each side, at 40, 58 and 80 columns', async ($, on) => {
   world(on)
@@ -3326,13 +3329,13 @@ async function lavoroRows($: Engine, bodyColumns = 50) {
   return rows
 }
 
-test('tabs: exactly Subagents, Context, Work, System, Subagents selected by default; System draws its own section', async ($, on) => {
+test('tabs: exactly Subagents, Context, Work, System, Notes, Subagents selected by default; System draws its own section', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const tabs = (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  expect(tabs.map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system'])
-  expect(tabs.map(b => b.text)).toEqual(['Subagents', 'Context', 'Work', 'System'])
+  expect(tabs.map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'tab:notes'])
+  expect(tabs.map(b => b.text)).toEqual(LONG_TABS)
   expect(tabs.filter(b => b.props.variant === 'primary').map(b => b.key)).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTS/ })).toBeDefined()
   await ui.press({ key: 'tab:system' })
@@ -3342,14 +3345,15 @@ test('tabs: exactly Subagents, Context, Work, System, Subagents selected by defa
   await ui.unmount()
 })
 
-test('tabs: with four tabs the full labels fit 58 columns again, the running count and the worklog dot included', async ($, on) => {
-  world(on, { hasWorklog: true })
+test('tabs: with five tabs the long labels, the running count included, sit on one row from 59 columns', async ($, on) => {
+  world(on)
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
-  for (const columns of [58, 80]) {
-    const { labels, root } = await tabsAt($, columns)
-    expect(labels).toEqual(['Subagents 1', 'Context', 'Work ●', 'System'])
+  for (const columns of [59, 80]) {
+    const { labels, cells, root } = await tabsAt($, columns)
+    expect(labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
+    expect(cells).toBeLessThanOrEqual(57)
     expect(wrapAround(root, 'tab:agents')).toBe('wrap')
   }
 })
@@ -4119,7 +4123,7 @@ test('follow-up: a state-file timer the engine refused does not stop a later cha
 
 const SAVED_PR = { number: 7, title: 'Old work', state: 'merged', isDraft: false }
 
-test('session data: history, PRs, the note and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
+test('session data: history, PRs, the notes and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   spawns(on)
@@ -4130,26 +4134,27 @@ test('session data: history, PRs, the note and the context rounds go to cockpit-
   await finishAgent($, 'a1')
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'm1', reason: 'answer' })
-  const ui = await mountPane($)
-  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
+  const ui = await notesPane($)
+  await saveNote(ui, 'ask Anna')
   await ui.unmount()
-  expect(dataOf(writes)?.note).toBeUndefined() // inside the 3 s window of the start write
+  expect(dataOf(writes)?.notes).toBeUndefined() // inside the 3 s window of the start write
   await clock.advance(135_000) // the finished agent leaves the list for the history
   const data = dataOf(writes)
-  expect(data).toMatchObject({ note: 'ask Anna', ctxRounds: [248_000], prs: [{ number: 42, title: 'Add filter' }] })
+  expect(data).toMatchObject({ notes: [{ id: 1, text: 'ask Anna' }], ctxRounds: [248_000], prs: [{ number: 42, title: 'Add filter' }] })
   expect(data?.history).toHaveLength(1)
   const flag = flagOf(writes) as Record<string, unknown>
   expect(flag.history).toBeUndefined()
   expect(flag.prs).toBeUndefined()
-  expect(flag.note).toBeUndefined()
+  expect(flag.notes).toBeUndefined()
+  expect(data?.note).toBeUndefined() // the single note of the old file is gone from the new one
 })
 
-test('session data: a resume brings back the history, the PRs, the note and the context samples', async ($, on) => {
+test('session data: a resume brings back the history, the PRs, the notes and the context samples', async ($, on) => {
   const writes = new Map<string, string>()
   const dataFile = JSON.stringify({
     history: [entry('a9', 'implementer', NOW - 30_000)],
     prs: [SAVED_PR],
-    note: 'ask Anna',
+    notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }],
     ctxRounds: [100_000, 200_000],
     ctxSamples: [100_000, 200_000],
   })
@@ -4157,12 +4162,36 @@ test('session data: a resume brings back the history, the PRs, the note and the 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
   expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 1 ▸')
-  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna')
+  await ui.press({ key: 'tab:notes' })
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:3', 'note:send:5'])
   await ui.press({ key: 'tab:work' })
   expect(rowTexts(await ui.drawn())).toContain('PR · 1')
   await ui.unmount()
   // written back as it was read
-  expect(dataOf(writes)).toMatchObject({ note: 'ask Anna', ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }], ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
+})
+
+test('session data: the single note of a data file from before the list becomes its first entry, and is written as a list', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [], note: 'ask Anna' }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // written back as a list, the old key gone
+  expect(dataOf(writes)?.note).toBeUndefined()
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'ask Anna' }] })
+  const ui = await notesPane($)
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
+  expect(rowTexts(await ui.drawn()).some(r => r.startsWith('ask Anna'))).toBe(true)
+  await saveNote(ui, 'call back')
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1', 'note:send:2'])
+  await ui.unmount()
+})
+
+test('session data: when the data file holds both, the list wins over the old single note', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], note: 'old', notes: [{ id: 2, text: 'new' }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:2'])
+  await ui.unmount()
 })
 
 test('session data: a state file from before the data file hands its history and PRs over, once', async ($, on) => {
@@ -4191,23 +4220,23 @@ test('session data: once the data file exists the old place is never read again,
 
 test('session data: a field of the wrong shape is left out, never thrown', async ($, on) => {
   const writes = new Map<string, string>()
-  world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, ctxRounds: ['a', -1], ctxSamples: null }) })
+  world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, notes: [null, { id: 1, text: 7 }, { id: 'x', text: 'a' }, { id: 2, text: ' ' }], ctxRounds: ['a', -1], ctxSamples: null }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX })
 })
 
-test('session data: the end of the session writes the note into the data file; a snapshot of another session writes none', async ($, on) => {
+test('session data: the end of the session writes the notes into the data file; a snapshot of another session writes none', async ($, on) => {
   let id = 's-1'
   const writes = new Map<string, string>()
   world(on, { sessionId: () => id, writes })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
-  await ui.input({ key: 'note', text: 'keep me', kind: 'change' })
+  const ui = await notesPane($)
+  await saveNote(ui, 'keep me')
   await ui.unmount()
   id = 's-2'
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  expect(dataOf(writes)).toMatchObject({ note: 'keep me' })
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'keep me' }] })
   const text = () => writes.get([...writes.keys()].find(k => DATA.test(k)) ?? '')
   const before = text()
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } }) // nothing owns the snapshot now
@@ -4298,7 +4327,7 @@ test('alerts: what a session was resumed with is not news: a saved red PR toasts
   expect(toasts).toEqual([])
 })
 
-// ── Phase 6: quick note ──
+// ── Phase 8: the Notes tab ──
 
 /** The keys of the drawn tree in drawing order. */
 const keysInOrder = (el: unknown): string[] => {
@@ -4307,75 +4336,163 @@ const keysInOrder = (el: unknown): string[] => {
   return [...(o?.props?.key ? [o.props.key] : []), ...(o?.children ?? []).flatMap(keysInOrder)]
 }
 
-test('note: an Input of two rows sits under the tab bar, on every tab, and holds the note', async ($, on) => {
+/** The mounted pane on its Notes tab. */
+const notesPane = async ($: Engine, columns = 58) => {
+  const ui = await mountPane($, columns)
+  await ui.press({ key: 'tab:notes' })
+  return ui
+}
+
+/** Types `text` into the Notes field and presses `save`. */
+const saveNote = async (ui: Awaited<ReturnType<typeof notesPane>>, text: string) => {
+  await ui.input({ key: 'note', text, kind: 'change' })
+  await ui.press({ key: 'note:save' })
+  await settleAll()
+}
+
+/** The saved notes' texts, as the rows of the Notes tab draw them. */
+const noteKeys = async (ui: Awaited<ReturnType<typeof notesPane>>, action: string) =>
+  keysInOrder(await ui.drawn()).filter(k => k.startsWith(`note:${action}:`))
+
+test('notes: the field is on the Notes tab only, under the tab bar; the list starts empty and says so', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
+  const ui = await mountPane($, 58)
+  for (const tab of ['agents', 'context', 'work', 'system']) {
+    await ui.press({ key: `tab:${tab}` })
+    expect(await ui.find({ type: 'Input', key: 'note' })).toBeUndefined()
+  }
+  await ui.press({ key: 'tab:notes' })
   const input = await ui.find({ type: 'Input', key: 'note' })
   expect(input?.props.rows).toBe(2)
   expect(input?.props.value).toBe('')
   const keys = keysInOrder(await ui.drawn())
-  expect(keys.indexOf('note')).toBeGreaterThan(keys.indexOf('tab:system'))
+  expect(keys.indexOf('note')).toBeGreaterThan(keys.indexOf('tab:notes'))
   expect(keys.indexOf('note')).toBeLessThan(keys.indexOf('bar:compact'))
-  await ui.press({ key: 'tab:work' })
-  expect(await ui.find({ type: 'Input', key: 'note' })).toBeDefined()
-  await ui.input({ key: 'note', text: 'ask Anna\nabout the filter', kind: 'change' })
-  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna\nabout the filter')
+  expect(await ui.find({ key: 'bar:note' })).toBeUndefined()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('NOTES · 0')
+  expect(rows).toContain('no saved notes')
   await ui.unmount()
 })
 
-test('note: send appends the note to the prompt box and clears it; with no note there is no button', async ($, on) => {
-  const fills: { text: string; mode?: string }[] = []
-  const writes = new Map<string, string>()
-  const clock = world(on, { fills, writes })
+test('notes: Input + save adds a note at the end of the list and empties the field; Enter saves the same way; a blank field adds nothing', async ($, on) => {
+  world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
-  expect(await ui.find({ key: 'bar:note' })).toBeUndefined()
-  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
-  expect((await ui.find({ key: 'bar:note' }))?.text).toBe('send')
-  await ui.press({ key: 'bar:note' })
-  await settleAll()
-  expect(fills).toEqual([{ text: 'ask Anna', mode: 'append' }])
+  const ui = await notesPane($)
+  await saveNote(ui, '   ')
+  expect(await noteKeys(ui, 'send')).toEqual([])
+  await saveNote(ui, 'ask Anna\nabout the filter')
   expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
-  expect(await ui.find({ key: 'bar:note' })).toBeUndefined()
-  await clock.advance(3000)
-  expect(dataOf(writes)?.note).toBeUndefined()
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
+  await ui.input({ key: 'note', text: 'call back', kind: 'submit' })
+  await settleAll()
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1', 'note:send:2'])
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('NOTES · 2')
+  expect(rows.some(r => r.startsWith('ask Anna about the filter'))).toBe(true) // a note is one line in the list
+  expect(rows.some(r => r.startsWith('call back'))).toBe(true)
   await ui.unmount()
 })
 
-test('note: Enter in the field sends it the same way', async ($, on) => {
+test('notes: edit loads a note into the field, then save replaces that note and no other', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await saveNote(ui, 'first')
+  await saveNote(ui, 'second')
+  await ui.press({ key: 'note:edit:1' })
+  await settleAll()
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('first')
+  await saveNote(ui, 'first, amended')
+  expect(await noteKeys(ui, 'edit')).toEqual(['note:edit:1', 'note:edit:2'])
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.some(r => r.startsWith('first, amended'))).toBe(true)
+  expect(rows.some(r => r.startsWith('second'))).toBe(true)
+  expect(rows.some(r => /^first(?!,)/.test(r))).toBe(false)
+  // the field is free again: the next save is a new note
+  await saveNote(ui, 'third')
+  expect(await noteKeys(ui, 'edit')).toEqual(['note:edit:1', 'note:edit:2', 'note:edit:3'])
+  await ui.unmount()
+})
+
+test('notes: emptying the field after edit ends the edit, so the next save adds a note and the edited one stays', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await saveNote(ui, 'first')
+  await ui.press({ key: 'note:edit:1' })
+  await settleAll()
+  await ui.input({ key: 'note', text: '', kind: 'change' })
+  await settleAll()
+  await saveNote(ui, 'other')
+  expect(await noteKeys(ui, 'edit')).toEqual(['note:edit:1', 'note:edit:2'])
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.some(r => r.startsWith('first'))).toBe(true)
+  expect(rows.some(r => r.startsWith('other'))).toBe(true)
+  await ui.unmount()
+})
+
+test('notes: send appends the note to the prompt box after a newline, and the note stays in the list', async ($, on) => {
   const fills: { text: string; mode?: string }[] = []
   world(on, { fills })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
-  await ui.input({ key: 'note', text: 'call back', kind: 'submit' })
+  const ui = await notesPane($)
+  await saveNote(ui, 'ask Anna')
+  await ui.press({ key: 'note:send:1' })
   await settleAll()
-  expect(fills).toEqual([{ text: 'call back', mode: 'append' }])
-  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
+  expect(fills).toEqual([{ text: '\nask Anna', mode: 'append' }])
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
   await ui.unmount()
 })
 
-test('note: a prompt box that refuses the text (a dialog holds the keys) keeps the note', async ($, on) => {
+test('notes: a prompt box that refuses the text (a dialog holds the keys) leaves the note in the list', async ($, on) => {
   const fills: { text: string; mode?: string }[] = []
   world(on, { fills, fillRefused: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($)
-  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
-  await ui.press({ key: 'bar:note' })
+  const ui = await notesPane($)
+  await saveNote(ui, 'ask Anna')
+  await ui.press({ key: 'note:send:1' })
   await settleAll()
   expect(fills).toHaveLength(1)
-  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna')
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
   await ui.unmount()
 })
 
-test('note: the buttons stay in the pane width at 30, 40 and 58 columns with a note to send', async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ history: [], prs: [], note: 'ask Anna' }) })
+test('notes: delete removes the note; deleting the one in the field leaves the next save a new note', async ($, on) => {
+  world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (const columns of [30, 40, 58]) {
-    const ui = await mountPane($, columns)
-    expect(await ui.find({ key: 'bar:note' })).toBeDefined()
-    for (const key of ['bar:compact', 'bar:worklog', 'bar:note']) expect(await ui.find({ key })).toBeDefined()
-    await ui.unmount()
+  const ui = await notesPane($)
+  await saveNote(ui, 'one')
+  await saveNote(ui, 'two')
+  await ui.press({ key: 'note:delete:1' })
+  await settleAll()
+  expect(await noteKeys(ui, 'delete')).toEqual(['note:delete:2'])
+  await ui.press({ key: 'note:edit:2' })
+  await ui.press({ key: 'note:delete:2' })
+  await settleAll()
+  expect(await noteKeys(ui, 'delete')).toEqual([])
+  expect(rowTexts(await ui.drawn())).toContain('no saved notes')
+  await saveNote(ui, 'kept text')
+  expect(await noteKeys(ui, 'delete')).toEqual(['note:delete:1'])
+  await ui.unmount()
+})
+
+test('notes: every note has its three buttons, in the pane width at 30, 40 and 58 columns, in both languages', async ($, on) => {
+  const options: World = { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 4, text: 'ask Anna' }] }) }
+  world(on, options)
+  for (const files of [{}, IT_FILE]) {
+    options.files = files
+    try {
+      await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+      for (const columns of [30, 40, 58]) {
+        const ui = await notesPane($, columns)
+        for (const key of ['note:edit:4', 'note:send:4', 'note:delete:4', 'note:save', 'bar:compact']) expect(await ui.find({ key })).toBeDefined()
+        await ui.unmount()
+      }
+    } finally {
+      setLang('en')
+    }
   }
 })
 
@@ -4735,10 +4852,12 @@ test('header: CONTEXT and CREDITS each have an empty row before and after the ti
   const credits = at(/^CREDITS/)
   expect(rows[context]).toBe('CONTEXTcache  94%')
   expect(rows[context - 1]).toBe(' ')
+  expect(rows[context - 2]).toMatch(/^─+$/) // a rule between the model / ALM block and the CONTEXT block
   expect(rows[context + 1]).toBe(' ')
   expect(rows[context + 2]).toMatch(/^[▰▱]+ 25% 248K\/1M$/)
   expect(rows[credits]).toBe('CREDITSvs expected 7d  \u22125%')
   expect(rows[credits - 1]).toBe(' ')
+  expect(rows[credits - 2]).toMatch(/^─+$/) // and one between the CONTEXT and the CREDITS block
   expect(rows[credits + 1]).toBe(' ')
   expect(rows[credits + 2]).toMatch(/ 62% 5h/)
   expect(rows[credits + 3]).toBe(' ') // the two windows are told apart by an empty row
@@ -4752,38 +4871,57 @@ const LANGUAGES = [
   {
     name: 'English',
     files: {},
-    tabs: ['Subagents', 'Context', 'Work ●', 'System'],
-    buttons: { compact: 'compact', worklog: 'log hours' },
+    // the five long labels are 55 cells bare, 57 with the dot: the short ones when the dot is there
+    tabs: ['Sub', 'Ctx', 'Wrk ●', 'Sys', 'Nts'],
+    bareTabs: ['Subagents', 'Context', 'Work', 'System', 'Notes'],
+    buttons: { compact: 'compact', worklog: 'log hours', save: 'save', edit: 'edit', send: 'send', delete: 'delete' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], system: [/^SYSTEM$/, /^reading…$/] },
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], system: [/^SYSTEM$/, /^reading…$/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
     files: IT_FILE,
-    tabs: ['Subagenti', 'Contesto', 'Lavoro ●', 'Sistema'],
-    buttons: { compact: 'compatta', worklog: 'segna ore' },
+    tabs: ['Sub', 'Ctx', 'Lav ●', 'Sis', 'Nte'],
+    // the five Italian names are 58 cells bare, 60 with the dot: the short ones at 58 columns either way
+    bareTabs: ['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'],
+    buttons: { compact: 'compatta', worklog: 'segna ore', save: 'salva', edit: 'modifica', send: 'invia', delete: 'elimina' },
     header: [/^CONTESTO/, /^CREDITI RESIDUI/, /vs atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], system: [/^SISTEMA$/, /^lettura…$/] },
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], system: [/^SISTEMA$/, /^lettura…$/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 
 for (const language of LANGUAGES) {
   test(`${language.name}: the tabs, buttons, header and every tab's titles at 58 columns`, async ($, on) => {
-    world(on, { files: language.files, hasWorklog: true })
-    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const options: World = { files: language.files, hasWorklog: true, dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'ask Anna' }] }) }
+    world(on, options)
+    try {
+      await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-    // the whole tab bar fits one row: the long labels, not the short ones
-    const { labels, cells } = await tabsAt($, 58)
-    expect(labels).toEqual(language.tabs)
-    expect(cells).toBeLessThanOrEqual(56)
-    const ui = await mountPane($, 58)
-    expect((await ui.find({ key: 'bar:compact' }))?.text).toBe(language.buttons.compact)
-    expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe(language.buttons.worklog)
-    await ui.unmount()
+      // the five labels fit one row of the 56 cells: the long ones while they do, else the short ones
+      const { labels, cells } = await tabsAt($, 58)
+      expect(labels).toEqual(language.tabs)
+      expect(cells).toBeLessThanOrEqual(56)
+      const ui = await mountPane($, 58)
+      expect((await ui.find({ key: 'bar:compact' }))?.text).toBe(language.buttons.compact)
+      expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe(language.buttons.worklog)
+      await ui.press({ key: 'tab:notes' })
+      for (const [key, text] of [['note:save', language.buttons.save], ['note:edit:1', language.buttons.edit], ['note:send:1', language.buttons.send], ['note:delete:1', language.buttons.delete]] as const) {
+        expect((await ui.find({ key }))?.text).toBe(text)
+      }
+      await ui.unmount()
 
-    for (const [tab, patterns] of Object.entries(language.byTab)) {
-      const { rows } = await paneRows($, 58, tab)
-      for (const re of [...language.header, ...patterns]) expect(rows.some(r => re.test(r))).toBe(true)
+      for (const [tab, patterns] of Object.entries(language.byTab)) {
+        const { rows } = await paneRows($, 58, tab)
+        for (const re of [...language.header, ...patterns]) expect(rows.some(r => re.test(r))).toBe(true)
+      }
+      // without the dot
+      options.hasWorklog = false
+      await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+      const bare = await tabsAt($, 58)
+      expect(bare.labels).toEqual(language.bareTabs)
+      expect(bare.cells).toBeLessThanOrEqual(56)
+    } finally {
+      setLang('en')
     }
   })
 }
@@ -4793,36 +4931,60 @@ test('language: cockpit.json names it; a missing, unreadable, malformed or unkno
   world(on, options)
   const tabs = async () => (await tabsAt($, 58)).labels
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const italian = ['Sub', 'Ctx', 'Lav', 'Sis', 'Nte']
+  const english = ['Subagents', 'Context', 'Work', 'System', 'Notes']
+  try {
+    await start()
+    expect(await tabs()).toEqual(italian)
 
-  await start()
-  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
+    options.files = { 'cockpit.json': '{"lang":"fr"}' }
+    await start()
+    expect(await tabs()).toEqual(english)
 
-  options.files = { 'cockpit.json': '{"lang":"fr"}' }
-  await start()
-  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+    options.files = IT_FILE
+    await start()
+    expect(await tabs()).toEqual(italian)
+    options.files = {}
+    options.unreadable = ['cockpit.json']
+    await start()
+    expect(await tabs()).toEqual(english)
 
-  options.files = IT_FILE
-  await start()
-  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
-  options.files = {}
-  options.unreadable = ['cockpit.json']
-  await start()
-  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+    options.files = IT_FILE
+    options.unreadable = undefined
+    await start()
+    expect(await tabs()).toEqual(italian)
+    options.files = { 'cockpit.json': '{ "lang": ' }
+    await start()
+    expect(await tabs()).toEqual(english)
+  } finally {
+    setLang('en')
+  }
+})
 
-  options.files = IT_FILE
-  options.unreadable = undefined
-  await start()
-  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
-  options.files = { 'cockpit.json': '{ "lang": ' }
-  await start()
-  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+test('language: a pane that draws before any session start (a mod enabled mid-session) reads cockpit.json once', async ($, on) => {
+  const options: World = { files: IT_FILE }
+  const clock = world(on, options)
+  try {
+    expect((await tabsAt($, 58)).labels).toEqual(['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'])
+    // read once: a change of the file is for the next session start
+    options.files = {}
+    await clock.advance(10) // the first drawing marked the language as read
+    expect((await tabsAt($, 58)).labels).toEqual(['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'])
+  } finally {
+    setLang('en')
+  }
 })
 
 test('language: the toasts are in the language of the pane', async ($, on) => {
   const toasts: string[] = []
   world(on, { toasts, files: IT_FILE })
   on('session.measure', (_, e) => ({ changed: e.changed }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.session.measure({ context: { window: 1_000_000, tokens: 850_000, percent: 85 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
-  expect(toasts).toEqual(['contesto al 85%'])
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.session.measure({ context: { window: 1_000_000, tokens: 850_000, percent: 85 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+    expect(toasts).toEqual(['contesto al 85%'])
+  } finally {
+    setLang('en')
+  }
 })
+

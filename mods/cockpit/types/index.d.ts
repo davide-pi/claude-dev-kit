@@ -210,8 +210,11 @@ export type CockpitSystem = {
   off: CockpitSystemPart[]
 }
 
-/** The view the pane draws: the tab bar's four buttons. */
-export type CockpitTab = 'agents' | 'context' | 'work' | 'system'
+/** The view the pane draws: the tab bar's five buttons. */
+export type CockpitTab = 'agents' | 'context' | 'work' | 'system' | 'notes'
+
+/** A note saved on the Notes tab; `id` is stable, the list keeps the order the notes were saved in. */
+export type CockpitNote = { id: number; text: string }
 
 export type CockpitSnapshot = {
   /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
@@ -287,8 +290,14 @@ export type CockpitSnapshot = {
   repo?: CockpitRepo
   /** The Sistema tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
   system?: CockpitSystem
-  /** The quick note under the tab bar, kept with the session in its data file; `invia` appends it to the prompt box and clears it. Absent when empty. */
-  note?: string
+  /** The Notes tab's saved notes, kept with the session in its data file; `send` appends one to the prompt box and keeps it. Absent when none. */
+  notes?: CockpitNote[]
+  /** What the Notes tab's field holds (not kept in the data file); absent when empty. */
+  noteDraft?: string
+  /** True once the pane's language was read (a session start or the first drawing); not kept in any file. */
+  isLangRead?: boolean
+  /** The id of the note the field was loaded from: `save` replaces that note instead of adding one. */
+  noteEditing?: number
   /** The diff of the file pressed on the Lavoro tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */

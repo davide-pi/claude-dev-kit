@@ -7,6 +7,7 @@ import type {
   CockpitChange,
   CockpitClaudeState,
   CockpitHistoryEntry,
+  CockpitNote,
   CockpitPerimeterCheck,
   CockpitPr,
   CockpitSnapshot,
@@ -45,7 +46,7 @@ import {
   parseCounts,
   parseCtx,
   parseHistory,
-  parseNote,
+  parseNotes,
   parseNumstat,
   parsePerimeter,
   parseRateCache,
@@ -419,7 +420,7 @@ let mainTools: string[] = []
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the quick note, the context samples and the last measured context; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the saved notes, the context samples and the last measured context; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
 const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
@@ -429,7 +430,7 @@ const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[]
   return {
     history,
     prs: s.prs ?? [],
-    ...(s.note !== undefined && { note: s.note }),
+    ...(s.notes !== undefined && { notes: s.notes }),
     ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(ctx && { ctx }),
@@ -514,7 +515,7 @@ type Saved = {
   prs?: CockpitPr[]
   mainTokens?: number
   agentTokens?: number
-  note?: string
+  notes?: CockpitNote[]
   ctxSamples?: number[]
   ctxRounds?: number[]
   ctx?: { tokens: number; window: number; percent: number }
@@ -523,7 +524,7 @@ type Saved = {
 /**
  * What an earlier run of session `id` left: in its state file the tab (none for a missing file or an unknown one; the v2 Sessione
  * and Repo tabs map to Subagents and Work) and the tokens of the main loop and of the agents that left the list (a file from before
- * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the note and the context
+ * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the notes and the context
  * samples. A state file from before the data file still holds the history and the pull requests: a field the data file does not
  * have is read from there, once (the next write moves it).
  */
@@ -543,7 +544,7 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       prs: prs.length > 0 ? prs : undefined,
       mainTokens: count(state?.mainTokens),
       agentTokens: count(state?.agentTokens) ?? historyTokens(history),
-      note: parseNote(data?.note),
+      notes: parseNotes(data?.notes, data?.note),
       ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       ctx: parseCtx(data?.ctx),
@@ -560,7 +561,9 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   agents: [],
   history: [],
   prs: undefined,
-  note: undefined,
+  notes: undefined,
+  noteDraft: undefined,
+  noteEditing: undefined,
   calls: undefined,
   tasks: [],
   cacheShare: undefined,
@@ -596,7 +599,7 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, note: saved.note, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
   // The monitor looked for the pid of the session it was started for: another one's gets its own, if the tab is still wanted.
   stopMonitor()
@@ -1050,19 +1053,43 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
   countExact: () => void countExact($).catch(() => undefined),
-  setNote: text => void patch($, s => ({ ...s, note: text === '' ? undefined : text.slice(0, NOTE_MAX) })).catch(() => undefined),
-  sendNote: text => void sendNote($, text).catch(() => undefined),
+  setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : text.slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
+  saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
+  editNote: id =>
+    void patch($, s => {
+      const note = s.notes?.find(n => n.id === id)
+      return note ? { ...s, noteDraft: note.text, noteEditing: id } : s
+    }).catch(() => undefined),
+  sendNote: id => void sendNote($, id).catch(() => undefined),
+  deleteNote: id =>
+    void patch($, s => {
+      const notes = (s.notes ?? []).filter(n => n.id !== id)
+      return { ...s, notes: notes.length > 0 ? notes : undefined, noteEditing: s.noteEditing === id ? undefined : s.noteEditing }
+    }).catch(() => undefined),
 })
 
 /**
- * Appends the quick note (`typed`, the field's text on Enter; else the one the snapshot holds) to the prompt box and clears it. The
- * box is only filled, never submitted (D3): the person decides. A box that refuses the text keeps the note.
+ * Saves the field's text (`typed`, the text of the field on Enter; else the draft the snapshot holds): a new note at the end of the list,
+ * or, when the field was loaded from a note (`noteEditing`) that is still there, that note's text replaced. The field is emptied; a blank text changes nothing.
  */
-async function sendNote($: EngineInterface, typed?: string): Promise<void> {
-  const note = typed ?? (await read($, snapshot)).note
-  if (note === undefined || note.trim() === '') return
-  const filled = await $.prompt.fill({ text: note, mode: 'append' })
-  await patch($, s => ({ ...s, note: filled.isFilled ? undefined : note.slice(0, NOTE_MAX) }))
+function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
+  const text = (typed ?? s.noteDraft ?? '').slice(0, NOTE_MAX)
+  if (text.trim() === '') return s
+  const notes = s.notes ?? []
+  const isEdit = notes.some(n => n.id === s.noteEditing)
+  const next = isEdit
+    ? notes.map(n => (n.id === s.noteEditing ? { ...n, text } : n))
+    : [...notes, { id: Math.max(0, ...notes.map(n => n.id)) + 1, text }]
+  return { ...s, notes: next, noteDraft: undefined, noteEditing: undefined }
+}
+
+/**
+ * Appends a saved note to the prompt box, after a newline (D6: it may follow text already typed). The box is only filled, never
+ * submitted (D3): the person decides. The note stays in the list, whether the box took the text or not.
+ */
+async function sendNote($: EngineInterface, id: number): Promise<void> {
+  const note = (await read($, snapshot)).notes?.find(n => n.id === id)
+  if (note) await $.prompt.fill({ text: `\n${note.text}`, mode: 'append' })
 }
 
 /**
@@ -1101,6 +1128,7 @@ export const register: Register = on => {
       model,
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
+      isLangRead: true,
     }))
     await refreshLastRates($)
     await refreshUsage($)
@@ -1479,6 +1507,11 @@ export const register: Register = on => {
     if (!isOpen) $.clock.after(0, () => void setOpen($, true).catch(() => undefined))
     const ui = $.ui.resolve(e)
     const s = await read($, snapshot)
+    // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
+    if (!s.isLangRead) {
+      await refreshLang($)
+      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
+    }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
 }

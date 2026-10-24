@@ -8,6 +8,7 @@ import type {
   CockpitContext,
   CockpitContextRow,
   CockpitDiff,
+  CockpitNote,
   CockpitPr,
   CockpitSnapshot,
   CockpitSysProc,
@@ -590,10 +591,15 @@ export type PaneActions = {
   countExact: () => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
-  /** Keeps the quick note as the person types it. */
-  setNote: (text: string) => void
-  /** Appends the quick note to the prompt box and clears it: the text of the field on Enter, the saved one when none is given. */
-  sendNote: (text?: string) => void
+  /** Keeps what the Notes tab's field holds as the person types it. */
+  setNoteDraft: (text: string) => void
+  /** Saves the field as a note (replacing the one it was loaded from, if any): the text of the field on Enter, the kept draft when none is given. */
+  saveNote: (text?: string) => void
+  /** Loads a saved note into the field. */
+  editNote: (id: number) => void
+  /** Appends a saved note to the prompt box; the note stays in the list. */
+  sendNote: (id: number) => void
+  deleteNote: (id: number) => void
 }
 
 /** What the diff pane's button does. */
@@ -684,6 +690,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     S.tabs.context,
     wlRows.length > 0 ? `${S.tabs.work} ●` : S.tabs.work,
     S.tabs.system,
+    S.tabs.notes,
   ]
   const names = buttonRowWidth(fullLabels) <= width ? S.tabs : S.tabsShort
   const tabBar = (
@@ -692,6 +699,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       {tabButton('context', names.context)}
       {tabButton('work', names.work, wlRows.length > 0)}
       {tabButton('system', names.system)}
+      {tabButton('notes', names.notes)}
     </Box>
   )
 
@@ -773,16 +781,10 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     return split(line(ui, barCells(barW, parts)), barW, text)
   }
 
-  // The quick note under the tab bar, on every tab: two rows, saved as it is typed; Enter and `send` append it to the prompt box.
-  const noteInput = Input && (
-    <Input key="note" rows={2} placeholder={S.notePlaceholder} value={s.note ?? ''} submitLabel={S.buttons.send} onInput={value => actions.setNote(value)} onSubmit={value => actions.sendNote(value)} />
-  )
-
-  // The last row of every tab: compact always; log hours (the hours of this chat) whenever the session has an id; send while
-  // the note holds something to send. The row stacks when its buttons do not fit the pane side by side.
+  // The last row of every tab: compact always; log hours (the hours of this chat) whenever the session has an id. The row stacks
+  // when its buttons do not fit the pane side by side.
   const hasSession = s.sessionId !== undefined
-  const hasNote = (s.note ?? '').trim() !== ''
-  const barLabels = [S.buttons.compact, ...(hasSession ? [S.buttons.logHours] : []), ...(hasNote ? [S.buttons.send] : [])]
+  const barLabels = [S.buttons.compact, ...(hasSession ? [S.buttons.logHours] : [])]
   const buttonsRow = (
     <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
       <Button key="bar:compact" onPress={() => actions.compact()}>
@@ -793,24 +795,21 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           {S.buttons.logHours}
         </Button>
       )}
-      {hasNote && (
-        <Button key="bar:note" onPress={() => actions.sendNote()}>
-          {S.buttons.send}
-        </Button>
-      )}
     </Box>
   )
 
-  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, each title with an empty row on both sides
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, the three blocks told apart by a rule, each title with an empty row on both sides
   const headerRows: Node[] = [
     modelLine,
     grid,
     almRow,
+    rule,
     gap(),
     title(S.contextTitle, contextRight),
     gap(),
     split(ctxBar, barW, ctxText),
     ctxWarning,
+    rule,
     gap(),
     title(S.creditsTitle, paceSpans),
     gap(),
@@ -1085,8 +1084,44 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
             : []),
         ]
 
+  // Notes: the field and `save` first, then the saved notes (the first line of each) with their buttons; the field is left out where the surface has none.
+  const notes = s.notes ?? []
+  const noteButtons = [S.buttons.edit, S.buttons.send, S.buttons.delete]
+  const noteRow = (n: CockpitNote) => (
+    <Box flexDirection="column">
+      <Text wrap="truncate">{n.text.replace(/\s*\n\s*/g, ' ')}</Text>
+      <Box flexDirection={buttonRowWidth(noteButtons) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+        <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
+          {S.buttons.edit}
+        </Button>
+        <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
+          {S.buttons.send}
+        </Button>
+        <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
+          {S.buttons.delete}
+        </Button>
+      </Box>
+    </Box>
+  )
+  const notesBlocks: Block[] = [
+    [
+      gap(),
+      title(S.notesTitle(notes.length)),
+      gap(),
+      Input && (
+        <Input key="note" rows={2} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
+      ),
+      Input && (
+        <Button key="note:save" onPress={() => actions.saveNote()}>
+          {S.buttons.save}
+        </Button>
+      ),
+      ...(notes.length > 0 ? [gap(), notes.flatMap((n, i) => [i > 0 && gap(), noteRow(n)])] : [gap(), line(ui, [dim(S.noNotes)])]),
+    ],
+  ]
+
   // Blocks are told apart by a rule; an empty tab says so.
-  const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks }[tab]
+  const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks, notes: notesBlocks }[tab]
   const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
 
   return (
@@ -1094,7 +1129,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       {headerRows}
       {rule}
       {tabBar}
-      {noteInput}
       {rule}
       {body}
       {/* The spacer takes what the tab leaves of the pane height: the buttons sit on its last row, or follow a taller tab. */}
