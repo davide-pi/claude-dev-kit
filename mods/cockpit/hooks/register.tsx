@@ -12,12 +12,14 @@ import type {
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
+  CockpitUsage,
   CockpitWorkflowRun,
 } from '../types'
 import {
   AGENT_KEEP_MS,
   addHistory,
   additionsDiff,
+  addUsage,
   azArgv,
   azureRepo,
   capDiff,
@@ -28,6 +30,7 @@ import {
   isDefaultBranch,
   isGithubRemote,
   isTab,
+  newTokens,
   parseAzurePr,
   parseDefaultBranch,
   parseDoneClaims,
@@ -42,8 +45,11 @@ import {
   recordBurnSample,
   recordCtxSample,
   resolveAlm,
+  settleUsage,
+  stateAfterWait,
   tabNeeds,
   toHistory,
+  usageOf,
   worklogDays,
 } from './format'
 import type { WorklogSnapshot } from './format'
@@ -78,9 +84,6 @@ function withBurnSample(samples: CockpitSnapshot['fiveHourSamples'], now: number
   const w = limits.find(r => r.kind === 'five_hour')
   return recordBurnSample(samples, now, w?.percentUsed, parseReset(w?.resetsAt))
 }
-
-const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
-  u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
 
 /**
  * Keeps the name of the first workflow among `tasks` (a stop's `background_tasks`) in the snapshot; none clears it. The
@@ -362,6 +365,8 @@ let isOpen = false
 let lastWritten = ''
 let lastWriteAt = 0
 let isWriteScheduled = false
+// The main loop's tools in flight (a `tool.call` seen before its `next` answered), in start order: the header's tool state lasts while any is left.
+let mainTools: string[] = []
 
 /**
  * Writes the state file when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
@@ -386,6 +391,8 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       tasks: counts ? { done: counts.done, total: counts.total } : null,
       tab: s.tab ?? 'session',
       history: s.history ?? [],
+      // the history's tokens survive a reload, so the main loop's must too: the share is a part of their sum
+      mainTokens: s.mainTokens,
     }
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
@@ -411,8 +418,8 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
   }
 }
 
-/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one) and the agent history. */
-async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[] }> {
+/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one), the agent history and the main loop's tokens. */
+async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; mainTokens?: number }> {
   try {
     const dir = await configDir($)
     if (!dir || !SESSION_ID.test(id)) return { history: [] }
@@ -420,7 +427,12 @@ async function savedState($: EngineInterface, id: string): Promise<{ tab?: Cockp
     const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
     if (typeof parsed !== 'object' || parsed === null) return { history: [] }
     const tab = 'tab' in parsed ? parsed.tab : undefined
-    return { tab: isTab(tab) ? tab : undefined, history: parseHistory('history' in parsed ? parsed.history : undefined) }
+    const mainTokens = 'mainTokens' in parsed ? parsed.mainTokens : undefined
+    return {
+      tab: isTab(tab) ? tab : undefined,
+      history: parseHistory('history' in parsed ? parsed.history : undefined),
+      mainTokens: typeof mainTokens === 'number' && Number.isFinite(mainTokens) && mainTokens >= 0 ? mainTokens : undefined,
+    }
   } catch {
     return { history: [] }
   }
@@ -434,6 +446,8 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   history: [],
   tasks: [],
   cacheShare: undefined,
+  mainTokens: undefined,
+  mainStepTokens: undefined,
   claudeState: undefined,
   ctxSamples: undefined,
   fiveHourSamples: [],
@@ -452,7 +466,9 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   if (current.sessionId === id || (!isStart && current.endedSessionId === id)) return
   const saved = await savedState($, id)
   await update($, snapshot, s =>
-    s.sessionId === id ? s : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history },
+    s.sessionId === id
+      ? s
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, mainTokens: saved.mainTokens },
   )
 }
 
@@ -563,6 +579,28 @@ async function setClaudeState($: EngineInterface, state: CockpitClaudeState, onl
 }
 
 /**
+ * Adds one response's counters to its loop's: an agent's four counters (kept apart as the turn's step part, which the turn's end
+ * swaps for the turn's own total) or, for the main loop, the session's token count. Never breaks the step.
+ */
+async function addStepUsage($: EngineInterface, agentId: string | undefined, usage: CockpitUsage): Promise<void> {
+  const now = await $.clock.now()
+  const added = newTokens(usage)
+  await patch($, s =>
+    agentId === undefined
+      ? { ...s, mainTokens: (s.mainTokens ?? 0) + added, mainStepTokens: (s.mainStepTokens ?? 0) + added }
+      : {
+          ...s,
+          agents: upsertAgent(s.agents, agentId, now, a => ({
+            ...a,
+            usage: addUsage(a.usage, usage),
+            stepUsage: addUsage(a.stepUsage, usage),
+            tokens: a.tokens + added,
+          })),
+        },
+  )
+}
+
+/**
  * The clock the countdowns and durations count from, and the agents that ended moved to the history: every tier runs it, so
  * `now` is never older than the tier's own period.
  */
@@ -602,23 +640,30 @@ async function fastTick($: EngineInterface): Promise<void> {
   if (await isTierWanted($, 'fast')) await tickClock($)
 }
 
-/** Medium tier (10 s): git (and, with the Repo tab, its reads) for a tab that shows them. */
+/** Medium tier (10 s): git (and, with the Repo tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
 async function mediumTick($: EngineInterface): Promise<void> {
-  if (!(await isTierWanted($, 'medium'))) return
+  if (!isOpen) return
   await tickClock($)
   await refreshGit($)
 }
 
 /** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. */
 async function slowTick($: EngineInterface): Promise<void> {
-  const now = await tickClock($)
-  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow read cannot delay it.
+  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow or failing read cannot delay or skip it.
   if (isOpen) await writeState($, true, true)
+  // A failed clock tick must not skip the reads below.
+  const now = await tickClock($).catch(() => $.clock.now())
   // The ALM line first: an Azure DevOps pull request is asked about with its org.
   await refreshAlm($)
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
+}
+
+/** `list` without its last entry equal to `tool` (a call that ended); undefined stays undefined. */
+const removeOne = (list: readonly string[] | undefined, tool: string): string[] | undefined => {
+  const i = list?.lastIndexOf(tool) ?? -1
+  return list && i >= 0 ? [...list.slice(0, i), ...list.slice(i + 1)] : list?.slice()
 }
 
 /** Applies `change` to the agent `id`; an agent whose events outran its spawn gets a stub the spawn later fills. */
@@ -767,7 +812,7 @@ export const register: Register = on => {
           .filter((h): h is CockpitHistoryEntry => h !== undefined)
           .sort((a, b) => b.endedAt - a.endedAt)
         const history = addHistory(own?.history, left)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history }
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history, mainTokens: own?.mainTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
       }
     } catch {
@@ -817,6 +862,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     // The deltas count from where the main loop's turn began.
     if (e.agentId === undefined) {
+      // A new turn has no tool in flight: one a crashed call left behind would hold the state on a tool for good.
+      mainTools = []
       await patch($, s => ({
         ...s,
         ctx: { ...s.ctx, startTokens: s.ctx.tokens ?? 0 },
@@ -840,13 +887,26 @@ export const register: Register = on => {
     } catch {
       // observing must never break the step
     }
-    // The main loop's chunks tell what Claude is doing: a thinking chunk is thinking, text or a tool's start is working.
-    for await (const chunk of next(e)) {
+    // The main loop's chunks tell what Claude is doing: a thinking chunk is thinking, text or a tool's start is working. A chunk
+    // repeats many times a second: the state is written when the kind it derives changes, with no snapshot read in between.
+    const stream = next(e)
+    let lastKind: 'thinking' | 'working' | undefined
+    for await (const chunk of stream) {
       if (e.agentId === undefined) {
-        if (chunk.kind === 'thinking') await setClaudeState($, { kind: 'thinking' })
-        else if (chunk.kind === 'text' || chunk.kind === 'tool') await setClaudeState($, { kind: 'working' })
+        const kind = chunk.kind === 'thinking' ? 'thinking' : chunk.kind === 'text' || chunk.kind === 'tool' ? 'working' : undefined
+        if (kind !== undefined && kind !== lastKind) {
+          lastKind = kind
+          await setClaudeState($, { kind })
+        }
       }
       yield chunk
+    }
+    // The response's own usage: the four counters of an agent, live per step, and the session's share.
+    try {
+      const { usage } = await stream.result
+      if (usage) await addStepUsage($, e.agentId, usageOf(usage))
+    } catch {
+      // observing must never break the step
     }
   })
 
@@ -914,24 +974,33 @@ export const register: Register = on => {
     return ran
   })
 
-  // The last tool of each subagent, from the tool events carrying its id; the main loop's calls are no agent's: while one
-  // runs the header shows the tool by name, and the call's end puts the state back to working (if no other call replaced it).
+  // The tools of each subagent, from the tool events carrying its id: the one running now (from the call to its end) and the last
+  // one. The main loop's calls are no agent's: while any runs the header shows a tool by name, and the end of the last one puts
+  // the state back to working.
   on('tool.call', async ($, e, next) => {
     const { agentId, tool } = e
     if (agentId !== undefined) {
+      const forAgent = (change: (a: CockpitAgent) => CockpitAgent) => patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? change(a) : a)) }))
       try {
         // Only an agent the mod already knows: a call that outran the spawn makes no stub the spawn would later fill.
-        await patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool } : a)) }))
+        await forAgent(a => ({ ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool] }))
       } catch {
         // observing must never break the call
       }
-      return next(e)
+      try {
+        return await next(e)
+      } finally {
+        await forAgent(a => ({ ...a, activeTools: removeOne(a.activeTools, tool) })).catch(() => undefined)
+      }
     }
+    mainTools = [...mainTools, tool]
     await setClaudeState($, { kind: 'tool', tool })
     try {
       return await next(e)
     } finally {
-      await setClaudeState($, { kind: 'working' }, held => held?.kind === 'tool' && held.tool === tool)
+      mainTools = removeOne(mainTools, tool) ?? []
+      const last = mainTools.at(-1)
+      await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
   })
 
@@ -939,15 +1008,17 @@ export const register: Register = on => {
   // something wants attention: waiting until the next event moves the state on.
   on('classic.PermissionRequest', async ($, e, next) => {
     if (e.agent_id !== undefined) return next(e)
+    const held = (await read($, snapshot).catch(() => undefined))?.claudeState
     await setClaudeState($, { kind: 'waiting' })
     try {
       return await next(e)
     } finally {
-      await setClaudeState($, { kind: 'working' }, held => held?.kind === 'waiting')
+      await setClaudeState($, stateAfterWait(held, mainTools), now => now?.kind === 'waiting')
     }
   })
   on('classic.Notification', async ($, e, next) => {
-    if (e.agent_id === undefined) await setClaudeState($, { kind: 'waiting' })
+    // A notification while Claude is idle (or before anything happened) wants nothing from the person yet: it stays idle.
+    if (e.agent_id === undefined) await setClaudeState($, { kind: 'waiting' }, now => now !== undefined && now.kind !== 'idle')
     return next(e)
   })
 
@@ -991,18 +1062,30 @@ export const register: Register = on => {
           ctxSamples: s.ctx.tokens ? recordCtxSample(s.ctxSamples, s.ctx.tokens) : s.ctxSamples,
         }))
       }
+      // The steps already counted their part of the session's tokens: the turn's own total replaces it.
+      await patch($, s => ({
+        ...s,
+        mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
+        mainStepTokens: undefined,
+      }))
       await setClaudeState($, { kind: 'idle' })
     } else {
       await patch($, s => ({
         ...s,
         workflowRun: finishWorkflowAgent(s.workflowRun, agentId),
-        agents: upsertAgent(s.agents, agentId, now, a => ({
-          ...a,
-          status: 'done',
-          endedAt: now,
-          isFailed: e.reason !== 'answer',
-          tokens: a.tokens + (usage ? sumUsage(usage) : 0),
-        })),
+        agents: upsertAgent(s.agents, agentId, now, a => {
+          // The steps already counted their part: the turn's own total replaces it.
+          const settled = settleUsage(a.usage, a.stepUsage, usage ? usageOf(usage) : undefined)
+          return {
+            ...a,
+            status: 'done',
+            endedAt: now,
+            isFailed: e.reason !== 'answer',
+            usage: settled,
+            stepUsage: undefined,
+            tokens: usage ? a.tokens - newTokens(a.stepUsage) + newTokens(usageOf(usage)) : a.tokens,
+          }
+        }),
       }))
     }
     await refreshGit($)

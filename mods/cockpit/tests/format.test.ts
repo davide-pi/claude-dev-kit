@@ -5,6 +5,7 @@ import {
   ICONS,
   abbrevTokens,
   addHistory,
+  addUsage,
   aheadBehindSpans,
   almText,
   autocompactForecast,
@@ -16,6 +17,12 @@ import {
   folderIcon,
   recordCtxSample,
   tabNeeds,
+  newTokens,
+  sessionTokens,
+  settleUsage,
+  stateAfterWait,
+  tokenShare,
+  usageOf,
   claimTime,
   compactInstructions,
   isGithubRemote,
@@ -699,4 +706,41 @@ test('tabNeeds: the clock tiers a selected tab asks for', () => {
   expect(tabNeeds('work')).toEqual({ fast: true, medium: true })
   expect(tabNeeds('repo')).toEqual({ fast: false, medium: true })
   expect(tabNeeds(undefined)).toEqual({ fast: true, medium: false })
+})
+
+test('stateAfterWait: a tool still in flight wins (the held one when it is), else what the wait interrupted', () => {
+  expect(stateAfterWait({ kind: 'tool', tool: 'Bash' }, ['Bash', 'Read'])).toEqual({ kind: 'tool', tool: 'Bash' })
+  expect(stateAfterWait({ kind: 'tool', tool: 'Bash' }, ['Read'])).toEqual({ kind: 'tool', tool: 'Read' })
+  expect(stateAfterWait({ kind: 'thinking' }, ['Read'])).toEqual({ kind: 'tool', tool: 'Read' })
+  expect(stateAfterWait({ kind: 'tool', tool: 'Bash' }, [])).toEqual({ kind: 'working' })
+  expect(stateAfterWait({ kind: 'thinking' }, [])).toEqual({ kind: 'thinking' })
+  expect(stateAfterWait({ kind: 'waiting' }, [])).toEqual({ kind: 'working' })
+  expect(stateAfterWait(undefined, [])).toEqual({ kind: 'working' })
+})
+
+test('usage counters: summed, new tokens leave the cache reads out, a turn total replaces its steps', () => {
+  const step = usageOf({ input_tokens: 10, output_tokens: 5, cache_read_input_tokens: 100, cache_creation_input_tokens: 20 })
+  expect(step).toEqual({ input: 10, output: 5, cacheRead: 100, cacheWrite: 20 })
+  expect(newTokens(step)).toBe(35)
+  expect(newTokens(undefined)).toBe(0)
+  const two = addUsage(addUsage(undefined, step), step)
+  expect(two).toEqual({ input: 20, output: 10, cacheRead: 200, cacheWrite: 40 })
+  // an earlier turn's counters stay, the steps' part is swapped for the turn's own total
+  const before = { input: 1, output: 1, cacheRead: 1, cacheWrite: 1 }
+  const total = addUsage(before, two)
+  expect(settleUsage(total, two, { input: 21, output: 11, cacheRead: 201, cacheWrite: 41 })).toEqual({ input: 22, output: 12, cacheRead: 202, cacheWrite: 42 })
+  expect(settleUsage(total, two, undefined)).toEqual(total)
+  expect(settleUsage(undefined, undefined, step)).toEqual(step)
+})
+
+test('tokenShare and sessionTokens: the share of main, listed agents and history together', () => {
+  const agent = (id: string, tokens: number) => ({ id, type: 't', status: 'running' as const, startedAt: 0, tokens })
+  const entry = { id: 'h', type: 't', startedAt: 0, endedAt: 1, tokens: 300, isFailed: false }
+  expect(sessionTokens({ mainTokens: 500, agents: [agent('a', 100), agent('b', 100)], history: [entry] })).toBe(1000)
+  expect(sessionTokens({ agents: [] })).toBe(0)
+  expect(tokenShare(250, 1000)).toBe('25%')
+  expect(tokenShare(2, 1000)).toBe('<1%')
+  expect(tokenShare(0, 1000)).toBe('0%')
+  expect(tokenShare(5, 0)).toBeUndefined()
+  expect(tokenShare(1500, 1000)).toBe('100%')
 })

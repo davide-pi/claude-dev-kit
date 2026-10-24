@@ -3,6 +3,9 @@
 
 export type CockpitRateLimit = { kind: string; percentUsed: number; resetsAt?: string }
 
+/** The four token counters the API reports for a response, kept as the agent's running totals. */
+export type CockpitUsage = { input: number; output: number; cacheRead: number; cacheWrite: number }
+
 export type CockpitAgent = {
   id: string
   parentId?: string
@@ -17,6 +20,8 @@ export type CockpitAgent = {
   description?: string
   /** The last tool the agent called, from the `tool.call` events carrying its id; absent before its first call. */
   lastTool?: string
+  /** The tools the agent has in flight (a `tool.call` seen before its `next` answered), in start order; the last one is the tool running now. */
+  activeTools?: string[]
   status: 'running' | 'done'
   startedAt: number
   endedAt?: number
@@ -26,6 +31,10 @@ export type CockpitAgent = {
   isInterrupted?: boolean
   /** New tokens the agent's turns used: input + cache writes + output (cache reads left out). */
   tokens: number
+  /** The four counters of the agent's turns, live: each step adds its own, the turn's end replaces them with the turn's total. Absent before any usage was seen. */
+  usage?: CockpitUsage
+  /** The part of `usage` that the steps of the turn in progress added; the turn's end swaps it for the turn's own total. */
+  stepUsage?: CockpitUsage
 }
 
 /** A finished agent that left the live list, as the history keeps it (and the state file persists it). */
@@ -148,6 +157,10 @@ export type CockpitSnapshot = {
   fiveHourSamples?: CockpitBurnSample[]
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number
+  /** New tokens the main loop used this session (same count as an agent's `tokens`), live like an agent's `usage`; absent before any usage was seen. With the agents' it is the session's tokens. */
+  mainTokens?: number
+  /** The part of `mainTokens` that the steps of the turn in progress added. */
+  mainStepTokens?: number
   /** The main loop's state for the header's icon; absent before any event (read as idle). */
   claudeState?: CockpitClaudeState
   /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
