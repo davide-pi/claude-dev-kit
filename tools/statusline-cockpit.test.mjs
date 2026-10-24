@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -62,6 +62,27 @@ test('pane open but stale (no heartbeat for over 45 s): the normal line', () => 
   const out = render({ ...STATE, open: true, at: Date.now() - 60_000 });
   assert.notEqual(out, '\u200B\n');
   assert.match(out, /\+\$0\.38/);
+});
+
+// ── Folder icon ──────────────────────────────────────────────────────────────
+
+test('folder segment: a linked worktree shows nf-md-source_repository_multiple (U+F0CD0), a main checkout the folder icon', () => {
+  const base = mkdtempSync(join(tmpdir(), 'statusline-worktree-'));
+  const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci', ...args], { cwd, stdio: 'ignore' });
+  try {
+    const main = join(base, 'main');
+    const linked = join(base, 'linked');
+    mkdirSync(main);
+    git(main, 'init', '-q');
+    git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(main, 'worktree', 'add', '-q', linked, '-b', 'linked-branch');
+    const inWorktree = render(undefined, { ...SAMPLE, cwd: linked });
+    assert.ok(inWorktree.includes('\u{F0CD0}'), 'worktree icon');
+    assert.ok(!inWorktree.includes('\u{F0253}'), 'the old worktree icon is gone');
+    const inMain = render(undefined, { ...SAMPLE, cwd: main });
+    assert.ok(inMain.includes('\u{F024B}'), 'folder icon');
+    assert.ok(!inMain.includes('\u{F0CD0}'), 'no worktree icon in the main checkout');
+  } finally { rmSync(base, { recursive: true, force: true }); }
 });
 
 // ── Cache pruning ────────────────────────────────────────────────────────────

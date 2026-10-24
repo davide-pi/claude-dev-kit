@@ -5,6 +5,7 @@ import type {
   CockpitAgent,
   CockpitAlm,
   CockpitChange,
+  CockpitClaudeState,
   CockpitHistoryEntry,
   CockpitPerimeterCheck,
   CockpitPr,
@@ -39,7 +40,9 @@ import {
   parseWorktree,
   parseWorktrees,
   recordBurnSample,
+  recordCtxSample,
   resolveAlm,
+  tabNeeds,
   toHistory,
   worklogDays,
 } from './format'
@@ -48,7 +51,10 @@ import { DIFF_PANE, INITIAL, PANE } from './state'
 import type { DiffActions, PaneActions } from './view'
 import { PANE_MAX_COLUMNS, agentCounts, diffView, paneView, taskCounts } from './view'
 
-const TICK_MS = 15_000
+// The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
+const FAST_MS = 2000
+const MEDIUM_MS = 10_000
+const SLOW_MS = 30_000
 /** The pull request (and the repo's default branch) of a branch is read again after this long. */
 const PR_EVERY_MS = 5 * 60_000
 /** The Repo tab keeps this many changed files; it draws 8 of them. */
@@ -428,6 +434,8 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   history: [],
   tasks: [],
   cacheShare: undefined,
+  claudeState: undefined,
+  ctxSamples: undefined,
   fiveHourSamples: [],
   workflow: undefined,
   workflowRun: undefined,
@@ -525,8 +533,40 @@ async function refreshUsage($: EngineInterface): Promise<void> {
   }
 }
 
-/** Ticks: the clock the countdowns and durations count from, finished agents moved to the history, the rest re-read. */
-async function tick($: EngineInterface): Promise<void> {
+/**
+ * Reads the auto-compaction threshold once per session start: a `summary` breakdown estimates locally, it asks the model for
+ * nothing. Off, or a failed read, leaves it absent (the header then draws no forecast).
+ */
+async function refreshAutoCompact($: EngineInterface): Promise<void> {
+  try {
+    const u = await $.session.usage({ breakdown: 'summary' })
+    const autoCompactAt = u.context.breakdown?.autoCompactThreshold
+    await patch($, s => ({ ...s, autoCompactAt }))
+  } catch {
+    // not measured: no forecast
+  }
+}
+
+/**
+ * Keeps the main loop's state for the header's icon. It is told apart before patching: a thinking chunk repeats many times
+ * a second, and a patch costs a session check and a state file check. `only` makes the change conditional on the state now held.
+ */
+async function setClaudeState($: EngineInterface, state: CockpitClaudeState, only?: (now: CockpitClaudeState | undefined) => boolean): Promise<void> {
+  try {
+    const { claudeState } = await read($, snapshot)
+    if (only && !only(claudeState)) return
+    if (claudeState?.kind === state.kind && claudeState.tool === state.tool) return
+    await patch($, s => ({ ...s, claudeState: state }))
+  } catch {
+    // observing must never break the event
+  }
+}
+
+/**
+ * The clock the countdowns and durations count from, and the agents that ended moved to the history: every tier runs it, so
+ * `now` is never older than the tier's own period.
+ */
+async function tickClock($: EngineInterface): Promise<number> {
   const now = await $.clock.now()
   const listed = await $.agent.list().catch(() => undefined)
   await patch($, s => {
@@ -547,13 +587,38 @@ async function tick($: EngineInterface): Promise<void> {
       .sort((a, b) => b.endedAt - a.endedAt)
     return { ...s, now, agents: agents.filter(isListed), history: left.length > 0 ? addHistory(s.history, left) : s.history }
   })
+  return now
+}
+
+/** Whether the pane is open and its selected tab asks for the fast (`fast`) or medium (`!fast`) tier. */
+async function isTierWanted($: EngineInterface, tier: 'fast' | 'medium'): Promise<boolean> {
+  if (!isOpen) return false
+  const { tab } = await read($, snapshot)
+  return tabNeeds(tab)[tier]
+}
+
+/** Fast tier (2 s): the elapsed times of a tab that draws them. */
+async function fastTick($: EngineInterface): Promise<void> {
+  if (await isTierWanted($, 'fast')) await tickClock($)
+}
+
+/** Medium tier (10 s): git (and, with the Repo tab, its reads) for a tab that shows them. */
+async function mediumTick($: EngineInterface): Promise<void> {
+  if (!(await isTierWanted($, 'medium'))) return
+  await tickClock($)
+  await refreshGit($)
+}
+
+/** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. */
+async function slowTick($: EngineInterface): Promise<void> {
+  const now = await tickClock($)
+  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow read cannot delay it.
+  if (isOpen) await writeState($, true, true)
   // The ALM line first: an Azure DevOps pull request is asked about with its org.
   await refreshAlm($)
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
-  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`.
-  if (isOpen) await writeState($, true, true)
 }
 
 /** Applies `change` to the agent `id`; an agent whose events outran its spawn gets a stub the spawn later fills. */
@@ -661,6 +726,7 @@ export const register: Register = on => {
       isSubagentModelForced: Boolean(forced),
     }))
     await refreshUsage($)
+    await refreshAutoCompact($)
     await refreshAlm($)
     await refreshGit($)
     await refreshWorklog($, now)
@@ -668,7 +734,9 @@ export const register: Register = on => {
     await writeState($, true)
 
     await $.command.register({ name: 'cockpit', description: 'Apre il pannello cockpit' })
-    $.clock.every(TICK_MS, () => void tick($).catch(() => undefined))
+    $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
+    $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
+    $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
     // The pane starts closed: `/cockpit` opens it.
     return next(e)
   })
@@ -753,6 +821,7 @@ export const register: Register = on => {
         ...s,
         ctx: { ...s.ctx, startTokens: s.ctx.tokens ?? 0 },
         cost: { ...s.cost, startUsd: s.cost.usd ?? 0 },
+        claudeState: { kind: 'working' },
       }))
     }
     return next(e)
@@ -771,7 +840,14 @@ export const register: Register = on => {
     } catch {
       // observing must never break the step
     }
-    return yield* next(e)
+    // The main loop's chunks tell what Claude is doing: a thinking chunk is thinking, text or a tool's start is working.
+    for await (const chunk of next(e)) {
+      if (e.agentId === undefined) {
+        if (chunk.kind === 'thinking') await setClaudeState($, { kind: 'thinking' })
+        else if (chunk.kind === 'text' || chunk.kind === 'tool') await setClaudeState($, { kind: 'working' })
+      }
+      yield chunk
+    }
   })
 
   // Tasks: TodoWrite is a per-agent list, so only the main thread (no `agentId`) feeds it; a call that failed changes nothing.
@@ -838,7 +914,8 @@ export const register: Register = on => {
     return ran
   })
 
-  // The last tool of each subagent, from the tool events carrying its id; the main loop's calls are no agent's.
+  // The last tool of each subagent, from the tool events carrying its id; the main loop's calls are no agent's: while one
+  // runs the header shows the tool by name, and the call's end puts the state back to working (if no other call replaced it).
   on('tool.call', async ($, e, next) => {
     const { agentId, tool } = e
     if (agentId !== undefined) {
@@ -848,7 +925,29 @@ export const register: Register = on => {
       } catch {
         // observing must never break the call
       }
+      return next(e)
     }
+    await setClaudeState($, { kind: 'tool', tool })
+    try {
+      return await next(e)
+    } finally {
+      await setClaudeState($, { kind: 'working' }, held => held?.kind === 'tool' && held.tool === tool)
+    }
+  })
+
+  // A permission request waits for the person: the state is waiting until it is answered. A notification only says that
+  // something wants attention: waiting until the next event moves the state on.
+  on('classic.PermissionRequest', async ($, e, next) => {
+    if (e.agent_id !== undefined) return next(e)
+    await setClaudeState($, { kind: 'waiting' })
+    try {
+      return await next(e)
+    } finally {
+      await setClaudeState($, { kind: 'working' }, held => held?.kind === 'waiting')
+    }
+  })
+  on('classic.Notification', async ($, e, next) => {
+    if (e.agent_id === undefined) await setClaudeState($, { kind: 'waiting' })
     return next(e)
   })
 
@@ -885,8 +984,14 @@ export const register: Register = on => {
       const total = usage ? usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens : 0
       if (usage && total > 0) {
         const cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
-        await patch($, s => ({ ...s, cacheShare }))
+        // The turn's usage sums every request of the turn: the context size is the engine's last reading, whose growth the autocompact forecast averages.
+        await patch($, s => ({
+          ...s,
+          cacheShare,
+          ctxSamples: s.ctx.tokens ? recordCtxSample(s.ctxSamples, s.ctx.tokens) : s.ctxSamples,
+        }))
       }
+      await setClaudeState($, { kind: 'idle' })
     } else {
       await patch($, s => ({
         ...s,
@@ -920,6 +1025,6 @@ export const register: Register = on => {
     if (!isOpen) $.clock.after(0, () => void setOpen($, true).catch(() => undefined))
     const ui = $.ui.resolve(e)
     const s = await read($, snapshot)
-    return paneView(ui, s, e.props.bodyColumns, paneActions($))
+    return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
 }

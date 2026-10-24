@@ -1,6 +1,6 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import type { AgentStatus, On } from 'claude-code'
+import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
 /** An ssh `origin` URL of GitHub (joined, so the text is not read as an e-mail address). */
@@ -141,6 +141,16 @@ type World = {
   unreadable?: string[]
   /** A promise the first `git rev-parse` waits on: the git read of a refresh that a later one overtakes. */
   holdRevParse?: Promise<void>
+  /** True: `git rev-parse` answers a linked worktree (its git dir differs from the common one). */
+  isLinkedWorktree?: boolean
+  /** Receives the argv (joined by spaces) of every `git status` call: the header's git reads. */
+  statusCalls?: string[]
+  /** Receives one entry per `$.agent.list()` call. */
+  listCalls?: string[]
+  /** The token count at which auto-compaction runs, answered to `usage({ breakdown })`; absent, the breakdown says it is off. */
+  autoCompactAt?: number
+  /** Receives the `breakdown` argument of every `$.session.usage()` call. */
+  usageCalls?: (string | undefined)[]
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -157,17 +167,39 @@ function world(on: On, options: World = {}) {
   on('session.cwd', () => ({ value: '/work/example-repo' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
-  on('session.usage', () => ({
-    value: {
-      startedAt: NOW,
-      context: options.isFresh ? { window: 1_000_000 } : { window: 1_000_000, tokens: 248_000, percent: options.ctxPercent ?? 25 },
-      rateLimits: options.rateLimits ?? [
-        { kind: 'five_hour', percentUsed: 38, resetsAt: iso((2 * 60 + 14) * 60000) },
-        { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
-      ],
-      cost: { usd: options.isFresh ? 0 : 4.82 },
-    },
-  }))
+  on('session.usage', (_, e) => {
+    options.usageCalls?.push(e.breakdown)
+    const breakdown: SessionContextBreakdown = {
+      categories: [],
+      totalTokens: 248_000,
+      maxTokens: 1_000_000,
+      rawMaxTokens: 1_000_000,
+      autocompactSource: 'auto',
+      percentage: 25,
+      gridRows: [],
+      model: 'claude-opus-5-5',
+      memoryFiles: [],
+      mcpTools: [],
+      agents: [],
+      ...(options.autoCompactAt !== undefined && { autoCompactThreshold: options.autoCompactAt }),
+      isAutoCompactEnabled: options.autoCompactAt !== undefined,
+      apiUsage: null,
+    }
+    return {
+      value: {
+        startedAt: NOW,
+        context: {
+          ...(options.isFresh ? { window: 1_000_000 } : { window: 1_000_000, tokens: 248_000, percent: options.ctxPercent ?? 25 }),
+          ...(e.breakdown !== undefined && { breakdown }),
+        },
+        rateLimits: options.rateLimits ?? [
+          { kind: 'five_hour', percentUsed: 38, resetsAt: iso((2 * 60 + 14) * 60000) },
+          { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
+        ],
+        cost: { usd: options.isFresh ? 0 : 4.82 },
+      },
+    }
+  })
   on('process.run', async (_, e) => {
     const answer = (stdout: string, exitCode = 0) => ({
       value: { exitCode, stderr: '', isStdoutTruncated: false, isStderrTruncated: false, stdout },
@@ -200,10 +232,11 @@ function world(on: On, options: World = {}) {
       const hold = options.holdRevParse
       options.holdRevParse = undefined
       await hold
-      return answer('.git\n.git\n/work/example-repo\n')
+      return answer(`${options.isLinkedWorktree ? '/work/example-repo/.git/worktrees/wt' : '.git'}\n.git\n/work/example-repo\n`)
     }
     if (e.argv.includes('symbolic-ref')) return options.defaultBranch === undefined ? answer('', 128) : answer(`origin/${options.defaultBranch}\n`)
     if (e.argv.includes('get-url')) return options.remote === undefined ? answer('', 2) : answer(`${options.remote}\n`)
+    options.statusCalls?.push(e.argv.join(' '))
     const header = options.detached ? 'HEAD (no branch)' : `${options.branch ?? 'feature/x'}${options.upstream === undefined ? '' : `...${options.upstream}`}`
     return answer(`## ${header}\nM  a.ts\n M b.ts\n?? c.ts\n`)
   })
@@ -233,7 +266,7 @@ function world(on: On, options: World = {}) {
     if (sized !== undefined) return { value: { kind: 'file', size: options.fileSizes?.[sized] ?? 0, mtimeMs: 0, isLink: false } }
     return { value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }
   })
-  on('agent.list', () => ({ value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }))
+  on('agent.list', () => (options.listCalls?.push('list'), { value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }))
   on('ui.view', (_, e) => {
     options.viewed?.push(e.agentId)
     return { value: {} }
@@ -346,37 +379,32 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   await ui.unmount()
 })
 
-test('empty rows separate the sections, each title from its rows and the 5h bar from the 7d bar', async ($, on) => {
+test('a rule closes the header and the tab bar, and sets the AGENTS title (after an empty row) apart from them', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  const at = (re: RegExp) => rows.findIndex(r => re.test(r))
-  for (const title of [/^CONTESTO/, /^CREDITI RESIDUI/, /^AGENTS/]) {
-    const i = at(title)
-    expect(i).toBeGreaterThan(1)
-    expect(rows[i - 1]).toBe(' ')
-    expect(rows[i - 2]).toMatch(/^\u2500+$/)
-  }
-  expect(rows[at(/^CONTESTO/) + 1]).toBe(' ')
-  expect(rows[at(/^CREDITI RESIDUI/) + 1]).toBe(' ')
+  const [first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
+  const title = rows.findIndex(r => /^AGENTS/.test(r))
+  // header, rule, tab bar, rule, then the tab's own content: an empty row first
+  expect(first).toBe(headerOf(rows).length)
+  expect(second).toBe(first + 2)
+  expect(title).toBe(second + 2)
+  expect(rows[title - 1]).toBe(' ')
   await ui.unmount()
 })
 
-test('the context section is the bar and its readout, then the rule: no session-share line', async ($, on) => {
+test('the header holds the context bar and its readout, with no session-share line', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  const title = rows.findIndex(r => /^CONTESTO/.test(r))
-  expect(rows[title + 1]).toBe(' ')
-  expect(rows[title + 2]).toMatch(/25% 248K\/1M/)
-  expect(rows[title + 3]).toMatch(/^─+$/)
+  expect(headerOf(rows).some(r => /25% 248K\/1M/.test(r))).toBe(true)
   expect(rows.some(r => /sessione/.test(r))).toBe(false)
   await ui.unmount()
 })
 
-test('the pane opens 60 columns wide; in a wider dock its content stops at 60 and the empty space is on the left', async ($, on) => {
+test('the pane opens 60 columns wide; in a wider dock its block stops at 60 (58 of content between its margins) and the empty space is on the left', async ($, on) => {
   const openedColumns: (number | undefined)[] = []
   world(on, { openedColumns })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -387,14 +415,14 @@ test('the pane opens 60 columns wide; in a wider dock its content stops at 60 an
   const root = await ui.drawn()
   const rules = rowTexts(root).filter(r => /^─+$/.test(r))
   expect(rules.length).toBeGreaterThan(0)
-  for (const r of rules) expect([...r].length).toBe(60)
+  for (const r of rules) expect([...r].length).toBe(58)
   // the 60-column block is pushed right: it starts at column 30 of 90
   expect(marginOf(root)).toBe(30)
   await ui.unmount()
 
   const narrow = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 50 }, surface: 'terminal' })
   const narrowRoot = await narrow.drawn()
-  for (const r of rowTexts(narrowRoot).filter(r => /^─+$/.test(r))) expect([...r].length).toBe(50)
+  for (const r of rowTexts(narrowRoot).filter(r => /^─+$/.test(r))) expect([...r].length).toBe(48)
   expect(marginOf(narrowRoot)).toBe(0)
   await narrow.unmount()
 })
@@ -484,12 +512,12 @@ test('while the pane is open the tick rewrites the state file with a fresh at; c
   const clock = world(on, { writes, log })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const afterStart = log.length
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(log.length).toBe(afterStart)
 
   await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
   const openedAt = (flagOf(writes) as { at: number }).at
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   const heartbeat = flagOf(writes) as { open: boolean; at: number }
   expect(heartbeat.open).toBe(true)
   expect(heartbeat.at).toBeGreaterThanOrEqual(openedAt + 15_000)
@@ -636,7 +664,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   expect(rows[i - 3]).toBe(' ')
   expect(rows[i - 4]).toMatch(/^─+$/)
   expect(rows[i + 1]).toBe(' ')
-  expect(rows[i + 2]).toMatch(/^[▰▱]{50}$/)
+  expect(rows[i + 2]).toMatch(/^[▰▱]{48}$/)
   // in progress first, with its elapsed time; then pending; then the completed row
   expect(rows[i + 3]).toMatch(/^◐ Working on it +2m00s$/)
   expect(rows[i + 4]).toMatch(/^○ Pending one +$/)
@@ -758,7 +786,7 @@ test('long subjects are cut with … and more than 6 open tasks end in … +N', 
   await $.tool.call({ tool: 'TodoWrite', todos })
   const { rows, i } = await taskRows($, 40)
   expect(rows[i + 3]).toMatch(/^◐ A very long subject.*… +0s$/)
-  expect([...(rows[i + 3] ?? '')].length).toBe(40)
+  expect([...(rows[i + 3] ?? '')].length).toBe(38)
   expect(rows.slice(i + 3, i + 9).filter(r => /^[◐○]/.test(r)).length).toBe(6)
   expect(rows[i + 9]).toBe('… +2')
 })
@@ -902,17 +930,17 @@ test('cache share: the last main-loop turn, right of CONTESTO; a subagent turn a
         model: 'm',
       },
     })
-  const title = async () => (await paneRows($)).rows.find(r => /^CONTESTO/.test(r))
+  const title = async () => (await paneRows($)).rows.find(r => /^cache/.test(r))
 
-  expect(await title()).toBe('CONTESTO')
+  expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
-  expect(await title()).toBe('CONTESTO')
+  expect(await title()).toBeUndefined()
   await complete({ input: 0, read: 0, write: 0 })
-  expect(await title()).toBe('CONTESTO')
+  expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 })
-  expect(await title()).toBe('CONTESTOcache  94%')
+  expect(await title()).toBe('cache  94%')
   await complete({ input: 9_000, read: 500, write: 500 })
-  expect(await title()).toBe('CONTESTOcache   5%')
+  expect(await title()).toBe('cache   5%')
 })
 
 /** The row under the folder row: where the ALM line sits. */
@@ -937,7 +965,7 @@ test('ALM line is cut in the middle to the pane width', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project, identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const row = (await paneRows($, 40)).rows.find(r => /^ALM/.test(r))
-  expect([...(row ?? '')].length).toBe(40)
+  expect([...(row ?? '')].length).toBe(38)
   expect(row).toMatch(/^ALM org-a.*….*id-a$/)
 })
 
@@ -947,20 +975,20 @@ test('a workspaces.json that goes missing clears the ALM line; a malformed one t
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspacesFail = true
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
   options.workspacesFail = false
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspaces = 'not a map' // valid JSON, no roots
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
   // text that is not JSON at all: cut in the middle, as a half-written file is
   options.workspaces = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspacesRaw = '{ "roots": [ { "path": "/work", "org": '
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
@@ -1007,17 +1035,17 @@ test('tab bar: four buttons, Sessione selected by default; a press on Agenti dra
   expect((await tabs()).map(b => b.text)).toEqual(['Sessione', 'Agenti', 'Lavoro', 'Repo'])
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:session'])
-  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
 
   await ui.press({ key: 'tab:agents' })
   expect(await selected()).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined() // the header stays on every tab
   expect(await ui.find({ type: 'Text', text: /^CREDITI/ })).toBeUndefined()
 
   await ui.press({ key: 'tab:session' })
-  expect(await ui.find({ type: 'Text', text: /^CONTESTO/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -1052,16 +1080,16 @@ test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks 
 
   const agents = (await paneRows($, 50, 'agents')).rows
   expect(agents.some(r => /^◐ code-reviewer/.test(r))).toBe(true)
-  expect(agents.some(r => /^TASK/.test(r) || /worklog/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+  expect(agents.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 
   const work = (await paneRows($, 50, 'work')).rows
   expect(work.some(r => /^TASK · 0\/1/.test(r))).toBe(true)
   expect(work.some(r => /worklog: 1d da registrare/.test(r))).toBe(true)
-  expect(work.some(r => /^AGENTS/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+  expect(work.some(r => /^AGENTS/.test(r))).toBe(false)
 
   const repo = (await paneRows($, 50, 'repo')).rows
-  expect(repo.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /\+1 ~1 \?1/.test(r))).toBe(true)
-  expect(repo.some(r => /^AGENTS/.test(r) || /^TASK/.test(r) || /^CONTESTO/.test(r))).toBe(false)
+  expect(repo.some(r => /^BRANCH/.test(r))).toBe(true)
+  expect(repo.some(r => /^AGENTS/.test(r) || /^TASK/.test(r))).toBe(false)
 })
 
 test('the selected tab is written in the state file', async ($, on) => {
@@ -1077,20 +1105,20 @@ test('a state file left by an earlier run brings its tab back', async ($, on) =>
   world(on, { stateFile: JSON.stringify({ open: false, tab: 'repo' }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  expect(rows.some(r => /^CONTESTO/.test(r))).toBe(false)
-  expect(rows.some(r => /feature\/x/.test(r))).toBe(true)
+  expect(rows.some(r => /^AGENTS/.test(r))).toBe(false)
+  expect(rows.some(r => /^BRANCH/.test(r))).toBe(true)
 })
 
 test('an unknown tab in the state file is ignored', async ($, on) => {
   world(on, { stateFile: JSON.stringify({ open: false, tab: 'nope' }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^CONTESTO/.test(r))).toBe(true)
+  expect((await paneRows($)).rows.some(r => /^BRANCH/.test(r))).toBe(false)
 })
 
 test('a state file that is not JSON is ignored', async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^CONTESTO/.test(r))).toBe(true)
+  expect((await paneRows($)).rows.some(r => /^BRANCH/.test(r))).toBe(false)
 })
 
 test('session.end keeps the tab in the closed file, so a resume finds it', async ($, on) => {
@@ -1403,7 +1431,7 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(ghCalls).toHaveLength(1)
-  for (let i = 0; i < 4; i++) await clock.advance(15_000) // four ticks, a minute: no new read
+  for (let i = 0; i < 4; i++) await clock.advance(30_000) // four ticks, a minute: no new read
   await settleAll()
   expect(ghCalls).toHaveLength(1)
   await clock.advance(5 * MIN)
@@ -1412,13 +1440,13 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
 
   options.branch = 'feature/other' // another branch is another question, asked at the next tick
   options.pr = 43
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
   expect(await repoRows($)).toContain('PR · #43 · aperta')
 
   options.branch = 'main'
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
 })
@@ -1431,7 +1459,7 @@ test('PR: the PR of a branch left behind is not shown on the next one', async ($
   expect(await repoRows($)).toContain('PR · #42 · aperta')
   options.branch = 'feature/other'
   options.pr = undefined
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect((await repoRows($)).some(r => /^PR ·/.test(r))).toBe(false)
 })
@@ -1502,7 +1530,7 @@ test('a session start (/clear) forgets the cache share and the 5h readings of th
   })
   const before = (await paneRows($)).rows
   expect(before.some(r => /finisce/.test(r))).toBe(true)
-  expect(before.some(r => /^CONTESTOcache/.test(r))).toBe(true)
+  expect(before.some(r => /^cache {2}94%/.test(r))).toBe(true)
 
   id = 's-2'
   // The new session reads the same 41% window: without the reset the old samples would still give a rate.
@@ -1510,7 +1538,7 @@ test('a session start (/clear) forgets the cache share and the 5h readings of th
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const after = (await paneRows($)).rows
   expect(after.some(r => /finisce/.test(r))).toBe(false)
-  expect(after.find(r => /^CONTESTO/.test(r))).toBe('CONTESTO')
+  expect(after.some(r => /^cache/.test(r))).toBe(false)
 })
 
 // ── Agenti: history and open an agent ──
@@ -1585,7 +1613,7 @@ test('Agenti: an agent the engine lists as killed or failed ends with ✗, one i
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✗ one/)
@@ -1608,8 +1636,8 @@ test('STORICO lists at most ten rows, then … +n', async ($, on) => {
   expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 12 ▾')
   expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(10)
   const rows = rowTexts(await ui.drawn())
-  // the buttons row closes the pane, under a rule
-  expect(rows.at(-3)).toBe('… +2')
+  // the buttons row closes the pane, under a rule and the spacer
+  expect(rows.at(-4)).toBe('… +2')
   await ui.unmount()
 })
 
@@ -1717,7 +1745,7 @@ test('session.end while id() still answers the ending session: a tick in between
     { id: 'a2', type: 'finished-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
   ])
   // a tick lands before the engine switches to the next id: it must not take s-1 back
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(fileOfSession(writes, 's-1')).toEqual(ended)
   id = 's-2' // no session.start follows a /clear
   await clock.advance(135_000)
@@ -1771,7 +1799,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   id = 's-1'
   await $.session.end({ reason: 'resume', sessionId: 's-2', resume: { id: 's-2' } })
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   const ui = await mountPane($)
   expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 2 ▸')
   await ui.unmount()
@@ -1847,7 +1875,7 @@ test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
-test('tab bar: below 48 columns the labels are short and the bar fits the pane; from 48 they are whole', async ($, on) => {
+test('tab bar: below 48 columns of content the labels are short and the bar fits it; from 48 (a 50-column pane) they are whole', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -1861,11 +1889,11 @@ test('tab bar: below 48 columns the labels are short and the bar fits the pane; 
   }
   const narrow = await tabsAt(40)
   expect(narrow.labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
-  expect(narrow.cells).toBeLessThanOrEqual(40)
-  expect((await tabsAt(47)).labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
-  const whole = await tabsAt(48)
+  expect(narrow.cells).toBeLessThanOrEqual(40 - 2)
+  expect((await tabsAt(49)).labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
+  const whole = await tabsAt(50)
   expect(whole.labels).toEqual(['Sessione', 'Agenti 1', 'Lavoro ●', 'Repo'])
-  expect(whole.cells).toBeLessThanOrEqual(48)
+  expect(whole.cells).toBeLessThanOrEqual(50 - 2)
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -1894,8 +1922,8 @@ test('Lavoro with no tasks and no worklog warnings says niente da mostrare', asy
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 50, 'work')
-  // the buttons row closes the pane, under a rule
-  expect(rows.at(-3)).toBe('niente da mostrare')
+  // the buttons row closes the pane, under a rule and the spacer
+  expect(rows.at(-4)).toBe('niente da mostrare')
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })
 
@@ -2077,7 +2105,7 @@ test('subagent blocks: type, the spawn description, the last tool it used and th
   const j = rows.findIndex(r => /^Explore/.test(r))
   expect(rows[j]).toBe('Explore2m00s')
   expect(rows[j + 1]).toBe('Find the DTOs')
-  expect(rows[j + 2]).toMatch(/^─+$/)
+  expect(rows[j + 3]).toMatch(/^─+$/) // the spacer comes first
 })
 
 test('subagent blocks: a finished agent has none, and at most 5 are drawn, then … +n', async ($, on) => {
@@ -2142,16 +2170,16 @@ test('PR: a detached HEAD or a folder without git forgets the PR read, so the br
   expect(ghCalls).toHaveLength(1)
 
   options.detached = true
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   options.detached = false
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(2)
 
   options.notRepo = true
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   options.notRepo = false
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
 })
@@ -2163,10 +2191,10 @@ test('PR: a branch left and come back to is asked again, not served from the rea
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   options.branch = 'feature/other'
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   options.branch = 'feature/orders-filter'
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toHaveLength(3)
 })
@@ -2199,7 +2227,7 @@ test('workflow agents: a tick does not end an agent just because the engine does
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^◐ implementer/)
   expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^◐ implementer/)
   await finishAgent($, 'a1')
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✓ implementer/)
   expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^◐ implementer/)
   await ui.unmount()
@@ -2211,7 +2239,7 @@ test('workflow agents: an explicit failed or killed listing ends them', async ($
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnWorkflowAgent($, 'wf_1', 1)
   await spawnWorkflowAgent($, 'wf_1', 2)
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✗ implementer/)
@@ -2225,7 +2253,7 @@ test('workflow agents: the end of their run (a main-loop Stop that reports none)
   on('classic.Stop', () => ({}))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnWorkflowAgent($, 'wf_1', 1)
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
@@ -2260,19 +2288,19 @@ test('hook triggers: the log is read again only when its size or modification ti
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(claimReads).toHaveLength(1)
-  for (let i = 0; i < 4; i++) await clock.advance(15_000)
+  for (let i = 0; i < 4; i++) await clock.advance(30_000)
   expect(claimReads).toHaveLength(1)
   expect((await workRows($)).some(r => /primo/.test(r))).toBe(true)
 
   mtime = 2 // same size, new time
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(claimReads).toHaveLength(2)
 
   options.doneClaims = `${claim(1, 'unproven-row', 'primo')}\n${claim(2, 'unproven-row', 'secondo')}\n` // another size
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
   expect((await workRows($)).some(r => /secondo/.test(r))).toBe(true)
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
 })
 
@@ -2562,14 +2590,335 @@ test('PR: a branch that changes between a refresh\'s git read and its patch is a
   options.holdRevParse = new Promise<void>(resolve => {
     release = resolve
   })
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   options.detached = true
-  await clock.advance(15_000)
+  await clock.advance(30_000)
   await settleAll()
   options.detached = false
   release() // the first refresh patches the branch it read, over the one the snapshot now holds
   await settleAll()
   expect(ghCalls).toHaveLength(2)
   expect(await repoRows($)).toContain('PR · #42 · aperta')
+})
+
+// ── Cockpit v3, phase 1: layout, header, refresh tiers, buttons at the bottom ──
+
+/** The rows above the tab bar: the always-visible header. */
+const headerOf = (rows: string[]): string[] => rows.slice(0, rows.findIndex(r => /^─+$/.test(r)))
+
+test('layout: the content is min(bodyColumns, 60) - 2 wide with one column of margin each side, at 40, 58 and 80 columns', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // [bodyColumns, drawn block width, empty columns on its left]
+  for (const [columns, block, left] of [[40, 40, 0], [58, 58, 0], [80, 60, 20]] as const) {
+    const { root, rows } = await paneRows($, columns)
+    const props = (root as { props?: { width?: number; paddingX?: number } }).props
+    expect(props?.width).toBe(block)
+    expect(props?.paddingX).toBe(1)
+    expect(marginOf(root)).toBe(left)
+    const rules = rows.filter(r => /^─+$/.test(r))
+    expect(rules.length).toBeGreaterThan(0)
+    for (const r of rules) expect([...r].length).toBe(block - 2)
+    // no row of the header is wider than the content
+    for (const r of headerOf(rows)) expect([...r].length).toBeLessThanOrEqual(block - 2)
+  }
+})
+
+test('header: above the tab bar on every tab, with the model, effort, state, session cost and the git, context, credit and cache rows', async ($, on) => {
+  world(on, { upstream: 'origin/feature/x [ahead 2, behind 1]' })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
+  })
+  for (const tab of ['session', 'agents', 'work', 'repo']) {
+    const header = headerOf((await paneRows($, 50, tab)).rows)
+    expect(header[0]).toMatch(/^Opus 5\.5/)
+    expect(header[0]).toContain('HIGH')
+    expect(header[0]).toContain('pronto')
+    expect(header[0]).toContain('$4.82')
+    expect(header.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /↑2 ↓1/.test(r))).toBe(true)
+    expect(header.some(r => /\+1 ~1 \?1/.test(r))).toBe(true)
+    expect(header.some(r => /25% 248K\/1M/.test(r))).toBe(true)
+    expect(header.some(r => /5h/.test(r))).toBe(true)
+    expect(header.some(r => /7d/.test(r))).toBe(true)
+    expect(header.some(r => /cache {2}94%/.test(r))).toBe(true)
+  }
+})
+
+test('header: the last round cost sits beside the session cost', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
+  const [first] = headerOf((await paneRows($)).rows)
+  expect(first).toMatch(/\$5\.20 \+0\.38$/)
+})
+
+test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
+  world(on, { notRepo: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const row = headerOf((await paneRows($)).rows).find(r => /example-repo/.test(r))
+  expect(row).toContain('\u{F024B} example-repo')
+})
+
+test('header: the folder icon of a repository is U+F0CCF', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const row = headerOf((await paneRows($)).rows).find(r => /example-repo/.test(r))
+  expect(row).toContain('\u{F0CCF} example-repo')
+})
+
+test('header: the folder icon of a linked worktree is U+F0CD0', async ($, on) => {
+  world(on, { isLinkedWorktree: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const row = headerOf((await paneRows($)).rows).find(r => /example-repo/.test(r))
+  expect(row).toContain('\u{F0CD0} example-repo')
+})
+
+test('header: the cache hit is green from 80 %, amber from 50 to 79, red below 50', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const complete = (read: number, other: number) =>
+    $.turn.complete({
+      answer: '',
+      durationMs: 1,
+      isAborted: false,
+      turnId: 't',
+      reason: 'answer',
+      usage: { input_tokens: other, output_tokens: 7, cache_read_input_tokens: read, cache_creation_input_tokens: 0, model: 'm' },
+    })
+  await complete(94, 6)
+  expect(colorOf((await paneRows($)).root, /^ 94%$/)).toBe(GREEN)
+  await complete(60, 40)
+  expect(colorOf((await paneRows($)).root, /^ 60%$/)).toBe('#e8a35a')
+  await complete(20, 80)
+  expect(colorOf((await paneRows($)).root, /^ 20%$/)).toBe(RED)
+})
+
+test('header: the autocompact forecast is the requests left at the recent growth; the threshold is read once, with a summary breakdown', async ($, on) => {
+  const usageCalls: (string | undefined)[] = []
+  world(on, { autoCompactAt: 400_000, usageCalls })
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // The context is what the engine measured; the turn's usage sums its requests (`steps` of them), so it is `steps` times the context.
+  const complete = async (context: number, steps: number, agentId?: string) => {
+    if (!agentId) await $.session.measure({ context: { window: 1_000_000, tokens: context, percent: 20 }, rateLimits: [], changed: ['context'] })
+    await $.turn.complete({
+      answer: '',
+      durationMs: 1,
+      isAborted: false,
+      turnId: 't',
+      reason: 'answer',
+      ...(agentId ? { agentId } : {}),
+      usage: { input_tokens: 0, output_tokens: 7, cache_read_input_tokens: context * steps, cache_creation_input_tokens: 0, model: 'm' },
+    })
+  }
+  const forecast = async () => headerOf((await paneRows($)).rows).find(r => /richieste/.test(r))
+  await complete(200_000, 8)
+  expect(await forecast()).toBeUndefined() // one turn: no growth to average
+  await complete(210_000, 1) // a one-request turn after an eight-request one is not a compaction
+  await complete(990_000, 3, 'a1') // a subagent's turn is not the main loop's growth
+  await complete(220_000, 5)
+  expect(await forecast()).toContain('~18 richieste') // 180k left at 10k a turn
+  expect(usageCalls.filter(c => c === 'summary')).toHaveLength(1)
+})
+
+test('header: the autocompact threshold survives a /clear: the forecast is still drawn', async ($, on) => {
+  let id = 's-1'
+  world(on, { autoCompactAt: 400_000, sessionId: () => id })
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  id = 's-2'
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } }) // no session start follows
+  for (const context of [200_000, 210_000, 220_000]) {
+    await $.session.measure({ context: { window: 1_000_000, tokens: context, percent: 20 }, rateLimits: [], changed: ['context'] })
+    await $.turn.complete({
+      answer: '',
+      durationMs: 1,
+      isAborted: false,
+      turnId: 't',
+      reason: 'answer',
+      usage: { input_tokens: 0, output_tokens: 7, cache_read_input_tokens: context, cache_creation_input_tokens: 0, model: 'm' },
+    })
+  }
+  expect(headerOf((await paneRows($)).rows).some(r => /~18 richieste/.test(r))).toBe(true)
+})
+
+test('header: no forecast when auto-compaction is off', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const tokens of [200_000, 210_000, 220_000]) {
+    await $.turn.complete({
+      answer: '',
+      durationMs: 1,
+      isAborted: false,
+      turnId: 't',
+      reason: 'answer',
+      usage: { input_tokens: 0, output_tokens: 7, cache_read_input_tokens: tokens, cache_creation_input_tokens: 0, model: 'm' },
+    })
+  }
+  expect(headerOf((await paneRows($)).rows).some(r => /richieste/.test(r))).toBe(false)
+})
+
+test('header: the Claude state follows turn.start, a thinking chunk, a tool in flight, a permission request, a notification and the turn end', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  const gates: Record<string, () => void> = {}
+  const gate = (name: string) => new Promise<void>(resolve => void (gates[name] = resolve))
+  const stepGate = gate('step')
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'thinking', index: 0, text: 'hm' }
+    await stepGate
+    yield { kind: 'text', index: 1, text: 'ok' }
+    return { turnId: e.turnId, index: e.index, answer: 'ok', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  const toolGate = gate('tool')
+  on('tool.call', { tool: 'Bash' }, async () => {
+    await toolGate
+    return { result: {} }
+  })
+  const askGate = gate('ask')
+  on('classic.PermissionRequest', async () => {
+    await askGate
+    return { decision: { behavior: 'allow' } }
+  })
+  on('classic.Notification', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
+
+  expect(await state()).toContain('pronto')
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  expect(await state()).toContain('lavora')
+
+  const stream = $.turn.step({ turnId: 't1', index: 0, model: 'claude-opus-5-5', messageCount: 1 })
+  await stream.next() // the thinking chunk
+  expect(await state()).toContain('pensa')
+  gates.step?.()
+  for await (const chunk of stream) void chunk
+  expect(await state()).toContain('lavora')
+
+  const call = $.tool.call({ tool: 'Bash', command: 'ls' })
+  await settleAll()
+  expect(await state()).toContain('Bash')
+  gates.tool?.()
+  await call
+  expect(await state()).toContain('lavora')
+
+  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  await settleAll()
+  expect(await state()).toContain('attesa')
+  gates.ask?.()
+  await ask
+  expect(await state()).toContain('lavora')
+
+  await $.classic.Notification({ message: 'Claude needs your attention', notification_type: 'permission_prompt' })
+  expect(await state()).toContain('attesa')
+
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  expect(await state()).toContain('pronto')
+})
+
+test('header: a subagent\'s events do not move the Claude state', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1', agentId: 'a1' })
+  await $.tool.call({ tool: 'Bash', command: 'ls', agentId: 'a1' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a1-t', agentId: 'a1', reason: 'answer' })
+  expect(headerOf((await paneRows($)).rows)[0]).toContain('pronto')
+})
+
+test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s for git while a git tab is, slow 30 s always, none while the pane is closed', async ($, on) => {
+  const statusCalls: string[] = []
+  const listCalls: string[] = []
+  const clock = world(on, { statusCalls, listCalls })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(4000)
+  expect(listCalls).toHaveLength(0) // the pane is closed: nothing to keep fresh at 2 s
+  expect(statusCalls.length).toBe(1) // the one git read of the session start
+
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  const ui = await mountPane($, 50)
+  const reset = () => {
+    statusCalls.length = 0
+    listCalls.length = 0
+  }
+  reset()
+  await clock.advance(2000) // t = 6 s: the fast timer ticked once (Sessione has elapsed times)
+  expect(listCalls.length).toBeGreaterThanOrEqual(1)
+  expect(statusCalls).toHaveLength(0)
+
+  await ui.press({ key: 'tab:repo' })
+  await settleAll()
+  reset()
+  await clock.advance(3000) // t = 9 s: Repo has no clock and git is not due yet
+  expect(listCalls).toHaveLength(0)
+  expect(statusCalls).toHaveLength(0)
+  await clock.advance(1500) // t = 10.5 s: the medium timer ticked
+  await settleAll()
+  expect(statusCalls.length).toBeGreaterThanOrEqual(1)
+
+  await ui.press({ key: 'tab:agents' })
+  await settleAll()
+  reset()
+  await clock.advance(10_000) // t = 20.5 s: the medium timer ticked at 20 s, Agenti does not ask for git
+  expect(listCalls.length).toBeGreaterThanOrEqual(1)
+  expect(statusCalls).toHaveLength(0)
+
+  await clock.advance(10_000) // t = 30.5 s: the slow timer ticked, whatever tab is selected
+  await settleAll()
+  expect(statusCalls.length).toBeGreaterThanOrEqual(1)
+  await ui.unmount()
+})
+
+test('refresh tiers: the state file heartbeat stays fresh while the pane is open, at the slow tier', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  await clock.advance(30_000)
+  await settleAll()
+  const at = (flagOf(writes) as { at: number }).at
+  expect(NOW + 30_000 - at).toBeLessThan(30_000)
+  expect(at).toBeGreaterThan(NOW)
+})
+
+test('buttons: compatta and segna ore close the pane height, whatever the tab: a column box of bodyRows with a growing spacer', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  type Node = { type?: string; props?: { flexGrow?: number; minHeight?: number; flexDirection?: string }; children?: Node[] }
+  const mountAt = async (bodyRows: number, tab: string) => {
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, scroll: { offset: 0, bodyRows } }, surface: 'terminal' })
+    await ui.press({ key: `tab:${tab}` })
+    const root = (await ui.drawn()) as Node
+    await ui.unmount()
+    return root
+  }
+  // a short tab in a tall pane, and a tall tab (the header alone is taller than 5 rows) in a short one
+  for (const [bodyRows, tab] of [[30, 'agents'], [30, 'session'], [5, 'work']] as const) {
+    const root = await mountAt(bodyRows, tab)
+    expect(root.props?.flexDirection).toBe('column')
+    expect(root.props?.minHeight).toBe(bodyRows)
+    const kids = root.children ?? []
+    expect(kids.at(-3)?.type).toBe('Box')
+    expect(kids.at(-3)?.props?.flexGrow).toBe(1) // the spacer
+    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:worklog'])
+  }
 })

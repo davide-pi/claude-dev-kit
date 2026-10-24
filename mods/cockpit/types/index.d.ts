@@ -118,6 +118,13 @@ export type CockpitBurnSample = { at: number; used: number }
 /** The ALM target the cwd resolves to in `workspaces.json`; absent from the snapshot when there is no usable map. */
 export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; identity?: string }
 
+/**
+ * What Claude is doing now, derived from the events the mod hears (the engine has no state of its own): a main turn
+ * starting or a text chunk is `working`, a thinking chunk `thinking`, a main-loop tool call in flight `tool` (its name),
+ * a permission request or a notification `waiting`, the main turn's end `idle`.
+ */
+export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string }
+
 /** The view the pane draws: the tab bar's four buttons. */
 export type CockpitTab = 'session' | 'agents' | 'work' | 'repo'
 
@@ -141,6 +148,12 @@ export type CockpitSnapshot = {
   fiveHourSamples?: CockpitBurnSample[]
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number
+  /** The main loop's state for the header's icon; absent before any event (read as idle). */
+  claudeState?: CockpitClaudeState
+  /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
+  ctxSamples?: number[]
+  /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
+  autoCompactAt?: number
   alm?: CockpitAlm
   /** The selected tab; absent (a state written before tabs existed) is the Sessione view. */
   tab?: CockpitTab

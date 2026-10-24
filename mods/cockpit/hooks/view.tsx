@@ -6,12 +6,16 @@ import {
   COLORS,
   ICONS,
   abbrevTokens,
+  aheadBehindSpans,
   almText,
+  autocompactForecast,
   barCells,
   burnRate,
   burnText,
   baseName,
+  cacheColor,
   claimTime,
+  claudeStateSpans,
   countdown,
   ctxColor,
   displayModel,
@@ -19,6 +23,7 @@ import {
   effortGlyph,
   fmtCost,
   fmtCostDelta,
+  folderIcon,
   gridWidths,
   isSameDir,
   modelFamily,
@@ -33,6 +38,7 @@ import {
   taskBarCells,
   truncEnd,
   truncMiddle,
+  truncateSpans,
   weeklyPace,
   worklogLabel,
 } from './format'
@@ -301,6 +307,8 @@ export function checksSpans(pr: CockpitPr): Span[] {
 
 /** The pane's content stops here; a wider dock leaves the rest empty on the left. */
 export const PANE_MAX_COLUMNS = 60
+/** Columns of margin on each side of the content. */
+const PANE_PADDING_X = 1
 
 type Node = RenderElement | false | undefined
 type Block = (Node | readonly Node[])[]
@@ -347,9 +355,11 @@ export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: num
   )
 }
 
-export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, actions: PaneActions): RenderElement {
+export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Text, Button } = ui
-  const width = Math.min(bodyColumns, PANE_MAX_COLUMNS)
+  // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
+  const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
+  const width = Math.max(0, block - 2 * PANE_PADDING_X)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
   const title = (label: string, right: Span[] = []) => (
     <Box justifyContent="space-between">
@@ -406,7 +416,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     </Box>
   )
 
-  // ── Folder · branch · diffs grid ──
+  // ── Header: folder · branch (ahead/behind) · compact git state ──
   const g = s.git
   const diffs: Span[] = []
   if (g && g.staged > 0) diffs.push(sp(`+${g.staged}`, COLORS.green))
@@ -416,13 +426,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
   const w = gridWidths(width, spanWidth(diffText))
   const dirty = g !== undefined && (g.staged > 0 || g.modified > 0)
   const folderName = g?.worktreeRoot ? baseName(g.worktreeRoot) : baseName(s.cwd)
+  const arrows = g ? aheadBehindSpans(g) : []
   const grid = (
     <Box columnGap={1}>
-      <Box width={w.folder}>
-        {line(ui, [sp(truncMiddle(`${g?.worktreeRoot ? ICONS.tree : ICONS.folder} ${folderName}`, w.folder), COLORS.folder)])}
-      </Box>
+      <Box width={w.folder}>{line(ui, [sp(truncMiddle(`${folderIcon(g)} ${folderName}`, w.folder), COLORS.folder)])}</Box>
       <Box width={w.branch}>
-        {g ? line(ui, [sp(truncMiddle(`${ICONS.branch} ${g.branch}`, w.branch), dirty ? COLORS.yellow : COLORS.lavender)]) : line(ui, [])}
+        {g
+          ? line(ui, [sp(truncMiddle(`${ICONS.branch} ${g.branch}`, Math.max(0, w.branch - spanWidth(arrows))), dirty ? COLORS.yellow : COLORS.lavender), ...arrows])
+          : line(ui, [])}
       </Box>
       <Box width={w.diffs} justifyContent="flex-end">
         {line(ui, diffText)}
@@ -434,14 +445,17 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
   const almLine = s.alm ? almSpans(s.alm, width) : []
   const almRow = almLine.length > 0 && line(ui, almLine)
 
-  // ── Sessione ──
-
-  // Header: model + effort | session cost (always: `$0.00` before the first turn) and the last turn's delta
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn) and the last round's delta
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
-  const header = (
+  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])]
+  const modelSpans = truncateSpans(
+    [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
+    Math.max(0, width - spanWidth(costSpans) - 1),
+  )
+  const modelLine = (
     <Box justifyContent="space-between">
-      {line(ui, [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort)])}
-      {line(ui, [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])])}
+      {line(ui, modelSpans)}
+      {line(ui, costSpans)}
     </Box>
   )
 
@@ -454,13 +468,23 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
   const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(t => spanWidth(t ?? [])))
   const barW = Math.max(4, width - textCol - 1)
 
-  // CONTESTO: the cache share of the last main-loop turn sits right of the title; from 80% a red line
+  // Context: from 80% a red line
   const pct = s.ctx.percent ?? 0
   const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
-  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare))]
   const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(`⚠ contesto al ${Math.round(pct)}%`, COLORS.red)])
 
-  // CREDITI RESIDUI
+  // The prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
+  const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
+  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(`~${forecast} richieste`)]
+  const cacheRow = cacheSpans.length + forecastSpans.length > 0 && (
+    <Box justifyContent="space-between">
+      {line(ui, cacheSpans)}
+      {line(ui, forecastSpans)}
+    </Box>
+  )
+
+  // Credits
   const paceDelta = seven?.pace?.delta
   const paceSpans: Span[] =
     paceDelta === undefined
@@ -503,21 +527,22 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
     </Box>
   )
 
-  const sessionBlocks = [
-    [header, grid, almRow],
-    [gap(), title('CONTESTO', cacheSpans), gap(), split(ctxBar, barW, ctxText), ctxWarning],
-    [
-      gap(),
-      title('CREDITI RESIDUI', paceSpans),
-      gap(),
-      five && fiveText && creditRow(five, fiveText),
-      burnRow,
-      five && seven && gap(),
-      seven && sevenText && creditRow(seven, sevenText),
-      !five && !seven && line(ui, [dim('nessun dato sui limiti')]),
-    ],
-    liveAgents,
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; context; credits; cache and forecast
+  const headerRows: Node[] = [
+    modelLine,
+    grid,
+    almRow,
+    split(ctxBar, barW, ctxText),
+    ctxWarning,
+    five && fiveText && creditRow(five, fiveText),
+    burnRow,
+    seven && sevenText && creditRow(seven, sevenText),
+    paceSpans.length > 0 && line(ui, paceSpans),
+    !five && !seven && line(ui, [dim('nessun dato sui limiti')]),
+    cacheRow,
   ]
+
+  const sessionBlocks = [liveAgents]
 
   // ── Agenti: every agent listed, finished ones for two minutes ──
   const rows = orderAgents(agents)
@@ -695,17 +720,21 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, action
         checksSpans(pr).length > 0 && line(ui, checksSpans(pr)),
       ]
     : []
-  const repoBlocks: Block[] = [[gap(), grid, almRow], branchPart, changesPart, worktreePart, prPart].filter(b => b.length > 0)
+  const repoBlocks: Block[] = [branchPart, changesPart, worktreePart, prPart].filter(b => b.length > 0)
 
   // Blocks are told apart by a rule; an empty tab says so.
   const blocks: Block[] = { session: sessionBlocks, agents: agentBlocks, work: workBlocks, repo: repoBlocks }[tab]
   const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim('niente da mostrare')])]
 
   return (
-    <Box flexDirection="column" width={width} marginLeft={bodyColumns - width}>
+    <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>
+      {headerRows}
+      {rule}
       {tabBar}
       {rule}
       {body}
+      {/* The spacer takes what the tab leaves of the pane height: the buttons sit on its last row, or follow a taller tab. */}
+      <Box flexGrow={1} />
       {rule}
       {buttonsRow}
     </Box>
