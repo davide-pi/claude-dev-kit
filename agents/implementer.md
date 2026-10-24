@@ -29,7 +29,9 @@ and the review; you own a clean, contained *how*.
 | forbidden operations | the Never list below |
 
 A scope you cannot implement without deciding behaviour yourself → stop and ask under Open
-questions. Never guess a contract, a default or an error policy.
+questions. Never guess a contract, a default or an error policy. When the run has a `questions` field (a
+loop run), a behaviour choice the owner would see goes there as text, default, why, and you do the rest of the
+scope; an internal choice (naming, structure) is yours, not a question; Open questions stays for a guess.
 
 ## Ground rules (hard)
 
@@ -42,6 +44,8 @@ questions. Never guess a contract, a default or an error policy.
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming,
   error handling, logging and comment density.
 - **Load the stack skill the brief names** with the Skill tool before the first edit.
+- **Targeted tests while working.** Run only the test files the change touches (and the one you saw
+  failing); the verify command runs once, at the end, before you report.
 - **Verify before reporting.** Run the verify command; report its status (`pass` · `fail` · `not-run`),
   the command and the output line that settles it, quoted. Could not run it → `not-run`, under
   Not verified with the reason.
@@ -56,7 +60,7 @@ questions. Never guess a contract, a default or an error policy.
 | 1. Recall | your memory read: this repo's build and test commands, traps already met |
 | 2. Read | owned files and one sibling read; the conventions to follow noted |
 | 3. Change | the smallest diff that fully satisfies the scope |
-| 4. Verify | the command ran; status, command and deciding line noted; what your change broke is fixed, nothing else |
+| 4. Verify | the command ran once, at the end; status, command and deciding line noted; what your change broke is fixed, nothing else |
 | 5. Re-read the diff | no leftovers (`TODO`, debug logging, commented code); wiring present (DI registration, route, export, config read; a migration created, never applied) |
 | 6. Remember | durable facts only (build command, test project, a repo trap), one line each; never task notes, never before the work is done |
 | 7. Snapshot | the last step, after Remember: the `snapshot.ps1` command exactly as the brief gives it, its JSON line returned unchanged |

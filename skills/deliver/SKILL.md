@@ -55,7 +55,7 @@ perimeter file already dirty → ask the user first; any other dirty file is the
 | --- | --- | --- | --- |
 | analysis | none | the approach in one line, then the doubts pass | `plan-work`, the doubts pass, `grill-me` on the plan |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
-| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, in steps |
+| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, one plan task per loop run (`references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when touched | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
 
 `implementer` runs at `medium`; `high` when the brief asks (`implementerEffort`). Preparation comes
@@ -84,7 +84,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size; ask only what the table says. S: make the edit inline now.
 3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
-   `OK` → `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` → ask the user, relaunch with every resolution so far.
+   `OK` → `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
 4. Run the matrix; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 

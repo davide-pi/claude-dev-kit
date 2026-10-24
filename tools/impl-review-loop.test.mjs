@@ -21,8 +21,8 @@ import { createRequire } from 'node:module';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, capLimit, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, capLimit, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -477,10 +477,11 @@ test('script: out-of-scope and minor findings seen again in a later round are li
   const { out } = await run(ARGS, [
     review([], [finding(), oos(), mnr()]),
     review([{ id: 'F1', status: 'closed' }], [oos(), mnr()]),
-  ]);
+    review([{ id: 'F1', status: 'closed' }]),                                   // the delta of the cleanup pass
+  ], [impl(), impl(), impl({ rejected: [{ id: 'F3', kind: 'wrong', reason: 'the name is the domain term' }] })]);
   assert.equal(out.status, 'OK');
   assert.equal(out.outOfScope.length, 1);
-  assert.equal(out.minor.length, 1);
+  assert.equal(out.minor.length, 1);                                            // listed once, kept: the cleanup fixer rejected it
 });
 
 test('script: a P2 on the spot of a known minor finding is a new blocking finding, not discarded', async () => {
@@ -489,9 +490,10 @@ test('script: a P2 on the spot of a known minor finding is a new blocking findin
     review([], [finding(), mnr('P3')]),
     review([{ id: 'F1', status: 'closed' }], [mnr('P2')]),
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),
+    review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),   // the delta of the cleanup pass (the P3 left over)
   ]);
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 3);
+  assert.equal(out.rounds, 4);
   assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix R1', 'fix R2']);
 });
 
@@ -577,11 +579,13 @@ test('readReport: a report without verify is not-run, without rejected/noticed e
   assert.deepEqual(r.verify, { status: 'not-run' });
   assert.deepEqual(r.rejected, []);
   assert.deepEqual(r.noticed, []);
+  assert.deepEqual(r.questions, []);
   assert.deepEqual(r.filesReviewed, []);
   assert.equal(r.snapshot, null);
   assert.deepEqual(r.files, ['a.cs']);
-  const full = { verify: { status: 'fail', command: 'dotnet test', line: 'Failed: 2' }, snapshot: { tree: 't', files: ['a.cs'], churn: 4 }, rejected: [{ id: 'F1', reason: 'not reproduced' }], noticed: [{ title: 't', path: 'p', why: 'w' }], filesReviewed: ['a.cs'] };
+  const full = { verify: { status: 'fail', command: 'dotnet test', line: 'Failed: 2' }, snapshot: { tree: 't', files: ['a.cs'], churn: 4 }, rejected: [{ id: 'F1', reason: 'not reproduced' }], noticed: [{ title: 't', path: 'p', why: 'w' }], questions: [{ text: 'q', default: 'd', why: 'w' }], filesReviewed: ['a.cs'] };
   assert.deepEqual(readReport(full), full);
+  assert.deepEqual(readReport({ questions: [{ text: 'q' }, { text: ' ' }, { default: 'd' }, null, 'q'] }).questions, [{ text: 'q' }]);
   assert.deepEqual(readReport({ verify: { status: 'green', command: 'x' } }).verify, { status: 'not-run', command: 'x' });
   assert.equal(readReport(null), null);
 });
@@ -590,10 +594,12 @@ const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
 const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
 const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
 
-test('script: every implementer, reviewer and fixer prompt carries the tool-call budget', async () => {
+test('script: every reviewer and fixer prompt carries the tool-call budget; the implement prompt does not, and asks for targeted tests', async () => {
   const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
-  for (const c of calls) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
-  assert.match(calls.find(c => c.opts.label === 'implement').prompt, /at most 120 tool calls/);
+  for (const c of calls.filter(c => c.opts.label !== 'implement')) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
+  const implement = calls.find(c => c.opts.label === 'implement').prompt;
+  assert.doesNotMatch(implement, /TOOL BUDGET/);
+  assert.match(implement, /run only the test files your change touches.*run the verify command once, at the end, before reporting/);
 });
 
 test('script: every implementer, reviewer and fixer prompt names the repository to work in', async () => {
@@ -1158,10 +1164,11 @@ test('script: a P2 caused by the change in a file it did not touch is a widen to
   const caused = await run(ARGS, [review([], [finding({ path: 'src/Other/Else.cs', causedByChange: true })])]);
   assert.equal(caused.out.status, 'STALL');
   assert.equal(caused.out.stall.findings[0].why, 'widen');
-  const style = await run(ARGS, [review([], [finding({ category: 'clean-code', priority: 'P1' })])]);
+  const style = await run(ARGS, [review([], [finding({ category: 'clean-code', priority: 'P1' })]), review([])]);
   assert.equal(style.out.status, 'OK');
-  assert.equal(style.out.minor.length, 1);
+  assert.equal(style.out.cleaned.length, 1);                                    // minor, never blocking: only the cleanup pass touches it
   assert.equal(style.calls.filter((c) => c.opts.label?.startsWith('fix')).length, 0);
+  assert.equal(style.calls.filter((c) => c.opts.label?.startsWith('cleanup')).length, 1);
 });
 
 test('script: an unrequested hunk inside the perimeter is reverted by the fixer and listed as a scope-revert proposal; noticed items reach outOfScope', async () => {
@@ -1282,13 +1289,36 @@ test('script: a delta that starts at the start head, not at an earlier snapshot,
 });
 
 // ── soft cap, churn stall, targeted recheck, follow-ups (T8, T9, T11, T12) ───────────────────────────
-test('capLimit: 3 fix cycles, 3 more for every continue: true', () => {
-  assert.equal(capLimit(0), 3);
-  assert.equal(capLimit(), 3);
-  assert.equal(capLimit(1), 6);
-  assert.equal(capLimit(2), 9);
-  assert.equal(capLimit(-1), 3);
-  assert.equal(capLimit('2'), 3);
+test('decideRound: an id with no verdict this round follows the no-verdict rule, a kept challenge is fixed (F1, F4, F5)', () => {
+  const base = { tracked: { F1: { status: 'open' } }, verdicts: {}, found: [f('F2')], files: FILES };
+  const unanswered = decideRound(base);                                                            // F5: F1 got no verdict: it follows the no-verdict rule, F2 is fixed
+  assert.equal(unanswered.action, 'FIX');
+  assert.deepEqual(unanswered.toFix, ['F2']);
+  assert.deepEqual(unanswered.unanswered, ['F1']);
+  assert.equal(decideRound({ ...base, found: [] }).action, 'RECHECK');                             // nothing to fix: no stall
+  const kept = decideRound({ tracked: { F1: { status: 'closed' }, F2: { status: 'open' } }, verdicts: { F2: 'open' }, challenged: ['F2'], rejections: { F2: 1 }, files: FILES });
+  assert.equal(kept.action, 'FIX');                                                                // F4: a challenge kept after a RECHECK
+  assert.deepEqual(kept.toFix, ['F2']);
+});
+
+test('cleanupCandidates: minor findings inside the perimeter, never a scope hunk, never one the change did not cause in a file it did not touch', () => {
+  const dto = 'src/Orders/Dto/A.cs';
+  const minor = [
+    f('F1', { priority: 'P3' }),
+    f('F2', { priority: 'P3', category: 'scope' }),
+    f('F3', { priority: 'P3', path: dto, causedByChange: false }),
+    f('F4', { priority: 'P3', path: 'src/Other.cs' }),
+    f('F5', { category: 'clean-code', priority: 'P1' }),
+  ];
+  assert.deepEqual(cleanupCandidates(minor, FILES, { root: ROOT, touched: [] }).map(m => m.id), ['F1', 'F5']);
+  assert.deepEqual(cleanupCandidates(minor, FILES, { root: ROOT, touched: [dto] }).map(m => m.id), ['F1', 'F3', 'F5']);
+  assert.deepEqual(cleanupCandidates(undefined, FILES), []);
+});
+
+test('readAnswers: only entries with a text and an answer; trimmed', () => {
+  assert.deepEqual(readAnswers({ answers: [{ text: ' q1 ', answer: ' yes ' }, { text: 'q2', answer: '' }, { text: '', answer: 'x' }, null, { text: 'q3' }] }), [{ text: 'q1', answer: 'yes' }]);
+  assert.deepEqual(readAnswers({}), []);
+  assert.deepEqual(readAnswers(undefined), []);
 });
 
 test('findingHistory: per finding the round it appeared, the fixes it went to, the round it closed and when it came back', () => {
@@ -1401,35 +1431,43 @@ test('decideRound: a P1/P2 outside the perimeter on a file that also has a fresh
 const reviewsNew = (n) => review(Array.from({ length: n - 1 }, (_, i) => ({ id: `F${i + 1}`, status: 'closed' })), [finding({ line: 100 * n, title: ['null tenant filter', 'pagination offset calculation', 'timezone conversion bug', 'retry backoff overflow', 'cache invalidation race', 'logging secrets leak', 'sorting comparator unstable', 'decimal rounding drift'][n - 1] })]);
 const closedUpTo = (n) => review(Array.from({ length: n }, (_, i) => ({ id: `F${i + 1}`, status: 'closed' })));
 
-test('script: three review→fix cycles and a fourth fix decision is a STALL "cap" with the history; every continue adds three cycles', async () => {
-  const reviews = () => [1, 2, 3, 4, 5, 6, 7].map(reviewsNew);
-  const { out, calls } = await run(ARGS, reviews());
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.stall.why, 'cap');
-  assert.equal(out.stall.round, 4);
-  assert.deepEqual(out.stall.findings.map(x => [x.id, x.why]), [['F4', 'cap']]);
-  assert.deepEqual(calls.filter(c => c.opts.label?.startsWith('fix')).map(c => c.opts.label), ['fix R1', 'fix R2', 'fix R3']);
-  assert.deepEqual(out.stall.history, [
-    { id: 'F1', firstRound: 1, fixedIn: [1], closedIn: 2, rematchedIn: [] },
-    { id: 'F2', firstRound: 2, fixedIn: [2], closedIn: 3, rematchedIn: [] },
-    { id: 'F3', firstRound: 3, fixedIn: [3], closedIn: 4, rematchedIn: [] },
-    { id: 'F4', firstRound: 4, fixedIn: [], closedIn: null, rematchedIn: [] },
-  ]);
-  assert.match(out.stall.reason, /3 fix cycles/);
-  assert.match(out.resume, /continue/);
-  assert.match(out.resume, /widen/);
-  assert.equal(out.open.length, 1);
-  const more = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }] }, reviews());
-  assert.equal(more.out.status, 'STALL');
-  assert.equal(more.out.stall.why, 'cap');
-  assert.equal(more.out.stall.round, 7);                                       // fix cycles 4, 5 and 6 ran, the 7th decision is over the limit of 6
-  assert.equal(more.calls.filter(c => c.opts.label?.startsWith('fix')).length, 6);
-  const done = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }] }, [1, 2, 3, 4].map(reviewsNew).concat([closedUpTo(4)]));
-  assert.equal(done.out.status, 'OK');
-  assert.equal(done.out.rounds, 5);
+test('script: no cap on the rounds: a fix that closes one finding and opens another is progress, the loop goes on until nothing is open', async () => {
+  const { out, calls } = await run(ARGS, [1, 2, 3, 4, 5, 6, 7].map(reviewsNew).concat([closedUpTo(7)]));
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 8);
+  assert.deepEqual(calls.filter(c => c.opts.label?.startsWith('fix')).map(c => c.opts.label), ['fix R1', 'fix R2', 'fix R3', 'fix R4', 'fix R5', 'fix R6', 'fix R7']);
+  assert.equal(out.stall, undefined);
 });
 
-test('script: RECHECK rounds and coverage reruns are not fix cycles: they never count against the cap', async () => {
+test('script: a group reviewer with no verdict on F1 while another finds a new P2 is not a stall: F2 is fixed, F1 follows the no-verdict rule (F5)', async () => {
+  const at = (n, extra = {}) => finding({ path: `src/Orders/F${n}.cs`, line: n, ...extra });
+  const { calls } = await run(manyArgs({ size: 'M' }), [
+    review([], [at(0)]), review([]),                                                               // R1: A1 finds F1
+    null, review([], [at(9, { title: 'pagination offset calculation' })]),                          // R2: A1 returns nothing, A2 finds F2
+  ], [manyImpl]);
+  assert.deepEqual(labels(calls, 'fix').slice(0, 2), ['fix R1', 'fix R2']);
+});
+
+test('script: a coverage rerun after a fix that closed F1 is not a fix round: its new P2 is fixed, never a stall (F1, F4)', async () => {
+  const two = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/A.cs'];
+  const { out, calls } = await run(ARGS, [
+    review([], [finding()], [two[0]]),                                                             // R1: F1; Dto/A.cs stays unread
+    review([{ id: 'F1', status: 'closed' }], [], [two[0]]),                                        // R2: F1 closed, Dto/A.cs still unread: a rerun, no fix
+    review([], [finding({ line: 200, title: 'pagination offset calculation' })]),                  // R3: the rerun reads it and finds F2
+    review([{ id: 'F2', status: 'closed' }]),
+  ], [impl({ files: two, snapshot: { tree: 't1', files: two, churn: 3 } })]);
+  assert.deepEqual(labels(calls, 'fix'), ['fix R1', 'fix R3']);
+  assert.equal(out.status, 'OK');
+});
+
+test('script: a fix round that closes one finding and a verify that turned green are progress, never a stall', async () => {
+  const noVerdict = (n) => review([], [reviewsNew(n).found[0]]);
+  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()]), noVerdict(2), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [impl({ verify: FAIL }), impl(), impl()]);
+  assert.equal(out.status, 'OK');                                              // V1 sent with F1: round 2's F1 got no verdict, yet the green verify is progress
+  assert.deepEqual(out.roundLog.map(r => r.toFix), [['V1', 'F1'], ['F2'], []]);
+});
+
+test('script: a RECHECK between a fix and its verdict does not stall: the sent findings are judged when the verdict comes', async () => {
   const { out, calls } = await run(ARGS, [
     reviewsNew(1), reviewsNew(2),
     review([]),                                                                // R3: F2 unanswered → RECHECK
@@ -1453,13 +1491,11 @@ test('script: every STALL carries the finding history', async () => {
   assert.equal(red.out.status === 'STALL' && Array.isArray(red.out.stall.history), true);
 });
 
-test('script: churn is judged at the decision after the fix was read: strictly growing over three fixes and the decision still FIX; continue only restarts the count', async () => {
+test('script: churn is judged at the decision after the fix was read: strictly growing over three fixes and the decision still FIX; a continue is ignored, guidance goes on', async () => {
   const fix = (tree, churn) => impl({ snapshot: { tree, files: ['src/Orders/OrdersQuery.cs'], churn } });
   const reviews = (n) => [1, 2, 3, 4, 5, 6, 7].slice(0, n).map(reviewsNew);
   const grow = [impl(), fix('t2', 30), fix('t3', 10), fix('t4', 20), fix('t5', 30), fix('t6', 40), fix('t7', 50)];
-  const cap = await run(ARGS, reviews(7), grow);
-  assert.equal(cap.out.stall.why, 'cap');                                      // three fix cycles run: the cap, the churn is not growing yet
-  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }] }, reviews(7), grow);
+  const { out, calls } = await run(ARGS, reviews(7), grow);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.why, 'churn');
   assert.equal(out.stall.round, 5);                                            // fix 4 ran, its reviewers read it, F5 would go to a fifth fix
@@ -1467,23 +1503,16 @@ test('script: churn is judged at the decision after the fix was read: strictly g
   assert.deepEqual(out.stall.findings.map(x => [x.id, x.why]), [['F5', 'churn']]);
   assert.match(out.stall.reason, /10, 20, 30/);
   assert.equal(calls.filter(c => c.opts.label?.startsWith('fix')).length, 4);
-  assert.match(out.resume, /continue: true \} to go on \(it only restarts the churn count/);
   assert.match(out.resume, /accept: \[ids\]/);
   assert.match(out.resume, /guidance/);
-  const more = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }, { round: 5, continue: true }] }, reviews(7), grow);
-  assert.equal(more.out.stall.why, 'cap');                                     // a continue on a churn stall grants no fix cycles: the limit is still 6
-  assert.equal(more.out.stall.round, 7);
-  assert.equal(more.calls.filter(c => c.opts.label?.startsWith('fix')).length, 6);
-  const guided = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }, { round: 5, guidance: 'a smaller change' }] }, [...reviews(5), closedUpTo(5)], grow);
+  assert.doesNotMatch(out.resume, /continue/);
+  const ignored = await run({ ...ARGS, resolutions: [{ round: 5, continue: true }] }, reviews(7), grow);
+  assert.equal(ignored.out.stall.why, 'churn');                                // an old caller's continue changes nothing
+  assert.equal(ignored.out.stall.round, 5);
+  const guided = await run({ ...ARGS, resolutions: [{ round: 5, guidance: 'a smaller change' }] }, [...reviews(5), closedUpTo(5)], grow);
   assert.equal(guided.out.status, 'OK');
   assert.equal(guided.calls.filter(c => c.opts.label?.startsWith('fix')).length, 5);
   assert.match(guided.calls.find(c => c.opts.label === 'fix R5').prompt, /The user directs: a smaller change/);
-  const both = await run(ARGS, reviews(4), [impl(), fix('t2', 10), fix('t3', 20), fix('t4', 30)]);
-  assert.equal(both.out.stall.why, 'cap');                                     // cap and churn at the same round: one stall, reported as the cap
-  assert.match(both.out.stall.reason, /10, 20, 30/);
-  const restart = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }] }, [...reviews(4), closedUpTo(4)], [impl(), fix('t2', 10), fix('t3', 20), fix('t4', 30), fix('t5', 40)]);
-  assert.equal(restart.out.status, 'OK');                                      // that continue answered both: 3 more cycles and a new churn count
-  assert.equal(restart.calls.filter(c => c.opts.label?.startsWith('fix')).length, 4);
   const nulls = await run(ARGS, [1, 2, 3].map(reviewsNew).concat([closedUpTo(3)]), [impl(), fix('t2', 10), impl({ snapshot: null }), fix('t4', 20)]);
   assert.equal(nulls.out.status, 'OK');
   assert.deepEqual(nulls.out.roundLog.map(r => r.churn), [10, null, 20, null]);
@@ -1636,30 +1665,14 @@ test('decideRound: a fresh blocking finding in accept is accepted, never fixed; 
   assert.equal(scope.tracked.F2, undefined);
 });
 
-test('script: a cap stall ends with accept on the fresh finding that caused it, and goes on with guidance or retry (one more fix cycle)', async () => {
-  const reviews = () => [1, 2, 3, 4, 5, 6, 7].map(reviewsNew);
-  const accepted = await run({ ...ARGS, resolutions: [{ round: 4, accept: ['F4'] }] }, reviews());
-  assert.equal(accepted.out.status, 'OK');
-  assert.equal(accepted.out.rounds, 4);
-  assert.deepEqual(accepted.out.accepted.map(x => x.title), ['retry backoff overflow']);
-  for (const resolution of [{ round: 4, guidance: 'use a join' }, { round: 4, retry: true }]) {
-    const { out, calls } = await run({ ...ARGS, resolutions: [resolution] }, reviews());
-    assert.equal(calls.filter(c => c.opts.label?.startsWith('fix')).length, 4);   // the 4th cycle ran
-    assert.equal(out.status, 'STALL');
-    assert.equal(out.stall.why, 'cap');
-    assert.equal(out.stall.round, 5);                                              // and the next fix decision is over the limit again
-  }
-  assert.match((await run(ARGS, reviews())).out.resume, /accept: \[ids\].*guidance/);
-});
-
 test('script: a churn stall is accepted on its own round: the reviewers already read the fix that ran, so OK closes with nothing unread', async () => {
   const fix = (tree, churn) => impl({ snapshot: { tree, files: ['src/Orders/OrdersQuery.cs'], churn } });
   const grow = [impl(), fix('t2', 30), fix('t3', 10), fix('t4', 20), fix('t5', 30)];
   const reviews = () => [1, 2, 3, 4, 5].map(reviewsNew);
-  const stalled = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }] }, reviews(), grow);
+  const stalled = await run(ARGS, reviews(), grow);
   assert.equal(stalled.out.stall.why, 'churn');
   assert.match(stalled.out.resume, /\{ round: 5, accept: \[ids\] \}/);
-  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 4, continue: true }, { round: 5, accept: ['F5'] }] }, reviews(), grow);
+  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 5, accept: ['F5'] }] }, reviews(), grow);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 5);
   assert.deepEqual(out.accepted.map(x => x.id), ['F5']);
@@ -1697,4 +1710,113 @@ test('script: a noticed item the implementer also wrote under openQuestions is l
 test('script: the reviewer prompt names filesReviewed explicitly', async () => {
   const { calls } = await run(ARGS, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /under filesReviewed list every file you actually read/);
+});
+
+// ── P3 cleanup pass (N4) ──────────────────────────────────────────────────────────────────────────────
+const nit = (n) => finding({ priority: 'P3', line: 40 * n, title: ['minor naming', 'comment typo', 'unused import', 'spacing'][n - 1] });
+
+test('script: a round that would end OK with minor findings inside the perimeter runs one cleanup fix and one review of that delta, never a second cleanup', async () => {
+  const oos = finding({ priority: 'P3', path: 'src/Other.cs', line: 9, title: 'other file nit' });
+  const { out, calls } = await run(ARGS, [review([], [nit(1), nit(2), oos]), review([], [nit(3)])]);
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 2);
+  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['implement', 'cleanup R1']);
+  const prompt = calls.find(c => c.opts.label === 'cleanup R1').prompt;
+  assert.match(prompt, /Cleanup pass, once/);
+  assert.match(prompt, /- F1 \[P3\].*minor naming/);
+  assert.match(prompt, /- F2 \[P3\].*comment typo/);
+  assert.doesNotMatch(prompt, /other file nit/);                                // outside the perimeter: stays in the table
+  assert.deepEqual(out.cleaned.map(x => x.id), ['F1', 'F2']);
+  assert.deepEqual(out.minor.map(x => x.id), ['F4']);                           // the P3 of the cleanup delta is reported, not cleaned
+  assert.deepEqual(out.outOfScope.filter(o => o.source === 'review').map(o => o.title), ['other file nit']);
+  assert.deepEqual(out.roundLog.map(r => [r.toFix, r.cleanup]), [[[], ['F1', 'F2']], [[], undefined]]);
+  assert.equal(out.stall, undefined);
+  assert.match(calls.find(c => c.opts.label === 'R2 A').prompt, /DELTA of the last fix/);
+});
+
+test('script: a finding the cleanup fixer rejects stays minor; a P2 of the cleanup delta goes through the normal loop and no second cleanup runs', async () => {
+  const { out, calls } = await run(ARGS, [
+    review([], [nit(1), nit(2)]),
+    review([], [finding({ line: 500, title: 'cleanup broke the null guard' }), nit(3)]),     // R2: the delta review finds a P2 (F3) and a new P3 (F4)
+    review([{ id: 'F3', status: 'closed' }]),
+  ], [impl(), impl({ rejected: [{ id: 'F2', kind: 'wrong', reason: 'the typo is in a quoted test name' }] }), impl()]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['implement', 'cleanup R1', 'fix R2']);
+  assert.deepEqual(out.cleaned.map(x => x.id), ['F1']);
+  assert.deepEqual(out.minor.map(x => x.id).sort(), ['F2', 'F4']);
+  assert.equal(out.stall, undefined);
+  assert.deepEqual(out.roundLog.map(r => r.toFix), [[], ['F3'], []]);
+  assert.deepEqual(out.roundLog.map(r => r.churn), [null, 3, null]);                           // the cleanup pass has no churn
+});
+
+test('script: no cleanup for a finding outside the perimeter or a change-unrelated one in an untouched file; the verify gate still applies to the cleanup', async () => {
+  const untouched = finding({ priority: 'P3', path: 'src/Orders/Dto/A.cs', causedByChange: false, title: 'old naming nit' });
+  const none = await run(ARGS, [review([], [untouched, finding({ priority: 'P3', path: 'src/Other.cs', title: 'other' })])]);
+  assert.equal(none.out.status, 'OK');
+  assert.equal(none.calls.filter(c => c.opts.agentType === 'implementer').length, 1);
+  assert.equal(none.out.minor.length, 1);
+  const red = await run({ ...ARGS, verify: 'node --test' }, [review([], [nit(1)]), review([]), review([])], [impl(), impl({ verify: FAIL }), impl()]);
+  assert.equal(red.out.status, 'STALL');                                                         // the verify was green, the cleanup turned it red
+  assert.equal(red.out.stall.why, 'green-to-red');
+});
+
+// ── questions (N5) ────────────────────────────────────────────────────────────────────────────────────
+const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant', why: 'two tenants are possible' }];
+
+test('script: the implementer and fixer schemas carry optional questions; both prompts say how to use them', async () => {
+  const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
+  for (const label of ['implement', 'fix R1']) {
+    const c = calls.find(x => x.opts.label === label);
+    assert.deepEqual(Object.keys(c.opts.schema.properties.questions.items.properties), ['text', 'default', 'why']);
+    assert.equal(c.opts.schema.required.includes('questions'), false);
+    assert.match(c.prompt, /behaviour choice the owner would see.*not yours to make.*`questions`/);
+  }
+});
+
+test('script: questions from the implementer are a STALL "question" at round 0, before any review; the answers run it once more as guidance', async () => {
+  const asking = impl({ questions: ASK });
+  const { out, calls } = await run(ARGS, [review([])], [asking]);
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'question');
+  assert.equal(out.stall.round, 0);
+  assert.deepEqual(out.stall.questions, ASK);
+  assert.deepEqual(calls.map(c => c.opts.label), ['implement']);
+  assert.match(out.resume, /\{ round: 0, answers: \[\{ text, answer \}\] \}/);
+  assert.match(out.resume, /apply every default and list it as an open decision/);
+  const answers = [{ text: ASK[0].text, answer: 'the tenant of the logged-in user' }];
+  const resumed = await run({ ...ARGS, resolutions: [{ round: 0, answers }] }, [review([])], [asking, impl({ noticed: [{ title: 'n', path: 'p', why: 'w' }] })]);
+  assert.equal(resumed.out.status, 'OK');
+  assert.deepEqual(resumed.calls.map(c => c.opts.label), ['implement', 'implement (answers)', 'R1 A']);
+  assert.equal(resumed.calls[1].prompt.includes(`- ${ASK[0].text} -> the tenant of the logged-in user`), true);
+  assert.equal(resumed.calls[0].prompt.includes('The owner answered'), false);                   // the first call is the cached one
+  assert.match(resumed.calls[1].prompt, /first run's edits are already in the tree/);
+  assert.match(resumed.calls[1].prompt, /snapshot\.ps1/);                                          // the snapshot stays the last step
+  assert.deepEqual(resumed.out.outOfScope.map(o => o.title), ['n']);
+  for (const blank of [[], [{ text: ASK[0].text, answer: ' ' }]]) {
+    const again = await run({ ...ARGS, resolutions: [{ round: 0, answers: blank }] }, [review([])], [asking]);
+    assert.equal(again.out.stall.why, 'question');                                                 // no usable answer: asked again
+  }
+});
+
+test('script: questions asked again after the answers are open decisions in outOfScope, not a second stall', async () => {
+  const again = [{ text: 'Soft delete?', default: 'no', why: 'not in the brief' }];
+  const { out } = await run({ ...ARGS, resolutions: [{ round: 0, answers: [{ text: ASK[0].text, answer: 'caller' }] }] }, [review([])], [impl({ questions: ASK }), impl({ questions: again })]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.outOfScope, [{ source: 'implementer', text: 'Soft delete? (default: no; not in the brief)' }]);
+});
+
+test('script: questions from a fixer are a STALL "question" at the round of the fix, before the next review; the answers rerun the fix', async () => {
+  const asking = impl({ questions: ASK });
+  const { out, calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), asking]);
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'question');
+  assert.equal(out.stall.round, 1);
+  assert.deepEqual(out.stall.questions, ASK);
+  assert.deepEqual(calls.map(c => c.opts.label), ['implement', 'R1 A', 'fix R1']);
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const resumed = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), asking, impl()]);
+  assert.equal(resumed.out.status, 'OK');
+  assert.deepEqual(resumed.calls.map(c => c.opts.label), ['implement', 'R1 A', 'fix R1', 'fix R1 (answers)', 'R2 A']);
+  assert.match(resumed.calls.find(c => c.opts.label === 'fix R1 (answers)').prompt, /- Which tenant owns the order\? -> caller/);
+  assert.match(resumed.calls.find(c => c.opts.label === 'fix R1 (answers)').prompt, /- F1 \[P2\]/);
 });
