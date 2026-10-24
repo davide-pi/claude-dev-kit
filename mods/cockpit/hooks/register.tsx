@@ -28,11 +28,12 @@ import {
   contextOf,
   diffHunks,
   isAzureRemote,
+  historyTokens,
   isDefaultBranch,
   isGithubRemote,
-  isTab,
   newTokens,
   parseAzurePr,
+  parseCreatedPr,
   parseDefaultBranch,
   parseDoneClaims,
   parseGitStatus,
@@ -41,16 +42,20 @@ import {
   parseNumstat,
   parsePerimeter,
   parseReset,
+  parseSavedPrs,
   parseWorktree,
-  parseWorktrees,
   recordBurnSample,
+  recordCall,
   recordCtxSample,
   recordRound,
   resolveAlm,
+  savedTab,
   settleUsage,
   stateAfterWait,
   tabNeeds,
   toHistory,
+  toolArg,
+  upsertPr,
   usageOf,
   withAgentTokens,
   worklogDays,
@@ -66,7 +71,7 @@ const MEDIUM_MS = 10_000
 const SLOW_MS = 30_000
 /** The pull request (and the repo's default branch) of a branch is read again after this long. */
 const PR_EVERY_MS = 5 * 60_000
-/** The Repo tab keeps this many changed files; it draws 8 of them. */
+/** The Lavoro tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
 /** A burst of main turns ends in one read of the context breakdown, this long after the first. */
 const CONTEXT_DEBOUNCE_MS = 2000
@@ -163,7 +168,7 @@ async function readPerimeterCheck($: EngineInterface, root: string, entries: rea
 let lastPrRead: { key: string; at: number } | undefined
 let isPrReading = false
 
-/** A file the Repo tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
+/** A file the Lavoro tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
 const DIFF_FILE_MAX = 4 * 1024 * 1024
 
 /** The private config folder of the ALM `identity` (`~/.azure-<identity>`, as hooks/lib/az-pin.js picks it), when it exists. */
@@ -190,7 +195,7 @@ async function runAz($: EngineInterface, args: readonly string[], cwd: string, a
 }
 
 /**
- * The open pull request of `branch` on Azure DevOps: `az repos pr list`, aimed at the org of the ALM line and the project of the remote,
+ * The latest pull request of `branch` on Azure DevOps, open, completed or abandoned: `az repos pr list`, aimed at the org of the ALM line and the project of the remote,
  * never at the CLI's configured default. Undefined without an org, a repository or a project to ask about.
  */
 async function readAzurePr($: EngineInterface, cwd: string, branch: string, url: string, alm: CockpitAlm | undefined): Promise<CockpitPr | undefined> {
@@ -200,14 +205,15 @@ async function readAzurePr($: EngineInterface, cwd: string, branch: string, url:
   if (!alm?.org || !repo || !project) return undefined
   const organization = /^https?:\/\//i.test(alm.org) ? alm.org : `https://dev.azure.com/${alm.org}`
   const args = ['repos', 'pr', 'list', '--organization', organization, '--project', project, '--repository', repo.repo]
-  const list = await runAz($, [...args, '--source-branch', `refs/heads/${branch}`, '--status', 'active', '--top', '1', '--output', 'json'], cwd, alm)
+  const list = await runAz($, [...args, '--source-branch', `refs/heads/${branch}`, '--status', 'all', '--top', '1', '--output', 'json'], cwd, alm)
   return list?.exitCode === 0 ? parseAzurePr(list.stdout) : undefined
 }
 
 /**
  * Reads, in the background (never awaited by a refresh or a render), the repo's default branch from `origin/HEAD` and,
- * off it, the open pull request of `branch`: `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure DevOps
- * one. No CLI, no PR or a failure leaves both absent. The result is dropped when the branch has moved on.
+ * off it, the pull request of `branch`: `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure
+ * DevOps one. One found joins the chat's pull requests, or updates its entry there; no CLI, no PR or a failure adds
+ * nothing. The result is dropped when the branch has moved on.
  */
 async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
   const now = await $.clock.now()
@@ -225,51 +231,40 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     if (!isDefaultBranch(branch, defaultBranch)) {
       const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
       if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
-        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup'], { cwd, timeoutMs: 10_000 })
+        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url'], { cwd, timeoutMs: 10_000 })
         pr = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
       } else if (remote.exitCode === 0 && isAzureRemote(remote.stdout)) {
         pr = await readAzurePr($, cwd, branch, remote.stdout, alm)
       }
     }
-    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, pr } : s))
+    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, defaultBranch, prs: pr ? upsertPr(s.prs, pr) : s.prs } : s))
   } catch {
-    // the CLI is missing or too slow: the branch has no PR we know of, and the next read is in `PR_EVERY_MS`
-    await patch($, s => (s.cwd === cwd && s.git?.branch === branch ? { ...s, pr: undefined } : s)).catch(() => undefined)
+    // the CLI is missing or too slow: no PR is added, and the next read is in `PR_EVERY_MS`
   } finally {
     isPrReading = false
   }
 }
 
 /**
- * The Repo tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
- * then untracked and not ignored), the commits on HEAD that the default branch lacks, the worktrees. A read that fails
- * leaves its part out; every read failing keeps the last reading.
+ * The Lavoro tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
+ * then untracked and not ignored). Every read failing keeps the last reading.
  */
 async function refreshRepo($: EngineInterface): Promise<void> {
   try {
     const s = await read($, snapshot)
     const { cwd, git } = s
-    if (s.tab !== 'repo' || !git?.root) return
+    if (s.tab !== 'work' || !git?.root) return
     const base = ['git', '-C', git.root, '--no-optional-locks']
     const run = (args: string[]) => $.process.run([...base, ...args], { timeoutMs: 3000 })
-    const [tracked, untracked, worktrees] = await Promise.all([
+    const [tracked, untracked] = await Promise.all([
       run(['diff', '--numstat', '--no-renames', '-z', 'HEAD', '--']),
       run(['ls-files', '--others', '--exclude-standard', '-z']),
-      run(['worktree', 'list', '--porcelain']),
     ])
-    const commits =
-      s.defaultBranch !== undefined && !isDefaultBranch(git.branch, s.defaultBranch) ? await run(['rev-list', '--count', `origin/${s.defaultBranch}..HEAD`]) : undefined
     const isRead = (r: { exitCode: number; isStdoutTruncated: boolean }) => r.exitCode === 0 && !r.isStdoutTruncated
     if (!isRead(tracked) && !isRead(untracked)) return
     const names = isRead(untracked) ? untracked.stdout.split('\0').filter(Boolean) : []
     const files = parseNumstat(isRead(tracked) ? tracked.stdout : '', names)
-    const count = commits && isRead(commits) ? Number.parseInt(commits.stdout, 10) : Number.NaN
-    const repo = {
-      files: files.slice(0, REPO_FILES_KEEP),
-      total: files.length,
-      commits: Number.isInteger(count) && count >= 0 ? count : undefined,
-      worktrees: isRead(worktrees) ? parseWorktrees(worktrees.stdout) : [],
-    }
+    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length }
     await patch($, x => (x.cwd === cwd && x.git?.branch === git.branch ? { ...x, repo } : x))
   } catch {
     // git missing or too slow: keep the last reading
@@ -318,7 +313,7 @@ async function refreshGit($: EngineInterface): Promise<void> {
     if (!parsed) {
       return void (await patch($, s => {
         lastPrRead = undefined
-        return { ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, pr: undefined, defaultBranch: undefined, repo: undefined }
+        return { ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, defaultBranch: undefined, repo: undefined }
       }))
     }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
@@ -329,8 +324,8 @@ async function refreshGit($: EngineInterface): Promise<void> {
     await patch($, s => {
       const isSameRepo = s.cwd === cwd
       const isSameBranch = isSameRepo && s.git?.branch === parsed.branch
-      // A PR and a default branch belong to the repository and branch they were read for: leaving them forgets the read too,
-      // decided here, in the patch that clears them, from the state it applies to.
+      // The PR read belongs to the repository and branch it was asked about: leaving them forgets the read too, decided here,
+      // in the patch that clears the default branch, from the state it applies to.
       if (!isSameBranch) lastPrRead = undefined
       return {
         ...s,
@@ -338,7 +333,6 @@ async function refreshGit($: EngineInterface): Promise<void> {
         git: { ...parsed, worktreeRoot, root: topLevel || undefined },
         perimeter,
         perimeterCheck,
-        pr: isSameBranch ? s.pr : undefined,
         defaultBranch: isSameRepo ? s.defaultBranch : undefined,
         repo: isSameRepo ? s.repo : undefined,
       }
@@ -394,8 +388,10 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
       agents: agentCounts(s),
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
-      tab: s.tab ?? 'session',
+      tab: s.tab ?? 'agents',
       history: s.history ?? [],
+      // the chat's pull requests come back with the session
+      prs: s.prs && s.prs.length > 0 ? s.prs : undefined,
       // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
       mainTokens: s.mainTokens,
       agentTokens: s.agentTokens,
@@ -424,8 +420,15 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
   }
 }
 
-/** What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one), the agent history and the tokens of the main loop and of the agents that left the list. */
-async function savedState($: EngineInterface, id: string): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; mainTokens?: number; agentTokens?: number }> {
+/**
+ * What an earlier run of session `id` left in its state file: the tab (none for a missing file or an unknown one; the v2 Sessione
+ * and Repo tabs map to Agenti and Lavoro), the agent history, the chat's pull requests and the tokens of the main loop and of the
+ * agents that left the list (a file from before that count: the history's sum).
+ */
+async function savedState(
+  $: EngineInterface,
+  id: string,
+): Promise<{ tab?: CockpitTab; history: CockpitHistoryEntry[]; prs?: CockpitPr[]; mainTokens?: number; agentTokens?: number }> {
   try {
     const dir = await configDir($)
     if (!dir || !SESSION_ID.test(id)) return { history: [] }
@@ -434,11 +437,14 @@ async function savedState($: EngineInterface, id: string): Promise<{ tab?: Cockp
     if (typeof parsed !== 'object' || parsed === null) return { history: [] }
     const tab = 'tab' in parsed ? parsed.tab : undefined
     const count = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined)
+    const history = parseHistory('history' in parsed ? parsed.history : undefined)
+    const prs = parseSavedPrs('prs' in parsed ? parsed.prs : undefined)
     return {
-      tab: isTab(tab) ? tab : undefined,
-      history: parseHistory('history' in parsed ? parsed.history : undefined),
+      tab: savedTab(tab),
+      history,
+      prs: prs.length > 0 ? prs : undefined,
       mainTokens: count('mainTokens' in parsed ? parsed.mainTokens : undefined),
-      agentTokens: count('agentTokens' in parsed ? parsed.agentTokens : undefined),
+      agentTokens: count('agentTokens' in parsed ? parsed.agentTokens : undefined) ?? historyTokens(history),
     }
   } catch {
     return { history: [] }
@@ -451,6 +457,8 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   sessionId: undefined,
   agents: [],
   history: [],
+  prs: undefined,
+  calls: undefined,
   tasks: [],
   cacheShare: undefined,
   mainTokens: undefined,
@@ -460,6 +468,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   ctxSamples: undefined,
   ctxRounds: undefined,
   context: undefined,
+  contextSeq: undefined,
   skillsUsed: undefined,
   fiveHourSamples: [],
   workflow: undefined,
@@ -479,7 +488,7 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
 }
 
@@ -487,8 +496,9 @@ async function setOpen($: EngineInterface, value: boolean): Promise<void> {
   isOpen = value
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
-  // The Contesto tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment.
-  if (value && (await read($, snapshot)).tab === 'context') await refreshContext($, 'summary')
+  // The Contesto tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment. The
+  // read is not waited for: a slow one must not hold the open (or the close) back.
+  if (value && (await read($, snapshot)).tab === 'context') void refreshContext($, 'summary').catch(() => undefined)
 }
 
 async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
@@ -576,21 +586,26 @@ async function refreshAutoCompact($: EngineInterface): Promise<void> {
   }
 }
 
-// The breakdown read the Contesto tab waits for, and the exact count in flight (a second press while it runs counts nothing more).
-let isContextScheduled = false
+// When the breakdown read the Contesto tab waits for was scheduled, and the exact count in flight (a second press while it runs counts nothing more).
+// A timer the engine refuses never runs its callback, so a mark the callback clears could stay for ever: it lapses by itself after twice the debounce.
+let contextScheduledAt: number | undefined
 let isCounting = false
+// Every context read takes the next number when it starts; the snapshot keeps the number of the reading it holds.
+let contextSeq = 0
 
 /**
  * Reads the context breakdown for the Contesto tab. `summary` estimates locally and is free; `full` counts with the token-count
- * API and so runs only from the button. A failed read leaves the last reading.
+ * API and so runs only from the button. A failed read leaves the last reading. Reads overlap (an exact count takes seconds): the
+ * one asked last wins, so an older answer that arrives after a newer one is dropped.
  */
 async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): Promise<void> {
+  const seq = ++contextSeq
   try {
     const u = await $.session.usage({ breakdown: detail })
     const breakdown = u.context.breakdown
     if (!breakdown) return
     const context = contextOf(breakdown, detail === 'full')
-    await patch($, s => ({ ...s, context }))
+    await patch($, s => ((s.contextSeq ?? 0) > seq ? s : { ...s, context, contextSeq: seq }))
   } catch {
     // not measured: the tab keeps what it drew
   }
@@ -609,10 +624,12 @@ async function countExact($: EngineInterface): Promise<void> {
 
 /** The end of a main turn re-reads the breakdown while the pane is open on the Contesto tab; a burst of turns is one read. */
 async function scheduleContextRead($: EngineInterface): Promise<void> {
-  if (!isOpen || isContextScheduled || (await read($, snapshot)).tab !== 'context') return
-  isContextScheduled = true
+  if (!isOpen || (await read($, snapshot)).tab !== 'context') return
+  const now = await $.clock.now()
+  if (contextScheduledAt !== undefined && now - contextScheduledAt < 2 * CONTEXT_DEBOUNCE_MS) return
+  contextScheduledAt = now
   $.clock.after(CONTEXT_DEBOUNCE_MS, () => {
-    isContextScheduled = false
+    contextScheduledAt = undefined
     void refreshContext($, 'summary').catch(() => undefined)
   })
 }
@@ -701,7 +718,7 @@ async function fastTick($: EngineInterface): Promise<void> {
   if (await isFastWanted($)) await tickClock($)
 }
 
-/** Medium tier (10 s): git (and, with the Repo tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
+/** Medium tier (10 s): git (and, with the Lavoro tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
 async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
@@ -758,6 +775,12 @@ function applyTodos(
 /** A call that answered without error and was not refused. */
 const isOk = (ran: { deny?: string; isError?: boolean }) => ran.deny === undefined && ran.isError !== true
 
+/** What a Bash call printed: the `stdout` of its result, narrowed from `unknown`; else the text the model read. */
+function bashOutput(ran: { result?: unknown; text?: string }): string {
+  const { result } = ran
+  return typeof result === 'object' && result !== null && 'stdout' in result && typeof result.stdout === 'string' ? result.stdout : (ran.text ?? '')
+}
+
 /** A TaskUpdate result that says it did not apply (`success: false`), narrowed from `unknown`. */
 function isRefused(result: unknown): boolean {
   return typeof result === 'object' && result !== null && 'success' in result && result.success === false
@@ -773,10 +796,10 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Repo tab's git reads and the Contesto tab's breakdown are made while the tab is selected: the press starts them.
+  // The Lavoro tab's git reads and the Contesto tab's breakdown are made while the tab is selected: the press starts them.
   selectTab: tab =>
     void patch($, s => ({ ...s, tab }))
-      .then(() => (tab === 'repo' ? refreshRepo($) : tab === 'context' ? refreshContext($, 'summary') : undefined))
+      .then(() => (tab === 'work' ? refreshRepo($) : tab === 'context' ? refreshContext($, 'summary') : undefined))
       .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
@@ -876,7 +899,7 @@ export const register: Register = on => {
         const history = addHistory(own?.history, left)
         // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
         const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'session', history, mainTokens: own?.mainTokens, agentTokens }
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', history, prs: own?.prs && own.prs.length > 0 ? own.prs : undefined, mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
       }
     } catch {
@@ -1059,13 +1082,30 @@ export const register: Register = on => {
     }
     mainTools = [...mainTools, tool]
     await setClaudeState($, { kind: 'tool', tool })
+    const at = await $.clock.now().catch(() => 0)
+    let isSuccess = false
     try {
-      return await next(e)
+      const ran = await next(e)
+      isSuccess = isOk(ran)
+      return ran
     } finally {
       mainTools = removeOne(mainTools, tool) ?? []
+      // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
+      await patch($, s => ({ ...s, calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }) })).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
+  })
+
+  // A pull request this chat created (`gh pr create`, `az repos pr create`; a subagent's call too: the PR is the chat's) is
+  // told by what the command printed.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (isOk(ran) && /\bpr\s+create\b/.test(e.command)) {
+      const pr = parseCreatedPr(e.command, bashOutput(ran))
+      if (pr) await patch($, s => ({ ...s, prs: upsertPr(s.prs, pr) })).catch(() => undefined)
+    }
+    return ran
   })
 
   // A permission request waits for the person: the state is waiting until it is answered. A notification only says that

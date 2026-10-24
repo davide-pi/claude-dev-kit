@@ -37,7 +37,15 @@ import {
   parseGithubPr,
   parseAzurePr,
   parseNumstat,
-  parseWorktrees,
+  CALLS_KEEP,
+  TABS,
+  historyTokens,
+  parseCreatedPr,
+  parseSavedPrs,
+  recordCall,
+  savedTab,
+  toolArg,
+  upsertPr,
   isAzureRemote,
   azureRepo,
   diffHunks,
@@ -485,12 +493,6 @@ test('parseNumstat: tracked files with +/-, a binary one, then the untracked one
   expect(parseNumstat('garbage\0', [])).toEqual([])
 })
 
-test('parseWorktrees: the path and branch of each checkout, a detached one without a branch, a bare one left out', () => {
-  const text = 'worktree /w/a\nHEAD 111\nbranch refs/heads/feature/x\n\nworktree /w/b\nHEAD 222\ndetached\n\nworktree /w/c.git\nbare\n'
-  expect(parseWorktrees(text)).toEqual([{ path: '/w/a', branch: 'feature/x' }, { path: '/w/b' }])
-  expect(parseWorktrees('')).toEqual([])
-})
-
 test('parseGithubPr: an open PR with its title, review decision and the checks told passed, failed, pending', () => {
   const checks = [
     { __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' },
@@ -505,15 +507,18 @@ test('parseGithubPr: an open PR with its title, review decision and the checks t
   expect(parseGithubPr(json({ reviewDecision: 'APPROVED', statusCheckRollup: checks }))).toEqual({
     number: 42,
     title: 'Fix',
+    state: 'open',
     isDraft: false,
     review: 'approved',
     checks: { passed: 3, failed: 2, pending: 2 },
   })
-  expect(parseGithubPr(json({ reviewDecision: 'CHANGES_REQUESTED', isDraft: true }))).toEqual({ number: 42, title: 'Fix', isDraft: true, review: 'changes' })
+  expect(parseGithubPr(json({ reviewDecision: 'CHANGES_REQUESTED', isDraft: true }))).toEqual({ number: 42, title: 'Fix', state: 'open', isDraft: true, review: 'changes' })
+  expect(parseGithubPr(json({ url: 'https://github.com/example/orders/pull/42' }))?.url).toBe('https://github.com/example/orders/pull/42')
   expect(parseGithubPr(json({ reviewDecision: 'REVIEW_REQUIRED', statusCheckRollup: [] }))?.review).toBe('pending')
   expect(parseGithubPr(json({ reviewDecision: '' }))?.review).toBeUndefined()
-  expect(parseGithubPr(json({ state: 'MERGED' }))).toBeUndefined()
-  expect(parseGithubPr(json({ state: 'CLOSED' }))).toBeUndefined()
+  expect(parseGithubPr(json({ state: 'MERGED' }))?.state).toBe('merged')
+  expect(parseGithubPr(json({ state: 'CLOSED' }))?.state).toBe('closed')
+  expect(parseGithubPr(json({ state: 'WEIRD' }))).toBeUndefined()
   expect(parseGithubPr(json({ number: 0 }))).toBeUndefined()
   expect(parseGithubPr(json({ number: '42' }))).toBeUndefined()
   expect(parseGithubPr('{}')).toBeUndefined()
@@ -521,15 +526,18 @@ test('parseGithubPr: an open PR with its title, review decision and the checks t
   expect(parseGithubPr('')).toBeUndefined()
 })
 
-test('parseAzurePr: the first active PR of az repos pr list, its review from the reviewers votes, no checks', () => {
+test('parseAzurePr: the first PR of az repos pr list (active, completed or abandoned), its review from the reviewers votes, no checks', () => {
   const list = (o: object) => JSON.stringify([{ pullRequestId: 7, title: 'Faster', status: 'active', isDraft: false, ...o }])
-  expect(parseAzurePr(list({ reviewers: [{ vote: 10 }, { vote: 0 }] }))).toEqual({ number: 7, title: 'Faster', isDraft: false, review: 'approved' })
-  expect(parseAzurePr(list({ isDraft: true }))).toEqual({ number: 7, title: 'Faster', isDraft: true })
+  expect(parseAzurePr(list({ reviewers: [{ vote: 10 }, { vote: 0 }] }))).toEqual({ number: 7, title: 'Faster', state: 'open', isDraft: false, review: 'approved' })
+  expect(parseAzurePr(list({ isDraft: true }))).toEqual({ number: 7, title: 'Faster', state: 'open', isDraft: true })
+  expect(parseAzurePr(list({ repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } }))?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
   expect(parseAzurePr(list({ reviewers: [{ vote: 10 }, { vote: -10 }] }))?.review).toBe('changes')
   expect(parseAzurePr(list({ reviewers: [{ vote: -5 }] }))?.review).toBe('changes')
   expect(parseAzurePr(list({ reviewers: [{ vote: 0 }, { vote: 0 }] }))?.review).toBe('pending')
   expect(parseAzurePr(list({ reviewers: [] }))?.review).toBeUndefined()
-  expect(parseAzurePr(list({ status: 'completed' }))).toBeUndefined()
+  expect(parseAzurePr(list({ status: 'completed' }))?.state).toBe('merged')
+  expect(parseAzurePr(list({ status: 'abandoned' }))?.state).toBe('closed')
+  expect(parseAzurePr(list({ status: 'notSet' }))).toBeUndefined()
   expect(parseAzurePr(list({ pullRequestId: 'x' }))).toBeUndefined()
   expect(parseAzurePr('[]')).toBeUndefined()
   expect(parseAzurePr('{}')).toBeUndefined()
@@ -707,9 +715,8 @@ test('autocompactForecast: requests left from the average growth; absent without
 
 test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
   expect(tabNeeds('agents')).toEqual({ fast: true })
-  expect(tabNeeds('session')).toEqual({ fast: true })
   expect(tabNeeds('work')).toEqual({ fast: true })
-  expect(tabNeeds('repo')).toEqual({ fast: false })
+  expect(tabNeeds('system')).toEqual({ fast: false })
   expect(tabNeeds('context')).toEqual({ fast: false })
   expect(tabNeeds(undefined)).toEqual({ fast: true })
 })
@@ -830,4 +837,84 @@ test('shouldCompact: from 70 % with the last three rounds each growing over 5 %,
   expect(shouldCompact({ percent: 10, forecast: 3 })).toBe(true)
   expect(shouldCompact({ percent: 10, forecast: 4 })).toBe(false)
   expect(shouldCompact({})).toBe(false)
+})
+
+test('savedTab: the four tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
+  expect(TABS).toEqual(['agents', 'context', 'work', 'system'])
+  for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
+  expect(savedTab('session')).toBe('agents')
+  expect(savedTab('repo')).toBe('work')
+  expect(savedTab('nope')).toBeUndefined()
+  expect(savedTab(undefined)).toBeUndefined()
+  expect(savedTab(3)).toBeUndefined()
+})
+
+test('toolArg: the short argument of a tool call, one line, a file by its name; none when the call carries nothing to show', () => {
+  expect(toolArg({ tool: 'Bash', command: 'git  status\n  --short' })).toBe('git status --short')
+  expect(toolArg({ tool: 'Read', file_path: '/w/src/orders/Filter.ts' })).toBe('Filter.ts')
+  expect(toolArg({ tool: 'Edit', file_path: 'C:\\w\\x.ts', old_string: 'a' })).toBe('x.ts')
+  expect(toolArg({ tool: 'Grep', pattern: 'Order' })).toBe('Order')
+  expect(toolArg({ tool: 'WebFetch', url: 'https://example.org/a' })).toBe('https://example.org/a')
+  expect(toolArg({ tool: 'Agent', description: 'Find the DTOs', prompt: 'long' })).toBe('Find the DTOs')
+  expect(toolArg({ tool: 'TodoWrite', todos: [] })).toBeUndefined()
+  expect(toolArg({ tool: 'Bash', command: '   ' })).toBeUndefined()
+  expect(toolArg({ tool: 'Bash', command: 'x'.repeat(500) })?.length).toBe(120)
+})
+
+test('recordCall keeps the last eight calls, newest last', () => {
+  let calls = recordCall(undefined, { tool: 'Bash', isOk: true, at: 0 })
+  expect(calls).toEqual([{ tool: 'Bash', isOk: true, at: 0 }])
+  for (let i = 1; i <= 9; i++) calls = recordCall(calls, { tool: 'Read', arg: String(i), isOk: i % 2 === 0, at: i })
+  expect(CALLS_KEEP).toBe(8)
+  expect(calls).toHaveLength(8)
+  expect(calls.map(c => c.arg)).toEqual(['2', '3', '4', '5', '6', '7', '8', '9'])
+})
+
+test('parseCreatedPr: the pull request a gh or az create printed, with the title the command gave; nothing for any other command or output', () => {
+  const GH = 'https://github.com/example/orders/pull/42'
+  expect(parseCreatedPr('gh pr create --title "Add filter" --body "x"', `Creating...\n${GH}\n`)).toEqual({ number: 42, title: 'Add filter', state: 'open', isDraft: false, url: GH })
+  expect(parseCreatedPr("gh pr create -t 'Add filter' --draft", GH)).toEqual({ number: 42, title: 'Add filter', state: 'open', isDraft: true, url: GH })
+  expect(parseCreatedPr('gh pr create --fill', GH)?.title).toBe('')
+  expect(parseCreatedPr('gh pr create --title "x"', 'no url here')).toBeUndefined()
+  expect(parseCreatedPr('gh pr view --title "x"', GH)).toBeUndefined()
+  const az = JSON.stringify({ pullRequestId: 9, title: 'Faster', status: 'active', isDraft: false, repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } })
+  expect(parseCreatedPr('az repos pr create --title Faster --source-branch x', az)).toEqual({
+    number: 9,
+    title: 'Faster',
+    state: 'open',
+    isDraft: false,
+    url: 'https://dev.azure.com/o/p/_git/r/pullrequest/9',
+  })
+  expect(parseCreatedPr('az repos pr create', JSON.stringify({ pullRequestId: 9, title: 'No web url' }))).toEqual({ number: 9, title: 'No web url', state: 'open', isDraft: false })
+  expect(parseCreatedPr('az repos pr create', 'ERROR: failed')).toBeUndefined()
+  expect(parseCreatedPr('git status', az)).toBeUndefined()
+})
+
+test('upsertPr: a PR seen again replaces its entry in place (by url, else by number); the list keeps the last ten', () => {
+  const pr = (number: number, extra: object = {}) => ({ number, title: `t${number}`, state: 'open' as const, isDraft: false, ...extra })
+  const first = upsertPr(undefined, pr(1, { url: 'u/1' }))
+  const two = upsertPr(first, pr(2))
+  expect(upsertPr(two, pr(1, { url: 'u/1', state: 'merged' })).map(p => `${p.number}:${p.state}`)).toEqual(['1:merged', '2:open'])
+  // a read without a url still finds the entry that has one
+  expect(upsertPr(two, pr(1, { state: 'closed' })).map(p => `${p.number}:${p.state}`)).toEqual(['1:closed', '2:open'])
+  // the same number under another url is another PR
+  expect(upsertPr(two, pr(1, { url: 'other/1' }))).toHaveLength(3)
+  let list = first
+  for (let n = 2; n <= 12; n++) list = upsertPr(list, pr(n))
+  expect(list.map(p => p.number)).toEqual([3, 4, 5, 6, 7, 8, 9, 10, 11, 12])
+})
+
+test('parseSavedPrs: the entries of a state file that have a number and a title, any state; none for anything else', () => {
+  const ok = { number: 7, title: 'Old', state: 'merged', isDraft: false, url: 'https://github.com/example/orders/pull/7', review: 'approved', checks: { passed: 1, failed: 0, pending: 0 } }
+  expect(parseSavedPrs([ok, { number: 'x', title: 't' }, { title: 'no number' }, null, 5])).toEqual([ok])
+  expect(parseSavedPrs([{ number: 8, title: 't' }])).toEqual([{ number: 8, title: 't', state: 'open', isDraft: false }])
+  expect(parseSavedPrs('nope')).toEqual([])
+  expect(parseSavedPrs(undefined)).toEqual([])
+})
+
+test('historyTokens: the new tokens of the agents a history lists', () => {
+  const h = (tokens: number) => ({ id: String(tokens), type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
+  expect(historyTokens([h(3000), h(2000)])).toBe(5000)
+  expect(historyTokens([])).toBeUndefined()
+  expect(historyTokens(undefined)).toBeUndefined()
 })
