@@ -43,15 +43,18 @@ import {
   parsePerimeter,
   parseReset,
   parseSavedPrs,
+  parseSysLine,
   parseWorktree,
   recordBurnSample,
   recordCall,
   recordCtxSample,
   recordRound,
+  recordSystem,
   resolveAlm,
   savedTab,
   settleUsage,
   stateAfterWait,
+  systemOff,
   tabNeeds,
   toHistory,
   toolArg,
@@ -363,7 +366,8 @@ const SESSION_ID = /^[\w-]{1,128}$/
 let isOpen = false
 let lastWritten = ''
 let lastWriteAt = 0
-let isWriteScheduled = false
+// When the write timer was scheduled: a timer the engine refuses never runs its callback, so the mark lapses by itself after twice the throttle.
+let writeScheduledAt: number | undefined
 // The main loop's tools in flight (a `tool.call` seen before its `next` answered), in start order: the header's tool state lasts while any is left.
 let mainTools: string[] = []
 
@@ -402,10 +406,10 @@ async function writeState($: EngineInterface, isForced = false, isHeartbeat = fa
     const now = await $.clock.now()
     const wait = STATE_MIN_MS - (now - lastWriteAt)
     if (!isForced && wait > 0) {
-      if (!isWriteScheduled) {
-        isWriteScheduled = true
+      if (writeScheduledAt === undefined || now - writeScheduledAt >= 2 * STATE_MIN_MS) {
+        writeScheduledAt = now
         $.clock.after(wait, () => {
-          isWriteScheduled = false
+          writeScheduledAt = undefined
           void writeState($).catch(() => undefined)
         })
       }
@@ -473,6 +477,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   fiveHourSamples: [],
   workflow: undefined,
   workflowRun: undefined,
+  system: undefined,
 })
 
 /**
@@ -490,12 +495,79 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
       ? s
       : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
+  // The monitor looked for the pid of the session it was started for: another one's gets its own, if the tab is still wanted.
+  stopMonitor()
+  await syncMonitor($)
+}
+
+// ── The Sistema tab's monitor: a child process that lives only while the pane is open on that tab ──
+
+/** The running monitor: its stream (ending the loop that reads it kills the child) and whether it was stopped on purpose. */
+type Monitor = { stream?: ReturnType<EngineInterface['process']['spawn']>; isStopped: boolean }
+let monitor: Monitor | undefined
+
+/**
+ * Runs `sysmon/sysmon.mjs` and keeps what it prints (one JSON line per reading) in the snapshot until it is stopped or ends. A
+ * child that cannot start, or ends by itself, leaves every part unavailable: the tab draws `non disponibile`, nothing throws.
+ */
+async function runMonitor($: EngineInterface, m: Monitor): Promise<void> {
+  let pending = ''
+  try {
+    const id = await $.session.id()
+    const dir = await configDir($)
+    m.stream = $.process.spawn({
+      argv: ['node', `${$.plugin.root}/sysmon/sysmon.mjs`],
+      env: { COCKPIT_SESSION_ID: id, ...(dir && { COCKPIT_CONFIG_DIR: dir }) },
+    })
+    for await (const chunk of m.stream) {
+      if (m.isStopped) break
+      if (chunk.stream !== 'stdout') continue
+      // a line may span two chunks, and a chunk may hold several lines
+      const lines = (pending + chunk.text).split('\n')
+      pending = lines.pop() ?? ''
+      for (const text of lines) {
+        const line = parseSysLine(text)
+        if (line && !m.isStopped) await patch($, s => ({ ...s, system: recordSystem(s.system, line) })).catch(() => undefined)
+      }
+    }
+  } catch {
+    // the child could not start or broke: the parts read as unavailable below
+  }
+  if (monitor === m) monitor = undefined
+  if (!m.isStopped) await patch($, s => ({ ...s, system: systemOff() })).catch(() => undefined)
+}
+
+/** Ends the running monitor: the loop that reads it stops, and closing its stream kills the child. */
+function stopMonitor(): void {
+  const m = monitor
+  if (!m) return
+  monitor = undefined
+  m.isStopped = true
+  void m.stream?.return({ code: null, signal: null }).catch(() => undefined)
+}
+
+/** The monitor runs exactly while the pane is open on the Sistema tab: started when it is wanted and not running, stopped (and its readings forgotten) when it runs and is not wanted. */
+async function syncMonitor($: EngineInterface): Promise<void> {
+  try {
+    const isWanted = isOpen && (await read($, snapshot)).tab === 'system'
+    if (isWanted && !monitor) {
+      const m: Monitor = { isStopped: false }
+      monitor = m
+      void runMonitor($, m)
+    } else if (!isWanted && monitor) {
+      stopMonitor()
+      await patch($, s => ({ ...s, system: undefined }))
+    }
+  } catch {
+    // the snapshot could not be read: the monitor stays as it is
+  }
 }
 
 async function setOpen($: EngineInterface, value: boolean): Promise<void> {
   isOpen = value
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
+  await syncMonitor($)
   // The Contesto tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment. The
   // read is not waited for: a slow one must not hold the open (or the close) back.
   if (value && (await read($, snapshot)).tab === 'context') void refreshContext($, 'summary').catch(() => undefined)
@@ -596,9 +668,11 @@ let contextSeq = 0
 /**
  * Reads the context breakdown for the Contesto tab. `summary` estimates locally and is free; `full` counts with the token-count
  * API and so runs only from the button. A failed read leaves the last reading. Reads overlap (an exact count takes seconds): the
- * one asked last wins, so an older answer that arrives after a newer one is dropped.
+ * one asked last wins, so an older answer that arrives after a newer one is dropped; a summary is therefore not read at all while
+ * the exact count runs (whoever asks: the tab, the pane opening, a turn), or the count, answering last, would be dropped.
  */
 async function refreshContext($: EngineInterface, detail: 'summary' | 'full'): Promise<void> {
+  if (detail === 'summary' && isCounting) return
   const seq = ++contextSeq
   try {
     const u = await $.session.usage({ breakdown: detail })
@@ -622,15 +696,18 @@ async function countExact($: EngineInterface): Promise<void> {
   }
 }
 
-/** The end of a main turn re-reads the breakdown while the pane is open on the Contesto tab; a burst of turns is one read. */
+/**
+ * The end of a main turn re-reads the breakdown while the pane is open on the Contesto tab; a burst of turns is one read. No read
+ * is scheduled or made while an exact count runs: the summary would be the newer reading, and the count, answering last, dropped.
+ */
 async function scheduleContextRead($: EngineInterface): Promise<void> {
-  if (!isOpen || (await read($, snapshot)).tab !== 'context') return
+  if (!isOpen || isCounting || (await read($, snapshot)).tab !== 'context') return
   const now = await $.clock.now()
   if (contextScheduledAt !== undefined && now - contextScheduledAt < 2 * CONTEXT_DEBOUNCE_MS) return
   contextScheduledAt = now
   $.clock.after(CONTEXT_DEBOUNCE_MS, () => {
     contextScheduledAt = undefined
-    void refreshContext($, 'summary').catch(() => undefined)
+    if (!isCounting) void refreshContext($, 'summary').catch(() => undefined)
   })
 }
 
@@ -796,9 +873,10 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Lavoro tab's git reads and the Contesto tab's breakdown are made while the tab is selected: the press starts them.
+  // The Lavoro tab's git reads, the Contesto tab's breakdown and the Sistema tab's monitor run while the tab is selected: the press starts them.
   selectTab: tab =>
     void patch($, s => ({ ...s, tab }))
+      .then(() => syncMonitor($))
       .then(() => (tab === 'work' ? refreshRepo($) : tab === 'context' ? refreshContext($, 'summary') : undefined))
       .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
@@ -878,6 +956,7 @@ export const register: Register = on => {
   // leave it in the atom: its agents go to its own history (the ones still running as `interrotto`), and the ended id
   // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
+    stopMonitor()
     let s: CockpitSnapshot | undefined
     try {
       s = await read($, snapshot)
@@ -1082,7 +1161,8 @@ export const register: Register = on => {
     }
     mainTools = [...mainTools, tool]
     await setClaudeState($, { kind: 'tool', tool })
-    const at = await $.clock.now().catch(() => 0)
+    // A clock that fails leaves the call without a time: the row draws none.
+    const at = await $.clock.now().catch(() => undefined)
     let isSuccess = false
     try {
       const ran = await next(e)

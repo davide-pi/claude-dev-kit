@@ -154,10 +154,49 @@ export type CockpitContext = {
   isExact: boolean
 }
 
-/** One tool call of the main loop, as the Lavoro tab's list keeps it: the tool, its short argument, whether it ran without error or refusal, and when it started. */
-export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at: number }
+/** One tool call of the main loop, as the Lavoro tab's list keeps it: the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
+export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
 
-/** The view the pane draws: the tab bar's four buttons (Sistema is a placeholder until its monitor exists). */
+/** The parts of the Sistema tab the monitor reads, in the order the tab draws them. */
+export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk' | 'power'
+
+/** A process of the session's tree with the TCP ports it listens on. */
+export type CockpitSysProc = { pid: number; name: string; ports: number[] }
+
+/** Where the machine's power comes from: the wall, or a battery with its charge and whether it is plugged in. */
+export type CockpitPower = { kind: 'wired' } | { kind: 'battery'; percent: number; isCharging: boolean }
+
+/** One JSON line of the system monitor (`sysmon/sysmon.mjs`), narrowed: only the parts it carries; `off` names the parts it cannot read. */
+export type CockpitSysLine = {
+  /** CPU busy share, 0-100. */
+  cpu?: number
+  ram?: { used: number; total: number }
+  /** Network bytes per second. */
+  net?: { rx: number; tx: number }
+  procs?: CockpitSysProc[]
+  /** Free and total bytes of the working directory's drive, and its short name (`D:`, `/`). */
+  disk?: { free: number; total: number; label?: string }
+  power?: CockpitPower
+  off?: CockpitSystemPart[]
+}
+
+/** What the Sistema tab draws: rings of the last samples (newest last), the latest slow readings, and the parts that could not be read. */
+export type CockpitSystem = {
+  cpu: number[]
+  /** RAM used, as a percent of the total. */
+  ram: number[]
+  ramUsed?: number
+  ramTotal?: number
+  rx: number[]
+  tx: number[]
+  procs?: CockpitSysProc[]
+  disk?: { free: number; total: number; label?: string }
+  power?: CockpitPower
+  /** The parts that read "non disponibile": the tool is missing or failed, or the monitor itself could not run. */
+  off: CockpitSystemPart[]
+}
+
+/** The view the pane draws: the tab bar's four buttons. */
 export type CockpitTab = 'agents' | 'context' | 'work' | 'system'
 
 export type CockpitSnapshot = {
@@ -226,6 +265,8 @@ export type CockpitSnapshot = {
   calls?: CockpitToolCall[]
   /** The Lavoro tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
+  /** The Sistema tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
+  system?: CockpitSystem
   /** The diff of the file pressed on the Lavoro tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
