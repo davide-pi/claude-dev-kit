@@ -25,8 +25,6 @@ import {
   almText,
   autocompactForecast,
   barCells,
-  burnRate,
-  burnText,
   baseName,
   cacheColor,
   claimTime,
@@ -65,6 +63,7 @@ import {
   worklogLabel,
 } from './format'
 import type { ModelFamily, Span } from './format'
+import { t } from './strings'
 
 /** The elements the views draw with; every surface's table has them. */
 export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'> & {
@@ -82,9 +81,6 @@ const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
 /** The context fill from which the header warns. */
 const CTX_WARN_PCT = 80
-const TAB_NAMES: Record<CockpitTab, string> = { agents: 'Subagents', context: 'Context', work: 'Work', system: 'System' }
-// The names a pane too narrow for the whole bar falls back to (the bar also wraps).
-const TAB_NAMES_SHORT: Record<CockpitTab, string> = { agents: 'Sub', context: 'Ctx', work: 'Wrk', system: 'Sys' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
@@ -101,7 +97,6 @@ const SYS_PID_W = 6
 const SYS_NAME_W = 14
 const SYS_CPU_W = 4
 const SYS_RAM_W = 5
-const SYS_NA = 'unavailable'
 /** Cells of a tool row: the tool's name, and the time it started (`HH:MM`). */
 const CALL_TOOL_W = 7
 const CALL_TIME_W = 5
@@ -114,7 +109,6 @@ const CTX_DELTA_W = 6
 const CONSUMER_KIND_W = 5
 /** The colors of the used categories, in turn; the compaction buffer is dim and the free space empty. */
 const CATEGORY_COLORS = [COLORS.blue, COLORS.lavender, COLORS.amber, COLORS.green, COLORS.yellow, COLORS.orange, COLORS.violet, COLORS.gray]
-const CONSUMER_KINDS: Record<CockpitConsumer['kind'], string> = { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' }
 
 // ── Spans ────────────────────────────────────────────────────────────────────
 
@@ -155,7 +149,7 @@ const headerEffort = (effort: string | number | undefined): Span[] => {
 
 // ── Data derived from the snapshot ───────────────────────────────────────────
 
-type RateRow = { rem: number; used: number; color: string; resetMs: number | undefined; isStale: boolean; pace?: { target: number; delta: number } }
+type RateRow = { rem: number; color: string; resetMs: number | undefined; isStale: boolean; pace?: { target: number; delta: number } }
 
 /** The windows to draw: the engine's, or while it reports none the status line's last known ones (drawn with a `~`). */
 const isLastKnownRates = (s: CockpitSnapshot): boolean => s.rateLimits.length === 0 && (s.lastRates?.length ?? 0) > 0
@@ -169,7 +163,6 @@ function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow |
   const rem = Math.max(0, Math.min(100, Math.round(100 - w.percentUsed)))
   return {
     rem,
-    used: w.percentUsed,
     resetMs,
     isStale,
     color: rateColor(w.percentUsed, resetMs, windowSec, s.now),
@@ -186,7 +179,7 @@ export function agentWarning(a: CockpitAgent, isForced: boolean): string | undef
   const asked = modelFamily(a.requested)
   const got = modelFamily(a.model)
   if (!asked || !got || asked === got) return undefined
-  return `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`
+  return t().askedModel(asked, got, isForced)
 }
 
 /** What the statusline's cockpit segment shows: agents running, and agents that run on another model than asked. */
@@ -202,16 +195,16 @@ export function agentCounts(s: CockpitSnapshot): { running: number; modelWarning
 export function taskCounts(s: CockpitSnapshot): { inProgress: number; pending: number; done: number; total: number } | null {
   const tasks = s.tasks ?? []
   if (tasks.length === 0) return null
-  const n = (status: CockpitTask['status']) => tasks.filter(t => t.status === status).length
+  const n = (status: CockpitTask['status']) => tasks.filter(task => task.status === status).length
   return { inProgress: n('in_progress'), pending: n('pending'), done: n('completed'), total: tasks.length }
 }
 
 /** One task row: icon, subject cut with `…` to fit, and for a task in progress the time since it started. */
-export function taskRow(t: CockpitTask, now: number, width: number): Span[] {
-  const isActive = t.status === 'in_progress'
+export function taskRow(task: CockpitTask, now: number, width: number): Span[] {
+  const isActive = task.status === 'in_progress'
   const subjectW = Math.max(4, width - 2 - 1 - TASK_TIME_W)
-  const subject = padCells(truncEnd(t.subject, subjectW), subjectW)
-  const elapsed = isActive && t.startedAt !== undefined ? duration(now - t.startedAt) : ''
+  const subject = padCells(truncEnd(task.subject, subjectW), subjectW)
+  const elapsed = isActive && task.startedAt !== undefined ? duration(now - task.startedAt) : ''
   return [
     isActive ? sp('◐', COLORS.blue) : dim('○'),
     sp(' '),
@@ -303,7 +296,7 @@ export function subagentFacts(a: CockpitAgent, now: number, total: number, inden
   const share = tokenShare(a.tokens, total)
   return {
     left: [sp(indent), a.model ? sp(shortModel(a.model), undefined, a.status === 'running') : dim('—'), ...headerEffort(a.effort)],
-    right: [...(share ? [sp(share, undefined, true), dim(' token  ')] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
+    right: [...(share ? [sp(share, undefined, true), dim(t().tokenShare)] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
   }
 }
 
@@ -317,19 +310,19 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
     ? truncateSpans(
         [
           sp(indent),
-          dim('in '),
+          dim(t().tokenLabels.input),
           sp(abbrevTokens(a.usage.input)),
-          dim('  out '),
+          dim(t().tokenLabels.output),
           sp(abbrevTokens(a.usage.output)),
-          dim('  cr '),
+          dim(t().tokenLabels.cacheRead),
           sp(abbrevTokens(a.usage.cacheRead)),
-          dim('  cw '),
+          dim(t().tokenLabels.cacheWrite),
           sp(abbrevTokens(a.usage.cacheWrite)),
         ],
         width,
       )
     : undefined
-  const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim('last tool '), sp(a.lastTool)] : undefined
+  const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
   const tool = toolSpans && truncateSpans(toolSpans, width)
   return [counters, tool].filter((r): r is Span[] => r !== undefined)
 }
@@ -375,15 +368,13 @@ export function toolCallSpans(c: CockpitToolCall, width: number): Span[] {
   ]
 }
 
-const PR_STATES = {
-  open: { text: 'open', color: COLORS.green },
-  draft: { text: 'draft', color: COLORS.yellow },
-  merged: { text: 'merged', color: COLORS.violet },
-  closed: { text: 'closed', color: COLORS.red },
-} as const
+const PR_COLORS = { open: COLORS.green, draft: COLORS.yellow, merged: COLORS.violet, closed: COLORS.red } as const
 
 /** The state word of a pull request, a draft told apart from an open one. */
-const prState = (pr: CockpitPr) => PR_STATES[pr.state === 'open' && pr.isDraft ? 'draft' : pr.state]
+const prState = (pr: CockpitPr) => {
+  const state = pr.state === 'open' && pr.isDraft ? 'draft' : pr.state
+  return { text: t().prStates[state], color: PR_COLORS[state] }
+}
 
 /** What follows a pull request's number on its row: its state and its title, cut to fit `width` (the number's own cells included). */
 export function prSpans(pr: CockpitPr, width: number): Span[] {
@@ -445,7 +436,7 @@ export function categoryRows(c: CockpitContext, width: number): Span[][] {
 /** A static consumer row: its kind, its name cut to fit, its tokens. */
 export function consumerSpans(c: CockpitConsumer, width: number): Span[] {
   const nameW = Math.max(4, width - CONSUMER_KIND_W - 1 - CTX_TOKENS_W)
-  return [dim(pad(CONSUMER_KINDS[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
+  return [dim(pad(t().consumerKinds[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
 }
 
 /** The color of a load in percent: green, yellow from 60, red from 85. */
@@ -465,11 +456,11 @@ export function metricSpans(label: string, samples: readonly number[], color: st
   return truncateSpans([dim(pad(label, SYS_LABEL_W)), ...(spark !== '' ? [sp(spark, color)] : []), ...maxSpans, sp(' '.repeat(fill)), ...readout], width)
 }
 
-const maxPct = (max: number) => `max ${Math.round(max)}%`
+const maxPct = (max: number) => `${t().max} ${Math.round(max)}%`
 
 /** The System tab's CPU, RAM and network rows; a part that could not be read says so, one not read yet draws `…`. */
 export function systemMetricRows(sys: CockpitSystem, width: number): Span[][] {
-  const na = (label: string): Span[] => [dim(pad(label, SYS_LABEL_W)), dim(SYS_NA)]
+  const na = (label: string): Span[] => [dim(pad(label, SYS_LABEL_W)), dim(t().unavailable)]
   const cpu = sys.cpu.at(-1)
   const ram = sys.ram.at(-1)
   const rx = sys.rx.at(-1)
@@ -496,7 +487,7 @@ export function systemMetricRows(sys: CockpitSystem, width: number): Span[][] {
           COLORS.blue,
           rx === undefined || tx === undefined ? [dim('…')] : [dim('↓'), sp(`${fmtBytes(rx)}/s`), dim(' ↑'), sp(`${fmtBytes(tx)}/s`)],
           width,
-          max => `max ${fmtBytes(max)}/s`,
+          max => `${t().max} ${fmtBytes(max)}/s`,
         ),
   ]
 }
@@ -505,19 +496,19 @@ export function systemMetricRows(sys: CockpitSystem, width: number): Span[][] {
 export function diskPowerSpans(sys: CockpitSystem, width: number): Span[] {
   const { disk, power } = sys
   const diskSpans: Span[] = sys.off.includes('disk')
-    ? [dim(`${ICONS.disk} `), dim(SYS_NA)]
+    ? [dim(`${ICONS.disk} `), dim(t().unavailable)]
     : disk
-      ? [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} free`, disk.total > 0 && disk.free / disk.total < 0.1 ? COLORS.red : disk.total > 0 && disk.free / disk.total < 0.2 ? COLORS.yellow : undefined)]
+      ? [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} ${t().diskFree}`, disk.total > 0 && disk.free / disk.total < 0.1 ? COLORS.red : disk.total > 0 && disk.free / disk.total < 0.2 ? COLORS.yellow : undefined)]
       : [dim(`${ICONS.disk} `), dim('…')]
   const powerSpans: Span[] = sys.off.includes('power')
-    ? [dim(`${ICONS.battery} `), dim(SYS_NA)]
+    ? [dim(`${ICONS.battery} `), dim(t().unavailable)]
     : !power
       ? [dim(`${ICONS.battery} `), dim('…')]
       : power.kind === 'wired'
-        ? [sp(`${ICONS.plug} `, COLORS.green), sp('mains')]
+        ? [sp(`${ICONS.plug} `, COLORS.green), sp(t().mains)]
         : [
             sp(`${power.isCharging ? ICONS.charging : ICONS.battery} `, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : power.percent <= 30 ? COLORS.yellow : undefined),
-            sp(`${Math.round(power.percent)}%${power.isCharging ? ' charging' : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
+            sp(`${Math.round(power.percent)}%${power.isCharging ? t().charging : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
           ]
   return truncateSpans([...diskSpans, sp('  '), ...powerSpans], width)
 }
@@ -555,16 +546,11 @@ export function procParts(p: CockpitSysProc, width: number): { head: Span[]; por
   return { head, ports, more: ports.length < p.ports.length && used + 2 <= width }
 }
 
-const REVIEW_LABELS: Record<NonNullable<CockpitPr['review']>, { text: string; color: string }> = {
-  approved: { text: 'approved', color: COLORS.green },
-  changes: { text: 'changes requested', color: COLORS.red },
-  pending: { text: 'pending', color: COLORS.yellow },
-}
+const REVIEW_COLORS: Record<NonNullable<CockpitPr['review']>, string> = { approved: COLORS.green, changes: COLORS.red, pending: COLORS.yellow }
 
 /** The review row of a pull request: `review approved`; empty when no review is known. */
 export function reviewSpans(pr: CockpitPr): Span[] {
-  const label = pr.review === undefined ? undefined : REVIEW_LABELS[pr.review]
-  return label ? [dim('review '), sp(label.text, label.color)] : []
+  return pr.review === undefined ? [] : [dim(t().review), sp(t().reviews[pr.review], REVIEW_COLORS[pr.review])]
 }
 
 /** The checks row of a pull request: `checks 2/4 · ✗ 1 · ◐ 1` (passed of all, then the failed and the undecided); empty when none are known. */
@@ -574,7 +560,7 @@ export function checksSpans(pr: CockpitPr): Span[] {
   const total = c.passed + c.failed + c.pending
   const color = c.failed > 0 ? COLORS.red : c.pending > 0 ? COLORS.yellow : COLORS.green
   return [
-    dim('checks '),
+    dim(t().checks),
     sp(`${c.passed}/${total}`, color, true),
     ...(c.failed > 0 ? [dim(' · '), sp(`✗ ${c.failed}`, COLORS.red)] : []),
     ...(c.pending > 0 ? [dim(' · '), sp(`◐ ${c.pending}`, COLORS.yellow)] : []),
@@ -616,31 +602,33 @@ export type DiffActions = { close: () => void }
 /** The second pane: the diff of the file pressed on the Work tab, drawn by the engine's `Code` as unified hunks; empty when none is open. */
 export function diffView(ui: Ui, diff: CockpitDiff | undefined, bodyColumns: number, actions: DiffActions): RenderElement {
   const { Box, Text, Button, Code } = ui
-  if (!diff) return <Text dimColor>nothing to show</Text>
+  const S = t()
+  if (!diff) return <Text dimColor>{S.nothingToShow}</Text>
   return (
     <Box flexDirection="column" width={bodyColumns}>
       <Box justifyContent="space-between">
         <Text wrap="truncate" color={COLORS.title}>
-          {`diff · ${diff.file}`}
+          {S.diffTitle(diff.file)}
         </Text>
         <Button key="diff:close" onPress={() => actions.close()}>
-          close
+          {S.buttons.close}
         </Button>
       </Box>
       {diff.isUnreadable === true ? (
-        <Text dimColor>file too big or unreadable</Text>
+        <Text dimColor>{S.diffUnreadable}</Text>
       ) : diff.text === '' ? (
-        <Text dimColor>no hunk to show</Text>
+        <Text dimColor>{S.noHunk}</Text>
       ) : (
         <Code source={diff.text} format="diff" wrap="truncate-end" />
       )}
-      {diff.isCut === true && <Text dimColor>… diff cut</Text>}
+      {diff.isCut === true && <Text dimColor>{S.diffCut}</Text>}
     </Box>
   )
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Text, Button, Link, Input } = ui
+  const S = t()
   // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
   const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
@@ -692,12 +680,12 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   }
   // The long labels, with the running count and the dot, when the whole bar fits; else the short ones.
   const fullLabels = [
-    running.length > 0 ? `${TAB_NAMES.agents} ${running.length}` : TAB_NAMES.agents,
-    TAB_NAMES.context,
-    wlRows.length > 0 ? `${TAB_NAMES.work} ●` : TAB_NAMES.work,
-    TAB_NAMES.system,
+    running.length > 0 ? `${S.tabs.agents} ${running.length}` : S.tabs.agents,
+    S.tabs.context,
+    wlRows.length > 0 ? `${S.tabs.work} ●` : S.tabs.work,
+    S.tabs.system,
   ]
-  const names = buttonRowWidth(fullLabels) <= width ? TAB_NAMES : TAB_NAMES_SHORT
+  const names = buttonRowWidth(fullLabels) <= width ? S.tabs : S.tabsShort
   const tabBar = (
     <Box columnGap={1} flexWrap="wrap">
       {tabButton('agents', running.length > 0 ? `${names.agents} ${running.length}` : names.agents)}
@@ -758,83 +746,78 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const fiveText = five && rateText('5h', five, s.now)
   const sevenText = seven && rateText('7d', seven, s.now)
   const ctxText = contextText(s)
-  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(t => spanWidth(t ?? [])))
+  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(text => spanWidth(text ?? [])))
   const barW = Math.max(4, width - textCol - 1)
 
-  // Context: from 80% a red line
+  // CONTEXT: from 80% a red line
   const pct = s.ctx.percent ?? 0
   const shownPct = s.ctx.percent ?? s.lastCtx?.percent ?? 0
   const ctxBar = line(ui, barCells(barW, [{ pct: shownPct, color: ctxColor(shownPct) }]))
-  const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(`⚠ context at ${Math.round(pct)}%`, COLORS.red)])
+  const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
 
-  // The prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
-  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim('cache '), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
+  // Right of the CONTEXT title: the prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
   const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
-  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(`~${forecast} requests`)]
-  const cacheRow = cacheSpans.length + forecastSpans.length > 0 && (
-    <Box justifyContent="space-between">
-      {line(ui, cacheSpans)}
-      {line(ui, forecastSpans)}
-    </Box>
-  )
+  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(S.requestsLeft(forecast))]
+  const contextRight: Span[] = [...cacheSpans, ...(cacheSpans.length > 0 && forecastSpans.length > 0 ? [sp('  ')] : []), ...forecastSpans]
 
-  // Credits
+  // CREDITS: the pace of the week sits right of the title
   const paceDelta = seven?.pace?.delta
   const paceSpans: Span[] =
     paceDelta === undefined
       ? []
-      : [dim('vs expected 7d '), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
+      : [dim(S.vsExpected), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
   const creditRow = (r: RateRow, text: Span[]) => {
     const gap = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
     const parts = [{ pct: r.rem, color: r.color }, ...(gap ? [{ pct: gap, color: COLORS.gap }] : [])]
     return split(line(ui, barCells(barW, parts)), barW, text)
   }
 
-  // The 5h burn rate: absent until 10 minutes of readings show the credits falling
-  const burn = five && burnRate(s.fiveHourSamples ?? [], s.now, five.used, five.resetMs)
-  const burnRow = burn && line(ui, [sp(burnText(burn), burn.isBeforeReset ? COLORS.red : COLORS.green)])
-
   // The quick note under the tab bar, on every tab: two rows, saved as it is typed; Enter and `send` append it to the prompt box.
   const noteInput = Input && (
-    <Input key="note" rows={2} placeholder="quick note" value={s.note ?? ''} submitLabel="send" onInput={value => actions.setNote(value)} onSubmit={value => actions.sendNote(value)} />
+    <Input key="note" rows={2} placeholder={S.notePlaceholder} value={s.note ?? ''} submitLabel={S.buttons.send} onInput={value => actions.setNote(value)} onSubmit={value => actions.sendNote(value)} />
   )
 
   // The last row of every tab: compact always; log hours (the hours of this chat) whenever the session has an id; send while
   // the note holds something to send. The row stacks when its buttons do not fit the pane side by side.
   const hasSession = s.sessionId !== undefined
   const hasNote = (s.note ?? '').trim() !== ''
-  const barLabels = ['compact', ...(hasSession ? ['log hours'] : []), ...(hasNote ? ['send'] : [])]
+  const barLabels = [S.buttons.compact, ...(hasSession ? [S.buttons.logHours] : []), ...(hasNote ? [S.buttons.send] : [])]
   const buttonsRow = (
     <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
       <Button key="bar:compact" onPress={() => actions.compact()}>
-        compact
+        {S.buttons.compact}
       </Button>
       {hasSession && (
         <Button key="bar:worklog" onPress={() => actions.runWorklog()}>
-          log hours
+          {S.buttons.logHours}
         </Button>
       )}
       {hasNote && (
         <Button key="bar:note" onPress={() => actions.sendNote()}>
-          send
+          {S.buttons.send}
         </Button>
       )}
     </Box>
   )
 
-  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; context; credits; cache and forecast
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, each title with an empty row on both sides
   const headerRows: Node[] = [
     modelLine,
     grid,
     almRow,
+    gap(),
+    title(S.contextTitle, contextRight),
+    gap(),
     split(ctxBar, barW, ctxText),
     ctxWarning,
+    gap(),
+    title(S.creditsTitle, paceSpans),
+    gap(),
     five && fiveText && creditRow(five, fiveText),
-    burnRow,
+    five && seven && gap(),
     seven && sevenText && creditRow(seven, sevenText),
-    paceSpans.length > 0 && line(ui, paceSpans),
-    !five && !seven && line(ui, [dim('no rate-limit data')]),
-    cacheRow,
+    !five && !seven && line(ui, [dim(S.noRateData)]),
   ]
 
   // ── Subagents: every agent listed (finished ones for two minutes), a block each ──
@@ -879,7 +862,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           [
             gap(),
             <Button key="history" plain onPress={() => actions.toggleHistory()}>
-              <Text color={COLORS.title}>{`HISTORY · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
+              <Text color={COLORS.title}>{`${S.historyTitle} · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
             </Button>,
             isHistoryOpen && gap(),
             isHistoryOpen &&
@@ -890,7 +873,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const agentBlocks: Block[] = [
     [
       gap(),
-      title(`SUBAGENTS · ${running.length} running`, modelCounts(agents)),
+      title(S.subagentsTitle(running.length), modelCounts(agents)),
       rows.length > 0 && gap(),
       agentRows,
       rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)]),
@@ -904,25 +887,25 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const hint = shouldCompact({ percent: s.ctx.percent, rounds, forecast })
   const breakdownBlock: Block = [
     gap(),
-    title(context ? `CONTEXT · ${abbrevTokens(context.total, true)}/${abbrevTokens(context.max, true)}` : 'CONTEXT', context ? [dim(context.isExact ? 'exact' : context.rows.some(r => r.isExact) ? '✓ = exact' : 'estimate')] : []),
+    title(context ? `${S.contextTitle} · ${abbrevTokens(context.total, true)}/${abbrevTokens(context.max, true)}` : S.contextTitle, context ? [dim(context.isExact ? S.exact : context.rows.some(r => r.isExact) ? S.someExact : S.estimate)] : []),
     gap(),
-    hint && line(ui, [sp('⚠ worth compacting', COLORS.yellow)]),
-    ...(context ? [line(ui, contextBar(context, width)), ...categoryRows(context, width).map(spans => line(ui, spans))] : [line(ui, [dim('no reading')])]),
+    hint && line(ui, [sp(S.worthCompacting, COLORS.yellow)]),
+    ...(context ? [line(ui, contextBar(context, width)), ...categoryRows(context, width).map(spans => line(ui, spans))] : [line(ui, [dim(S.noReading)])]),
     gap(),
     <Button key="ctx:exact" onPress={() => actions.countExact()}>
-      exact count
+      {S.buttons.exactCount}
     </Button>,
   ]
   const consumersBlock: Block =
     context && context.consumers.length > 0
-      ? [gap(), title(`CONSUMERS · top ${context.consumers.length}`), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
+      ? [gap(), title(S.consumersTitle(context.consumers.length)), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
       : []
   const skillsUsed = s.skillsUsed ?? []
   const skillsBlock: Block =
     skillsUsed.length > 0 || context?.skills
       ? [
           gap(),
-          title(`SKILLS · ${skillsUsed.length} used`, context?.skills ? [dim(`${context.skills.listed}/${context.skills.total} listed`)] : []),
+          title(S.skillsTitle(skillsUsed.length), context?.skills ? [dim(S.skillsListed(context.skills.listed, context.skills.total))] : []),
           skillsUsed.length > 0 && gap(),
           skillsUsed.slice(0, MAX_SKILL_ROWS).map(name => line(ui, [sp(truncEnd(name, width))])),
           skillsUsed.length > MAX_SKILL_ROWS && line(ui, [dim(`… +${skillsUsed.length - MAX_SKILL_ROWS}`)]),
@@ -934,7 +917,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     first !== undefined && last !== undefined
       ? [
           gap(),
-          title(`TREND · ${rounds.length} ${rounds.length === 1 ? 'round' : 'rounds'}`),
+          title(S.trendTitle(rounds.length)),
           gap(),
           line(ui, [sp(sparkline(rounds), ctxColor(s.ctx.percent ?? 0)), dim(`  ${abbrevTokens(first)} → ${abbrevTokens(last)}`)]),
         ]
@@ -949,7 +932,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       ? []
       : [
           gap(),
-          title(`TASK · ${counts.done}/${counts.total}`, [
+          title(`${S.taskTitle} · ${counts.done}/${counts.total}`, [
             sp(`◐ ${counts.inProgress}`, COLORS.blue),
             sp('  '),
             dim(`○ ${counts.pending}`),
@@ -958,9 +941,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           ]),
           gap(),
           line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
-          open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
+          open.slice(0, MAX_TASK_ROWS).map(task => line(ui, taskRow(task, s.now, width))),
           open.length > MAX_TASK_ROWS && line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)]),
-          counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} done`)]),
+          counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(S.tasksDone(counts.done))]),
         ]
   const worklogPart: Block = wlRows.length > 0 ? [gap(), wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))] : []
 
@@ -973,18 +956,18 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       : [
           gap(),
           line(ui, [
-            dim(`deliver perimeter · ${s.perimeter.length} ${s.perimeter.length === 1 ? 'entry' : 'entries'}`),
-            ...(check ? [dim(` · ${check.files} ${check.files === 1 ? 'file' : 'files'} touched`)] : []),
+            dim(S.perimeter(s.perimeter.length)),
+            ...(check ? [dim(S.filesTouched(check.files))] : []),
           ]),
           check && (outside.length === 0
-            ? line(ui, [sp('✓ ', COLORS.green), dim('no file outside the perimeter')])
-            : line(ui, [sp(`⚠ ${outside.length} ${outside.length === 1 ? 'file' : 'files'} outside the perimeter`, COLORS.red)])),
+            ? line(ui, [sp('✓ ', COLORS.green), dim(S.noFileOutside)])
+            : line(ui, [sp(S.filesOutside(outside.length), COLORS.red)])),
           outside.slice(0, MAX_OUTSIDE_ROWS).map(file => line(ui, [sp(`  ${truncMiddle(file, Math.max(4, width - 2))}`, COLORS.yellow)])),
           outside.length > MAX_OUTSIDE_ROWS && line(ui, [dim(`  … +${outside.length - MAX_OUTSIDE_ROWS}`)]),
         ]
   const principalBlock: Block[] =
     perimeterPart.length + taskPart.length + worklogPart.length > 0
-      ? [[gap(), title('MAIN'), ...perimeterPart, ...taskPart, ...worklogPart]]
+      ? [[gap(), title(S.mainTitle), ...perimeterPart, ...taskPart, ...worklogPart]]
       : []
 
   // The workflow in flight: its name (from the last stop) and the agents of the run finished out of those seen starting. The engine
@@ -995,9 +978,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     ? [
         [
           gap(),
-          title(s.workflow === undefined ? 'WORKFLOW' : `WORKFLOW · ${truncMiddle(s.workflow, Math.max(4, width - 11))}`),
+          title(s.workflow === undefined ? S.workflowTitle : `${S.workflowTitle} · ${truncMiddle(s.workflow, Math.max(4, width - textCells(S.workflowTitle) - 3))}`),
           runAgents.length > 0 && gap(),
-          runAgents.length > 0 && line(ui, [dim('agents '), sp(`${runAgents.filter(a => a.isDone).length}/${runAgents.length}`, COLORS.blue)]),
+          runAgents.length > 0 && line(ui, [dim(S.workflowAgents), sp(`${runAgents.filter(a => a.isDone).length}/${runAgents.length}`, COLORS.blue)]),
         ],
       ]
     : []
@@ -1009,7 +992,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     gap(),
     title(truncMiddle(a.type, Math.max(4, width - 7)), [dim(duration(s.now - a.startedAt))]),
     a.description ? line(ui, [sp(truncEnd(a.description, width))]) : undefined,
-    a.lastTool ? line(ui, truncateSpans([dim('last tool '), sp(a.lastTool)], width)) : undefined,
+    a.lastTool ? line(ui, truncateSpans([dim(S.lastTool), sp(a.lastTool)], width)) : undefined,
     i === MAX_SUBAGENT_BLOCKS - 1 && workers.length > MAX_SUBAGENT_BLOCKS && line(ui, [dim(`… +${workers.length - MAX_SUBAGENT_BLOCKS}`)]),
   ])
 
@@ -1020,7 +1003,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       ? [
           [
             gap(),
-            title('HOOK · done-claim'),
+            title(S.hookTitle),
             gap(),
             claims.map(c => line(ui, [dim(`${claimTime(c.at)} `), sp(c.rule, COLORS.yellow), ...(c.excerpt ? [dim(` ${c.excerpt}`)] : [])])),
           ],
@@ -1031,10 +1014,10 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const changesPart: Block = repo
     ? [
         gap(),
-        title(`CHANGES · ${repo.total}`),
+        title(`${S.changesTitle} · ${repo.total}`),
         gap(),
         repo.files.length === 0
-          ? line(ui, [dim('no changes')])
+          ? line(ui, [dim(S.noChanges)])
           : repo.files.slice(0, MAX_FILE_ROWS).map(c => (
               <Button key={`file:${c.path}`} plain onPress={() => actions.openDiff(c)}>
                 {spanNodes(ui, changeSpans(c, width))}
@@ -1056,7 +1039,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     prs.length > 0
       ? [
           gap(),
-          title(`PR · ${prs.length}`),
+          title(`${S.prTitle} · ${prs.length}`),
           gap(),
           prs.slice(0, MAX_PR_ROWS).flatMap(pr => {
             const detail = prDetailSpans(pr, '  ', width)
@@ -1068,7 +1051,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // The main loop's last tools, the newest first.
   const calls = [...(s.calls ?? [])].reverse()
-  const toolsPart: Block = calls.length > 0 ? [gap(), title(`TOOL · ${calls.length}`), gap(), calls.map(c => line(ui, toolCallSpans(c, width)))] : []
+  const toolsPart: Block = calls.length > 0 ? [gap(), title(`${S.toolTitle} · ${calls.length}`), gap(), calls.map(c => line(ui, toolCallSpans(c, width)))] : []
   const workBlocks: Block[] = [...principalBlock, changesPart, prPart, toolsPart, ...workflowBlock, ...subagentBlocks, ...claimsBlock].filter(b => b.length > 0)
 
   // System: what the monitor child prints, drawn while the tab is selected; none yet reads as such, a part it cannot read says so. Every
@@ -1087,16 +1070,16 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   }
   const systemBlocks: Block[] =
     sys === undefined
-      ? [[gap(), title('SYSTEM'), gap(), line(ui, [dim('reading…')])]]
+      ? [[gap(), title(S.systemTitle), gap(), line(ui, [dim(S.reading)])]]
       : [
-          [gap(), title('SYSTEM'), gap(), systemMetricRows(sys, width).map(spans => line(ui, spans)), line(ui, diskPowerSpans(sys, width))],
+          [gap(), title(S.systemTitle), gap(), systemMetricRows(sys, width).map(spans => line(ui, spans)), line(ui, diskPowerSpans(sys, width))],
           ...(sys.off.includes('procs') || sys.procs
             ? [
                 [
                   gap(),
-                  title(sys.procs ? `PROCESSES · ${procs.length}` : 'PROCESSES'),
+                  title(sys.procs ? `${S.processesTitle} · ${procs.length}` : S.processesTitle),
                   gap(),
-                  sys.procs ? (procs.length === 0 ? line(ui, [dim('no child process')]) : procs.map(procRow)) : line(ui, [dim(SYS_NA)]),
+                  sys.procs ? (procs.length === 0 ? line(ui, [dim(S.noChildProcess)]) : procs.map(procRow)) : line(ui, [dim(S.unavailable)]),
                 ],
               ]
             : []),
@@ -1104,7 +1087,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // Blocks are told apart by a rule; an empty tab says so.
   const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks }[tab]
-  const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim('nothing to show')])]
+  const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
 
   return (
     <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>
