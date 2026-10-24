@@ -1767,6 +1767,20 @@ test('script: a noticed item the implementer also wrote under openQuestions is l
   assert.doesNotMatch(calls.find(c => c.opts.label === 'R1 A').prompt, /Anything worth doing outside the perimeter/);
 });
 
+test('script: the cleanup prompt never asks for questions, even with owner decisions', async () => {
+  const { calls } = await run({ ...ARGS, decisions: ['Comments: the strict minimum.'] }, [review([], [nit(1)])], [], { watcher: review([]) });
+  const prompt = calls.find(c => c.opts.label === 'cleanup R1').prompt;
+  assert.match(prompt, /never ask about it/);
+  assert.doesNotMatch(prompt, /`questions`/);
+});
+
+test('script: questions a cleanup fixer returns anyway never stall the run: they become notes', async () => {
+  const asks = impl({ questions: [{ text: 'Rename the helper?', default: 'no', why: 'naming' }] });
+  const { out } = await run(ARGS, [review([], [nit(1)])], [impl(), asks], { watcher: review([]) });
+  assert.equal(out.status, 'OK');
+  assert.ok(out.outOfScope.some(o => /Rename the helper\?/.test(o.text ?? '')));
+});
+
 test('script: the reviewer prompt names filesReviewed explicitly', async () => {
   const { calls } = await run(ARGS, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /under filesReviewed list every file you actually read/);
@@ -2097,7 +2111,7 @@ test('readReport (W4): defaults keep the entries with a choice; cleanupCandidate
   assert.equal(isNeverBlocking(f('y', { priority: 'P1', proposal: true })), false);
   assert.equal(isNeverBlocking(f('y', { priority: 'P2', category: 'clean-code', proposal: true })), true);   // clean-code never blocks anyway
   assert.equal(isNeverBlocking(f('y', { priority: 'P3', category: 'correctness', proposal: true })), false);
-  assert.deepEqual(cleanupCandidates([f('F7', { priority: 'P3', proposal: true })], FILES, { root: ROOT }).map(m => m.id), ['F7']);   // the flag is ignored outside clean-code
+  assert.deepEqual(cleanupCandidates([f('F7', { priority: 'P3', proposal: true })], FILES, { root: ROOT }).map(m => m.id), []);   // every proposal is left alone, whatever its category
   assert.equal(classify(f('y', { priority: 'P1', proposal: true }), FILES), 'blocking');
 });
 
@@ -2306,4 +2320,23 @@ test('script (W12): the result carries the findings log line (size, rounds, find
 test('script (W13): a reviewer never raises a hunk the owner asked for as "scope": it is a question', async () => {
   const { calls } = await run({ ...ARGS, request: 'add the sort', decisions: ['sort by date'] }, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'R1 A').prompt, /asked for is never a "scope" finding.*`questions`/s);
+});
+
+test('script: with owner decisions the cleanup prompt does not carry the "hunk not reverted" question line', async () => {
+  const { calls } = await run({ ...ARGS, decisions: ['No soft delete'] }, [review([], [nit(1)])]);
+  const cleanup = calls.find(c => c.opts.label === 'cleanup R1').prompt;
+  assert.match(cleanup, /never ask/);
+  assert.doesNotMatch(cleanup, /not reverted, whatever the finding says/);
+});
+
+test('script: after a resumed reviewer question the cleanup runs, and a question its fixer returns becomes a note, not a stall', async () => {
+  const ask = [{ text: 'Keep the public name?', default: 'yes', why: 'a caller may use it' }];
+  const round1 = () => ({ ...review([], [nit(1), nit(2)]), questions: [{ text: 'Is the sort order a contract?', default: 'no', why: 'callers' }] });
+  const owner = { round: 1, answers: [{ text: 'Is the sort order a contract?', answer: 'no' }] };
+  const { out, calls } = await run({ ...ARGS, resolutions: [owner] }, [round1()], [impl(), impl(), impl({ questions: ask })]);
+  assert.equal(out.status, 'OK');
+  const cleanups = calls.filter(c => c.opts.label?.startsWith('cleanup'));
+  assert.equal(cleanups.length, 1);
+  assert.match(cleanups[0].prompt, /needs a decision.*never ask/s);
+  assert.ok(out.outOfScope.some(o => /Keep the public name?/.test(o.text ?? '')));
 });
