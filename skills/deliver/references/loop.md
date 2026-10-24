@@ -74,12 +74,15 @@ far, one per stalled round:
 
 `accept` takes the risk (it goes in the verdict), `retry: true` is one more round with no direction,
 `guidance` is one more round with the user's direction, `answers` answer a `question` stall (above); `widen` adds
-perimeter entries (below). There is no cap on the rounds and no `continue`: an old `continue` is ignored.
+perimeter entries (below). There is no cap on the rounds and no `continue`: an old `continue` is ignored. A loop that
+keeps opening a new P1/P2 for each one it closes is stopped by `not-converging` (below), not by a cap. `guidance` or
+`accept` on that round restarts its count; `retry` does not.
 
 | `stall.why` | Meaning, and the question |
 | --- | --- |
 | `question` | the implementer or fixer left a behaviour question: ask it (above) and resume with `answers` |
 | `churn` | the last 3 fixes each changed more lines: not converging. `accept` closes the ids the reviewers already read; `guidance` or `retry` for another attempt |
+| `not-converging` | after each of the last 3 fix rounds the open P1/P2 count (plus the open `V` finding) did not drop below its lowest of the fix rounds before: every fix closes one and the reviewers open another. `accept` closes the ids the reviewers already read; `guidance` (a different approach) or `retry` for another attempt |
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction for the fixer, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, and `accept` is not offered |
 | `green-to-red` | the verify passed, then a fix broke it: same question and answers as `verify-failed` |
 | `verify-not-run` | `verify` was given and the run did not execute it: same question and answers as `verify-failed`; at `stall.round` 0 (the implementer did not run it) a resume replays the cached implementer report: relaunch WITHOUT `resumeFromRunId` |
@@ -112,10 +115,11 @@ relaunch WITHOUT `resumeFromRunId`.
 
 ## The cleanup pass before OK
 
-A round that would end `OK` with minor findings inside the perimeter (P3 or style, not a `scope` hunk, not one the change
+A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not one the change
 does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta. Its new
 P1/P2 go through the normal loop; its P3s are only reported, never a second cleanup. The result lists what the pass fixed
-under `cleaned`; `minor` keeps the rest (and the P3s of the delta), and P3s outside the perimeter stay in `outOfScope`,
+under `cleaned` once the delta review has read it (a finding the delta review reports again stays in `minor`); `minor` keeps
+the rest (and the P3s of the delta, and style findings of a higher priority), and P3s outside the perimeter stay in `outOfScope`,
 all of them for the closing table.
 
 ## A red test after OK

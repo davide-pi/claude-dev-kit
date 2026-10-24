@@ -83,7 +83,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size; ask only what the table says. S: make the edit inline now.
-3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`).
+3. Launch the `impl-review-loop` workflow (args, size S inline, `STALL` and resume: `references/loop.md`); L: one plan task per run, `/commit` between runs.
    `OK` → `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
 4. Run the matrix; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
