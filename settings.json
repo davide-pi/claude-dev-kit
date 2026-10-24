@@ -348,11 +348,6 @@
     ],
     "defaultMode": "auto"
   },
-  "deniedMcpServers": [
-    { "serverName": "claude.ai Microsoft 365" },
-    { "serverName": "claude.ai Figma" },
-    { "serverName": "claude.ai Airtable" }
-  ],
   "autoMode": {
     "environment": [
       "$defaults",
