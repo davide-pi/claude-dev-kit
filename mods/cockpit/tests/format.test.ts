@@ -785,8 +785,8 @@ test('shouldCompact: from 70 % with the last three rounds each growing over 5 %,
   expect(shouldCompact({})).toBe(false)
 })
 
-test('savedTab: the four tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
-  expect(TABS).toEqual(['agents', 'context', 'work', 'system'])
+test('savedTab: the five tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
+  expect(TABS).toEqual(['agents', 'context', 'work', 'system', 'notes'])
   for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
   expect(savedTab('session')).toBe('agents')
   expect(savedTab('repo')).toBe('work')

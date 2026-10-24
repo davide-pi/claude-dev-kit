@@ -8,17 +8,32 @@ export type Lang = 'en' | 'it'
 
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many)
 
+/** What reads the same in both languages: written once, spread into both bundles. */
+const SHARED = {
+  cache: 'cache ',
+  tokenShare: ' token  ',
+  /** The four counters of an agent's row. */
+  tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
+  consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
+  taskTitle: 'TASK',
+  workflowTitle: 'WORKFLOW',
+  hookTitle: 'HOOK · done-claim',
+  prTitle: 'PR',
+  toolTitle: 'TOOL',
+  max: 'max',
+  diffTitle: (file: string) => `diff · ${file}`,
+}
+
 const EN = {
-  tabs: { agents: 'Subagents', context: 'Context', work: 'Work', system: 'System' },
+  ...SHARED,
+  tabs: { agents: 'Subagents', context: 'Context', work: 'Work', system: 'System', notes: 'Notes' },
   /** What a pane too narrow for the whole tab bar falls back to. */
-  tabsShort: { agents: 'Sub', context: 'Ctx', work: 'Wrk', system: 'Sys' },
-  buttons: { compact: 'compact', logHours: 'log hours', send: 'send', exactCount: 'exact count', close: 'close' },
-  notePlaceholder: 'quick note',
+  tabsShort: { agents: 'Sub', context: 'Ctx', work: 'Wrk', system: 'Sys', notes: 'Nts' },
+  buttons: { compact: 'compact', logHours: 'log hours', send: 'send', exactCount: 'exact count', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
 
   // Header
   contextTitle: 'CONTEXT',
   creditsTitle: 'CREDITS',
-  cache: 'cache ',
   vsExpected: 'vs expected 7d ',
   noRateData: 'no rate-limit data',
   contextAt: (pct: number) => `⚠ context at ${pct}%`,
@@ -31,9 +46,6 @@ const EN = {
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   lastTool: 'last tool ',
-  tokenShare: ' token  ',
-  /** The four counters of an agent's row; the same abbreviations in both languages. */
-  tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
   historyTitle: 'HISTORY',
 
   // Context
@@ -43,14 +55,12 @@ const EN = {
   worthCompacting: '⚠ worth compacting',
   noReading: 'no reading',
   consumersTitle: (n: number) => `CONSUMERS · top ${n}`,
-  consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   skillsTitle: (used: number) => `SKILLS · ${used} used`,
   skillsListed: (listed: number, total: number) => `${listed}/${total} listed`,
   trendTitle: (rounds: number) => `TREND · ${rounds} ${plural(rounds, 'round', 'rounds')}`,
 
   // Work
   mainTitle: 'MAIN',
-  taskTitle: 'TASK',
   tasksDone: (n: number) => ` ${n} done`,
   perimeter: (entries: number) => `deliver perimeter · ${entries} ${plural(entries, 'entry', 'entries')}`,
   filesTouched: (n: number) => ` · ${n} ${plural(n, 'file', 'files')} touched`,
@@ -61,17 +71,13 @@ const EN = {
     underTarget: 'under target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}d ${what} (${dates})`,
   },
-  workflowTitle: 'WORKFLOW',
   workflowAgents: 'agents ',
-  hookTitle: 'HOOK · done-claim',
   changesTitle: 'CHANGES',
   noChanges: 'no changes',
-  prTitle: 'PR',
   prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   review: 'review ',
   reviews: { approved: 'approved', changes: 'changes requested', pending: 'pending' },
   checks: 'checks ',
-  toolTitle: 'TOOL',
 
   // System
   systemTitle: 'SYSTEM',
@@ -79,13 +85,16 @@ const EN = {
   reading: 'reading…',
   unavailable: 'unavailable',
   noChildProcess: 'no child process',
-  max: 'max',
   diskFree: 'free',
   mains: 'mains',
   charging: ' charging',
 
+  // Notes
+  notesTitle: (n: number) => `NOTES · ${n}`,
+  notePlaceholder: 'quick note',
+  noNotes: 'no saved notes',
+
   // The diff pane
-  diffTitle: (file: string) => `diff · ${file}`,
   nothingToShow: 'nothing to show',
   diffUnreadable: 'file too big or unreadable',
   noHunk: 'no hunk to show',
@@ -104,14 +113,13 @@ const EN = {
 export type Strings = typeof EN
 
 const IT: Strings = {
-  tabs: { agents: 'Subagenti', context: 'Contesto', work: 'Lavoro', system: 'Sistema' },
-  tabsShort: { agents: 'Sub', context: 'Ctx', work: 'Lav', system: 'Sis' },
-  buttons: { compact: 'compatta', logHours: 'segna ore', send: 'invia', exactCount: 'conteggio esatto', close: 'chiudi' },
-  notePlaceholder: 'nota rapida',
+  ...SHARED,
+  tabs: { agents: 'Subagenti', context: 'Contesto', work: 'Lavoro', system: 'Sistema', notes: 'Note' },
+  tabsShort: { agents: 'Sub', context: 'Ctx', work: 'Lav', system: 'Sis', notes: 'Nte' },
+  buttons: { compact: 'compatta', logHours: 'segna ore', send: 'invia', exactCount: 'conteggio esatto', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
 
   contextTitle: 'CONTESTO',
   creditsTitle: 'CREDITI RESIDUI',
-  cache: 'cache ',
   vsExpected: 'vs atteso 7d ',
   noRateData: 'nessun dato sui limiti',
   contextAt: (pct: number) => `⚠ contesto al ${pct}%`,
@@ -122,8 +130,6 @@ const IT: Strings = {
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   lastTool: 'ultimo tool ',
-  tokenShare: ' token  ',
-  tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
   historyTitle: 'STORICO',
 
   exact: 'esatto',
@@ -132,13 +138,11 @@ const IT: Strings = {
   worthCompacting: '⚠ conviene compattare',
   noReading: 'nessuna lettura',
   consumersTitle: (n: number) => `CONSUMI · primi ${n}`,
-  consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   skillsTitle: (used: number) => `SKILL · ${used} ${plural(used, 'usata', 'usate')}`,
   skillsListed: (listed: number, total: number) => `${listed}/${total} elencate`,
   trendTitle: (rounds: number) => `ANDAMENTO · ${rounds} round`,
 
   mainTitle: 'PRINCIPALE',
-  taskTitle: 'TASK',
   tasksDone: (n: number) => ` ${n} ${plural(n, 'fatto', 'fatti')}`,
   perimeter: (entries: number) => `perimetro deliver · ${entries} ${plural(entries, 'voce', 'voci')}`,
   filesTouched: (n: number) => ` · ${n} ${plural(n, 'file toccato', 'file toccati')}`,
@@ -149,29 +153,27 @@ const IT: Strings = {
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
   },
-  workflowTitle: 'WORKFLOW',
   workflowAgents: 'agent ',
-  hookTitle: 'HOOK · done-claim',
   changesTitle: 'MODIFICHE',
   noChanges: 'nessuna modifica',
-  prTitle: 'PR',
   prStates: { open: 'aperta', draft: 'bozza', merged: 'unita', closed: 'chiusa' },
   review: 'revisione ',
   reviews: { approved: 'approvata', changes: 'modifiche richieste', pending: 'in attesa' },
   checks: 'check ',
-  toolTitle: 'TOOL',
 
   systemTitle: 'SISTEMA',
   processesTitle: 'PROCESSI',
   reading: 'lettura…',
   unavailable: 'non disponibile',
   noChildProcess: 'nessun processo figlio',
-  max: 'max',
   diskFree: 'liberi',
   mains: 'rete',
   charging: ' in carica',
 
-  diffTitle: (file: string) => `diff · ${file}`,
+  notesTitle: (n: number) => `NOTE · ${n}`,
+  notePlaceholder: 'nota rapida',
+  noNotes: 'nessuna nota salvata',
+
   nothingToShow: 'niente da mostrare',
   diffUnreadable: 'file troppo grande o illeggibile',
   noHunk: 'nessun blocco da mostrare',
