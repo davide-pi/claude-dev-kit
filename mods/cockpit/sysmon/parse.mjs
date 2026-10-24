@@ -13,8 +13,11 @@ export function netBytes(text) {
   return undefined
 }
 
-/** Counters of an old interface are 32 bits and wrap: a reading below the last one counts forward from the wrap. */
-const counted = (before, after) => (after >= before ? after - before : after + 2 ** 32 - before)
+/**
+ * Counters of an old interface are 32 bits and wrap: a reading below the last one counts forward from the wrap only when the last
+ * one was within a gigabyte of the limit (what two seconds can move); any other drop is a reset, counted as nothing.
+ */
+const counted = (before, after) => (after >= before ? after - before : before > 2 ** 32 - 2 ** 30 && before <= 2 ** 32 ? after + 2 ** 32 - before : 0)
 
 /** Bytes per second between two `netBytes` readings `seconds` apart. */
 export function netRate(before, after, seconds) {

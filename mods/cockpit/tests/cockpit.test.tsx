@@ -157,10 +157,19 @@ type World = {
   breakdown?: Partial<SessionContextBreakdown>
   /** A promise a `usage({ breakdown })` read waits on, by detail (`summary` or `full`), read at every call: a breakdown read that is slow. */
   holdUsage?: (detail: string) => Promise<void> | undefined
+  /** The text of this session's data file (`cockpit-data-s-1.json`), as an earlier run left it; absent, the file answers an empty object. */
+  dataFile?: string
+  /** Receives the text of every `$.ui.toast`. */
+  toasts?: string[]
+  /** Receives every `$.prompt.fill`: its text and mode. */
+  fills?: { text: string; mode?: string }[]
+  /** True: the prompt box refuses every `$.prompt.fill` (a dialog holds the keys). */
+  fillRefused?: boolean
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
 const FLAG = /cockpit-s-1\.json$/
+const DATA = /cockpit-data-s-1\.json$/
 
 /** The world beneath the plugin: what the engine would answer to the calls the mod makes. */
 function world(on: On, options: World = {}) {
@@ -253,6 +262,7 @@ function world(on: On, options: World = {}) {
       return { value: options.workspacesRaw ?? JSON.stringify(options.workspaces ?? {}) }
     }
     if (FLAG.test(e.path) && options.stateFile !== undefined) return { value: options.stateFile }
+    if (DATA.test(e.path) && options.dataFile !== undefined) return { value: options.dataFile }
     if (options.perimeter !== undefined && /deliver[\\/]perimeter\.md$/.test(e.path)) return { value: options.perimeter }
     if (/done-claim\.log$/.test(e.path)) options.claimReads?.push(e.path)
     if (options.doneClaims !== undefined && /done-claim\.log$/.test(e.path)) return { value: options.doneClaims }
@@ -301,6 +311,14 @@ function world(on: On, options: World = {}) {
     options.commands?.push(`/${e.command} ${e.args}`)
     return { text: 'ok' }
   })
+  on('ui.toast', (_, e) => {
+    options.toasts?.push(e.text)
+    return { value: undefined }
+  })
+  on('prompt.fill', (_, e) => {
+    options.fills?.push({ text: e.text, mode: e.mode })
+    return { isFilled: options.fillRefused !== true }
+  })
   on('fs.write', (_, e) => {
     if (options.failWrites?.()) throw new Error('timed out')
     options.writes?.set(e.path, e.text)
@@ -313,6 +331,12 @@ function world(on: On, options: World = {}) {
 /** The statusline's state file as last written, parsed. */
 const flagOf = (writes: Map<string, string>): unknown => {
   const path = [...writes.keys()].find(k => FLAG.test(k))
+  return JSON.parse((path && writes.get(path)) || 'null')
+}
+
+/** The session data file as last written, parsed; null when none was written. */
+const dataOf = (writes: Map<string, string>): Record<string, unknown> | null => {
+  const path = [...writes.keys()].find(k => DATA.test(k))
   return JSON.parse((path && writes.get(path)) || 'null')
 }
 
@@ -392,9 +416,9 @@ test('a rule closes the header and the tab bar, and sets the SUBAGENTI title (af
   const rows = rowTexts(await ui.drawn())
   const [first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^SUBAGENTI/.test(r))
-  // header, rule, tab bar, rule, then the tab's own content: an empty row first
+  // header, rule, tab bar, the note's field, rule, then the tab's own content: an empty row first
   expect(first).toBe(headerOf(rows).length)
-  expect(second).toBe(first + 2)
+  expect(second).toBe(first + 3)
   expect(title).toBe(second + 2)
   expect(rows[title - 1]).toBe(' ')
   await ui.unmount()
@@ -453,12 +477,13 @@ test('the state file is written at session start with open:false and the session
     effort: 'high',
     tasks: null,
     tab: 'agents',
-    history: [],
   })
-  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab', 'history'])
+  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
+  // what must survive a resume is in the session data file
+  expect(dataOf(writes)).toEqual({ history: [], prs: [] })
 })
 
-const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'agents', history: [] }
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'agents' }
 
 test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
   const writes = new Map<string, string>()
@@ -489,7 +514,7 @@ test('a new session id (/clear) gets its own file, even with the same content', 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   id = 's-2'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect([...writes.keys()].map(k => k.replace(/^.*(cockpit-s-\d\.json)$/, '$1')).sort()).toEqual(['cockpit-s-1.json', 'cockpit-s-2.json'])
+  expect([...writes.keys()].map(k => k.replace(/^.*(cockpit-(?:data-)?s-\d\.json)$/, '$1')).sort()).toEqual(['cockpit-data-s-1.json', 'cockpit-data-s-2.json', 'cockpit-s-1.json', 'cockpit-s-2.json'])
 })
 
 test('a session id the statusline would not accept writes nothing', async ($, on) => {
@@ -1594,7 +1619,7 @@ test('Agenti: a finished agent leaves the list after 2 minutes for STORICO, coll
 
   // the state file carries it, so a resume or a reload finds it
   await clock.advance(3000)
-  expect((flagOf(writes) as { history: unknown }).history).toEqual([
+  expect(dataOf(writes)?.history).toEqual([
     { id: 'a2', type: 'two', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW + 5000, tokens: 0, isFailed: true },
     { id: 'a1', type: 'one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
   ])
@@ -1656,9 +1681,9 @@ test('STORICO survives a reload: the session id reads its history from its state
   await ui.unmount()
 })
 
-/** The state file of session `id` as last written, parsed; `undefined` when none was written. */
+/** The data file of session `id` as last written, parsed; `undefined` when none was written. */
 const fileOfSession = (writes: Map<string, string>, id: string): { history: unknown[] } | undefined => {
-  const path = [...writes.keys()].find(k => k.endsWith(`cockpit-${id}.json`))
+  const path = [...writes.keys()].find(k => k.endsWith(`cockpit-data-${id}.json`))
   return path === undefined ? undefined : JSON.parse(writes.get(path) ?? 'null')
 }
 
@@ -1817,8 +1842,9 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  // a file without agentTokens starts the count from the history it lists
-  expect(flagOf(writes)).toEqual({ ...CLOSED, history, agentTokens: 5400 })
+  // a file without agentTokens starts the count from the history it lists; the history itself is in the data file
+  expect(flagOf(writes)).toEqual({ ...CLOSED, agentTokens: 5400 })
+  expect(dataOf(writes)).toEqual({ history, prs: [] })
 })
 
 test('pressing an agent row, live or in STORICO, puts that agent in the main view', async ($, on) => {
@@ -3484,7 +3510,7 @@ test('Lavoro: a PR created in the session (gh pr create) is a Link with its stat
   expect((await ui.find({ type: 'Link' }))?.props.href).toBe(GH_CREATED)
   await ui.unmount()
   await clock.advance(3000)
-  expect((flagOf(writes) as { prs?: unknown }).prs).toEqual([{ number: 42, title: 'Add filter', state: 'open', isDraft: false, url: GH_CREATED }])
+  expect(dataOf(writes)?.prs).toEqual([{ number: 42, title: 'Add filter', state: 'open', isDraft: false, url: GH_CREATED }])
 })
 
 test('Lavoro: a PR created with az repos pr create takes its link from the repository web url', async ($, on) => {
@@ -4156,5 +4182,354 @@ test('follow-up: a state-file timer the engine refused does not stop a later cha
   await clock.advance(2500)
   await settleAll()
   expect((flagOf(writes) as { tab?: string }).tab).toBe('context')
+  await ui.unmount()
+})
+
+// ── Phase 6: session data file ──
+
+const SAVED_PR = { number: 7, title: 'Old work', state: 'merged', isDraft: false }
+
+test('session data: history, PRs, the note and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('tool.call', { tool: 'Bash' }, () => bashResult(`${GH_CREATED}\n`))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'old')
+  await finishAgent($, 'a1')
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'm1', reason: 'answer' })
+  const ui = await mountPane($)
+  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
+  await ui.unmount()
+  expect(dataOf(writes)?.note).toBeUndefined() // inside the 3 s window of the start write
+  await clock.advance(135_000) // the finished agent leaves the list for the history
+  const data = dataOf(writes)
+  expect(data).toMatchObject({ note: 'ask Anna', ctxRounds: [248_000], prs: [{ number: 42, title: 'Add filter' }] })
+  expect(data?.history).toHaveLength(1)
+  const flag = flagOf(writes) as Record<string, unknown>
+  expect(flag.history).toBeUndefined()
+  expect(flag.prs).toBeUndefined()
+  expect(flag.note).toBeUndefined()
+})
+
+test('session data: a resume brings back the history, the PRs, the note and the context samples', async ($, on) => {
+  const writes = new Map<string, string>()
+  const dataFile = JSON.stringify({
+    history: [entry('a9', 'implementer', NOW - 30_000)],
+    prs: [SAVED_PR],
+    note: 'ask Anna',
+    ctxRounds: [100_000, 200_000],
+    ctxSamples: [100_000, 200_000],
+  })
+  world(on, { writes, dataFile })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect((await ui.find({ key: 'history' }))?.text).toBe('STORICO · 1 ▸')
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna')
+  await ui.press({ key: 'tab:work' })
+  expect(rowTexts(await ui.drawn())).toContain('PR · 1')
+  await ui.unmount()
+  // written back as it was read
+  expect(dataOf(writes)).toMatchObject({ note: 'ask Anna', ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
+})
+
+test('session data: a state file from before the data file hands its history and PRs over, once', async ($, on) => {
+  const writes = new Map<string, string>()
+  const history = [entry('a9', 'implementer', NOW - 30_000)]
+  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'work', history, prs: [SAVED_PR] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(dataOf(writes)).toEqual({ history, prs: [SAVED_PR] })
+  const flag = flagOf(writes) as Record<string, unknown>
+  expect(flag.history).toBeUndefined()
+  expect(flag.prs).toBeUndefined()
+  expect(flag.tab).toBe('work')
+})
+
+test('session data: once the data file exists the old place is never read again, even with its fields empty', async ($, on) => {
+  world(on, {
+    dataFile: JSON.stringify({ history: [], prs: [] }),
+    stateFile: JSON.stringify({ open: false, tab: 'work', history: [entry('a9', 'implementer', NOW - 30_000)], prs: [SAVED_PR] }),
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(rowTexts(await ui.drawn()).some(r => /^PR ·/.test(r))).toBe(false)
+  await ui.unmount()
+})
+
+test('session data: a field of the wrong shape is left out, never thrown', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, ctxRounds: ['a', -1], ctxSamples: null }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(dataOf(writes)).toEqual({ history: [], prs: [] })
+})
+
+test('session data: the end of the session writes the note into the data file; a snapshot of another session writes none', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  world(on, { sessionId: () => id, writes })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.input({ key: 'note', text: 'keep me', kind: 'change' })
+  await ui.unmount()
+  id = 's-2'
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(dataOf(writes)).toMatchObject({ note: 'keep me' })
+  const text = () => writes.get([...writes.keys()].find(k => DATA.test(k)) ?? '')
+  const before = text()
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } }) // nothing owns the snapshot now
+  expect(text()).toBe(before)
+})
+
+// ── Phase 6: alerts ──
+
+test('alerts: context at 80 % toasts once per episode, and again once it cleared', async ($, on) => {
+  const toasts: string[] = []
+  world(on, { toasts, ctxPercent: 85 })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(toasts).toEqual(['contesto al 85%'])
+  const measure = (percent: number) => $.session.measure({ context: { window: 1_000_000, tokens: percent * 10_000, percent }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  await measure(90)
+  await measure(81)
+  expect(toasts).toHaveLength(1) // the same episode
+  await measure(40) // cleared
+  await measure(82)
+  expect(toasts).toEqual(['contesto al 85%', 'contesto al 82%'])
+})
+
+test('alerts: a context under 80 % at the start of a session toasts nothing', async ($, on) => {
+  const toasts: string[] = []
+  world(on, { toasts, ctxPercent: 79 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(toasts).toEqual([])
+})
+
+test('alerts: 5h credits at 10 % left or less toast once; the 7d window does not count', async ($, on) => {
+  const toasts: string[] = []
+  world(on, { toasts, rateLimits: [{ kind: 'five_hour', percentUsed: 92 }, { kind: 'seven_day', percentUsed: 99 }] })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(toasts).toEqual(['crediti 5h: resta il 8%'])
+  const measure = (used: number) => $.session.measure({ context: { window: 1_000_000, tokens: 1, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: used }], cost: { usd: 5 }, changed: ['rateLimits'] })
+  await measure(95)
+  expect(toasts).toHaveLength(1)
+  await measure(50)
+  await measure(91)
+  expect(toasts).toEqual(['crediti 5h: resta il 8%', 'crediti 5h: resta il 9%'])
+})
+
+test('alerts: a subagent that failed toasts once; one that answered does not', async ($, on) => {
+  const toasts: string[] = []
+  world(on, { toasts })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'reviewer')
+  await spawnAgent($, 'writer')
+  await finishAgent($, 'a2', 'answer')
+  expect(toasts).toEqual([])
+  await finishAgent($, 'a1', 'error')
+  expect(toasts).toEqual(['subagent reviewer fallito'])
+})
+
+test('alerts: PR checks that turned red toast once; green and red again is a new episode', async ($, on) => {
+  const toasts: string[] = []
+  const options: World = { toasts, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { statusCheckRollup: CHECKS } }
+  const clock = world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(toasts).toEqual(['PR #42: check in errore'])
+  await clock.advance(5 * MIN + 30_000) // read again, still red: the same episode
+  await settleAll()
+  expect(toasts).toHaveLength(1)
+  options.prExtra = { statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] }
+  await clock.advance(5 * MIN + 30_000)
+  await settleAll()
+  options.prExtra = { statusCheckRollup: CHECKS }
+  await clock.advance(5 * MIN + 30_000)
+  await settleAll()
+  expect(toasts).toEqual(['PR #42: check in errore', 'PR #42: check in errore'])
+})
+
+test('alerts: what a session was resumed with is not news: a saved red PR toasts nothing', async ($, on) => {
+  const toasts: string[] = []
+  const prs = [{ number: 8, title: 'Checks', state: 'open', isDraft: false, checks: { passed: 1, failed: 1, pending: 0 } }]
+  world(on, { toasts, dataFile: JSON.stringify({ history: [], prs }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(toasts).toEqual([])
+})
+
+// ── Phase 6: quick note ──
+
+/** The keys of the drawn tree in drawing order. */
+const keysInOrder = (el: unknown): string[] => {
+  if (typeof el === 'string') return []
+  const o = el as { props?: { key?: string }; children?: unknown[] } | null
+  return [...(o?.props?.key ? [o.props.key] : []), ...(o?.children ?? []).flatMap(keysInOrder)]
+}
+
+test('note: an Input of two rows sits under the tab bar, on every tab, and holds the note', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  const input = await ui.find({ type: 'Input', key: 'note' })
+  expect(input?.props.rows).toBe(2)
+  expect(input?.props.value).toBe('')
+  const keys = keysInOrder(await ui.drawn())
+  expect(keys.indexOf('note')).toBeGreaterThan(keys.indexOf('tab:system'))
+  expect(keys.indexOf('note')).toBeLessThan(keys.indexOf('bar:compact'))
+  await ui.press({ key: 'tab:work' })
+  expect(await ui.find({ type: 'Input', key: 'note' })).toBeDefined()
+  await ui.input({ key: 'note', text: 'ask Anna\nabout the filter', kind: 'change' })
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna\nabout the filter')
+  await ui.unmount()
+})
+
+test('note: invia appends the note to the prompt box and clears it; with no note there is no button', async ($, on) => {
+  const fills: { text: string; mode?: string }[] = []
+  const writes = new Map<string, string>()
+  const clock = world(on, { fills, writes })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'bar:note' })).toBeUndefined()
+  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
+  expect((await ui.find({ key: 'bar:note' }))?.text).toBe('invia')
+  await ui.press({ key: 'bar:note' })
+  await settleAll()
+  expect(fills).toEqual([{ text: 'ask Anna', mode: 'append' }])
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
+  expect(await ui.find({ key: 'bar:note' })).toBeUndefined()
+  await clock.advance(3000)
+  expect(dataOf(writes)?.note).toBeUndefined()
+  await ui.unmount()
+})
+
+test('note: Enter in the field sends it the same way', async ($, on) => {
+  const fills: { text: string; mode?: string }[] = []
+  world(on, { fills })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.input({ key: 'note', text: 'call back', kind: 'submit' })
+  await settleAll()
+  expect(fills).toEqual([{ text: 'call back', mode: 'append' }])
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
+  await ui.unmount()
+})
+
+test('note: a prompt box that refuses the text (a dialog holds the keys) keeps the note', async ($, on) => {
+  const fills: { text: string; mode?: string }[] = []
+  world(on, { fills, fillRefused: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  await ui.input({ key: 'note', text: 'ask Anna', kind: 'change' })
+  await ui.press({ key: 'bar:note' })
+  await settleAll()
+  expect(fills).toHaveLength(1)
+  expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('ask Anna')
+  await ui.unmount()
+})
+
+test('note: the buttons stay in the pane width at 30, 40 and 58 columns with a note to send', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], note: 'ask Anna' }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const columns of [30, 40, 58]) {
+    const ui = await mountPane($, columns)
+    expect(await ui.find({ key: 'bar:note' })).toBeDefined()
+    for (const key of ['bar:compact', 'bar:worklog', 'bar:note']) expect(await ui.find({ key })).toBeDefined()
+    await ui.unmount()
+  }
+})
+
+// ── Phase 6: phase 5 follow-ups ──
+
+test('follow-up: a monitor stopped before it reached its spawn leaves no child running', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } }) // stops the monitor the press was still starting
+  await sleep(100)
+  await settleAll()
+  expect(m.stops).toBe(m.spawns.length) // none started, or every one started was stopped
+  await ui.unmount()
+})
+
+test('follow-up: after a monitor crash the readings are forgotten when the tab is left; the next visit starts from none', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  m.push(FULL_LINE)
+  await until(() => m.queue.length === 0)
+  m.end()
+  await until(() => m.stops === 1)
+  await settleAll()
+  expect(rowTexts(await ui.drawn())).toContain('CPU  non disponibile')
+  m.isEnded = false
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 2)
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('lettura in corso')
+  expect(rows).not.toContain('CPU  non disponibile')
+  await ui.unmount()
+})
+
+test('follow-up: opening the pane on the Contesto tab while the exact count runs reads no summary', async ($, on) => {
+  const h = holds()
+  const usageCalls: (string | undefined)[] = []
+  world(on, { usageCalls, holdUsage: h.holdUsage, stateFile: JSON.stringify({ open: false, tab: 'context' }), breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  const releaseFull = h.hold('full')
+  await ui.press({ key: 'ctx:exact' })
+  const before = summaries()
+  await openCockpit($)
+  await settleAll()
+  expect(summaries()).toBe(before)
+  releaseFull()
+  await settleAll()
+  await ui.unmount()
+})
+
+test('follow-up: an exact count that never answers is released after a timeout, so the Contesto tab reads again', async ($, on) => {
+  const h = holds()
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const releaseFull = h.hold('full') // never answers, until the end of the test
+  await ui.press({ key: 'ctx:exact' })
+  const before = summaries()
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  expect(summaries()).toBe(before) // still counting
+  await clock.advance(61_000)
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  expect(summaries()).toBe(before + 1) // released
+  releaseFull()
+  await settleAll()
   await ui.unmount()
 })

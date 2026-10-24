@@ -89,8 +89,10 @@ import {
   worklogDays,
   worklogLabel,
   COLORS,
+  activeAlerts,
 } from '../hooks/format'
 import type { Span } from '../hooks/format'
+import { INITIAL } from '../hooks/state'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
 
@@ -951,6 +953,9 @@ test('safeUrl: every source of a PR address goes through it (gh url, az webUrl, 
   expect(az('https://dev.azure.com/o/p/_git/r')?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
   expect(az('javascript:alert(1)')?.url).toBeUndefined()
   expect(az('ftp://host/r')?.url).toBeUndefined()
+  // a refused address costs the link, never the pull request
+  expect(az('javascript:alert(1)')?.number).toBe(7)
+  expect(az('ftp://host/r')?.number).toBe(7)
   const created = parseCreatedPr('gh pr create --title T', 'https://github.com/a\u001b/b/pull/42')
   expect(created?.number).toBe(42)
   expect(created?.url).toBeUndefined()
@@ -980,6 +985,20 @@ test('parseCreatedPr: the title and draft flags are read only from the create co
   expect(title("gh pr create --title 'x; y' --body z")).toBe('x; y')
 })
 
+test('parseCreatedPr: a -t or -d inside a quoted argument is text, not a flag', () => {
+  const out = 'https://github.com/example/orders/pull/42\n'
+  const title = (command: string) => parseCreatedPr(command, out)?.title
+  const draft = (command: string) => parseCreatedPr(command, out)?.isDraft
+  expect(title('gh pr create --body "fix -t nope" --title Right')).toBe('Right')
+  expect(title("gh pr create --body 'see -t nope' --fill")).toBe('')
+  expect(draft('gh pr create --title T --body "use -d for a draft"')).toBe(false)
+  expect(draft("gh pr create --title T --body 'x -d'")).toBe(false)
+  expect(draft('gh pr create --title T --body "x" -d')).toBe(true)
+  expect(title('gh pr create --title="a -t b" --draft')).toBe('a -t b')
+  expect(title('gh pr create -t "a -d b"')).toBe('a -d b')
+  expect(draft('gh pr create -t "a -d b"')).toBe(false)
+})
+
 test('toolArg: a search shows its pattern before the folder it looks in', () => {
   expect(toolArg({ tool: 'Grep', pattern: 'Order', path: '/w/src' })).toBe('Order')
   expect(toolArg({ tool: 'Glob', pattern: '**/*.ts', path: '/w/src' })).toBe('**/*.ts')
@@ -1003,6 +1022,33 @@ test('fmtBytes: base 1024 with one letter, a decimal only under ten', () => {
   expect(fmtBytes(340 * 1024 ** 2)).toBe('340M')
   expect(fmtBytes(12.4 * 1024 ** 3)).toBe('12G')
   expect(fmtBytes(-5)).toBe('0B')
+})
+
+test('fmtBytes: the value is rounded before the unit is chosen, so it never reads 1024K or 10.0K', () => {
+  expect(fmtBytes(1024 ** 2 - 1)).toBe('1.0M')
+  expect(fmtBytes(1023.6)).toBe('1.0K')
+  expect(fmtBytes(10 * 1024 - 1)).toBe('10K')
+  expect(fmtBytes(Math.round(9.96 * 1024 ** 2))).toBe('10M')
+  expect(fmtBytes(1024 ** 3 - 1)).toBe('1.0G')
+  expect(fmtBytes(9.94 * 1024)).toBe('9.9K')
+  expect(fmtBytes(1023.4)).toBe('1023B')
+})
+
+test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed subagent, a PR with red checks; one entry per cause', () => {
+  const alerts = (patch: Partial<typeof INITIAL>) => activeAlerts({ ...INITIAL, ...patch }).map(a => a.key)
+  expect(alerts({})).toEqual([])
+  expect(alerts({ ctx: { percent: 79.9 } })).toEqual([])
+  expect(alerts({ ctx: { percent: 80 } })).toEqual(['context'])
+  expect(alerts({ rateLimits: [{ kind: 'five_hour', percentUsed: 89 }, { kind: 'seven_day', percentUsed: 99 }] })).toEqual([])
+  expect(alerts({ rateLimits: [{ kind: 'five_hour', percentUsed: 90 }] })).toEqual(['credits'])
+  const agent = { type: 'reviewer', status: 'done' as const, startedAt: 0, tokens: 0 }
+  expect(alerts({ agents: [{ ...agent, id: 'a1' }, { ...agent, id: 'a2', isFailed: true }, { ...agent, id: 'a3', isFailed: false }] })).toEqual(['agent:a2'])
+  const pr = { title: 't', state: 'open' as const, isDraft: false }
+  expect(alerts({ prs: [{ ...pr, number: 1, checks: { passed: 3, failed: 0, pending: 1 } }, { ...pr, number: 2, checks: { passed: 1, failed: 2, pending: 0 } }, { ...pr, number: 3 }] })).toEqual(['pr:2'])
+  const texts = activeAlerts({ ...INITIAL, ctx: { percent: 85.4 }, rateLimits: [{ kind: 'five_hour', percentUsed: 93 }] }).map(a => a.text)
+  expect(texts).toEqual(['contesto al 85%', 'crediti 5h: resta il 7%'])
+  const failed = activeAlerts({ ...INITIAL, agents: [{ ...agent, id: 'a9', isFailed: true }], prs: [{ ...pr, number: 5, checks: { passed: 0, failed: 1, pending: 0 } }] }).map(a => a.text)
+  expect(failed).toEqual(['subagent reviewer fallito', 'PR #5: check in errore'])
 })
 
 test('parseSysLine: one JSON line of the monitor, narrowed field by field; a bad line or a bad field is dropped, never thrown', () => {

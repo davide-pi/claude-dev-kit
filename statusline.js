@@ -346,8 +346,26 @@ const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const PRUNE_RULES = [
   { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 5 s only
   { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // the nudge distrusts it past 6 h
-  { re: /^cockpit-[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 },       // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
+  { re: /^cockpit-(?!data-)[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 }, // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
 ];
+// The cockpit's session data (history, PRs, note, context samples) lives as long as the session can be resumed: no age rule,
+// it goes when `projects/*/<session>.jsonl` is gone.
+const SESSION_DATA_RE = /^cockpit-data-([\w-]+)\.json$/;
+
+/** The ids of the sessions that still have a transcript (one readdir of `projects/` and of each project folder); undefined when that cannot be told. */
+function transcriptIds() {
+  try {
+    const root = path.join(CONFIG_DIR, "projects");
+    const ids = new Set();
+    for (const project of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue;
+      for (const name of fs.readdirSync(path.join(root, project.name))) {
+        if (name.endsWith(".jsonl")) ids.add(name.slice(0, -".jsonl".length));
+      }
+    }
+    return ids;
+  } catch { return undefined; }  // a folder that cannot be listed hides transcripts: delete nothing
+}
 
 function pruneCache(currentSessionId) {
   try {
@@ -360,8 +378,16 @@ function pruneCache(currentSessionId) {
     // The folder exists by now (the snapshot and the git caches create it); if the marker cannot be written, skip.
     try { fs.writeFileSync(marker, ""); } catch { return; }
     const keep = new Set(typeof currentSessionId === "string"
-      ? [`context-${currentSessionId}.json`, `cockpit-${currentSessionId}.json`] : []);
+      ? [`context-${currentSessionId}.json`, `cockpit-${currentSessionId}.json`, `cockpit-data-${currentSessionId}.json`] : []);
+    let transcripts;  // read at the first data file, once
     for (const name of fs.readdirSync(dir)) {
+      const data = SESSION_DATA_RE.exec(name);
+      if (data) {
+        if (keep.has(name)) continue;
+        transcripts ??= transcriptIds() ?? null;
+        try { if (transcripts && !transcripts.has(data[1])) fs.unlinkSync(path.join(dir, name)); } catch { /* next hour */ }
+        continue;
+      }
       const rule = PRUNE_RULES.find((r) => r.re.test(name));
       if (!rule || keep.has(name)) continue;
       try {

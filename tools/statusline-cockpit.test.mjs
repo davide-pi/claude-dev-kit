@@ -133,6 +133,39 @@ test('prune: old files of each kind go, fresh ones stay, the current session and
   });
 });
 
+/** Writes `<projects>/<project>/<session>.jsonl`: the transcript the session data file lives by. */
+function transcript(dir, project, session) {
+  mkdirSync(join(dir, 'projects', project), { recursive: true });
+  writeFileSync(join(dir, 'projects', project, `${session}.jsonl`), '');
+}
+
+test('prune: the session data file is not a 3-day handshake file: kept while its transcript exists, deleted once it is gone', () => {
+  withCache((dir, has) => {
+    const sid = SAMPLE.session_id;
+    transcript(dir, 'p1', 'alive');
+    transcript(dir, 'p2', 'alive-too');
+    put(dir, 'cockpit-data-alive.json', 40 * 24 * HOUR);
+    put(dir, 'cockpit-data-alive-too.json', 40 * 24 * HOUR);
+    put(dir, 'cockpit-data-gone.json', 1 * HOUR);
+    put(dir, `cockpit-data-${sid}.json`, 40 * 24 * HOUR); // the current session's: never touched, transcript or not
+    put(dir, 'cockpit-old.json', 4 * 24 * HOUR);
+    run(dir);
+    assert.equal(has('cockpit-data-alive.json'), true, 'transcript in one project');
+    assert.equal(has('cockpit-data-alive-too.json'), true, 'transcript in another project');
+    assert.equal(has(`cockpit-data-${sid}.json`), true, 'current session');
+    assert.equal(has('cockpit-data-gone.json'), false, 'no transcript left');
+    assert.equal(has('cockpit-old.json'), false, 'the handshake file still ages out after 3 days');
+  });
+});
+
+test('prune: with no readable projects folder no data file is deleted', () => {
+  withCache((dir, has) => {
+    put(dir, 'cockpit-data-orphan.json', 40 * 24 * HOUR);
+    run(dir);
+    assert.equal(has('cockpit-data-orphan.json'), true);
+  });
+});
+
 test('prune: throttled to once an hour by the marker file', () => {
   withCache((dir, has) => {
     run(dir);

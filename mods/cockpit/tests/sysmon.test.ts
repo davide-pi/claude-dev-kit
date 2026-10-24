@@ -66,6 +66,12 @@ test('netRate: bytes per second between two readings; a 32-bit counter that wrap
   expect(netRate({ rx: 1000, tx: 500 }, { rx: 5000, tx: 700 }, 2)).toEqual({ rx: 2000, tx: 100 })
   expect(netRate({ rx: 2 ** 32 - 1000, tx: 0 }, { rx: 1000, tx: 0 }, 2)).toEqual({ rx: 1000, tx: 0 })
   expect(netRate({ rx: 1, tx: 1 }, { rx: 1, tx: 1 }, 0)).toEqual({ rx: 0, tx: 0 })
+  // a counter that drops far from the 32-bit limit was reset (an interface restarted): no rate for that sample, not a wrap
+  expect(netRate({ rx: 5_000_000, tx: 100 }, { rx: 1000, tx: 0 }, 2)).toEqual({ rx: 0, tx: 0 })
+  expect(netRate({ rx: 2 ** 31, tx: 2 ** 31 }, { rx: 10, tx: 10 }, 2)).toEqual({ rx: 0, tx: 0 })
+  expect(netRate({ rx: 2 ** 32 - 100, tx: 5_000_000 }, { rx: 100, tx: 4_000_000 }, 2)).toEqual({ rx: 100, tx: 0 })
+  // a 64-bit counter above the 32-bit limit cannot have wrapped there: its drop is a reset too, never a negative rate
+  expect(netRate({ rx: 5e9, tx: 2 ** 32 + 10 }, { rx: 1000, tx: 5 }, 2)).toEqual({ rx: 0, tx: 0 })
 })
 
 test('listeningPorts: the TCP rows with no peer, by pid, in any language; established and UDP rows are not listening', () => {

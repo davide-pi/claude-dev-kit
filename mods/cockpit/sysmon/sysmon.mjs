@@ -107,8 +107,20 @@ async function readNet() {
 }
 
 let tickCount = 0
+let isTicking = false
 
 async function tick() {
+  // A netstat that is slower than the tick would stack reads: the tick that finds the previous one in flight is skipped.
+  if (isTicking) return
+  isTicking = true
+  try {
+    await readTick()
+  } finally {
+    isTicking = false
+  }
+}
+
+async function readTick() {
   const n = tickCount++
   const times = cpuTimes(cpus())
   const line = { ram: { used: totalmem() - freemem(), total: totalmem() }, ...(n > 0 && { cpu: cpuPercent(lastCpu, times) }) }
