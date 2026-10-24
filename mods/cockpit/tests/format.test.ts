@@ -9,8 +9,6 @@ import {
   aheadBehindSpans,
   almText,
   autocompactForecast,
-  burnRate,
-  burnText,
   cacheColor,
   checkPerimeter,
   claudeStateSpans,
@@ -59,7 +57,6 @@ import {
   additionsDiff,
   isDefaultBranch,
   pctCell,
-  recordBurnSample,
   resolveAlm,
   taskBarCells,
   textCells,
@@ -256,72 +253,6 @@ test('pctCell pads a percentage to four cells so one, two and three digits align
   expect(pctCell(87)).toBe(' 87%')
   expect(pctCell(100)).toBe('100%')
   expect(pctCell(0)).toBe('  0%')
-})
-
-test('recordBurnSample keeps the last 30 minutes, anchors the value that held at their start, skips an unchanged reading and starts over when the window resets', () => {
-  const min = 60000
-  const first = recordBurnSample(undefined, 0, 38)
-  expect(first).toEqual([{ at: 0, used: 38 }])
-  expect(recordBurnSample(first, 5 * min, 38)).toEqual(first)
-  const grown = recordBurnSample(first, 12 * min, 41)
-  expect(grown).toEqual([{ at: 0, used: 38 }, { at: 12 * min, used: 41 }])
-  // the reading that fell out of the window still says what the credits stood at when it opened: kept, clamped to its start
-  expect(recordBurnSample(grown, 35 * min, 45)).toEqual([{ at: 5 * min, used: 38 }, { at: 12 * min, used: 41 }, { at: 35 * min, used: 45 }])
-  expect(recordBurnSample(grown, 60 * min, 41)).toEqual([{ at: 30 * min, used: 41 }])
-  expect(recordBurnSample([{ at: 0, used: 38 }], 50 * min, 38)).toEqual([{ at: 20 * min, used: 38 }])
-  expect(recordBurnSample([{ at: 0, used: 38 }], 50 * min, 40)).toEqual([{ at: 20 * min, used: 38 }, { at: 50 * min, used: 40 }])
-  expect(recordBurnSample([{ at: 0, used: 38 }, { at: 20 * min, used: 40 }], 30 * min, undefined)).toEqual([{ at: 0, used: 38 }, { at: 20 * min, used: 40 }])
-  expect(recordBurnSample(grown, 40 * min, 3)).toEqual([{ at: 40 * min, used: 3 }]) // a fall is a window reset: no anchor
-  expect(recordBurnSample(grown, 20 * min, undefined)).toEqual(grown)
-})
-
-test('burnRate: rate, exhaustion time and the verdict against the reset; nothing without 10 minutes or a positive rate', () => {
-  const min = 60000
-  const now = 20 * min
-  const samples = [{ at: 0, used: 35 }]
-  // 3 points in 20 min = 9 %/h; 62 left lasts 6h53, the reset comes in 2h14
-  const slow = burnRate(samples, now, 38, now + 134 * min)
-  expect(slow?.perHour).toBe(9)
-  expect(slow?.isBeforeReset).toBe(false)
-  expect(Math.round((slow?.etaMs ?? 0) / min)).toBe(413)
-  expect(burnText(slow!)).toBe('−9%/h · runs out in  6h53m: lasts to the reset')
-  // 30 points in 20 min = 90 %/h; 35 left lasts 23 min, the reset comes in 3 h
-  const fast = burnRate([{ at: 0, used: 35 }], now, 65, now + 180 * min)
-  expect(fast?.isBeforeReset).toBe(true)
-  expect(burnText(fast!)).toBe('−90%/h · runs out in    23m, before the reset')
-  // the duration is the countdown's 6 cells, days included
-  expect(burnText({ perHour: 3, etaMs: (1440 + 6 * 60) * min, isBeforeReset: false })).toBe('−3%/h · runs out in  1d06h: lasts to the reset')
-  // under 10 minutes of samples, a flat or falling reading, a reset unknown or gone, a spent window: no line
-  expect(burnRate([{ at: 15 * min, used: 35 }], now, 38, now + 134 * min)).toBeUndefined()
-  expect(burnRate(samples, now, 35, now + 134 * min)).toBeUndefined()
-  expect(burnRate(samples, now, 30, now + 134 * min)).toBeUndefined()
-  expect(burnRate(samples, now, 38, undefined)).toBeUndefined()
-  expect(burnRate(samples, now, 38, now - 1)).toBeUndefined()
-  expect(burnRate(samples, now, 100, now + 134 * min)).toBeUndefined()
-  expect(burnRate([], now, 38, now + 134 * min)).toBeUndefined()
-  // the last sample older than 30 minutes counts as the reading at the window's start: 28 points in 30 min = 56 %/h
-  expect(burnRate([{ at: 0, used: 10 }], 40 * min, 38, 40 * min + 134 * min)?.perHour).toBe(56)
-  // ... but an older one before it does not, and a flat value says nothing
-  expect(burnRate([{ at: 0, used: 1 }, { at: 5 * min, used: 10 }], 40 * min, 38, 40 * min + 134 * min)?.perHour).toBe(56)
-  expect(burnRate([{ at: 0, used: 38 }], 40 * min, 38, 40 * min + 134 * min)).toBeUndefined()
-  // a rate that rounds to zero is not shown
-  expect(burnRate([{ at: 0, used: 38 }], 30 * min, 38.1, 30 * min + 134 * min)).toBeUndefined()
-})
-
-test('a reading from before the current 5h window opened is never the start of the burn rate', () => {
-  const min = 60000
-  const now = 400 * min
-  const resetsAt = now + 100 * min // the window opened at minute 200
-  expect(burnRate([{ at: 100 * min, used: 5 }], now, 38, resetsAt)).toBeUndefined()
-  // the same reading inside the window counts: 33 points in 30 minutes = 66 %/h
-  expect(burnRate([{ at: 250 * min, used: 5 }], now, 38, resetsAt)?.perHour).toBe(66)
-  // an older one before a newer one is not the anchor either
-  expect(burnRate([{ at: 100 * min, used: 1 }, { at: 250 * min, used: 5 }], now, 38, resetsAt)?.perHour).toBe(66)
-  // recorded: the old reading is dropped, so no anchor is kept across the reset
-  expect(recordBurnSample([{ at: 100 * min, used: 5 }], now, 38, resetsAt)).toEqual([{ at: now, used: 38 }])
-  expect(recordBurnSample([{ at: 250 * min, used: 5 }], now, 38, resetsAt)).toEqual([{ at: now - 30 * min, used: 5 }, { at: now, used: 38 }])
-  // no reset time known: no bound
-  expect(recordBurnSample([{ at: 100 * min, used: 5 }], now, 38)).toEqual([{ at: now - 30 * min, used: 5 }, { at: now, used: 38 }])
 })
 
 test('parseReset reads the engine reset text; absent or not a date is undefined', () => {

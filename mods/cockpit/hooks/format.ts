@@ -6,7 +6,6 @@ import type { SessionContextBreakdown } from 'claude-code'
 import type {
   CockpitAgent,
   CockpitAlm,
-  CockpitBurnSample,
   CockpitChange,
   CockpitClaudeState,
   CockpitConsumer,
@@ -29,6 +28,7 @@ import type {
   CockpitToolCall,
   CockpitUsage,
 } from '../types'
+import { t } from './strings'
 
 export const COLORS = {
   text: '#d6d8dc',
@@ -320,18 +320,19 @@ export const ctxColor = (pct: number): string =>
 export const cacheColor = (pct: number): string => (pct >= 80 ? COLORS.green : pct >= 50 ? COLORS.amber : COLORS.red)
 
 const STATE_LOOK = {
-  idle: { icon: '○', text: 'ready', color: COLORS.dim },
-  working: { icon: '◐', text: 'working', color: COLORS.blue },
-  thinking: { icon: '◌', text: 'thinking', color: COLORS.lavender },
-  tool: { icon: '▸', text: '', color: COLORS.green },
-  waiting: { icon: '◆', text: 'waiting', color: COLORS.yellow },
+  idle: { icon: '○', color: COLORS.dim },
+  working: { icon: '◐', color: COLORS.blue },
+  thinking: { icon: '◌', color: COLORS.lavender },
+  tool: { icon: '▸', color: COLORS.green },
+  waiting: { icon: '◆', color: COLORS.yellow },
 } as const
 const STATE_TOOL_MAX = 14
 
 /** The header's Claude state: an icon and a word (the tool's own name while one runs, cut to fit); no state yet reads as idle. */
 export function claudeStateSpans(state: CockpitClaudeState | undefined): Span[] {
-  const look = STATE_LOOK[state?.kind ?? 'idle']
-  const text = state?.kind === 'tool' && state.tool ? truncEnd(state.tool, STATE_TOOL_MAX) : look.text
+  const kind = state?.kind ?? 'idle'
+  const look = STATE_LOOK[kind]
+  const text = state?.kind === 'tool' && state.tool ? truncEnd(state.tool, STATE_TOOL_MAX) : t().state[kind]
   return [{ t: `${look.icon} ${text}`, c: look.color }]
 }
 
@@ -579,18 +580,14 @@ export const shortDate = (iso: string): string => `${iso.slice(8, 10)}/${iso.sli
 
 /** The `wl` / `worklog:` text of the footer for one kind of day. */
 export function worklogLabel(kind: 'pending' | 'underTarget', dates: readonly string[]): string {
-  const what = kind === 'pending' ? 'to log' : 'under target'
-  return `worklog: ${dates.length}d ${what} (${dates.map(shortDate).join(', ')})`
+  const { worklog } = t()
+  return worklog.label(dates.length, worklog[kind], dates.map(shortDate).join(', '))
 }
 
 /** A percentage in a 4-cell column (`  7%`, ` 87%`, `100%`) so one-, two- and three-digit values line up. */
 export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
 
-// ── Burn rate of the 5h window ───────────────────────────────────────────────
-
-const BURN_WINDOW_MS = 30 * 60_000
-const BURN_MIN_SPAN_MS = 10 * 60_000
-const FIVE_HOURS_MS = 5 * 3_600_000
+// ── Rate limits ──────────────────────────────────────────────────────────────
 
 /**
  * The status line's rate-limit cache (`.statusline-rate-limits.json`, `resets_at` in seconds) as the engine's limits, reconciled the way the
@@ -619,65 +616,6 @@ export function parseCtx(value: unknown): CockpitSnapshot['lastCtx'] {
 export function parseReset(resetsAt: string | undefined): number | undefined {
   const ms = resetsAt ? Date.parse(resetsAt) : Number.NaN
   return Number.isNaN(ms) ? undefined : ms
-}
-
-/** The readings taken inside the current 5h window, which opened five hours before its reset: an older one belongs to the last window. */
-const sinceWindowOpen = (samples: readonly CockpitBurnSample[], resetsAtMs: number | undefined): CockpitBurnSample[] =>
-  resetsAtMs === undefined ? [...samples] : samples.filter(s => s.at >= resetsAtMs - FIVE_HOURS_MS)
-
-/**
- * Appends the 5h usage reading `used` taken at `now`, keeping the last 30 minutes. A reading equal to the last one
- * adds nothing (the rate counts from the oldest reading to the present), so the reading that fell out of the window
- * is what the credits stood at when it opened: it stays as the first sample, clamped to the window's start. A lower
- * reading means the window reset: start over. Given the window's reset time, a reading older than the window's opening
- * is dropped: the credits were not counting from it.
- */
-export function recordBurnSample(
-  samples: readonly CockpitBurnSample[] | undefined,
-  now: number,
-  used: number | undefined,
-  resetsAtMs?: number,
-): CockpitBurnSample[] {
-  const start = now - BURN_WINDOW_MS
-  const current = sinceWindowOpen(samples ?? [], resetsAtMs)
-  const inWindow = current.filter(s => s.at >= start)
-  const before = current.filter(s => s.at < start).at(-1)
-  const kept = before && inWindow[0]?.at !== start ? [{ at: start, used: before.used }, ...inWindow] : inWindow
-  if (used === undefined) return kept
-  const last = kept.at(-1)
-  if (last && used < last.used) return [{ at: now, used }]
-  return last && used === last.used ? kept : [...kept, { at: now, used }]
-}
-
-/**
- * How fast the 5h credits fall, from the reading at the start of the last 30 minutes (the last one before it, when
- * none lies on it: the value held since) to `used` now: the rate in points
- * per hour, when they run out, and whether that is before the reset. A reading from before the current window opened
- * (five hours before the reset) is never the start. Undefined with under 10 minutes of readings,
- * a rate that rounds to under 1 %/h, a window already spent or no reset ahead.
- */
-export function burnRate(
-  samples: readonly CockpitBurnSample[],
-  now: number,
-  used: number,
-  resetsAtMs: number | undefined,
-): { perHour: number; etaMs: number; isBeforeReset: boolean } | undefined {
-  const start = now - BURN_WINDOW_MS
-  const current = sinceWindowOpen(samples, resetsAtMs)
-  const before = current.filter(s => s.at < start).at(-1)
-  const oldest = before ? { at: start, used: before.used } : current.find(s => s.at >= start)
-  if (!oldest || resetsAtMs === undefined || resetsAtMs <= now || used >= 100) return undefined
-  const span = now - oldest.at
-  if (span < BURN_MIN_SPAN_MS) return undefined
-  const perHour = ((used - oldest.used) * 3_600_000) / span
-  if (Math.round(perHour) < 1) return undefined
-  const etaMs = ((100 - used) * 3_600_000) / perHour
-  return { perHour, etaMs, isBeforeReset: etaMs < resetsAtMs - now }
-}
-
-/** `−9%/h · runs out in  6h53m: lasts to the reset`, or `…, before the reset` (the time in `fixedSpan`'s 6 cells). */
-export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boolean }): string {
-  return `\u2212${Math.round(b.perHour)}%/h \u00b7 runs out in ${fixedSpan(b.etaMs)}${b.isBeforeReset ? ', before the reset' : ': lasts to the reset'}`
 }
 
 // ── ALM target of the working directory ──────────────────────────────────────
@@ -723,7 +661,7 @@ function projectOf(entry: Record<string, unknown>, firstSubfolder: string): stri
 
 /** The target alone, `<org> / <project> · <identity>`, each part only when known (empty when none is); `unmapped` when no root matches. */
 export function almText(alm: CockpitAlm): string {
-  if (!alm.isMapped) return 'unmapped'
+  if (!alm.isMapped) return t().unmapped
   const target = [alm.org, alm.project].filter(Boolean).join(' / ')
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
@@ -1426,11 +1364,11 @@ export type CockpitAlert = { key: string; text: string }
 export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
   const out: CockpitAlert[] = []
   const pct = s.ctx.percent
-  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: `context at ${Math.round(pct)}%` })
+  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: t().alertContext(Math.round(pct)) })
   const five = s.rateLimits.find(r => r.kind === 'five_hour')
-  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: `credits 5h: ${Math.max(0, Math.round(100 - five.percentUsed))}% left` })
-  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: `subagent ${a.type} failed` })
-  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: `PR #${pr.number}: checks failing` })
+  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: t().alertCredits(Math.max(0, Math.round(100 - five.percentUsed))) })
+  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: t().alertSubagent(a.type) })
+  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: t().alertChecks(pr.number) })
   return out
 }
 

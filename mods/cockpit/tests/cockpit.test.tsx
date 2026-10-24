@@ -903,49 +903,6 @@ test('percentages are right-aligned with three digits too: 100% and 87% start th
   expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
 })
 
-test('burn rate: under the 5h row, green when the credits last to the reset, red when they run out before it', async ($, on) => {
-  const clock = world(on)
-  on('session.measure', (_, e) => ({ changed: e.changed }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /runs out/.test(r))).toBe(false) // one reading: no rate yet
-  await clock.advance(15 * MIN)
-  const measure = (used: number) =>
-    $.session.measure({
-      context: { window: 1_000_000, tokens: 260_000, percent: 26 },
-      rateLimits: [
-        { kind: 'five_hour', percentUsed: used, resetsAt: iso(2 * 60 * MIN) },
-        { kind: 'seven_day', percentUsed: 59, resetsAt: iso(0.46 * 604800 * 1000) },
-      ],
-      cost: { usd: 5.2 },
-      changed: ['rateLimits'],
-    })
-
-  await measure(41) // 3 points in 15 min = 12 %/h; 59 left lasts 4h55, the reset is in 1h45
-  let { root, rows } = await paneRows($)
-  const five = rows.findIndex(r => /59% 5h/.test(r))
-  expect(rows[five + 1]).toBe('−12%/h · runs out in  4h55m: lasts to the reset')
-  expect(colorOf(root, /runs out/)).toBe(GREEN)
-
-  await measure(50) // 12 points in 15 min = 48 %/h; 50 left lasts 1h02, before the reset
-  ;({ root, rows } = await paneRows($))
-  expect(rows[rows.findIndex(r => /50% 5h/.test(r)) + 1]).toBe('−48%/h · runs out in  1h02m, before the reset')
-  expect(colorOf(root, /runs out/)).toBe(RED)
-})
-
-test('burn rate: no line with under 10 minutes of readings', async ($, on) => {
-  const clock = world(on)
-  on('session.measure', (_, e) => ({ changed: e.changed }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await clock.advance(5 * MIN)
-  await $.session.measure({
-    context: { window: 1_000_000, tokens: 260_000, percent: 26 },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 60, resetsAt: iso(2 * 60 * MIN) }],
-    cost: { usd: 5.2 },
-    changed: ['rateLimits'],
-  })
-  expect((await paneRows($)).rows.some(r => /runs out/.test(r))).toBe(false)
-})
-
 test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn and an empty one do not set it', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
@@ -966,7 +923,8 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
         model: 'm',
       },
     })
-  const title = async () => (await paneRows($)).rows.find(r => /^cache/.test(r))
+  // the title row reads as its text joined with the right side: CONTEXT, then the cache share
+  const title = async () => (await paneRows($)).rows.find(r => /^CONTEXT.*cache/.test(r))?.slice('CONTEXT'.length)
 
   expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
@@ -1533,20 +1491,11 @@ test('buttons row: the very last row of every tab', async ($, on) => {
 
 // ── Phase 1 follow-ups ──
 
-test('a session start (/clear) forgets the cache share and the 5h readings of the burn rate', async ($, on) => {
+test('a session start (/clear) forgets the cache share', async ($, on) => {
   let id = 's-1'
-  const options: World = { sessionId: () => id }
-  const clock = world(on, options)
-  on('session.measure', (_, e) => ({ changed: e.changed }))
+  world(on, { sessionId: () => id })
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await clock.advance(15 * MIN)
-  await $.session.measure({
-    context: { window: 1_000_000, tokens: 260_000, percent: 26 },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 41, resetsAt: iso(2 * 60 * MIN) }],
-    cost: { usd: 5.2 },
-    changed: ['rateLimits'],
-  })
   await $.turn.complete({
     answer: '',
     durationMs: 1,
@@ -1556,16 +1505,12 @@ test('a session start (/clear) forgets the cache share and the 5h readings of th
     usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
   })
   const before = (await paneRows($)).rows
-  expect(before.some(r => /runs out/.test(r))).toBe(true)
-  expect(before.some(r => /^cache {2}94%/.test(r))).toBe(true)
+  expect(before.some(r => /^CONTEXT.*cache {2}94%/.test(r))).toBe(true)
 
   id = 's-2'
-  // The new session reads the same 41% window: without the reset the old samples would still give a rate.
-  options.rateLimits = [{ kind: 'five_hour', percentUsed: 41, resetsAt: iso(2 * 60 * MIN) }]
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const after = (await paneRows($)).rows
-  expect(after.some(r => /runs out/.test(r))).toBe(false)
-  expect(after.some(r => /^cache/.test(r))).toBe(false)
+  expect(after.some(r => /cache/.test(r))).toBe(false)
 })
 
 // ── Subagents: history and open an agent ──
@@ -1877,26 +1822,6 @@ test('pressing an agent row, live or in HISTORY, puts that agent in the main vie
 })
 
 // ── Phase 2 follow-ups ──
-
-test('burn rate: a reading from before the current 5h window opened is not carried across the reset', async ($, on) => {
-  const clock = world(on) // 38% at start, in a window that opened before it
-  on('session.measure', (_, e) => ({ changed: e.changed }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const measure = (used: number, resetsAt: string) =>
-    $.session.measure({
-      context: { window: 1_000_000, tokens: 260_000, percent: 26 },
-      rateLimits: [{ kind: 'five_hour', percentUsed: used, resetsAt }],
-      cost: { usd: 5.2 },
-      changed: ['rateLimits'],
-    })
-  await clock.advance(15 * MIN)
-  await measure(41, iso(2 * 60 * MIN)) // the same window: 3 points in 15 minutes
-  expect((await paneRows($)).rows.some(r => /runs out/.test(r))).toBe(true)
-
-  await clock.advance(75 * MIN)
-  await measure(45, iso(90 * MIN + 5 * 60 * MIN)) // a new window that opened just now: the earlier readings are not its start
-  expect((await paneRows($)).rows.some(r => /runs out/.test(r))).toBe(false)
-})
 
 test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   world(on, { workspacesRaw: '{ "roots": [ { "path": "/work", "org": ' })
@@ -4786,4 +4711,118 @@ test('System: a flat window draws the lowest bars, never noise', async ($, on) =
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await sistemaRows($, m, [30, 30, 30].map(cpu => sysLine({ cpu })))
   expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +▁▁▁ max 30% +30%$/)
+})
+
+// ── Phase 8: the v2 header and the pane's two languages ──
+
+const IT_FILE = { 'cockpit.json': '{"lang":"it"}' }
+
+test('header: CONTEXT and CREDITS each have an empty row before and after the title, the cache share and the week pace right of it, and no burn line', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
+  })
+  const { rows } = await paneRows($, 58)
+  const at = (re: RegExp) => rows.findIndex(r => re.test(r))
+  const context = at(/^CONTEXT/)
+  const credits = at(/^CREDITS/)
+  expect(rows[context]).toBe('CONTEXTcache  94%')
+  expect(rows[context - 1]).toBe(' ')
+  expect(rows[context + 1]).toBe(' ')
+  expect(rows[context + 2]).toMatch(/^[▰▱]+ 25% 248K\/1M$/)
+  expect(rows[credits]).toBe('CREDITSvs expected 7d  \u22125%')
+  expect(rows[credits - 1]).toBe(' ')
+  expect(rows[credits + 1]).toBe(' ')
+  expect(rows[credits + 2]).toMatch(/ 62% 5h/)
+  expect(rows[credits + 3]).toBe(' ') // the two windows are told apart by an empty row
+  expect(rows[credits + 4]).toMatch(/ 41% 7d/)
+  expect(rows.some(r => /runs out/.test(r))).toBe(false)
+})
+
+
+/** What each language draws on a 58-column pane with one day of worklog pending: the tab labels, the buttons row, the header titles and a title or empty state of every tab. */
+const LANGUAGES = [
+  {
+    name: 'English',
+    files: {},
+    tabs: ['Subagents', 'Context', 'Work ●', 'System'],
+    buttons: { compact: 'compact', worklog: 'log hours' },
+    header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], system: [/^SYSTEM$/, /^reading…$/] },
+  },
+  {
+    name: 'Italian',
+    files: IT_FILE,
+    tabs: ['Subagenti', 'Contesto', 'Lavoro ●', 'Sistema'],
+    buttons: { compact: 'compatta', worklog: 'segna ore' },
+    header: [/^CONTESTO/, /^CREDITI RESIDUI/, /vs atteso 7d/],
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], system: [/^SISTEMA$/, /^lettura…$/] },
+  },
+]
+
+for (const language of LANGUAGES) {
+  test(`${language.name}: the tabs, buttons, header and every tab's titles at 58 columns`, async ($, on) => {
+    world(on, { files: language.files, hasWorklog: true })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+    // the whole tab bar fits one row: the long labels, not the short ones
+    const { labels, cells } = await tabsAt($, 58)
+    expect(labels).toEqual(language.tabs)
+    expect(cells).toBeLessThanOrEqual(56)
+    const ui = await mountPane($, 58)
+    expect((await ui.find({ key: 'bar:compact' }))?.text).toBe(language.buttons.compact)
+    expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe(language.buttons.worklog)
+    await ui.unmount()
+
+    for (const [tab, patterns] of Object.entries(language.byTab)) {
+      const { rows } = await paneRows($, 58, tab)
+      for (const re of [...language.header, ...patterns]) expect(rows.some(r => re.test(r))).toBe(true)
+    }
+  })
+}
+
+test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {
+  const options: World = { files: IT_FILE }
+  world(on, options)
+  const tabs = async () => (await tabsAt($, 58)).labels
+  const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+
+  await start()
+  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
+
+  options.files = { 'cockpit.json': '{"lang":"fr"}' }
+  await start()
+  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+
+  options.files = IT_FILE
+  await start()
+  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
+  options.files = {}
+  options.unreadable = ['cockpit.json']
+  await start()
+  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+
+  options.files = IT_FILE
+  options.unreadable = undefined
+  await start()
+  expect(await tabs()).toEqual(['Subagenti', 'Contesto', 'Lavoro', 'Sistema'])
+  options.files = { 'cockpit.json': '{ "lang": ' }
+  await start()
+  expect(await tabs()).toEqual(['Subagents', 'Context', 'Work', 'System'])
+})
+
+test('language: the toasts are in the language of the pane', async ($, on) => {
+  const toasts: string[] = []
+  world(on, { toasts, files: IT_FILE })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 850_000, percent: 85 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  expect(toasts).toEqual(['contesto al 85%'])
 })

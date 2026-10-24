@@ -49,11 +49,9 @@ import {
   parseNumstat,
   parsePerimeter,
   parseRateCache,
-  parseReset,
   parseSavedPrs,
   parseSysLine,
   parseWorktree,
-  recordBurnSample,
   recordCall,
   recordCtxSample,
   recordRound,
@@ -76,6 +74,7 @@ import {
 } from './format'
 import type { WorklogSnapshot } from './format'
 import { DIFF_PANE, INITIAL, PANE } from './state'
+import { langOf, setLang, t } from './strings'
 import type { DiffActions, PaneActions } from './view'
 import { PANE_MAX_COLUMNS, agentCounts, diffView, paneView, taskCounts } from './view'
 
@@ -131,12 +130,6 @@ async function raiseAlerts($: EngineInterface): Promise<void> {
   } catch {
     // an alert that cannot be raised is lost; observing must never break the change
   }
-}
-
-/** The 5h samples after a reading of the rate limits the engine reported at `now`; the window's usage and reset time are absent off a subscription. */
-function withBurnSample(samples: CockpitSnapshot['fiveHourSamples'], now: number, limits: CockpitSnapshot['rateLimits']) {
-  const w = limits.find(r => r.kind === 'five_hour')
-  return recordBurnSample(samples, now, w?.percentUsed, parseReset(w?.resetsAt))
 }
 
 /**
@@ -342,7 +335,7 @@ async function showDiff($: EngineInterface, change: CockpitChange): Promise<void
     const hunks = await readHunks($, git.root, change)
     const { text, isCut } = capDiff(hunks ?? '')
     await patch($, s => ({ ...s, diff: { file: change.path, text, ...(isCut && { isCut }), ...(hunks === undefined && { isUnreadable: true }) } }))
-    await $.ui.open({ id: DIFF_PANE, title: `diff · ${change.path}`, closeOnEscape: true })
+    await $.ui.open({ id: DIFF_PANE, title: t().diffTitle(change.path), closeOnEscape: true })
   } catch {
     // the snapshot or the pane failed: the pane stays as it was
   }
@@ -393,6 +386,17 @@ async function configDir($: EngineInterface): Promise<string | undefined> {
   if (explicit) return explicit
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   return home ? `${home}/.claude` : undefined
+}
+
+/** The language of the pane's texts: the `lang` of `<config dir>/cockpit.json`; a missing or unreadable file is English. */
+async function refreshLang($: EngineInterface): Promise<void> {
+  try {
+    const dir = await configDir($)
+    const text = dir ? await $.fs.read(`${dir}/cockpit.json`) : undefined
+    setLang(langOf(typeof text === 'string' ? text : ''))
+  } catch {
+    setLang('en')
+  }
 }
 
 // ── The statusline's state file ──
@@ -574,7 +578,6 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   contextSeq: undefined,
   contextStatic: undefined,
   skillsUsed: undefined,
-  fiveHourSamples: [],
   workflow: undefined,
   workflowRun: undefined,
   system: undefined,
@@ -751,7 +754,6 @@ async function refreshUsage($: EngineInterface): Promise<void> {
     const now = await $.clock.now()
     await patch($, s => ({
       ...s,
-      fiveHourSamples: withBurnSample(s.fiveHourSamples, now, u.rateLimits),
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
       cost: { ...s.cost, usd: u.cost?.usd },
@@ -1085,6 +1087,8 @@ async function open($: EngineInterface) {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // First: the command registered below is described in the language read here.
+    await refreshLang($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
@@ -1107,7 +1111,7 @@ export const register: Register = on => {
     await refreshDoneClaims($)
     await writeState($, true)
 
-    await $.command.register({ name: 'cockpit', description: 'Opens the cockpit pane' })
+    await $.command.register({ name: 'cockpit', description: t().commandDescription })
     $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
     $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
     $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
@@ -1158,7 +1162,7 @@ export const register: Register = on => {
   // `/cockpit` opens the pane; a command-initiated open is placed at any width.
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)
-    return { text: opened.isPlaced ? 'cockpit open' : `cockpit waiting: ${opened.reason}` }
+    return { text: opened.isPlaced ? t().commandOpen : t().commandWaiting(opened.reason) }
   })
 
   // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
@@ -1185,7 +1189,6 @@ export const register: Register = on => {
     const now = await $.clock.now()
     await patch($, s => ({
       ...s,
-      fiveHourSamples: withBurnSample(s.fiveHourSamples, now, e.rateLimits),
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
       lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
