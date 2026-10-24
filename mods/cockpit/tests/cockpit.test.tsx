@@ -1,9 +1,10 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { ICONS, TABS, spanText, spanWidth, textCells } from '../hooks/format'
+import { ICONS, TABS, TAB_ICONS, spanText, spanWidth, textCells } from '../hooks/format'
 import { setLang } from '../hooks/strings'
-import { subagentDetails, toolCallSpans } from '../hooks/view'
+import { categorySpans, subagentDetails, toolCallSpans } from '../hooks/view'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
+import type { CockpitTab } from '../types'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
 /** An ssh `origin` URL of GitHub (joined, so the text is not read as an e-mail address). */
@@ -21,11 +22,21 @@ const PANE = {
 const rowTexts = (root: unknown): string[] => {
   const text = (el: unknown): string => {
     if (typeof el === 'string') return el
-    const o = el as { text?: string; children?: unknown[] } | null
-    return o?.text ?? (o?.children ?? []).map(text).join('')
+    const o = el as { text?: string; props?: { display?: string }; children?: unknown[] } | null
+    if (o?.props?.display === 'none') return ''
+    // the System tab's numbers are items of a wrapping Box with a gap of two cells
+    const gap = (o as { props?: { flexWrap?: string; columnGap?: number } } | null)?.props
+    return o?.text ?? (o?.children ?? []).map(text).join(gap?.flexWrap === 'wrap' && gap.columnGap === 2 ? '  ' : '')
   }
   return ((root as { children?: unknown[] }).children ?? []).map(text)
 }
+
+/** The share of the session's tokens each Subagents row ends with, as `12% token`, in the order the rows draw them. */
+const shares = (rows: string[]) =>
+  rows.flatMap(r => {
+    const m = /(<?\d+%) token {2}\S+$/.exec(r)
+    return m ? [`${m[1]} token`] : []
+  })
 
 /** The left margin of the drawn root: the column its content starts at. */
 const marginOf = (root: unknown): number => (root as { props?: { marginLeft?: number } }).props?.marginLeft ?? 0
@@ -168,6 +179,17 @@ type World = {
   fills?: { text: string; mode?: string }[]
   /** True: the prompt box refuses every `$.prompt.fill` (a dialog holds the keys). */
   fillRefused?: boolean
+  /** What `$.prompt.read()` answers as the draft in the prompt box; absent, an empty box. */
+  promptText?: string
+  /** True: `$.prompt.read()` fails. */
+  promptReadFails?: boolean
+  /** The commit `git merge-base HEAD <default branch>` answers; absent, there is none (the branch has no default branch to count from). */
+  mergeBase?: string
+  /** The commits `git log <base>..HEAD` lists, newest first, and how many `git rev-list --count` says there are (the list's length when not given). */
+  branchCommits?: { hash: string; subject: string }[]
+  commitCount?: number
+  /** Receives the arguments (joined by spaces, after the `-C <dir> --no-optional-locks` prefix) of every git call that reads the Work tab. */
+  repoCalls?: string[]
 }
 
 /** The harness reports a path in the host's own spelling (backslashes on Windows): compared by its tail. */
@@ -189,7 +211,6 @@ function world(on: On, options: World = {}) {
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
   on('session.usage', async (_, e) => {
     options.usageCalls?.push(e.breakdown)
-    if (e.breakdown !== undefined) await options.holdUsage?.(e.breakdown)
     const breakdown: SessionContextBreakdown = {
       categories: [],
       totalTokens: 248_000,
@@ -208,6 +229,8 @@ function world(on: On, options: World = {}) {
       ...options.breakdown,
       ...(e.breakdown === 'full' && options.exactBreakdown),
     }
+    // the answer is fixed when the read starts: a held read answers with what the world held then
+    if (e.breakdown !== undefined) await options.holdUsage?.(e.breakdown)
     return {
       value: {
         startedAt: NOW,
@@ -242,6 +265,13 @@ function world(on: On, options: World = {}) {
       return answer(JSON.stringify(options.azPr ?? []))
     }
     if (options.notRepo) return answer('', 128)
+    if (e.argv.includes('merge-base')) return options.mergeBase === undefined ? answer('', 1) : answer(`${options.mergeBase}
+`)
+    if (e.argv.includes('rev-list')) return answer(`${options.commitCount ?? options.branchCommits?.length ?? 0}
+`)
+    if (e.argv.includes('log')) return answer((options.branchCommits ?? []).map(c => `${c.hash}	${c.subject}
+`).join(''))
+    if (e.argv.includes('diff') || e.argv.includes('ls-files')) options.repoCalls?.push(e.argv.slice(4).join(' '))
     if (e.argv.includes('--numstat')) return answer((options.numstat ?? []).map(([a, d, p]) => `${a}\t${d}\t${p}\0`).join(''))
     if (e.argv.includes('worktree')) return answer(options.worktrees ?? '')
     if (e.argv.includes('diff') && !e.argv.includes('--name-only')) return answer(options.fileDiffs?.[e.argv.at(-1) ?? ''] ?? '')
@@ -321,6 +351,10 @@ function world(on: On, options: World = {}) {
     options.toasts?.push(e.text)
     return { value: undefined }
   })
+  on('prompt.read', () => {
+    if (options.promptReadFails) throw new Error('no prompt box')
+    return { value: { text: options.promptText ?? '', cursor: (options.promptText ?? '').length } }
+  })
   on('prompt.fill', (_, e) => {
     options.fills?.push({ text: e.text, mode: e.mode })
     return { isFilled: options.fillRefused !== true }
@@ -388,6 +422,13 @@ test('the pane shows header, context, credits and an agent that finished before 
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('\u2713 code-reviewer')
     expect(await text(/son 5\.5/)).toContain('son 5.5')
+    // the four counters are one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
+    const toggle = (await ui.find({ key: 'usage:a1' }))?.text ?? ''
+    expect(toggle).toMatch(/^ +[▸▾] tokens$/)
+    if (toggle.includes('▸')) {
+      expect(await text(/^ *in 30k/)).toBeUndefined()
+      await ui.press({ key: 'usage:a1' })
+    }
     expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')
     expect(await text(/asked/)).toContain('asked fable \u2192 sonnet')
     expect(await text(/SUBAGENTS/)).toBe('SUBAGENTS \u00b7 0 running')
@@ -400,7 +441,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'tab:notes', 'bar:compact', 'bar:worklog'])
+  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:insights', 'tab:system', 'tab:notes', 'bar:compact', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -938,28 +979,31 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
   expect(await title()).toBe('cache   5%')
 })
 
-/** The row under the folder row: where the ALM line sits. */
-const belowFolder = (rows: string[]): string | undefined => rows[rows.findIndex(r => /example-repo/.test(r)) + 1]
+/** The ALM line of the Work tab, where it sits since the header lost it. */
+const almRow = (rows: string[]): string | undefined => rows.find(r => /^ALM/.test(r))
+const workTab = async ($: Engine, bodyColumns = 50) => paneRows($, bodyColumns, 'work')
 
-test('ALM line under the folder row: org / project and identity, resolved for the cwd', async ($, on) => {
+test('ALM line at the top of the Work tab, not in the header: org / project and identity, resolved for the cwd', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { rows } = await paneRows($)
-  expect(belowFolder(rows)).toBe('ALM org-a / Alpha · id-a')
+  expect(almRow((await paneRows($)).rows)).toBeUndefined()
+  const { rows } = await workTab($)
+  expect(almRow(rows)).toBe('ALM org-a / Alpha · id-a')
+  expect(rows.findIndex(r => /^ALM/.test(r))).toBeLessThan(rows.findIndex(r => /^BRANCH/.test(r)))
 })
 
 test('ALM line: a mapped root with no org, project or identity draws no line', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/work', platform: 'github' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { rows } = await paneRows($)
-  expect(rows.some(r => /^ALM/.test(r))).toBe(false)
+  const { rows } = await workTab($)
+  expect(almRow(rows)).toBeUndefined()
 })
 
 test('ALM line is cut in the middle to the pane width', async ($, on) => {
   const project = 'A-very-long-project-name-that-cannot-fit-in-a-narrow-pane'
   world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project, identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const row = (await paneRows($, 40)).rows.find(r => /^ALM/.test(r))
+  const row = almRow((await workTab($, 40)).rows)
   expect([...(row ?? '')].length).toBe(38)
   expect(row).toMatch(/^ALM org-a.*….*id-a$/)
 })
@@ -968,37 +1012,37 @@ test('a workspaces.json that goes missing clears the ALM line; a malformed one t
   const options: World = { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
   const clock = world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspacesFail = true
   await clock.advance(30_000)
-  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  expect(almRow((await workTab($)).rows)).toBeUndefined()
   options.workspacesFail = false
   await clock.advance(30_000)
-  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspaces = 'not a map' // valid JSON, no roots
   await clock.advance(30_000)
-  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  expect(almRow((await workTab($)).rows)).toBeUndefined()
   // text that is not JSON at all: cut in the middle, as a half-written file is
   options.workspaces = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
   await clock.advance(30_000)
-  expect(belowFolder((await paneRows($)).rows)).toBe('ALM org-a / Alpha · id-a')
+  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
   options.workspacesRaw = '{ "roots": [ { "path": "/work", "org": '
   await clock.advance(30_000)
-  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  expect(almRow((await workTab($)).rows)).toBeUndefined()
 })
 
 test('ALM line reads ALM unmapped in red when no root contains the cwd, and is absent without a map', async ($, on) => {
   world(on, { workspaces: { roots: [{ path: '/elsewhere', platform: 'github', org: 'o' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { root, rows } = await paneRows($)
-  expect(belowFolder(rows)).toBe('ALM unmapped')
+  const { root, rows } = await workTab($)
+  expect(almRow(rows)).toBe('ALM unmapped')
   expect(colorOf(root, /^ALM unmapped$/)).toBe(RED)
 })
 
 test('no workspaces map: no ALM line at all', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
+  expect(almRow((await workTab($)).rows)).toBeUndefined()
 })
 
 // ── Tabs ──
@@ -1022,12 +1066,11 @@ function spawns(on: On) {
   on('agent.spawn', () => ({ model: 'claude-sonnet-5-5', agentId: `a${++n}` }))
 }
 
-test('tab bar: five buttons, Subagents selected by default; a press on Work draws the Work view', async ($, on) => {
+test('tab bar: six buttons, Subagents selected by default; a press on Work draws the Work view', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  // the five bare names need 55 cells: the 56 of a 58-column pane's content hold them
   expect((await tabs()).map(b => b.text)).toEqual(LONG_TABS)
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:agents'])
@@ -1052,14 +1095,13 @@ test('tab labels: Subagents counts the running agents, Work carries a dot when t
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
   const ui = await mountPane($, 80)
-  // the count and the dot together need 59 cells, more than a 60-column pane holds: the short labels
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Sub 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Wrk ●')
-  expect((await ui.find({ key: 'tab:system' }))?.text).toBe('Sys')
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe(`${TAB_ICONS.agents} Subagents 2`)
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe(`${TAB_ICONS.work} ●`)
+  expect((await ui.find({ key: 'tab:system' }))?.text).toBe(TAB_ICONS.system)
   await ui.unmount()
 })
 
-test('tab labels without agents or warnings are the bare names', async ($, on) => {
+test('tab labels without agents or warnings carry no badge', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
@@ -1596,22 +1638,20 @@ test('Subagents: an agent the engine lists as killed or failed ends with ✗, on
   await ui.unmount()
 })
 
-test('HISTORY lists at most ten rows, then … +n', async ($, on) => {
+test('HISTORY lists every entry, no cap and no … +n', async ($, on) => {
   const clock = world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let n = 1; n <= 12; n++) await spawnAgent($, `agent-${n}`)
-  for (let n = 1; n <= 12; n++) await finishAgent($, `a${n}`)
+  for (let n = 1; n <= 25; n++) await spawnAgent($, `agent-${n}`)
+  for (let n = 1; n <= 25; n++) await finishAgent($, `a${n}`)
   await clock.advance(135_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 12 ▾')
-  expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(10)
-  const rows = rowTexts(await ui.drawn())
-  // the buttons row closes the pane, under a rule and the spacer
-  expect(rows.at(-4)).toBe('… +2')
+  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 25 ▾')
+  expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(25)
+  expect(rowTexts(await ui.drawn()).some(r => /^… \+\d+$/.test(r))).toBe(false)
   await ui.unmount()
 })
 
@@ -1851,40 +1891,66 @@ const tabsAt = async ($: Engine, columns: number) => {
   return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
 }
 
-const LONG_TABS = ['Subagents', 'Context', 'Work', 'System', 'Notes']
-const SHORT_TABS = ['Sub', 'Ctx', 'Wrk', 'Sys', 'Nts']
+const NAMES_EN: Record<CockpitTab, string> = { agents: 'Subagents', context: 'Context', work: 'Work', insights: 'Insights', system: 'System', notes: 'Notes' }
+const NAMES_IT: Record<CockpitTab, string> = { agents: 'Subagenti', context: 'Contesto', work: 'Lavoro', insights: 'Analisi', system: 'Sistema', notes: 'Note' }
 
-test('tab bar: the whole names appear once the bar fits the content (55 cells bare, 57 with the running count), at any pane from 57 columns up', async ($, on) => {
+/** The tab bar's labels with `selected` named: an icon each, the name beside the selected one's; `extras` adds a badge (` 1`, ` ●`) after a label. */
+const barLabels = (selected: CockpitTab, extras: Partial<Record<CockpitTab, string>> = {}, names: Record<CockpitTab, string> = NAMES_EN) =>
+  TABS.map(tab => `${TAB_ICONS[tab]}${tab === selected ? ` ${names[tab]}` : ''}${extras[tab] ?? ''}`)
+const LONG_TABS = barLabels('agents')
+
+/** The text of the hover tooltips the tab bar draws: the Boxes drawn `display: none` that a hover reveals. */
+const tooltips = (root: unknown): { text: string; isAbsolute: boolean }[] => {
+  const o = root as { type?: string; props?: { display?: string; position?: string }; hover?: { display?: string }; children?: unknown[]; text?: string } | string | null
+  if (typeof o !== 'object' || o === null) return []
+  const text = (el: unknown): string => (typeof el === 'string' ? el : ((el as { text?: string; children?: unknown[] }).text ?? ((el as { children?: unknown[] }).children ?? []).map(text).join('')))
+  if (o.type === 'Box' && o.props?.display === 'none' && o.hover?.display === 'flex') return [{ text: text(o), isAbsolute: o.props.position === 'absolute' }]
+  return (o.children ?? []).flatMap(tooltips)
+}
+
+test('tab bar: an icon per tab and the name on the selected one only, at 40, 58 and 80 columns; the bar wraps rather than overflow', async ($, on) => {
   world(on)
-  spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  // 57 columns leave 55 cells of content: exactly the bare bar
-  for (const columns of [57, 58, 60, 80]) {
-    const bare = await tabsAt($, columns)
-    expect(bare.labels).toEqual(LONG_TABS)
-    expect(bare.cells).toBe(55)
+  for (const columns of [40, 58, 80]) {
+    const { labels, cells, root } = await tabsAt($, columns)
+    expect(labels).toEqual(barLabels('agents'))
+    expect(wrapAround(root, 'tip:agents')).toBe('wrap')
+    // a button never needs more than the content's width; the bar is one row where all of them fit
+    expect(Math.max(...labels.map(l => [...l].length + 4))).toBeLessThanOrEqual(columns - 2)
+    if (columns >= 58) expect(cells).toBeLessThanOrEqual(Math.min(columns, 60) - 2)
   }
-  expect((await tabsAt($, 56)).labels).toEqual(SHORT_TABS)
-  // a running agent adds ` 1`: 57 cells, which a pane of 59 columns or more holds
-  await spawnAgent($, 'code-reviewer')
-  expect((await tabsAt($, 80)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
-  expect((await tabsAt($, 59)).labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
-  expect((await tabsAt($, 58)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk', 'Sys', 'Nts'])
+  const ui = await mountPane($, 58)
+  await ui.press({ key: 'tab:insights' })
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(barLabels('insights'))
+  await ui.unmount()
 })
 
-test('tab bar: the labels are short while the whole bar does not fit the content (count and dot together need 59 cells, more than any pane holds), and the bar wraps rather than overflow', async ($, on) => {
+test('tab bar: a running agent and a worklog day add their badge to the tab, selected or not', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
-  const narrow = await tabsAt($, 30)
-  expect(narrow.labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
-  // the short bar is 43 cells: wider than a 30-column pane's content, so the row wraps
-  expect(narrow.cells).toBeGreaterThan(30 - 2)
-  expect(wrapAround(narrow.root, 'tab:agents')).toBe('wrap')
-  for (const columns of [40, 50]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
-  // the count and the dot together are 59 cells: the 58 of a full pane's content do not hold them
-  for (const columns of [58, 80]) expect((await tabsAt($, columns)).labels).toEqual(['Sub 1', 'Ctx', 'Wrk ●', 'Sys', 'Nts'])
+  for (const columns of [40, 58]) expect((await tabsAt($, columns)).labels).toEqual(barLabels('agents', { agents: ' 1', work: ' ●' }))
+  const ui = await mountPane($, 58)
+  await ui.press({ key: 'tab:work' })
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(barLabels('work', { agents: ' 1', work: ' ●' }))
+  await ui.unmount()
+})
+
+test('tab bar: every tab has a hover tooltip with its name, in both languages, placed inside the pane', async ($, on) => {
+  const options: World = {}
+  world(on, options)
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const names = (await tabsAt($, 58)).root
+    expect(tooltips(names).map(t => t.text)).toEqual(TABS.map(tab => ` ${NAMES_EN[tab]} `))
+    expect(tooltips(names).every(t => t.isAbsolute)).toBe(true)
+    options.files = IT_FILE
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    expect(tooltips((await tabsAt($, 58)).root).map(t => t.text)).toEqual(TABS.map(tab => ` ${NAMES_IT[tab]} `))
+  } finally {
+    setLang('en')
+  }
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -1922,6 +1988,7 @@ test('Work with no tasks, no worklog warnings and no git says nothing to show', 
 
 const PERIMETER = 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n'
 const workRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'work')).rows
+const insightsRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'insights')).rows
 
 test('MAIN: the deliver perimeter with its entries and touched files, and the changed files outside it', async ($, on) => {
   const gitCalls: string[] = []
@@ -2019,98 +2086,16 @@ const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number) =>
 
 const WORKFLOW_TASK = { id: 'b2', type: 'workflow', status: 'running', description: 'x', name: 'impl-review-loop' }
 
-test('workflow: its name and the agents finished out of the agents started, nothing the engine does not expose', async ($, on) => {
-  world(on)
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  on('classic.Stop', () => ({}))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(await workRows($)).not.toContain('WORKFLOW')
-  for (const n of [1, 2, 3]) await spawnWorkflowAgent($, 'wf_1', n)
-  await finishAgent($, 'a1')
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
-  const rows = await workRows($)
-  const i = rows.findIndex(r => r.startsWith('WORKFLOW'))
-  expect(rows[i]).toBe('WORKFLOW · impl-review-loop')
-  expect(rows[i - 1]).toBe(' ')
-  expect(rows[i - 2]).toMatch(/^─+$/)
-  expect(rows[i + 1]).toBe(' ')
-  expect(rows[i + 2]).toBe('agents 1/3')
-  // phase, round and P1/P2 counts are not exposed: not drawn
-  expect(rows.some(r => /fase|round|P1|P2/i.test(r))).toBe(false)
-  // the run's agents are the workflow's, not subagent blocks of their own
-  expect(rows.some(r => /^implementer/.test(r))).toBe(false)
-})
-
-test('workflow: a Stop that reports none ends the block; agents seen without a name still make one', async ($, on) => {
-  world(on)
+test('Work: neither the workflow block nor subagent blocks; the Subagents tab holds the agents', async ($, on) => {
+  world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('classic.Stop', () => ({}))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await spawnWorkflowAgent($, 'wf_1', 1)
-  expect(await workRows($)).toContain('WORKFLOW')
-  expect(await workRows($)).toContain('agents 0/1')
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
-  expect(await workRows($)).toContain('WORKFLOW · impl-review-loop')
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
-  expect((await workRows($)).some(r => r.startsWith('WORKFLOW'))).toBe(false)
-})
-
-test('workflow: a new run starts its own count', async ($, on) => {
-  world(on)
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await spawnWorkflowAgent($, 'wf_1', 1)
-  await finishAgent($, 'a1')
-  await spawnWorkflowAgent($, 'wf_2', 1)
-  expect(await workRows($)).toContain('agents 0/1')
-})
-
-test('subagent blocks: type, the spawn description, the last tool it used and the elapsed time; none for the main loop', async ($, on) => {
-  const clock = world(on, {
-    listed: [
-      { id: 'a1', status: 'running' },
-      { id: 'a2', status: 'running' },
-    ],
-  })
-  spawns(on)
-  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
-  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'Explore', description: 'Find the DTOs' })
-  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
-  await $.tool.call({ tool: 'Bash', command: 'dotnet test', agentId: 'a1' })
-  // the main loop's tool calls belong to no subagent
-  await $.tool.call({ tool: 'Grep', pattern: 'x' })
-  await clock.advance(2 * MIN)
-
-  const rows = await workRows($)
-  const i = rows.findIndex(r => /^code-reviewer/.test(r))
-  expect(rows[i]).toBe('code-reviewer2m00s')
-  expect(rows[i - 1]).toBe(' ')
-  expect(rows[i - 2]).toMatch(/^─+$/)
-  expect(rows[i + 1]).toBe('Review the orders filter')
-  expect(rows[i + 2]).toBe('last tool Bash')
-  // the second one has used no tool yet: no line, nothing invented
-  const j = rows.findIndex(r => /^Explore/.test(r))
-  expect(rows[j]).toBe('Explore2m00s')
-  expect(rows[j + 1]).toBe('Find the DTOs')
-  expect(rows[j + 3]).toMatch(/^─+$/) // the spacer comes first
-})
-
-test('subagent blocks: a finished agent has none, and at most 5 are drawn, then … +n', async ($, on) => {
-  world(on, { listed: Array.from({ length: 7 }, (_, n) => ({ id: `a${n + 1}`, status: 'running' as const })) })
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let n = 1; n <= 7; n++) await $.agent.spawn({ ...SPAWN, subagentType: `agent-${n}`, description: `task ${n}` })
-  await finishAgent($, 'a1')
-  const rows = await workRows($)
-  expect(rows.some(r => /^agent-1/.test(r))).toBe(false)
-  expect(rows.filter(r => /^agent-\d/.test(r)).map(r => r.slice(0, 7))).toEqual(['agent-2', 'agent-3', 'agent-4', 'agent-5', 'agent-6'])
-  expect(rows).toContain('… +1')
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
+  expect((await workRows($)).some(r => /WORKFLOW|^agents \d|code-reviewer|Review the orders filter/.test(r))).toBe(false)
+  expect((await paneRows($, 50, 'agents')).rows.some(r => /code-reviewer/.test(r))).toBe(true)
 })
 
 /** An `agent.spawn` input but for the agent type and its description. */
@@ -2124,14 +2109,23 @@ const SPAWN = {
   fork: false,
 } as const
 
-const claim = (n: number, rule: string, excerpt: string) =>
-  JSON.stringify({ at: new Date(2026, 9, 22, 8 + n, 5).toISOString(), session: 's-1', cwd: '/w', rule, word: 'fatto', excerpt })
+const claim = (n: number, rule: string, excerpt: string, session = 's-1') =>
+  JSON.stringify({ at: new Date(2026, 9, 22, 8 + n, 5).toISOString(), session, cwd: '/w', rule, word: 'fatto', excerpt })
 
-test('hook triggers: the last three done-claim.log entries, newest first, with time, rule and text', async ($, on) => {
-  const doneClaims = [claim(1, 'unproven-row', 'primo'), claim(2, 'unproven-row', 'secondo'), claim(3, 'tail-truncated', 'terzo'), claim(4, 'unproven-row', 'tutto fatto, test verdi'), ''].join('\n')
+test('hook triggers: the last three blocks of done-claim.log that belong to this session, newest first, on the Insights tab', async ($, on) => {
+  const doneClaims = [
+    claim(1, 'unproven-row', 'primo'),
+    claim(2, 'unproven-row', 'secondo'),
+    claim(3, 'tail-cut', 'terzo'),
+    claim(4, 'unproven-row', 'tutto fatto, test verdi'),
+    claim(5, 'shell-ran', 'solo contato'),
+    claim(6, 'tail-truncated', 'vecchio'),
+    claim(7, 'unproven-row', 'altra sessione', 's-2'),
+    '',
+  ].join('\n')
   world(on, { doneClaims })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await workRows($)
+  const rows = await insightsRows($)
   const i = rows.findIndex(r => r.startsWith('HOOK'))
   expect(rows[i]).toBe('HOOK · done-claim')
   expect(rows[i - 1]).toBe(' ')
@@ -2139,16 +2133,23 @@ test('hook triggers: the last three done-claim.log entries, newest first, with t
   expect(rows[i + 1]).toBe(' ')
   expect(rows.slice(i + 2, i + 5)).toEqual([
     '22/10 12:05 unproven-row tutto fatto, test verdi',
-    '22/10 11:05 tail-truncated terzo',
+    '22/10 11:05 tail-cut terzo',
     '22/10 10:05 unproven-row secondo',
   ])
-  expect(rows.some(r => /primo/.test(r))).toBe(false)
+  expect(rows.some(r => /primo|solo contato|vecchio|altra sessione/.test(r))).toBe(false)
+  expect((await workRows($)).some(r => r.startsWith('HOOK'))).toBe(false)
+})
+
+test('hook triggers: the blocks of another session or no block at all draw nothing', async ($, on) => {
+  world(on, { doneClaims: `${claim(1, 'unproven-row', 'altra', 's-2')}\n${claim(2, 'shell-ran', 'contato')}\n` })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await insightsRows($)).some(r => r.startsWith('HOOK'))).toBe(false)
 })
 
 test('hook triggers: no log (or an empty one) draws no block', async ($, on) => {
   world(on, { doneClaims: '' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await workRows($)).some(r => r.startsWith('HOOK'))).toBe(false)
+  expect((await insightsRows($)).some(r => r.startsWith('HOOK'))).toBe(false)
 })
 
 // ── PR read follow-ups ──
@@ -2255,20 +2256,19 @@ test('workflow agents: the end of their run (a main-loop Stop that reports none)
   await ui.unmount()
 })
 
-test('subagent blocks: a tool call seen before its agent spawned does not make a stub that the spawn later fills', async ($, on) => {
+test('subagent rows: a tool call seen before its agent spawned does not make a stub that the spawn later fills', async ($, on) => {
   world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
   await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
-  const rows = await workRows($)
-  const i = rows.findIndex(r => /^code-reviewer/.test(r))
-  expect(rows[i + 1]).toBe('Review the orders filter')
+  const rows = (await paneRows($, 50, 'agents')).rows
+  expect(rows.find(r => /code-reviewer/.test(r))).toMatch(/Review the orders filter/)
   expect(rows.some(r => /last tool/.test(r))).toBe(false)
   // a call after the spawn is seen as before
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
-  expect((await workRows($)).some(r => r === 'last tool Grep')).toBe(true)
+  expect((await paneRows($, 50, 'agents')).rows.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
 })
 
 // ── done-claim.log is read again only when it changed ──
@@ -2282,7 +2282,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   expect(claimReads).toHaveLength(1)
   for (let i = 0; i < 4; i++) await clock.advance(30_000)
   expect(claimReads).toHaveLength(1)
-  expect((await workRows($)).some(r => /primo/.test(r))).toBe(true)
+  expect((await insightsRows($)).some(r => /primo/.test(r))).toBe(true)
 
   mtime = 2 // same size, new time
   await clock.advance(30_000)
@@ -2291,7 +2291,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   options.doneClaims = `${claim(1, 'unproven-row', 'primo')}\n${claim(2, 'unproven-row', 'secondo')}\n` // another size
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
-  expect((await workRows($)).some(r => /secondo/.test(r))).toBe(true)
+  expect((await insightsRows($)).some(r => /secondo/.test(r))).toBe(true)
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
 })
@@ -2795,10 +2795,10 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
 
-  await ui.press({ key: 'tab:context' })
+  await ui.press({ key: 'tab:insights' })
   await settleAll()
   reset()
-  await clock.advance(3000) // t = 9 s: Context has no clock and git is not due yet
+  await clock.advance(3000) // t = 9 s: Insights has no clock and git is not due yet
   expect(listCalls).toHaveLength(0)
   expect(statusCalls).toHaveLength(0)
   await clock.advance(1500) // t = 10.5 s: the medium timer ticked
@@ -2987,7 +2987,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   const rows = async () => rowTexts(await ui.drawn())
-  const facts = async (u: typeof ui) => (await u.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ }))[0]?.text
+  const facts = async () => /(\d+% token {2}\d+s)$/.exec((await rows()).find(r => /% token/.test(r)) ?? '')?.[1]
   const counters = /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/
 
   // before any step the counters are not drawn: nothing is faked
@@ -2996,18 +2996,24 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await step('a1')
   let now = await rows()
   expect(now.find(r => /code-reviewer/.test(r))).toBe('◐ code-reviewer  go')
+  // the four counters are one press away
+  expect(now.some(r => counters.test(r))).toBe(false)
+  expect(now.find(r => /tokens$/.test(r))).toBe('  ▸ tokens')
+  await ui.press({ key: 'usage:a1' })
+  now = await rows()
   expect(now.some(r => counters.test(r))).toBe(true)
+  expect(now.find(r => /tokens$/.test(r))).toBe('  ▾ tokens')
   expect(now.find(r => /son 5\.5/.test(r))).toMatch(/^ +son 5\.5 .* HIGH/)
-  expect(await facts(ui)).toBe('100% token  0s')
+  expect(await facts()).toBe('100% token  0s')
 
   // the main loop's step counts in the session: the agent is half of it
   await step()
-  expect(await facts(ui)).toBe('50% token  0s')
+  expect(await facts()).toBe('50% token  0s')
 
   // the elapsed time moves with the fast tier
   await clock.advance(2000)
   await settleAll()
-  expect(await facts(ui)).toBe('50% token  2s')
+  expect(await facts()).toBe('50% token  2s')
 
   // the tool in flight, then the last one
   const call = $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' })
@@ -3041,13 +3047,15 @@ test('Subagenti: the turn\'s own total replaces what its steps added, a turn tha
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a1-t', agentId: 'a1', reason: 'answer', usage: more })
   // a2 saw no step: the turn's end alone gives its counters
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a2-t', agentId: 'a2', reason: 'answer', usage: STEP_USAGE })
-  const rows = (await paneRows($, 50, 'agents')).rows
-  expect(rows.filter(r => /^ +in 1k {2}out 300 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
-  expect(rows.filter(r => /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
   // 1800 and 1700 new tokens of 3500
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ })).map(n => n.text?.replace(/ {2}\d+s$/, ''))).toEqual(['51% token', '49% token'])
+  await ui.press({ key: 'usage:a1' })
+  await ui.press({ key: 'usage:a2' })
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.filter(r => /^ +in 1k {2}out 300 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
+  expect(rows.filter(r => /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
+  expect(shares(rows)).toEqual(['51% token', '49% token'])
   await ui.unmount()
 })
 
@@ -3065,7 +3073,7 @@ test('Subagenti: after a reload the share keeps the main loop\'s tokens and the 
   // 1700 of 10000 + 5400 + 1700 new tokens
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ })).map(n => n.text?.replace(/ {2}\d+s$/, ''))).toEqual(['10% token'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['10% token'])
   await ui.unmount()
   // a main step is written, for the next reload
   for await (const chunk of $.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 })) void chunk
@@ -3089,8 +3097,8 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await clock.advance(4000)
   await settleAll()
   expect(await elapsed()).toBe('4s')
-  await ui.press({ key: 'tab:context' })
-  await clock.advance(4000) // Context has no clock: the agent's time stands where it was
+  await ui.press({ key: 'tab:insights' })
+  await clock.advance(4000) // Insights has no clock: the agent's time stands where it was
   await settleAll()
   await ui.press({ key: 'tab:agents' })
   expect(await elapsed()).toBe('4s')
@@ -3122,13 +3130,15 @@ test('Context: opening the tab reads a summary breakdown and draws the bar and a
   expect(summaries()).toBe(atStart + 1)
   const rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^CONTEXT/.test(r))).toBe(true)
-  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1%$/)
-  expect(rows.find(r => /Messages/.test(r))).toMatch(/^■ Messages +90k +9%$/)
-  expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70%$/)
+  // every row is as wide as the pane's content (its background bar spans it)
+  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1% *$/)
+  expect(rows.find(r => /Messages/.test(r))).toMatch(/^■ Messages +90k +9% *$/)
+  expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70% *$/)
+  expect(textCells(rows.find(r => /Messages/.test(r)) ?? '')).toBe(48)
   expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('exact')
   expect(usageCalls.filter(c => c === 'full')).toHaveLength(1) // the first opening, idle, counts once by itself
 
-  await ui.press({ key: 'ctx:exact' })
+  await ui.press({ key: 'ctx:refresh' })
   await settleAll()
   expect(usageCalls.filter(c => c === 'full')).toHaveLength(2)
   expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('exact')
@@ -3167,7 +3177,7 @@ test('Context: a main turn reads the breakdown again, debounced, only while the 
   await ui.unmount()
 })
 
-test('Context: the tab has no clock of its own: the fast tier does not run while it is selected', async ($, on) => {
+test('Context: the fast tier runs while the tab is selected (the refresh countdown), and not on the Insights tab', async ($, on) => {
   const listCalls: string[] = []
   const clock = world(on, { listCalls })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -3177,6 +3187,12 @@ test('Context: the tab has no clock of its own: the fast tier does not run while
   await settleAll()
   listCalls.length = 0
   await clock.advance(6000)
+  await settleAll()
+  expect(listCalls.length).toBeGreaterThan(0)
+  await ui.press({ key: 'tab:insights' })
+  await settleAll()
+  listCalls.length = 0
+  await clock.advance(3000) // t = 9 s: before the medium tier's tick
   await settleAll()
   expect(listCalls).toHaveLength(0)
   await ui.unmount()
@@ -3220,10 +3236,15 @@ test('Context: the top five static consumers by tokens, and the skills invoked t
   expect(consumers[2]).toMatch(/^file +User CLAUDE\.md +3k$/)
   expect(consumers[3]).toMatch(/^file +Project CLAUDE\.md +900$/)
   expect(consumers[4]).toMatch(/^agent +code-reviewer +400$/)
+  // the skills used and the listing count are on the Insights tab, not the Context one
+  expect(await ui.find({ type: 'Text', text: /^41\/60 listed$/ })).toBeUndefined()
+  expect(rows.some(r => /^SKILLS/.test(r))).toBe(false)
+  await ui.press({ key: 'tab:insights' })
+  const insights = rowTexts(await ui.drawn())
   expect((await ui.find({ type: 'Text', text: /^41\/60 listed$/ }))?.text).toBe('41/60 listed')
-  expect(rows.some(r => /^SKILLS · 2 used/.test(r))).toBe(true)
-  const at = rows.findIndex(r => /^SKILLS ·/.test(r))
-  expect(rows.slice(at + 1).filter(r => r === 'commit' || r === 'react')).toEqual(['commit', 'react'])
+  expect(insights.some(r => /^SKILLS · 2 used/.test(r))).toBe(true)
+  const at = insights.findIndex(r => /^SKILLS ·/.test(r))
+  expect(insights.slice(at + 1).filter(r => r === 'commit' || r === 'react')).toEqual(['commit', 'react'])
   await ui.unmount()
 })
 
@@ -3250,14 +3271,15 @@ test('Context: the sparkline holds the context at each main turn, the last twent
 
   for (let i = 0; i < 20; i++) await contextRound($, 100_000, 10)
   let rows = await view()
-  expect(rows.find(r => /^[▁-█]{20} /.test(r))).toMatch(/^█{20} {2}100k → 100k$/)
+  // one line: the last rounds as bars (a flat run is the lowest bar), where the context went; no growth, so no rate
+  expect(rows.find(r => /^[▁-█]{8} /.test(r))).toMatch(/^▁{8} {2}100k → 100k$/)
   expect(rows.some(r => /worth compacting/.test(r))).toBe(false)
 
   // 72 % and three rounds up by more than 5 % each: 100k, 106k, 113k, 120k
   for (const [tokens, percent] of [[106_000, 70], [113_000, 71], [120_000, 72]] as const) await contextRound($, tokens, percent)
   rows = await view()
-  // the sparkline stays at twenty blocks: the oldest went
-  expect(rows.find(r => /^[▁-█]{20} /.test(r))).toMatch(/^[▁-█]{20} {2}100k → 120k$/)
+  // eight bars, the oldest rounds gone; the rate is the growth per round of the samples the forecast uses (4k over the last five)
+  expect(rows.find(r => /^[▁-█]{8} /.test(r))).toMatch(/^▁{5}▃▆█ {2}100k → 120k \(\+4k\/round\)$/)
   expect(rows.some(r => /worth compacting/.test(r))).toBe(true)
 })
 
@@ -3300,7 +3322,7 @@ test('Subagenti: an agent that leaves the list joins a cumulative counter that t
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   // 1700 of 100000 + 1700 + 1700 (the agent has run for minutes by now)
-  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\S+$/ })).map(n => n.text?.replace(/ {2}\S+$/, ''))).toEqual(['2% token'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['2% token'])
   await ui.unmount()
 })
 
@@ -3329,12 +3351,12 @@ async function lavoroRows($: Engine, bodyColumns = 50) {
   return rows
 }
 
-test('tabs: exactly Subagents, Context, Work, System, Notes, Subagents selected by default; System draws its own section', async ($, on) => {
+test('tabs: exactly Subagents, Context, Work, Insights, System, Notes, Subagents selected by default; System draws its own section', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const tabs = (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  expect(tabs.map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:system', 'tab:notes'])
+  expect(tabs.map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:work', 'tab:insights', 'tab:system', 'tab:notes'])
   expect(tabs.map(b => b.text)).toEqual(LONG_TABS)
   expect(tabs.filter(b => b.props.variant === 'primary').map(b => b.key)).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTS/ })).toBeDefined()
@@ -3343,19 +3365,6 @@ test('tabs: exactly Subagents, Context, Work, System, Notes, Subagents selected 
   expect(await ui.find({ type: 'Text', text: /^in arrivo$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTS/ })).toBeUndefined()
   await ui.unmount()
-})
-
-test('tabs: with five tabs the long labels, the running count included, sit on one row from 59 columns', async ($, on) => {
-  world(on)
-  spawns(on)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await spawnAgent($, 'code-reviewer')
-  for (const columns of [59, 80]) {
-    const { labels, cells, root } = await tabsAt($, columns)
-    expect(labels).toEqual(['Subagents 1', 'Context', 'Work', 'System', 'Notes'])
-    expect(cells).toBeLessThanOrEqual(57)
-    expect(wrapAround(root, 'tab:agents')).toBe('wrap')
-  }
 })
 
 // A tab a state file of an earlier version holds goes where its content went.
@@ -3377,7 +3386,7 @@ for (const [saved, shown] of [
   })
 }
 
-test('Work: the changed files with +/-, read only while Work is selected; no branch or worktree block (the header holds the branch)', async ($, on) => {
+test('Work: the changed files with +/-, read only while Work is selected; a branch block and no worktree one', async ($, on) => {
   world(on, { numstat: [['3', '1', 'src/a.ts']], untracked: ['notes.md'], worktrees: 'worktree /work/example-repo\nHEAD 1\nbranch refs/heads/feature/x\n' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
@@ -3388,11 +3397,12 @@ test('Work: the changed files with +/-, read only while Work is selected; no bra
   expect(rows).toContain('CHANGES · 2')
   expect(rows.some(r => /^ +\+3 +-1 src\/a\.ts$/.test(r))).toBe(true)
   expect(rows.some(r => /^ +\? +notes\.md$/.test(r))).toBe(true)
-  expect(rows.some(r => /^BRANCH|^WORKTREE/.test(r))).toBe(false)
+  expect(rows).toContain('BRANCH')
+  expect(rows.some(r => /^WORKTREE/.test(r))).toBe(false)
   await ui.unmount()
 })
 
-test('Work: the last 8 main-loop tools, newest first, each with its short argument, outcome and time; a subagent call is not one', async ($, on) => {
+test('Insights: the tools by type with their failures, and the last 5 main-loop calls, newest first, each with its short argument, outcome and time; a subagent call is not one', async ($, on) => {
   world(on)
   on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
   on('tool.call', { tool: 'Read' }, () => ({ result: {} }))
@@ -3402,25 +3412,29 @@ test('Work: the last 8 main-loop tools, newest first, each with its short argume
   await $.tool.call({ tool: 'Read', file_path: '/w/src/orders/Filter.ts' })
   await $.tool.call({ tool: 'Edit', file_path: '/w/x.ts', old_string: 'a', new_string: 'b' })
   await $.tool.call({ tool: 'Bash', command: 'from a subagent', agentId: 'a1' })
-  const rows = await lavoroRows($)
-  const i = rows.findIndex(r => r === 'TOOL · 8')
+  const rows = await insightsRows($)
+  const i = rows.findIndex(r => r === 'TOOLS · 11 calls')
   expect(i).toBeGreaterThan(0)
   expect(rows[i - 1]).toBe(' ')
   expect(rows[i - 2]).toMatch(/^─+$/)
-  const list = rows.slice(i + 2, i + 10)
+  // by type, the most called first; a refused call is a failure
+  expect(rows.slice(i + 2, i + 5)).toEqual([expect.stringMatching(/^Bash +9$/), expect.stringMatching(/^Edit +1 {2}✗ 1$/), expect.stringMatching(/^Read +1$/)])
+  const last = rows.findIndex(r => r === 'last')
+  const list = rows.slice(last + 1, last + 6)
   expect(list[0]).toMatch(/^✗ Edit +x\.ts +\d\d:\d\d$/)
   expect(list[1]).toMatch(/^✓ Read +Filter\.ts +\d\d:\d\d$/)
   expect(list[2]).toMatch(/^✓ Bash +echo 9 +\d\d:\d\d$/)
-  expect(list[7]).toMatch(/^✓ Bash +echo 4 +\d\d:\d\d$/)
+  expect(list[4]).toMatch(/^✓ Bash +echo 7 +\d\d:\d\d$/)
   expect(rows.some(r => /subagent/.test(r))).toBe(false)
+  expect((await workRows($)).some(r => /^TOOL/.test(r))).toBe(false)
 })
 
-test('Work: a tool row is cut to the width: a long argument ends with an ellipsis and the time stays', async ($, on) => {
+test('Insights: a tool row is cut to the width: a long argument ends with an ellipsis and the time stays', async ($, on) => {
   world(on)
   on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'dotnet test --filter "FullyQualifiedName~Orders.Filter.VeryLongTestName" --no-build' })
-  const row = (await lavoroRows($, 40)).find(r => /^[✓✗] Bash/.test(r)) ?? ''
+  const row = (await insightsRows($, 40)).find(r => /^[✓✗] Bash/.test(r)) ?? ''
   expect([...row].length).toBe(38)
   expect(row).toMatch(/…\s+\d\d:\d\d$/)
 })
@@ -3575,7 +3589,7 @@ test('follow-up: an older context read never replaces a newer one: the exact cou
   const releaseSummary = h.hold('summary')
   await ui.press({ key: 'tab:context' }) // summary read #1, held
   const releaseFull = h.hold('full')
-  await ui.press({ key: 'ctx:exact' }) // full read #2, held
+  await ui.press({ key: 'ctx:refresh' }) // full read #2, held
   releaseFull()
   await settleAll()
   expect(await kind()).toBe('exact')
@@ -3596,7 +3610,7 @@ test('follow-up: a summary read asked by a tab change while the exact count runs
   await ui.press({ key: 'tab:context' })
   await settleAll()
   const releaseFull = h.hold('full')
-  await ui.press({ key: 'ctx:exact' }) // full read #2, held
+  await ui.press({ key: 'ctx:refresh' }) // full read #2, held
   const before = summaries()
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'tab:context' }) // would be summary read #3: skipped while counting
@@ -3669,19 +3683,6 @@ test('follow-up: a context read timer the engine refused does not stop the next 
   await settleAll()
   expect(summaries()).toBe(opened + 1)
   await ui.unmount()
-})
-
-test('follow-up: the last tool line of a subagent block in Work is cut to the width', async ($, on) => {
-  world(on, { listed: [{ id: 'a1', status: 'running' }] })
-  spawns(on)
-  on('tool.call', { tool: 'ListMcpResourcesTool' }, () => ({ result: {} }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review' })
-  await $.tool.call({ tool: 'ListMcpResourcesTool', agentId: 'a1' })
-  // 30 columns leave 28 cells: 'last tool ListMcpResourcesTool' needs 32
-  const row = (await lavoroRows($, 30)).find(r => /^last tool/.test(r)) ?? ''
-  expect([...row].length).toBe(28)
-  expect(row).toMatch(/…$/)
 })
 
 // ── Cockpit v3, phase 5: the System tab ──
@@ -3824,33 +3825,50 @@ test('System: the end of the session stops the monitor', async ($, on) => {
   await ui.unmount()
 })
 
-test('System: four rows, CPU, RAM and network with a sparkline each, then disk and power with their icons, and the process table with its ports', async ($, on) => {
+type WrapBox = { props?: { flexWrap?: string }; children?: unknown[] }
+
+/** The text of every wrapping Box of the drawn tree: each is a row of items the pane wraps by item. */
+const wrapRows = (el: unknown): string[] => {
+  const o = el as WrapBox | string | null
+  if (o === null || typeof o === 'string') return []
+  if (o.props?.flexWrap === 'wrap') return rowTexts({ children: [o] }).filter(r => r !== '')
+  return (o.children ?? []).flatMap(wrapRows)
+}
+
+test('System: CPU, RAM and network on one row, disk and power on the next, no sparkline, and the process table with its ports', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await sistemaRows($, m, [FULL_LINE, sysLine({ cpu: 80, ram: { used: 14 * GIB, total: 32 * GIB }, net: { rx: 0, tx: 0 } })])
+  await openCockpit($)
+  const ui = await mountPane($, 58)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length > 0)
+  for (const l of [FULL_LINE, sysLine({ cpu: 80, ram: { used: 14 * GIB, total: 32 * GIB }, net: { rx: 0, tx: 0 } })]) m.push(l)
+  await until(() => m.queue.length === 0)
+  await settleAll()
+  const drawn = await ui.drawn()
+  await ui.unmount()
+  // a Box each, so the disk never rises to the first row when the network is quiet
+  expect(wrapRows(drawn)).toEqual(['CPU 80%  RAM 44%  NET ↓0 B/s ↑0 B/s', `${ICONS.disk} D: 120 GB free  ${ICONS.charging} 87% charging`])
+  const rows = rowTexts(drawn)
   const i = rows.indexOf('SYSTEM')
   expect(i).toBeGreaterThan(0)
-  expect(rows.slice(i + 2, i + 6)).toEqual([
-    expect.stringMatching(/^CPU +[▁-█]{2} max 80% +80%$/),
-    expect.stringMatching(/^RAM +[▁-█]{2} max 44% +14G\/32G 44%$/),
-    expect.stringMatching(/^NET +[▁-█]{2} max 1\.2M\/s +↓0B\/s ↑0B\/s$/),
-    `${ICONS.disk} D: 120G free  ${ICONS.charging} 87% charging`,
-  ])
+  expect(rows.some(r => /[▁-█]/.test(r))).toBe(false)
   expect(rows).toContain('PROCESSES · 2')
   expect(rows.some(r => /^ +7000 bash *$/.test(r))).toBe(true)
   expect(rows.some(r => /^ +7240 node +:3000 :5173$/.test(r))).toBe(true)
   expect(rows.some(r => /in arrivo/.test(r))).toBe(false)
 })
 
-test('System: the bars grow with the samples, scaled on the window, and a line split across two chunks is read whole', async ($, on) => {
+test('System: the numbers are the last reading, and a line split across two chunks is read whole', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const lines = [5, 5, 100].map(cpu => sysLine({ cpu }))
   const half = lines[2]?.length ? Math.floor(lines[2].length / 2) : 0
   const rows = await sistemaRows($, m, [lines[0] ?? '', lines[1] ?? '', lines[2]?.slice(0, half) ?? '', lines[2]?.slice(half) ?? ''])
-  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +▁▁█ max 100% +100%$/)
+  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU 100%  /)
 })
 
 test('System: power drawn as wired, and a disk with little room left in red', async ($, on) => {
@@ -3866,8 +3884,8 @@ test('System: power drawn as wired, and a disk with little room left in red', as
   await until(() => m.queue.length === 0)
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain(`${ICONS.disk} D: 5.0G free  ${ICONS.plug} mains`)
-  expect(colorOf(await ui.drawn(), /D: 5\.0G free/)).toBe(RED)
+  expect(rows.some(r => r.endsWith(`${ICONS.disk} D: 5.0 GB free  ${ICONS.plug} mains`))).toBe(true)
+  expect(colorOf(await ui.drawn(), /D: 5\.0 GB free/)).toBe(RED)
   await ui.unmount()
 })
 
@@ -3891,9 +3909,7 @@ test('System: a monitor that cannot start: CPU, RAM, network, disk, power and th
   await until(() => m.spawns.length === 1)
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain('CPU  unavailable')
-  expect(rows).toContain('RAM  unavailable')
-  expect(rows).toContain('NET  unavailable')
+  expect(rows).toContain('CPU unavailable  RAM unavailable  NET unavailable')
   expect(rows).toContain(`${ICONS.disk} unavailable  ${ICONS.battery} unavailable`)
   expect(rows).toContain('unavailable')
   expect(rows).toContain('PROCESSES')
@@ -3905,8 +3921,7 @@ test('System: a part the monitor reports off (network on another platform) reads
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await sistemaRows($, m, [sysLine({ cpu: 20, ram: { used: GIB, total: 8 * GIB }, off: ['net', 'procs', 'power'] })])
-  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +[▁-█]+ max 20% +20%$/)
-  expect(rows).toContain('NET  unavailable')
+  expect(rows.find(r => /^CPU/.test(r))).toBe('CPU 20%  RAM 13%  NET unavailable')
   expect(rows).toContain('PROCESSES')
   expect(rows).toContain('unavailable')
 })
@@ -3923,13 +3938,12 @@ test('System: the monitor ending on its own (a crash) turns every row to unavail
   m.push(FULL_LINE)
   await until(() => m.queue.length === 0)
   await settleAll()
-  expect(rowTexts(await ui.drawn()).find(r => /^CPU/.test(r))).toMatch(/37%$/)
+  expect(rowTexts(await ui.drawn()).find(r => /^CPU/.test(r))).toMatch(/^CPU 37%  /)
   m.end()
   await until(() => m.stops === 1)
   await settleAll()
-  const after = rowTexts(await ui.drawn())
-  expect(after).toContain('CPU  unavailable')
-  expect(after).toContain('NET  unavailable')
+  const after = rowTexts(await ui.drawn()).find(r => /^CPU/.test(r)) ?? ''
+  expect(after).toBe('CPU unavailable  RAM unavailable  NET unavailable')
   await ui.unmount()
 })
 
@@ -3965,7 +3979,8 @@ test('System: every row fits the pane at 30, 40, 58 and 80 columns, a long proce
     expect(i).toBeGreaterThan(0)
     for (const row of rows.slice(i)) {
       if (/^─+$/.test(row)) continue
-      expect(textCells(row)).toBeLessThanOrEqual(width)
+      // the numbers are items that wrap: each fits, the row of them need not
+      for (const part of /^CPU/.test(row) ? row.split('  ') : [row]) expect(textCells(part)).toBeLessThanOrEqual(width)
     }
     expect(rows.slice(i).some(r => /^CPU/.test(r))).toBe(true)
   }
@@ -3986,7 +4001,7 @@ test('follow-up: an exact context count in flight is not overwritten by the sche
   await ui.press({ key: 'tab:context' })
   await settleAll()
   const release = h.hold('full')
-  await ui.press({ key: 'ctx:exact' }) // counting, held
+  await ui.press({ key: 'ctx:refresh' }) // counting, held
   const before = summaries()
   await mainTurnEnd($) // schedules a summary read in 2 s
   await clock.advance(5000)
@@ -3994,15 +4009,17 @@ test('follow-up: an exact context count in flight is not overwritten by the sche
   expect(summaries()).toBe(before) // skipped while the count runs
   release()
   await settleAll()
-  expect(await kind()).toBe('exact')
-  await mainTurnEnd($) // the count is over: the next turn's read runs again
+  // the turn that ended meanwhile is read once the count is over, laid over the count's static rows
+  expect(summaries()).toBe(before + 1)
+  expect(await kind()).toBe('✓ = exact')
+  await mainTurnEnd($) // the next turn's read runs again
   await clock.advance(5000)
   await settleAll()
-  expect(summaries()).toBe(before + 1)
+  expect(summaries()).toBe(before + 2)
   await ui.unmount()
 })
 
-test('follow-up: a turn that ended just before the exact count started does not read a summary into it either', async ($, on) => {
+test('follow-up: a turn that ended just before the exact count started does not read a summary into it either, and is read once the count is over', async ($, on) => {
   const h = holds()
   const usageCalls: (string | undefined)[] = []
   const clock = world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
@@ -4016,13 +4033,14 @@ test('follow-up: a turn that ended just before the exact count started does not 
   await mainTurnEnd($) // the summary is scheduled, not yet read
   const before = summaries()
   const release = h.hold('full')
-  await ui.press({ key: 'ctx:exact' })
+  await ui.press({ key: 'ctx:refresh' })
   await clock.advance(5000) // its timer fires while the count is in flight
   await settleAll()
   expect(summaries()).toBe(before)
   release()
   await settleAll()
-  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('exact')
+  expect(summaries()).toBe(before + 1) // the read its timer could not make
+  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('✓ = exact')
   await ui.unmount()
 })
 
@@ -4053,7 +4071,7 @@ test('follow-up: a main-loop tool call whose start time could not be read is lis
   isFailing = true
   await $.tool.call({ tool: 'Bash', command: 'echo no-clock' })
   isFailing = false
-  const row = (await lavoroRows($)).find(r => /echo no-clock/.test(r)) ?? ''
+  const row = (await insightsRows($)).find(r => /echo no-clock/.test(r)) ?? ''
   expect(row).toMatch(/^✓ Bash +echo no-clock *$/)
 })
 
@@ -4358,13 +4376,13 @@ test('notes: the field is on the Notes tab only, under the tab bar; the list sta
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  for (const tab of ['agents', 'context', 'work', 'system']) {
+  for (const tab of ['agents', 'context', 'work', 'insights', 'system']) {
     await ui.press({ key: `tab:${tab}` })
     expect(await ui.find({ type: 'Input', key: 'note' })).toBeUndefined()
   }
   await ui.press({ key: 'tab:notes' })
   const input = await ui.find({ type: 'Input', key: 'note' })
-  expect(input?.props.rows).toBe(2)
+  expect(input?.props.rows).toBe(6)
   expect(input?.props.value).toBe('')
   const keys = keysInOrder(await ui.drawn())
   expect(keys.indexOf('note')).toBeGreaterThan(keys.indexOf('tab:notes'))
@@ -4390,7 +4408,9 @@ test('notes: Input + save adds a note at the end of the list and empties the fie
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:1', 'note:send:2'])
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('NOTES · 2')
-  expect(rows.some(r => r.startsWith('ask Anna about the filter'))).toBe(true) // a note is one line in the list
+  // a note shows its first lines, one row each
+  expect((await ui.find({ type: 'Text', text: /^ask Anna$/ }))?.text).toBe('ask Anna')
+  expect((await ui.find({ type: 'Text', text: /^about the filter$/ }))?.text).toBe('about the filter')
   expect(rows.some(r => r.startsWith('call back'))).toBe(true)
   await ui.unmount()
 })
@@ -4433,15 +4453,24 @@ test('notes: emptying the field after edit ends the edit, so the next save adds 
   await ui.unmount()
 })
 
-test('notes: send appends the note to the prompt box after a newline, and the note stays in the list', async ($, on) => {
+test('notes: send appends the note to the prompt box, after a newline only when the box already holds text, and the note stays in the list', async ($, on) => {
   const fills: { text: string; mode?: string }[] = []
-  world(on, { fills })
+  const options: World = { fills }
+  world(on, options)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
   await saveNote(ui, 'ask Anna')
   await ui.press({ key: 'note:send:1' })
   await settleAll()
-  expect(fills).toEqual([{ text: '\nask Anna', mode: 'append' }])
+  expect(fills).toEqual([{ text: 'ask Anna', mode: 'append' }]) // an empty box: no leading newline
+  options.promptText = 'draft in the box'
+  await ui.press({ key: 'note:send:1' })
+  await settleAll()
+  expect(fills.at(-1)).toEqual({ text: '\nask Anna', mode: 'append' })
+  options.promptReadFails = true // a box that cannot be read counts as holding text
+  await ui.press({ key: 'note:send:1' })
+  await settleAll()
+  expect(fills.at(-1)).toEqual({ text: '\nask Anna', mode: 'append' })
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
   await ui.unmount()
 })
@@ -4528,7 +4557,7 @@ test('follow-up: after a monitor crash the readings are forgotten when the tab i
   m.end()
   await until(() => m.stops === 1)
   await settleAll()
-  expect(rowTexts(await ui.drawn())).toContain('CPU  unavailable')
+  expect(rowTexts(await ui.drawn()).some(r => r.startsWith('CPU unavailable'))).toBe(true)
   m.isEnded = false
   await ui.press({ key: 'tab:context' })
   await settleAll()
@@ -4537,7 +4566,7 @@ test('follow-up: after a monitor crash the readings are forgotten when the tab i
   await settleAll()
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('reading…')
-  expect(rows).not.toContain('CPU  unavailable')
+  expect(rows.some(r => r.startsWith('CPU unavailable'))).toBe(false)
   await ui.unmount()
 })
 
@@ -4549,7 +4578,7 @@ test('follow-up: opening the pane on the Context tab while the exact count runs 
   const ui = await mountPane($, 50)
   const summaries = () => usageCalls.filter(c => c === 'summary').length
   const releaseFull = h.hold('full')
-  await ui.press({ key: 'ctx:exact' })
+  await ui.press({ key: 'ctx:refresh' })
   const before = summaries()
   await openCockpit($)
   await settleAll()
@@ -4569,7 +4598,7 @@ test('follow-up: an exact count that never answers is released after a timeout, 
   await ui.press({ key: 'tab:context' })
   await settleAll()
   const releaseFull = h.hold('full') // never answers, until the end of the test
-  await ui.press({ key: 'ctx:exact' })
+  await ui.press({ key: 'ctx:refresh' })
   const before = summaries()
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'tab:context' })
@@ -4598,13 +4627,13 @@ test('English: the tabs, the buttons, the empty state and the titles of every ta
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:work'), await label('tab:system'), await label('bar:compact'), await label('bar:worklog')]).toEqual(['Subagents', 'Context', 'Work', 'System', 'compact', 'log hours'])
+  expect([await label('tab:agents'), await label('tab:context'), await label('tab:work'), await label('tab:system'), await label('bar:compact'), await label('bar:worklog')]).toEqual([`${TAB_ICONS.agents} Subagents`, TAB_ICONS.context, TAB_ICONS.work, TAB_ICONS.system, 'compact', 'log hours'])
   expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
   await ui.press({ key: 'tab:work' })
   expect(rowTexts(await ui.drawn())).toContain('nothing to show')
   await ui.unmount()
   const narrow = await mountPane($, 40)
-  expect([(await narrow.find({ key: 'tab:agents' }))?.text, (await narrow.find({ key: 'tab:context' }))?.text, (await narrow.find({ key: 'tab:work' }))?.text, (await narrow.find({ key: 'tab:system' }))?.text]).toEqual(['Sub', 'Ctx', 'Wrk', 'Sys'])
+  expect([(await narrow.find({ key: 'tab:agents' }))?.text, (await narrow.find({ key: 'tab:context' }))?.text, (await narrow.find({ key: 'tab:work' }))?.text, (await narrow.find({ key: 'tab:system' }))?.text]).toEqual([TAB_ICONS.agents, TAB_ICONS.context, `${TAB_ICONS.work} Work`, TAB_ICONS.system])
   await narrow.unmount()
 })
 
@@ -4707,17 +4736,15 @@ test('header: the last round duration sits beside the round cost, from the main 
   expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
 })
 
-test('System: the bars scale on the window lowest to highest value, a flat window draws low bars, and the highest value is printed after them', async ($, on) => {
+test('System: the numbers are those of the last reading, whatever the readings before it', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await sistemaRows($, m, [20, 40, 60].map(cpu => sysLine({ cpu, ram: { used: (cpu / 20) * 4, total: 16 }, net: { rx: (cpu / 20) * 1024 ** 2, tx: 0 } })))
-  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +▁▅█ max 60% +60%$/)
-  expect(rows.find(r => /^NET/.test(r))).toMatch(/^NET +▁▅█ max 3\.0M\/s +↓3\.0M\/s ↑0B\/s$/)
-  expect(rows.find(r => /^RAM/.test(r))).toMatch(/^RAM +▁▅█ max 75% +/)
+  const rows = await sistemaRows($, m, [20, 40, 60].map(cpu => sysLine({ cpu, ram: { used: (cpu / 20) * 4 * 1024 ** 2, total: 16 * 1024 ** 2 }, net: { rx: (cpu / 20) * 1024 ** 2, tx: 0 } })))
+  expect(rows.find(r => /^CPU/.test(r))?.startsWith('CPU 60%  RAM 75%  NET ↓3.0 MB/s ↑0 B/s')).toBe(true)
 })
 
-test('System: every process is listed with pid, name, CPU, RAM and its ports as links to localhost, in the order the monitor sent them, with no row count cap', async ($, on) => {
+test('System: every process is listed with pid, name, CPU, RAM and its ports as links to localhost, by RAM, with no row count cap', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -4733,9 +4760,11 @@ test('System: every process is listed with pid, name, CPU, RAM and its ports as 
   await settleAll()
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('PROCESSES · 11')
-  expect(rows.some(r => /^ +7240 node +12% +180M :3000 :5173$/.test(r))).toBe(true)
-  expect(rows.some(r => /^ +7000 bash +0\.4% +12M$/.test(r))).toBe(true)
-  expect(rows.filter(r => /proc\d +1\.0% +1\.0M$/.test(r))).toHaveLength(9)
+  // a header row names the columns; the table is sorted by RAM, the sorted column marked
+  expect(rows.some(r => /^ +PID NAME +CPU +RAM▾ PORTS$/.test(r))).toBe(true)
+  expect(rows.some(r => /^ +7240 node +12% +180 MB :3000 :5173$/.test(r))).toBe(true)
+  expect(rows.some(r => /^ +7000 bash +0\.4% +12 MB$/.test(r))).toBe(true)
+  expect(rows.filter(r => /proc\d +1\.0% +1\.0 MB$/.test(r))).toHaveLength(9)
   expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['http://localhost:3000', 'http://localhost:5173'])
   expect(rows.some(r => /^… \+\d/.test(r))).toBe(false)
   await ui.unmount()
@@ -4791,10 +4820,10 @@ test('Context: the first time the tab opens while idle one exact count runs; its
   expect(fulls()).toBe(1)
   expect(await kind()).toBe('✓ = exact')
   const rows = rowTexts(await ui.drawn())
-  expect(rows.find(r => /^■ System prompt/.test(r))).toMatch(/^■ System prompt +9\.5k +1% ✓$/)
+  expect(rows.find(r => /^■ System prompt/.test(r))).toMatch(/^■ System prompt +9\.5k +1% ✓ *$/)
   expect(rows.find(r => /^■ Messages/.test(r))).toMatch(/^■ Messages +95k +10% +\+5k$/) // from the summary read of the reopened tab, 90k
-  expect(rows.some(r => /^CONTEXT · 104\.5K\/1M/.test(r))).toBe(true)
-  expect((await ui.find({ key: 'ctx:exact' }))?.text).toBe('exact count') // the button stays
+  expect(rows.some(r => /^CONTEXT DETAILS · 104\.5K\/1M/.test(r))).toBe(true)
+  expect((await ui.find({ key: 'ctx:refresh' }))?.text).toBe('refresh') // the button stays
   await ui.unmount()
 })
 
@@ -4822,13 +4851,6 @@ test('Context: no exact count while Claude is working; the next time the tab ope
   await ui.unmount()
 })
 
-test('System: a flat window draws the lowest bars, never noise', async ($, on) => {
-  const m = fakeMonitor(on)
-  world(on)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await sistemaRows($, m, [30, 30, 30].map(cpu => sysLine({ cpu })))
-  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +▁▁▁ max 30% +30%$/)
-})
 
 // ── Phase 8: the v2 header and the pane's two languages ──
 
@@ -4871,22 +4893,20 @@ const LANGUAGES = [
   {
     name: 'English',
     files: {},
-    // the five long labels are 55 cells bare, 57 with the dot: the short ones when the dot is there
-    tabs: ['Sub', 'Ctx', 'Wrk ●', 'Sys', 'Nts'],
-    bareTabs: ['Subagents', 'Context', 'Work', 'System', 'Notes'],
+    tabs: barLabels('agents', { work: ' ●' }),
+    bareTabs: (tab: CockpitTab) => barLabels(tab),
     buttons: { compact: 'compact', worklog: 'log hours', save: 'save', edit: 'edit', send: 'send', delete: 'delete' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], system: [/^SYSTEM$/, /^reading…$/], notes: [/^NOTES · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], system: [/^SYSTEM$/, /^reading…$/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
     files: IT_FILE,
-    tabs: ['Sub', 'Ctx', 'Lav ●', 'Sis', 'Nte'],
-    // the five Italian names are 58 cells bare, 60 with the dot: the short ones at 58 columns either way
-    bareTabs: ['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'],
+    tabs: barLabels('agents', { work: ' ●' }, NAMES_IT),
+    bareTabs: (tab: CockpitTab) => barLabels(tab, {}, NAMES_IT),
     buttons: { compact: 'compatta', worklog: 'segna ore', save: 'salva', edit: 'modifica', send: 'invia', delete: 'elimina' },
-    header: [/^CONTESTO/, /^CREDITI RESIDUI/, /vs atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], system: [/^SISTEMA$/, /^lettura…$/], notes: [/^NOTE · 1$/, /^ask Anna/] },
+    header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], system: [/^SISTEMA$/, /^lettura…$/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 
@@ -4897,7 +4917,7 @@ for (const language of LANGUAGES) {
     try {
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
-      // the five labels fit one row of the 56 cells: the long ones while they do, else the short ones
+      // an icon each and the selected tab's name fit one row of the 56 cells
       const { labels, cells } = await tabsAt($, 58)
       expect(labels).toEqual(language.tabs)
       expect(cells).toBeLessThanOrEqual(56)
@@ -4918,7 +4938,7 @@ for (const language of LANGUAGES) {
       options.hasWorklog = false
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
       const bare = await tabsAt($, 58)
-      expect(bare.labels).toEqual(language.bareTabs)
+      expect(bare.labels).toEqual(language.bareTabs('notes')) // the tab the loop above ended on
       expect(bare.cells).toBeLessThanOrEqual(56)
     } finally {
       setLang('en')
@@ -4931,8 +4951,8 @@ test('language: cockpit.json names it; a missing, unreadable, malformed or unkno
   world(on, options)
   const tabs = async () => (await tabsAt($, 58)).labels
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const italian = ['Sub', 'Ctx', 'Lav', 'Sis', 'Nte']
-  const english = ['Subagents', 'Context', 'Work', 'System', 'Notes']
+  const italian = barLabels('agents', {}, NAMES_IT)
+  const english = barLabels('agents')
   try {
     await start()
     expect(await tabs()).toEqual(italian)
@@ -4965,11 +4985,11 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
-    expect((await tabsAt($, 58)).labels).toEqual(['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'])
+    expect((await tabsAt($, 58)).labels).toEqual(barLabels('agents', {}, NAMES_IT))
     // read once: a change of the file is for the next session start
     options.files = {}
     await clock.advance(10) // the first drawing marked the language as read
-    expect((await tabsAt($, 58)).labels).toEqual(['Sub', 'Ctx', 'Lav', 'Sis', 'Nte'])
+    expect((await tabsAt($, 58)).labels).toEqual(barLabels('agents', {}, NAMES_IT))
   } finally {
     setLang('en')
   }
@@ -4982,9 +5002,682 @@ test('language: the toasts are in the language of the pane', async ($, on) => {
   try {
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await $.session.measure({ context: { window: 1_000_000, tokens: 850_000, percent: 85 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
-    expect(toasts).toEqual(['contesto al 85%'])
+    expect(toasts).toEqual(["contesto all'85%"])
   } finally {
     setLang('en')
   }
 })
 
+
+// ── Phase 9, K5: the Context tab follows the turns ──
+
+const messagesRow = (rows: string[]) => rows.find(r => /^■ Messages/.test(r))?.replace(/ +/g, ' ').trim()
+const withMessages = (tokens: number) => ({
+  categories: [breakdownRow('System prompt', 8000), breakdownRow('Messages', tokens), breakdownRow('Autocompact buffer', 33_000, 'buffer'), breakdownRow('Free space', 700_000, 'free')],
+  totalTokens: 8000 + tokens,
+  rawMaxTokens: 1_000_000,
+})
+
+test('Context: a turn that ends while the exact count runs is on the tab once the count is over', async ($, on) => {
+  const h = holds()
+  const options: World = { holdUsage: h.holdUsage, breakdown: withMessages(90_000) }
+  const clock = world(on, options)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  const releaseFull = h.hold('full')
+  await ui.press({ key: 'tab:context' }) // a summary, then the first exact count, held
+  await settleAll()
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9%')
+  // the conversation grows and a turn ends while the count is still running: no read is made for it
+  options.breakdown = withMessages(120_000)
+  await mainTurnEnd($)
+  await clock.advance(5000)
+  await settleAll()
+  options.breakdown = withMessages(150_000)
+  releaseFull() // the count answers with what the conversation held when it started
+  await settleAll()
+  expect(messagesRow(rowTexts(await ui.drawn()))).toMatch(/^■ Messages 150k 15%/)
+  await ui.unmount()
+})
+
+// ── Phase 9: the Insights tab ──
+
+/** A main round: the turn starts, the engine measures the cost, the turn ends with `read` tokens served from the cache of `read + write + 600`. */
+const insightRound = async ($: Engine, usd: number, ms: number, cache: { read: number; write: number }) => {
+  await $.turn.start({ text: 'go', turnId: 't' })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 100_000, percent: 10 }, rateLimits: [], cost: { usd }, changed: ['context'] })
+  await $.turn.complete({
+    answer: '',
+    durationMs: ms,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: cache.read, cache_creation_input_tokens: cache.write, model: 'm' },
+  })
+}
+
+/** The hooks a round needs a terminal handler for. */
+const roundHooks = (on: On) => {
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+}
+
+test('Insights: before any round or call the tab says there is nothing to show', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(await insightsRows($)).toContain('nothing to show')
+})
+
+test('Insights: the rhythm of the rounds (their number, the mean cost, the dearest with its length, the compactions) and the cache efficiency', async ($, on) => {
+  world(on)
+  roundHooks(on)
+  on('classic.PostCompact', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await insightRound($, 5.02, 60_000, { read: 94_000, write: 5_400 }) // the session was at 4.82: 0.20
+  await insightRound($, 6.22, 240_000, { read: 30_000, write: 69_400 }) // 1.20
+  await $.classic.PostCompact({ trigger: 'auto', compact_summary: 'summary' })
+  await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('RHYTHM')
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i - 2, i)).toEqual([expect.stringMatching(/^─+$/), ' '])
+  expect(rows.slice(i + 2, i + 6)).toEqual(['rounds       2', 'cost / round $0.700', 'costliest    $1.20 · 4m00s', 'compactions  2'])
+  // no tool and no wait: all the time is the model's
+  expect(rows).toContain('EFFICIENCY')
+  expect(rows.find(r => /^model /.test(r))).toBe('model        100% 5m00s')
+  expect(rows.find(r => /^cache hit/.test(r))).toMatch(/^cache hit +62% {2}█▃$/)
+  expect(rows.some(r => /^subagents/.test(r) || /of the tokens/.test(r))).toBe(false)
+})
+
+test('Insights: the time of the rounds splits into the model, the tools and the waits on permissions', async ($, on) => {
+  const clock = world(on)
+  roundHooks(on)
+  let releaseTool = () => {}
+  let releaseAsk = () => {}
+  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
+  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
+  on('tool.call', { tool: 'Bash' }, async () => {
+    await toolGate
+    return { result: {} }
+  })
+  on('classic.PermissionRequest', async () => {
+    await askGate
+    return { decision: { behavior: 'allow' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't' })
+  const call = $.tool.call({ tool: 'Bash', command: 'sleep 30' })
+  await settleAll()
+  await clock.advance(30_000)
+  releaseTool()
+  await call
+  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  await settleAll()
+  await clock.advance(10_000)
+  releaseAsk()
+  await ask
+  await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('TIME')
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i + 2, i + 5)).toEqual(['model         60% 1m00s', 'tools         30% 30s', 'permissions   10% 10s'])
+})
+
+test('Insights: a permission wait inside a tool call counts once, as a wait, not also as tool time', async ($, on) => {
+  const clock = world(on)
+  roundHooks(on)
+  let releaseTool = () => {}
+  let releaseAsk = () => {}
+  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
+  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
+  on('tool.call', { tool: 'Bash' }, async () => {
+    await toolGate
+    return { result: {} }
+  })
+  on('classic.PermissionRequest', async () => {
+    await askGate
+    return { decision: { behavior: 'allow' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't' })
+  const call = $.tool.call({ tool: 'Bash', command: 'sleep 30' })
+  await settleAll()
+  await clock.advance(10_000)
+  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  await settleAll()
+  await clock.advance(10_000)
+  releaseAsk()
+  await ask
+  await clock.advance(20_000)
+  releaseTool()
+  await call
+  await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('TIME')
+  expect(rows.slice(i + 2, i + 5)).toEqual(['model         60% 1m00s', 'tools         30% 30s', 'permissions   10% 10s'])
+})
+
+test('Insights: a permission wait takes off a tool call only the part of it inside the call, so a call that began during the wait loses just that part', async ($, on) => {
+  const clock = world(on)
+  roundHooks(on)
+  let releaseTool = () => {}
+  let releaseAsk = () => {}
+  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
+  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
+  on('tool.call', { tool: 'Bash' }, async () => {
+    await toolGate
+    return { result: {} }
+  })
+  on('classic.PermissionRequest', async () => {
+    await askGate
+    return { decision: { behavior: 'allow' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't' })
+  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  await settleAll()
+  await clock.advance(10_000)
+  const call = $.tool.call({ tool: 'Bash', command: 'sleep 90' })
+  await settleAll()
+  await clock.advance(20_000)
+  releaseAsk()
+  await ask
+  await clock.advance(70_000)
+  releaseTool()
+  await call
+  await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('TIME')
+  expect(rows.slice(i + 2, i + 5)).toEqual(['model          0% 0s', 'tools         70% 1m10s', 'permissions   30% 30s'])
+})
+
+test('Insights: each hint shows while its cause holds: a file read 6 times, a cold cache for 3 rounds, 7 failed commands, subagents over 60 % of the tokens, a round over 10 minutes', async ($, on) => {
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 100, agentTokens: 900 }) })
+  roundHooks(on)
+  on('tool.call', { tool: 'Read' }, () => ({ result: {} }))
+  on('tool.call', { tool: 'Bash' }, () => ({ deny: 'no' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const hints = async () => {
+    const rows = await insightsRows($)
+    const i = rows.indexOf('HINTS')
+    return i < 0 ? [] : rows.slice(i + 2).filter(r => r.startsWith('⚠'))
+  }
+  expect(await hints()).toEqual(['⚠ subagents used 90% of the tokens'])
+  expect((await insightsRows($)).filter(r => /of the tokens/.test(r))).toHaveLength(1) // the share is not also a fact under EFFICIENCY
+  for (let n = 0; n < 5; n++) await $.tool.call({ tool: 'Read', file_path: '/w/src/a.ts' })
+  expect((await hints()).some(h => /read/.test(h))).toBe(false)
+  await $.tool.call({ tool: 'Read', file_path: '/w/src/a.ts' })
+  expect(await hints()).toContain('⚠ a.ts read 6 times')
+  for (let n = 0; n < 6; n++) await $.tool.call({ tool: 'Bash', command: 'false' })
+  expect((await hints()).some(h => /failed/.test(h))).toBe(false)
+  await $.tool.call({ tool: 'Bash', command: 'false' })
+  expect(await hints()).toContain('⚠ 7 failed commands')
+  for (let n = 0; n < 3; n++) await insightRound($, 5, 1000, { read: 10, write: 60_000 }) // 0 % served from the cache
+  expect(await hints()).toContain('⚠ cache under 50% for 3 rounds')
+  await insightRound($, 5, 601_000, { read: 90_000, write: 0 }) // a long round, the cache warm again
+  const now = await hints()
+  expect(now).toContain('⚠ the last round took 10m01s')
+  expect(now.some(h => /cache/.test(h))).toBe(false)
+  await insightRound($, 5, 1000, { read: 90_000, write: 0 })
+  expect((await hints()).some(h => /last round/.test(h))).toBe(false)
+})
+
+test('Insights: in Italian every title and hint', async ($, on) => {
+  world(on, { files: IT_FILE, stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 100, agentTokens: 900_000 }) })
+  roundHooks(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.tool.call({ tool: 'Bash', command: 'ls' })
+    await insightRound($, 5, 60_000, { read: 94_000, write: 5_400 })
+    const rows = await insightsRows($)
+    for (const re of [/^RITMO$/, /^TEMPO$/, /^TOOL · 1 chiamata$/, /^EFFICIENZA$/, /^SUGGERIMENTI$/, /^⚠ i subagent hanno usato il 99% dei token$/, /^giri +1$/, /^costo \/ giro/, /^permessi/]) {
+      expect([re.source, rows.some(r => re.test(r))]).toEqual([re.source, true])
+    }
+  } finally {
+    setLang('en')
+  }
+})
+
+test('Insights: in Italian the percent of a hint takes its article, elided before 85', async ($, on) => {
+  const options: World = { files: IT_FILE, stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 150, agentTokens: 850 }) }
+  world(on, options)
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    expect((await insightsRows($)).filter(r => r.startsWith('⚠'))).toEqual(["⚠ i subagent hanno usato l'85% dei token"])
+  } finally {
+    setLang('en')
+  }
+})
+
+// ── Phase 9: Work ──
+
+test('Work: the branch block names the upstream with its commits ahead and behind, the commits since the default branch and the newest of them', async ($, on) => {
+  const repoCalls: string[] = []
+  world(on, {
+    repoCalls,
+    defaultBranch: 'main',
+    mergeBase: 'abc1234def',
+    upstream: 'origin/feature/x [ahead 2, behind 1]',
+    branchCommits: [{ hash: '1111111', subject: 'Add the filter' }, { hash: '2222222', subject: 'Cover it with a test' }],
+    commitCount: 7,
+    numstat: [['3', '1', 'src/a.ts']],
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  const i = rows.indexOf('BRANCH')
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i + 1, i + 8)).toEqual([' ', 'upstream origin/feature/x ↑2 ↓1', '7 commits from main', '1111111 Add the filter', '2222222 Cover it with a test', '… +5', expect.stringMatching(/^─+$/)])
+  // the changed files are those against where the branch left main, and the uncommitted ones
+  expect(repoCalls).toContain('diff --numstat --no-renames -z abc1234def --')
+  expect(rows).toContain('CHANGES · 1')
+})
+
+test('Work: a branch without an upstream says so; one commit reads in the singular', async ($, on) => {
+  world(on, { defaultBranch: 'main', mergeBase: 'abc1234def', branchCommits: [{ hash: '1111111', subject: 'Only one' }] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows).toContain('no upstream')
+  expect(rows).toContain('1 commit from main')
+  expect(rows).toContain('1111111 Only one')
+})
+
+test('Work: on the default branch there are no commits to list', async ($, on) => {
+  world(on, { branch: 'main', defaultBranch: 'main', mergeBase: 'abc1234def', branchCommits: [{ hash: '1111111', subject: 'On main' }], commitCount: 1 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows).toContain('BRANCH')
+  expect(rows.some(r => /commit.* from|On main/.test(r))).toBe(false)
+})
+
+test('Work: with no default branch to count from (no origin/HEAD, no main or master) the changed files are the uncommitted ones against HEAD and no commits are listed', async ($, on) => {
+  const repoCalls: string[] = []
+  world(on, { repoCalls, numstat: [['1', '1', 'a.ts']] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows).toContain('CHANGES · 1')
+  expect(rows.some(r => /commit.* from/.test(r))).toBe(false)
+  expect(repoCalls).toContain('diff --numstat --no-renames -z HEAD --')
+})
+
+test('Work: a detached HEAD has no branch block', async ($, on) => {
+  world(on, { detached: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await workRows($)).includes('BRANCH')).toBe(false)
+})
+
+test('Work: the diff of a changed file is taken against the commit the branch left the default branch at', async ($, on) => {
+  const repoCalls: string[] = []
+  world(on, { repoCalls, defaultBranch: 'main', mergeBase: 'abc1234def', numstat: [['2', '1', 'src/a.ts']], fileDiffs: { 'src/a.ts': DIFF } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const diff = await pressFile($, 'src/a.ts')
+  expect(repoCalls).toContain('diff --no-color --no-ext-diff --no-renames abc1234def -- src/a.ts')
+  await diff.unmount()
+})
+
+// ── Phase 9: Context ──
+
+test('Context: `refresh` waits a minute after a press, with a countdown in its place', async ($, on) => {
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(on, { usageCalls, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  const fulls = () => usageCalls.filter(c => c === 'full').length
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  expect(fulls()).toBe(1) // the first opening, idle, counted by itself: no wait for it
+  expect((await ui.find({ key: 'ctx:refresh' }))?.text).toBe('refresh')
+  await ui.press({ key: 'ctx:refresh' })
+  await settleAll()
+  expect(fulls()).toBe(2)
+  expect(await ui.find({ key: 'ctx:refresh' })).toBeUndefined()
+  expect((await ui.find({ type: 'Text', text: /^refresh \d+s$/ }))?.text).toBe('refresh 60s')
+  await clock.advance(20_000)
+  await settleAll()
+  expect((await ui.find({ type: 'Text', text: /^refresh \d+s$/ }))?.text).toBe('refresh 40s')
+  await clock.advance(38_000)
+  await settleAll()
+  expect((await ui.find({ type: 'Text', text: /^refresh \d+s$/ }))?.text).toBe('refresh 2s')
+  expect(fulls()).toBe(2)
+  await clock.advance(2000)
+  await settleAll()
+  expect((await ui.find({ key: 'ctx:refresh' }))?.text).toBe('refresh')
+  await ui.press({ key: 'ctx:refresh' })
+  await settleAll()
+  expect(fulls()).toBe(3)
+  await ui.unmount()
+})
+
+test('Context: every row carries a background bar in proportion to its share of the window, at least one cell for what is there', () => {
+  const row = { name: 'Messages', tokens: 90_000, kind: 'used' as const }
+  const barred = (tokens: number) => {
+    const spans = categorySpans({ ...row, tokens }, '#fff', '#222', 1_000_000, 48)
+    expect(spanWidth(spans)).toBe(48)
+    return spans.filter(s => s.bg === '#222').reduce((n, s) => n + [...s.t].length, 0)
+  }
+  expect(barred(90_000)).toBe(4)
+  expect(barred(500_000)).toBe(24)
+  expect(barred(100)).toBe(1)
+  expect(barred(0)).toBe(0)
+})
+
+test('Context: the trend is one line: the bars, where the context went, the growth per round and the rounds left before compaction', async ($, on) => {
+  world(on, { autoCompactAt: 150_000 })
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const tokens of [100_000, 110_000, 120_000]) await contextRound($, tokens, 10)
+  const line = (columns: number) => paneRows($, columns, 'context').then(r => r.rows.find(x => /→/.test(x)))
+  expect(await line(58)).toBe('▁▅█  100k → 120k (+10k/round), compact in ~3 rounds')
+  // too narrow for bars and the whole text: the text goes first, cut at the end
+  const narrow = (await line(40)) ?? ''
+  expect(narrow.startsWith('100k → 120k (+10k/round)')).toBe(true)
+  expect(textCells(narrow)).toBeLessThanOrEqual(38)
+})
+
+// ── Phase 9: System ──
+
+test('System: the process table is sorted by RAM; a press on the CPU header sorts by CPU, a press on RAM back, and the sorted column is marked', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const procs = [
+    { pid: 11, name: 'small', ports: [], cpu: 90, ram: 10 * 1024 ** 2 },
+    { pid: 22, name: 'big', ports: [], cpu: 1, ram: 900 * 1024 ** 2 },
+    { pid: 33, name: 'mid', ports: [], cpu: 50, ram: 100 * 1024 ** 2 },
+  ]
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length > 0)
+  m.push(sysLine({ procs }))
+  await until(() => m.queue.length === 0)
+  await settleAll()
+  const order = async () => rowTexts(await ui.drawn()).flatMap(r => /^ +\d+ (small|big|mid)/.exec(r)?.[1] ?? [])
+  const header = async () => rowTexts(await ui.drawn()).find(r => /PID NAME/.test(r))
+  expect(await order()).toEqual(['big', 'mid', 'small'])
+  expect(await header()).toMatch(/CPU +RAM▾ PORTS$/)
+  await ui.press({ key: 'proc:cpu' })
+  await settleAll()
+  expect(await order()).toEqual(['small', 'mid', 'big'])
+  expect(await header()).toMatch(/CPU▾ +RAM PORTS$/)
+  await ui.press({ key: 'proc:ram' })
+  await settleAll()
+  expect(await order()).toEqual(['big', 'mid', 'small'])
+  await ui.unmount()
+})
+
+// ── Phase 9: Notes ──
+
+test('notes: a note shows its first 3 lines and `▸ +N lines`; a press opens the rest, another closes it; a short note has no such line', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'one\ntwo\nthree\nfour\nfive' }, { id: 2, text: 'a\nb\nc' }, { id: 3, text: 'x\ny\nz\nw' }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  const texts = async () => (await ui.findAll({ type: 'Text' })).map(n => n.text)
+  expect(await texts()).toContain('three')
+  expect(await texts()).not.toContain('four')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('▸ +2 lines')
+  expect((await ui.find({ key: 'note:more:3' }))?.text).toBe('▸ +1 line')
+  expect(await ui.find({ key: 'note:more:2' })).toBeUndefined() // exactly three lines: nothing hidden
+  await ui.press({ key: 'note:more:1' })
+  await settleAll()
+  expect(await texts()).toContain('five')
+  expect(await texts()).not.toContain('w')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('▾ −2 lines')
+  await ui.press({ key: 'note:more:1' })
+  await settleAll()
+  expect(await texts()).not.toContain('five')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('▸ +2 lines')
+  await ui.unmount()
+})
+
+test('notes: the lines of a note are cut to the pane width, never wrapped, and the italian label reads righe', async ($, on) => {
+  const long = 'a very long line of a note that cannot fit in a narrow pane of the cockpit at all'
+  const options: World = { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: `${long}\n${long}\nshort\nmore` }] }) }
+  world(on, options)
+  try {
+    for (const files of [{}, IT_FILE]) {
+      options.files = files
+      await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+      const ui = await notesPane($, 40)
+      // each long line is one Text that truncates (its span inside it has no wrap of its own)
+      expect((await ui.findAll({ type: 'Text', text: long })).filter(n => n.props.wrap === 'truncate')).toHaveLength(2)
+      expect((await ui.find({ key: 'note:more:1' }))?.text).toBe(files === IT_FILE ? '▸ +1 riga' : '▸ +1 line')
+      await ui.unmount()
+    }
+  } finally {
+    setLang('en')
+  }
+})
+
+// ── Phase 9: Subagents rows are one cut line each ──
+
+test('Subagents: every row is one line cut to the width, at 40, 58 and 80 columns: the type and description, the facts, the warning, the tool', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'a-code-reviewer-with-a-long-name', description: 'Review the orders filter and every test around it, then report back', model: 'fable' })
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  await clock.advance(2 * MIN)
+  for (const columns of [40, 58, 80]) {
+    const width = Math.min(columns, 60) - 2
+    const { root, rows } = await paneRows($, columns, 'agents')
+    const i = rows.findIndex(r => r.startsWith('SUBAGENTS'))
+    expect(i).toBeGreaterThan(0)
+    const body = rows.slice(i).filter(r => !/^─+$/.test(r))
+    expect(body.length).toBeGreaterThan(3)
+    for (const row of body) expect(textCells(row)).toBeLessThanOrEqual(width)
+    expect(rows.find(r => /^◐ a-code/.test(r))).toMatch(/…$/)
+    // the facts row is exactly the width: the model on the left, the time on the right
+    expect(textCells(rows.find(r => /son 5\.5/.test(r)) ?? '')).toBe(width)
+    // every pressable row of the tab is one truncating Text
+    const rowsOfAgent = (n: unknown): unknown[] => {
+      const o = n as { type?: string; props?: { key?: string; wrap?: string }; children?: unknown[] } | null
+      return o?.type === 'Button' && o.props?.key === 'agent:a1' ? (o.children ?? []) : (o?.children ?? []).flatMap(rowsOfAgent)
+    }
+    const inner = rowsOfAgent(root)[0] as { type?: string; props?: { wrap?: string } } | undefined
+    expect(inner?.type).toBe('Text')
+    expect(inner?.props?.wrap).toBe('truncate')
+  }
+})
+
+test('Subagents: a description with line breaks stays on its one row', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review the filter\r\n\n  then report', model: 'fable' })
+  await clock.advance(MIN)
+  const { rows } = await paneRows($, 58, 'agents')
+  expect(rows.filter(r => /^◐ reviewer/.test(r))).toEqual(['◐ reviewer  Review the filter then report'])
+  expect(rows.some(r => /^then report/.test(r.trim()))).toBe(false)
+})
+
+test('Subagents: the history rows are one truncating Text each', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [{ id: 'h1', type: 'a-reviewer-with-an-extremely-long-name-indeed', startedAt: NOW - 60_000, endedAt: NOW - 30_000, tokens: 1234, isFailed: false }], prs: [] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 40)
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'history' })
+  const rows = rowTexts(await ui.drawn())
+  const row = rows.find(r => /^✓ a-reviewer/.test(r)) ?? ''
+  expect(textCells(row)).toBeLessThanOrEqual(38)
+  await ui.unmount()
+})
+
+test('Context: a reload that restarts the read counter does not leave the tab behind the number of the reading the snapshot kept', async ($, on) => {
+  const options: World = { breakdown: withMessages(90_000) }
+  world(on, options)
+  // the snapshot outlives a hot reload and remembers the number of its last read, while the module's own counter starts at zero again
+  let isAhead = false
+  on('state.get', async (_, e, next) => {
+    const answer = await next(e)
+    const read = answer.value
+    const held: unknown = read?.value
+    if (!isAhead || !read || typeof held !== 'object' || held === null || !('contextSeq' in held)) return answer
+    return { value: { ...read, value: { ...held, contextSeq: 50 } } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9%')
+  isAhead = true
+  options.breakdown = withMessages(120_000)
+  await ui.press({ key: 'ctx:refresh' })
+  await settleAll()
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 120k 12%')
+  await ui.unmount()
+})
+
+// ── Phase 9: what the tabs hold belongs to the session that is current ──
+
+test('scoping: the Insights counters, tool calls and last rounds of a session are not the next one\'s, and the last rounds stay in the first one\'s data file', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  world(on, { sessionId: () => id, writes })
+  roundHooks(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'echo a' })
+  await insightRound($, 5.02, 60_000, { read: 94_000, write: 5_400 })
+  const first = await insightsRows($)
+  expect(first).toContain('RHYTHM')
+  expect(first).toContain('TOOLS · 1 call')
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  id = 's-2'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(await insightsRows($)).toEqual(expect.arrayContaining(['nothing to show']))
+  expect(dataOf(writes)).toMatchObject({ ctxRounds: [expect.any(Number)] })
+})
+
+test('scoping: the notes of a session are not the next one\'s, and stay in the first one\'s data file', async ($, on) => {
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  world(on, { sessionId: () => id, writes })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  let ui = await notesPane($)
+  await saveNote(ui, 'keep me')
+  expect(rowTexts(await ui.drawn())).toContain('keep me')
+  await ui.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  id = 's-2'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  ui = await notesPane($)
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('no saved notes')
+  expect(rows).not.toContain('keep me')
+  await ui.unmount()
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'keep me' }] })
+})
+
+test('scoping: the pull requests of a session are not the next one\'s', async ($, on) => {
+  let id = 's-1'
+  const prs = [{ number: 8, title: 'Checks', state: 'open', isDraft: false, checks: { passed: 1, failed: 1, pending: 0 } }]
+  world(on, { sessionId: () => id, dataFile: JSON.stringify({ history: [], prs }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await workRows($)).some(r => /#8/.test(r))).toBe(true)
+  id = 's-2'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await workRows($)).some(r => /#8/.test(r))).toBe(false)
+})
+
+test('scoping: the refresh cooldown of a session does not hold the next one\'s button', async ($, on) => {
+  let id = 's-1'
+  const options: World = { breakdown: withMessages(90_000), sessionId: () => id }
+  world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  await ui.press({ key: 'ctx:refresh' })
+  await settleAll()
+  expect(await ui.find({ key: 'ctx:refresh' })).toBeUndefined() // the countdown stands in for it
+  id = 's-2'
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await ui.find({ key: 'ctx:refresh' })).toBeDefined()
+  await ui.unmount()
+})
+
+// ── Phase 9: owner preview notes ──
+
+test('System: the numbers row has the RAM as a percent only (no byte sizes), and CPU, RAM and network fit 58 columns at their widest', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await sistemaRows($, m, [sysLine({ cpu: 100, ram: { used: 31 * GIB, total: 32 * GIB }, net: { rx: 999 * 1024 ** 2, tx: 999 * 1024 ** 2 } })], 58)
+  const row = rows.find(r => /^CPU/.test(r)) ?? ''
+  expect(row).toMatch(/^CPU 100%  RAM 97%  NET ↓999 MB\/s ↑999 MB\/s/)
+  expect(row).not.toMatch(/RAM [\d.]+ [KMG]?B/)
+  expect(textCells(row.slice(0, row.indexOf('NET') + 'NET ↓999 MB/s ↑999 MB/s'.length))).toBeLessThanOrEqual(58)
+})
+
+type TitleBox = { props?: { justifyContent?: string; flexDirection?: string }; children?: unknown[] }
+
+/** The space-between Box of the title row whose text matches `re`. */
+const titleBox = (el: unknown, re: RegExp): TitleBox | undefined => {
+  const o = el as TitleBox | string | null
+  if (o === null || typeof o === 'string') return undefined
+  if (o.props?.justifyContent === 'space-between' && re.test(rowTexts({ children: [o] })[0] ?? '')) return o
+  return (o.children ?? []).flatMap(c => titleBox(c, re) ?? [])[0]
+}
+
+test('Italian: the process header, the pace title and the trend title are translated, and the title rows fit 40 and 58 columns', async ($, on) => {
+  const options: World = {
+    files: IT_FILE,
+    rateLimits: [
+      { kind: 'five_hour', percentUsed: 62, resetsAt: iso(2 * 60 * MIN) },
+      { kind: 'seven_day', percentUsed: 41, resetsAt: iso(2 * 24 * 60 * MIN) },
+    ],
+  }
+  const m = fakeMonitor(on)
+  world(on, options)
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    for (const columns of [40, 58]) {
+      const width = Math.min(columns, 60) - 2
+      const { root, rows } = await paneRows($, columns)
+      // the pace sits right of the title, or under it where the pane is too narrow for both
+      const row = rows.find(r => /^CREDITI RESIDUI/.test(r)) ?? ''
+      expect(row).toMatch(/rispetto all'atteso 7d/)
+      expect(titleBox(root, /^CREDITI RESIDUI/)?.props?.flexDirection).toBe(textCells(row) + 1 <= width ? 'row' : 'column')
+      expect(textCells(row) + 1 <= width).toBe(columns === 58)
+    }
+    const system = await sistemaRows($, m, [FULL_LINE], 40)
+    expect(system.some(r => /^ +PID NOME +CPU +RAM▾ PORTE$/.test(r))).toBe(true)
+  } finally {
+    setLang('en')
+  }
+})
+
+test('Context: in Italian the category names are translated, an unknown one shows as the engine names it, and the block is titled DETTAGLI CONTESTO', async ($, on) => {
+  const categories = [breakdownRow('Free space', 700_000, 'free'), breakdownRow('System prompt', 8000), breakdownRow('Messages', 90_000), breakdownRow('Brand new', 1000)]
+  world(on, { files: IT_FILE, breakdown: { categories, totalTokens: 99_000, rawMaxTokens: 1_000_000 } })
+  try {
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const rows = (await paneRows($, 50, 'context')).rows
+    expect(categoryNames(rows)).toEqual(['Messaggi', 'Prompt di sistema', 'Brand new', 'Spazio libero'])
+    expect(rows.some(r => /^DETTAGLI CONTESTO · 99K\/1M/.test(r))).toBe(true)
+  } finally {
+    setLang('en')
+  }
+})
+
+test('Subagents: every agent of the session is listed, no cap and no … +n, at 40, 58 and 80 columns', async ($, on) => {
+  world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let n = 1; n <= 15; n++) await spawnAgent($, `agent-${n}`)
+  for (const columns of [40, 58, 80]) {
+    const { rows } = await paneRows($, columns, 'agents')
+    for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`◐ agent-${n} `))]).toEqual([n, true])
+    expect(rows.some(r => /^… \+\d+$/.test(r))).toBe(false)
+  }
+})

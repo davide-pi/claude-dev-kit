@@ -10,6 +10,7 @@ import type {
   CockpitDiff,
   CockpitNote,
   CockpitPr,
+  CockpitProcSort,
   CockpitSnapshot,
   CockpitSysProc,
   CockpitSystem,
@@ -19,8 +20,12 @@ import type {
 } from '../types'
 import {
   AGENT_KEEP_MS,
+  CALLS_SHOWN,
   COLORS,
   ICONS,
+  REFRESH_COOLDOWN_MS,
+  TABS,
+  TAB_ICONS,
   abbrevTokens,
   aheadBehindSpans,
   almText,
@@ -29,9 +34,11 @@ import {
   baseName,
   cacheColor,
   claimTime,
+  claimsOf,
   claudeStateSpans,
   countdown,
   ctxColor,
+  ctxGrowth,
   displayModel,
   duration,
   effortGlyph,
@@ -41,6 +48,7 @@ import {
   folderIcon,
   gridWidths,
   hhmm,
+  insightHints,
   modelFamily,
   openTasks,
   parseReset,
@@ -49,21 +57,25 @@ import {
   shortModel,
   shouldCompact,
   signedPctCell,
+  sortProcs,
   spanWidth,
-  sparkline,
   padCells,
   rangeSparkline,
+  shade,
   textCells,
+  timeSplit,
   sessionTokens,
+  sparkline,
   taskBarCells,
   tokenShare,
   truncEnd,
   truncMiddle,
   truncateSpans,
   weeklyPace,
+  withBackground,
   worklogLabel,
 } from './format'
-import type { ModelFamily, Span } from './format'
+import type { CockpitHint, ModelFamily, Span } from './format'
 import { t } from './strings'
 
 /** The elements the views draw with; every surface's table has them. */
@@ -75,8 +87,6 @@ export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
 const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
-const MAX_AGENT_ROWS = 10
-const MAX_HISTORY_ROWS = 10
 /** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
 const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
@@ -85,23 +95,29 @@ const CTX_WARN_PCT = 80
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
-const MAX_SUBAGENT_BLOCKS = 5
 const TASK_TIME_W = 6
 const MAX_FILE_ROWS = 8
 /** Cells before a changed file's path: the added column, the deleted one and their gaps. */
 const CHANGE_COUNTS_W = 12
 const MAX_PR_ROWS = 4
-/** Cells of a System row's label (`CPU  `), the sparkline's longest run, and the cells of a process row's columns: pid, name (at most), CPU and RAM. */
-const SYS_LABEL_W = 5
-const SYS_SPARK_MAX = 20
+/** Cells of a process row's columns: pid, name (at most), CPU, RAM and the ports' header (` PORTS`). */
 const SYS_PID_W = 6
 const SYS_NAME_W = 14
 const SYS_CPU_W = 4
-const SYS_RAM_W = 5
+const SYS_RAM_W = 6
+const SYS_PORTS_W = 6
+/** The most bars the Context trend line draws before its text, and the most lines a note shows before `▸ +N lines`. */
+const TREND_BARS_MAX = 8
+const NOTE_LINES_SHOWN = 3
+/** The height of the note field: multi-line notes are common. */
+const NOTE_INPUT_ROWS = 6
 /** Cells of a tool row: the tool's name, and the time it started (`HH:MM`). */
 const CALL_TOOL_W = 7
 const CALL_TIME_W = 5
 const MAX_SKILL_ROWS = 6
+/** The Insights tab: the cells of a row's label, and the tool types listed. */
+const INSIGHT_LABEL_W = 13
+const MAX_TOOL_TYPES = 6
 /** Cells of the Context rows: a category's tokens and share of the window, what follows them (the exact mark and the change of the last round) and a consumer's kind label. */
 const CTX_TOKENS_W = 6
 const CTX_SHARE_W = 5
@@ -119,7 +135,7 @@ const sp = (t: string, c?: string, bold?: boolean): Span => ({ t, c, bold })
 /** One `Text` per span: the children of a row and of a pressable row. */
 function spanNodes({ Text }: Ui, spans: readonly Span[]): RenderElement[] {
   return spans.map(s => (
-    <Text color={s.c} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
+    <Text color={s.c} backgroundColor={s.bg} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
       {s.t}
     </Text>
   ))
@@ -292,37 +308,51 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
   ]
 }
 
-/** The Subagenti tab's second row of an agent: model and effort on the left; its share of the session's tokens and its elapsed time on the right. */
-export function subagentFacts(a: CockpitAgent, now: number, total: number, indent: string): { left: Span[]; right: Span[] } {
+/** `left` and `right` on one row of `width` cells: a gap between them, the left cut to leave the right whole; a row too short for both is cut. */
+export function pairRow(left: readonly Span[], right: readonly Span[], width: number): Span[] {
+  const rightW = spanWidth(right)
+  if (width - rightW - 1 < 1) return truncateSpans([...left, sp(' '), ...right], width)
+  const l = truncateSpans(left, width - rightW - 1)
+  return [...l, sp(' '.repeat(width - spanWidth(l) - rightW)), ...right]
+}
+
+/** `left` and `right` as `pairRow` lays them when both fit `width`; the left alone, cut, when they do not. */
+export const fitPair = (left: readonly Span[], right: readonly Span[], width: number): Span[] =>
+  spanWidth(left) + 1 + spanWidth(right) <= width ? pairRow(left, right, width) : truncateSpans(left, width)
+
+/** The Subagents tab's second row of an agent, `width` cells: model and effort on the left; its share of the session's tokens and its elapsed time on the right. */
+export function subagentFacts(a: CockpitAgent, now: number, total: number, indent: string, width: number): Span[] {
   const share = tokenShare(a.tokens, total)
-  return {
-    left: [sp(indent), a.model ? sp(shortModel(a.model), undefined, a.status === 'running') : dim('—'), ...headerEffort(a.effort)],
-    right: [...(share ? [sp(share, undefined, true), dim(t().tokenShare)] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
-  }
+  return pairRow(
+    [sp(indent), a.model ? sp(shortModel(a.model), undefined, a.status === 'running') : dim('—'), ...headerEffort(a.effort)],
+    [...(share ? [sp(share, undefined, true), dim(t().tokenShare)] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
+    width,
+  )
 }
 
 /**
- * The rows under an agent's facts on the Subagenti tab: the four counters, then the tool running now (or, when none is, the last
- * one). Each is left out until the engine gave it: nothing is faked.
+ * The rows under an agent's facts on the Subagents tab: the four counters when the agent's are open (`isUsageOpen`), then the tool running
+ * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
  */
-export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
+export function subagentDetails(a: CockpitAgent, indent: string, width: number, isUsageOpen = false): Span[][] {
   const running = a.status === 'running' ? a.activeTools?.at(-1) : undefined
-  const counters = a.usage
-    ? truncateSpans(
-        [
-          sp(indent),
-          dim(t().tokenLabels.input),
-          sp(abbrevTokens(a.usage.input)),
-          dim(t().tokenLabels.output),
-          sp(abbrevTokens(a.usage.output)),
-          dim(t().tokenLabels.cacheRead),
-          sp(abbrevTokens(a.usage.cacheRead)),
-          dim(t().tokenLabels.cacheWrite),
-          sp(abbrevTokens(a.usage.cacheWrite)),
-        ],
-        width,
-      )
-    : undefined
+  const counters =
+    a.usage && isUsageOpen
+      ? truncateSpans(
+          [
+            sp(indent),
+            dim(t().tokenLabels.input),
+            sp(abbrevTokens(a.usage.input)),
+            dim(t().tokenLabels.output),
+            sp(abbrevTokens(a.usage.output)),
+            dim(t().tokenLabels.cacheRead),
+            sp(abbrevTokens(a.usage.cacheRead)),
+            dim(t().tokenLabels.cacheWrite),
+            sp(abbrevTokens(a.usage.cacheWrite)),
+          ],
+          width,
+        )
+      : undefined
   const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
   const tool = toolSpans && truncateSpans(toolSpans, width)
   return [counters, tool].filter((r): r is Span[] => r !== undefined)
@@ -405,23 +435,24 @@ export function contextBar(c: CockpitContext, width: number): Span[] {
 }
 
 /**
- * One category row: a square in the bar color, its name cut to fit, its tokens and its share of the window; then a `✓` when the tokens are an
- * exact count kept from earlier, and the change of the last round (`+12k`, none when it did not move).
+ * One category row, exactly `width` cells: a square in the bar color, its name cut to fit, its tokens and its share of the window; a `✓`
+ * when the tokens are an exact count kept from earlier and the change of the last round (`+12k`, blank when it did not move). The first
+ * cells, in proportion to the share of the window, sit on the `bg` background: the row carries its own bar.
  */
-export function categorySpans(r: CockpitContextRow, color: string, max: number, width: number): Span[] {
+export function categorySpans(r: CockpitContextRow, color: string, bg: string, max: number, width: number): Span[] {
   const nameW = Math.max(4, width - 2 - CTX_TOKENS_W - CTX_SHARE_W - CTX_MARK_W - CTX_DELTA_W)
   const share = max > 0 ? `${Math.round((100 * r.tokens) / max)}%` : ''
-  const delta = r.delta ? padStart(`${r.delta > 0 ? '+' : '−'}${abbrevTokens(Math.abs(r.delta))}`, CTX_DELTA_W) : ''
-  const mark = r.isExact ? ' ✓' : delta !== '' ? '  ' : ''
-  return [
+  const delta = r.delta ? padStart(`${r.delta > 0 ? '+' : '−'}${abbrevTokens(Math.abs(r.delta))}`, CTX_DELTA_W) : ' '.repeat(CTX_DELTA_W)
+  const row = [
     sp('■', color),
     sp(' '),
-    sp(padCells(truncEnd(r.name, nameW), nameW)),
+    sp(padCells(truncEnd(t().contextCategories[r.name] ?? r.name, nameW), nameW)),
     sp(padStart(abbrevTokens(r.tokens), CTX_TOKENS_W)),
     dim(padStart(share, CTX_SHARE_W)),
-    ...(mark !== '' ? [r.isExact ? sp(mark, COLORS.green) : dim(mark)] : []),
-    ...(delta !== '' ? [dim(delta)] : []),
+    r.isExact ? sp(' ✓', COLORS.green) : dim('  '),
+    dim(delta),
   ]
+  return withBackground(row, r.tokens > 0 && max > 0 ? Math.max(1, Math.round((width * r.tokens) / max)) : 0, bg)
 }
 
 /** The rows of the table, in the order the reading holds them (biggest first): the categories inside the window (a deferred one is outside it), colored as the bar colors them. */
@@ -430,8 +461,22 @@ export function categoryRows(c: CockpitContext, width: number): Span[][] {
   return c.rows.flatMap(r => {
     if (r.kind === 'deferred') return []
     const color = r.kind === 'free' ? COLORS.empty : r.kind === 'buffer' ? COLORS.dim : (CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray)
-    return [categorySpans(r, color, c.max, width)]
+    // the free space is drawn from a dim gray, whose own square is nearly invisible
+    return [categorySpans(r, color, shade(r.kind === 'free' ? COLORS.gray : color, r.kind === 'free' ? 0.2 : 0.32), c.max, width)]
   })
+}
+
+/**
+ * The context's trend as one line: the last rounds as bars (as many as fit before the text, at most eight, none under two) then where the
+ * context went, how fast it grows per round and in how many rounds auto-compaction comes (`forecast`); cut to `width`. Empty without a round.
+ */
+export function trendSpans(rounds: readonly number[], growth: number | undefined, forecast: number | undefined, color: string, width: number): Span[] {
+  const first = rounds[0]
+  const last = rounds.at(-1)
+  if (first === undefined || last === undefined) return []
+  const text = t().trendLine(abbrevTokens(first), abbrevTokens(last), growth === undefined ? undefined : abbrevTokens(Math.round(growth)), forecast)
+  const bars = Math.min(rounds.length, TREND_BARS_MAX, width - 2 - textCells(text))
+  return truncateSpans([...(bars >= 2 ? [sp(rangeSparkline(rounds.slice(-bars)), color), sp('  ')] : []), sp(text)], width)
 }
 
 /** A static consumer row: its kind, its name cut to fit, its tokens. */
@@ -440,89 +485,92 @@ export function consumerSpans(c: CockpitConsumer, width: number): Span[] {
   return [dim(pad(t().consumerKinds[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
 }
 
+/** The text of an Insights hint. */
+function hintText(h: CockpitHint): string {
+  const S = t().hints
+  switch (h.kind) {
+    case 'rereads':
+      return S.rereads(h.file, h.count)
+    case 'coldCache':
+      return S.coldCache
+    case 'failures':
+      return S.failures(h.count)
+    case 'subagents':
+      return S.subagents(h.share)
+    case 'longRound':
+      return S.longRound(duration(h.ms))
+  }
+}
+
 /** The color of a load in percent: green, yellow from 60, red from 85. */
 const loadColor = (pct: number): string => (pct >= 85 ? COLORS.red : pct >= 60 ? COLORS.yellow : COLORS.green)
 
-/**
- * One System row: its label, bars of the last samples (as many as fit, at most 20, scaled between the lowest and the highest of them),
- * the highest one printed after them (`formatMax`) and the readout flush right; cut to `width`.
- */
-export function metricSpans(label: string, samples: readonly number[], color: string, readout: Span[], width: number, formatMax: (max: number) => string): Span[] {
-  const widest = samples.length > 0 ? 1 + textCells(formatMax(Math.max(...samples))) : 0
-  const room = Math.max(0, Math.min(SYS_SPARK_MAX, width - SYS_LABEL_W - spanWidth(readout) - 1 - widest))
-  const shown = samples.slice(-room)
-  const spark = room > 0 ? rangeSparkline(shown) : ''
-  const maxSpans: Span[] = spark !== '' ? [dim(` ${formatMax(Math.max(...shown))}`)] : []
-  const fill = Math.max(1, width - SYS_LABEL_W - spark.length - spanWidth(maxSpans) - spanWidth(readout))
-  return truncateSpans([dim(pad(label, SYS_LABEL_W)), ...(spark !== '' ? [sp(spark, color)] : []), ...maxSpans, sp(' '.repeat(fill)), ...readout], width)
-}
-
-const maxPct = (max: number) => `${t().max} ${Math.round(max)}%`
-
-/** The System tab's CPU, RAM and network rows; a part that could not be read says so, one not read yet draws `…`. */
-export function systemMetricRows(sys: CockpitSystem, width: number): Span[][] {
-  const na = (label: string): Span[] => [dim(pad(label, SYS_LABEL_W)), dim(t().unavailable)]
+/** The System tab's first numbers, one item each: CPU, RAM and network; a part that could not be read says so, one not read yet draws `…`. */
+function usageItems(sys: CockpitSystem): Span[][] {
+  const item = (label: string, isOff: boolean, value: Span[]): Span[] => [dim(`${label} `), ...(isOff ? [dim(t().unavailable)] : value)]
   const cpu = sys.cpu.at(-1)
   const ram = sys.ram.at(-1)
   const rx = sys.rx.at(-1)
   const tx = sys.tx.at(-1)
   return [
-    sys.off.includes('cpu') ? na('CPU') : metricSpans('CPU', sys.cpu, cpu === undefined ? COLORS.dim : loadColor(cpu), cpu === undefined ? [dim('…')] : [sp(`${Math.round(cpu)}%`, loadColor(cpu), true)], width, maxPct),
-    sys.off.includes('ram')
-      ? na('RAM')
-      : metricSpans(
-          'RAM',
-          sys.ram,
-          ram === undefined ? COLORS.dim : loadColor(ram),
-          ram === undefined || sys.ramUsed === undefined || sys.ramTotal === undefined
-            ? [dim('…')]
-            : [sp(`${fmtBytes(sys.ramUsed)}/${fmtBytes(sys.ramTotal)}`), sp(' '), sp(`${ram}%`, loadColor(ram), true)],
-          width,
-          maxPct,
-        ),
-    sys.off.includes('net')
-      ? na('NET')
-      : metricSpans(
-          'NET',
-          sys.rx.map((v, i) => v + (sys.tx[i] ?? 0)),
-          COLORS.blue,
-          rx === undefined || tx === undefined ? [dim('…')] : [dim('↓'), sp(`${fmtBytes(rx)}/s`), dim(' ↑'), sp(`${fmtBytes(tx)}/s`)],
-          width,
-          max => `${t().max} ${fmtBytes(max)}/s`,
-        ),
+    item('CPU', sys.off.includes('cpu'), cpu === undefined ? [dim('…')] : [sp(`${Math.round(cpu)}%`, loadColor(cpu), true)]),
+    item('RAM', sys.off.includes('ram'), ram === undefined ? [dim('…')] : [sp(`${ram}%`, loadColor(ram), true)]),
+    item('NET', sys.off.includes('net'), rx === undefined || tx === undefined ? [dim('…')] : [dim('↓'), sp(`${fmtBytes(rx)}/s`), dim(' ↑'), sp(`${fmtBytes(tx)}/s`)]),
   ]
 }
 
-/** The System tab's last metric row: the free room of the working directory's drive and where the power comes from, each with its icon. */
-export function diskPowerSpans(sys: CockpitSystem, width: number): Span[] {
-  const { disk, power } = sys
-  const diskSpans: Span[] = sys.off.includes('disk')
-    ? [dim(`${ICONS.disk} `), dim(t().unavailable)]
-    : disk
-      ? [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} ${t().diskFree}`, disk.total > 0 && disk.free / disk.total < 0.1 ? COLORS.red : disk.total > 0 && disk.free / disk.total < 0.2 ? COLORS.yellow : undefined)]
-      : [dim(`${ICONS.disk} `), dim('…')]
-  const powerSpans: Span[] = sys.off.includes('power')
-    ? [dim(`${ICONS.battery} `), dim(t().unavailable)]
-    : !power
-      ? [dim(`${ICONS.battery} `), dim('…')]
-      : power.kind === 'wired'
-        ? [sp(`${ICONS.plug} `, COLORS.green), sp(t().mains)]
-        : [
-            sp(`${power.isCharging ? ICONS.charging : ICONS.battery} `, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : power.percent <= 30 ? COLORS.yellow : undefined),
-            sp(`${Math.round(power.percent)}%${power.isCharging ? t().charging : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
-          ]
-  return truncateSpans([...diskSpans, sp('  '), ...powerSpans], width)
+/** The free room of the working directory's drive, with its icon. */
+function diskSpans(sys: CockpitSystem): Span[] {
+  const { disk } = sys
+  if (sys.off.includes('disk')) return [dim(`${ICONS.disk} `), dim(t().unavailable)]
+  if (!disk) return [dim(`${ICONS.disk} `), dim('…')]
+  const color = disk.total > 0 && disk.free / disk.total < 0.1 ? COLORS.red : disk.total > 0 && disk.free / disk.total < 0.2 ? COLORS.yellow : undefined
+  return [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} ${t().diskFree}`, color)]
 }
+
+/** Where the power comes from, with its icon. */
+function powerSpans(sys: CockpitSystem): Span[] {
+  const { power } = sys
+  if (sys.off.includes('power')) return [dim(`${ICONS.battery} `), dim(t().unavailable)]
+  if (!power) return [dim(`${ICONS.battery} `), dim('…')]
+  if (power.kind === 'wired') return [sp(`${ICONS.plug} `, COLORS.green), sp(t().mains)]
+  return [
+    sp(`${power.isCharging ? ICONS.charging : ICONS.battery} `, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : power.percent <= 30 ? COLORS.yellow : undefined),
+    sp(`${Math.round(power.percent)}%${power.isCharging ? t().charging : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
+  ]
+}
+
+/** The System tab's two rows of numbers, one item each (the pane lays an item out beside the last, wrapping where they do not fit): CPU, RAM and network; disk and power. */
+export const systemRowItems = (sys: CockpitSystem): Span[][][] => [usageItems(sys), [diskSpans(sys), powerSpans(sys)]]
 
 /** A CPU share in its cell: a tenth under 10 %, whole above (`0.4%`, `12%`); empty until two reads gave one. */
 const cpuCell = (cpu: number | undefined): string => (cpu === undefined ? '' : cpu >= 10 ? `${Math.round(cpu)}%` : `${cpu.toFixed(1)}%`)
+
+/** The width of a process row's name column: what the width leaves after the other columns, at most `SYS_NAME_W`. */
+const procNameWidth = (width: number): number => Math.max(4, Math.min(SYS_NAME_W, width - (SYS_PID_W + SYS_CPU_W + SYS_RAM_W + SYS_PORTS_W + 3)))
+
+/**
+ * The process table's header, in the columns `procParts` draws: `PID NAME` before the CPU and RAM cells (which the pane makes buttons: the
+ * press sorts by that column, and the sorted one carries a `▾`), then `PORTS`. The cells are the label padded to their column.
+ */
+export function procHeader(sort: CockpitProcSort, width: number): { start: Span[]; cpu: string; ram: string; ports: Span[] } {
+  const H = t().procHeader
+  const nameW = procNameWidth(width)
+  const mark = (by: CockpitProcSort, label: string) => padStart(sort === by ? `${label}▾` : label, by === 'cpu' ? SYS_CPU_W : SYS_RAM_W)
+  return {
+    start: [dim(padStart(H.pid, SYS_PID_W)), sp(' '), dim(padCells(H.name, nameW)), sp(' ')],
+    cpu: mark('cpu', H.cpu),
+    ram: mark('ram', H.ram),
+    ports: truncateSpans([sp(' '), dim(H.ports)], Math.max(0, width - (SYS_PID_W + 1 + nameW + 1 + SYS_CPU_W + 1 + SYS_RAM_W))),
+  }
+}
 
 /**
  * One row of the process table: pid, name (cut to what the width leaves), CPU, RAM, then the ports that fit after them (each is a link the
  * pane draws); `more` when a port was left out for lack of room. The head is cut to `width`.
  */
 export function procParts(p: CockpitSysProc, width: number): { head: Span[]; ports: number[]; more: boolean } {
-  const nameW = Math.max(4, Math.min(SYS_NAME_W, width - (SYS_PID_W + SYS_CPU_W + SYS_RAM_W + 3)))
+  const nameW = procNameWidth(width)
   const head = truncateSpans(
     [
       dim(padStart(String(p.pid), SYS_PID_W)),
@@ -587,8 +635,14 @@ export type PaneActions = {
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
-  /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests). */
-  countExact: () => void
+  /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests): the Context tab's `refresh`, once a minute. */
+  refresh: () => void
+  /** Opens or closes the four token counters of an agent. */
+  toggleUsage: (agentId: string) => void
+  /** Opens or closes a note beyond its first lines. */
+  toggleNote: (id: number) => void
+  /** Sorts the process table by the column pressed. */
+  sortProcs: (by: CockpitProcSort) => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
   /** Keeps what the Notes tab's field holds as the person types it. */
@@ -639,8 +693,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
+  // a right side that does not fit beside its title goes under it
   const title = (label: string, right: Span[] = []) => (
-    <Box justifyContent="space-between">
+    <Box justifyContent="space-between" flexDirection={textCells(label) + 1 + spanWidth(right) <= width ? 'row' : 'column'}>
       {line(ui, [sp(label, COLORS.title)])}
       {line(ui, right)}
     </Box>
@@ -658,7 +713,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   // An agent row is a Button: a press puts the agent's transcript in the main view.
   const agentButton = (key: string, a: CockpitAgent, depth: number) => (
     <Button key={key} plain onPress={() => actions.openAgent(a.id)}>
-      {spanNodes(ui, agentRow(a, depth, s.now, width))}
+      <Text wrap="truncate">{spanNodes(ui, agentRow(a, depth, s.now, width))}</Text>
     </Button>
   )
 
@@ -672,10 +727,12 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : []),
   ]
 
-  // ── Tab bar: the selected tab is the primary button ──
-  const tabButton = (id: CockpitTab, label: string, hasDot = false) => {
-    const variant = tab === id ? 'primary' : 'secondary'
-    return hasDot ? (
+  // ── Tab bar: the selected tab is the primary button with its name, the others show their icon; a hover shows every name ──
+  const tabButton = (id: CockpitTab, hasDot = false, count = 0) => {
+    const isSelected = tab === id
+    const label = `${isSelected ? `${TAB_ICONS[id]} ${S.tabs[id]}` : TAB_ICONS[id]}${count > 0 ? ` ${count}` : ''}`
+    const variant = isSelected ? 'primary' : 'secondary'
+    const button = hasDot ? (
       <Button key={`tab:${id}`} variant={variant} onPress={() => actions.selectTab(id)}>
         {label}
         <Text color={COLORS.yellow}> ●</Text>
@@ -683,23 +740,25 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     ) : (
       <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />
     )
+    // The tooltip hangs from the row under the button; the last tabs anchor it to their right edge so it stays inside the pane.
+    const anchor = TABS.indexOf(id) < TABS.length - 2 ? { left: 0 } : { right: 0 }
+    return (
+      <Box key={`tip:${id}`}>
+        {button}
+        <Box position="absolute" top={1} {...anchor} display="none" hover={{ display: 'flex' }}>
+          <Text color={COLORS.text} backgroundColor={COLORS.rule}>{` ${S.tabs[id]} `}</Text>
+        </Box>
+      </Box>
+    )
   }
-  // The long labels, with the running count and the dot, when the whole bar fits; else the short ones.
-  const fullLabels = [
-    running.length > 0 ? `${S.tabs.agents} ${running.length}` : S.tabs.agents,
-    S.tabs.context,
-    wlRows.length > 0 ? `${S.tabs.work} ●` : S.tabs.work,
-    S.tabs.system,
-    S.tabs.notes,
-  ]
-  const names = buttonRowWidth(fullLabels) <= width ? S.tabs : S.tabsShort
   const tabBar = (
     <Box columnGap={1} flexWrap="wrap">
-      {tabButton('agents', running.length > 0 ? `${names.agents} ${running.length}` : names.agents)}
-      {tabButton('context', names.context)}
-      {tabButton('work', names.work, wlRows.length > 0)}
-      {tabButton('system', names.system)}
-      {tabButton('notes', names.notes)}
+      {tabButton('agents', false, running.length)}
+      {tabButton('context')}
+      {tabButton('work', wlRows.length > 0)}
+      {tabButton('insights')}
+      {tabButton('system')}
+      {tabButton('notes')}
     </Box>
   )
 
@@ -727,10 +786,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       </Box>
     </Box>
   )
-
-  // ALM target of the folder (absent without a workspaces map, or a mapped root that names nothing)
-  const almLine = s.alm ? almSpans(s.alm, width) : []
-  const almRow = almLine.length > 0 && line(ui, almLine)
 
   // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn), the last round's delta and duration
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
@@ -802,7 +857,6 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const headerRows: Node[] = [
     modelLine,
     grid,
-    almRow,
     rule,
     gap(),
     title(S.contextTitle, contextRight),
@@ -822,33 +876,37 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   // ── Subagents: every agent listed (finished ones for two minutes), a block each ──
   const rows = orderAgents(agents)
   const sessionTotal = sessionTokens(s)
-  const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }, i) => {
+  const agentRows = rows.flatMap(({ agent, depth }, i) => {
     const indent = '  '.repeat(depth + 1)
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    const facts = subagentFacts(agent, s.now, sessionTotal, indent)
+    const isUsageOpen = s.usageOpen?.includes(agent.id) === true
     return [
       i > 0 && gap(),
-      // The first row is the pressable one: state, type and what the agent was asked.
+      // The first row is the pressable one: state, type and what the agent was asked. Every row is one cut line, never wrapped.
       <Button key={`agent:${agent.id}`} plain onPress={() => actions.openAgent(agent.id)}>
-        {spanNodes(
-          ui,
-          truncateSpans(
-            [
-              agentIcon(agent),
-              sp(' '),
-              sp(depth > 0 ? `${'  '.repeat(depth - 1)}└ ${agent.type}` : agent.type, undefined, agent.status === 'running'),
-              ...(agent.description ? [dim(`  ${agent.description}`)] : []),
-            ],
-            width,
-          ),
-        )}
+        <Text wrap="truncate">
+          {spanNodes(
+            ui,
+            truncateSpans(
+              [
+                agentIcon(agent),
+                sp(' '),
+                sp(depth > 0 ? `${'  '.repeat(depth - 1)}└ ${agent.type}` : agent.type, undefined, agent.status === 'running'),
+                ...(agent.description ? [dim(`  ${agent.description.replace(/\s+/g, ' ')}`)] : []),
+              ],
+              width,
+            ),
+          )}
+        </Text>
       </Button>,
-      <Box justifyContent="space-between">
-        {line(ui, facts.left)}
-        {line(ui, facts.right)}
-      </Box>,
+      line(ui, subagentFacts(agent, s.now, sessionTotal, indent, width)),
       warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
-      ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
+      agent.usage && (
+        <Button key={`usage:${agent.id}`} plain onPress={() => actions.toggleUsage(agent.id)}>
+          <Text wrap="truncate" color={COLORS.title}>{`${indent}${isUsageOpen ? '▾' : '▸'} ${S.tokensToggle}`}</Text>
+        </Button>
+      ),
+      ...subagentDetails(agent, indent, width, isUsageOpen).map(spans => line(ui, spans)),
     ]
   })
   // HISTORY: the agents that left the list, newest first, behind a toggle (collapsed by default)
@@ -864,18 +922,15 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
               <Text color={COLORS.title}>{`${S.historyTitle} · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
             </Button>,
             isHistoryOpen && gap(),
-            isHistoryOpen &&
-              history.slice(0, MAX_HISTORY_ROWS).map(h => agentButton(`history:${h.id}`, { ...h, status: 'done' }, 0)),
-            isHistoryOpen && history.length > MAX_HISTORY_ROWS && line(ui, [dim(`… +${history.length - MAX_HISTORY_ROWS}`)]),
+            isHistoryOpen && history.map(h => agentButton(`history:${h.id}`, { ...h, status: 'done' }, 0)),
           ],
         ]
   const agentBlocks: Block[] = [
     [
       gap(),
-      title(S.subagentsTitle(running.length), modelCounts(agents)),
+      line(ui, fitPair([sp(S.subagentsTitle(running.length), COLORS.title)], modelCounts(agents), width)),
       rows.length > 0 && gap(),
       agentRows,
-      rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)]),
     ],
     ...historyBlock,
   ]
@@ -884,46 +939,34 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const context = s.context
   const rounds = s.ctxRounds ?? []
   const hint = shouldCompact({ percent: s.ctx.percent, rounds, forecast })
+  // `refresh` is an exact count and waits a minute from its press: a countdown stands in for the button meanwhile
+  const wait = s.refreshedAt === undefined ? 0 : Math.min(REFRESH_COOLDOWN_MS, s.refreshedAt + REFRESH_COOLDOWN_MS - s.now)
+  const refreshRow =
+    wait > 0 ? (
+      line(ui, [dim(S.refreshIn(Math.ceil(wait / 1000)))])
+    ) : (
+      <Button key="ctx:refresh" onPress={() => actions.refresh()}>
+        {S.buttons.refresh}
+      </Button>
+    )
   const breakdownBlock: Block = [
     gap(),
-    title(context ? `${S.contextTitle} · ${abbrevTokens(context.total, true)}/${abbrevTokens(context.max, true)}` : S.contextTitle, context ? [dim(context.isExact ? S.exact : context.rows.some(r => r.isExact) ? S.someExact : S.estimate)] : []),
+    title(context ? `${S.contextDetailsTitle} · ${abbrevTokens(context.total, true)}/${abbrevTokens(context.max, true)}` : S.contextDetailsTitle, context ? [dim(context.isExact ? S.exact : context.rows.some(r => r.isExact) ? S.someExact : S.estimate)] : []),
     gap(),
     hint && line(ui, [sp(S.worthCompacting, COLORS.yellow)]),
     ...(context ? [line(ui, contextBar(context, width)), ...categoryRows(context, width).map(spans => line(ui, spans))] : [line(ui, [dim(S.noReading)])]),
     gap(),
-    <Button key="ctx:exact" onPress={() => actions.countExact()}>
-      {S.buttons.exactCount}
-    </Button>,
+    refreshRow,
   ]
   const consumersBlock: Block =
     context && context.consumers.length > 0
       ? [gap(), title(S.consumersTitle(context.consumers.length)), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
       : []
-  const skillsUsed = s.skillsUsed ?? []
-  const skillsBlock: Block =
-    skillsUsed.length > 0 || context?.skills
-      ? [
-          gap(),
-          title(S.skillsTitle(skillsUsed.length), context?.skills ? [dim(S.skillsListed(context.skills.listed, context.skills.total))] : []),
-          skillsUsed.length > 0 && gap(),
-          skillsUsed.slice(0, MAX_SKILL_ROWS).map(name => line(ui, [sp(truncEnd(name, width))])),
-          skillsUsed.length > MAX_SKILL_ROWS && line(ui, [dim(`… +${skillsUsed.length - MAX_SKILL_ROWS}`)]),
-        ]
-      : []
-  const first = rounds[0]
-  const last = rounds.at(-1)
-  const roundsBlock: Block =
-    first !== undefined && last !== undefined
-      ? [
-          gap(),
-          title(S.trendTitle(rounds.length)),
-          gap(),
-          line(ui, [sp(sparkline(rounds), ctxColor(s.ctx.percent ?? 0)), dim(`  ${abbrevTokens(first)} → ${abbrevTokens(last)}`)]),
-        ]
-      : []
-  const contextBlocks: Block[] = [breakdownBlock, consumersBlock, skillsBlock, roundsBlock].filter(b => b.length > 0)
+  const trend = trendSpans(rounds, ctxGrowth(s.ctxSamples), forecast, ctxColor(s.ctx.percent ?? 0), width)
+  const roundsBlock: Block = trend.length > 0 ? [gap(), title(S.trendTitle(rounds.length)), gap(), line(ui, trend)] : []
+  const contextBlocks: Block[] = [breakdownBlock, consumersBlock, roundsBlock].filter(b => b.length > 0)
 
-  // ── Work, per agent: the main one, the workflow in flight, each running subagent, the hooks that fired ──
+  // ── Work: the ALM line, the main agent's perimeter, tasks and worklog, the branch, the changed files, the PRs ──
   const counts = taskCounts(s)
   const open = openTasks(s)
   const taskPart: Block =
@@ -969,34 +1012,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       ? [[gap(), title(S.mainTitle), ...perimeterPart, ...taskPart, ...worklogPart]]
       : []
 
-  // The workflow in flight: its name (from the last stop) and the agents of the run finished out of those seen starting. The engine
-  // does not expose a phase, a round or P1/P2 counts: they are not drawn.
-  const runAgents = s.workflowRun?.agents ?? []
-  const isWorkflowActive = s.workflow !== undefined || runAgents.some(a => !a.isDone)
-  const workflowBlock: Block[] = isWorkflowActive
-    ? [
-        [
-          gap(),
-          title(s.workflow === undefined ? S.workflowTitle : `${S.workflowTitle} · ${truncMiddle(s.workflow, Math.max(4, width - textCells(S.workflowTitle) - 3))}`),
-          runAgents.length > 0 && gap(),
-          runAgents.length > 0 && line(ui, [dim(S.workflowAgents), sp(`${runAgents.filter(a => a.isDone).length}/${runAgents.length}`, COLORS.blue)]),
-        ],
-      ]
-    : []
-
-  // One block per running subagent (a workflow's agents are the workflow's); the tool line only once a tool call was seen
-  const inWorkflow = new Set(runAgents.map(a => a.id))
-  const workers = running.filter(a => !inWorkflow.has(a.id))
-  const subagentBlocks: Block[] = workers.slice(0, MAX_SUBAGENT_BLOCKS).map((a, i) => [
-    gap(),
-    title(truncMiddle(a.type, Math.max(4, width - 7)), [dim(duration(s.now - a.startedAt))]),
-    a.description ? line(ui, [sp(truncEnd(a.description, width))]) : undefined,
-    a.lastTool ? line(ui, truncateSpans([dim(S.lastTool), sp(a.lastTool)], width)) : undefined,
-    i === MAX_SUBAGENT_BLOCKS - 1 && workers.length > MAX_SUBAGENT_BLOCKS && line(ui, [dim(`… +${workers.length - MAX_SUBAGENT_BLOCKS}`)]),
-  ])
-
-  // The hooks that fired: the last done-claim entries
-  const claims = s.doneClaims ?? []
+  // The hooks that fired: the last done-claim blocks of this session
+  const claims = claimsOf(s.doneClaims, s.sessionId)
   const claimsBlock: Block[] =
     claims.length > 0
       ? [
@@ -1008,7 +1025,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           ],
         ]
       : []
-  // The changed files (the branch and its upstream are in the header). A changed file is a Button: a press draws its diff in the second pane.
+  // The files changed on the branch and not committed yet. A changed file is a Button: a press draws its diff in the second pane.
   const repo = s.repo
   const changesPart: Block = repo
     ? [
@@ -1048,15 +1065,114 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         ]
       : []
 
-  // The main loop's last tools, the newest first.
-  const calls = [...(s.calls ?? [])].reverse()
-  const toolsPart: Block = calls.length > 0 ? [gap(), title(`${S.toolTitle} · ${calls.length}`), gap(), calls.map(c => line(ui, toolCallSpans(c, width)))] : []
-  const workBlocks: Block[] = [...principalBlock, changesPart, prPart, toolsPart, ...workflowBlock, ...subagentBlocks, ...claimsBlock].filter(b => b.length > 0)
+  // The ALM target of the folder (absent without a workspaces map, or a mapped root that names nothing)
+  const almLine = s.alm ? almSpans(s.alm, width) : []
+  const almPart: Block = almLine.length > 0 ? [gap(), line(ui, almLine)] : []
+
+  // The branch: its upstream (or the lack of one), the commits since it left the default branch and the newest of them
+  const commits = s.repo?.commits
+  const branchPart: Block =
+    g && !g.isDetached
+      ? [
+          gap(),
+          title(S.branchTitle),
+          gap(),
+          line(ui, g.upstream === undefined ? [dim(S.noUpstream)] : [dim(S.upstream), sp(truncMiddle(g.upstream, Math.max(4, width - textCells(S.upstream) - 8))), ...aheadBehindSpans(g)]),
+          commits && s.repo?.from !== undefined && line(ui, [sp(S.commitsFrom(commits.count, s.repo.from), COLORS.lavender)]),
+          commits?.list.map(c => line(ui, [dim(`${c.hash} `), sp(truncEnd(c.subject, Math.max(4, width - textCells(c.hash) - 1)))])),
+          commits && commits.count > commits.list.length && line(ui, [dim(`… +${commits.count - commits.list.length}`)]),
+        ]
+      : []
+  const workBlocks: Block[] = [almPart, ...principalBlock, branchPart, changesPart, prPart].filter(b => b.length > 0)
+
+  // ── Insights: what the main loop's events add up to ──
+  const ins = s.insights
+  const fact = (name: string, ...value: Span[]) => line(ui, [dim(pad(name, INSIGHT_LABEL_W)), ...value])
+  const rhythmPart: Block =
+    ins && ins.rounds > 0
+      ? [
+          gap(),
+          title(S.rhythmTitle),
+          gap(),
+          fact(S.rhythm.rounds, sp(String(ins.rounds), undefined, true)),
+          ins.usd > 0 && fact(S.rhythm.perRound, sp(fmtCost(ins.usd / ins.rounds), COLORS.yellow)),
+          ins.costliest && fact(S.rhythm.costliest, sp(fmtCost(ins.costliest.usd), COLORS.yellow), dim(` · ${duration(ins.costliest.ms)}`)),
+          fact(S.rhythm.compactions, sp(String(ins.compactions))),
+        ]
+      : []
+  const spent = ins && timeSplit(ins)
+  const timeRows = spent
+    ? ([['model', spent.model, COLORS.blue], ['tools', spent.tools, COLORS.green], ['wait', spent.wait, COLORS.yellow]] as const).map(([key, ms, color]) =>
+        fact(S.time[key], sp(padStart(`${Math.round((100 * ms) / spent.total)}%`, 4), color, true), dim(` ${duration(ms)}`)),
+      )
+    : []
+  const timePart: Block = timeRows.length > 0 ? [gap(), title(S.timeTitle), gap(), timeRows] : []
+  const toolList = Object.entries(ins?.tools ?? {}).sort((a, b) => b[1].calls - a[1].calls || a[0].localeCompare(b[0]))
+  const totalCalls = toolList.reduce((n, [, v]) => n + v.calls, 0)
+  const lastCalls = [...(s.calls ?? [])].reverse().slice(0, CALLS_SHOWN)
+  const toolNameW = Math.max(8, width - 12)
+  const toolsPart: Block =
+    totalCalls > 0
+      ? [
+          gap(),
+          title(S.toolsTitle(totalCalls)),
+          gap(),
+          toolList.slice(0, MAX_TOOL_TYPES).map(([name, v]) => line(ui, [sp(padCells(truncEnd(name, toolNameW), toolNameW)), sp(padStart(String(v.calls), 5)), ...(v.failed > 0 ? [sp(`  ✗ ${v.failed}`, COLORS.red)] : [])])),
+          toolList.length > MAX_TOOL_TYPES && line(ui, [dim(`… +${toolList.length - MAX_TOOL_TYPES}`)]),
+          lastCalls.length > 0 && gap(),
+          lastCalls.length > 0 && line(ui, [dim(S.lastTools)]),
+          lastCalls.map(c => line(ui, toolCallSpans(c, width))),
+        ]
+      : []
+  const shares = ins?.cacheShares ?? []
+  const meanCache = shares.length > 0 ? Math.round(shares.reduce((a, b) => a + b, 0) / shares.length) : undefined
+  const efficiencyPart: Block =
+    meanCache !== undefined
+      ? [
+          gap(),
+          title(S.efficiencyTitle),
+          gap(),
+          fact(S.efficiency.cacheHit, sp(pctCell(meanCache), cacheColor(meanCache), true), sp('  '), sp(sparkline(shares, 100), cacheColor(meanCache))),
+        ]
+      : []
+  const hints = insightHints(s)
+  const hintsPart: Block = hints.length > 0 ? [gap(), title(S.hintsTitle), gap(), hints.map(h => line(ui, truncateSpans([sp(hintText(h), COLORS.yellow)], width)))] : []
+  const skillsUsed = s.skillsUsed ?? []
+  const skillsPart: Block =
+    skillsUsed.length > 0 || s.context?.skills
+      ? [
+          gap(),
+          title(S.skillsTitle(skillsUsed.length), s.context?.skills ? [dim(S.skillsListed(s.context.skills.listed, s.context.skills.total))] : []),
+          skillsUsed.length > 0 && gap(),
+          skillsUsed.slice(0, MAX_SKILL_ROWS).map(name => line(ui, [sp(truncEnd(name, width))])),
+          skillsUsed.length > MAX_SKILL_ROWS && line(ui, [dim(`… +${skillsUsed.length - MAX_SKILL_ROWS}`)]),
+        ]
+      : []
+  const insightsBlocks: Block[] = [rhythmPart, timePart, toolsPart, efficiencyPart, hintsPart, skillsPart, ...claimsBlock].filter(b => b.length > 0)
 
   // System: what the monitor child prints, drawn while the tab is selected; none yet reads as such, a part it cannot read says so. Every
-  // process is listed (the pane's own window scrolls what the height cannot show); a listening port is a link to it on localhost.
+  // process is listed (the pane's own window scrolls what the height cannot show), by RAM unless the CPU header was pressed; a listening
+  // port is a link to it on localhost.
   const sys = s.system
-  const procs = sys?.procs ?? []
+  const sort = s.procSort ?? 'ram'
+  const procs = sortProcs(sys?.procs ?? [], sort)
+  const header = procHeader(sort, width)
+  const sortButton = (by: CockpitProcSort, label: string) => (
+    <Button key={`proc:${by}`} plain onPress={() => actions.sortProcs(by)}>
+      <Text color={sort === by ? COLORS.title : undefined} dimColor={sort !== by} weight={sort === by ? 'bold' : undefined}>
+        {label}
+      </Text>
+    </Button>
+  )
+  const procTable = (
+    <Box width={width}>
+      <Text>{spanNodes(ui, header.start)}</Text>
+      {sortButton('cpu', header.cpu)}
+      <Text> </Text>
+      {sortButton('ram', header.ram)}
+      <Text>{spanNodes(ui, header.ports)}</Text>
+    </Box>
+  )
   const procRow = (p: CockpitSysProc) => {
     const { head, ports, more } = procParts(p, width)
     return (
@@ -1071,45 +1187,64 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     sys === undefined
       ? [[gap(), title(S.systemTitle), gap(), line(ui, [dim(S.reading)])]]
       : [
-          [gap(), title(S.systemTitle), gap(), systemMetricRows(sys, width).map(spans => line(ui, spans)), line(ui, diskPowerSpans(sys, width))],
+          [
+            gap(),
+            title(S.systemTitle),
+            gap(),
+            ...systemRowItems(sys).map(items => (
+              <Box flexWrap="wrap" columnGap={2}>
+                {items.map(item => line(ui, item))}
+              </Box>
+            )),
+          ],
           ...(sys.off.includes('procs') || sys.procs
             ? [
                 [
                   gap(),
                   title(sys.procs ? `${S.processesTitle} · ${procs.length}` : S.processesTitle),
                   gap(),
-                  sys.procs ? (procs.length === 0 ? line(ui, [dim(S.noChildProcess)]) : procs.map(procRow)) : line(ui, [dim(S.unavailable)]),
+                  sys.procs ? (procs.length === 0 ? line(ui, [dim(S.noChildProcess)]) : [procTable, ...procs.map(procRow)]) : line(ui, [dim(S.unavailable)]),
                 ],
               ]
             : []),
         ]
 
-  // Notes: the field and `save` first, then the saved notes (the first line of each) with their buttons; the field is left out where the surface has none.
+  // Notes: the field and `save` first, then the saved notes (the first lines of each, the rest one press away) with their buttons; the field is left out where the surface has none.
   const notes = s.notes ?? []
   const noteButtons = [S.buttons.edit, S.buttons.send, S.buttons.delete]
-  const noteRow = (n: CockpitNote) => (
-    <Box flexDirection="column">
-      <Text wrap="truncate">{n.text.replace(/\s*\n\s*/g, ' ')}</Text>
-      <Box flexDirection={buttonRowWidth(noteButtons) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
-        <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
-          {S.buttons.edit}
-        </Button>
-        <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
-          {S.buttons.send}
-        </Button>
-        <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
-          {S.buttons.delete}
-        </Button>
+  const noteRow = (n: CockpitNote) => {
+    const lines = n.text.trimEnd().split(/\r?\n/)
+    const isOpen = s.notesOpen?.includes(n.id) === true
+    const hidden = Math.max(0, lines.length - NOTE_LINES_SHOWN)
+    return (
+      <Box flexDirection="column">
+        {(isOpen ? lines : lines.slice(0, NOTE_LINES_SHOWN)).map(text => line(ui, [sp(text === '' ? ' ' : text)]))}
+        {hidden > 0 && (
+          <Button key={`note:more:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
+            <Text color={COLORS.title}>{isOpen ? S.lessLines(hidden) : S.moreLines(hidden)}</Text>
+          </Button>
+        )}
+        <Box flexDirection={buttonRowWidth(noteButtons) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+          <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
+            {S.buttons.edit}
+          </Button>
+          <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
+            {S.buttons.send}
+          </Button>
+          <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
+            {S.buttons.delete}
+          </Button>
+        </Box>
       </Box>
-    </Box>
-  )
+    )
+  }
   const notesBlocks: Block[] = [
     [
       gap(),
       title(S.notesTitle(notes.length)),
       gap(),
       Input && (
-        <Input key="note" rows={2} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
+        <Input key="note" rows={NOTE_INPUT_ROWS} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
       ),
       Input && (
         <Button key="note:save" onPress={() => actions.saveNote()}>
@@ -1121,7 +1256,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   ]
 
   // Blocks are told apart by a rule; an empty tab says so.
-  const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks, notes: notesBlocks }[tab]
+  const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, insights: insightsBlocks, system: systemBlocks, notes: notesBlocks }[tab]
   const body: Node[] = blocks.length > 0 ? blocks.flatMap((block, i) => [...(i > 0 ? [rule] : []), ...block.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
 
   return (

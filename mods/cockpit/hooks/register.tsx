@@ -10,6 +10,7 @@ import type {
   CockpitNote,
   CockpitPerimeterCheck,
   CockpitPr,
+  CockpitProcSort,
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
@@ -20,6 +21,7 @@ import {
   AGENT_KEEP_MS,
   CTX_SAMPLES_KEEP,
   NOTE_MAX,
+  REFRESH_COOLDOWN_MS,
   ROUNDS_KEEP,
   activeAlerts,
   addHistory,
@@ -43,6 +45,7 @@ import {
   parseDoneClaims,
   parseGitStatus,
   parseGithubPr,
+  parseCommits,
   parseCounts,
   parseCtx,
   parseHistory,
@@ -53,9 +56,15 @@ import {
   parseSavedPrs,
   parseSysLine,
   parseWorktree,
+  readPathOf,
   recordCall,
+  recordCompaction,
   recordCtxSample,
+  recordRoundEnd,
   recordRound,
+  recordToolCall,
+  recordWait,
+  roundCost,
   recordSystem,
   resolveAlm,
   savedTab,
@@ -87,6 +96,7 @@ const SLOW_MS = 30_000
 const PR_EVERY_MS = 5 * 60_000
 /** The Work tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
+const COMMITS_SHOWN = 5
 /** A burst of main turns ends in one read of the context breakdown, this long after the first. */
 const CONTEXT_DEBOUNCE_MS = 2000
 /** An exact count that has not answered after this long is given up on; the Context tab reads summaries again, and a late answer older than the summary read since is discarded. */
@@ -283,9 +293,35 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
   }
 }
 
+type GitRun = (args: string[]) => ReturnType<EngineInterface['process']['run']>
+
+/** A git read that exited clean and was not cut. */
+const isRead = (r: { exitCode: number; isStdoutTruncated: boolean }) => r.exitCode === 0 && !r.isStdoutTruncated
+
 /**
- * The Work tab's reads, only while that tab is selected: the changed files with their line counts (tracked against HEAD,
- * then untracked and not ignored). Every read failing keeps the last reading.
+ * Where the branch left the default branch: the ref of the default branch (the one `origin/HEAD` names, else `main` or `master`; its
+ * remote-tracking ref before the local one) and the merge base with it. Undefined when no such ref exists.
+ */
+async function branchPoint(run: GitRun, known: string | undefined): Promise<{ ref: string; name: string; base: string } | undefined> {
+  let name = known
+  if (name === undefined) {
+    const head = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
+    name = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
+  }
+  for (const candidate of name === undefined ? ['main', 'master'] : [name]) {
+    for (const ref of [`origin/${candidate}`, candidate]) {
+      const mergeBase = await run(['merge-base', 'HEAD', ref])
+      const base = mergeBase.exitCode === 0 ? mergeBase.stdout.trim() : ''
+      if (/^[0-9a-f]{7,64}$/.test(base)) return { ref, name: candidate, base }
+    }
+  }
+  return undefined
+}
+
+/**
+ * The Work tab's reads, only while that tab is selected: the files changed on the branch since it left the default branch plus the
+ * uncommitted ones (tracked, with their line counts, then untracked and not ignored), and the commits of the branch. Without a default
+ * branch to count from, the changed files are the uncommitted ones against HEAD. Every read failing keeps the last reading.
  */
 async function refreshRepo($: EngineInterface): Promise<void> {
   try {
@@ -293,16 +329,23 @@ async function refreshRepo($: EngineInterface): Promise<void> {
     const { cwd, git } = s
     if (s.tab !== 'work' || !git?.root) return
     const base = ['git', '-C', git.root, '--no-optional-locks']
-    const run = (args: string[]) => $.process.run([...base, ...args], { timeoutMs: 3000 })
+    const run: GitRun = args => $.process.run([...base, ...args], { timeoutMs: 3000 })
+    const from = await branchPoint(run, s.defaultBranch)
     const [tracked, untracked] = await Promise.all([
-      run(['diff', '--numstat', '--no-renames', '-z', 'HEAD', '--']),
+      run(['diff', '--numstat', '--no-renames', '-z', from?.base ?? 'HEAD', '--']),
       run(['ls-files', '--others', '--exclude-standard', '-z']),
     ])
-    const isRead = (r: { exitCode: number; isStdoutTruncated: boolean }) => r.exitCode === 0 && !r.isStdoutTruncated
     if (!isRead(tracked) && !isRead(untracked)) return
     const names = isRead(untracked) ? untracked.stdout.split('\0').filter(Boolean) : []
     const files = parseNumstat(isRead(tracked) ? tracked.stdout : '', names)
-    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length }
+    // the default branch has no commits of its own to list
+    const [count, log] =
+      from && !isDefaultBranch(git.branch, from.name)
+        ? await Promise.all([run(['rev-list', '--count', `${from.base}..HEAD`]), run(['log', '--format=%h%x09%s', '-n', String(COMMITS_SHOWN), `${from.base}..HEAD`])])
+        : []
+    const total = count && isRead(count) ? Number(count.stdout.trim()) : 0
+    const commits = log && isRead(log) && total > 0 ? { count: total, list: parseCommits(log.stdout) } : undefined
+    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length, ...(from && { base: from.base, from: from.name }), ...(commits && { commits }) }
     await patch($, x => (x.cwd === cwd && x.git?.branch === git.branch ? { ...x, repo } : x))
   } catch {
     // git missing or too slow: keep the last reading
@@ -310,10 +353,10 @@ async function refreshRepo($: EngineInterface): Promise<void> {
 }
 
 /**
- * The hunks of `change` to draw: `git diff HEAD -- <file>`, or the whole file as additions when it is untracked.
+ * The hunks of `change` to draw: `git diff <base> -- <file>` (`base` is the commit the Work tab compares with, HEAD without one), or the whole file as additions when it is untracked.
  * Undefined when they cannot be had: a file over `DIFF_FILE_MAX` or unreadable, a git that failed, was cut or too slow.
  */
-async function readHunks($: EngineInterface, root: string, change: CockpitChange): Promise<string | undefined> {
+async function readHunks($: EngineInterface, root: string, change: CockpitChange, base = 'HEAD'): Promise<string | undefined> {
   try {
     if (change.isUntracked) {
       const file = `${root}/${change.path}`
@@ -321,7 +364,7 @@ async function readHunks($: EngineInterface, root: string, change: CockpitChange
       const text = await $.fs.read(file)
       return typeof text === 'string' ? additionsDiff(change.path, text) : undefined
     }
-    const out = await $.process.run(['git', '-C', root, '--no-optional-locks', 'diff', '--no-color', '--no-ext-diff', '--no-renames', 'HEAD', '--', change.path], { timeoutMs: 5000 })
+    const out = await $.process.run(['git', '-C', root, '--no-optional-locks', 'diff', '--no-color', '--no-ext-diff', '--no-renames', base, '--', change.path], { timeoutMs: 5000 })
     return out.exitCode === 0 && !out.isStdoutTruncated ? diffHunks(out.stdout) : undefined
   } catch {
     return undefined
@@ -331,9 +374,9 @@ async function readHunks($: EngineInterface, root: string, change: CockpitChange
 /** Draws the diff of `change` in the second pane; a file that cannot be had opens it saying so. */
 async function showDiff($: EngineInterface, change: CockpitChange): Promise<void> {
   try {
-    const { git } = await read($, snapshot)
+    const { git, repo } = await read($, snapshot)
     if (!git?.root) return
-    const hunks = await readHunks($, git.root, change)
+    const hunks = await readHunks($, git.root, change, repo?.base)
     const { text, isCut } = capDiff(hunks ?? '')
     await patch($, s => ({ ...s, diff: { file: change.path, text, ...(isCut && { isCut }), ...(hunks === undefined && { isUnreadable: true }) } }))
     await $.ui.open({ id: DIFF_PANE, title: t().diffTitle(change.path), closeOnEscape: true })
@@ -417,6 +460,12 @@ let lastWriteAt = 0
 let writeScheduledAt: number | undefined
 // The main loop's tools in flight (a `tool.call` seen before its `next` answered), in start order: the header's tool state lasts while any is left.
 let mainTools: string[] = []
+// The last permission waits that ended, as [from, to]: a tool call takes off its running time only the part of them inside its own span (the wait is counted on its own).
+let waits: { from: number; to: number }[] = []
+const WAITS_KEPT = 50
+
+const waitOverlap = (list: readonly { from: number; to: number }[], from: number, to: number): number =>
+  list.reduce((sum, w) => sum + Math.max(0, Math.min(to, w.to) - Math.max(from, w.from)), 0)
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
@@ -565,6 +614,10 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   noteDraft: undefined,
   noteEditing: undefined,
   calls: undefined,
+  insights: undefined,
+  usageOpen: undefined,
+  notesOpen: undefined,
+  refreshedAt: undefined,
   tasks: [],
   cacheShare: undefined,
   mainTokens: undefined,
@@ -717,8 +770,8 @@ async function refreshAlm($: EngineInterface): Promise<void> {
   }
 }
 
-// The size and modification time of `done-claim.log` as last read: the log is read again only when either changed.
-let lastClaimsStat: { size: number; mtimeMs: number } | undefined
+// The size, modification time and session of `done-claim.log` as last read: the log is read again only when one changed.
+let lastClaimsStat: { size: number; mtimeMs: number; sessionId: string | undefined } | undefined
 
 /** The last entries of the done-claim hook's log, read when its size or mtime changed; no readable log clears them. */
 async function refreshDoneClaims($: EngineInterface): Promise<void> {
@@ -726,12 +779,13 @@ async function refreshDoneClaims($: EngineInterface): Promise<void> {
     const dir = await configDir($)
     if (!dir) return
     const file = `${dir}/.cache/done-claim.log`
+    const { sessionId } = await read($, snapshot)
     const { size, mtimeMs } = await $.fs.stat(file)
-    if (lastClaimsStat?.size === size && lastClaimsStat.mtimeMs === mtimeMs) return
+    if (lastClaimsStat?.size === size && lastClaimsStat.mtimeMs === mtimeMs && lastClaimsStat.sessionId === sessionId) return
     const text = await $.fs.read(file)
-    const claims = parseDoneClaims(typeof text === 'string' ? text : '')
+    const claims = parseDoneClaims(typeof text === 'string' ? text : '', sessionId)
     await patch($, s => ({ ...s, doneClaims: claims.length > 0 ? claims : undefined }))
-    lastClaimsStat = { size, mtimeMs }
+    lastClaimsStat = { size, mtimeMs, sessionId }
   } catch {
     lastClaimsStat = undefined
     await patch($, s => ({ ...s, doneClaims: undefined })).catch(() => undefined)
@@ -787,6 +841,8 @@ let contextScheduledAt: number | undefined
 // When the exact count in flight started (none: no count runs) and which count it is: one that outlives `COUNT_TIMEOUT_MS` no longer counts as running.
 let countingSince: number | undefined
 let countRun = 0
+// A main turn ended on the Context tab while the exact count ran: its read was skipped, so the count's end makes it.
+let isTurnMissed = false
 // Every context read takes the next number when it starts; the snapshot keeps the number of the reading it holds.
 let contextSeq = 0
 
@@ -799,7 +855,12 @@ let contextSeq = 0
  * rows with their change from the reading before.
  */
 async function refreshContext($: EngineInterface, detail: 'summary' | 'full', isRound = false): Promise<void> {
-  if (detail === 'summary' && (await isCountRunning($))) return
+  if (detail === 'summary' && (await isCountRunning($))) {
+    if (isRound) isTurnMissed = true
+    return
+  }
+  // A reload starts the counter over while the snapshot keeps the number of the reading it holds: the counter never falls behind it.
+  contextSeq = Math.max(contextSeq, (await read($, snapshot)).contextSeq ?? 0)
   const seq = ++contextSeq
   try {
     const u = await $.session.usage({ breakdown: detail })
@@ -838,7 +899,16 @@ async function isCountRunning($: EngineInterface): Promise<boolean> {
   return countingSince !== undefined && (await $.clock.now()) - countingSince < COUNT_TIMEOUT_MS
 }
 
-/** The exact count of the button: one at a time. */
+/** The Context tab's `refresh`: an exact count, and no other until `REFRESH_COOLDOWN_MS` have passed (it spends token-count requests). */
+async function pressRefresh($: EngineInterface): Promise<void> {
+  const now = await $.clock.now()
+  const { refreshedAt } = await read($, snapshot)
+  if (refreshedAt !== undefined && now - refreshedAt < REFRESH_COOLDOWN_MS) return
+  await patch($, s => ({ ...s, now, refreshedAt: now }))
+  await countExact($)
+}
+
+/** The exact count of the first opening and of the refresh: one at a time. */
 async function countExact($: EngineInterface): Promise<void> {
   const now = await $.clock.now()
   if (countingSince !== undefined && now - countingSince < COUNT_TIMEOUT_MS) return
@@ -848,16 +918,27 @@ async function countExact($: EngineInterface): Promise<void> {
     await refreshContext($, 'full')
   } finally {
     // a count given up on does not release the one that replaced it
-    if (countRun === run) countingSince = undefined
+    if (countRun === run) {
+      countingSince = undefined
+      if (isTurnMissed) {
+        isTurnMissed = false
+        await refreshContext($, 'summary', true).catch(() => undefined)
+      }
+    }
   }
 }
 
 /**
  * The end of a main turn re-reads the breakdown while the pane is open on the Context tab; a burst of turns is one read. No read
- * is scheduled or made while an exact count runs: the summary would be the newer reading, and the count, answering last, dropped.
+ * is scheduled or made while an exact count runs: the summary would be the newer reading, and the count, answering last, dropped;
+ * the turn is remembered, and the count's end reads the summary it missed.
  */
 async function scheduleContextRead($: EngineInterface): Promise<void> {
-  if (!isOpen || (await isCountRunning($)) || (await read($, snapshot)).tab !== 'context') return
+  if (!isOpen || (await read($, snapshot)).tab !== 'context') return
+  if (await isCountRunning($)) {
+    isTurnMissed = true
+    return
+  }
   const now = await $.clock.now()
   if (contextScheduledAt !== undefined && now - contextScheduledAt < 2 * CONTEXT_DEBOUNCE_MS) return
   contextScheduledAt = now
@@ -1028,6 +1109,12 @@ function createdTask(result: unknown): { id: string; subject: string } | undefin
   return typeof task.id === 'string' && typeof task.subject === 'string' ? { id: task.id, subject: task.subject } : undefined
 }
 
+/** `list` with `item` taken out when it is in, put in when it is not; an empty list is none. */
+function toggled<T>(list: readonly T[] | undefined, item: T): T[] | undefined {
+  const next = list?.includes(item) ? list.filter(x => x !== item) : [...(list ?? []), item]
+  return next.length > 0 ? next : undefined
+}
+
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
   // The Work tab's git reads, the Context tab's breakdown and the System tab's monitor run while the tab is selected: the press starts them.
@@ -1052,7 +1139,10 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
-  countExact: () => void countExact($).catch(() => undefined),
+  refresh: () => void pressRefresh($).catch(() => undefined),
+  toggleUsage: id => void patch($, s => ({ ...s, usageOpen: toggled(s.usageOpen, id) })).catch(() => undefined),
+  toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
+  sortProcs: (by: CockpitProcSort) => void patch($, s => ({ ...s, procSort: by })).catch(() => undefined),
   setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : text.slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
   saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
   editNote: id =>
@@ -1084,12 +1174,14 @@ function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
 }
 
 /**
- * Appends a saved note to the prompt box, after a newline (D6: it may follow text already typed). The box is only filled, never
- * submitted (D3): the person decides. The note stays in the list, whether the box took the text or not.
+ * Appends a saved note to the prompt box, after a newline when the box already holds text (D6; a box that cannot be read counts as
+ * holding some). The box is only filled, never submitted (D3): the person decides. The note stays in the list, whether the box took the text or not.
  */
 async function sendNote($: EngineInterface, id: number): Promise<void> {
   const note = (await read($, snapshot)).notes?.find(n => n.id === id)
-  if (note) await $.prompt.fill({ text: `\n${note.text}`, mode: 'append' })
+  if (!note) return
+  const box = await $.prompt.read().catch(() => undefined)
+  await $.prompt.fill({ text: `${box?.text === '' ? '' : '\n'}${note.text}`, mode: 'append' })
 }
 
 /**
@@ -1151,7 +1243,7 @@ export const register: Register = on => {
   // finished agent in its history; the statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot
   // delete). Best-effort: the write is skipped when the exit's short budget is nearly spent, and any failure is swallowed.
   // The snapshot lets go of the session first (any reason), from the reading taken here, so a write cut short cannot
-  // leave it in the atom: its agents go to its own history (the ones still running as `interrotto`), and the ended id
+  // leave it in the atom: its agents go to its own history (the ones still running as `interrupted`), and the ended id
   // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
     stopMonitor()
@@ -1178,7 +1270,7 @@ export const register: Register = on => {
         const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
         const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
-        // The history takes the running agents as interrotto; a snapshot that is not this session's has nothing of it to write.
+        // The history takes the running agents as interrupted; a snapshot that is not this session's has nothing of it to write.
         if (own) await $.fs.write(`${dir}/.cache/cockpit-data-${e.sessionId}.json`, JSON.stringify(sessionData(own, history)))
       }
     } catch {
@@ -1362,7 +1454,7 @@ export const register: Register = on => {
     }
     mainTools = [...mainTools, tool]
     await setClaudeState($, { kind: 'tool', tool })
-    // A clock that fails leaves the call without a time: the row draws none.
+    // A clock that fails leaves the call without a time: the row draws none, and the call adds no running time.
     const at = await $.clock.now().catch(() => undefined)
     let isSuccess = false
     try {
@@ -1372,7 +1464,13 @@ export const register: Register = on => {
     } finally {
       mainTools = removeOne(mainTools, tool) ?? []
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
-      await patch($, s => ({ ...s, calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }) })).catch(() => undefined)
+      const ended = await $.clock.now().catch(() => undefined)
+      const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
+      await patch($, s => ({
+        ...s,
+        calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }),
+        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e) }),
+      })).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
@@ -1394,12 +1492,22 @@ export const register: Register = on => {
   on('classic.PermissionRequest', async ($, e, next) => {
     if (e.agent_id !== undefined) return next(e)
     const held = (await read($, snapshot).catch(() => undefined))?.claudeState
+    const waitFrom = await $.clock.now().catch(() => undefined)
     await setClaudeState($, { kind: 'waiting' })
     try {
       return await next(e)
     } finally {
       await setClaudeState($, stateAfterWait(held, mainTools), now => now?.kind === 'waiting')
+      const waitTo = await $.clock.now().catch(() => undefined)
+      if (waitFrom !== undefined && waitTo !== undefined) {
+        waits = [...waits, { from: waitFrom, to: waitTo }].slice(-WAITS_KEPT)
+        await patch($, s => ({ ...s, insights: recordWait(s.insights, waitTo - waitFrom) })).catch(() => undefined)
+      }
     }
+  })
+  on('classic.PostCompact', async ($, e, next) => {
+    if (e.agent_id === undefined) await patch($, s => ({ ...s, insights: recordCompaction(s.insights) })).catch(() => undefined)
+    return next(e)
   })
   on('classic.Notification', async ($, e, next) => {
     // A notification while Claude is idle (or before anything happened) wants nothing from the person yet: it stays idle.
@@ -1438,12 +1546,14 @@ export const register: Register = on => {
     if (agentId === undefined) {
       // The main loop's turn: how much of its input the prompt cache served. An empty turn leaves the last share.
       const total = usage ? usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens : 0
+      let cacheShare: number | undefined
       if (usage && total > 0) {
-        const cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
+        cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
+        const share = cacheShare
         // The turn's usage sums every request of the turn: the context size is the engine's last reading, whose growth the autocompact forecast averages.
         await patch($, s => ({
           ...s,
-          cacheShare,
+          cacheShare: share,
           ctxSamples: s.ctx.tokens ? recordCtxSample(s.ctxSamples, s.ctx.tokens) : s.ctxSamples,
         }))
       }
@@ -1455,6 +1565,7 @@ export const register: Register = on => {
         lastRoundMs: e.durationMs,
         // Every main turn is a round of the Context sparkline: the context the engine last measured.
         ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
+        insights: recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare }),
       }))
       await setClaudeState($, { kind: 'idle' })
       await scheduleContextRead($).catch(() => undefined)
@@ -1481,7 +1592,7 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Context tab lists them.
+  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Insights tab lists them.
   on('skill.prompt', async ($, e, next) => {
     try {
       await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))

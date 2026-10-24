@@ -13,10 +13,12 @@ import type {
   CockpitDoneClaim,
   CockpitGit,
   CockpitHistoryEntry,
+  CockpitInsights,
   CockpitNote,
   CockpitPerimeterCheck,
   CockpitContextRow,
   CockpitPr,
+  CockpitProcSort,
   CockpitRateLimit,
   CockpitSnapshot,
   CockpitStatic,
@@ -84,7 +86,7 @@ export function effortGlyph(effort: string | number | undefined): { icon: string
 }
 
 /** A run of text with one style: the unit both views are built from. */
-export type Span = { t: string; c?: string; dim?: boolean; bold?: boolean }
+export type Span = { t: string; c?: string; dim?: boolean; bold?: boolean; bg?: string }
 
 export const spanWidth = (spans: readonly Span[]): number =>
   spans.reduce((n, s) => n + [...s.t].length, 0)
@@ -313,6 +315,26 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
   return out
 }
 
+/** `spans` with their first `cells` cells on a `bg` background: a row that carries its own bar. */
+export function withBackground(spans: readonly Span[], cells: number, bg: string): Span[] {
+  const out: Span[] = []
+  let left = Math.max(0, cells)
+  for (const s of spans) {
+    const chars = [...s.t]
+    if (left <= 0) out.push(s)
+    else if (chars.length <= left) out.push({ ...s, bg })
+    else out.push({ ...s, t: chars.slice(0, left).join(''), bg }, { ...s, t: chars.slice(left).join('') })
+    left -= chars.length
+  }
+  return out
+}
+
+/** `color` (`#rrggbb`) darkened to `factor` of its brightness: a background that text of any color stays readable on. */
+export function shade(color: string, factor: number): string {
+  const channel = (i: number) => Math.round(parseInt(color.slice(1 + 2 * i, 3 + 2 * i), 16) * factor)
+  return `#${[0, 1, 2].map(i => channel(i).toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Context color by fill: green, yellow, red (no orange: too close to red). */
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
@@ -371,17 +393,24 @@ export function recordCtxSample(samples: readonly number[] | undefined, tokens: 
  * turn. Absent with fewer than two readings, no threshold (auto-compaction off) or a context that does not grow.
  */
 export function autocompactForecast(samples: readonly number[] | undefined, threshold: number | undefined): number | undefined {
-  if (samples === undefined || samples.length < 2 || threshold === undefined) return undefined
-  const first = samples[0] ?? 0
-  const last = samples[samples.length - 1] ?? 0
-  const growth = (last - first) / (samples.length - 1)
-  return growth > 0 ? Math.max(0, Math.ceil((threshold - last) / growth)) : undefined
+  const growth = ctxGrowth(samples)
+  const last = samples?.at(-1)
+  return growth === undefined || last === undefined || threshold === undefined ? undefined : Math.max(0, Math.ceil((threshold - last) / growth))
+}
+
+/** The average growth of the context per main turn over `samples`; absent with fewer than two readings or a context that does not grow. */
+export function ctxGrowth(samples: readonly number[] | undefined): number | undefined {
+  if (samples === undefined || samples.length < 2) return undefined
+  const growth = ((samples.at(-1) ?? 0) - (samples[0] ?? 0)) / (samples.length - 1)
+  return growth > 0 ? growth : undefined
 }
 
 // ── The Context tab: the breakdown, the sparkline of rounds, when to compact ──
 
 /** Main turns the sparkline keeps. */
 export const ROUNDS_KEEP = 20
+/** How long the Context tab's `refresh` waits after a press: an exact count spends token-count requests. */
+export const REFRESH_COOLDOWN_MS = 60_000
 /** The context fill from which the compact hint can show with the rounds' growth, and the growth each of the last rounds needs. */
 export const COMPACT_HINT_PCT = 70
 const COMPACT_GROWTH = 1.05
@@ -495,13 +524,13 @@ export function contextOf(
 }
 
 /**
- * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws. The medium tier (10 s, git) runs
+ * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws (the Context tab's refresh countdown too). The medium tier (10 s, git) runs
  * whenever the pane is open, the header shows git on every tab; the slow tier (30 s) runs whatever the tab; none of them
  * while the pane is closed.
  */
 export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
   switch (tab ?? 'agents') {
-    case 'context':
+    case 'insights':
     case 'system':
     case 'notes':
       return { fast: false }
@@ -718,8 +747,8 @@ export function tokenShare(tokens: number, total: number): string | undefined {
 
 // ── History of finished agents ───────────────────────────────────────────────
 
-/** Entries the history keeps (the state file persists them); the pane lists the newest ten of them. */
-export const HISTORY_KEEP = 50
+/** Entries the history keeps (the state file persists them); the pane lists them all. */
+export const HISTORY_KEEP = 300
 
 /** What the history keeps of a finished agent; undefined for one the mod only saw through its events (type `?`). */
 export function toHistory(a: CockpitAgent): CockpitHistoryEntry | undefined {
@@ -1050,24 +1079,33 @@ export function checkPerimeter(changed: readonly string[], entries: readonly str
 
 // ── The done-claim hook's log ────────────────────────────────────────────────
 
-const CLAIMS_SHOWN = 3
+/** Entries kept from the log (the session's own) and shown. */
+const CLAIMS_KEEP = 30
+export const CLAIMS_SHOWN = 3
 const CLAIM_EXCERPT_MAX = 160
+/** The rules whose entry is a turn the hook sent back; the others (`shell-ran`, the old `tail-truncated`) were only counted. */
+const BLOCK_RULES: readonly string[] = ['unproven-row', 'tail-cut', 'claim-without-evidence']
 
-/** The last `CLAIMS_SHOWN` lines of `done-claim.log` (one JSON object each), newest first; a line without `at` and `rule` is skipped. */
-export function parseDoneClaims(text: string): CockpitDoneClaim[] {
+/** The last `CLAIMS_KEEP` entries of `done-claim.log` (one JSON object each) of session `sessionId` that were blocks, newest first; a line without `at` and `rule` is skipped. */
+export function parseDoneClaims(text: string, sessionId: string | undefined): CockpitDoneClaim[] {
+  if (sessionId === undefined) return []
   const out: CockpitDoneClaim[] = []
   for (const l of text.split(/\r?\n/).reverse()) {
-    if (out.length === CLAIMS_SHOWN) break
+    if (out.length === CLAIMS_KEEP) break
     try {
       const v: unknown = JSON.parse(l)
-      if (!isRecord(v) || typeof v.at !== 'string' || typeof v.rule !== 'string') continue
-      out.push({ at: v.at, rule: v.rule, excerpt: typeof v.excerpt === 'string' ? v.excerpt.trim().slice(0, CLAIM_EXCERPT_MAX) : '' })
+      if (!isRecord(v) || v.session !== sessionId || typeof v.at !== 'string' || typeof v.rule !== 'string' || !BLOCK_RULES.includes(v.rule)) continue
+      out.push({ at: v.at, session: sessionId, rule: v.rule, excerpt: typeof v.excerpt === 'string' ? v.excerpt.trim().slice(0, CLAIM_EXCERPT_MAX) : '' })
     } catch {
       // a torn or foreign line
     }
   }
   return out
 }
+
+/** The last `CLAIMS_SHOWN` blocks of session `sessionId`, newest first. */
+export const claimsOf = (claims: readonly CockpitDoneClaim[] | undefined, sessionId: string | undefined): CockpitDoneClaim[] =>
+  sessionId === undefined ? [] : (claims ?? []).filter(c => c.session === sessionId).slice(0, CLAIMS_SHOWN)
 
 /** `22/10 09:05`: the log entry's day and time on the local clock; empty for a date that does not parse. */
 export function claimTime(at: string): string {
@@ -1086,17 +1124,28 @@ export function hhmm(ms: number): string {
 }
 
 /** The cockpit's tabs, in the order the bar draws them. */
-export const TABS: readonly CockpitTab[] = ['agents', 'context', 'work', 'system', 'notes']
+export const TABS: readonly CockpitTab[] = ['agents', 'context', 'work', 'insights', 'system', 'notes']
+
+/** What an unselected tab's button shows instead of its name (Nerd Font Material Design glyphs). */
+export const TAB_ICONS: Record<CockpitTab, string> = {
+  agents: '\u{F06A9}', // nf-md-robot
+  context: '\u{F035B}', // nf-md-memory
+  work: '\u{F00D1}', // nf-md-briefcase
+  insights: '\u{F0335}', // nf-md-lightbulb
+  system: '\u{F0493}', // nf-md-cog
+  notes: '\u{F039B}', // nf-md-note_text
+}
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
 
 /** The tab a state file names; the v2 Sessione and Repo tabs went to Subagents and Work, and so does a file that still holds them. */
 export const savedTab = (v: unknown): CockpitTab | undefined => (v === 'session' ? 'agents' : v === 'repo' ? 'work' : isTab(v) ? v : undefined)
 
-// ── Work: the main loop's last tools, the pull requests of the chat ──
+// ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
-/** The main loop's tool calls the Work tab lists. */
+/** The main loop's tool calls kept, and the newest of them the Insights tab lists. */
 export const CALLS_KEEP = 8
+export const CALLS_SHOWN = 5
 const ARG_MAX = 120
 // What a tool call shows of itself, first match: a command, a file (by its name), a pattern (a Grep or Glob shows what it looks for, before the folder it looks in), a folder, an address, a query, a description.
 const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'description', 'skill'] as const
@@ -1264,10 +1313,10 @@ const PROCS_KEEP = 200
 /** The parts of the tab, in the order it draws them. */
 const SYSTEM_PARTS: readonly CockpitSystemPart[] = ['cpu', 'ram', 'net', 'procs', 'disk', 'power']
 
-/** Bytes as `512B`, `1.5K`, `40K`, `1.2M`, `12G` (base 1024, one letter, a decimal only under ten). */
+/** Bytes as `512 B`, `850 KB`, `1.2 MB`, `45 MB`, `1.2 GB` (base 1024, a decimal only under ten). */
 export function fmtBytes(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '0B'
-  const units = ['B', 'K', 'M', 'G', 'T']
+  if (!Number.isFinite(n) || n <= 0) return '0 B'
+  const units = ['B', 'KB', 'MB', 'GB', 'TB']
   let v = n
   let i = 0
   // The unit is chosen on the rounded value: 1023.6K is 1.0M, never 1024K.
@@ -1275,10 +1324,10 @@ export function fmtBytes(n: number): string {
     v /= 1024
     i++
   }
-  if (i === 0) return `${Math.round(v)}B`
-  // A tenth that rounds up to ten reads as a whole number: 10K, not 10.0K.
+  if (i === 0) return `${Math.round(v)} B`
+  // A tenth that rounds up to ten reads as a whole number: 10 KB, not 10.0 KB.
   const tenth = Math.round(v * 10) / 10
-  return `${tenth < 10 ? tenth.toFixed(1) : Math.round(v)}${units[i]}`
+  return `${tenth < 10 ? tenth.toFixed(1) : Math.round(v)} ${units[i]}`
 }
 
 const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
@@ -1324,8 +1373,6 @@ export function recordSystem(system: CockpitSystem | undefined, line: CockpitSys
   if (line.cpu !== undefined) next.cpu = ring(s.cpu, line.cpu)
   if (line.ram) {
     next.ram = ring(s.ram, line.ram.total > 0 ? Math.round((100 * line.ram.used) / line.ram.total) : 0)
-    next.ramUsed = line.ram.used
-    next.ramTotal = line.ram.total
   }
   if (line.net) {
     next.rx = ring(s.rx, line.net.rx)
@@ -1344,7 +1391,7 @@ export function recordSystem(system: CockpitSystem | undefined, line: CockpitSys
   ])
   const off = new Set([...s.off.filter(part => !carried.has(part)), ...(line.off ?? [])])
   if (off.has('cpu')) next.cpu = []
-  if (off.has('ram')) Object.assign(next, { ram: [], ramUsed: undefined, ramTotal: undefined })
+  if (off.has('ram')) next.ram = []
   if (off.has('net')) Object.assign(next, { rx: [], tx: [] })
   if (off.has('procs')) next.procs = undefined
   if (off.has('disk')) next.disk = undefined
@@ -1400,4 +1447,125 @@ export function parseNotes(notes: unknown, legacyNote?: unknown): CockpitNote[] 
     list.push({ id: 1, text: legacyNote.slice(0, NOTE_MAX) })
   }
   return list.length > 0 ? list : undefined
+}
+
+// ── Insights: what the main loop's events add up to ──
+
+/** The hints' limits: a file read this many times, the cache under `COLD_CACHE_PCT` for `COLD_CACHE_ROUNDS` rounds, this many failed Bash calls, subagents over `SUBAGENT_SHARE_PCT` of the tokens, a round this long. */
+const REREAD_MIN = 6
+const COLD_CACHE_PCT = 50
+const COLD_CACHE_ROUNDS = 3
+const FAILED_COMMANDS_MIN = 7
+const SUBAGENT_SHARE_PCT = 60
+const LONG_ROUND_MS = 10 * 60_000
+/** Tool names and file paths the counts keep: past them a new name is not counted. */
+const INSIGHT_TOOLS_KEEP = 40
+const INSIGHT_READS_KEEP = 200
+
+/** The cost of the main round that just ended: the session's cost now over what it was when the round began; none when either was not measured. */
+export const roundCost = (cost: CockpitSnapshot['cost']): number | undefined =>
+  cost.usd !== undefined && cost.startUsd !== undefined && cost.usd >= cost.startUsd ? cost.usd - cost.startUsd : undefined
+
+/** `ins` after a main round ended: its cost where measured, its length, the cache hit of its input, and the dearest round so far. */
+export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: number; ms: number; cacheShare?: number }): CockpitInsights {
+  const now = ins ?? emptyInsights()
+  const usd = round.usd ?? 0
+  const isCostliest = round.usd !== undefined && round.usd > (now.costliest?.usd ?? 0)
+  return {
+    ...now,
+    rounds: now.rounds + 1,
+    usd: now.usd + usd,
+    ...(isCostliest && { costliest: { usd, ms: round.ms } }),
+    roundMs: now.roundMs + Math.max(0, round.ms),
+    cacheShares: round.cacheShare === undefined ? now.cacheShares : [...now.cacheShares, round.cacheShare].slice(-ROUNDS_KEEP),
+  }
+}
+
+/** `ins` after a main-loop tool call ended: counted by tool (and as a failure when it did not run clean), its running time added, a successful `Read` counted by file. */
+export function recordToolCall(ins: CockpitInsights | undefined, call: { tool: string; isOk: boolean; ms: number; readPath?: string }): CockpitInsights {
+  const now = ins ?? emptyInsights()
+  const known = now.tools[call.tool]
+  const tools = known || Object.keys(now.tools).length < INSIGHT_TOOLS_KEEP ? { ...now.tools, [call.tool]: { calls: (known?.calls ?? 0) + 1, failed: (known?.failed ?? 0) + (call.isOk ? 0 : 1) } } : now.tools
+  const path = call.isOk ? call.readPath : undefined
+  const isReadKept = path !== undefined && (path in now.reads || Object.keys(now.reads).length < INSIGHT_READS_KEEP)
+  return {
+    ...now,
+    tools,
+    toolMs: now.toolMs + Math.max(0, call.ms),
+    reads: isReadKept ? { ...now.reads, [path]: (now.reads[path] ?? 0) + 1 } : now.reads,
+  }
+}
+
+/** `ins` with `ms` more spent waiting on the person's answer to a permission request. */
+export const recordWait = (ins: CockpitInsights | undefined, ms: number): CockpitInsights => {
+  const now = ins ?? emptyInsights()
+  return { ...now, waitMs: now.waitMs + Math.max(0, ms) }
+}
+
+/** `ins` with one more compaction. */
+export const recordCompaction = (ins: CockpitInsights | undefined): CockpitInsights => {
+  const now = ins ?? emptyInsights()
+  return { ...now, compactions: now.compactions + 1 }
+}
+
+export const emptyInsights = (): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })
+
+/** The file a `Read` call opens, from its input; none for any other call. */
+export const readPathOf = (input: { readonly [key: string]: unknown }): string | undefined =>
+  input.tool === 'Read' && typeof input.file_path === 'string' && input.file_path !== '' ? input.file_path.replace(/\\/g, '/') : undefined
+
+/** Where the rounds' time went: the tools' and the permission waits' share of it, the model taking the rest. Tools that ran side by side can add up to more than the rounds: the total then is theirs. Undefined before a round ended. */
+export function timeSplit(ins: CockpitInsights): { model: number; tools: number; wait: number; total: number } | undefined {
+  if (ins.roundMs <= 0) return undefined
+  const total = Math.max(ins.roundMs, ins.toolMs + ins.waitMs)
+  return { model: total - ins.toolMs - ins.waitMs, tools: ins.toolMs, wait: ins.waitMs, total }
+}
+
+/** The subagents' share of the session's tokens, in percent; undefined before any tokens were used. */
+export function subagentShare(s: Pick<CockpitSnapshot, 'mainTokens' | 'agents' | 'agentTokens'>): number | undefined {
+  const total = sessionTokens(s)
+  return total > 0 ? Math.round((100 * (total - (s.mainTokens ?? 0))) / total) : undefined
+}
+
+/** One automatic hint of the Insights tab, with what it is about. */
+export type CockpitHint =
+  | { kind: 'rereads'; file: string; count: number }
+  | { kind: 'coldCache' }
+  | { kind: 'failures'; count: number }
+  | { kind: 'subagents'; share: number }
+  | { kind: 'longRound'; ms: number }
+
+/** The hints that apply now: each shows only while its cause holds. */
+export function insightHints(s: CockpitSnapshot): CockpitHint[] {
+  const ins = s.insights
+  const out: CockpitHint[] = []
+  const [file, count] = Object.entries(ins?.reads ?? {}).sort((a, b) => b[1] - a[1])[0] ?? []
+  if (file !== undefined && count !== undefined && count >= REREAD_MIN) out.push({ kind: 'rereads', file: baseName(file), count })
+  const last = (ins?.cacheShares ?? []).slice(-COLD_CACHE_ROUNDS)
+  if (last.length === COLD_CACHE_ROUNDS && last.every(share => share < COLD_CACHE_PCT)) out.push({ kind: 'coldCache' })
+  const failed = ins?.tools.Bash?.failed ?? 0
+  if (failed >= FAILED_COMMANDS_MIN) out.push({ kind: 'failures', count: failed })
+  const share = subagentShare(s)
+  if (share !== undefined && share > SUBAGENT_SHARE_PCT) out.push({ kind: 'subagents', share })
+  if (s.lastRoundMs !== undefined && s.lastRoundMs > LONG_ROUND_MS) out.push({ kind: 'longRound', ms: s.lastRoundMs })
+  return out
+}
+
+// ── Work: the commits of the branch ──
+
+/** `git log --format=%h%x09%s` -> the commits, newest first; a line without a tab is skipped. */
+export function parseCommits(out: string): { hash: string; subject: string }[] {
+  return out.split('\n').flatMap(line => {
+    const [hash, ...rest] = line.split('\t')
+    const subject = rest.join('\t').trim()
+    return hash && subject !== '' ? [{ hash, subject }] : []
+  })
+}
+
+// ── System: the processes' sort ──
+
+/** The processes by `by`, biggest first, the other measure breaking a tie and one that is not read yet after those that are. */
+export function sortProcs(procs: readonly CockpitSysProc[], by: CockpitProcSort): CockpitSysProc[] {
+  const other = by === 'ram' ? 'cpu' : 'ram'
+  return [...procs].sort((a, b) => (b[by] ?? -1) - (a[by] ?? -1) || (b[other] ?? -1) - (a[other] ?? -1) || a.pid - b.pid)
 }

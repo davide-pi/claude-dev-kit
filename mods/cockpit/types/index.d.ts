@@ -27,7 +27,7 @@ export type CockpitAgent = {
   endedAt?: number
   /** True when the agent ended on an error, an interruption or a refusal, or the engine lists it failed or killed. */
   isFailed?: boolean
-  /** True when the session ended with the agent still running: the history's third outcome, `interrotto`. */
+  /** True when the session ended with the agent still running: the history's third outcome, `interrupted`. */
   isInterrupted?: boolean
   /** New tokens the agent's turns used: input + cache writes + output (cache reads left out). */
   tokens: number
@@ -59,7 +59,7 @@ export type CockpitGit = {
   untracked: number
   /** Root of the linked worktree the session runs in; absent in a main checkout. */
   worktreeRoot?: string
-  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Lavoro tab's git reads run and the paths they list start. */
+  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Work tab's git reads run and the paths they list start. */
   root?: string
   /** The branch's upstream (`origin/feature/x`) and the commits ahead of it and behind it; absent without an upstream. */
   upstream?: string
@@ -67,15 +67,21 @@ export type CockpitGit = {
   behind?: number
 }
 
-/** One changed file of the Lavoro tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
+/** One changed file of the Work tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
 export type CockpitChange = { path: string; added?: number; deleted?: number; isBinary?: boolean; isUntracked?: boolean }
 
-/** What the Lavoro tab draws of the repository beyond the header, read only while that tab is selected. */
+/** What the Work tab draws of the repository beyond the header, read only while that tab is selected. */
 export type CockpitRepo = {
   /** The changed files, tracked first then untracked, kept to a few dozen. */
   files: CockpitChange[]
   /** How many files changed in all (`files` may hold fewer). */
   total: number
+  /** The commit the files are compared with: where the branch left the default branch (`git merge-base`). Absent when no default branch is known: the files are then the uncommitted ones, against HEAD. */
+  base?: string
+  /** The name of the default branch the branch is counted from (`main`). */
+  from?: string
+  /** The commits of the branch since `base`: how many in all, and the newest few. Absent without a default branch to count from, and on the default branch itself. */
+  commits?: { count: number; list: { hash: string; subject: string }[] }
 }
 
 /**
@@ -119,7 +125,7 @@ export type CockpitPerimeterCheck = { files: number; outside: string[] }
 export type CockpitWorkflowRun = { runId: string; agents: { id: string; isDone: boolean }[] }
 
 /** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
-export type CockpitDoneClaim = { at: string; rule: string; excerpt: string }
+export type CockpitDoneClaim = { at: string; session?: string; rule: string; excerpt: string }
 
 /** The ALM target the cwd resolves to in `workspaces.json`; absent from the snapshot when there is no usable map. */
 export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; identity?: string }
@@ -131,7 +137,7 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
  */
 export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string }
 
-/** One row of the Contesto tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
+/** One row of the Context tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
 export type CockpitContextRow = {
   name: string
   tokens: number
@@ -152,7 +158,7 @@ export type CockpitStatic = {
 /** A static consumer of the window: a memory file, a loaded MCP tool's schema, a custom agent's description, or the skills listing as a whole. */
 export type CockpitConsumer = { name: string; kind: 'memory' | 'mcp' | 'agent' | 'skill'; tokens: number }
 
-/** What the Contesto tab draws from `usage({ breakdown })`: the rows, the window they are measured against, the five biggest static consumers. */
+/** What the Context tab draws from `usage({ breakdown })`: the rows, the window they are measured against, the five biggest static consumers. */
 export type CockpitContext = {
   rows: CockpitContextRow[]
   /** Tokens in use and the window measured against (the compaction window), as the breakdown counts them. */
@@ -166,10 +172,10 @@ export type CockpitContext = {
   isExact: boolean
 }
 
-/** One tool call of the main loop, as the Lavoro tab's list keeps it: the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
+/** One tool call of the main loop, as the main loop's call list keeps it (the Insights tab draws the newest five): the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
 export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
 
-/** The parts of the Sistema tab the monitor reads, in the order the tab draws them. */
+/** The parts of the System tab the monitor reads, in the order the tab draws them. */
 export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk' | 'power'
 
 /** A process of the session's tree with the TCP ports it listens on, its CPU share (percent of every core, since the monitor's last read) and its working set in bytes; the last two are absent until read. */
@@ -194,13 +200,11 @@ export type CockpitSysLine = {
   off?: CockpitSystemPart[]
 }
 
-/** What the Sistema tab draws: rings of the last samples (newest last), the latest slow readings, and the parts that could not be read. */
+/** What the System tab draws: the last samples (newest last; the tab shows the latest of each), the latest slow readings, and the parts that could not be read. */
 export type CockpitSystem = {
   cpu: number[]
   /** RAM used, as a percent of the total. */
   ram: number[]
-  ramUsed?: number
-  ramTotal?: number
   rx: number[]
   tx: number[]
   procs?: CockpitSysProc[]
@@ -210,8 +214,35 @@ export type CockpitSystem = {
   off: CockpitSystemPart[]
 }
 
-/** The view the pane draws: the tab bar's five buttons. */
-export type CockpitTab = 'agents' | 'context' | 'work' | 'system' | 'notes'
+/** The view the pane draws: the tab bar's six buttons. */
+export type CockpitTab = 'agents' | 'context' | 'work' | 'insights' | 'system' | 'notes'
+
+/**
+ * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
+ * for it); per session, not persisted.
+ */
+export type CockpitInsights = {
+  /** Main turns that ended. */
+  rounds: number
+  /** Their cost in USD where the engine measured it, and the dearest one with its length. */
+  usd: number
+  costliest?: { usd: number; ms: number }
+  /** Compactions the session went through, manual or automatic. */
+  compactions: number
+  /** Wall-clock milliseconds: the rounds', the main loop's tool calls', and the permission requests' wait for the person. */
+  roundMs: number
+  toolMs: number
+  waitMs: number
+  /** Calls and failures (an error, a refusal or a throw) by tool name. */
+  tools: Record<string, { calls: number; failed: number }>
+  /** Successful reads by file path. */
+  reads: Record<string, number>
+  /** The cache hit of the last twenty main turns, oldest first. */
+  cacheShares: number[]
+}
+
+/** How the System tab's process table is sorted: by the working set (the default) or the CPU share. */
+export type CockpitProcSort = 'cpu' | 'ram'
 
 /** A note saved on the Notes tab; `id` is stable, the list keeps the order the notes were saved in. */
 export type CockpitNote = { id: number; text: string }
@@ -244,9 +275,9 @@ export type CockpitSnapshot = {
   claudeState?: CockpitClaudeState
   /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
   ctxSamples?: number[]
-  /** The context size at the end of each of the last twenty main turns, newest last: the Contesto sparkline. A shrinking context stays in it (a compaction shows as a drop). */
+  /** The context size at the end of each of the last twenty main turns, newest last: the Context tab's trend line. A shrinking context stays in it (a compaction shows as a drop). */
   ctxRounds?: number[]
-  /** The Contesto tab's last reading of the context breakdown; absent until the tab was opened. */
+  /** The Context tab's last reading of the context breakdown; absent until the tab was opened. */
   context?: CockpitContext
   /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
   contextSeq?: number
@@ -258,17 +289,17 @@ export type CockpitSnapshot = {
   lastRates?: CockpitRateLimit[]
   /** How long the last main round took (`turn.complete`'s wall-clock length), in milliseconds; absent before one ended. */
   lastRoundMs?: number
-  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
+  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran: the Insights tab lists them. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
   autoCompactAt?: number
   alm?: CockpitAlm
-  /** The selected tab; absent is the Agenti view. */
+  /** The selected tab; absent is the Subagents view. */
   tab?: CockpitTab
   agents: CockpitAgent[]
   /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
   history?: CockpitHistoryEntry[]
-  /** The STORICO list is expanded; absent is collapsed. */
+  /** The HISTORY list is expanded; absent is collapsed. */
   isHistoryOpen?: boolean
   git?: CockpitGit
   worklog: CockpitWorklog
@@ -280,16 +311,26 @@ export type CockpitSnapshot = {
   perimeterCheck?: CockpitPerimeterCheck
   /** The workflow run whose agents the mod saw spawn; cleared by a stop that reports no workflow in flight. */
   workflowRun?: CockpitWorkflowRun
-  /** The last entries of `done-claim.log`, newest first; absent without a readable log. */
+  /** The last blocks of `done-claim.log` (this session's), newest first; the Insights tab shows this session's three newest. Absent without a readable log. */
   doneClaims?: CockpitDoneClaim[]
   /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
   prs?: CockpitPr[]
-  /** The last eight tool calls of the main loop, oldest first (the subagents' are theirs); per session, not persisted. */
+  /** The last eight tool calls of the main loop, oldest first (the subagents' are theirs); per session, not persisted. The Insights tab lists the newest five. */
   calls?: CockpitToolCall[]
-  /** The Lavoro tab's changed files; absent until that tab was selected, and without git. */
+  /** The Work tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
-  /** The Sistema tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
+  /** The System tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
   system?: CockpitSystem
+  /** What the Insights tab shows; absent before the first round or tool call. */
+  insights?: CockpitInsights
+  /** The agents whose four token counters are expanded on the Subagents tab (the others show a line to open them). */
+  usageOpen?: string[]
+  /** The notes shown in full on the Notes tab (the others show their first lines). */
+  notesOpen?: number[]
+  /** The process table's sort; absent is by RAM. */
+  procSort?: CockpitProcSort
+  /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */
+  refreshedAt?: number
   /** The Notes tab's saved notes, kept with the session in its data file; `send` appends one to the prompt box and keeps it. Absent when none. */
   notes?: CockpitNote[]
   /** What the Notes tab's field holds (not kept in the data file); absent when empty. */
@@ -298,7 +339,7 @@ export type CockpitSnapshot = {
   isLangRead?: boolean
   /** The id of the note the field was loaded from: `save` replaces that note instead of adding one. */
   noteEditing?: number
-  /** The diff of the file pressed on the Lavoro tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
+  /** The diff of the file pressed on the Work tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
   /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
   workflow?: string

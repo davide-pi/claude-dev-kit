@@ -93,6 +93,22 @@ import {
   staticOf,
   withDeltas,
   withStatic,
+  claimsOf,
+  ctxGrowth,
+  emptyInsights,
+  insightHints,
+  parseCommits,
+  readPathOf,
+  recordCompaction,
+  recordRoundEnd,
+  recordToolCall,
+  recordWait,
+  roundCost,
+  shade,
+  sortProcs,
+  subagentShare,
+  timeSplit,
+  withBackground,
 } from '../hooks/format'
 import type { Span } from '../hooks/format'
 import { INITIAL } from '../hooks/state'
@@ -289,6 +305,10 @@ test('addHistory puts the new entries first, replaces an id it already has and k
   expect(next.length).toBe(HISTORY_KEEP)
   expect(next[0]?.id).toBe('new')
   expect(next.at(-1)?.id).toBe(`old${HISTORY_KEEP - 2}`)
+})
+
+test('HISTORY_KEEP holds the 300 entries a session with workflows can reach', () => {
+  expect(HISTORY_KEEP).toBeGreaterThanOrEqual(300)
 })
 
 test('parseHistory takes the entries with their fields from a parsed state file and drops the rest', () => {
@@ -588,13 +608,31 @@ test('checkPerimeter: the changed files no entry covers, as scope-guard --check 
   expect(checkPerimeter(['a\\b.ts'], ['a/b.ts'])).toEqual({ files: 1, outside: [] })
 })
 
-test('parseDoneClaims: the last three log lines, newest first; a line without time or rule is skipped', () => {
-  const line = (n: number, rule = 'unproven-row') => JSON.stringify({ at: `2026-10-22T0${n}:00:00.000Z`, session: 's', rule, word: 'fatto', excerpt: `claim ${n}` })
-  const text = [line(1), 'not json', line(2, 'tail-truncated'), JSON.stringify({ rule: 'x' }), line(3), line(4), ''].join('\n')
-  expect(parseDoneClaims(text).map(c => c.excerpt)).toEqual(['claim 4', 'claim 3', 'claim 2'])
-  expect(parseDoneClaims(text)[2]).toEqual({ at: '2026-10-22T02:00:00.000Z', rule: 'tail-truncated', excerpt: 'claim 2' })
-  expect(parseDoneClaims('')).toEqual([])
-  expect(parseDoneClaims('{}')).toEqual([])
+test('parseDoneClaims: the log lines that were blocks, newest first, with their session; a line without time or rule, and a rule that only counted, is skipped', () => {
+  const line = (n: number, rule = 'unproven-row', session = 's') => JSON.stringify({ at: `2026-10-22T0${n}:00:00.000Z`, session, rule, word: 'fatto', excerpt: `claim ${n}` })
+  const text = [line(1), 'not json', line(2, 'tail-cut'), JSON.stringify({ rule: 'x' }), line(3, 'shell-ran'), line(4, 'tail-truncated'), line(5, 'claim-without-evidence', 'other'), ''].join('\n')
+  expect(parseDoneClaims(text, 's').map(c => c.excerpt)).toEqual(['claim 2', 'claim 1'])
+  expect(parseDoneClaims(text, 's')[0]).toEqual({ at: '2026-10-22T02:00:00.000Z', session: 's', rule: 'tail-cut', excerpt: 'claim 2' })
+  expect(parseDoneClaims(text, 'other').map(c => c.excerpt)).toEqual(['claim 5'])
+  expect(parseDoneClaims(text, undefined)).toEqual([])
+  expect(parseDoneClaims('', 's')).toEqual([])
+  expect(parseDoneClaims('{}', 's')).toEqual([])
+})
+
+test('parseDoneClaims: the session is filtered before the last entries are kept, so a busy other session cannot push its blocks out', () => {
+  const line = (n: number, session: string) => JSON.stringify({ at: new Date(2026, 9, 22, 8, n).toISOString(), session, rule: 'unproven-row', excerpt: `${session} ${n}` })
+  const text = [line(1, 'mine'), line(2, 'mine'), ...Array.from({ length: 40 }, (_, i) => line(3 + i, 'busy'))].join('\n')
+  expect(parseDoneClaims(text, 'mine').map(c => c.excerpt)).toEqual(['mine 2', 'mine 1'])
+  expect(parseDoneClaims(text, 'busy')).toHaveLength(30)
+})
+
+test('claimsOf: the last three blocks of the session, newest first; none without a session', () => {
+  const claim = (at: string, session?: string) => ({ at, ...(session && { session }), rule: 'unproven-row', excerpt: at })
+  const list = [claim('5', 'b'), claim('4', 'a'), claim('3'), claim('2', 'a'), claim('1', 'a'), claim('0', 'a')]
+  expect(claimsOf(list, 'a').map(c => c.at)).toEqual(['4', '2', '1'])
+  expect(claimsOf(list, 'c')).toEqual([])
+  expect(claimsOf(list, undefined)).toEqual([])
+  expect(claimsOf(undefined, 'a')).toEqual([])
 })
 
 test('claimTime: day/month and hour:minute of the log entry, in the local clock', () => {
@@ -656,13 +694,16 @@ test('autocompactForecast: requests left from the average growth; absent without
   expect(autocompactForecast([110_000, 110_000], 180_000)).toBeUndefined()
   // past the threshold already
   expect(autocompactForecast([170_000, 190_000], 180_000)).toBe(0)
+  expect(autocompactForecast([100_000, 110_000], 150_000)).toBe(4)
 })
 
 test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
   expect(tabNeeds('agents')).toEqual({ fast: true })
   expect(tabNeeds('work')).toEqual({ fast: true })
   expect(tabNeeds('system')).toEqual({ fast: false })
-  expect(tabNeeds('context')).toEqual({ fast: false })
+  expect(tabNeeds('insights')).toEqual({ fast: false })
+  expect(tabNeeds('notes')).toEqual({ fast: false })
+  expect(tabNeeds('context')).toEqual({ fast: true }) // the refresh countdown
   expect(tabNeeds(undefined)).toEqual({ fast: true })
 })
 
@@ -785,8 +826,8 @@ test('shouldCompact: from 70 % with the last three rounds each growing over 5 %,
   expect(shouldCompact({})).toBe(false)
 })
 
-test('savedTab: the five tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
-  expect(TABS).toEqual(['agents', 'context', 'work', 'system', 'notes'])
+test('savedTab: the six tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
+  expect(TABS).toEqual(['agents', 'context', 'work', 'insights', 'system', 'notes'])
   for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
   expect(savedTab('session')).toBe('agents')
   expect(savedTab('repo')).toBe('work')
@@ -951,25 +992,142 @@ test('sparkline: a given maximum fixes the scale, so a quiet reading stays low',
   expect(sparkline([150], 100)).toBe('█')
 })
 
-test('fmtBytes: base 1024 with one letter, a decimal only under ten', () => {
-  expect(fmtBytes(0)).toBe('0B')
-  expect(fmtBytes(512)).toBe('512B')
-  expect(fmtBytes(1536)).toBe('1.5K')
-  expect(fmtBytes(40 * 1024)).toBe('40K')
-  expect(fmtBytes(Math.round(1.2 * 1024 ** 2))).toBe('1.2M')
-  expect(fmtBytes(340 * 1024 ** 2)).toBe('340M')
-  expect(fmtBytes(12.4 * 1024 ** 3)).toBe('12G')
-  expect(fmtBytes(-5)).toBe('0B')
+test('fmtBytes: base 1024, a space and the unit (B, KB, MB, GB), a decimal only under ten', () => {
+  expect(fmtBytes(0)).toBe('0 B')
+  expect(fmtBytes(512)).toBe('512 B')
+  expect(fmtBytes(850 * 1024)).toBe('850 KB')
+  expect(fmtBytes(1536)).toBe('1.5 KB')
+  expect(fmtBytes(Math.round(1.2 * 1024 ** 2))).toBe('1.2 MB')
+  expect(fmtBytes(45 * 1024 ** 2)).toBe('45 MB')
+  expect(fmtBytes(340 * 1024 ** 2)).toBe('340 MB')
+  expect(fmtBytes(Math.round(1.2 * 1024 ** 3))).toBe('1.2 GB')
+  expect(fmtBytes(12.4 * 1024 ** 3)).toBe('12 GB')
+  expect(fmtBytes(-5)).toBe('0 B')
 })
 
-test('fmtBytes: the value is rounded before the unit is chosen, so it never reads 1024K or 10.0K', () => {
-  expect(fmtBytes(1024 ** 2 - 1)).toBe('1.0M')
-  expect(fmtBytes(1023.6)).toBe('1.0K')
-  expect(fmtBytes(10 * 1024 - 1)).toBe('10K')
-  expect(fmtBytes(Math.round(9.96 * 1024 ** 2))).toBe('10M')
-  expect(fmtBytes(1024 ** 3 - 1)).toBe('1.0G')
-  expect(fmtBytes(9.94 * 1024)).toBe('9.9K')
-  expect(fmtBytes(1023.4)).toBe('1023B')
+test('fmtBytes: the value is rounded before the unit is chosen, so it never reads 1024 KB or 10.0 KB', () => {
+  expect(fmtBytes(1024 ** 2 - 1)).toBe('1.0 MB')
+  expect(fmtBytes(1023.6)).toBe('1.0 KB')
+  expect(fmtBytes(10 * 1024 - 1)).toBe('10 KB')
+  expect(fmtBytes(Math.round(9.96 * 1024 ** 2))).toBe('10 MB')
+  expect(fmtBytes(1024 ** 3 - 1)).toBe('1.0 GB')
+  expect(fmtBytes(9.94 * 1024)).toBe('9.9 KB')
+  expect(fmtBytes(1023.4)).toBe('1023 B')
+})
+
+test('ctxGrowth: the average growth per turn of the samples; none with fewer than two or a context that does not grow', () => {
+  expect(ctxGrowth([100_000, 106_000, 112_000])).toBe(6000)
+  expect(ctxGrowth([100_000])).toBeUndefined()
+  expect(ctxGrowth(undefined)).toBeUndefined()
+  expect(ctxGrowth([100_000, 100_000])).toBeUndefined()
+  expect(ctxGrowth([120_000, 100_000])).toBeUndefined()
+})
+
+test('withBackground: the first cells of a row on a background, a span cut where the cells end', () => {
+  const row: Span[] = [{ t: '■ ', c: 'x' }, { t: 'abcdef', dim: true }]
+  expect(withBackground(row, 5, '#111')).toEqual([{ t: '■ ', c: 'x', bg: '#111' }, { t: 'abc', dim: true, bg: '#111' }, { t: 'def', dim: true }])
+  expect(withBackground(row, 0, '#111')).toEqual(row)
+  expect(withBackground(row, 8, '#111')).toEqual([{ t: '■ ', c: 'x', bg: '#111' }, { t: 'abcdef', dim: true, bg: '#111' }])
+  expect(withBackground(row, 99, '#111').every(span => span.bg === '#111')).toBe(true)
+})
+
+test('shade: a color at a fraction of its brightness, as #rrggbb', () => {
+  expect(shade('#ffffff', 0.5)).toBe('#808080')
+  expect(shade('#7fb4ff', 0)).toBe('#000000')
+  expect(shade('#102030', 1)).toBe('#102030')
+})
+
+test('sortProcs: by the column asked, biggest first, the other column breaking a tie and a value not read yet last', () => {
+  const procs = [
+    { pid: 1, name: 'a', ports: [], cpu: 5, ram: 100 },
+    { pid: 2, name: 'b', ports: [], cpu: 1, ram: 900 },
+    { pid: 3, name: 'c', ports: [], ram: 500 },
+    { pid: 4, name: 'd', ports: [], cpu: 5, ram: 50 },
+  ]
+  expect(sortProcs(procs, 'ram').map(p => p.pid)).toEqual([2, 3, 1, 4])
+  expect(sortProcs(procs, 'cpu').map(p => p.pid)).toEqual([1, 4, 2, 3])
+  expect(procs.map(p => p.pid)).toEqual([1, 2, 3, 4]) // the list given is not touched
+  expect(sortProcs([], 'cpu')).toEqual([])
+})
+
+test('parseCommits: hash and subject per line, newest first; a line without a tab or a subject is skipped', () => {
+  expect(parseCommits('abc1234\tAdd the filter\ndef5678\tFix: a\tb\nnotab\n\n9999999\t \n')).toEqual([
+    { hash: 'abc1234', subject: 'Add the filter' },
+    { hash: 'def5678', subject: 'Fix: a\tb' },
+  ])
+  expect(parseCommits('')).toEqual([])
+})
+
+test('insights: a round counts its cost where measured, its length and cache hit, and keeps the dearest; the cache hits are the last twenty', () => {
+  expect(roundCost({ usd: 5, startUsd: 4.5 })).toBe(0.5)
+  expect(roundCost({ usd: 5 })).toBeUndefined()
+  expect(roundCost({ usd: 4, startUsd: 5 })).toBeUndefined()
+  let ins = recordRoundEnd(undefined, { usd: 0.4, ms: 60_000, cacheShare: 90 })
+  ins = recordRoundEnd(ins, { usd: 1.2, ms: 240_000, cacheShare: 40 })
+  ins = recordRoundEnd(ins, { ms: 5000 })
+  ins = recordRoundEnd(ins, { usd: 0.3, ms: 1000, cacheShare: 70 })
+  expect(ins).toMatchObject({ rounds: 4, roundMs: 306_000, costliest: { usd: 1.2, ms: 240_000 }, cacheShares: [90, 40, 70] })
+  expect(Math.round(ins.usd * 100)).toBe(190)
+  for (let i = 0; i < 25; i++) ins = recordRoundEnd(ins, { ms: 1, cacheShare: i })
+  expect(ins.cacheShares).toHaveLength(20)
+  expect(ins.cacheShares.at(-1)).toBe(24)
+})
+
+test('insights: tool calls are counted by tool with their failures and running time; a successful Read counts its file; names and files are capped', () => {
+  let ins = recordToolCall(undefined, { tool: 'Bash', isOk: true, ms: 1000 })
+  ins = recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 500 })
+  ins = recordToolCall(ins, { tool: 'Read', isOk: true, ms: 10, readPath: '/w/a.ts' })
+  ins = recordToolCall(ins, { tool: 'Read', isOk: true, ms: 10, readPath: '/w/a.ts' })
+  ins = recordToolCall(ins, { tool: 'Read', isOk: false, ms: 10, readPath: '/w/b.ts' })
+  expect(ins.tools).toEqual({ Bash: { calls: 2, failed: 1 }, Read: { calls: 3, failed: 1 } })
+  expect(ins.reads).toEqual({ '/w/a.ts': 2 })
+  expect(ins.toolMs).toBe(1530)
+  let capped = emptyInsights()
+  for (let i = 0; i < 60; i++) capped = recordToolCall(capped, { tool: `t${i}`, isOk: true, ms: 0, readPath: `/f${i}` })
+  expect(Object.keys(capped.tools)).toHaveLength(40)
+  expect(Object.keys(capped.reads)).toHaveLength(60)
+  for (let i = 0; i < 300; i++) capped = recordToolCall(capped, { tool: 't0', isOk: true, ms: 0, readPath: `/g${i}` })
+  expect(Object.keys(capped.reads)).toHaveLength(200)
+  expect(capped.tools.t0?.calls).toBe(301)
+  expect(recordToolCall(capped, { tool: 'new', isOk: true, ms: 0 }).tools.new).toBeUndefined()
+  expect(readPathOf({ tool: 'Read', file_path: ['', 'w', 'a.ts'].join(String.fromCharCode(92)) })).toBe('/w/a.ts')
+  expect(readPathOf({ tool: 'Edit', file_path: '/w/a.ts' })).toBeUndefined()
+  expect(readPathOf({ tool: 'Read' })).toBeUndefined()
+})
+
+test('insights: the permission waits and the compactions add up; the time splits into model, tools and waiting', () => {
+  expect(timeSplit(emptyInsights())).toBeUndefined()
+  let ins = recordRoundEnd(undefined, { ms: 100_000 })
+  ins = recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 30_000 })
+  ins = recordWait(ins, 10_000)
+  ins = recordWait(ins, -5)
+  ins = recordCompaction(recordCompaction(ins))
+  expect(ins).toMatchObject({ waitMs: 10_000, compactions: 2 })
+  expect(timeSplit(ins)).toEqual({ model: 60_000, tools: 30_000, wait: 10_000, total: 100_000 })
+  // tools that ran side by side can add up to more than the rounds: the total is then theirs
+  expect(timeSplit(recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 90_000 }))).toEqual({ model: 0, tools: 120_000, wait: 10_000, total: 130_000 })
+})
+
+test('insightHints: each hint shows only while its cause holds', () => {
+  const base = { ...INITIAL, sessionId: 's' }
+  expect(insightHints(base)).toEqual([])
+  const reads = (n: number) => ({ ...emptyInsights(), reads: { '/w/src/a.ts': n, '/w/b.ts': 2 } })
+  expect(insightHints({ ...base, insights: reads(5) })).toEqual([])
+  expect(insightHints({ ...base, insights: reads(6) })).toEqual([{ kind: 'rereads', file: 'a.ts', count: 6 }])
+  const shares = (list: number[]) => ({ ...emptyInsights(), cacheShares: list })
+  expect(insightHints({ ...base, insights: shares([10, 20]) })).toEqual([])
+  expect(insightHints({ ...base, insights: shares([90, 10, 20, 49]) })).toEqual([{ kind: 'coldCache' }])
+  expect(insightHints({ ...base, insights: shares([10, 20, 50]) })).toEqual([])
+  const failed = (n: number) => ({ ...emptyInsights(), tools: { Bash: { calls: 20, failed: n }, Read: { calls: 9, failed: 9 } } })
+  expect(insightHints({ ...base, insights: failed(6) })).toEqual([])
+  expect(insightHints({ ...base, insights: failed(7) })).toEqual([{ kind: 'failures', count: 7 }])
+  // subagents over 60 % of the tokens: 600 of 1000 is not over, 610 is
+  expect(subagentShare({ mainTokens: 400, agents: [], agentTokens: 600 })).toBe(60)
+  expect(insightHints({ ...base, mainTokens: 400, agentTokens: 600 })).toEqual([])
+  expect(insightHints({ ...base, mainTokens: 390, agentTokens: 610 })).toEqual([{ kind: 'subagents', share: 61 }])
+  expect(subagentShare({ agents: [], mainTokens: undefined, agentTokens: undefined })).toBeUndefined()
+  expect(insightHints({ ...base, lastRoundMs: 600_000 })).toEqual([])
+  expect(insightHints({ ...base, lastRoundMs: 600_001 })).toEqual([{ kind: 'longRound', ms: 600_001 }])
 })
 
 test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed subagent, a PR with red checks; one entry per cause', () => {
@@ -1012,7 +1170,7 @@ test('parseSysLine: one JSON line of the monitor, narrowed field by field; a bad
 
 test('recordSystem: samples go into rings of the last thirty, a part reported off is cleared and marked, a later reading brings it back', () => {
   const first = recordSystem(undefined, { cpu: 10, ram: { used: 4, total: 8 }, net: { rx: 100, tx: 50 } })
-  expect(first).toEqual({ cpu: [10], ram: [50], rx: [100], tx: [50], ramUsed: 4, ramTotal: 8, off: [] })
+  expect(first).toEqual({ cpu: [10], ram: [50], rx: [100], tx: [50], off: [] })
   let s = first
   for (let i = 0; i < 40; i++) s = recordSystem(s, { cpu: i })
   expect(s.cpu).toHaveLength(SYSTEM_KEEP)
