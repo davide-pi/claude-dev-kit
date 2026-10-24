@@ -35,7 +35,7 @@ export const meta = {
 // P1/P2 and the reviewers open another never ends by itself. So the count of open P1/P2 (plus the open V finding) is read at the decision after each fix
 // round: STALL 'not-converging' when it did not drop below the lowest count of the fix rounds before it for 3 fix rounds in a row
 // (notConverging; the first fix round only sets the bar; a decision with a finding still without a verdict is not read, the
-// cleanup pass is no fix round). A resolution `guidance` or `accept` on a round restarts that count; `retry` does not.
+// cleanup pass is no fix round). A resolution `guidance` or `accept` on a round restarts that count; `retry` does not; it also restarts when a DONE starts the cleanup pass or a coverage rerun (its 0 is no bar).
 // Every STALL carries `history` (findingHistory): per finding the round it appeared, the fixes it went to, when it closed and
 // when it came back. A fixer whose snapshot churn (lines inserted + deleted) grows strictly over three fixes in a row is a STALL
 // 'churn' (churnGrowing; a report without a snapshot has no churn and is skipped; the cleanup pass is no fix cycle and has none). The churn
@@ -835,10 +835,12 @@ const result = extra => withHistory({
 
 // A report that holds questions stops the run before review (STALL 'question'), unless the resolution of that round carries the answers:
 // then the same call runs once more with them as guidance (`build(extra)` is the prompt; the first call is the one a resume replays from the
-// cache). The questioning run is not taken as a report (its tree is the next -Since, so the delta keeps both runs): of it only the `noticed`
-// items and the `openQuestions` are kept (as they are), and its `rejected` ones are merged into the second run's report (the second run's own entry wins for an id).
+// cache). The questioning run is not taken as a report (the tree before it stays the next -Since, so the delta keeps both runs): its `noticed`
+// items go to `noticed`, its `openQuestions` to the notes (each only when not already there, see sameText), and its `rejected` ones are merged into the second
+// run's report (the second run's own entry wins for an id), each a CHALLENGE only when the second run did not change the file of the finding it rejects.
 // Returns { report } (null: it returned nothing) or { stall } (the result to return).
-const answersBlock = answers => `The owner answered your questions: apply each answer. Your first run's edits are already in the tree: continue from them, do not start over.\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
+const addNotes = qs => (qs ?? []).forEach(q => { if (!notes.some(n => sameText(n.text, q))) notes.push({ source: 'implementer', text: q }) })
+const answersBlock = answers => `The owner answered your questions: apply each answer. Your first run's edits are already in the tree: continue from them, do not start over, and list in \`files\` only the files you change in this run.\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
 const askWithQuestions = async (build, opts, at, resolution) => {
   const first = readReport(await ask(build(''), opts))
   if (!first?.questions.length) return { report: first }
@@ -853,11 +855,16 @@ const askWithQuestions = async (build, opts, at, resolution) => {
     }
   }
   takeNoticed(first)
-  ;(first.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  addNotes(first.openQuestions)
   const second = readReport(await ask(build(answersBlock(answers)), { ...opts, label: `${opts.label} (answers)` }))
   ;(second?.questions ?? []).forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
   if (!second) return { report: second }
-  return { report: { ...second, rejected: [...second.rejected, ...first.rejected.filter(r => !second.rejected.some(s => s?.id === r?.id))] } }
+  // `stale`: first-run rejections whose file the second run changed. They stay in the report (so the ids count as rejected) but are no CHALLENGE.
+  const carried = first.rejected.filter(r => !second.rejected.some(s => s?.id === r?.id))
+  const stale = new Set(carried.filter(r => isTouched(known[r?.id]?.path, second.files, repoRoot)).map(r => r?.id))
+  // `files` of the merged report covers both runs (the delta does); only `stale` looks at the second run's own files.
+  const files = [...new Set([...(Array.isArray(first.files) ? first.files : []), ...(Array.isArray(second.files) ? second.files : [])])]
+  return { report: { ...second, files, rejected: [...second.rejected, ...carried] }, stale }
 }
 
 if (!inline) {
@@ -883,7 +890,7 @@ if (!inline) {
   }
   const implStall = gateReport(impl, false)
   takeReport(impl)
-  ;(impl.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  addNotes(impl.openQuestions)
   if (implStall) return verifyStall(0, implStall)
 }
 
@@ -1012,12 +1019,15 @@ while (true) {
   const merged = mergeReviews(alive, repoRoot)
   // The delta review of the cleanup pass has read what the cleanup changed: a finding it reports again (never tracked, so it comes back as a
   // new one) is still there and stays in `minor`; the rest is cleaned.
+  // An id whose file is still unread waits for the round that reads it.
+  const cleanupWait = []
   for (const id of cleanupSent) {
+    if (isTouched(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
     if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
     minor.splice(minor.findIndex(m => m.id === id), 1)
     cleaned.push(known[id])
   }
-  cleanupSent = []
+  cleanupSent = cleanupWait
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
   found.forEach(f => { known[f.id] = f })
@@ -1066,12 +1076,14 @@ while (true) {
     if (cover === 'rerun') {
       nextRound = { only: coverageOwners(unread, everyone, groups, repoRoot), coverage: true }
       coverageRetried = true
+      openCounts = []
       continue
     }
     // One P3 cleanup pass on the minor findings inside the perimeter, then one review of its delta: the Fix phase below runs it.
     if (!cleanupDone) cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
     if (!cleanupIds.length) return result({ status: 'OK' })
     cleanupDone = true
+    openCounts = []                   // the 0 of this DONE is no bar for the fix cycles after the cleanup delta
     rounds[rounds.length - 1].cleanup = cleanupIds
   }
   if (stopped) {
@@ -1154,11 +1166,11 @@ while (true) {
     if (!proposals.some(p => p.path === known[id].path && p.title === known[id].title)) proposals.push({ source: 'scope-revert', title: known[id].title, path: known[id].path, why: known[id].failure })
   })
   // A finding the fixer rejected is not fixed: the next round's reviewers get it as a CHALLENGE (only the ones it was given).
-  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r?.id) && tracked[r.id]?.status === 'open'), counts: rejectionCounts })
+  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r?.id) && tracked[r.id]?.status === 'open' && !asked1.stale?.has(r.id)), counts: rejectionCounts })
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
-  ;(fixed.openQuestions ?? []).forEach(q => notes.push({ source: 'implementer', text: q }))
+  addNotes(fixed.openQuestions)
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (fixStall) return verifyStall(round, fixStall)
   // The churn and the open count of this fix are judged at the next round's decision, once the reviewers have read it. The cleanup is no fix cycle.

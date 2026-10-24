@@ -1883,11 +1883,108 @@ test('script: the first run\'s openQuestions are kept when the answers arrive (i
 test('script: a finding the first fixer run rejected stays rejected when the answers rerun it: the next reviewers get the challenge', async () => {
   const answers = [{ text: ASK[0].text, answer: 'caller' }];
   const wrong = { id: 'F1', kind: 'wrong', reason: 'first run reason' };
-  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ questions: ASK, rejected: [wrong] }), impl()]);
+  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ questions: ASK, rejected: [wrong] }), impl({ files: ['src/Orders/Dto/A.cs'], snapshot: snapshot(['src/Orders/Dto/A.cs']) })]);
   assert.equal(out.status, 'OK');
   assert.match(calls.find(c => c.opts.label === 'R2 A').prompt, /CHALLENGE.*F1.*the fixer's reason: first run reason/s);
   const again = { ...wrong, reason: 'second run reason' };                       // the rerun rejects it again: its own reason wins, once
   const twice = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ questions: ASK, rejected: [wrong] }), impl({ rejected: [again] })]);
   assert.match(twice.calls.find(c => c.opts.label === 'R2 A').prompt, /the fixer's reason: second run reason/);
   assert.doesNotMatch(twice.calls.find(c => c.opts.label === 'R2 A').prompt, /first run reason/);
+});
+
+// ── follow-up minors F2-F7 ────────────────────────────────────────────────────────────────────────────
+test('script: a DONE decision that goes on to a cleanup restarts the open counts: a later fix cycle is not judged against a 0 (F2)', async () => {
+  const p2 = (n, title) => finding({ line: 100 * n, title });
+  const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
+  const { out, calls } = await run(ARGS, [
+    review([], [nit(1), p2(1, 'alpha query broken')]),                                  // R1: P2 F2 + a P3 F1
+    review(closed('F2')),                                                               // R2: DONE (count 0), then the cleanup pass
+    review(closed('F2'), [p2(3, 'beta cache stale')]),                                  // R3: F3 -> fix
+    review(closed('F2', 'F3'), [p2(4, 'gamma lock racing')]),                           // R4: count 1 after the fix
+    review(closed('F2', 'F3', 'F4'), [p2(5, 'delta index dropped')]),                   // R5: 1 again
+    review(closed('F2', 'F3', 'F4', 'F5'), [p2(6, 'epsilon retry loops')]),             // R6: 1 a third time: not below the bar of 1, but no 0 to be judged against
+    review(closed('F2', 'F3', 'F4', 'F5', 'F6')),                                       // R7: all closed
+  ]);
+  assert.equal(out.stall, undefined);
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 7);
+  assert.equal(calls.filter(c => c.opts.label === 'cleanup R2').length, 1);
+});
+
+test('script: a cleanup id whose file the delta review did not read stays pending until the round that reads it (F4)', async () => {
+  const { out } = await run(ARGS, [
+    review([], [nit(1), nit(2)]),                                                       // R1: two nits -> cleanup
+    review([], [], []),                                                                 // R2: the delta review lists no file: unread, a coverage rerun follows
+    review([], [{ ...nit(1), line: 42 }]),                                              // R3: the rerun reads the file and still finds F1's nit
+  ]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.cleaned.map(x => x.id), ['F2']);
+  assert.deepEqual(out.minor.map(x => x.id), ['F1']);
+});
+
+test('script: the first run\'s openQuestions are added only when not already in notes (F6)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const { out } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])],
+    [impl({ openQuestions: ['shared guess'] }), impl({ questions: ASK, openQuestions: [' Shared Guess', 'new guess'] }), impl()]);
+  assert.deepEqual(out.outOfScope.map(o => o.text), ['shared guess', 'new guess']);
+});
+
+test('script: a first-run rejection is kept only when the answers run did not change the finding\'s file (F7)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const wrong = { id: 'F1', kind: 'wrong', reason: 'first run reason' };
+  const reviews = () => [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])];
+  const touchedAgain = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, reviews(), [impl(), impl({ questions: ASK, rejected: [wrong] }), impl()]);
+  assert.doesNotMatch(touchedAgain.calls.find(c => c.opts.label === 'R2 A').prompt, /CHALLENGE/);
+  const dto = 'src/Orders/Dto/A.cs';
+  const kept = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, reviews(), [impl(), impl({ questions: ASK, rejected: [wrong] }), impl({ files: [dto], snapshot: snapshot([dto]) })]);
+  assert.match(kept.calls.find(c => c.opts.label === 'R2 A').prompt, /CHALLENGE.*F1.*first run reason/s);
+});
+
+// ── follow-up minors, second pass (F1-F5) ─────────────────────────────────────────────────────────────
+test('script: a cleanup nit the first run rejected stays minor when the answers run touches its file for another nit (F1)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const wrong = { id: 'F1', kind: 'wrong', reason: 'needs a decision' };
+  const { out } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [nit(1), nit(2)]), review([])], [impl(), impl({ questions: ASK, rejected: [wrong] }), impl()]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.cleaned.map(x => x.id), ['F2']);
+  assert.deepEqual(out.minor.map(x => x.id), ['F1']);
+});
+
+test('script: the answers block asks the second run to list in files only what it changed (F2)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const { calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ questions: ASK }), impl()]);
+  assert.match(calls.find(c => c.opts.label === 'fix R1 (answers)').prompt, /list in `files` only the files you change in this run/);
+});
+
+test('script: the merged report of a questioning fix keeps the files of both runs (F6)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const dto = 'src/Orders/Dto/A.cs';
+  const { calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])],
+    [impl(), impl({ files: [dto], questions: ASK }), impl({ files: ['src/Orders/OrdersQuery.cs'] })]);
+  assert.match(calls.find(c => c.opts.label === 'R2 A').prompt, /Files the fix changed: src\/Orders\/Dto\/A\.cs, src\/Orders\/OrdersQuery\.cs\./);
+});
+
+test('script: an openQuestion the second run repeats is kept once, for the implementer and the fixer (F3)', async () => {
+  const answers = [{ text: ASK[0].text, answer: 'caller' }];
+  const first = await run({ ...ARGS, resolutions: [{ round: 0, answers }] }, [review([])], [impl({ questions: ASK, openQuestions: ['one guess'] }), impl({ openQuestions: ['One Guess'] })]);
+  assert.deepEqual(first.out.outOfScope.map(o => o.text), ['one guess']);
+  const fixer = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ questions: ASK, openQuestions: ['fixer guess'] }), impl({ openQuestions: ['fixer guess'] })]);
+  assert.deepEqual(fixer.out.outOfScope.map(o => o.text), ['fixer guess']);
+});
+
+test('script: a coverage rerun restarts the open counts: three non-improving fixes after it are no stall against the 0 of the DONE (F4)', async () => {
+  const two = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/A.cs'];
+  const p2 = (n, title) => finding({ line: 100 * n, title });
+  const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
+  const { out } = await run(ARGS, [
+    review([], [finding()], [two[0]]),                                                  // R1: F1; Dto/A.cs stays unread
+    review(closed('F1'), [], [two[0]]),                                                 // R2: DONE with a file unread: count 0, then a rerun
+    review(closed('F1'), [p2(2, 'alpha query broken')]),                                // R3: the rerun finds F2 -> fix
+    review(closed('F1', 'F2'), [p2(3, 'beta cache stale')]),                            // R4: count 1
+    review(closed('F1', 'F2', 'F3'), [p2(4, 'gamma lock racing')]),                     // R5: 1
+    review(closed('F1', 'F2', 'F3', 'F4'), [p2(5, 'delta index dropped')]),             // R6: 1
+    review(closed('F1', 'F2', 'F3', 'F4', 'F5')),                                       // R7: all closed
+  ], [impl({ files: two, snapshot: { tree: 't1', files: two, churn: 3 } })]);
+  assert.equal(out.stall, undefined);
+  assert.equal(out.status, 'OK');
 });
