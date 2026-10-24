@@ -35,7 +35,9 @@ import {
   signedPctCell,
   spanWidth,
   padCells,
+  sessionTokens,
   taskBarCells,
+  tokenShare,
   truncEnd,
   truncMiddle,
   truncateSpans,
@@ -53,15 +55,13 @@ const SEVEN_DAYS = 604800
 const MAX_AGENT_ROWS = 10
 const MAX_HISTORY_ROWS = 10
 const MAX_LIVE_ROWS = 5
-/** Below this pane width the tab bar uses the short labels: the full bar is 48 cells at its widest. */
-const TAB_SHORT_BELOW = 48
 /** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */
 const BUTTON_CHROME = 4
 const BUTTON_GAP = 1
 /** The context fill from which the Sessione view warns. */
 const CTX_WARN_PCT = 80
-const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Agenti', work: 'Lavoro', repo: 'Repo' }
-const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Agen', work: 'Lav', repo: 'Repo' }
+const TAB_NAMES: Record<CockpitTab, string> = { session: 'Sessione', agents: 'Subagenti', work: 'Lavoro', repo: 'Repo' }
+const TAB_NAMES_SHORT: Record<CockpitTab, string> = { session: 'Sess', agents: 'Sub', work: 'Lav', repo: 'Repo' }
 const ALM_LABEL = 'ALM '
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
@@ -218,13 +218,17 @@ export function almSpans(alm: CockpitAlm, width: number): Span[] {
   return alm.isMapped ? [dim(ALM_LABEL), sp(target)] : [sp(ALM_LABEL + target, COLORS.red)]
 }
 
+/** An agent's state mark: running, interrupted, failed or done. */
+const agentIcon = (a: CockpitAgent): Span =>
+  a.status === 'running' ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green)
+
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
   const nameW = Math.max(6, width - 27)
   const prefix = depth > 0 ? `${'  '.repeat(depth - 1)}└ ` : ''
   const isRunning = a.status === 'running'
   const end = a.endedAt ?? now
   return [
-    isRunning ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green),
+    agentIcon(a),
     sp(' '),
     depth > 0 ? sp(pad(truncMiddle(prefix + a.type, nameW), nameW), COLORS.dim) : sp(pad(truncMiddle(a.type, nameW), nameW)),
     sp(' '),
@@ -236,6 +240,41 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
     sp(' '),
     sp(padStart(isRunning ? '' : abbrevTokens(a.tokens), 5)),
   ]
+}
+
+/** The Subagenti tab's second row of an agent: model and effort on the left; its share of the session's tokens and its elapsed time on the right. */
+export function subagentFacts(a: CockpitAgent, now: number, total: number, indent: string): { left: Span[]; right: Span[] } {
+  const share = tokenShare(a.tokens, total)
+  return {
+    left: [sp(indent), a.model ? sp(shortModel(a.model), undefined, a.status === 'running') : dim('—'), ...headerEffort(a.effort)],
+    right: [...(share ? [sp(share, undefined, true), dim(' token  ')] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
+  }
+}
+
+/**
+ * The rows under an agent's facts on the Subagenti tab: the four counters, then the tool running now (or, when none is, the last
+ * one). Each is left out until the engine gave it: nothing is faked.
+ */
+export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
+  const running = a.status === 'running' ? a.activeTools?.at(-1) : undefined
+  const counters = a.usage
+    ? truncateSpans(
+        [
+          sp(indent),
+          dim('in '),
+          sp(abbrevTokens(a.usage.input)),
+          dim('  out '),
+          sp(abbrevTokens(a.usage.output)),
+          dim('  cr '),
+          sp(abbrevTokens(a.usage.cacheRead)),
+          dim('  cw '),
+          sp(abbrevTokens(a.usage.cacheWrite)),
+        ],
+        width,
+      )
+    : undefined
+  const tool = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim('ultimo tool '), sp(a.lastTool)] : undefined
+  return [counters, tool].filter((r): r is Span[] => r !== undefined)
 }
 
 const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [
@@ -406,7 +445,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />
     )
   }
-  const names = width < TAB_SHORT_BELOW ? TAB_NAMES_SHORT : TAB_NAMES
+  // The long labels, with the running count and the dot, when the whole bar fits; else the short ones.
+  const fullLabels = [
+    TAB_NAMES.session,
+    running.length > 0 ? `${TAB_NAMES.agents} ${running.length}` : TAB_NAMES.agents,
+    wlRows.length > 0 ? `${TAB_NAMES.work} ●` : TAB_NAMES.work,
+    TAB_NAMES.repo,
+  ]
+  const names = buttonRowWidth(fullLabels) <= width ? TAB_NAMES : TAB_NAMES_SHORT
   const tabBar = (
     <Box columnGap={1}>
       {tabButton('session', names.session)}
@@ -544,13 +590,37 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   const sessionBlocks = [liveAgents]
 
-  // ── Agenti: every agent listed, finished ones for two minutes ──
+  // ── Subagenti: every agent listed (finished ones for two minutes), a block each ──
   const rows = orderAgents(agents)
-  const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }) => {
+  const sessionTotal = sessionTokens(s)
+  const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }, i) => {
+    const indent = '  '.repeat(depth + 1)
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    const out = [agentButton(`agent:${agent.id}`, agent, depth)]
-    if (warn) out.push(line(ui, [sp(`${'  '.repeat(depth + 1)}⚠ ${warn}`, COLORS.yellow)]))
-    return out
+    const facts = subagentFacts(agent, s.now, sessionTotal, indent)
+    return [
+      i > 0 && gap(),
+      // The first row is the pressable one: state, type and what the agent was asked.
+      <Button key={`agent:${agent.id}`} plain onPress={() => actions.openAgent(agent.id)}>
+        {spanNodes(
+          ui,
+          truncateSpans(
+            [
+              agentIcon(agent),
+              sp(' '),
+              sp(depth > 0 ? `${'  '.repeat(depth - 1)}└ ${agent.type}` : agent.type, undefined, agent.status === 'running'),
+              ...(agent.description ? [dim(`  ${agent.description}`)] : []),
+            ],
+            width,
+          ),
+        )}
+      </Button>,
+      <Box justifyContent="space-between">
+        {line(ui, facts.left)}
+        {line(ui, facts.right)}
+      </Box>,
+      warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
+      ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
+    ]
   })
   // STORICO: the agents that left the list, newest first, behind a toggle (collapsed by default)
   const history = s.history ?? []
@@ -573,7 +643,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const agentBlocks: Block[] = [
     [
       gap(),
-      title(`AGENTS · ${running.length} in corso`, modelCounts(agents)),
+      title(`SUBAGENTI · ${running.length} in corso`, modelCounts(agents)),
       rows.length > 0 && gap(),
       agentRows,
       rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)]),

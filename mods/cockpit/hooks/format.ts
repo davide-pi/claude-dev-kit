@@ -15,6 +15,7 @@ import type {
   CockpitSnapshot,
   CockpitTab,
   CockpitTask,
+  CockpitUsage,
   CockpitWorktree,
 } from '../types'
 
@@ -319,6 +320,16 @@ export function claudeStateSpans(state: CockpitClaudeState | undefined): Span[] 
   return [{ t: `${look.icon} ${text}`, c: look.color }]
 }
 
+/**
+ * The state to go back to when a permission wait that began in `held` is answered: a main tool still in flight (the held one when
+ * it is, else the newest) or, with none, what the wait interrupted (working when that was a tool that has since ended).
+ */
+export function stateAfterWait(held: CockpitClaudeState | undefined, inFlight: readonly string[]): CockpitClaudeState {
+  const tool = held?.kind === 'tool' && held.tool !== undefined && inFlight.includes(held.tool) ? held.tool : inFlight.at(-1)
+  if (tool !== undefined) return { kind: 'tool', tool }
+  return held && held.kind !== 'tool' && held.kind !== 'waiting' ? held : { kind: 'working' }
+}
+
 /** ` ↑2 ↓1`: the commits ahead of and behind the upstream; empty when level or without an upstream. */
 export function aheadBehindSpans(g: CockpitGit): Span[] {
   const parts: Span[] = []
@@ -351,8 +362,9 @@ export function autocompactForecast(samples: readonly number[] | undefined, thre
 }
 
 /**
- * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws, `medium` (10 s) for git.
- * The slow tier (30 s) runs whatever the tab; none of them while the pane is closed.
+ * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws, `medium` (10 s) for the reads of its own.
+ * Git is not one of them: it runs at the medium tier whenever the pane is open (the header shows it on every tab). The slow tier
+ * (30 s) runs whatever the tab; none of them while the pane is closed.
  */
 export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean; medium: boolean } {
   switch (tab ?? 'session') {
@@ -567,6 +579,49 @@ export function almText(alm: CockpitAlm): string {
 }
 
 // ── History of finished agents ───────────────────────────────────────────────
+
+// ── Tokens: the four counters, live per step, and an agent's share of the session ──
+
+/** The counters of an API usage record (`ModelUsage`). */
+export const usageOf = (u: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }): CockpitUsage => ({
+  input: u.input_tokens,
+  output: u.output_tokens,
+  cacheRead: u.cache_read_input_tokens,
+  cacheWrite: u.cache_creation_input_tokens,
+})
+
+export const addUsage = (a: CockpitUsage | undefined, b: CockpitUsage): CockpitUsage => ({
+  input: (a?.input ?? 0) + b.input,
+  output: (a?.output ?? 0) + b.output,
+  cacheRead: (a?.cacheRead ?? 0) + b.cacheRead,
+  cacheWrite: (a?.cacheWrite ?? 0) + b.cacheWrite,
+})
+
+/** New tokens: input + cache writes + output, cache reads left out (the count an agent's `tokens` keeps). */
+export const newTokens = (u: CockpitUsage | undefined): number => (u ? u.input + u.output + u.cacheWrite : 0)
+
+/** `total` when a turn ends with its own count `final`: the part its steps added (`step`) is swapped for `final`; no count leaves `total` as the steps made it. */
+export function settleUsage(total: CockpitUsage | undefined, step: CockpitUsage | undefined, final: CockpitUsage | undefined): CockpitUsage | undefined {
+  if (final === undefined) return total
+  const left = (a: number | undefined, b: number | undefined) => Math.max(0, (a ?? 0) - (b ?? 0))
+  return {
+    input: left(total?.input, step?.input) + final.input,
+    output: left(total?.output, step?.output) + final.output,
+    cacheRead: left(total?.cacheRead, step?.cacheRead) + final.cacheRead,
+    cacheWrite: left(total?.cacheWrite, step?.cacheWrite) + final.cacheWrite,
+  }
+}
+
+/** New tokens of the whole session: the main loop's, every agent listed and every one in the history. */
+export const sessionTokens = (s: Pick<CockpitSnapshot, 'mainTokens' | 'agents' | 'history'>): number =>
+  (s.mainTokens ?? 0) + s.agents.reduce((n, a) => n + a.tokens, 0) + (s.history ?? []).reduce((n, h) => n + h.tokens, 0)
+
+/** `tokens` as a share of `total`, `12%` (`<1%` for a non-empty share that rounds to none); undefined when nothing was used yet. */
+export function tokenShare(tokens: number, total: number): string | undefined {
+  if (total <= 0 || tokens < 0) return undefined
+  const pct = Math.min(100, Math.round((100 * tokens) / total))
+  return pct === 0 && tokens > 0 ? '<1%' : `${pct}%`
+}
 
 /** Entries the history keeps (the state file persists them); the pane lists the newest ten of them. */
 export const HISTORY_KEEP = 50

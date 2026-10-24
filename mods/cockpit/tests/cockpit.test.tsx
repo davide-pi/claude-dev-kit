@@ -147,6 +147,8 @@ type World = {
   statusCalls?: string[]
   /** Receives one entry per `$.agent.list()` call. */
   listCalls?: string[]
+  /** A promise every `$.agent.list()` waits on, read at every call: a clock tick stuck listing the agents. */
+  holdList?: () => Promise<void> | undefined
   /** The token count at which auto-compaction runs, answered to `usage({ breakdown })`; absent, the breakdown says it is off. */
   autoCompactAt?: number
   /** Receives the `breakdown` argument of every `$.session.usage()` call. */
@@ -266,7 +268,11 @@ function world(on: On, options: World = {}) {
     if (sized !== undefined) return { value: { kind: 'file', size: options.fileSizes?.[sized] ?? 0, mtimeMs: 0, isLink: false } }
     return { value: { kind: 'file', size: 0, mtimeMs: options.hasWorklog ? 5 : 0, isLink: false } }
   })
-  on('agent.list', () => (options.listCalls?.push('list'), { value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }))
+  on('agent.list', async () => {
+    await options.holdList?.()
+    options.listCalls?.push('list')
+    return { value: (options.listed ?? []).map(l => ({ ...l, description: 'go', type: 'code-reviewer' })) }
+  })
   on('ui.view', (_, e) => {
     options.viewed?.push(e.agentId)
     return { value: {} }
@@ -350,10 +356,10 @@ test('the pane shows header, context, credits and an agent that finished before 
     // the row is one pressable Button: its text is the whole row
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('\u2713 code-reviewer')
-    expect(row).toContain('son 5.5')
-    expect(row).toContain('38k')
+    expect(await text(/son 5\.5/)).toContain('son 5.5')
+    expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')
     expect(await text(/chiesto/)).toContain('chiesto fable \u2192 sonnet')
-    expect(await text(/AGENTS/)).toBe('AGENTS \u00b7 0 in corso')
+    expect(await text(/SUBAGENTI/)).toBe('SUBAGENTI \u00b7 0 in corso')
     await ui.press({ key: 'tab:session' })
     await ui.unmount()
   }
@@ -1032,7 +1038,7 @@ test('tab bar: four buttons, Sessione selected by default; a press on Agenti dra
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const tabs = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
-  expect((await tabs()).map(b => b.text)).toEqual(['Sessione', 'Agenti', 'Lavoro', 'Repo'])
+  expect((await tabs()).map(b => b.text)).toEqual(['Sessione', 'Subagenti', 'Lavoro', 'Repo'])
   const selected = async () => (await tabs()).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:session'])
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
@@ -1040,7 +1046,7 @@ test('tab bar: four buttons, Sessione selected by default; a press on Agenti dra
 
   await ui.press({ key: 'tab:agents' })
   expect(await selected()).toEqual(['tab:agents'])
-  expect(await ui.find({ type: 'Text', text: /^AGENTS/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined() // the header stays on every tab
   expect(await ui.find({ type: 'Text', text: /^CREDITI/ })).toBeUndefined()
 
@@ -1049,14 +1055,14 @@ test('tab bar: four buttons, Sessione selected by default; a press on Agenti dra
   await ui.unmount()
 })
 
-test('tab labels: Agenti counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
+test('tab labels: Subagenti counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Agenti 2')
+  const ui = await mountPane($, 52)
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Subagenti 2')
   expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lavoro ●')
   expect((await ui.find({ key: 'tab:repo' }))?.text).toBe('Repo')
   await ui.unmount()
@@ -1066,7 +1072,7 @@ test('tab labels without agents or warnings are the bare names', async ($, on) =
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sessione', 'Agenti', 'Lavoro', 'Repo'])
+  expect((await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? '')).map(b => b.text)).toEqual(['Sessione', 'Subagenti', 'Lavoro', 'Repo'])
   await ui.unmount()
 })
 
@@ -1875,7 +1881,7 @@ test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
-test('tab bar: below 48 columns of content the labels are short and the bar fits it; from 48 (a 50-column pane) they are whole', async ($, on) => {
+test('tab bar: the labels are short while the whole bar does not fit the content, and whole from 50 cells of it (a 52-column pane, with a count and a dot)', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -1888,12 +1894,12 @@ test('tab bar: below 48 columns of content the labels are short and the bar fits
     return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1 }
   }
   const narrow = await tabsAt(40)
-  expect(narrow.labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
+  expect(narrow.labels).toEqual(['Sess', 'Sub 1', 'Lav ●', 'Repo'])
   expect(narrow.cells).toBeLessThanOrEqual(40 - 2)
-  expect((await tabsAt(49)).labels).toEqual(['Sess', 'Agen 1', 'Lav ●', 'Repo'])
-  const whole = await tabsAt(50)
-  expect(whole.labels).toEqual(['Sessione', 'Agenti 1', 'Lavoro ●', 'Repo'])
-  expect(whole.cells).toBeLessThanOrEqual(50 - 2)
+  expect((await tabsAt(51)).labels).toEqual(['Sess', 'Sub 1', 'Lav ●', 'Repo'])
+  const whole = await tabsAt(52)
+  expect(whole.labels).toEqual(['Sessione', 'Subagenti 1', 'Lavoro ●', 'Repo'])
+  expect(whole.cells).toBeLessThanOrEqual(52 - 2)
 })
 
 /** The `flexDirection` of the Box that holds the Button keyed `key`. */
@@ -2845,7 +2851,7 @@ test('header: a subagent\'s events do not move the Claude state', async ($, on) 
   expect(headerOf((await paneRows($)).rows)[0]).toContain('pronto')
 })
 
-test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s for git while a git tab is, slow 30 s always, none while the pane is closed', async ($, on) => {
+test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s for git whatever the tab while the pane is open, slow 30 s always, none while the pane is closed', async ($, on) => {
   const statusCalls: string[] = []
   const listCalls: string[] = []
   const clock = world(on, { statusCalls, listCalls })
@@ -2878,10 +2884,12 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
   await ui.press({ key: 'tab:agents' })
   await settleAll()
   reset()
-  await clock.advance(10_000) // t = 20.5 s: the medium timer ticked at 20 s, Agenti does not ask for git
+  await clock.advance(10_000) // t = 20.5 s: the medium timer ticked at 20 s: the header shows git on every tab
+  await settleAll()
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
-  expect(statusCalls).toHaveLength(0)
+  expect(statusCalls.length).toBeGreaterThanOrEqual(1)
 
+  reset()
   await clock.advance(10_000) // t = 30.5 s: the slow timer ticked, whatever tab is selected
   await settleAll()
   expect(statusCalls.length).toBeGreaterThanOrEqual(1)
@@ -2921,4 +2929,246 @@ test('buttons: compatta and segna ore close the pane height, whatever the tab: a
     expect(kids.at(-3)?.props?.flexGrow).toBe(1) // the spacer
     expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:worklog'])
   }
+})
+
+// ── Phase 2 follow-ups ──
+
+test('header: parallel main tool calls keep the state on a tool until none is left, and a permission wait restores the tool held before', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  const gates: Record<string, () => void> = {}
+  const gate = (name: string) => new Promise<void>(resolve => void (gates[name] = resolve))
+  const bashGate = gate('bash')
+  const readGate = gate('read')
+  const askGate = gate('ask')
+  on('tool.call', { tool: 'Bash' }, async () => {
+    await bashGate
+    return { result: {} }
+  })
+  on('tool.call', { tool: 'Read' }, async () => {
+    await readGate
+    return { result: {} }
+  })
+  on('classic.PermissionRequest', async () => {
+    await askGate
+    return { decision: { behavior: 'allow' } }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
+  await $.turn.start({ text: 'go', turnId: 't1' })
+
+  const bash = $.tool.call({ tool: 'Bash', command: 'ls' })
+  await settleAll()
+  const read = $.tool.call({ tool: 'Read', file_path: '/a' })
+  await settleAll()
+  expect(await state()).toContain('Read')
+
+  gates.read?.()
+  await read
+  // Bash is still in flight: not back to working, and the tool shown is the one left
+  expect(await state()).toContain('Bash')
+
+  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  await settleAll()
+  expect(await state()).toContain('attesa')
+  gates.ask?.()
+  await ask
+  expect(await state()).toContain('Bash')
+
+  gates.bash?.()
+  await bash
+  expect(await state()).toContain('lavora')
+})
+
+test('header: a notification while idle does not switch to waiting; while working it does', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('classic.Notification', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
+  const notify = () => $.classic.Notification({ message: 'Claude is waiting for your input', notification_type: 'idle_prompt' })
+
+  await notify() // before any event the state reads as idle
+  expect(await state()).toContain('pronto')
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await notify()
+  expect(await state()).toContain('attesa')
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await notify()
+  expect(await state()).toContain('pronto')
+})
+
+test('refresh tiers: the slow tick writes the heartbeat before the clock tick runs', async ($, on) => {
+  const writes = new Map<string, string>()
+  let hold: Promise<void> | undefined
+  const clock = world(on, { writes, holdList: () => hold })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  hold = new Promise<void>(() => {}) // the clock tick never gets its list of agents
+  await clock.advance(30_000)
+  await settleAll()
+  expect((flagOf(writes) as { at: number }).at).toBe(NOW + 30_000)
+})
+
+test('turn.step: the main loop\'s chunks read the snapshot once per change of state, not once per chunk', async ($, on) => {
+  let reads = 0
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('state.get', (_, e, next) => {
+    reads++
+    return next(e)
+  })
+  on('turn.step', async function* (_, e) {
+    for (let i = 0; i < (e.index === 2 ? 6 : 1); i++) yield { kind: 'text', index: i, text: 'x' }
+    return { turnId: e.turnId, index: e.index, answer: 'x', toolUses: [], stopReason: 'end_turn', usage: null }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const run = async (index: number) => {
+    const before = reads
+    for await (const chunk of $.turn.step({ turnId: 't1', index, model: 'claude-opus-5-5', messageCount: 1 })) void chunk
+    return reads - before
+  }
+  await run(0) // the first step also writes the model and the effort
+  const one = await run(1)
+  expect(await run(2)).toBe(one) // five more chunks of the same kind cost no read
+})
+
+// ── Subagenti ──
+
+const STEP_USAGE = { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 8000, cache_creation_input_tokens: 500, model: 'claude-sonnet-5-5' }
+
+test('Subagenti: an agent block shows state, type, description, model, effort, share of the session tokens, time, the four counters per step and the tool running now, then the last one', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'text', index: 0, text: 'x' }
+    return { turnId: e.turnId, index: e.index, answer: 'x', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
+  })
+  on('turn.complete', () => ({ text: '' }))
+  let release = () => {}
+  const toolGate = new Promise<void>(resolve => void (release = resolve))
+  on('tool.call', { tool: 'Read' }, async () => {
+    await toolGate
+    return { result: {} }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  await spawnAgent($, 'code-reviewer')
+  const step = async (agentId?: string) => {
+    for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', effort: 'high', messageCount: 1, ...(agentId && { agentId }) })) void chunk
+  }
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  const rows = async () => rowTexts(await ui.drawn())
+  const facts = async (u: typeof ui) => (await u.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ }))[0]?.text
+  const counters = /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/
+
+  // before any step the counters are not drawn: nothing is faked
+  expect((await rows()).some(r => /^ +in /.test(r))).toBe(false)
+
+  await step('a1')
+  let now = await rows()
+  expect(now.find(r => /code-reviewer/.test(r))).toBe('◐ code-reviewer  go')
+  expect(now.some(r => counters.test(r))).toBe(true)
+  expect(now.find(r => /son 5\.5/.test(r))).toMatch(/^ +son 5\.5 .* HIGH/)
+  expect(await facts(ui)).toBe('100% token  0s')
+
+  // the main loop's step counts in the session: the agent is half of it
+  await step()
+  expect(await facts(ui)).toBe('50% token  0s')
+
+  // the elapsed time moves with the fast tier
+  await clock.advance(2000)
+  await settleAll()
+  expect(await facts(ui)).toBe('50% token  2s')
+
+  // the tool in flight, then the last one
+  const call = $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' })
+  await settleAll()
+  expect((await rows()).some(r => /^ +▸ Read$/.test(r))).toBe(true)
+  release()
+  await call
+  now = await rows()
+  expect(now.some(r => /^ +▸ Read$/.test(r))).toBe(false)
+  expect(now.some(r => /^ +ultimo tool Read$/.test(r))).toBe(true)
+
+  // the turn's end settles the counters on the turn's own total: the steps are not counted twice
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a1-t', agentId: 'a1', reason: 'answer', usage: STEP_USAGE })
+  expect((await rows()).some(r => counters.test(r))).toBe(true)
+  await ui.unmount()
+})
+
+test('Subagenti: the turn\'s own total replaces what its steps added, a turn that saw no step adds its own, and the share follows', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
+  })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'one')
+  await spawnAgent($, 'two')
+  for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' })) void chunk
+  // the engine's total for the turn is a little more than its steps summed: it wins
+  const more = { ...STEP_USAGE, output_tokens: 300 }
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a1-t', agentId: 'a1', reason: 'answer', usage: more })
+  // a2 saw no step: the turn's end alone gives its counters
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'a2-t', agentId: 'a2', reason: 'answer', usage: STEP_USAGE })
+  const rows = (await paneRows($, 50, 'agents')).rows
+  expect(rows.filter(r => /^ +in 1k {2}out 300 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
+  expect(rows.filter(r => /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
+  // 1800 and 1700 new tokens of 3500
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ })).map(n => n.text?.replace(/ {2}\d+s$/, ''))).toEqual(['51% token', '49% token'])
+  await ui.unmount()
+})
+
+test('Subagenti: after a reload the share keeps the main loop\'s tokens, which the state file persists next to the history', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', mainTokens: 10_000, history: [entry('a9', 'implementer', NOW - 30_000)] }) })
+  spawns(on)
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
+  })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'one')
+  for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' })) void chunk
+  // 1700 of 10000 + 5400 + 1700 new tokens
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.findAll({ type: 'Text', text: /^\d+% token {2}\d+s$/ })).map(n => n.text?.replace(/ {2}\d+s$/, ''))).toEqual(['10% token'])
+  await ui.unmount()
+  // a main step is written, for the next reload
+  for await (const chunk of $.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 })) void chunk
+  await settleAll()
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  const file = [...writes.entries()].find(([k]) => /cockpit-s-1\.json$/.test(k))
+  expect(JSON.parse(file?.[1] ?? 'null')).toMatchObject({ mainTokens: 11_700 })
+})
+
+test('Subagenti: the elapsed time is refreshed by the fast tier only while this tab is selected', async ($, on) => {
+  const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  await spawnAgent($, 'code-reviewer')
+  const ui = await mountPane($)
+  const elapsed = async () => (await ui.findAll({ type: 'Text', text: /^\d+s$/ }))[0]?.text
+  await ui.press({ key: 'tab:agents' })
+  await clock.advance(4000)
+  await settleAll()
+  expect(await elapsed()).toBe('4s')
+  await ui.press({ key: 'tab:repo' })
+  await clock.advance(4000) // Repo has no clock: the agent's time stands where it was
+  await settleAll()
+  await ui.press({ key: 'tab:agents' })
+  expect(await elapsed()).toBe('4s')
+  await clock.advance(2000)
+  await settleAll()
+  expect(await elapsed()).toBe('10s')
+  await ui.unmount()
 })
