@@ -135,7 +135,22 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
 export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string }
 
 /** One row of the Contesto tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
-export type CockpitContextRow = { name: string; tokens: number; kind: 'used' | 'free' | 'buffer' | 'deferred' }
+export type CockpitContextRow = {
+  name: string
+  tokens: number
+  kind: 'used' | 'free' | 'buffer' | 'deferred'
+  /** The change of the row in the last round (negative: it shrank); absent before a round was seen. */
+  delta?: number
+  /** True when the tokens are those of an exact count kept from earlier, not this reading's estimate. */
+  isExact?: true
+}
+
+/** What an exact (`full`) reading fixes for the rest of the session: the static rows (every one but Messages), the consumers and the skills listing. */
+export type CockpitStatic = {
+  rows: { name: string; tokens: number }[]
+  consumers: CockpitConsumer[]
+  skills?: { listed: number; total: number }
+}
 
 /** A static consumer of the window: a memory file, a loaded MCP tool's schema, a custom agent's description, or the skills listing as a whole. */
 export type CockpitConsumer = { name: string; kind: 'memory' | 'mcp' | 'agent' | 'skill'; tokens: number }
@@ -150,7 +165,7 @@ export type CockpitContext = {
   consumers: CockpitConsumer[]
   /** How many skills the listing includes of those the session has; absent when the session lists none. */
   skills?: { listed: number; total: number }
-  /** True when the breakdown was counted with the token-count API (`full`, on the button); false for the local estimate. */
+  /** True when the whole breakdown was counted with the token-count API (`full`); false for the local estimate (its static rows may still be exact: `isExact` per row). */
   isExact: boolean
 }
 
@@ -160,8 +175,8 @@ export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: 
 /** The parts of the Sistema tab the monitor reads, in the order the tab draws them. */
 export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk' | 'power'
 
-/** A process of the session's tree with the TCP ports it listens on. */
-export type CockpitSysProc = { pid: number; name: string; ports: number[] }
+/** A process of the session's tree with the TCP ports it listens on, its CPU share (percent of every core, since the monitor's last read) and its working set in bytes; the last two are absent until read. */
+export type CockpitSysProc = { pid: number; name: string; ports: number[]; cpu?: number; ram?: number }
 
 /** Where the machine's power comes from: the wall, or a battery with its charge and whether it is plugged in. */
 export type CockpitPower = { kind: 'wired' } | { kind: 'battery'; percent: number; isCharging: boolean }
@@ -194,7 +209,7 @@ export type CockpitSystem = {
   procs?: CockpitSysProc[]
   disk?: CockpitDisk
   power?: CockpitPower
-  /** The parts that read "non disponibile": the tool is missing or failed, or the monitor itself could not run. */
+  /** The parts that read "unavailable": the tool is missing or failed, or the monitor itself could not run. */
   off: CockpitSystemPart[]
 }
 
@@ -237,6 +252,14 @@ export type CockpitSnapshot = {
   context?: CockpitContext
   /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
   contextSeq?: number
+  /** The static part of the session's first exact count: every later summary reading reuses it (Messages stay live); absent until one ran. */
+  contextStatic?: CockpitStatic
+  /** The context of the session's last state (its data file), drawn with a `~` until the engine measures the live window; never an alert's input. */
+  lastCtx?: { tokens: number; window: number; percent: number }
+  /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
+  lastRates?: CockpitRateLimit[]
+  /** How long the last main round took (`turn.complete`'s wall-clock length), in milliseconds; absent before one ended. */
+  lastRoundMs?: number
   /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */

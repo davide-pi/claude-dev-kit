@@ -90,6 +90,12 @@ import {
   worklogLabel,
   COLORS,
   activeAlerts,
+  parseCtx,
+  parseRateCache,
+  rangeSparkline,
+  staticOf,
+  withDeltas,
+  withStatic,
 } from '../hooks/format'
 import type { Span } from '../hooks/format'
 import { INITIAL } from '../hooks/state'
@@ -213,7 +219,7 @@ test('worklogDays is silent when the snapshot is stale', () => {
   expect(worklogDays(snap, 1000.5, '2026-10-22').underTarget).toEqual(['2026-10-12', '2026-10-20'])
   expect(worklogDays(snap, 2000, '2026-10-22').underTarget).toEqual([])
   expect(worklogDays(snap, 1000.5, '2026-10-23').underTarget).toEqual([])
-  expect(worklogLabel('underTarget', ['2026-10-12', '2026-10-20'])).toBe('worklog: 2d sotto target (12/10, 20/10)')
+  expect(worklogLabel('underTarget', ['2026-10-12', '2026-10-20'])).toBe('worklog: 2d under target (12/10, 20/10)')
 })
 
 test('truncateSpans cuts to the width with an unstyled ellipsis and leaves a fitting line alone', () => {
@@ -278,13 +284,13 @@ test('burnRate: rate, exhaustion time and the verdict against the reset; nothing
   expect(slow?.perHour).toBe(9)
   expect(slow?.isBeforeReset).toBe(false)
   expect(Math.round((slow?.etaMs ?? 0) / min)).toBe(413)
-  expect(burnText(slow!)).toBe('−9%/h · finisce tra  6h53m: arrivi al reset')
+  expect(burnText(slow!)).toBe('−9%/h · runs out in  6h53m: lasts to the reset')
   // 30 points in 20 min = 90 %/h; 35 left lasts 23 min, the reset comes in 3 h
   const fast = burnRate([{ at: 0, used: 35 }], now, 65, now + 180 * min)
   expect(fast?.isBeforeReset).toBe(true)
-  expect(burnText(fast!)).toBe('−90%/h · finisce tra    23m, prima del reset')
+  expect(burnText(fast!)).toBe('−90%/h · runs out in    23m, before the reset')
   // the duration is the countdown's 6 cells, days included
-  expect(burnText({ perHour: 3, etaMs: (1440 + 6 * 60) * min, isBeforeReset: false })).toBe('−3%/h · finisce tra  1d06h: arrivi al reset')
+  expect(burnText({ perHour: 3, etaMs: (1440 + 6 * 60) * min, isBeforeReset: false })).toBe('−3%/h · runs out in  1d06h: lasts to the reset')
   // under 10 minutes of samples, a flat or falling reading, a reset unknown or gone, a spent window: no line
   expect(burnRate([{ at: 15 * min, used: 35 }], now, 38, now + 134 * min)).toBeUndefined()
   expect(burnRate(samples, now, 35, now + 134 * min)).toBeUndefined()
@@ -405,7 +411,7 @@ test('almText: the target only, org / project and the identity; unmapped says so
   expect(almText({ isMapped: true, org: 'gh-org' })).toBe('gh-org')
   expect(almText({ isMapped: true, identity: 'id-a' })).toBe('id-a')
   expect(almText({ isMapped: true })).toBe('')
-  expect(almText({ isMapped: false })).toBe('non mappato')
+  expect(almText({ isMapped: false })).toBe('unmapped')
 })
 
 test('signedPctCell pads the pace delta to the width of the other percentages', () => {
@@ -683,11 +689,11 @@ test('cacheColor: green from 80 %, amber from 50 to 79, red below 50', () => {
 })
 
 test('claudeStateSpans: an icon and a word per state, the tool by name, a long name cut', () => {
-  expect(spanText(claudeStateSpans(undefined))).toContain('pronto')
-  expect(spanText(claudeStateSpans({ kind: 'idle' }))).toContain('pronto')
-  expect(spanText(claudeStateSpans({ kind: 'working' }))).toContain('lavora')
-  expect(spanText(claudeStateSpans({ kind: 'thinking' }))).toContain('pensa')
-  expect(spanText(claudeStateSpans({ kind: 'waiting' }))).toContain('attesa')
+  expect(spanText(claudeStateSpans(undefined))).toContain('ready')
+  expect(spanText(claudeStateSpans({ kind: 'idle' }))).toContain('ready')
+  expect(spanText(claudeStateSpans({ kind: 'working' }))).toContain('working')
+  expect(spanText(claudeStateSpans({ kind: 'thinking' }))).toContain('thinking')
+  expect(spanText(claudeStateSpans({ kind: 'waiting' }))).toContain('waiting')
   expect(spanText(claudeStateSpans({ kind: 'tool', tool: 'Bash' }))).toContain('Bash')
   const long = spanText(claudeStateSpans({ kind: 'tool', tool: 'mcp__server__a_very_long_tool_name' }))
   expect(long.endsWith('…')).toBe(true)
@@ -795,9 +801,10 @@ test('contextOf: the rows and the window, and the top five static consumers over
     },
     false,
   )
+  // biggest first, free space last
   expect(context.rows).toEqual([
-    { name: 'System prompt', tokens: 8000, kind: 'used' },
     { name: 'Messages', tokens: 90_000, kind: 'used' },
+    { name: 'System prompt', tokens: 8000, kind: 'used' },
     { name: 'Free space', tokens: 700_000, kind: 'free' },
   ])
   expect([context.total, context.max, context.isExact]).toEqual([248_000, 1_000_000, false])
@@ -1046,9 +1053,9 @@ test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed
   const pr = { title: 't', state: 'open' as const, isDraft: false }
   expect(alerts({ prs: [{ ...pr, number: 1, checks: { passed: 3, failed: 0, pending: 1 } }, { ...pr, number: 2, checks: { passed: 1, failed: 2, pending: 0 } }, { ...pr, number: 3 }] })).toEqual(['pr:2'])
   const texts = activeAlerts({ ...INITIAL, ctx: { percent: 85.4 }, rateLimits: [{ kind: 'five_hour', percentUsed: 93 }] }).map(a => a.text)
-  expect(texts).toEqual(['contesto al 85%', 'crediti 5h: resta il 7%'])
+  expect(texts).toEqual(['context at 85%', 'credits 5h: 7% left'])
   const failed = activeAlerts({ ...INITIAL, agents: [{ ...agent, id: 'a9', isFailed: true }], prs: [{ ...pr, number: 5, checks: { passed: 0, failed: 1, pending: 0 } }] }).map(a => a.text)
-  expect(failed).toEqual(['subagent reviewer fallito', 'PR #5: check in errore'])
+  expect(failed).toEqual(['subagent reviewer failed', 'PR #5: checks failing'])
 })
 
 test('parseSysLine: one JSON line of the monitor, narrowed field by field; a bad line or a bad field is dropped, never thrown', () => {
@@ -1093,4 +1100,91 @@ test('recordSystem: samples go into rings of the last thirty, a part reported of
 
 test('systemOff: every part marked unavailable, no samples', () => {
   expect(systemOff()).toEqual({ cpu: [], ram: [], rx: [], tx: [], off: ['cpu', 'ram', 'net', 'procs', 'disk', 'power'] })
+})
+
+// ── v3.1 ──
+
+test('rangeSparkline: bars scaled between the lowest and the highest value; a flat series draws the lowest bar, never noise', () => {
+  expect(rangeSparkline([])).toBe('')
+  expect(rangeSparkline([20, 40, 60])).toBe('▁▅█')
+  expect(rangeSparkline([30, 30, 30])).toBe('▁▁▁')
+  expect(rangeSparkline([0, 100])).toBe('▁█')
+  expect(rangeSparkline([5])).toBe('▁')
+  expect(rangeSparkline([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007])).toBe('▁▂▃▄▅▆▇█')
+})
+
+test('parseRateCache: the status line cache read as rate limits (resets_at in seconds); a window already over is back to 0 % with no reset; garbage is none', () => {
+  const now = 1_700_000_000_000
+  expect(parseRateCache({ five_hour: { used_percentage: 40, resets_at: 1_800_000_000 }, seven_day: { used_percentage: 20, resets_at: 1_900_000_000 } }, now)).toEqual([
+    { kind: 'five_hour', percentUsed: 40, resetsAt: new Date(1_800_000_000_000).toISOString() },
+    { kind: 'seven_day', percentUsed: 20, resetsAt: new Date(1_900_000_000_000).toISOString() },
+  ])
+  expect(parseRateCache({ five_hour: { used_percentage: 90, resets_at: 1_600_000_000 } }, now)).toEqual([{ kind: 'five_hour', percentUsed: 0 }])
+  expect(parseRateCache({ five_hour: { used_percentage: 12 } }, now)).toEqual([{ kind: 'five_hour', percentUsed: 12 }])
+  expect(parseRateCache({ five_hour: { used_percentage: 'x', resets_at: 1 }, seven_day: null }, now)).toEqual([])
+  expect(parseRateCache('nope', now)).toEqual([])
+  expect(parseRateCache(null, now)).toEqual([])
+})
+
+test('parseCtx: the context a data file keeps, or none when any number is missing or wrong', () => {
+  expect(parseCtx({ tokens: 600_000, window: 1_000_000, percent: 60 })).toEqual({ tokens: 600_000, window: 1_000_000, percent: 60 })
+  expect(parseCtx({ tokens: 600_000, window: 1_000_000 })).toBeUndefined()
+  expect(parseCtx({ tokens: -1, window: 1, percent: 1 })).toBeUndefined()
+  expect(parseCtx('x')).toBeUndefined()
+})
+
+const ctxRow = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred' = 'used') => ({ name, tokens, kind })
+
+test('staticOf and withStatic: the static rows of an exact reading replace the estimate of a later one, Messages stay live, free space gives back what the used rows took', () => {
+  const exact = {
+    rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500), ctxRow('MCP tools', 4000, 'deferred'), ctxRow('Free space', 690_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
+    total: 100_500,
+    max: 1_000_000,
+    consumers: [{ name: 'User CLAUDE.md', kind: 'memory' as const, tokens: 3000 }],
+    skills: { listed: 4, total: 5 },
+    isExact: true,
+  }
+  expect(staticOf(exact)).toEqual({
+    rows: [
+      { name: 'System prompt', tokens: 9500 },
+      { name: 'MCP tools', tokens: 4000 },
+    ],
+    consumers: exact.consumers,
+    skills: { listed: 4, total: 5 },
+  })
+  const summary = {
+    rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 8000), ctxRow('MCP tools', 3000, 'deferred'), ctxRow('Free space', 700_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
+    total: 103_000,
+    max: 1_000_000,
+    consumers: [],
+    isExact: false,
+  }
+  const merged = withStatic(summary, staticOf(exact))
+  expect(merged.rows).toEqual([
+    { name: 'Messages', tokens: 95_000, kind: 'used' },
+    { name: 'System prompt', tokens: 9500, kind: 'used', isExact: true },
+    { name: 'MCP tools', tokens: 4000, kind: 'deferred', isExact: true },
+    { name: 'Free space', tokens: 698_500, kind: 'free' },
+    { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
+  ])
+  expect([merged.total, merged.isExact, merged.consumers, merged.skills]).toEqual([104_500, false, exact.consumers, { listed: 4, total: 5 }])
+})
+
+test('withDeltas: a round read stamps each row with its change from the reading before; any other read keeps the deltas it had', () => {
+  const before = { rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500)], total: 100_500, max: 1_000_000, consumers: [], isExact: false }
+  const next = { ...before, rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 9500), ctxRow('Skills', 2000)] }
+  const round = withDeltas(next, before, true)
+  expect(round.rows.map(r => r.delta)).toEqual([4000, 0, undefined])
+  const later = withDeltas({ ...next, rows: [ctxRow('Messages', 96_000), ctxRow('System prompt', 9500), ctxRow('Skills', 2000)] }, round, false)
+  expect(later.rows.map(r => r.delta)).toEqual([4000, 0, undefined])
+  expect(withDeltas(next, undefined, true).rows.map(r => r.delta)).toEqual([undefined, undefined, undefined])
+})
+
+test('parseSysLine: a process carries its CPU share and working set when they are counts', () => {
+  expect(parseSysLine('{"procs":[{"pid":1,"name":"node","ports":[],"cpu":12.5,"ram":1048576},{"pid":2,"name":"x","cpu":"hi","ram":-1}]}')).toEqual({
+    procs: [
+      { pid: 1, name: 'node', ports: [], cpu: 12.5, ram: 1048576 },
+      { pid: 2, name: 'x', ports: [] },
+    ],
+  })
 })

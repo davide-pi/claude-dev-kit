@@ -15,8 +15,11 @@ import type {
   CockpitGit,
   CockpitHistoryEntry,
   CockpitPerimeterCheck,
+  CockpitContextRow,
   CockpitPr,
+  CockpitRateLimit,
   CockpitSnapshot,
+  CockpitStatic,
   CockpitSysLine,
   CockpitSysProc,
   CockpitSystem,
@@ -317,11 +320,11 @@ export const ctxColor = (pct: number): string =>
 export const cacheColor = (pct: number): string => (pct >= 80 ? COLORS.green : pct >= 50 ? COLORS.amber : COLORS.red)
 
 const STATE_LOOK = {
-  idle: { icon: '○', text: 'pronto', color: COLORS.dim },
-  working: { icon: '◐', text: 'lavora', color: COLORS.blue },
-  thinking: { icon: '◌', text: 'pensa', color: COLORS.lavender },
+  idle: { icon: '○', text: 'ready', color: COLORS.dim },
+  working: { icon: '◐', text: 'working', color: COLORS.blue },
+  thinking: { icon: '◌', text: 'thinking', color: COLORS.lavender },
   tool: { icon: '▸', text: '', color: COLORS.green },
-  waiting: { icon: '◆', text: 'attesa', color: COLORS.yellow },
+  waiting: { icon: '◆', text: 'waiting', color: COLORS.yellow },
 } as const
 const STATE_TOOL_MAX = 14
 
@@ -373,7 +376,7 @@ export function autocompactForecast(samples: readonly number[] | undefined, thre
   return growth > 0 ? Math.max(0, Math.ceil((threshold - last) / growth)) : undefined
 }
 
-// ── The Contesto tab: the breakdown, the sparkline of rounds, when to compact ──
+// ── The Context tab: the breakdown, the sparkline of rounds, when to compact ──
 
 /** Main turns the sparkline keeps. */
 export const ROUNDS_KEEP = 20
@@ -395,8 +398,16 @@ export function sparkline(values: readonly number[], max: number = Math.max(0, .
   return values.map(v => SPARK[max > 0 ? Math.min(SPARK.length - 1, Math.round((Math.max(0, v) / max) * (SPARK.length - 1))) : 0]).join('')
 }
 
+/** One block per value, scaled between the lowest and the highest of them: a flat series draws the lowest block (nothing to tell apart), never noise; empty without values. */
+export function rangeSparkline(values: readonly number[]): string {
+  if (values.length === 0) return ''
+  const min = Math.min(...values)
+  const span = Math.max(...values) - min
+  return values.map(v => SPARK[span > 0 ? Math.round(((v - min) / span) * (SPARK.length - 1)) : 0]).join('')
+}
+
 /**
- * Whether `conviene compattare` shows: the context is at 70 % or more and each of the last three rounds grew it by more than 5 %
+ * Whether `worth compacting` shows: the context is at 70 % or more and each of the last three rounds grew it by more than 5 %
  * of the round before, or auto-compaction is three requests away or nearer (`forecast`), whatever the fill.
  */
 export function shouldCompact(p: { percent?: number; rounds?: readonly number[]; forecast?: number }): boolean {
@@ -406,8 +417,59 @@ export function shouldCompact(p: { percent?: number; rounds?: readonly number[];
   return (p.percent ?? 0) >= COMPACT_HINT_PCT && isGrowing
 }
 
+const ROW_ORDER = { used: 0, deferred: 1, free: 2, buffer: 3 } as const
+
+/** The rows biggest first: what fills the window, then the tool schemas outside it, then the free space and the compaction buffer. */
+export const sortRows = (rows: readonly CockpitContextRow[]): CockpitContextRow[] =>
+  [...rows].sort((a, b) => ROW_ORDER[a.kind] - ROW_ORDER[b.kind] || b.tokens - a.tokens)
+
+/** Messages are what the conversation holds and change with every response; every other row of the window is fixed for a session. */
+const isStaticRow = (r: CockpitContextRow): boolean => (r.kind === 'used' || r.kind === 'deferred') && !/^messages$/i.test(r.name)
+
+/** What an exact reading fixes for the session: its static rows, consumers and skills listing. */
+export const staticOf = (c: CockpitContext): CockpitStatic => ({
+  rows: c.rows.filter(isStaticRow).map(r => ({ name: r.name, tokens: r.tokens })),
+  consumers: c.consumers,
+  ...(c.skills && { skills: c.skills }),
+})
+
 /**
- * What the Contesto tab keeps of a breakdown: every row as the engine lists it, the window, and the five biggest static
+ * A summary reading with the static part of an exact count laid over it: those rows (marked exact), the consumers and the skills
+ * listing come from the count, Messages stay the summary's. The free space gives back what the used rows took, the total follows.
+ */
+export function withStatic(c: CockpitContext, fixed: CockpitStatic): CockpitContext {
+  let diff = 0
+  const rows = c.rows.map((r): CockpitContextRow => {
+    const exact = isStaticRow(r) ? fixed.rows.find(f => f.name === r.name) : undefined
+    if (!exact) return r
+    if (r.kind === 'used') diff += exact.tokens - r.tokens
+    return { ...r, tokens: exact.tokens, isExact: true }
+  })
+  return {
+    ...c,
+    rows: sortRows(rows.map(r => (r.kind === 'free' ? { ...r, tokens: Math.max(0, r.tokens - diff) } : r))),
+    total: c.total + diff,
+    consumers: fixed.consumers,
+    ...(fixed.skills && { skills: fixed.skills }),
+    isExact: false,
+  }
+}
+
+/** `next` with each row's change from `previous`: measured by a round's read, kept as it was by any other; a row the reading before did not have has none. */
+export function withDeltas(next: CockpitContext, previous: CockpitContext | undefined, isRound: boolean): CockpitContext {
+  const before = new Map((previous?.rows ?? []).map(r => [r.name, r]))
+  return {
+    ...next,
+    rows: next.rows.map((r): CockpitContextRow => {
+      const was = before.get(r.name)
+      const delta = was === undefined ? undefined : isRound ? r.tokens - was.tokens : was.delta
+      return delta === undefined ? r : { ...r, delta }
+    }),
+  }
+}
+
+/**
+ * What the Context tab keeps of a breakdown: every row as the engine lists it, the window, and the five biggest static
  * consumers (memory files, MCP tools inside the window, agents, and the skills listing as one).
  */
 export function contextOf(
@@ -421,7 +483,7 @@ export function contextOf(
     ...(b.skills ? [{ name: 'skills', kind: 'skill' as const, tokens: b.skills.tokens }] : []),
   ]
   return {
-    rows: b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind })),
+    rows: sortRows(b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind }))),
     total: b.totalTokens,
     max: b.rawMaxTokens,
     consumers: consumers.filter(c => c.tokens > 0).sort((a, c) => c.tokens - a.tokens).slice(0, CONSUMERS_SHOWN),
@@ -517,7 +579,7 @@ export const shortDate = (iso: string): string => `${iso.slice(8, 10)}/${iso.sli
 
 /** The `wl` / `worklog:` text of the footer for one kind of day. */
 export function worklogLabel(kind: 'pending' | 'underTarget', dates: readonly string[]): string {
-  const what = kind === 'pending' ? 'da registrare' : 'sotto target'
+  const what = kind === 'pending' ? 'to log' : 'under target'
   return `worklog: ${dates.length}d ${what} (${dates.map(shortDate).join(', ')})`
 }
 
@@ -529,6 +591,29 @@ export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
 const BURN_WINDOW_MS = 30 * 60_000
 const BURN_MIN_SPAN_MS = 10 * 60_000
 const FIVE_HOURS_MS = 5 * 3_600_000
+
+/**
+ * The status line's rate-limit cache (`.statusline-rate-limits.json`, `resets_at` in seconds) as the engine's limits, reconciled the way the
+ * status line does: a window whose reset is over is back to 0 % used with no reset time. A window of the wrong shape is left out.
+ */
+export function parseRateCache(value: unknown, now: number): CockpitRateLimit[] {
+  if (!isRecord(value)) return []
+  const window = (kind: 'five_hour' | 'seven_day'): CockpitRateLimit[] => {
+    const w = value[kind]
+    if (!isRecord(w) || typeof w.used_percentage !== 'number' || !Number.isFinite(w.used_percentage)) return []
+    const resetsMs = typeof w.resets_at === 'number' && Number.isFinite(w.resets_at) && w.resets_at > 0 ? w.resets_at * 1000 : undefined
+    if (resetsMs !== undefined && resetsMs <= now) return [{ kind, percentUsed: 0 }]
+    return [{ kind, percentUsed: w.used_percentage, ...(resetsMs !== undefined && { resetsAt: new Date(resetsMs).toISOString() }) }]
+  }
+  return [...window('five_hour'), ...window('seven_day')]
+}
+
+/** The context a data file keeps (`tokens`, `window`, `percent`); none when any of the three is not a count. */
+export function parseCtx(value: unknown): CockpitSnapshot['lastCtx'] {
+  if (!isRecord(value)) return undefined
+  const { tokens, window, percent } = value
+  return isCount(tokens) && isCount(window) && isCount(percent) ? { tokens, window, percent } : undefined
+}
 
 /** A reset time as the engine reports it (ISO text) in milliseconds; undefined when absent or not a date. */
 export function parseReset(resetsAt: string | undefined): number | undefined {
@@ -590,9 +675,9 @@ export function burnRate(
   return { perHour, etaMs, isBeforeReset: etaMs < resetsAtMs - now }
 }
 
-/** `−9%/h · finisce tra  6h53m: arrivi al reset`, or `…, prima del reset` (the time in `fixedSpan`'s 6 cells). */
+/** `−9%/h · runs out in  6h53m: lasts to the reset`, or `…, before the reset` (the time in `fixedSpan`'s 6 cells). */
 export function burnText(b: { perHour: number; etaMs: number; isBeforeReset: boolean }): string {
-  return `\u2212${Math.round(b.perHour)}%/h \u00b7 finisce tra ${fixedSpan(b.etaMs)}${b.isBeforeReset ? ', prima del reset' : ': arrivi al reset'}`
+  return `\u2212${Math.round(b.perHour)}%/h \u00b7 runs out in ${fixedSpan(b.etaMs)}${b.isBeforeReset ? ', before the reset' : ': lasts to the reset'}`
 }
 
 // ── ALM target of the working directory ──────────────────────────────────────
@@ -636,9 +721,9 @@ function projectOf(entry: Record<string, unknown>, firstSubfolder: string): stri
   return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
 }
 
-/** The target alone, `<org> / <project> · <identity>`, each part only when known (empty when none is); `non mappato` when no root matches. */
+/** The target alone, `<org> / <project> · <identity>`, each part only when known (empty when none is); `unmapped` when no root matches. */
 export function almText(alm: CockpitAlm): string {
-  if (!alm.isMapped) return 'non mappato'
+  if (!alm.isMapped) return 'unmapped'
   const target = [alm.org, alm.project].filter(Boolean).join(' / ')
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
@@ -730,7 +815,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
   return out
 }
 
-// ── Buttons: what `compatta` tells the summary to keep, and what `segna ore` asks the worklog for ──
+// ── Buttons: what `compact` tells the summary to keep, and what `log hours` asks the worklog for ──
 
 /** The open tasks the pane lists: in progress first, then pending, each in the order it arrived. */
 export const openTasks = (s: Pick<CockpitSnapshot, 'tasks'>): CockpitTask[] => {
@@ -746,7 +831,7 @@ const COMPACT_LIST_MAX = 3
 const COMPACT_PERIMETER_MAX = 2
 
 /**
- * What the summary of `compatta` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
+ * What the summary of `compact` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
  * snapshot knows (the open task titles, the deliver perimeter: its size and first two entries, the name of the workflow
  * the last `Stop` reported in flight), each part only when it fits.
  */
@@ -896,7 +981,7 @@ export function parseAzurePr(out: string): CockpitPr | undefined {
   }
 }
 
-// ── The Lavoro tab: the changed files, the diff of one ──
+// ── The Work tab: the changed files, the diff of one ──
 
 /** `git diff --numstat --no-renames -z HEAD --` then the untracked paths -> the changed files; a binary file has `-` counts. */
 export function parseNumstat(out: string, untracked: readonly string[]): CockpitChange[] {
@@ -1065,12 +1150,12 @@ export const TABS: readonly CockpitTab[] = ['agents', 'context', 'work', 'system
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
 
-/** The tab a state file names; the v2 Sessione and Repo tabs went to Agenti and Lavoro, and so does a file that still holds them. */
+/** The tab a state file names; the v2 Sessione and Repo tabs went to Subagents and Work, and so does a file that still holds them. */
 export const savedTab = (v: unknown): CockpitTab | undefined => (v === 'session' ? 'agents' : v === 'repo' ? 'work' : isTab(v) ? v : undefined)
 
-// ── Lavoro: the main loop's last tools, the pull requests of the chat ──
+// ── Work: the main loop's last tools, the pull requests of the chat ──
 
-/** The main loop's tool calls the Lavoro tab lists. */
+/** The main loop's tool calls the Work tab lists. */
 export const CALLS_KEEP = 8
 const ARG_MAX = 120
 // What a tool call shows of itself, first match: a command, a file (by its name), a pattern (a Grep or Glob shows what it looks for, before the folder it looks in), a folder, an address, a query, a description.
@@ -1228,10 +1313,13 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
 export const historyTokens = (history: readonly { tokens: number }[] | undefined): number | undefined =>
   history === undefined || history.length === 0 ? undefined : history.reduce((n, h) => n + h.tokens, 0)
 
-// ── Sistema: the monitor's lines, the rings the tab draws ──
+// ── System: the monitor's lines, the rings the tab draws ──
 
 /** Samples a ring keeps: a minute of the monitor's 2 s ticks. */
 export const SYSTEM_KEEP = 30
+
+/** Processes a line carries at most: the monitor lists every one of the session's tree, in this number. */
+const PROCS_KEEP = 200
 
 /** The parts of the tab, in the order it draws them. */
 const SYSTEM_PARTS: readonly CockpitSystemPart[] = ['cpu', 'ram', 'net', 'procs', 'disk', 'power']
@@ -1270,9 +1358,9 @@ export function parseSysLine(text: string): CockpitSysLine | undefined {
   if (isRecord(ram) && isCount(ram.used) && isCount(ram.total)) out.ram = { used: ram.used, total: ram.total }
   if (isRecord(net) && isCount(net.rx) && isCount(net.tx)) out.net = { rx: net.rx, tx: net.tx }
   if (Array.isArray(procs)) {
-    out.procs = procs.slice(0, 50).flatMap((p): CockpitSysProc[] =>
+    out.procs = procs.slice(0, PROCS_KEEP).flatMap((p): CockpitSysProc[] =>
       isRecord(p) && isCount(p.pid) && typeof p.name === 'string'
-        ? [{ pid: p.pid, name: p.name, ports: Array.isArray(p.ports) ? p.ports.filter(isCount) : [] }]
+        ? [{ pid: p.pid, name: p.name, ports: Array.isArray(p.ports) ? p.ports.filter(isCount) : [], ...(isCount(p.cpu) && { cpu: p.cpu }), ...(isCount(p.ram) && { ram: p.ram }) }]
         : [],
     )
   }
@@ -1338,11 +1426,11 @@ export type CockpitAlert = { key: string; text: string }
 export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
   const out: CockpitAlert[] = []
   const pct = s.ctx.percent
-  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: `contesto al ${Math.round(pct)}%` })
+  if (pct !== undefined && pct >= ALERT_CTX_PCT) out.push({ key: 'context', text: `context at ${Math.round(pct)}%` })
   const five = s.rateLimits.find(r => r.kind === 'five_hour')
-  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: `crediti 5h: resta il ${Math.max(0, Math.round(100 - five.percentUsed))}%` })
-  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: `subagent ${a.type} fallito` })
-  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: `PR #${pr.number}: check in errore` })
+  if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: `credits 5h: ${Math.max(0, Math.round(100 - five.percentUsed))}% left` })
+  for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: `subagent ${a.type} failed` })
+  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: `PR #${pr.number}: checks failing` })
   return out
 }
 

@@ -1,19 +1,21 @@
-// The cockpit's system monitor: a plain Node child (no dependencies) that the mod starts only while the Sistema tab is
+// The cockpit's system monitor: a plain Node child (no dependencies) that the mod starts only while the System tab is
 // selected and the pane is open, and closes when either stops being true. It prints one JSON line per event on stdout:
 //
 //   every 2 s   { cpu: 0-100, ram: { used, total }, net?: { rx, tx } }     (CPU, RAM, network bytes per second)
-//   every 10 s  { procs: [{ pid, name, ports }] }   the session's descendant processes with their listening ports
+//   every 10 s  { procs: [{ pid, name, ports, cpu?, ram? }] }   the session's descendant processes (service helpers hidden, the
+//               busiest first) with their listening ports, CPU share since the last read and working set
 //   every 30 s  { disk: { free, total, label } }    the drive of the working directory
 //   once        { power: { kind: 'wired' } | { kind: 'battery', percent, isCharging } }
-//   a part that cannot be read: { off: ['net', ...] } (the mod draws "non disponibile"; the monitor never throws for it)
+//   a part that cannot be read: { off: ['net', ...] } (the mod draws "unavailable"; the monitor never throws for it)
 //
 // Environment: COCKPIT_SESSION_ID (the session whose ~/.claude/sessions/<pid>.json names the Claude pid) and
 // COCKPIT_CONFIG_DIR (the config folder, ~/.claude when absent). Network, processes and power are read on Windows only.
 //
 // Cost of the Windows reads, measured on the owner's machine (median of three, one process each, from node):
 //   netstat -e 30 ms, netstat -ano 35 ms                         -> every tick / every 10 s
-//   powershell -NoProfile Get-CimInstance Win32_Process 550 ms   -> every 10 s only (ProcessId, ParentProcessId, Name: 37 KB;
-//                                                                   with CommandLine 214 KB for the same time, so it is left out)
+//   powershell -NoProfile Get-CimInstance Win32_Process 550 ms   -> every 10 s only (ProcessId, ParentProcessId, Name, the CPU times and
+//                                                                   the working set: 76 KB, measured 469 ms; with CommandLine 214 KB for
+//                                                                   the same time, so it is left out)
 //   Get-WmiObject 780 ms, tasklist 650 ms (and no parent pid), wmic: not installed
 //   Win32_Battery 265 ms                                         -> once
 // A PowerShell per tick would cost a quarter of every 2 s; one CIM query per 10 s, started without waiting for the tick, costs ~5 %.
@@ -23,12 +25,14 @@ import { readFile, readdir, statfs } from 'node:fs/promises'
 import { cpus, freemem, homedir, totalmem } from 'node:os'
 import { join, parse } from 'node:path'
 
-import { cpuPercent, cpuTimes, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, withPorts } from './parse.mjs'
+import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, shapeProcesses, withPorts } from './parse.mjs'
 
 const TICK_MS = 2000
 /** Ticks between two reads of the processes (10 s) and of the disk (30 s). */
 const PROCS_EVERY = 5
 const DISK_EVERY = 15
+/** Processes a read lists at most (the mod's parser keeps the same number). */
+const PROCS_KEEP = 200
 
 const isWindows = process.platform === 'win32'
 const sessionId = process.env.COCKPIT_SESSION_ID ?? ''
@@ -51,6 +55,9 @@ let lastNet
 let lastNetAt = 0
 let claudePid
 let isReadingProcs = false
+/** The CPU times of the last process read (by pid) and when it was taken: the next read measures the shares against them. */
+let lastProcTimes = new Map()
+let lastProcsAt = 0
 
 /** The Claude pid of this session: the `sessions/<pid>.json` file that names it; kept once found. */
 async function findClaudePid() {
@@ -67,11 +74,16 @@ async function readProcs() {
   isReadingProcs = true
   try {
     const root = await findClaudePid()
-    const table = root === undefined ? undefined : await powershell('Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name | ConvertTo-Json -Compress')
+    const table = root === undefined ? undefined : await powershell('Get-CimInstance Win32_Process | Select-Object ProcessId,ParentProcessId,Name,KernelModeTime,UserModeTime,WorkingSetSize | ConvertTo-Json -Compress')
+    const readAt = Date.now()
     const procs = table === undefined || root === undefined ? undefined : parseProcesses(table, root, process.pid)
     if (procs === undefined) return emit({ off: ['procs'] })
+    // The share needs two reads: the first one lists processes with no CPU yet.
+    const shared = cpuShares(procs, lastProcTimes, readAt - lastProcsAt, cpus().length)
+    lastProcTimes = cpuTimesOf(procs)
+    lastProcsAt = readAt
     const sockets = await run('netstat', ['-ano'], 5000)
-    emit({ procs: withPorts(procs.slice(0, 50), sockets === undefined ? [] : listeningPorts(sockets)) })
+    emit({ procs: shapeProcesses(withPorts(shared, sockets === undefined ? [] : listeningPorts(sockets)), PROCS_KEEP) })
   } catch {
     emit({ off: ['procs'] })
   } finally {
