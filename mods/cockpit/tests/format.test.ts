@@ -46,6 +46,12 @@ import {
   savedTab,
   toolArg,
   upsertPr,
+  safeUrl,
+  fmtBytes,
+  parseSysLine,
+  recordSystem,
+  systemOff,
+  SYSTEM_KEEP,
   isAzureRemote,
   azureRepo,
   diffHunks,
@@ -917,4 +923,128 @@ test('historyTokens: the new tokens of the agents a history lists', () => {
   expect(historyTokens([h(3000), h(2000)])).toBe(5000)
   expect(historyTokens([])).toBeUndefined()
   expect(historyTokens(undefined)).toBeUndefined()
+})
+
+// ── Cockpit v3, phase 5: the Sistema tab, and the phase 4 follow-ups ──
+
+test('safeUrl: only an http(s) address without control characters; anything else is none', () => {
+  expect(safeUrl('https://github.com/example/orders/pull/42')).toBe('https://github.com/example/orders/pull/42')
+  expect(safeUrl('HTTP://localhost:3000/x')).toBe('HTTP://localhost:3000/x')
+  expect(safeUrl('javascript:alert(1)')).toBeUndefined()
+  expect(safeUrl('file:///etc/passwd')).toBeUndefined()
+  expect(safeUrl('https://')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u001b]8;;x')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\nb')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u007f')).toBeUndefined()
+  expect(safeUrl('https://example.org/a\u009b')).toBeUndefined()
+  expect(safeUrl('')).toBeUndefined()
+  expect(safeUrl(42)).toBeUndefined()
+  expect(safeUrl(undefined)).toBeUndefined()
+})
+
+test('safeUrl: every source of a PR address goes through it (gh url, az webUrl, gh create output, saved state)', () => {
+  const gh = (url: string) => parseGithubPr(JSON.stringify({ number: 1, state: 'OPEN', title: 't', url }))
+  expect(gh('https://github.com/example/orders/pull/1')?.url).toBe('https://github.com/example/orders/pull/1')
+  expect(gh('javascript:alert(1)')?.number).toBe(1)
+  expect(gh('javascript:alert(1)')?.url).toBeUndefined()
+  const az = (webUrl: string) => parseAzurePr(JSON.stringify([{ pullRequestId: 7, status: 'active', repository: { webUrl } }]))
+  expect(az('https://dev.azure.com/o/p/_git/r')?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
+  expect(az('javascript:alert(1)')?.url).toBeUndefined()
+  expect(az('ftp://host/r')?.url).toBeUndefined()
+  const created = parseCreatedPr('gh pr create --title T', 'https://github.com/a\u001b/b/pull/42')
+  expect(created?.number).toBe(42)
+  expect(created?.url).toBeUndefined()
+  const azCreated = parseCreatedPr('az repos pr create', JSON.stringify({ pullRequestId: 9, repository: { webUrl: 'javascript:x' } }))
+  expect(azCreated?.number).toBe(9)
+  expect(azCreated?.url).toBeUndefined()
+  const saved = parseSavedPrs([{ number: 3, title: 't', url: 'javascript:alert(1)' }, { number: 4, title: 't', url: 'https://example.org/pr/4' }])
+  expect(saved.map(p => p.url)).toEqual([undefined, 'https://example.org/pr/4'])
+})
+
+test('parseCreatedPr: the title and draft flags are read only from the create command, not from the rest of a compound command', () => {
+  const out = 'https://github.com/example/orders/pull/42\n'
+  const title = (command: string) => parseCreatedPr(command, out)?.title
+  const draft = (command: string) => parseCreatedPr(command, out)?.isDraft
+  expect(title('echo --title "Wrong" && gh pr create --title "Right"')).toBe('Right')
+  expect(title('gh pr create --fill && git log -t nope --title other')).toBe('')
+  expect(title('gh pr create --fill; echo -t nope')).toBe('')
+  expect(title('gh pr create -t Short | tee log')).toBe('Short')
+  expect(draft('docker run -d x && gh pr create --title T')).toBe(false)
+  expect(draft('gh pr create --title T && git branch -d old')).toBe(false)
+  expect(draft('git fetch -d || gh pr create --fill')).toBe(false)
+  expect(draft('gh pr create --title T --draft')).toBe(true)
+  expect(draft('cd repo\ngh pr create -d --title T')).toBe(true)
+  // an operator inside a quoted title does not end the command
+  expect(title('gh pr create --title "a && b" --draft')).toBe('a && b')
+  expect(draft('gh pr create --title "a && b" --draft')).toBe(true)
+  expect(title("gh pr create --title 'x; y' --body z")).toBe('x; y')
+})
+
+test('toolArg: a search shows its pattern before the folder it looks in', () => {
+  expect(toolArg({ tool: 'Grep', pattern: 'Order', path: '/w/src' })).toBe('Order')
+  expect(toolArg({ tool: 'Glob', pattern: '**/*.ts', path: '/w/src' })).toBe('**/*.ts')
+  expect(toolArg({ tool: 'Grep', path: '/w/src' })).toBe('src')
+  expect(toolArg({ tool: 'Read', file_path: '/w/a.ts' })).toBe('a.ts')
+})
+
+test('sparkline: a given maximum fixes the scale, so a quiet reading stays low', () => {
+  expect(sparkline([5, 5], 100)).toBe('▁▁')
+  expect(sparkline([0, 50, 100], 100)).toBe('▁▅█')
+  expect(sparkline([5, 5])).toBe('██')
+  expect(sparkline([150], 100)).toBe('█')
+})
+
+test('fmtBytes: base 1024 with one letter, a decimal only under ten', () => {
+  expect(fmtBytes(0)).toBe('0B')
+  expect(fmtBytes(512)).toBe('512B')
+  expect(fmtBytes(1536)).toBe('1.5K')
+  expect(fmtBytes(40 * 1024)).toBe('40K')
+  expect(fmtBytes(Math.round(1.2 * 1024 ** 2))).toBe('1.2M')
+  expect(fmtBytes(340 * 1024 ** 2)).toBe('340M')
+  expect(fmtBytes(12.4 * 1024 ** 3)).toBe('12G')
+  expect(fmtBytes(-5)).toBe('0B')
+})
+
+test('parseSysLine: one JSON line of the monitor, narrowed field by field; a bad line or a bad field is dropped, never thrown', () => {
+  expect(parseSysLine('{"cpu":37,"ram":{"used":8,"total":16},"net":{"rx":1200,"tx":40}}')).toEqual({ cpu: 37, ram: { used: 8, total: 16 }, net: { rx: 1200, tx: 40 } })
+  expect(parseSysLine('{"cpu":"x","ram":{"used":8},"net":null}')).toEqual({})
+  expect(parseSysLine('nope')).toBeUndefined()
+  expect(parseSysLine('[1]')).toBeUndefined()
+  expect(parseSysLine('')).toBeUndefined()
+  expect(parseSysLine('{"procs":[{"pid":1,"name":"node","ports":[3000,"x"]},{"pid":"z","name":"q"},{"pid":2,"name":"dotnet"}]}')).toEqual({
+    procs: [
+      { pid: 1, name: 'node', ports: [3000] },
+      { pid: 2, name: 'dotnet', ports: [] },
+    ],
+  })
+  expect(parseSysLine('{"disk":{"free":10,"total":100,"label":"D:"},"power":{"kind":"battery","percent":87,"isCharging":true}}')).toEqual({
+    disk: { free: 10, total: 100, label: 'D:' },
+    power: { kind: 'battery', percent: 87, isCharging: true },
+  })
+  expect(parseSysLine('{"power":{"kind":"wired"}}')).toEqual({ power: { kind: 'wired' } })
+  expect(parseSysLine('{"power":{"kind":"solar"},"disk":{"free":1}}')).toEqual({})
+  expect(parseSysLine('{"off":["net","bogus","procs"]}')).toEqual({ off: ['net', 'procs'] })
+})
+
+test('recordSystem: samples go into rings of the last thirty, a part reported off is cleared and marked, a later reading brings it back', () => {
+  const first = recordSystem(undefined, { cpu: 10, ram: { used: 4, total: 8 }, net: { rx: 100, tx: 50 } })
+  expect(first).toEqual({ cpu: [10], ram: [50], rx: [100], tx: [50], ramUsed: 4, ramTotal: 8, off: [] })
+  let s = first
+  for (let i = 0; i < 40; i++) s = recordSystem(s, { cpu: i })
+  expect(s.cpu).toHaveLength(SYSTEM_KEEP)
+  expect(s.cpu.at(-1)).toBe(39)
+  expect(s.ram).toEqual([50]) // a line without ram leaves it
+  const off = recordSystem(s, { off: ['net'] })
+  expect(off.off).toEqual(['net'])
+  expect(off.rx).toEqual([])
+  expect(off.tx).toEqual([])
+  expect(recordSystem(off, { net: { rx: 1, tx: 2 } }).off).toEqual([])
+  const slow = recordSystem(first, { procs: [{ pid: 1, name: 'node', ports: [3000] }], disk: { free: 5, total: 10 }, power: { kind: 'wired' } })
+  expect(slow.procs).toEqual([{ pid: 1, name: 'node', ports: [3000] }])
+  expect(recordSystem(slow, { cpu: 1 }).procs).toEqual(slow.procs)
+  expect(recordSystem(slow, { off: ['procs'] }).procs).toBeUndefined()
+})
+
+test('systemOff: every part marked unavailable, no samples', () => {
+  expect(systemOff()).toEqual({ cpu: [], ram: [], rx: [], tx: [], off: ['cpu', 'ram', 'net', 'procs', 'disk', 'power'] })
 })

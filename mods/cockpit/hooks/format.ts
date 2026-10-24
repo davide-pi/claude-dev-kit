@@ -17,6 +17,10 @@ import type {
   CockpitPerimeterCheck,
   CockpitPr,
   CockpitSnapshot,
+  CockpitSysLine,
+  CockpitSysProc,
+  CockpitSystem,
+  CockpitSystemPart,
   CockpitTab,
   CockpitTask,
   CockpitToolCall,
@@ -51,6 +55,10 @@ export const ICONS = {
   repo: '\u{F0CCF}', // nf-md-source_repository: a repository's own checkout
   tree: '\u{F0CD0}', // nf-md-source_repository_multiple: a linked worktree, another checkout of the same repo
   branch: '\u{F062C}', // nf-md-source_branch
+  disk: '\u{F02CA}', // nf-md-harddisk
+  battery: '\u{F0079}', // nf-md-battery
+  charging: '\u{F0084}', // nf-md-battery_charging
+  plug: '\u{F06A5}', // nf-md-power_plug
 } as const
 
 /** The folder glyph by what the folder is: a linked worktree, a repository's checkout, or a plain folder (no git). */
@@ -382,10 +390,9 @@ export const recordRound = (rounds: readonly number[] | undefined, tokens: numbe
 
 const SPARK = '▁▂▃▄▅▆▇█'
 
-/** One block per value, scaled to the tallest of them (a context of 0 is the lowest block); empty without values. */
-export function sparkline(values: readonly number[]): string {
-  const max = Math.max(0, ...values)
-  return values.map(v => SPARK[max > 0 ? Math.round((Math.max(0, v) / max) * (SPARK.length - 1)) : 0]).join('')
+/** One block per value, scaled to `max` (the tallest of them when not given; a value of 0 is the lowest block, one above `max` the highest); empty without values. */
+export function sparkline(values: readonly number[], max: number = Math.max(0, ...values)): string {
+  return values.map(v => SPARK[max > 0 ? Math.min(SPARK.length - 1, Math.round((Math.max(0, v) / max) * (SPARK.length - 1))) : 0]).join('')
 }
 
 /**
@@ -840,12 +847,13 @@ export function parseGithubPr(out: string): CockpitPr | undefined {
     if (prState === undefined || typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
     const review: CockpitPr['review'] =
       reviewDecision === 'APPROVED' ? 'approved' : reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : reviewDecision === 'REVIEW_REQUIRED' ? 'pending' : undefined
+    const link = safeUrl(url)
     return {
       number,
       title: typeof title === 'string' ? title : '',
       state: prState,
       isDraft: isDraft === true,
-      ...(typeof url === 'string' && url !== '' && { url }),
+      ...(link !== undefined && { url: link }),
       review,
       checks: summarizeChecks(statusCheckRollup),
     }
@@ -854,10 +862,15 @@ export function parseGithubPr(out: string): CockpitPr | undefined {
   }
 }
 
-/** The `url` of an `az` pull request record: its repository's web address and the pull request's path; nothing when the record names no address. */
+/** `value` when it is an http(s) address without control characters (what a pull request's link may point to); none otherwise. */
+export function safeUrl(value: unknown): string | undefined {
+  return typeof value === 'string' && /^https?:\/\/\S/i.test(value) && !/[\u0000-\u001f\u007f-\u009f]/.test(value) ? value : undefined
+}
+
+/** The `url` of an `az` pull request record: its repository's web address and the pull request's path; nothing when the record names no safe address. */
 function azureUrl(pr: Record<string, unknown>, number: number): { url?: string } {
-  const webUrl = isRecord(pr.repository) && typeof pr.repository.webUrl === 'string' ? pr.repository.webUrl.replace(/\/+$/, '') : ''
-  return webUrl === '' ? {} : { url: `${webUrl}/pullrequest/${number}` }
+  const webUrl = isRecord(pr.repository) ? safeUrl(pr.repository.webUrl)?.replace(/\/+$/, '') : undefined
+  return webUrl === undefined ? {} : { url: `${webUrl}/pullrequest/${number}` }
 }
 
 /**
@@ -1060,8 +1073,8 @@ export const savedTab = (v: unknown): CockpitTab | undefined => (v === 'session'
 /** The main loop's tool calls the Lavoro tab lists. */
 export const CALLS_KEEP = 8
 const ARG_MAX = 120
-// What a tool call shows of itself, first match: a command, a file (by its name), a pattern, an address, a query, a description.
-const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'path', 'pattern', 'url', 'query', 'description', 'skill'] as const
+// What a tool call shows of itself, first match: a command, a file (by its name), a pattern (a Grep or Glob shows what it looks for, before the folder it looks in), a folder, an address, a query, a description.
+const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'description', 'skill'] as const
 
 /** The short argument of a tool call: one line of at most 120 characters, a file by its name; undefined when the call carries nothing to show. */
 export function toolArg(input: { readonly [key: string]: unknown }): string | undefined {
@@ -1082,18 +1095,38 @@ const AZ_PR_CREATE = /\baz\s+repos\s+pr\s+create\b/
 const PR_TITLE_FLAG = /(?:^|\s)(?:--title|-t)(?:\s+|=)(?:"([^"]*)"|'([^']*)'|(\S+))/
 const PR_DRAFT_FLAG = /(?:^|\s)(?:--draft|-d)(?=\s|$)/
 
+/** The part of `command` from `from` to the next `;`, `|`, `&` or line break outside quotes: the command that starts there, without the rest of a compound one. */
+function commandSegment(command: string, from: number): string {
+  let quote = ''
+  for (let i = from; i < command.length; i++) {
+    const ch = command.charAt(i)
+    if (quote !== '') {
+      if (ch === quote) quote = ''
+    } else if (ch === '"' || ch === "'") {
+      quote = ch
+    } else if (ch === ';' || ch === '|' || ch === '&' || ch === '\n') {
+      return command.slice(from, i)
+    }
+  }
+  return command.slice(from)
+}
+
 /**
  * The pull request that `command` created, from what it printed: `gh pr create` prints the pull request's URL (the title is
  * the one the command gave, none for `--fill`); `az repos pr create` prints the pull request as JSON. Undefined for any
  * other command, or output that names no pull request.
  */
 export function parseCreatedPr(command: string, out: string): CockpitPr | undefined {
-  if (GH_PR_CREATE.test(command)) {
+  const gh = GH_PR_CREATE.exec(command)
+  if (gh) {
     const found = /https?:\/\/\S+\/pull\/(\d+)/.exec(out)
     const number = Number(found?.[1])
     if (!found || !Number.isInteger(number) || number <= 0) return undefined
-    const title = PR_TITLE_FLAG.exec(command)
-    return { number, title: title?.[1] ?? title?.[2] ?? title?.[3] ?? '', state: 'open', isDraft: PR_DRAFT_FLAG.test(command), url: found[0] }
+    // The flags are the create command's own: an `-d` or `-t` of another command of the line is not.
+    const segment = commandSegment(command, gh.index)
+    const title = PR_TITLE_FLAG.exec(segment)
+    const url = safeUrl(found[0])
+    return { number, title: title?.[1] ?? title?.[2] ?? title?.[3] ?? '', state: 'open', isDraft: PR_DRAFT_FLAG.test(segment), ...(url !== undefined && { url }) }
   }
   if (AZ_PR_CREATE.test(command)) {
     try {
@@ -1135,7 +1168,7 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
       title,
       state: state === 'merged' || state === 'closed' ? state : 'open',
       isDraft: isDraft === true,
-      ...(typeof url === 'string' && url !== '' && { url }),
+      ...(safeUrl(url) !== undefined && { url: safeUrl(url) }),
       ...((review === 'approved' || review === 'changes' || review === 'pending') && { review }),
       ...(isRecord(checks) && { checks: { passed: count(checks.passed), failed: count(checks.failed), pending: count(checks.pending) } }),
     })
@@ -1146,3 +1179,96 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
 /** The new tokens of the agents a history lists; undefined for an empty one. */
 export const historyTokens = (history: readonly { tokens: number }[] | undefined): number | undefined =>
   history === undefined || history.length === 0 ? undefined : history.reduce((n, h) => n + h.tokens, 0)
+
+// ── Sistema: the monitor's lines, the rings the tab draws ──
+
+/** Samples a ring keeps: a minute of the monitor's 2 s ticks. */
+export const SYSTEM_KEEP = 30
+
+/** The parts of the tab, in the order it draws them. */
+const SYSTEM_PARTS: readonly CockpitSystemPart[] = ['cpu', 'ram', 'net', 'procs', 'disk', 'power']
+
+/** Bytes as `512B`, `1.5K`, `40K`, `1.2M`, `12G` (base 1024, one letter, a decimal only under ten). */
+export function fmtBytes(n: number): string {
+  if (!Number.isFinite(n) || n <= 0) return '0B'
+  const units = ['B', 'K', 'M', 'G', 'T']
+  let v = n
+  let i = 0
+  while (v >= 1024 && i < units.length - 1) {
+    v /= 1024
+    i++
+  }
+  return i === 0 ? `${Math.round(v)}B` : `${v < 10 ? v.toFixed(1) : Math.round(v)}${units[i]}`
+}
+
+const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+
+/** One JSON line of the system monitor, narrowed field by field: a field that is not the expected shape is dropped; text that is no JSON object is none. */
+export function parseSysLine(text: string): CockpitSysLine | undefined {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    return undefined
+  }
+  if (!isRecord(parsed)) return undefined
+  const { cpu, ram, net, procs, disk, power, off } = parsed
+  const out: CockpitSysLine = {}
+  if (isCount(cpu)) out.cpu = Math.min(100, cpu)
+  if (isRecord(ram) && isCount(ram.used) && isCount(ram.total)) out.ram = { used: ram.used, total: ram.total }
+  if (isRecord(net) && isCount(net.rx) && isCount(net.tx)) out.net = { rx: net.rx, tx: net.tx }
+  if (Array.isArray(procs)) {
+    out.procs = procs.slice(0, 50).flatMap((p): CockpitSysProc[] =>
+      isRecord(p) && isCount(p.pid) && typeof p.name === 'string'
+        ? [{ pid: p.pid, name: p.name, ports: Array.isArray(p.ports) ? p.ports.filter(isCount) : [] }]
+        : [],
+    )
+  }
+  if (isRecord(disk) && isCount(disk.free) && isCount(disk.total)) out.disk = { free: disk.free, total: disk.total, ...(typeof disk.label === 'string' && { label: disk.label }) }
+  if (isRecord(power) && power.kind === 'wired') out.power = { kind: 'wired' }
+  else if (isRecord(power) && power.kind === 'battery' && isCount(power.percent) && typeof power.isCharging === 'boolean') {
+    out.power = { kind: 'battery', percent: power.percent, isCharging: power.isCharging }
+  }
+  if (Array.isArray(off)) out.off = SYSTEM_PARTS.filter(part => off.includes(part))
+  return out
+}
+
+/** The tab's readings with every part unavailable: the monitor could not start, or it ended. */
+export const systemOff = (): CockpitSystem => ({ cpu: [], ram: [], rx: [], tx: [], off: [...SYSTEM_PARTS] })
+
+/** `system` after one line of the monitor: samples join their rings, a slow reading replaces the last one, a part the line reports off is cleared and marked, a part it carries is no longer off. */
+export function recordSystem(system: CockpitSystem | undefined, line: CockpitSysLine): CockpitSystem {
+  const s: CockpitSystem = system ?? { cpu: [], ram: [], rx: [], tx: [], off: [] }
+  const ring = (list: readonly number[], v: number) => [...list, v].slice(-SYSTEM_KEEP)
+  const next: CockpitSystem = { ...s }
+  if (line.cpu !== undefined) next.cpu = ring(s.cpu, line.cpu)
+  if (line.ram) {
+    next.ram = ring(s.ram, line.ram.total > 0 ? Math.round((100 * line.ram.used) / line.ram.total) : 0)
+    next.ramUsed = line.ram.used
+    next.ramTotal = line.ram.total
+  }
+  if (line.net) {
+    next.rx = ring(s.rx, line.net.rx)
+    next.tx = ring(s.tx, line.net.tx)
+  }
+  if (line.procs) next.procs = line.procs
+  if (line.disk) next.disk = line.disk
+  if (line.power) next.power = line.power
+  const carried = new Set<CockpitSystemPart>([
+    ...(line.cpu !== undefined ? ['cpu' as const] : []),
+    ...(line.ram ? ['ram' as const] : []),
+    ...(line.net ? ['net' as const] : []),
+    ...(line.procs ? ['procs' as const] : []),
+    ...(line.disk ? ['disk' as const] : []),
+    ...(line.power ? ['power' as const] : []),
+  ])
+  const off = new Set([...s.off.filter(part => !carried.has(part)), ...(line.off ?? [])])
+  if (off.has('cpu')) next.cpu = []
+  if (off.has('ram')) Object.assign(next, { ram: [], ramUsed: undefined, ramTotal: undefined })
+  if (off.has('net')) Object.assign(next, { rx: [], tx: [] })
+  if (off.has('procs')) next.procs = undefined
+  if (off.has('disk')) next.disk = undefined
+  if (off.has('power')) next.power = undefined
+  next.off = SYSTEM_PARTS.filter(part => off.has(part))
+  return next
+}

@@ -1,7 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
-import { TABS, spanText, spanWidth } from '../hooks/format'
-import { subagentDetails } from '../hooks/view'
+import { ICONS, TABS, spanText, spanWidth, textCells } from '../hooks/format'
+import { subagentDetails, toolCallSpans } from '../hooks/view'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
 const NOW = Date.parse('2026-10-22T10:00:00Z')
@@ -1077,7 +1077,7 @@ test('tab labels without agents or warnings are the bare names', async ($, on) =
   await ui.unmount()
 })
 
-test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks and worklog warnings, Sistema its placeholder', async ($, on) => {
+test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks and worklog warnings, Sistema its own title', async ($, on) => {
   world(on, { hasWorklog: true })
   taskTools(on)
   spawns(on)
@@ -1095,7 +1095,8 @@ test('the other tabs draw the current sections: Agenti the agents, Lavoro tasks 
   expect(work.some(r => /^SUBAGENTI/.test(r))).toBe(false)
 
   const system = (await paneRows($, 50, 'system')).rows
-  expect(system).toContain('in arrivo')
+  expect(system).toContain('SISTEMA')
+  expect(system).not.toContain('in arrivo')
   expect(system.some(r => /^SUBAGENTI/.test(r) || /^TASK/.test(r))).toBe(false)
 })
 
@@ -3369,7 +3370,7 @@ async function lavoroRows($: Engine, bodyColumns = 50) {
   return rows
 }
 
-test('tabs: exactly Agenti, Contesto, Lavoro, Sistema, Agenti selected by default; Sistema says in arrivo', async ($, on) => {
+test('tabs: exactly Agenti, Contesto, Lavoro, Sistema, Agenti selected by default; Sistema draws its own section', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
@@ -3379,7 +3380,8 @@ test('tabs: exactly Agenti, Contesto, Lavoro, Sistema, Agenti selected by defaul
   expect(tabs.filter(b => b.props.variant === 'primary').map(b => b.key)).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeDefined()
   await ui.press({ key: 'tab:system' })
-  expect(await ui.find({ type: 'Text', text: /^in arrivo$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^SISTEMA$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^in arrivo$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTI/ })).toBeUndefined()
   await ui.unmount()
 })
@@ -3623,22 +3625,30 @@ test('follow-up: an older context read never replaces a newer one: the exact cou
   await ui.unmount()
 })
 
-test('follow-up: a summary read asked after a slow exact count wins over it when the count answers last', async ($, on) => {
+test('follow-up: a summary read asked by a tab change while the exact count runs is skipped: the exact result is never discarded', async ($, on) => {
   const h = holds()
-  world(on, { holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  const usageCalls: (string | undefined)[] = []
+  world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
   const kind = async () => (await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
   await ui.press({ key: 'tab:context' })
   await settleAll()
   const releaseFull = h.hold('full')
   await ui.press({ key: 'ctx:exact' }) // full read #2, held
+  const before = summaries()
   await ui.press({ key: 'tab:agents' })
-  await ui.press({ key: 'tab:context' }) // summary read #3, answered at once
+  await ui.press({ key: 'tab:context' }) // would be summary read #3: skipped while counting
   await settleAll()
-  expect(await kind()).toBe('stima')
-  releaseFull() // the older read answers last
+  expect(summaries()).toBe(before)
+  releaseFull() // the count answers
   await settleAll()
+  expect(await kind()).toBe('esatto')
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'tab:context' }) // the count is over: a tab change reads a summary again
+  await settleAll()
+  expect(summaries()).toBe(before + 1)
   expect(await kind()).toBe('stima')
   await ui.unmount()
 })
@@ -3712,4 +3722,439 @@ test('follow-up: the ultimo tool line of a subagent block in Lavoro is cut to th
   const row = (await lavoroRows($, 30)).find(r => /^ultimo tool/.test(r)) ?? ''
   expect([...row].length).toBe(28)
   expect(row).toMatch(/…$/)
+})
+
+// ── Cockpit v3, phase 5: the Sistema tab ──
+
+const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
+/** Waits (up to a second) for something a loop the mod left running does on its own. */
+const until = async (isDone: () => boolean) => {
+  for (let i = 0; i < 100 && !isDone(); i++) await sleep(10)
+}
+const GIB = 1024 ** 3
+const sysLine = (fields: object) => `${JSON.stringify(fields)}\n`
+
+/**
+ * A fake monitor behind `$.process.spawn`: prints what the test pushes (and a stderr dot while idle, as the real one prints every
+ * 2 s: a loop that was stopped notices at the next piece), notes how it was started and when its stream was closed (a generator ends
+ * in `finally` when the loop that reads it stops). It is finite: it ends by itself after two seconds. A stand-in for a call on `$`
+ * answers `{ value }`, here the way the child ended.
+ */
+function fakeMonitor(on: On, options: { isBroken?: boolean } = {}) {
+  const monitor = {
+    spawns: [] as { argv: readonly string[]; env?: Record<string, string> }[],
+    stops: 0,
+    isEnded: false,
+    queue: [] as string[],
+    push: (text: string) => void monitor.queue.push(text),
+    /** The monitor exits by itself, as a crash would end it. */
+    end: () => void (monitor.isEnded = true),
+  }
+  on('process.spawn', async function* (_, e) {
+    monitor.spawns.push({ argv: e.argv, env: e.env })
+    if (options.isBroken) throw new Error('spawn node ENOENT')
+    try {
+      for (let i = 0; i < 400; i++) {
+        while (monitor.queue.length > 0) yield { stream: 'stdout' as const, text: monitor.queue.shift() ?? '' }
+        if (monitor.isEnded) return { value: { code: 1, signal: null } }
+        yield { stream: 'stderr' as const, text: '.' }
+        await sleep(5)
+      }
+      return { value: { code: 0, signal: null } }
+    } finally {
+      monitor.stops++
+    }
+  })
+  return monitor
+}
+
+const FULL_LINE = sysLine({
+  cpu: 37,
+  ram: { used: Math.round(12.4 * GIB), total: 32 * GIB },
+  net: { rx: Math.round(1.2 * 1024 ** 2), tx: 40 * 1024 },
+  procs: [
+    { pid: 7000, name: 'bash', ports: [] },
+    { pid: 7240, name: 'node', ports: [3000, 5173] },
+  ],
+  disk: { free: 120 * GIB, total: 266 * GIB, label: 'D:' },
+  power: { kind: 'battery', percent: 87, isCharging: true },
+})
+
+/** The Sistema tab's rows after `lines` came from the monitor. */
+async function sistemaRows($: Engine, m: ReturnType<typeof fakeMonitor>, lines: string[], bodyColumns = 50) {
+  await openCockpit($)
+  const ui = await mountPane($, bodyColumns)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length > 0)
+  for (const l of lines) m.push(l)
+  await until(() => m.queue.length === 0)
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  return rows
+}
+
+test('Sistema: the monitor starts when the Sistema tab is selected, with the session and config folder, and stops when another tab is', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  expect(m.spawns).toHaveLength(0) // another tab is selected: nothing runs
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  expect(m.spawns).toHaveLength(1)
+  expect(m.spawns[0]?.argv[0]).toBe('node')
+  expect(m.spawns[0]?.argv[1]).toMatch(/sysmon[\\/]sysmon\.mjs$/)
+  expect(m.spawns[0]?.env).toEqual({ COCKPIT_SESSION_ID: 's-1', COCKPIT_CONFIG_DIR: '/cfg' })
+  expect(m.stops).toBe(0)
+  await ui.press({ key: 'tab:context' })
+  await until(() => m.stops === 1)
+  expect(m.stops).toBe(1)
+  await ui.press({ key: 'tab:system' }) // back on the tab: a fresh monitor
+  await until(() => m.spawns.length === 2)
+  expect(m.spawns).toHaveLength(2)
+  await ui.press({ key: 'tab:work' })
+  await until(() => m.stops === 2)
+  expect(m.stops).toBe(2)
+  await ui.unmount()
+})
+
+test('Sistema: pressing the Sistema tab twice runs one monitor', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length > 0)
+  await settleAll()
+  expect(m.spawns).toHaveLength(1)
+  expect(m.stops).toBe(0)
+  await ui.unmount()
+})
+
+test('Sistema: a pane that opens on the Sistema tab (the saved one) starts the monitor', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'system' }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect(m.spawns).toHaveLength(0) // the pane starts closed
+  await openCockpit($)
+  await until(() => m.spawns.length === 1)
+  expect(m.spawns).toHaveLength(1)
+})
+
+test('Sistema: the end of the session stops the monitor', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  await until(() => m.stops === 1)
+  expect(m.stops).toBe(1)
+  await ui.unmount()
+})
+
+test('Sistema: four rows, CPU, RAM and network with a sparkline each, then disk and power with their icons, and the process table with its ports', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await sistemaRows($, m, [FULL_LINE, sysLine({ cpu: 80, ram: { used: 14 * GIB, total: 32 * GIB }, net: { rx: 0, tx: 0 } })])
+  const i = rows.indexOf('SISTEMA')
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i + 2, i + 6)).toEqual([
+    expect.stringMatching(/^CPU +[▁-█]{2} +80%$/),
+    expect.stringMatching(/^RAM +[▁-█]{2} +14G\/32G 44%$/),
+    expect.stringMatching(/^NET +[▁-█]{2} +↓0B\/s ↑0B\/s$/),
+    `${ICONS.disk} D: 120G liberi  ${ICONS.charging} 87% in carica`,
+  ])
+  expect(rows).toContain('PROCESSI · 2')
+  expect(rows.some(r => /^ +7000 bash$/.test(r))).toBe(true)
+  expect(rows.some(r => /^ +7240 node +:3000 :5173$/.test(r))).toBe(true)
+  expect(rows.some(r => /in arrivo/.test(r))).toBe(false)
+})
+
+test('Sistema: the sparklines grow with the samples, CPU on a fixed 0-100 scale, and a line split across two chunks is read whole', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const lines = [5, 5, 100].map(cpu => sysLine({ cpu }))
+  const half = lines[2]?.length ? Math.floor(lines[2].length / 2) : 0
+  const rows = await sistemaRows($, m, [lines[0] ?? '', lines[1] ?? '', lines[2]?.slice(0, half) ?? '', lines[2]?.slice(half) ?? ''])
+  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +▁▁█ +100%$/)
+})
+
+test('Sistema: power drawn as wired, and a disk with little room left in red', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  m.push(sysLine({ disk: { free: 5 * GIB, total: 100 * GIB, label: 'D:' }, power: { kind: 'wired' } }))
+  await until(() => m.queue.length === 0)
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain(`${ICONS.disk} D: 5.0G liberi  ${ICONS.plug} da rete`)
+  expect(colorOf(await ui.drawn(), /D: 5\.0G liberi/)).toBe(RED)
+  await ui.unmount()
+})
+
+test('Sistema: before the first line the tab says it is reading', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await sistemaRows($, m, [])
+  expect(rows).toContain('SISTEMA')
+  expect(rows).toContain('lettura in corso')
+})
+
+test('Sistema: a monitor that cannot start: CPU, RAM, network, disk, power and the processes all read non disponibile', async ($, on) => {
+  const m = fakeMonitor(on, { isBroken: true })
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  await settleAll()
+  const rows = rowTexts(await ui.drawn())
+  expect(rows).toContain('CPU  non disponibile')
+  expect(rows).toContain('RAM  non disponibile')
+  expect(rows).toContain('NET  non disponibile')
+  expect(rows).toContain(`${ICONS.disk} non disponibile  ${ICONS.battery} non disponibile`)
+  expect(rows).toContain('non disponibile')
+  expect(rows).toContain('PROCESSI')
+  await ui.unmount()
+})
+
+test('Sistema: a part the monitor reports off (network on another platform) reads non disponibile while the others draw', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await sistemaRows($, m, [sysLine({ cpu: 20, ram: { used: GIB, total: 8 * GIB }, off: ['net', 'procs', 'power'] })])
+  expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU +[▁-█]+ +20%$/)
+  expect(rows).toContain('NET  non disponibile')
+  expect(rows).toContain('PROCESSI')
+  expect(rows).toContain('non disponibile')
+})
+
+test('Sistema: the monitor ending on its own (a crash) turns every row to non disponibile', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await settleAll()
+  await ui.press({ key: 'tab:system' })
+  await until(() => m.spawns.length === 1)
+  m.push(FULL_LINE)
+  await until(() => m.queue.length === 0)
+  await settleAll()
+  expect(rowTexts(await ui.drawn()).find(r => /^CPU/.test(r))).toMatch(/37%$/)
+  m.end()
+  await until(() => m.stops === 1)
+  await settleAll()
+  const after = rowTexts(await ui.drawn())
+  expect(after).toContain('CPU  non disponibile')
+  expect(after).toContain('NET  non disponibile')
+  await ui.unmount()
+})
+
+test('Sistema: the process table keeps six rows and counts the rest', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const procs = Array.from({ length: 9 }, (_, n) => ({ pid: 100 + n, name: `proc${n}`, ports: [] }))
+  const rows = await sistemaRows($, m, [sysLine({ procs })])
+  expect(rows).toContain('PROCESSI · 9')
+  expect(rows.filter(r => /proc\d$/.test(r))).toHaveLength(6)
+  expect(rows).toContain('… +3')
+  const none = await sistemaRows($, m, [sysLine({ procs: [] })])
+  expect(none).toContain('nessun processo figlio')
+})
+
+test('Sistema: every row fits the pane at 30, 40, 58 and 80 columns, a long process name and many ports cut with an ellipsis', async ($, on) => {
+  const m = fakeMonitor(on)
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const long = sysLine({
+    cpu: 100,
+    ram: { used: 31 * GIB, total: 32 * GIB },
+    net: { rx: 900 * 1024 ** 2, tx: 900 * 1024 ** 2 },
+    procs: [{ pid: 123456, name: 'a-very-long-process-name-indeed', ports: [3000, 3001, 3002, 3003, 3004, 3005] }],
+    disk: { free: 900 * GIB, total: 1000 * GIB, label: 'D:' },
+    power: { kind: 'battery', percent: 100, isCharging: false },
+  })
+  for (const columns of [30, 40, 58, 80]) {
+    const rows = await sistemaRows($, m, [long, long, long], columns)
+    const width = Math.min(columns, 60) - 2
+    const i = rows.indexOf('SISTEMA')
+    expect(i).toBeGreaterThan(0)
+    for (const row of rows.slice(i)) {
+      if (/^─+$/.test(row)) continue
+      expect(textCells(row)).toBeLessThanOrEqual(width)
+    }
+    expect(rows.slice(i).some(r => /^CPU/.test(r))).toBe(true)
+  }
+})
+
+// ── Cockpit v3, phase 4 follow-ups, round 2 ──
+
+test('follow-up: an exact context count in flight is not overwritten by the scheduled summary of a turn that ends meanwhile', async ($, on) => {
+  const h = holds()
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const release = h.hold('full')
+  await ui.press({ key: 'ctx:exact' }) // counting, held
+  const before = summaries()
+  await mainTurnEnd($) // schedules a summary read in 2 s
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(before) // skipped while the count runs
+  release()
+  await settleAll()
+  expect(await kind()).toBe('esatto')
+  await mainTurnEnd($) // the count is over: the next turn's read runs again
+  await clock.advance(5000)
+  await settleAll()
+  expect(summaries()).toBe(before + 1)
+  await ui.unmount()
+})
+
+test('follow-up: a turn that ended just before the exact count started does not read a summary into it either', async ($, on) => {
+  const h = holds()
+  const usageCalls: (string | undefined)[] = []
+  const clock = world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await openCockpit($)
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const summaries = () => usageCalls.filter(c => c === 'summary').length
+  await mainTurnEnd($) // the summary is scheduled, not yet read
+  const before = summaries()
+  const release = h.hold('full')
+  await ui.press({ key: 'ctx:exact' })
+  await clock.advance(5000) // its timer fires while the count is in flight
+  await settleAll()
+  expect(summaries()).toBe(before)
+  release()
+  await settleAll()
+  expect((await ui.find({ type: 'Text', text: /^(stima|esatto)$/ }))?.text).toBe('esatto')
+  await ui.unmount()
+})
+
+test('follow-up: a tool row without a time (the clock failed) draws no time, never 01:00', () => {
+  const spans = toolCallSpans({ tool: 'Bash', arg: 'echo 1', isOk: true }, 40)
+  expect(spanText(spans)).toMatch(/^✓ Bash +echo 1 *$/)
+  expect(spanText(spans)).not.toMatch(/\d\d:\d\d/)
+  expect(spanWidth(spans)).toBeLessThanOrEqual(40)
+  expect(spanText(toolCallSpans({ tool: 'Bash', arg: 'echo 1', isOk: true, at: NOW }, 40))).toMatch(/\d\d:\d\d$/)
+})
+
+test('follow-up: a main-loop tool call whose start time could not be read is listed without a time', async ($, on) => {
+  let isFailing = false
+  const wrapped = (pattern: string, ...rest: unknown[]) => {
+    const hook = rest.pop() as (...args: unknown[]) => unknown
+    const guarded =
+      pattern === 'clock.now'
+        ? (...args: unknown[]) => {
+            if (isFailing) throw new Error('clock refused')
+            return hook(...args)
+          }
+        : hook
+    return (on as unknown as (...a: unknown[]) => unknown)(pattern, ...rest, guarded)
+  }
+  world(wrapped as unknown as On)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  isFailing = true
+  await $.tool.call({ tool: 'Bash', command: 'echo no-clock' })
+  isFailing = false
+  const row = (await lavoroRows($)).find(r => /echo no-clock/.test(r)) ?? ''
+  expect(row).toMatch(/^✓ Bash +echo no-clock *$/)
+})
+
+test('follow-up: each PR row draws its review and checks line once', async ($, on) => {
+  const prs = [{ number: 8, title: 'Checks', state: 'open', isDraft: false, checks: { passed: 1, failed: 1, pending: 0 }, review: 'changes' }]
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'work', prs }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.filter(r => /review modifiche richieste/.test(r))).toHaveLength(1)
+  await ui.unmount()
+})
+
+test('follow-up: a PR link that is not an http(s) address (a saved state, a CLI answer) is drawn as plain text', async ($, on) => {
+  const prs = [
+    { number: 7, title: 'Bad', state: 'open', isDraft: false, url: 'javascript:alert(1)' },
+    { number: 8, title: 'Good', state: 'open', isDraft: false, url: 'https://github.com/example/orders/pull/8' },
+  ]
+  world(on, { stateFile: JSON.stringify({ open: false, tab: 'work', prs }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://github.com/example/orders/pull/8'])
+  await ui.unmount()
+})
+
+/** `on` with the first state-file timer (a `clock.after` of 3 s, the write throttle) refused: the hook throws, so the engine skips it and runs nothing. */
+function refusingFirstWriteTimer(on: On): On {
+  let isRefused = false
+  const wrapped = (pattern: string, ...rest: unknown[]) => {
+    const hook = rest.pop() as (...args: unknown[]) => unknown
+    const guarded =
+      pattern === 'clock.after'
+        ? (...args: unknown[]) => {
+            if (isRefused || (args[1] as { ms?: number } | undefined)?.ms !== 3000) return hook(...args)
+            isRefused = true
+            throw new Error('refused')
+          }
+        : hook
+    return (on as unknown as (...a: unknown[]) => unknown)(pattern, ...rest, guarded)
+  }
+  return wrapped as unknown as On
+}
+
+test('follow-up: a state-file timer the engine refused does not stop a later change from being written', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(refusingFirstWriteTimer(on), { writes })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  await settleAll()
+  // Contesto draws no elapsed time: no fast tick writes the file behind the timer's back.
+  await ui.press({ key: 'tab:context' }) // inside the throttle window: its timer is refused, nothing is written
+  await settleAll()
+  await clock.advance(6500)
+  await ui.press({ key: 'tab:agents' }) // the window is over: written at once
+  await settleAll()
+  expect((flagOf(writes) as { tab?: string }).tab).toBe('agents')
+  await clock.advance(500)
+  await ui.press({ key: 'tab:context' }) // inside the window again: the refused timer must not hold this one back
+  await settleAll()
+  await clock.advance(2500)
+  await settleAll()
+  expect((flagOf(writes) as { tab?: string }).tab).toBe('context')
+  await ui.unmount()
 })

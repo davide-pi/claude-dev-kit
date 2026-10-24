@@ -10,6 +10,8 @@ import type {
   CockpitDiff,
   CockpitPr,
   CockpitSnapshot,
+  CockpitSysProc,
+  CockpitSystem,
   CockpitTab,
   CockpitTask,
   CockpitToolCall,
@@ -35,6 +37,7 @@ import {
   duration,
   effortGlyph,
   fmtCost,
+  fmtBytes,
   fmtCostDelta,
   folderIcon,
   gridWidths,
@@ -87,7 +90,14 @@ const MAX_FILE_ROWS = 8
 /** Cells before a changed file's path: the added column, the deleted one and their gaps. */
 const CHANGE_COUNTS_W = 12
 const MAX_PR_ROWS = 4
-/** Cells of a tool row: the tool's name, and the time at its end. */
+/** Cells of a Sistema row's label (`CPU  `), the sparkline's longest run, the process table's rows, and the cells of a process's pid and name. */
+const SYS_LABEL_W = 5
+const SYS_SPARK_MAX = 20
+const MAX_PROC_ROWS = 6
+const SYS_PID_W = 6
+const SYS_NAME_W = 14
+const SYS_NA = 'non disponibile'
+/** Cells of a tool row: the tool's name, and the time it started (`HH:MM`). */
 const CALL_TOOL_W = 7
 const CALL_TIME_W = 5
 const MAX_SKILL_ROWS = 6
@@ -332,17 +342,17 @@ export function changeSpans(c: CockpitChange, width: number): Span[] {
   return [...counts, sp(' '), sp(truncMiddle(c.path, Math.max(4, width - CHANGE_COUNTS_W)))]
 }
 
-/** One tool call of the main loop: how it ended, the tool, its short argument cut to fit, the time it started. */
+/** One tool call of the main loop: how it ended, the tool, its short argument cut to fit, the time it started (none when the clock could not give it). */
 export function toolCallSpans(c: CockpitToolCall, width: number): Span[] {
-  const argW = Math.max(0, width - 2 - CALL_TOOL_W - 1 - 1 - CALL_TIME_W)
+  const timeW = c.at === undefined ? 0 : 1 + CALL_TIME_W
+  const argW = Math.max(0, width - 2 - CALL_TOOL_W - 1 - timeW)
   return [
     c.isOk ? sp('✓', COLORS.green) : sp('✗', COLORS.red),
     sp(' '),
     sp(padCells(truncEnd(c.tool, CALL_TOOL_W), CALL_TOOL_W)),
     sp(' '),
-    dim(padCells(truncEnd(c.arg ?? '', argW), argW)),
-    sp(' '),
-    dim(hhmm(c.at)),
+    // a call whose start the clock could not give has no time to draw: its argument takes the cells
+    ...(c.at === undefined ? [dim(truncEnd(c.arg ?? '', argW))] : [dim(padCells(truncEnd(c.arg ?? '', argW), argW)), sp(' '), dim(hhmm(c.at))]),
   ]
 }
 
@@ -404,6 +414,78 @@ export function categoryRows(c: CockpitContext, width: number): Span[][] {
 export function consumerSpans(c: CockpitConsumer, width: number): Span[] {
   const nameW = Math.max(4, width - CONSUMER_KIND_W - 1 - CTX_TOKENS_W)
   return [dim(pad(CONSUMER_KINDS[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
+}
+
+/** The color of a load in percent: green, yellow from 60, red from 85. */
+const loadColor = (pct: number): string => (pct >= 85 ? COLORS.red : pct >= 60 ? COLORS.yellow : COLORS.green)
+
+/** One Sistema row: its label, a sparkline of the last samples (as many as fit, at most 20) and the readout flush right; cut to `width`. `max` fixes the sparkline's scale. */
+export function metricSpans(label: string, samples: readonly number[], color: string, readout: Span[], width: number, max?: number): Span[] {
+  const room = Math.max(0, Math.min(SYS_SPARK_MAX, width - SYS_LABEL_W - spanWidth(readout) - 1))
+  const spark = room > 0 ? sparkline(samples.slice(-room), max) : ''
+  const fill = Math.max(1, width - SYS_LABEL_W - spark.length - spanWidth(readout))
+  return truncateSpans([dim(pad(label, SYS_LABEL_W)), ...(spark !== '' ? [sp(spark, color)] : []), sp(' '.repeat(fill)), ...readout], width)
+}
+
+/** The Sistema tab's CPU, RAM and network rows; a part that could not be read says so, one not read yet draws `…`. */
+export function systemMetricRows(sys: CockpitSystem, width: number): Span[][] {
+  const na = (label: string): Span[] => [dim(pad(label, SYS_LABEL_W)), dim(SYS_NA)]
+  const cpu = sys.cpu.at(-1)
+  const ram = sys.ram.at(-1)
+  const rx = sys.rx.at(-1)
+  const tx = sys.tx.at(-1)
+  return [
+    sys.off.includes('cpu') ? na('CPU') : metricSpans('CPU', sys.cpu, cpu === undefined ? COLORS.dim : loadColor(cpu), cpu === undefined ? [dim('…')] : [sp(`${Math.round(cpu)}%`, loadColor(cpu), true)], width, 100),
+    sys.off.includes('ram')
+      ? na('RAM')
+      : metricSpans(
+          'RAM',
+          sys.ram,
+          ram === undefined ? COLORS.dim : loadColor(ram),
+          ram === undefined || sys.ramUsed === undefined || sys.ramTotal === undefined
+            ? [dim('…')]
+            : [sp(`${fmtBytes(sys.ramUsed)}/${fmtBytes(sys.ramTotal)}`), sp(' '), sp(`${ram}%`, loadColor(ram), true)],
+          width,
+          100,
+        ),
+    sys.off.includes('net')
+      ? na('NET')
+      : metricSpans(
+          'NET',
+          sys.rx.map((v, i) => v + (sys.tx[i] ?? 0)),
+          COLORS.blue,
+          rx === undefined || tx === undefined ? [dim('…')] : [dim('↓'), sp(`${fmtBytes(rx)}/s`), dim(' ↑'), sp(`${fmtBytes(tx)}/s`)],
+          width,
+        ),
+  ]
+}
+
+/** The Sistema tab's last metric row: the free room of the working directory's drive and where the power comes from, each with its icon. */
+export function diskPowerSpans(sys: CockpitSystem, width: number): Span[] {
+  const { disk, power } = sys
+  const diskSpans: Span[] = sys.off.includes('disk')
+    ? [dim(`${ICONS.disk} `), dim(SYS_NA)]
+    : disk
+      ? [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} liberi`, disk.total > 0 && disk.free / disk.total < 0.1 ? COLORS.red : disk.total > 0 && disk.free / disk.total < 0.2 ? COLORS.yellow : undefined)]
+      : [dim(`${ICONS.disk} `), dim('…')]
+  const powerSpans: Span[] = sys.off.includes('power')
+    ? [dim(`${ICONS.battery} `), dim(SYS_NA)]
+    : !power
+      ? [dim(`${ICONS.battery} `), dim('…')]
+      : power.kind === 'wired'
+        ? [sp(`${ICONS.plug} `, COLORS.green), sp('da rete')]
+        : [
+            sp(`${power.isCharging ? ICONS.charging : ICONS.battery} `, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : power.percent <= 30 ? COLORS.yellow : undefined),
+            sp(`${Math.round(power.percent)}%${power.isCharging ? ' in carica' : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
+          ]
+  return truncateSpans([...diskSpans, sp('  '), ...powerSpans], width)
+}
+
+/** One row of the process table: the pid, the name (cut) and the ports it listens on, all cut to `width`. */
+export function procSpans(p: CockpitSysProc, width: number): Span[] {
+  const ports = p.ports.map(port => `:${port}`).join(' ')
+  const name = ports === '' ? p.name : padCells(truncEnd(p.name, SYS_NAME_W), SYS_NAME_W)
+  return truncateSpans([dim(padStart(String(p.pid), SYS_PID_W)), sp(' '), sp(name), ...(ports === '' ? [] : [sp(' '), sp(ports, COLORS.blue)])], width)
 }
 
 const REVIEW_LABELS: Record<NonNullable<CockpitPr['review']>, { text: string; color: string }> = {
@@ -891,7 +973,10 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           gap(),
           title(`PR · ${prs.length}`),
           gap(),
-          prs.slice(0, MAX_PR_ROWS).flatMap(pr => [prRow(pr), ...(prDetailSpans(pr, '  ', width).length > 0 ? [line(ui, prDetailSpans(pr, '  ', width))] : [])]),
+          prs.slice(0, MAX_PR_ROWS).flatMap(pr => {
+            const detail = prDetailSpans(pr, '  ', width)
+            return [prRow(pr), ...(detail.length > 0 ? [line(ui, detail)] : [])]
+          }),
           prs.length > MAX_PR_ROWS && line(ui, [dim(`… +${prs.length - MAX_PR_ROWS}`)]),
         ]
       : []
@@ -901,8 +986,30 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const toolsPart: Block = calls.length > 0 ? [gap(), title(`TOOL · ${calls.length}`), gap(), calls.map(c => line(ui, toolCallSpans(c, width)))] : []
   const workBlocks: Block[] = [...principalBlock, changesPart, prPart, toolsPart, ...workflowBlock, ...subagentBlocks, ...claimsBlock].filter(b => b.length > 0)
 
-  // Sistema waits for its monitor (a later phase): the tab says so.
-  const systemBlocks: Block[] = [[gap(), line(ui, [dim('in arrivo')])]]
+  // Sistema: what the monitor child prints, drawn while the tab is selected; none yet reads as such, a part it cannot read says so.
+  const sys = s.system
+  const procs = sys?.procs ?? []
+  const systemBlocks: Block[] =
+    sys === undefined
+      ? [[gap(), title('SISTEMA'), gap(), line(ui, [dim('lettura in corso')])]]
+      : [
+          [gap(), title('SISTEMA'), gap(), systemMetricRows(sys, width).map(spans => line(ui, spans)), line(ui, diskPowerSpans(sys, width))],
+          ...(sys.off.includes('procs') || sys.procs
+            ? [
+                [
+                  gap(),
+                  title(sys.procs ? `PROCESSI · ${procs.length}` : 'PROCESSI'),
+                  gap(),
+                  sys.procs
+                    ? procs.length === 0
+                      ? line(ui, [dim('nessun processo figlio')])
+                      : procs.slice(0, MAX_PROC_ROWS).map(p => line(ui, procSpans(p, width)))
+                    : line(ui, [dim(SYS_NA)]),
+                  procs.length > MAX_PROC_ROWS && line(ui, [dim(`… +${procs.length - MAX_PROC_ROWS}`)]),
+                ],
+              ]
+            : []),
+        ]
 
   // Blocks are told apart by a rule; an empty tab says so.
   const blocks: Block[] = { agents: agentBlocks, context: contextBlocks, work: workBlocks, system: systemBlocks }[tab]
