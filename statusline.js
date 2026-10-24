@@ -282,6 +282,20 @@ function abbrevTokens(n) {
   return String(Math.round(n));
 }
 
+// Prompt-cache hit of the last main turn, from the usage the payload already carries (no file read):
+// cache_read / (cache_read + cache_creation + input), coloured like the cockpit (80 / 50). Nothing when
+// the usage is absent (before the first call, after /compact), a field is not a number, or the total is 0.
+function segCacheHit(usage) {
+  if (!usage || typeof usage !== "object") return "";
+  const part = (v) => (v == null ? 0 : v);
+  const read = part(usage.cache_read_input_tokens);
+  const total = read + part(usage.cache_creation_input_tokens) + part(usage.input_tokens);
+  if (![read, total].every((n) => Number.isFinite(n) && n >= 0) || total === 0) return "";
+  const pct = Math.round(read / total * 100);
+  const col = pct >= 80 ? C.green : pct >= 50 ? C.amber : C.red;
+  return ` ${col}⚡${pct}%${R}`;
+}
+
 // The percentage alone doesn't say how much room is left in absolute terms, and
 // the window size varies by model: 62% of 200k and 62% of 1M are different
 // decisions. The token pair is rendered only when the payload carries both.
@@ -296,7 +310,7 @@ function segContext(ctx) {
   const used   = abbrevTokens(ctx?.total_input_tokens);
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
-  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}`;
+  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}${segCacheHit(ctx?.current_usage)}`;
 }
 
 // Per-session context snapshot for hooks/context-nudge.js, which runs on

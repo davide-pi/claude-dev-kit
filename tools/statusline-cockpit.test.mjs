@@ -186,3 +186,37 @@ test('prune: a marker dated in the future does not block pruning', () => {
     assert.equal(has('context-old.json'), false);
   });
 });
+
+// ── Cache hit of the last turn ───────────────────────────────────────────────
+
+/** The raw output (colours kept) of a render with `current_usage` in the context window; undefined: no usage. */
+function renderUsage(usage) {
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-hit-'));
+  try {
+    const payload = { ...SAMPLE, context_window: { ...SAMPLE.context_window, ...(usage === undefined ? {} : { current_usage: usage }) } };
+    const r = spawnSync(process.execPath, [STATUSLINE], {
+      input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, COLUMNS: '200' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout;
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const plain = (s) => s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+const GREEN = '\x1b[38;2;126;198;153m', AMBER = '\x1b[38;2;232;163;90m', RED = '\x1b[38;2;240;122;111m';
+
+test('cache hit: read / (read + creation + input) of the last turn, right of the context readout, coloured by band', () => {
+  // 90 / (90 + 5 + 5) = 90 % green; 60 / 100 = 60 % amber; 10 / 100 = 10 % red
+  for (const [read, creation, input, pct, col] of [[90, 5, 5, 90, GREEN], [60, 30, 10, 60, AMBER], [10, 80, 10, 10, RED], [80, 10, 10, 80, GREEN], [50, 40, 10, 50, AMBER]]) {
+    const raw = renderUsage({ cache_read_input_tokens: read, cache_creation_input_tokens: creation, input_tokens: input, output_tokens: 7 });
+    assert.ok(plain(raw).includes("(248K/1M) ⚡" + pct + "%"), plain(raw));
+    assert.ok(raw.includes(`${col}⚡${pct}%`), `${pct} % is coloured ${col}`);
+  }
+});
+
+test('cache hit: absent with no usage, a null usage, a zero total or a bad number', () => {
+  for (const usage of [undefined, null, {}, { cache_read_input_tokens: 0, cache_creation_input_tokens: 0, input_tokens: 0 }, { cache_read_input_tokens: 'x', input_tokens: 5 }]) {
+    assert.doesNotMatch(plain(renderUsage(usage)), /⚡/);
+  }
+  // a provider that reports no cache tokens but plain input: 0 % is a reading, not an absence
+  assert.match(plain(renderUsage({ input_tokens: 100 })), /⚡0%/);
+});
