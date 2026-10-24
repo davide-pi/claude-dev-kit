@@ -46,8 +46,7 @@ Entries go in single quotes (the hook asks on `$`, `(`, `@`, backtick outside th
 to the perimeter; widening it is an edit to this file first, with the user's yes. `plan-work`'s plan file
 (`docs/plans/`) holds an L plan and the scenario's saved numbers, never the perimeter.
 
-**Start point**, before step 3: HEAD, the repo root and the files already dirty (`references/loop.md`). A
-perimeter file already dirty → ask the user first; any other dirty file is the user's, never reverted.
+**Start point**, before step 3: HEAD, the repo root and the files already dirty (`references/loop.md`).
 
 ### 2. Analysis and review by size
 
@@ -58,13 +57,12 @@ perimeter file already dirty → ask the user first; any other dirty file is the
 | implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, every plan task of the request in one run (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when touched | A Sonnet high + B Opus high, + `review-security` / `review-performance` when touched |
 
-`implementer` runs at `medium`; `high` when the brief asks (`implementerEffort`). Preparation comes
-before the loop: `references/scenarios.md`; the doubts pass (M, L): `references/loop.md`.
+`implementer` runs at `medium` (`implementerEffort` for `high`). Before the loop: `references/scenarios.md`, and the doubts pass (M, L) in `references/loop.md`.
 
 ### 3. Who asks the user
 
-Only this session. The workflow and every subagent return their state and stop; a decision they
-cannot make comes back as an open question. Batch the questions, each with a recommendation, only the weighty ones (P-weight, `references/loop.md`). `accept` of a P1/P2 comes only from the owner.
+Only this session. The workflow and every subagent return their state and stop; a decision they cannot make
+comes back as an open question. Batch the questions, each with a recommendation, only the weighty ones (P-weight, `references/loop.md`).
 
 ### 4. Tests by level — run here, not delegated
 
@@ -83,8 +81,8 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size, the criteria with their proof (`references/loop.md`); ask only what the table says. S: edit inline now.
-3. Launch `impl-review-loop` once per coherent request (args, `request`, `decisions`, size S inline, `STALL` and resume: `references/loop.md`); split only past ~15 files or areas sharing nothing.
-   `OK` → append `result.findingsLog` (`references/loop.md`), then `scope-guard.js --check <head>`: files outside → step 3; clean (exit 0) → step 4; exit 2 = not checked, never clean (`references/loop.md`). `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
+3. Launch `impl-review-loop` once per coherent request (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
+   `OK` → append `result.findingsLog`, then `scope-guard.js --check <head>`: files outside → step 3; exit 0 → step 4; exit 2 = not checked, never clean. `STALL` (a `question` one too) → ask the user, relaunch with every resolution so far.
 4. Run the matrix on the final code; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`). M, L: the proof check (assertion lines of each criterion's test).
 5. Verdict, `perimeter.ps1 -Close`, then `/commit`, `pr-create` when asked.
 
@@ -112,8 +110,8 @@ the perimeter (`outOfScope`, with its `noticed` and `scope-revert` items, `minor
 
 ## References
 
-- `references/loop.md` — the doubts pass (M, L), launching the workflow: its args, the start point, size S
-  inline, each `STALL` and the resume with the user's answers, the scope check after `OK`, the findings log.
+- `references/loop.md` — the doubts pass, the start point, the workflow's args, size S inline, each `STALL` and the
+  resume, the cleanup pass, the scope check after `OK`, the findings log.
 - `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
 - `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": the baseline, the runs,
   BenchmarkDotNet and HTTP timing, the result as ratio and spread.
