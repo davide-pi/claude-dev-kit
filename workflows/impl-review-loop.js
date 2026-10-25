@@ -109,6 +109,7 @@ const readReport = r => {
     questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
     defaults: list(r.defaults).filter(d => d && typeof d.choice === 'string' && d.choice.trim()),
     filesReviewed: list(r.filesReviewed),
+    remaining: list(r.remaining).filter(s => typeof s === 'string' && s.trim()),
   }
 }
 
@@ -487,8 +488,9 @@ const writerTail = (budget, cleaning = false) => [
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
   RULES,
   budget ?? '',
+  'Environment: when the verify fails for an environment reason (a missing file, tool or config), change no code for it: return verify.status fail and explain it in notVerified.',
   'Time: when the work is long, return the structured output before the turn budget runs out, with the work done so far and what is left under `openQuestions`: a partial report beats none, and a run that ends without it is lost.',
-  'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.',
+  'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions, remaining (the tasks or parts of the brief not done yet; empty when the work is complete).',
   snapshotText(lastTree),
 ]
 
@@ -510,6 +512,7 @@ const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 
   }), 'review findings you judged wrong or could not reproduce, left unchanged'),
   noticed: arr(obj(['title', 'path', 'why'], { title: str(), path: str(), why: str() }), 'things outside the request you saw and deliberately did not do (inside or outside the perimeter)'),
   notVerified: str(),
+  remaining: arr(str(), 'tasks or parts of the brief not done yet, one line each; empty when the work is complete'),
   openQuestions: arr(str('a guess you had to make and its alternative, one line (out-of-perimeter proposals go under noticed)')),
   questions: arr(QUESTION, 'a behaviour choice the owner would see (never an internal one), left undecided: the run stops before review until it is answered'),
   defaults: arr(obj(['choice', 'alternative', 'path'], { choice: str(), alternative: str(), path: str() }), 'non-trivial choices the brief did not state, with the alternative: the owner reads them in the verdict (no stall)'),
@@ -685,18 +688,40 @@ if (!inline) {
   const resolution0 = resolutions.find(r => Number(r?.round) === 0)
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
   if (asked0.stall) return asked0.stall
-  const impl = asked0.report
-  if (!impl) {
-    const left = await recoverChanges()
-    if (!left.length) return stallAgain(0, `the implementer returned nothing (stopped or failed${why('implement')})`)
-    left.forEach(f => changed.add(f))
-    gaps.push(`the implementer returned no report: the tree shows ${left.length} changed file(s) in the perimeter, reviewed as they are (the verify was not reported)`)
-    addNotes(['the implementer ran out of turns before its report: the work may be partial, check what is left against the brief'])
+  let impl = asked0.report
+  // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
+  let continuations = 0
+  while ((!impl || impl.remaining.length) && continuations < 2) {
+    if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
+    continuations += 1
+    const left = impl?.remaining ?? []
+    const label = `implement (continue ${continuations})`
+    const next = readReport(await ask(buildImpl([
+      'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
+      left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n')), { ...implOpts, label }))
+    if (next) addQuestionNotes(next.questions)
+    impl = next ?? impl
   }
-  const implStall = impl ? absorb(impl) : null
+  if (!impl || impl.remaining.length) {
+    // A report lists its own files; only a missing one needs the probe.
+    const done = impl ? strings(impl.files) : await recoverChanges()
+    const todo = impl?.remaining ?? []
+    return result({
+      status: 'STALL',
+      stall: {
+        round: 0,
+        why: 'incomplete',
+        findings: [],
+        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement (continue ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+      },
+      resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
+    })
+  }
+  const implStall = absorb(impl)
   if (implStall) return verifyStall(0, implStall)
 
-  if (impl && previewText && sizeFor(givenSize, risk) !== 'S') {
+  if (previewText && sizeFor(givenSize, risk) !== 'S') {
     const previewQuestion = {
       text: `Preview: show the owner ${previewText} (a screenshot or a sample of the output) and ask whether it is right; "ok" goes on to the review, any other answer is a direction for one more implementer pass`,
       default: 'ok',

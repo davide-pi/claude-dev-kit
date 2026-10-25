@@ -53,7 +53,7 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 | --- | --- | --- | --- |
 | analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, the doubts pass, the challenger `Plan` on Sonnet | `plan-work`, criteria + proof + questions, owner ok, the doubts pass, the challenger `Plan` on Opus |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
-| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, every plan task of the request in one run (P-run, `references/loop.md`) |
+| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, a run per phase, 3-4 tasks (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
 `implementer` runs at `medium` (`implementerEffort`: `high`). Before the loop: `references/scenarios.md`; the criteria, the doubts pass and the challenger (M, L) in `references/loop.md`.
@@ -79,7 +79,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size, the criteria with their proof (`references/loop.md`); ask only what the table says. S: edit inline now.
-3. Launch `impl-review-loop` once per coherent request (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
+3. Verify pre-check (`references/loop.md`), launch `impl-review-loop` once per coherent request (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
    `OK` → `scope-guard.js --check <head>`: files outside → step 3; exit 0 → step 4; exit 2 = not checked, never clean. `STALL` (`question` too) → `references/stall.md`, ask the user, relaunch with every resolution so far.
 4. Run the matrix on the final code; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`). M, L: the proof check (assertion lines of each criterion's test).
 5. `perimeter.ps1 -Close -FindingsLog`, then the verdict (`done-claim` blocks one with the perimeter still active), then `/commit`, `pr-create` when asked.

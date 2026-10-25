@@ -41,14 +41,14 @@ round restarts its count, `retry` does not.
 | `still-open` | a finding is still open after its fix: `accept`, `guidance` with a direction, or `retry` |
 | `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same as `still-open` |
 | `no-verdict` | two rounds in a row without a reviewer verdict on the same id (one round is not a stall: only that id is asked again, and listed under `gaps`): same as `still-open` |
+| `incomplete` | the implementer did not finish after 2 continuations (`stall.reason` names what is left and the files already changed): relaunch WITHOUT `resumeFromRunId`, with a smaller scope (split the plan into phases) or a higher `implementerEffort` |
 | `gap` | no reviewer read `stall.files`, or a specialist returned nothing: relaunch with the same resolutions (that reviewer runs again), or name the gap in the verdict |
 | `widen` | a P1/P2 outside the perimeter in a file the change touched or causes: on the user's yes write the widened list (old and new entries) with `perimeter.ps1 -Files` and resume with `{ round, widen: [the new entries] }` (it applies from that round on); else `accept` it as out of scope |
 | `disputed` | the fixer rejected the finding twice and the reviewer kept it |
 | `not-reproduced` | the fixer could not reproduce it and the reviewer kept it with steps; never goes back to the fixer |
 
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
-cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report but changed files in the
-perimeter is no stall: those files go to review, with a gap and a note that the work may be partial. A red implementer verify at round 0 is no stall: it
+cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report or a non-empty `remaining` is continued (twice at most), never reviewed partial. A red implementer verify at round 0 is no stall: it
 becomes a synthetic P1 `V<n>` that heads the fixer's list. A reviewer or a fixer that stops without its structured
 result (turn cap) counts as no answer: a reviewer is a `gaps` line, no reviewer at all or the fixer is a `STALL`. A group
 reviewer that returned nothing while no whole-change reviewer answered stalls naming the unreviewed files, never `OK`.

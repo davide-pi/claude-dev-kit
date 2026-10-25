@@ -55,12 +55,19 @@ delta (M with one fix round: the finder read it, so none runs; L where only A fo
 `inline: true, changed: [the files you edited]`. No implementer runs first; a finding is fixed by `implementer` inside
 the loop. S has no final full read, no cleanup pass, no preview stop, no proof check.
 
+## Verify pre-check
+
+Before the launch, run `verify` once on the start tree. An environment failure (command, tool or config not found, restore or
+build infrastructure error) → stop: fix the command or ask the user; never launch with a verify that cannot run. An expected
+red (the bug scenario's repro test) is fine: note it. A fixer meeting an environment failure of the verify changes no code for it.
+
 ## One run per coherent request (P-run)
 
 A run has a large fixed cost whatever its size: launch once per coherent request. The cost is not measured yet; the
-findings log, with its `tokens`, will measure it. One implementer works through every plan task in order, testing after each; the
-reviewers read the whole diff once. Split only past ~15 files or for areas that share nothing (other reviewers, other
-verify): sequential runs in the same worktree, `/commit` between them, each with its own `start`. The implementer has no
+findings log, with its `tokens`, will measure it. One implementer works through the plan tasks in order, testing after each; the
+reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
+for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
+An implementer that stops before finishing is continued twice (`stall.why: incomplete` after that: split the plan). The implementer has no
 tool-call budget; it runs only the tests the change touches while it works, and `verify` once at the end.
 
 ## Weight, criteria, proof

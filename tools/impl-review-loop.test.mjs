@@ -524,28 +524,62 @@ test('script: a P2 on the spot of a known minor finding is a new blocking findin
   assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix R1', 'fix R2']);
 });
 
+const DONE = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] };
+
 test('script: an implementer that returns nothing is a resumable STALL, on the first call and on a fix', async () => {
-  const first = await run(ARGS, [], [null]);
+  const first = await run(ARGS, [], [null, null, null]);
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.round, 0);
   assert.match(first.out.resume, /WITHOUT resumeFromRunId/);   // a resume replays the cached null report
-  const fix =await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, null]);
+  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, null]);
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.resume, /resumeFromRunId/);
   assert.doesNotMatch(fix.out.resume, /WITHOUT/);
 });
 
-test('script: an implementer with no report but changes in the perimeter goes on to review with a note; with none it stalls', async () => {
-  const { out, calls } = await run({ ...ARGS, changed: ['src/Orders/OrdersQuery.cs'] }, [review([])], [null], { probe: { files: ['src/Orders/OrdersQuery.cs', 'src/Other.cs'] } });
+test('script: an implementer with no report is continued, never reviewed partial; the continuation delta starts at the first tree', async () => {
+  const { out, calls } = await run(ARGS, [review([])], [null, DONE]);
   assert.equal(out.status, 'OK');
-  assert.deepEqual(out.files, ['src/Orders/OrdersQuery.cs']);
-  assert.match(out.gaps.join(' '), /returned no report/);
-  assert.match(out.outOfScope.map((n) => n.text).join(' '), /ran out of turns/);
-  assert.match(calls.find((c) => c.opts.label === 'R1 A').prompt, /list the implementer declared \(src\/Orders\/OrdersQuery\.cs\)/);
-  const none = await run(ARGS, [], [null], { probe: { files: ['src/Other.cs'] } });
-  assert.equal(none.out.status, 'STALL');
-  assert.equal(none.out.stall.round, 0);
+  const impls = calls.filter((c) => c.opts.agentType === 'implementer');
+  assert.deepEqual(impls.map((c) => c.opts.label), ['implement', 'implement (continue 1)']);
+  assert.match(impls[1].prompt, /Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over/);
+  assert.match(impls[1].prompt, /fix it/);
+  assert.equal(calls.filter((c) => c.opts.label === 'R1 A').length, 1);
+  assert.equal(out.gaps.join(' ').includes('returned no report'), false);
+});
+
+test('script: a non-empty remaining triggers a continuation with the list; the partial report is not the review base', async () => {
+  const partial = { ...DONE, snapshot: { tree: 'partial', files: ['src/Orders/OrdersQuery.cs'], churn: 0 }, remaining: ['task 3: the DTO', 'task 4: tests'] };
+  const { out, calls } = await run(ARGS, [review([])], [partial, DONE]);
+  assert.equal(out.status, 'OK');
+  const second = calls.filter((c) => c.opts.agentType === 'implementer')[1];
+  assert.equal(second.opts.label, 'implement (continue 1)');
+  assert.match(second.prompt, /task 3: the DTO/);
+  assert.match(second.prompt, /task 4: tests/);
+  assert.doesNotMatch(second.prompt, /-Since partial/);
+  assert.match(second.prompt, /-Since HEAD/);
+});
+
+test('script: two failed continuations (null, or still remaining) → STALL incomplete naming what is left', async () => {
+  const left = { ...DONE, remaining: ['task 5'] };
+  const still = await run(ARGS, [], [left, left, left], { probe: { files: ['src/Orders/OrdersQuery.cs', 'src/Other.cs'] } });
+  assert.equal(still.out.status, 'STALL');
+  assert.equal(still.out.stall.why, 'incomplete');
+  assert.equal(still.out.stall.round, 0);
+  assert.match(still.out.stall.reason, /task 5/);
+  assert.match(still.out.stall.reason, /src\/Orders\/OrdersQuery\.cs/);
+  assert.doesNotMatch(still.out.stall.reason, /Other\.cs/);
+  assert.match(still.out.resume, /WITHOUT resumeFromRunId/);
+  assert.equal(still.calls.filter((c) => c.opts.agentType === 'implementer').length, 3);
+  assert.equal(still.calls.some((c) => c.opts.label === 'R1 A'), false);
+  const none = await run(ARGS, [], [null, null, null], { probe: { files: [] } });
+  assert.equal(none.out.stall.why, 'incomplete');
+});
+
+test('script: a fixer that returns remaining keeps the current behaviour (no continuation)', async () => {
+  const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [DONE, { ...DONE, remaining: ['x'] }]);
+  assert.equal(calls.filter((c) => c.opts.label?.startsWith('implement (continue')).length, 0);
 });
 
 test('script: a reviewer carries defaults (no question, no stall) and both prompts name the weight rule', async () => {
@@ -647,7 +681,7 @@ test('readReport: a report without verify is not-run, without rejected/noticed e
   assert.equal(r.snapshot, null);
   assert.deepEqual(r.files, ['a.cs']);
   const full = { verify: { status: 'fail', command: 'dotnet test', line: 'Failed: 2' }, snapshot: { tree: 't', files: ['a.cs'], churn: 4 }, rejected: [{ id: 'F1', reason: 'not reproduced' }], noticed: [{ title: 't', path: 'p', why: 'w' }], questions: [{ text: 'q', default: 'd', why: 'w' }], filesReviewed: ['a.cs'] };
-  assert.deepEqual(readReport(full), { ...full, defaults: [] });
+  assert.deepEqual(readReport(full), { ...full, defaults: [], remaining: [] });
   assert.deepEqual(readReport({ questions: [{ text: 'q' }, { text: ' ' }, { default: 'd' }, null, 'q'] }).questions, [{ text: 'q' }]);
   assert.deepEqual(readReport({ verify: { status: 'green', command: 'x' } }).verify, { status: 'not-run', command: 'x' });
   assert.equal(readReport(null), null);
@@ -886,10 +920,10 @@ test('script: a group that threw in round 1 and again in round 2 is a STALL nami
 });
 
 test('script: an implementer or a fixer that throws is the same resumable STALL as one that returns nothing', async () => {
-  const first = await run(ARGS, [], [new Error('max turns')]);
+  const first = await run(ARGS, [], [new Error('max turns'), new Error('max turns'), new Error('max turns')]);
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.round, 0);
-  assert.match(first.out.stall.reason, /implementer returned nothing.*max turns/);
+  assert.match(first.out.stall.reason, /implementer did not finish.*no report.*max turns/);
   const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, new Error('max turns')]);
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
@@ -944,7 +978,7 @@ test('script: implement and fix prompts end with the snapshot command, -Since th
   for (const p of [first, fix]) {
     assert.match(p, /return the one JSON line it prints as `snapshot`, unchanged/);
     assert.match(p, /with the PowerShell tool \(the quoting of -Dirty is PowerShell's\)/);
-    assert.match(p, /Return your report through the structured output: scope, files, evidence, verify \{status, command, line\}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions\./);
+    assert.match(p, /Return your report through the structured output: scope, files, evidence, verify \{status, command, line\}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions, remaining \(the tasks or parts of the brief not done yet; empty when the work is complete\)\./);
   }
   const bare = await run(ARGS, [review([])]);
   assert.ok(bare.calls[0].prompt.trimEnd().endsWith(`${SNAP} -Since HEAD`));                 // no start recorded: HEAD, no -Start, no -Dirty
