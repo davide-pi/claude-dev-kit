@@ -80,23 +80,13 @@ export type CockpitRepo = {
   base?: string
   /** The name of the default branch the branch is counted from (`main`). */
   from?: string
-  /** The commits of the branch since `base`: how many in all, and the newest few. Absent without a default branch to count from, and on the default branch itself. */
-  commits?: { count: number; list: { hash: string; subject: string }[] }
 }
 
-/**
- * A pull request of this chat: seen for the branch checked out (`gh pr view`, `az repos pr list`) or created in the session
- * (`gh pr create`, `az repos pr create`). Azure DevOps lists no checks, so `checks` is then absent; `url` is absent when the
- * CLI named no web address.
- */
+/** A pull request of this chat, as a link: seen for the branch checked out (`gh pr view`, `az repos pr list`) or created in the session. `url` is absent when the CLI named no web address. */
 export type CockpitPr = {
   number: number
   title: string
-  state: 'open' | 'merged' | 'closed'
-  isDraft: boolean
   url?: string
-  review?: 'approved' | 'changes' | 'pending'
-  checks?: { passed: number; failed: number; pending: number }
 }
 
 /** The diff the second pane draws: `text` is what `Code` takes (unified hunks); `isCut` when it was cut to fit; `isUnreadable` when the file is too big or cannot be read (no text). */
@@ -187,42 +177,17 @@ export type CockpitContext = {
 /** One tool call of the main loop, as the main loop's call list keeps it (the Insights tab draws the newest five): the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
 export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
 
-/** The parts of the System tab the monitor reads, in the order the tab draws them. */
-export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk'
+/** A process of the session's tree with the TCP ports it listens on and its working set in bytes (absent until read). */
+export type CockpitSysProc = { pid: number; name: string; ports: number[]; ram?: number }
 
-/** A process of the session's tree with the TCP ports it listens on, its CPU share (percent of every core, since the monitor's last read) and its working set in bytes; the last two are absent until read. */
-export type CockpitSysProc = { pid: number; name: string; ports: number[]; cpu?: number; ram?: number }
+/** The view the pane draws, the tab bar's six buttons: `agents` is Ora, `signals` Segnali, `history` Cronologia, `context` Costi, `work` Lavoro, `notes` Note. */
+export type CockpitTab = 'agents' | 'signals' | 'history' | 'context' | 'work' | 'notes'
 
-/** The free and total bytes of the working directory's drive, and its short name (`D:`, `/`). */
-export type CockpitDisk = { free: number; total: number; label?: string }
+/** What an entry of the Cronologia's ring buffer is about. */
+export type CockpitEventKind = 'round' | 'skill' | 'agent' | 'compaction' | 'error' | 'block' | 'stall'
 
-/** One JSON line of the system monitor (`sysmon/sysmon.mjs`), narrowed: only the parts it carries; `off` names the parts it cannot read. */
-export type CockpitSysLine = {
-  /** CPU busy share, 0-100. */
-  cpu?: number
-  ram?: { used: number; total: number }
-  /** Network bytes per second. */
-  net?: { rx: number; tx: number }
-  procs?: CockpitSysProc[]
-  disk?: CockpitDisk
-  off?: CockpitSystemPart[]
-}
-
-/** What the System tab draws: the last samples (newest last; the tab shows the latest of each), the latest slow readings, and the parts that could not be read. */
-export type CockpitSystem = {
-  cpu: number[]
-  /** RAM used, as a percent of the total. */
-  ram: number[]
-  rx: number[]
-  tx: number[]
-  procs?: CockpitSysProc[]
-  disk?: CockpitDisk
-  /** The parts that read "unavailable": the tool is missing or failed, or the monitor itself could not run. */
-  off: CockpitSystemPart[]
-}
-
-/** The view the pane draws: the tab bar's six buttons. */
-export type CockpitTab = 'agents' | 'context' | 'work' | 'insights' | 'system' | 'notes'
+/** One row of the Cronologia: when, what, and the numbers that kind carries (`usd` and `ms` of a round, the model, tokens and cache hit of an agent; `text` is the skill, agent type, error or rule). `key` makes an entry once-only. */
+export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; usd?: number; ms?: number; model?: string; tokens?: number; hit?: number; id?: string }
 
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
@@ -246,16 +211,19 @@ export type CockpitInsights = {
   reads: Record<string, number>
   /** The cache hit of the last twenty main turns, oldest first. */
   cacheShares: number[]
-  /** The five main-loop calls whose result was the largest, biggest first: the tool, its short argument and the result's estimated tokens (characters / 4). */
+  /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument and the result's estimated tokens (characters / 4). */
   biggest?: { tool: string; arg?: string; tokens: number }[]
+  /** How many times each Bash command failed (its short argument). */
+  failedCmds?: Record<string, number>
+  /** When the last main round ended (`$.clock.now()`). */
+  lastRoundEnd?: number
+  /** The last round that began after an idle gap over the signals' limit: its number, its cache hit and the gap. */
+  idleCold?: { round: number; share: number; gapMs: number }
   /** The last main-loop call that failed: the tool and its error message on one line. */
   lastError?: { tool: string; text: string }
   /** The context before and after each of the last three compactions, oldest first; `after` is the first reading that followed (absent until one did). */
   compactCtx?: { before: number; after?: number }[]
 }
-
-/** How the System tab's process table is sorted: by the working set (the default) or the CPU share. */
-export type CockpitProcSort = 'cpu' | 'ram'
 
 /** A note saved on the Notes tab; `id` is stable, the list keeps the order the notes were saved in. */
 export type CockpitNote = { id: number; text: string }
@@ -292,7 +260,7 @@ export type CockpitSnapshot = {
   ctxRounds?: number[]
   /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: the Work tab marks them among the changes. Kept in the session data file. */
   edited?: string[]
-  /** The Context tab's last reading of the context breakdown; absent until the tab was opened. */
+  /** The Costi tab's last reading of the context breakdown; absent until the tab was opened. */
   context?: CockpitContext
   /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
   contextSeq?: number
@@ -334,16 +302,26 @@ export type CockpitSnapshot = {
   calls?: CockpitToolCall[]
   /** The Work tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
-  /** The System tab's readings, kept while the monitor runs; absent when it is not (another tab, or the pane closed). */
-  system?: CockpitSystem
+  /** The session's processes with their listening ports, read while the Lavoro tab is open; absent until read. */
+  procs?: CockpitSysProc[]
+  /** True when the processes cannot be read here (not Windows, or the read failed). */
+  isProcsOff?: boolean
+  /** The Cronologia's ring buffer, oldest first. */
+  events?: CockpitEvent[]
+  /** The Cronologia shows only this kind; absent shows all. */
+  eventFilter?: CockpitEventKind
+  /** The usage counters of every finished turn by model id: the Costi tab prices them. */
+  modelUse?: Record<string, CockpitUsage>
+  /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
+  startedAt?: number
+  /** A button waiting for its confirmation: the footer's `analizza suite` or Lavoro's `log hours`. */
+  confirm?: 'suite' | 'worklog'
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights
   /** The agents whose four token counters are expanded on the Subagents tab (the others show a line to open them). */
   usageOpen?: string[]
   /** The notes shown in full on the Notes tab (the others show their first lines). */
   notesOpen?: number[]
-  /** The process table's sort; absent is by RAM. */
-  procSort?: CockpitProcSort
   /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */
   refreshedAt?: number
   /** The Notes tab's saved notes, kept with the session in its data file; `send` appends one to the prompt box and keeps it. Absent when none. */

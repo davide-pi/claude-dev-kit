@@ -2,6 +2,7 @@ import type { CockpitInsights, CockpitSnapshot, CockpitToolCall } from '../types
 import { subagentShare } from './agents'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
+import { THRESHOLDS } from './signals'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
@@ -44,12 +45,17 @@ export const roundCost = (cost: CockpitSnapshot['cost']): number | undefined =>
   cost.usd !== undefined && cost.startUsd !== undefined && cost.usd >= cost.startUsd ? cost.usd - cost.startUsd : undefined
 
 /** `ins` after a main round ended: its cost where measured, its length, the cache hit of its input, and the dearest round so far. */
-export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: number; ms: number; cacheShare?: number }): CockpitInsights {
+export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: number; ms: number; cacheShare?: number; endedAt?: number }): CockpitInsights {
   const now = ins ?? emptyInsights()
   const usd = round.usd ?? 0
   const isCostliest = round.usd !== undefined && round.usd > (now.costliest?.usd ?? 0)
+  // The gap between the last round's end and this one's start: a long one let the prompt cache lapse.
+  const gapMs = round.endedAt !== undefined && now.lastRoundEnd !== undefined ? round.endedAt - Math.max(0, round.ms) - now.lastRoundEnd : 0
+  const isIdle = gapMs > THRESHOLDS.idleGapMs && round.cacheShare !== undefined
   return {
     ...now,
+    ...(round.endedAt !== undefined && { lastRoundEnd: round.endedAt }),
+    ...(isIdle && round.cacheShare !== undefined && { idleCold: { round: now.rounds + 1, share: round.cacheShare, gapMs } }),
     rounds: now.rounds + 1,
     usd: now.usd + usd,
     ...(isCostliest && { costliest: { usd, ms: round.ms } }),
@@ -62,6 +68,7 @@ export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: 
 const BIGGEST_KEEP = 5
 const COMPACT_CTX_KEEP = 3
 const ERROR_MAX = 200
+const FAILED_CMDS_KEEP = 40
 
 /** The tokens a tool result weighs for the model, estimated from its text (characters / 4); a result with no text is measured on its JSON. */
 export function resultTokens(ran: { text?: unknown; result?: unknown }): number {
@@ -79,11 +86,14 @@ export function recordToolCall(
   const tools = known || Object.keys(now.tools).length < INSIGHT_TOOLS_KEEP ? { ...now.tools, [call.tool]: { calls: (known?.calls ?? 0) + 1, failed: (known?.failed ?? 0) + (call.isOk ? 0 : 1) } } : now.tools
   const path = call.isOk ? call.readPath : undefined
   const isReadKept = path !== undefined && (path in now.reads || Object.keys(now.reads).length < INSIGHT_READS_KEEP)
+  const failedKey = !call.isOk && call.tool === 'Bash' ? call.arg : undefined
+  const isCmdKept = failedKey !== undefined && (failedKey in (now.failedCmds ?? {}) || Object.keys(now.failedCmds ?? {}).length < FAILED_CMDS_KEEP)
   const error = call.error?.replace(/\s+/g, ' ').trim().slice(0, ERROR_MAX)
   return {
     ...now,
     tools,
     toolMs: now.toolMs + Math.max(0, call.ms),
+    ...(isCmdKept && failedKey !== undefined && { failedCmds: { ...now.failedCmds, [failedKey]: (now.failedCmds?.[failedKey] ?? 0) + 1 } }),
     reads: isReadKept ? { ...now.reads, [path]: (now.reads[path] ?? 0) + 1 } : now.reads,
     ...(call.tokens !== undefined && call.tokens > 0 && {
       biggest: [...(now.biggest ?? []), { tool: call.tool, ...(call.arg !== undefined && { arg: call.arg }), tokens: call.tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, BIGGEST_KEEP),
@@ -104,6 +114,8 @@ export const recordCompaction = (ins: CockpitInsights | undefined, before?: numb
   return {
     ...now,
     compactions: now.compactions + 1,
+    // what grew the context is measured from the compaction on
+    biggest: undefined,
     ...(before !== undefined && before > 0 && { compactCtx: [...(now.compactCtx ?? []), { before }].slice(-COMPACT_CTX_KEEP) }),
   }
 }

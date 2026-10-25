@@ -9,7 +9,7 @@ test('notes: the field is on the Notes tab only, under the tab bar; the list sta
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  for (const tab of ['agents', 'context', 'work', 'insights', 'system']) {
+  for (const tab of ['agents', 'signals', 'history', 'context', 'work']) {
     await ui.press({ key: `tab:${tab}` })
     expect(await ui.find({ type: 'Input', key: 'note' })).toBeUndefined()
   }

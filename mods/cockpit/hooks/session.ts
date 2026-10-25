@@ -20,14 +20,13 @@ export function weeklyPace(
 }
 
 /**
- * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws (the Context tab's refresh countdown too). The medium tier (10 s, git) runs
- * whenever the pane is open, the header shows git on every tab; the slow tier (30 s) runs whatever the tab; none of them
+ * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws (Ora's, Segnali's wait, Costi's refresh countdown). The medium tier
+ * (10 s, git) runs whenever the pane is open, the header shows git on every tab; the slow tier (30 s) runs whatever the tab; none of them
  * while the pane is closed.
  */
 export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
   switch (tab ?? 'agents') {
-    case 'insights':
-    case 'system':
+    case 'history':
     case 'notes':
       return { fast: false }
     default:
@@ -137,23 +136,14 @@ export function almText(alm: CockpitAlm): string {
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
 
-/** The cockpit's tabs, in the order the bar draws them. */
-export const TABS: readonly CockpitTab[] = ['agents', 'context', 'work', 'insights', 'system', 'notes']
-
-/** What an unselected tab's button shows instead of its name (Nerd Font Material Design glyphs). */
-export const TAB_ICONS: Record<CockpitTab, string> = {
-  agents: '\u{F06A9}', // nf-md-robot
-  context: '\u{F035B}', // nf-md-memory
-  work: '\u{F00D1}', // nf-md-briefcase
-  insights: '\u{F0335}', // nf-md-lightbulb
-  system: '\u{F0493}', // nf-md-cog
-  notes: '\u{F039B}', // nf-md-note_text
-}
+/** The cockpit's tabs, in the order the bar draws them: Ora, Segnali, Cronologia, Costi, Lavoro, Note. */
+export const TABS: readonly CockpitTab[] = ['agents', 'signals', 'history', 'context', 'work', 'notes']
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
 
-/** The tab a state file names; the v2 Sessione and Repo tabs went to Subagents and Work, and so does a file that still holds them. */
-export const savedTab = (v: unknown): CockpitTab | undefined => (v === 'session' ? 'agents' : v === 'repo' ? 'work' : isTab(v) ? v : undefined)
+/** The tab a state file names; the tabs of the older versions went where their content did (Insights to Costi, System to Lavoro). */
+export const savedTab = (v: unknown): CockpitTab | undefined =>
+  v === 'session' ? 'agents' : v === 'repo' || v === 'system' ? 'work' : v === 'insights' ? 'context' : isTab(v) ? v : undefined
 
 // ── Alerts (D4) and the session data file ──
 
@@ -164,7 +154,7 @@ const ALERT_CREDITS_LEFT_PCT = 10
 /** One cause the person is told about: `key` names the episode (it ends when the cause is no longer in the list), `text` is the toast. */
 export type CockpitAlert = { key: string; text: string }
 
-/** The causes of an alert in `s` now: context at 80 % or more, 5h credits at 10 % left or less, each failed subagent, each pull request with red checks. */
+/** The causes of an alert in `s` now: context at 80 % or more, 5h credits at 10 % left or less, each failed subagent. */
 export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
   const out: CockpitAlert[] = []
   const pct = s.ctx.percent
@@ -172,7 +162,6 @@ export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
   const five = s.rateLimits.find(r => r.kind === 'five_hour')
   if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: t().alertCredits(Math.max(0, Math.round(100 - five.percentUsed))) })
   for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: t().alertSubagent(a.type) })
-  for (const pr of s.prs ?? []) if ((pr.checks?.failed ?? 0) > 0) out.push({ key: `pr:${pr.number}`, text: t().alertChecks(pr.number) })
   return out
 }
 

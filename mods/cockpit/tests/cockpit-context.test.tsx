@@ -142,7 +142,7 @@ test('Context: a main turn reads the breakdown again, debounced, only while the 
   await ui.unmount()
 })
 
-test('Context: the fast tier runs while the tab is selected (the refresh countdown), and not on the Insights tab', async ($, on) => {
+test('Context: the fast tier runs while the tab is selected (the refresh countdown), and not on the Cronologia tab', async ($, on) => {
   const listCalls: string[] = []
   const clock = world(on, { listCalls })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -154,7 +154,7 @@ test('Context: the fast tier runs while the tab is selected (the refresh countdo
   await clock.advance(6000)
   await settleAll()
   expect(listCalls.length).toBeGreaterThan(0)
-  await ui.press({ key: 'tab:insights' })
+  await ui.press({ key: 'tab:history' })
   await settleAll()
   listCalls.length = 0
   await clock.advance(3000) // t = 9 s: before the medium tier's tick
@@ -201,15 +201,7 @@ test('Context: the top five static consumers by tokens, and the skills invoked t
   expect(consumers[2]).toMatch(/^file +User CLAUDE\.md +3k$/)
   expect(consumers[3]).toMatch(/^file +Project CLAUDE\.md +900$/)
   expect(consumers[4]).toMatch(/^agent +code-reviewer +400$/)
-  // the skills used and the listing count are on the Insights tab, not the Context one
-  expect(await ui.find({ type: 'Text', text: /^41\/60 listed$/ })).toBeUndefined()
   expect(rows.some(r => /^SKILLS/.test(r))).toBe(false)
-  await ui.press({ key: 'tab:insights' })
-  const insights = rowTexts(await ui.drawn())
-  expect((await ui.find({ type: 'Text', text: /^41\/60 listed$/ }))?.text).toBe('41/60 listed')
-  expect(insights.some(r => /^SKILLS · 2 used/.test(r))).toBe(true)
-  const at = insights.findIndex(r => /^SKILLS ·/.test(r))
-  expect(insights.slice(at + 1).filter(r => r === 'commit' || r === 'react')).toEqual(['commit', 'react'])
   await ui.unmount()
 })
 

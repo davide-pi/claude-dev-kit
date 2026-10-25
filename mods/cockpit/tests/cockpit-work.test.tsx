@@ -219,7 +219,7 @@ for (const { name, options } of [
   })
 }
 
-test('Work: the changed files with +/-, read only while Work is selected; a branch block and no worktree one', async ($, on) => {
+test('Work: the changed files with +/-, read only while Work is selected; no branch block and no worktree one', async ($, on) => {
   world(on, { numstat: [['3', '1', 'src/a.ts']], untracked: ['notes.md'], worktrees: 'worktree /work/example-repo\nHEAD 1\nbranch refs/heads/feature/x\n' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
@@ -230,49 +230,22 @@ test('Work: the changed files with +/-, read only while Work is selected; a bran
   expect(rows).toContain('CHANGES · 2')
   expect(rows.some(r => /^ +\+3 +-1 src\/a\.ts$/.test(r))).toBe(true)
   expect(rows.some(r => /^ +\? +notes\.md$/.test(r))).toBe(true)
-  expect(rows).toContain('BRANCH')
+  expect(rows).not.toContain('BRANCH')
   expect(rows.some(r => /^WORKTREE/.test(r))).toBe(false)
   await ui.unmount()
 })
 
 // ── Phase 9: Work ──
 
-test('Work: the branch block names the upstream with its commits ahead and behind, the commits since the default branch and the newest of them', async ($, on) => {
+test('Work: the changed files are those against where the branch left the default branch, and the uncommitted ones; no branch block, no commits', async ($, on) => {
   const repoCalls: string[] = []
-  world(on, {
-    repoCalls,
-    defaultBranch: 'main',
-    mergeBase: 'abc1234def',
-    upstream: 'origin/feature/x [ahead 2, behind 1]',
-    branchCommits: [{ hash: '1111111', subject: 'Add the filter' }, { hash: '2222222', subject: 'Cover it with a test' }],
-    commitCount: 7,
-    numstat: [['3', '1', 'src/a.ts']],
-  })
+  world(on, { repoCalls, defaultBranch: 'main', mergeBase: 'abc1234def', upstream: 'origin/feature/x [ahead 2, behind 1]', numstat: [['3', '1', 'src/a.ts']] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
-  const i = rows.indexOf('BRANCH')
-  expect(i).toBeGreaterThan(0)
-  expect(rows.slice(i + 1, i + 8)).toEqual([' ', 'upstream origin/feature/x ↑2 ↓1', '7 commits from main', '1111111 Add the filter', '2222222 Cover it with a test', '… +5', expect.stringMatching(/^─+$/)])
-  // the changed files are those against where the branch left main, and the uncommitted ones
   expect(repoCalls).toContain('diff --numstat --no-renames -z abc1234def --')
   expect(rows).toContain('CHANGES · 1')
-})
-
-test('Work: a branch without an upstream says so; one commit reads in the singular', async ($, on) => {
-  world(on, { defaultBranch: 'main', mergeBase: 'abc1234def', branchCommits: [{ hash: '1111111', subject: 'Only one' }] })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await workRows($)
-  expect(rows).toContain('no upstream')
-  expect(rows).toContain('1 commit from main')
-  expect(rows).toContain('1111111 Only one')
-})
-
-test('Work: on the default branch there are no commits to list', async ($, on) => {
-  world(on, { branch: 'main', defaultBranch: 'main', mergeBase: 'abc1234def', branchCommits: [{ hash: '1111111', subject: 'On main' }], commitCount: 1 })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await workRows($)
-  expect(rows).toContain('BRANCH')
-  expect(rows.some(r => /commit.* from|On main/.test(r))).toBe(false)
+  expect(rows).not.toContain('BRANCH')
+  expect(rows.some(r => /commit.* from|upstream/.test(r))).toBe(false)
 })
 
 test('Work: with no default branch to count from (no origin/HEAD, no main or master) the changed files are the uncommitted ones against HEAD and no commits are listed', async ($, on) => {

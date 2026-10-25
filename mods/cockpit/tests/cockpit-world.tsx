@@ -90,8 +90,6 @@ export type World = {
   defaultBranch?: string
   /** The number `gh pr view` answers; absent, gh answers that the branch has no PR. */
   pr?: number
-  /** The state `gh pr view` answers (`OPEN` when not given). */
-  prState?: string
   /** True: `gh` is not installed (the process cannot start). */
   noGh?: boolean
   /** Receives every `gh` call's argv, joined by spaces. */
@@ -120,7 +118,7 @@ export type World = {
   fileDiffs?: Record<string, string>
   /** The text of the working-tree files `fs.read` answers, by path tail (the untracked files the diff pane reads). */
   files?: Record<string, string>
-  /** Extra fields of the `gh pr view` answer (title, reviewDecision, statusCheckRollup, isDraft ...). */
+  /** Extra fields of the `gh pr view` answer (title, url ...). */
   prExtra?: Record<string, unknown>
   /** The list `az repos pr list` answers; absent, az answers an empty list. */
   azPr?: readonly unknown[]
@@ -172,9 +170,10 @@ export type World = {
   promptReadFails?: boolean
   /** The commit `git merge-base HEAD <default branch>` answers; absent, there is none (the branch has no default branch to count from). */
   mergeBase?: string
-  /** The commits `git log <base>..HEAD` lists, newest first, and how many `git rev-list --count` says there are (the list's length when not given). */
-  branchCommits?: { hash: string; subject: string }[]
-  commitCount?: number
+  /** What the process reader (`node sysmon/procs.mjs`) prints; absent, it prints nothing and exits 1. */
+  procsLine?: string
+  /** Receives the argv (joined by spaces) of every run of the process reader. */
+  procsCalls?: string[]
   /** Receives the arguments (joined by spaces, after the `-C <dir> --no-optional-locks` prefix) of every git call that reads the Work tab. */
   repoCalls?: string[]
 }
@@ -240,7 +239,7 @@ export function world(on: On, options: World = {}) {
       if (options.noGh) throw new Error('spawn gh ENOENT')
       return options.pr === undefined
         ? answer('', 1)
-        : answer(JSON.stringify({ number: options.pr, state: options.prState ?? 'OPEN', title: 'Fix the orders filter', ...options.prExtra }))
+        : answer(JSON.stringify({ number: options.pr, title: 'Fix the orders filter', ...options.prExtra }))
     }
     // On Windows the mod starts az through cmd, the way a shell would resolve az.cmd.
     if (e.argv[0] === 'az' || (e.argv.slice(0, 4).join(' ') === 'cmd /d /s /c' && e.argv[4] === 'az')) {
@@ -249,13 +248,13 @@ export function world(on: On, options: World = {}) {
       if (options.noAz) throw new Error('spawn az ENOENT')
       return answer(JSON.stringify(options.azPr ?? []))
     }
+    if (e.argv[0] === 'node') {
+      options.procsCalls?.push(e.argv.join(' '))
+      return options.procsLine === undefined ? answer('', 1) : answer(options.procsLine)
+    }
     if (options.notRepo) return answer('', 128)
     if (e.argv.includes('merge-base')) return options.mergeBase === undefined ? answer('', 1) : answer(`${options.mergeBase}
 `)
-    if (e.argv.includes('rev-list')) return answer(`${options.commitCount ?? options.branchCommits?.length ?? 0}
-`)
-    if (e.argv.includes('log')) return answer((options.branchCommits ?? []).map(c => `${c.hash}	${c.subject}
-`).join(''))
     if (e.argv.includes('diff') || e.argv.includes('ls-files')) options.repoCalls?.push(e.argv.slice(4).join(' '))
     if (e.argv.includes('--numstat')) return answer((options.numstat ?? []).map(([a, d, p]) => `${a}\t${d}\t${p}\0`).join(''))
     if (e.argv.includes('worktree')) return answer(options.worktrees ?? '')
@@ -330,6 +329,10 @@ export function world(on: On, options: World = {}) {
   })
   on('command.run', { command: 'worklog' }, (_, e) => {
     options.commands?.push(`/${e.command} ${e.args}`)
+    return { text: 'ok' }
+  })
+  on('command.run', { command: 'retro' }, (_, e) => {
+    options.commands?.push(`/${e.command}${e.args ? ` ${e.args}` : ''}`)
     return { text: 'ok' }
   })
   on('ui.toast', (_, e) => {

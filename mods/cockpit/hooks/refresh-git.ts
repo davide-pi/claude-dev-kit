@@ -16,7 +16,6 @@ import {
   isDefaultBranch,
   isGithubRemote,
   parseAzurePr,
-  parseCommits,
   parseDefaultBranch,
   parseGitStatus,
   parseGithubPr,
@@ -30,7 +29,6 @@ import {
 const PR_EVERY_MS = 5 * 60_000
 /** The Work tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
-const COMMITS_SHOWN = 5
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -132,7 +130,7 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     if (!isDefaultBranch(branch, defaultBranch)) {
       const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
       if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
-        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,state,isDraft,reviewDecision,statusCheckRollup,url'], { cwd, timeoutMs: 10_000 })
+        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,url'], { cwd, timeoutMs: 10_000 })
         pr = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
       } else if (remote.exitCode === 0 && isAzureRemote(remote.stdout)) {
         pr = await readAzurePr($, cwd, branch, remote.stdout, alm)
@@ -173,7 +171,7 @@ async function branchPoint(run: GitRun, known: string | undefined): Promise<{ re
 
 /**
  * The Work tab's reads, only while that tab is selected: the files changed on the branch since it left the default branch plus the
- * uncommitted ones (tracked, with their line counts, then untracked and not ignored), and the commits of the branch. Without a default
+ * uncommitted ones (tracked, with their line counts, then untracked and not ignored). Without a default
  * branch to count from, the changed files are the uncommitted ones against HEAD. Every read failing keeps the last reading.
  */
 export async function refreshRepo($: EngineInterface): Promise<void> {
@@ -191,14 +189,7 @@ export async function refreshRepo($: EngineInterface): Promise<void> {
     if (!isRead(tracked) && !isRead(untracked)) return
     const names = isRead(untracked) ? untracked.stdout.split('\0').filter(Boolean) : []
     const files = parseNumstat(isRead(tracked) ? tracked.stdout : '', names)
-    // the default branch has no commits of its own to list
-    const [count, log] =
-      from && !isDefaultBranch(git.branch, from.name)
-        ? await Promise.all([run(['rev-list', '--count', `${from.base}..HEAD`]), run(['log', '--format=%h%x09%s', '-n', String(COMMITS_SHOWN), `${from.base}..HEAD`])])
-        : []
-    const total = count && isRead(count) ? Number(count.stdout.trim()) : 0
-    const commits = log && isRead(log) && total > 0 ? { count: total, list: parseCommits(log.stdout) } : undefined
-    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length, ...(from && { base: from.base, from: from.name }), ...(commits && { commits }) }
+    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length, ...(from && { base: from.base, from: from.name }) }
     await patch($, x => (x.cwd === cwd && x.git?.branch === git.branch ? { ...x, repo } : x))
   } catch {
     // git missing or too slow: keep the last reading

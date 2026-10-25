@@ -84,25 +84,27 @@ test('almText: the target only, org / project and the identity; unmapped says so
 
 test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
   expect(tabNeeds('agents')).toEqual({ fast: true })
+  expect(tabNeeds('signals')).toEqual({ fast: true })
   expect(tabNeeds('work')).toEqual({ fast: true })
-  expect(tabNeeds('system')).toEqual({ fast: false })
-  expect(tabNeeds('insights')).toEqual({ fast: false })
+  expect(tabNeeds('history')).toEqual({ fast: false })
   expect(tabNeeds('notes')).toEqual({ fast: false })
   expect(tabNeeds('context')).toEqual({ fast: true }) // the refresh countdown
   expect(tabNeeds(undefined)).toEqual({ fast: true })
 })
 
-test('savedTab: the six tabs, and the two v2 ones a state file may still hold mapped to where their content went', () => {
-  expect(TABS).toEqual(['agents', 'context', 'work', 'insights', 'system', 'notes'])
+test('savedTab: the six tabs, and the older ones a state file may still hold mapped to where their content went', () => {
+  expect(TABS).toEqual(['agents', 'signals', 'history', 'context', 'work', 'notes'])
   for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
   expect(savedTab('session')).toBe('agents')
   expect(savedTab('repo')).toBe('work')
+  expect(savedTab('system')).toBe('work')
+  expect(savedTab('insights')).toBe('context')
   expect(savedTab('nope')).toBeUndefined()
   expect(savedTab(undefined)).toBeUndefined()
   expect(savedTab(3)).toBeUndefined()
 })
 
-test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed subagent, a PR with red checks; one entry per cause', () => {
+test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed subagent; one entry per cause', () => {
   const alerts = (patch: Partial<typeof INITIAL>) => activeAlerts({ ...INITIAL, ...patch }).map(a => a.key)
   expect(alerts({})).toEqual([])
   expect(alerts({ ctx: { percent: 79.9 } })).toEqual([])
@@ -111,12 +113,10 @@ test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed
   expect(alerts({ rateLimits: [{ kind: 'five_hour', percentUsed: 90 }] })).toEqual(['credits'])
   const agent = { type: 'reviewer', status: 'done' as const, startedAt: 0, tokens: 0 }
   expect(alerts({ agents: [{ ...agent, id: 'a1' }, { ...agent, id: 'a2', isFailed: true }, { ...agent, id: 'a3', isFailed: false }] })).toEqual(['agent:a2'])
-  const pr = { title: 't', state: 'open' as const, isDraft: false }
-  expect(alerts({ prs: [{ ...pr, number: 1, checks: { passed: 3, failed: 0, pending: 1 } }, { ...pr, number: 2, checks: { passed: 1, failed: 2, pending: 0 } }, { ...pr, number: 3 }] })).toEqual(['pr:2'])
   const texts = activeAlerts({ ...INITIAL, ctx: { percent: 85.4 }, rateLimits: [{ kind: 'five_hour', percentUsed: 93 }] }).map(a => a.text)
   expect(texts).toEqual(['context at 85%', 'credits 5h: 7% left'])
-  const failed = activeAlerts({ ...INITIAL, agents: [{ ...agent, id: 'a9', isFailed: true }], prs: [{ ...pr, number: 5, checks: { passed: 0, failed: 1, pending: 0 } }] }).map(a => a.text)
-  expect(failed).toEqual(['subagent reviewer failed', 'PR #5: checks failing'])
+  const failed = activeAlerts({ ...INITIAL, agents: [{ ...agent, id: 'a9', isFailed: true }] }).map(a => a.text)
+  expect(failed).toEqual(['subagent reviewer failed'])
 })
 
 test('parseRateCache: the status line cache read as rate limits (resets_at in seconds); a window already over is back to 0 % with no reset; garbage is none', () => {

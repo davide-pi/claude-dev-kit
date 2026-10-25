@@ -95,44 +95,15 @@ export function azureRepo(url: string): { project?: string; repo: string } | und
   return isOrgOnly ? { repo } : { project, repo }
 }
 
-const CHECK_PASSED: readonly string[] = ['SUCCESS', 'NEUTRAL', 'SKIPPED']
-const CHECK_FAILED: readonly string[] = ['FAILURE', 'ERROR', 'CANCELLED', 'TIMED_OUT', 'ACTION_REQUIRED', 'STARTUP_FAILURE']
-
-/** The checks of a `statusCheckRollup` told passed, failed or not decided yet; undefined without any. */
-function summarizeChecks(rollup: unknown): CockpitPr['checks'] {
-  if (!Array.isArray(rollup)) return undefined
-  const out = { passed: 0, failed: 0, pending: 0 }
-  for (const c of rollup) {
-    if (!isRecord(c)) continue
-    // a check run says `conclusion` once it completed, a status context says `state`
-    const verdict = typeof c.conclusion === 'string' && c.conclusion !== '' ? c.conclusion : typeof c.state === 'string' ? c.state : ''
-    if (CHECK_PASSED.includes(verdict)) out.passed++
-    else if (CHECK_FAILED.includes(verdict)) out.failed++
-    else out.pending++
-  }
-  return out.passed + out.failed + out.pending > 0 ? out : undefined
-}
-
-/** `gh pr view --json number,title,state,isDraft,reviewDecision,statusCheckRollup,url` -> the pull request with its state (open, merged or closed); undefined for any other state or text. */
+/** `gh pr view --json number,title,url` -> the pull request as a link (number, title, address); undefined for any other text. */
 export function parseGithubPr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
     if (!isRecord(parsed)) return undefined
-    const { number, state, title, isDraft, reviewDecision, statusCheckRollup, url } = parsed
-    const prState: CockpitPr['state'] | undefined = state === 'OPEN' ? 'open' : state === 'MERGED' ? 'merged' : state === 'CLOSED' ? 'closed' : undefined
-    if (prState === undefined || typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
-    const review: CockpitPr['review'] =
-      reviewDecision === 'APPROVED' ? 'approved' : reviewDecision === 'CHANGES_REQUESTED' ? 'changes' : reviewDecision === 'REVIEW_REQUIRED' ? 'pending' : undefined
+    const { number, title, url } = parsed
+    if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
     const link = safeUrl(url)
-    return {
-      number,
-      title: typeof title === 'string' ? title : '',
-      state: prState,
-      isDraft: isDraft === true,
-      ...(link !== undefined && { url: link }),
-      review,
-      checks: summarizeChecks(statusCheckRollup),
-    }
+    return { number, title: typeof title === 'string' ? title : '', ...(link !== undefined && { url: link }) }
   } catch {
     return undefined
   }
@@ -150,23 +121,17 @@ function azureUrl(pr: Record<string, unknown>, number: number): { url?: string }
 }
 
 /**
- * `az repos pr list --output json` -> the first pull request: active is open, completed is merged, abandoned is closed (any other
- * status is none). The review comes from the reviewers' votes (10 and 5
- * approve, -5 and -10 ask for changes); the list carries no checks, so none are claimed. The link is the repository's web
- * address with the pull request's path, when the list names one.
+ * `az repos pr list --output json` -> the first pull request as a link. The address is the repository's web address with the pull
+ * request's path, when the list names one.
  */
 export function parseAzurePr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
     const pr = Array.isArray(parsed) ? parsed[0] : undefined
     if (!isRecord(pr)) return undefined
-    const { pullRequestId: number, title, isDraft, reviewers, status } = pr
-    const state: CockpitPr['state'] | undefined = status === 'active' ? 'open' : status === 'completed' ? 'merged' : status === 'abandoned' ? 'closed' : undefined
-    if (state === undefined) return undefined
+    const { pullRequestId: number, title } = pr
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
-    const votes = Array.isArray(reviewers) ? reviewers.flatMap(r => (isRecord(r) && typeof r.vote === 'number' ? [r.vote] : [])) : []
-    const review: CockpitPr['review'] = votes.length === 0 ? undefined : votes.some(v => v < 0) ? 'changes' : votes.some(v => v > 0) ? 'approved' : 'pending'
-    return { number, title: typeof title === 'string' ? title : '', state, isDraft: isDraft === true, ...azureUrl(pr, number), review }
+    return { number, title: typeof title === 'string' ? title : '', ...azureUrl(pr, number) }
   } catch {
     return undefined
   }
@@ -385,11 +350,10 @@ function shellWords(segment: string): { text: string; isQuoted: boolean }[] {
   return words
 }
 
-/** The title and the draft flag of a `gh pr create` command segment: only unquoted words are flags, and a flag's own value is not read as one. */
-function createFlags(segment: string): { title: string; isDraft: boolean } {
+/** The title of a `gh pr create` command segment: only unquoted words are flags, and a flag's own value is not read as one. */
+function createTitle(segment: string): string {
   const words = shellWords(segment)
   let title: string | undefined
-  let isDraft = false
   for (let i = 0; i < words.length; i++) {
     const word = words[i]
     if (!word || word.isQuoted) continue
@@ -401,9 +365,9 @@ function createFlags(segment: string): { title: string; isDraft: boolean } {
         title ??= value.text
         i++
       }
-    } else if (word.text === '--draft' || word.text === '-d') isDraft = true
+    }
   }
-  return { title: title ?? '', isDraft }
+  return title ?? ''
 }
 
 /**
@@ -417,18 +381,18 @@ export function parseCreatedPr(command: string, out: string): CockpitPr | undefi
     const found = /https?:\/\/\S+\/pull\/(\d+)/.exec(out)
     const number = Number(found?.[1])
     if (!found || !Number.isInteger(number) || number <= 0) return undefined
-    // The flags are the create command's own: an `-d` or `-t` of another command of the line is not.
-    const { title, isDraft } = createFlags(commandSegment(command, gh.index))
+    // The flag is the create command's own: a `-t` of another command of the line is not.
+    const title = createTitle(commandSegment(command, gh.index))
     const url = safeUrl(found[0])
-    return { number, title, state: 'open', isDraft, ...(url !== undefined && { url }) }
+    return { number, title, ...(url !== undefined && { url }) }
   }
   if (AZ_PR_CREATE.test(command)) {
     try {
       const pr: unknown = JSON.parse(out.slice(Math.max(0, out.indexOf('{'))))
       if (!isRecord(pr)) return undefined
-      const { pullRequestId: number, title, isDraft } = pr
+      const { pullRequestId: number, title } = pr
       if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
-      return { number, title: typeof title === 'string' ? title : '', state: 'open', isDraft: isDraft === true, ...azureUrl(pr, number) }
+      return { number, title: typeof title === 'string' ? title : '', ...azureUrl(pr, number) }
     } catch {
       return undefined
     }
@@ -454,19 +418,10 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
   const out: CockpitPr[] = []
   for (const v of value.slice(-PRS_KEEP)) {
     if (!isRecord(v)) continue
-    const { number, title, state, isDraft, url, review, checks } = v
+    const { number, title, url } = v
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0 || typeof title !== 'string') continue
-    const count = (n: unknown) => (typeof n === 'number' && Number.isFinite(n) && n >= 0 ? n : 0)
     const link = safeUrl(url)
-    out.push({
-      number,
-      title,
-      state: state === 'merged' || state === 'closed' ? state : 'open',
-      isDraft: isDraft === true,
-      ...(link !== undefined && { url: link }),
-      ...((review === 'approved' || review === 'changes' || review === 'pending') && { review }),
-      ...(isRecord(checks) && { checks: { passed: count(checks.passed), failed: count(checks.failed), pending: count(checks.pending) } }),
-    })
+    out.push({ number, title, ...(link !== undefined && { url: link }) })
   }
   return out
 }
@@ -496,15 +451,4 @@ export function parseEdited(value: unknown): string[] | undefined {
   if (!Array.isArray(value)) return undefined
   const paths = value.filter((v): v is string => typeof v === 'string' && v !== '').slice(-EDITED_KEEP)
   return paths.length > 0 ? paths : undefined
-}
-
-// ── Work: the commits of the branch ──
-
-/** `git log --format=%h%x09%s` -> the commits, newest first; a line without a tab is skipped. */
-export function parseCommits(out: string): { hash: string; subject: string }[] {
-  return out.split('\n').flatMap(line => {
-    const [hash, ...rest] = line.split('\t')
-    const subject = rest.join('\t').trim()
-    return hash && subject !== '' ? [{ hash, subject }] : []
-  })
 }

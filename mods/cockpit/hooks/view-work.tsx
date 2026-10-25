@@ -21,50 +21,12 @@ export function changeSpans(c: CockpitChange, width: number, isEdited = false): 
   return [...counts, sp(' '), sp(truncMiddle(c.path, pathW)), ...(isEdited ? [sp(' ●', COLORS.lavender)] : [])]
 }
 
-const PR_COLORS = { open: COLORS.green, draft: COLORS.yellow, merged: COLORS.violet, closed: COLORS.red } as const
-
-/** The state word of a pull request, a draft told apart from an open one. */
-const prState = (pr: CockpitPr) => {
-  const state = pr.state === 'open' && pr.isDraft ? 'draft' : pr.state
-  return { text: t().prStates[state], color: PR_COLORS[state] }
-}
-
-/** What follows a pull request's number on its row: its state and its title, cut to fit `width` (the number's own cells included). */
+/** What follows a pull request's number on its row: its title, cut to fit `width` (the number's own cells included). */
 export function prSpans(pr: CockpitPr, width: number): Span[] {
-  const { text, color } = prState(pr)
-  const head = ` · ${text}`
-  const titleW = width - textCells(`#${pr.number}${head} · `)
-  return [sp(' · ', COLORS.dim), sp(text, color), ...(pr.title !== '' && titleW >= 4 ? [sp(' · ', COLORS.dim), sp(truncEnd(pr.title, titleW))] : [])]
+  const titleW = width - textCells(`#${pr.number} `)
+  return pr.title !== '' && titleW >= 4 ? [sp(' '), sp(truncEnd(pr.title, titleW))] : []
 }
 
-/** The row under a pull request's: its review and its checks, when known; empty when neither is. */
-export function prDetailSpans(pr: CockpitPr, indent: string, width: number): Span[] {
-  const review = reviewSpans(pr)
-  const checks = checksSpans(pr)
-  if (review.length + checks.length === 0) return []
-  return truncateSpans([sp(indent), ...review, ...(review.length > 0 && checks.length > 0 ? [dim(' · ')] : []), ...checks], width)
-}
-
-const REVIEW_COLORS: Record<NonNullable<CockpitPr['review']>, string> = { approved: COLORS.green, changes: COLORS.red, pending: COLORS.yellow }
-
-/** The review row of a pull request: `review approved`; empty when no review is known. */
-export function reviewSpans(pr: CockpitPr): Span[] {
-  return pr.review === undefined ? [] : [dim(t().review), sp(t().reviews[pr.review], REVIEW_COLORS[pr.review])]
-}
-
-/** The checks row of a pull request: `checks 2/4 · ✗ 1 · ◐ 1` (passed of all, then the failed and the undecided); empty when none are known. */
-export function checksSpans(pr: CockpitPr): Span[] {
-  const c = pr.checks
-  if (!c) return []
-  const total = c.passed + c.failed + c.pending
-  const color = c.failed > 0 ? COLORS.red : c.pending > 0 ? COLORS.yellow : COLORS.green
-  return [
-    dim(t().checks),
-    sp(`${c.passed}/${total}`, color, true),
-    ...(c.failed > 0 ? [dim(' · '), sp(`✗ ${c.failed}`, COLORS.red)] : []),
-    ...(c.pending > 0 ? [dim(' · '), sp(`◐ ${c.pending}`, COLORS.yellow)] : []),
-  ]
-}
 
 /** What the diff pane's button does. */
 export type DiffActions = { close: () => void }

@@ -1,8 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CHECKS, finishAgent, measureWith, MIN, mainTurnEnd, RL_FILE, rlCache, settleAll, spawnAgent, spawns } from './cockpit-fixtures'
-import { GH_SSH, world } from './cockpit-world'
-import type { World } from './cockpit-world'
+import { finishAgent, measureWith, RL_FILE, rlCache, settleAll, spawnAgent, spawns } from './cockpit-fixtures'
+import { world } from './cockpit-world'
 
 // ── Phase 6: alerts ──
 
@@ -58,38 +57,6 @@ test('alerts: a subagent that failed toasts once; one that answered does not', a
   expect(toasts).toEqual([])
   await finishAgent($, 'a1', 'error')
   expect(toasts).toEqual(['subagent reviewer failed'])
-})
-
-test('alerts: PR checks that turned red toast once; green and red again is a new episode', async ($, on) => {
-  const toasts: string[] = []
-  const options: World = { toasts, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { statusCheckRollup: CHECKS } }
-  const clock = world(on, options)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  expect(toasts).toEqual(['PR #42: checks failing'])
-  await clock.advance(5 * MIN + 30_000) // read again, still red: the same episode
-  await mainTurnEnd($) // the branch is read again at the end of a main round
-  await settleAll()
-  expect(toasts).toHaveLength(1)
-  options.prExtra = { statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] }
-  await clock.advance(5 * MIN + 30_000)
-  await mainTurnEnd($) // the branch is read again at the end of a main round
-  await settleAll()
-  options.prExtra = { statusCheckRollup: CHECKS }
-  await clock.advance(5 * MIN + 30_000)
-  await mainTurnEnd($) // the branch is read again at the end of a main round
-  await settleAll()
-  expect(toasts).toEqual(['PR #42: checks failing', 'PR #42: checks failing'])
-})
-
-test('alerts: what a session was resumed with is not news: a saved red PR toasts nothing', async ($, on) => {
-  const toasts: string[] = []
-  const prs = [{ number: 8, title: 'Checks', state: 'open', isDraft: false, checks: { passed: 1, failed: 1, pending: 0 } }]
-  world(on, { toasts, dataFile: JSON.stringify({ history: [], prs }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await settleAll()
-  expect(toasts).toEqual([])
 })
 
 test('alerts: a session resumed above a threshold raises nothing for it; the first live readings are the seed, a rise later toasts', async ($, on) => {

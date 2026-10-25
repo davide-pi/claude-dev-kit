@@ -1,7 +1,7 @@
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { TABS, TAB_ICONS } from '../hooks/session'
+import { TABS } from '../hooks/session'
 import type { CockpitTab } from '../types'
 import { NOW, PANE, rowTexts, settle } from './cockpit-world'
 
@@ -133,18 +133,16 @@ export const tabsAt = async ($: Engine, columns: number) => {
   return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
 }
 
-export const NAMES_EN: Record<CockpitTab, string> = { agents: 'Subagents', context: 'Context', work: 'Work', insights: 'Insights', system: 'System', notes: 'Notes' }
-export const NAMES_IT: Record<CockpitTab, string> = { agents: 'Subagenti', context: 'Contesto', work: 'Lavoro', insights: 'Analisi', system: 'Sistema', notes: 'Note' }
+/** The tab labels: Italian text in both languages. */
+export const NAMES: Record<CockpitTab, string> = { agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' }
 
-/** The tab bar's labels with `selected` named: an icon each, the name beside the selected one's; `extras` adds a badge (` 1`, ` ●`) after a label. */
-export const barLabels = (selected: CockpitTab, extras: Partial<Record<CockpitTab, string>> = {}, names: Record<CockpitTab, string> = NAMES_EN) =>
-  TABS.map(tab => `${TAB_ICONS[tab]}${tab === selected ? ` ${names[tab]}` : ''}${extras[tab] ?? ''}`)
+/** The tab bar's labels: every tab's name; `extras` adds a badge (` 1`, ` ●`) after a label. */
+export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}) => TABS.map(tab => `${NAMES[tab]}${extras[tab] ?? ''}`)
 
 // ── Phase 4: Work, per agent ──
 
 export const PERIMETER = 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n'
 export const workRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'work')).rows
-export const insightsRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'insights')).rows
 
 /** A workflow agent's spawn: `runId` and its place in the run. */
 export const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number) =>
@@ -216,74 +214,12 @@ export function holds() {
   }
 }
 
-// ── Cockpit v3, phase 5: the System tab ──
+// ── Waiting for what a loop the mod left running does ──
 
 export const sleep = (ms: number) => new Promise<void>(resolve => setTimeout(resolve, ms))
 /** Waits (up to a second) for something a loop the mod left running does on its own. */
 export const until = async (isDone: () => boolean) => {
   for (let i = 0; i < 100 && !isDone(); i++) await sleep(10)
-}
-export const GIB = 1024 ** 3
-export const sysLine = (fields: object) => `${JSON.stringify(fields)}\n`
-
-/**
- * A fake monitor behind `$.process.spawn`: prints what the test pushes (and a stderr dot while idle, as the real one prints every
- * 2 s: a loop that was stopped notices at the next piece), notes how it was started and when its stream was closed (a generator ends
- * in `finally` when the loop that reads it stops). It is finite: it ends by itself after two seconds. A stand-in for a call on `$`
- * answers `{ value }`, here the way the child ended.
- */
-export function fakeMonitor(on: On, options: { isBroken?: boolean } = {}) {
-  const monitor = {
-    spawns: [] as { argv: readonly string[]; env?: Record<string, string> }[],
-    stops: 0,
-    isEnded: false,
-    queue: [] as string[],
-    push: (text: string) => void monitor.queue.push(text),
-    /** The monitor exits by itself, as a crash would end it. */
-    end: () => void (monitor.isEnded = true),
-  }
-  on('process.spawn', async function* (_, e) {
-    monitor.spawns.push({ argv: e.argv, env: e.env })
-    if (options.isBroken) throw new Error('spawn node ENOENT')
-    try {
-      for (let i = 0; i < 400; i++) {
-        while (monitor.queue.length > 0) yield { stream: 'stdout' as const, text: monitor.queue.shift() ?? '' }
-        if (monitor.isEnded) return { value: { code: 1, signal: null } }
-        yield { stream: 'stderr' as const, text: '.' }
-        await sleep(5)
-      }
-      return { value: { code: 0, signal: null } }
-    } finally {
-      monitor.stops++
-    }
-  })
-  return monitor
-}
-
-export const FULL_LINE = sysLine({
-  cpu: 37,
-  ram: { used: Math.round(12.4 * GIB), total: 32 * GIB },
-  net: { rx: Math.round(1.2 * 1024 ** 2), tx: 40 * 1024 },
-  procs: [
-    { pid: 7000, name: 'bash', ports: [] },
-    { pid: 7240, name: 'node', ports: [3000, 5173] },
-  ],
-  disk: { free: 120 * GIB, total: 266 * GIB, label: 'D:' },
-})
-
-/** The System tab's rows after `lines` came from the monitor. */
-export async function sistemaRows($: Engine, m: ReturnType<typeof fakeMonitor>, lines: string[], bodyColumns = 50) {
-  await openCockpit($)
-  const ui = await mountPane($, bodyColumns)
-  await settleAll()
-  await ui.press({ key: 'tab:system' })
-  await until(() => m.spawns.length > 0)
-  for (const l of lines) m.push(l)
-  await until(() => m.queue.length === 0)
-  await settleAll()
-  const rows = rowTexts(await ui.drawn())
-  await ui.unmount()
-  return rows
 }
 
 // ── Phase 8: the Notes tab ──

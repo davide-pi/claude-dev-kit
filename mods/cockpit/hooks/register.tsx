@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitProcSort, CockpitSnapshot, CockpitTask } from '../types'
-import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
+import { addHistory, addModelUse, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
 import { compactInstructions, recordCtxSample, recordRound } from './context'
+import { costSummary } from './costs'
 import {
   addStepUsage,
   applyTodos,
@@ -33,7 +34,6 @@ import {
   roundCost,
   toolArg,
 } from './insights'
-import { stopMonitor, syncMonitor } from './monitor'
 import {
   fastTick,
   mediumTick,
@@ -47,6 +47,8 @@ import {
   refreshWorklog,
   slowTick,
 } from './refresh'
+import { cacheHit, usdOf } from './pricing'
+import { refreshProcs } from './procs'
 import { openContext, pressRefresh, scheduleContextRead } from './refresh-context'
 import { refreshGit, refreshRepo, showDiff } from './refresh-git'
 import { NOTE_MAX } from './session'
@@ -54,6 +56,7 @@ import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession,
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
+import { recordAgentEvent, recordEvent } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
 import type { PaneActions } from './view'
 import { diffView } from './view-work'
@@ -74,6 +77,8 @@ let mainTools: string[] = []
 // The last permission waits that ended, as [from, to]: a tool call takes off its running time only the part of them inside its own span (the wait is counted on its own).
 let waits: { from: number; to: number }[] = []
 const WAITS_KEPT = 50
+/** The error text a Cronologia row keeps. */
+const ERROR_EVENT_MAX = 80
 // The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
 const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
 
@@ -95,32 +100,48 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Work tab's git reads, the Context tab's breakdown and the System tab's monitor run while the tab is selected: the press starts them.
+  // The Lavoro tab's git and process reads and the Costi tab's breakdown run while the tab is selected: the press starts them.
   selectTab: tab =>
-    void patch($, s => ({ ...s, tab }))
-      .then(() => syncMonitor($))
-      .then(() => (tab === 'work' ? refreshRepo($) : tab === 'context' ? openContext($) : undefined))
+    void patch($, s => ({ ...s, tab, confirm: undefined, procs: tab === 'work' ? s.procs : undefined, isProcsOff: tab === 'work' ? s.isProcsOff : undefined }))
+      .then(async () => {
+        if (tab === 'work') await Promise.all([refreshRepo($), refreshProcs($)])
+        else if (tab === 'context') await openContext($)
+      })
       .catch(() => undefined),
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
     void read($, snapshot)
       .then(s => $.session.compact({ instructions: compactInstructions({ ...s, workflow: activeRun(s.workflowRun)?.name }) }))
       .catch(() => undefined),
+  // A button that sends something waits for its confirmation; the answer runs it or drops it.
+  ask: kind => void patch($, s => ({ ...s, confirm: kind })).catch(() => undefined),
   // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
-  // `command.run` entry of the engine types).
-  // The hours of this chat: the worklog skill's `sessione <id>` scope.
-  runWorklog: () =>
-    void $.session
-      .id()
-      .then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
+  // `command.run` entry of the engine types). The worklog is the skill's `sessione <id>` scope: the hours of this chat.
+  answer: isYes =>
+    void read($, snapshot)
+      .then(async s => {
+        const asked = s.confirm
+        await patch($, x => ({ ...x, confirm: undefined }))
+        if (!isYes) return
+        if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
+        if (asked === 'suite') await $.command.run({ command: 'retro' })
+      })
       .catch(() => undefined),
+  copySummary: () =>
+    void read($, snapshot)
+      .then(async s => {
+        const box = await $.prompt.read().catch(() => undefined)
+        await $.prompt.fill({ text: `${box?.text === '' ? '' : '\n'}${costSummary(s)}`, mode: 'append' })
+        $.ui.toast(t().summaryCopied)
+      })
+      .catch(() => undefined),
+  filterEvents: kind => void patch($, s => ({ ...s, eventFilter: kind })).catch(() => undefined),
   openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
   refresh: () => void pressRefresh($).catch(() => undefined),
   toggleUsage: id => void patch($, s => ({ ...s, usageOpen: toggled(s.usageOpen, id) })).catch(() => undefined),
   toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
-  sortProcs: (by: CockpitProcSort) => void patch($, s => ({ ...s, procSort: by })).catch(() => undefined),
   setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : text.slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
   saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
   editNote: id =>
@@ -175,6 +196,7 @@ export const register: Register = on => {
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
       isLangRead: true,
+      startedAt: s.startedAt ?? now,
     }))
     await refreshLastRates($)
     await refreshUsage($)
@@ -200,7 +222,6 @@ export const register: Register = on => {
   // leave it in the atom: its agents go to its own history (the ones still running as `interrupted`), and the ended id
   // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
-    stopMonitor()
     markClaudeState(undefined)
     let s: CockpitSnapshot | undefined
     try {
@@ -398,7 +419,12 @@ export const register: Register = on => {
     const ran = await next(e)
     if (isOk(ran)) {
       try {
-        await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))
+        const at = await $.clock.now()
+        await patch($, s => ({
+          ...s,
+          skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill],
+          events: recordEvent(s.events, { at, kind: 'skill', text: e.skill }),
+        }))
       } catch {
         // observing must never break the call
       }
@@ -459,9 +485,11 @@ export const register: Register = on => {
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
+      const failure = isSuccess ? undefined : outcome?.error?.replace(/\s+/g, ' ').trim().slice(0, ERROR_EVENT_MAX)
       await patch($, s => ({
         ...s,
         calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }),
+        events: failure === undefined ? s.events : recordEvent(s.events, { at: ended ?? at ?? s.now, kind: 'error', text: `${tool}: ${failure}` }),
         insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
       })).catch(() => undefined)
       const last = mainTools.at(-1)
@@ -513,7 +541,12 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
-      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
+      const at = await $.clock.now().catch(() => undefined)
+      await patch($, s => ({
+        ...s,
+        insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens),
+        events: recordEvent(s.events, { at: at ?? s.now, kind: 'compaction' }),
+      })).catch(() => undefined)
     }
     return done
   })
@@ -561,25 +594,28 @@ export const register: Register = on => {
         }))
       }
       // The steps already counted their part of the session's tokens: the turn's own total replaces it.
-      await patch($, s => ({
-        ...s,
-        mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
-        mainStepTokens: undefined,
-        lastRoundMs: e.durationMs,
-        // Every main turn is a round of the Context sparkline: the context the engine last measured.
-        ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
-        insights: recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare }),
-      }))
+      await patch($, s => {
+        const insights = recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare, endedAt: now })
+        return {
+          ...s,
+          mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
+          mainStepTokens: undefined,
+          lastRoundMs: e.durationMs,
+          // Every main turn is a round of the Costi sparkline: the context the engine last measured.
+          ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
+          insights,
+          modelUse: usage && s.model ? addModelUse(s.modelUse, s.model, usageOf(usage)) : s.modelUse,
+          events: recordEvent(s.events, { at: now, kind: 'round', key: String(insights.rounds), usd: roundCost(s.cost), ms: e.durationMs }),
+        }
+      })
       await setClaudeState($, { kind: 'idle' })
       await scheduleContextRead($).catch(() => undefined)
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
       await refreshGit($)
       await refreshDoneClaims($)
     } else {
-      await patch($, s => ({
-        ...s,
-        workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
-        agents: upsertAgent(s.agents, agentId, now, a => {
+      await patch($, s => {
+        const agents = upsertAgent(s.agents, agentId, now, a => {
           // The steps already counted their part: the turn's own total replaces it.
           const settled = settleUsage(a.usage, a.stepUsage, usage ? usageOf(usage) : undefined)
           return {
@@ -591,8 +627,18 @@ export const register: Register = on => {
             stepUsage: undefined,
             tokens: usage ? a.tokens - newTokens(a.stepUsage) + newTokens(usageOf(usage)) : a.tokens,
           }
-        }),
-      }))
+        })
+        const ended = agents.find(a => a.id === agentId)
+        return {
+          ...s,
+          workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
+          agents,
+          modelUse: usage && ended?.model ? addModelUse(s.modelUse, ended.model, usageOf(usage)) : s.modelUse,
+          events: ended
+            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
+            : s.events,
+        }
+      })
     }
     return next(e)
   })

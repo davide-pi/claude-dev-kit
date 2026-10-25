@@ -1,34 +1,28 @@
 import { expect, test } from 'claude-code/testing'
 
-import { TAB_ICONS } from '../hooks/session'
 import { textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
-import { FULL_LINE, IT_FILE, MIN, NAMES_IT, barLabels, fakeMonitor, mountPane, paneRows, sistemaRows, tabsAt } from './cockpit-fixtures'
+import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
 import { iso, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-test('English: the tabs, the buttons, the empty state and the titles of every tab are English', async ($, on) => {
+test('English: the tab labels and the footer are Italian text; the other titles are English', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:work'), await label('tab:system'), await label('bar:compact'), await label('bar:worklog')]).toEqual([`${TAB_ICONS.agents} Subagents`, TAB_ICONS.context, TAB_ICONS.work, TAB_ICONS.system, 'compact', 'log hours'])
+  expect([await label('tab:agents'), await label('tab:context'), await label('tab:work'), await label('bar:compact'), await label('bar:suite'), await label('bar:summary')]).toEqual(['Ora', 'Costi', 'Lavoro', 'compact', 'analizza suite', 'copia riepilogo'])
   expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
-  await ui.press({ key: 'tab:work' })
-  expect(rowTexts(await ui.drawn())).toContain('nothing to show')
   await ui.unmount()
-  const narrow = await mountPane($, 40)
-  expect([(await narrow.find({ key: 'tab:agents' }))?.text, (await narrow.find({ key: 'tab:context' }))?.text, (await narrow.find({ key: 'tab:work' }))?.text, (await narrow.find({ key: 'tab:system' }))?.text]).toEqual([TAB_ICONS.agents, TAB_ICONS.context, `${TAB_ICONS.work} Work`, TAB_ICONS.system])
-  await narrow.unmount()
 })
 
 test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {
   const options: World = { files: IT_FILE }
   world(on, options)
-  const tabs = async () => (await tabsAt($, 58)).labels
+  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^SUBAGENTI · /.test(r)) ? 'it' : 'en')
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const italian = barLabels('agents', {}, NAMES_IT)
-  const english = barLabels('agents')
+  const italian = 'it'
+  const english = 'en'
   try {
     await start()
     expect(await tabs()).toEqual(italian)
@@ -61,11 +55,12 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
-    expect((await tabsAt($, 58)).labels).toEqual(barLabels('agents', {}, NAMES_IT))
+    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^SUBAGENTI · /.test(r))
+    expect(await isItalian()).toBe(true)
     // read once: a change of the file is for the next session start
     options.files = {}
     await clock.advance(10) // the first drawing marked the language as read
-    expect((await tabsAt($, 58)).labels).toEqual(barLabels('agents', {}, NAMES_IT))
+    expect(await isItalian()).toBe(true)
   } finally {
     setLang('en')
   }
@@ -94,7 +89,7 @@ const titleBox = (el: unknown, re: RegExp): TitleBox | undefined => {
   return (o.children ?? []).flatMap(c => titleBox(c, re) ?? [])[0]
 }
 
-test('Italian: the process header, the pace title and the trend title are translated, and the title rows fit 40 and 58 columns', async ($, on) => {
+test('Italian: the pace title is translated, and the title rows fit 40 and 58 columns', async ($, on) => {
   const options: World = {
     files: IT_FILE,
     rateLimits: [
@@ -102,7 +97,6 @@ test('Italian: the process header, the pace title and the trend title are transl
       { kind: 'seven_day', percentUsed: 41, resetsAt: iso(2 * 24 * 60 * MIN) },
     ],
   }
-  const m = fakeMonitor(on)
   world(on, options)
   try {
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -115,8 +109,6 @@ test('Italian: the process header, the pace title and the trend title are transl
       expect(titleBox(root, /^CREDITI RESIDUI/)?.props?.flexDirection).toBe(textCells(row) + 1 <= width ? 'row' : 'column')
       expect(textCells(row) + 1 <= width).toBe(columns === 58)
     }
-    const system = await sistemaRows($, m, [FULL_LINE], 40)
-    expect(system.some(r => /^ +PID NOME +CPU +RAM▾ PORTE$/.test(r))).toBe(true)
   } finally {
     setLang('en')
   }

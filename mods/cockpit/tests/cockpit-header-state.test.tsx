@@ -5,7 +5,6 @@ import {
   callAs,
   gatedBash,
   headerOf,
-  insightsRows,
   launchWorkflow,
   loadSkill,
   mountPane,
@@ -96,10 +95,10 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
 
-  await ui.press({ key: 'tab:insights' })
+  await ui.press({ key: 'tab:history' })
   await settleAll()
   reset()
-  await clock.advance(3000) // t = 9 s: Insights has no clock and git is not due yet
+  await clock.advance(3000) // t = 9 s: Cronologia has no clock and git is not due yet
   expect(listCalls).toHaveLength(0)
   expect(statusCalls).toHaveLength(0)
   await clock.advance(1500) // t = 10.5 s: the medium timer ticked
@@ -258,5 +257,5 @@ test('events that really arrive: with the classic events never dispatched, skill
   await ui.press({ key: 'bar:compact' })
   expect(instructions[0]).toContain('Workflow in corso: release-notes.')
   await ui.unmount()
-  expect((await insightsRows($)).some(r => /^SKILLS · 1 used/.test(r))).toBe(true)
+  expect((await paneRows($, 50, 'history')).rows.some(r => /commit/.test(r))).toBe(true)
 })

@@ -14,8 +14,61 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
   return `${isVowel ? (article === 'il' ? "l'" : "all'") : `${article} `}${n}%`
 }
 
+/** Footer buttons and confirmations that read the same in both languages (Italian). */
+const BUTTONS = { analyzeSuite: 'analizza suite', copySummary: 'copia riepilogo', yes: 'sì', no: 'no' }
+
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
+  /** Every tab's label, in the bar: text, never an icon alone. */
+  tabs: { agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' },
+  confirmLog: 'registrare le ore di questa chat?',
+  confirmSuite: 'analizzare la suite? invia /retro al modello',
+  summaryCopied: 'riepilogo nel prompt',
+  waitingSince: (seconds: number) => `in attesa da ${seconds}s`,
+  toolRunning: 'tool in corso',
+  noToolRunning: 'nessun tool in corso',
+  workflowTitle: 'WORKFLOW',
+  workflowLine: (phase: string, round: number | undefined, done: number, total: number) => `${phase}${round === undefined ? '' : ` · giro ${round}`} · agenti ${done}/${total}`,
+  workflowCost: (usd: string) => `${usd} finora`,
+  lastError: 'ultimo errore',
+  signalsTitle: (n: number) => `SEGNALI · ${n}`,
+  noSignals: 'nessun segnale: tutto nella norma',
+  signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
+  eventsTitle: (shown: number, total: number) => `CRONOLOGIA · ${shown === total ? total : `${shown}/${total}`}`,
+  noEvents: 'nessun evento ancora',
+  filterAll: 'tutti',
+  eventKinds: { round: 'giri', skill: 'skill', agent: 'agenti', compaction: 'compattazioni', error: 'errori', block: 'blocchi', stall: 'stall' },
+  eventRow: {
+    round: (usd: string, duration: string) => `giro ${usd} · ${duration}`,
+    skill: (name: string) => `skill ${name}`,
+    agent: (type: string, model: string, usd: string) => `agente ${type} · ${model} · ${usd}`,
+    compaction: 'compattazione',
+    error: (text: string) => `errore ${text}`,
+    block: (rule: string) => `blocco ${rule}`,
+    stall: (name: string) => `STALL workflow ${name}`,
+  },
+  costRounds: (n: number) => `COSTO PER GIRO · ${n}`,
+  costTop: 'primi 3',
+  costAgentsTitle: 'PER AGENTE',
+  costModelsTitle: 'PER MODELLO',
+  costCacheHit: 'cache',
+  costRate: (perHour: string) => `${perHour}/h`,
+  costProjectionTitle: 'RITMO E CREDITI 5h',
+  creditsHold: 'i crediti 5h reggono fino al reset',
+  creditsRunOut: (left: string, reset: string) => `crediti 5h finiti tra ~${left}, prima del reset (${reset})`,
+  noCosts: 'nessun costo ancora',
+  linksTitle: (n: number) => `LINK · ${n}`,
+  workItemsTitle: 'WORK ITEM',
+  procsTitle: 'PROCESSI E PORTE',
+  procsOff: 'processi non leggibili qui',
+  noProcs: 'nessun processo figlio',
+  summaryTitle: 'Riepilogo sessione',
+  summary: {
+    cost: (usd: string, rounds: number, perHour?: string) => `costo ${usd} in ${rounds} giri${perHour === undefined ? '' : `, ${perHour}/h`}`,
+    models: (list: string) => `modelli: ${list}`,
+    credits: (pct: number) => `crediti 5h usati: ${pct}%`,
+    signals: (n: number) => `segnali: ${n}`,
+  },
   cache: 'cache ',
   tokenShare: ' token  ',
   /** The four counters of an agent's row. */
@@ -25,14 +78,23 @@ const SHARED = {
   hookTitle: 'HOOK · done-claim',
   prTitle: 'PR',
   diffTitle: (file: string) => `diff · ${file}`,
+  signalText: {
+    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} pesa ${Math.round(n / 1000)}k token o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
+    opusReadOnly: (a: string) => ({ what: `Opus su un agente di sola lettura (${a})`, why: 'Opus costa molto di più e una lettura non ne ha bisogno', todo: 'imposta model sonnet o haiku per questo tipo di agente' }),
+    bigResult: (tool: string, chars: number) => ({ what: `risultato di ${tool} da ${Math.round(chars / 1000)}k caratteri`, why: 'resta nel contesto a ogni giro e lo gonfia', todo: "limita l'output (filtra, usa head/offset) o compatta" }),
+    reread: (file: string, n: number) => ({ what: `${file} letto ${n} volte`, why: 'ogni lettura ripaga token già spesi', todo: 'ricorda cosa serve del file o leggine solo la parte utile' }),
+    failedCommand: (cmd: string, n: number) => ({ what: `comando fallito ${n} volte: ${cmd}`, why: 'si ripete lo stesso errore senza cambiare approccio', todo: "leggi l'errore, correggi la causa invece di rilanciare" }),
+    coldAfterIdle: (share: number) => ({ what: `cache al ${share}% dopo una pausa lunga`, why: 'la cache è scaduta: il giro ha ripagato tutto il contesto', todo: 'con pause lunghe compatta prima di riprendere' }),
+    ctxGrowth: (n: number) => ({ what: `contesto +${Math.round(n / 1000)}k in pochi giri`, why: 'si avvicina alla compattazione e ogni giro costa di più', todo: 'trova cosa lo ha gonfiato (Costi) e compatta' }),
+    doneClaims: (n: number) => ({ what: `${n} blocchi done-claim`, why: 'il modello dichiara finito senza prove, più volte', todo: 'chiedi la prova (comando e output) prima di accettare' }),
+    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow fermo (STALL)', why: 'nessun agente ha fatto nulla da minuti: forse perso un evento', todo: 'controlla gli agenti in Ora; interrompi o rilancia' } : { what: `workflow al giro ${n}`, why: 'oltre il terzo giro il lavoro non converge', todo: 'fermati e rivedi il perimetro o il criterio' }),
+    permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
+  },
 }
 
 const EN = {
   ...SHARED,
-  /** The selected tab's label and every tab's tooltip; an unselected tab shows its icon only. */
-  tabs: { agents: 'Subagents', context: 'Context', work: 'Work', insights: 'Insights', system: 'System', notes: 'Notes' },
-  procHeader: { pid: 'PID', name: 'NAME', cpu: 'CPU', ram: 'RAM', ports: 'PORTS' },
-  buttons: { compact: 'compact', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
+  buttons: { ...BUTTONS, compact: 'compact', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
 
   // Header
   contextTitle: 'CONTEXT',
@@ -139,7 +201,6 @@ const EN = {
   alertContext: (pct: number) => `context at ${pct}%`,
   alertCredits: (left: number) => `credits 5h: ${left}% left`,
   alertSubagent: (type: string) => `subagent ${type} failed`,
-  alertChecks: (number: number) => `PR #${number}: checks failing`,
   commandDescription: 'Opens the cockpit pane',
   commandOpen: 'cockpit open',
   commandWaiting: (reason: string) => `cockpit waiting: ${reason}`,
@@ -149,9 +210,7 @@ export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  tabs: { agents: 'Subagenti', context: 'Contesto', work: 'Lavoro', insights: 'Analisi', system: 'Sistema', notes: 'Note' },
-  procHeader: { pid: 'PID', name: 'NOME', cpu: 'CPU', ram: 'RAM', ports: 'PORTE' },
-  buttons: { compact: 'compatta', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
+  buttons: { ...BUTTONS, compact: 'compatta', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
 
   contextTitle: 'CONTESTO',
   contextDetailsTitle: 'DETTAGLI CONTESTO',
@@ -256,7 +315,6 @@ const IT: Strings = {
   alertContext: (pct: number) => `contesto ${pctAfter('al', pct)}`,
   alertCredits: (left: number) => `crediti 5h: ${left}% residui`,
   alertSubagent: (type: string) => `subagent ${type} fallito`,
-  alertChecks: (number: number) => `PR #${number}: check falliti`,
   commandDescription: 'Apre il pannello cockpit',
   commandOpen: 'cockpit aperto',
   commandWaiting: (reason: string) => `cockpit in attesa: ${reason}`,

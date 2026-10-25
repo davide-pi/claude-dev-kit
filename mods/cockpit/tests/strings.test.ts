@@ -37,26 +37,25 @@ test('what reads the same in both languages is one value, shared by both bundles
     expect(it.consumerKinds).toBe(en.consumerKinds)
     expect(it.diffTitle).toBe(en.diffTitle)
     for (const key of ['cache', 'tokenShare', 'taskTitle', 'hookTitle', 'prTitle'] as const) expect(it[key]).toBe(en[key])
-    expect(it.tabs).not.toBe(en.tabs)
-    expect(it.procHeader).not.toEqual(en.procHeader)
+    // the Cockpit v4 texts are Italian whatever the language
+    for (const key of ['tabs', 'signalText', 'eventKinds', 'eventRow', 'summary'] as const) expect(it[key]).toBe(en[key])
+    expect(it.buttons.analyzeSuite).toBe(en.buttons.analyzeSuite)
   } finally {
     setLang('en')
   }
 })
 
-test('Italian: the process header, the pace, the trend title and the context block title are translated', () => {
+test('Italian: the pace, the trend title and the context block title are translated', () => {
   try {
     setLang('it')
-    expect(t().procHeader).toEqual({ pid: 'PID', name: 'NOME', cpu: 'CPU', ram: 'RAM', ports: 'PORTE' })
     expect(t().vsExpected).toBe("rispetto all'atteso 7d ")
     expect(t().trendTitle(1)).toBe('ANDAMENTO · 1 giro')
     expect(t().trendTitle(5)).toBe('ANDAMENTO · 5 giri')
     expect(t().contextDetailsTitle).toBe('DETTAGLI CONTESTO')
-    expect(t().tabs.insights).toBe('Analisi')
+    expect(t().tabs).toEqual({ agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' })
     setLang('en')
-    expect(t().procHeader.name).toBe('NAME')
     expect(t().contextDetailsTitle).toBe('CONTEXT DETAILS')
-    expect(t().tabs.insights).toBe('Insights')
+    expect(t().tabs.history).toBe('Cronologia')
   } finally {
     setLang('en')
   }

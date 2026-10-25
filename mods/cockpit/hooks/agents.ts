@@ -51,6 +51,12 @@ export const addUsage = (a: CockpitUsage | undefined, b: CockpitUsage): CockpitU
 })
 
 /** New tokens: input + cache writes + output, cache reads left out (the count an agent's `tokens` keeps). */
+/** `use` with `usage` added to the counters of `model`. */
+export const addModelUse = (use: Readonly<Record<string, CockpitUsage>> | undefined, model: string, usage: CockpitUsage): Record<string, CockpitUsage> => ({
+  ...use,
+  [model]: addUsage(use?.[model], usage),
+})
+
 export const newTokens = (u: CockpitUsage | undefined): number => (u ? u.input + u.output + u.cacheWrite : 0)
 
 /** `total` when a turn ends with its own count `final`: the part its steps added (`step`) is swapped for `final`; no count leaves `total` as the steps made it. */

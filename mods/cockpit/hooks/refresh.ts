@@ -4,6 +4,9 @@ import type { EngineInterface } from 'claude-code'
 import type { CockpitAgent, CockpitHistoryEntry } from '../types'
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
 import { recordCtxAfter } from './insights'
+import { refreshProcs } from './procs'
+import { isStalled } from './signals'
+import { recordEvent } from './timeline'
 import { refreshGit } from './refresh-git'
 import { parseRateCache, resolveAlm, tabNeeds, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
@@ -76,7 +79,12 @@ export async function refreshDoneClaims($: EngineInterface): Promise<void> {
     if (lastClaimsStat?.size === size && lastClaimsStat.mtimeMs === mtimeMs && lastClaimsStat.sessionId === sessionId) return
     const text = await $.fs.read(file)
     const claims = parseDoneClaims(typeof text === 'string' ? text : '', sessionId)
-    await patch($, s => ({ ...s, doneClaims: claims.length > 0 ? claims : undefined }))
+    // every block the hook fired is a Cronologia row, once (its key is its time and rule)
+    await patch($, s => ({
+      ...s,
+      doneClaims: claims.length > 0 ? claims : undefined,
+      events: [...claims].reverse().reduce((events, c) => recordEvent(events, { at: Date.parse(c.at) || s.now, kind: 'block', key: `${c.at}|${c.rule}`, text: c.rule }), s.events),
+    }))
     lastClaimsStat = { size, mtimeMs, sessionId }
   } catch {
     lastClaimsStat = undefined
@@ -155,9 +163,11 @@ async function tickClock($: EngineInterface): Promise<number> {
       .map(toHistory)
       .filter((h): h is CockpitHistoryEntry => h !== undefined)
       .sort((a, b) => b.endedAt - a.endedAt)
+    const stalled = s.workflowRun && isStalled(s.workflowRun, now) ? s.workflowRun : undefined
     return {
       ...s,
       now,
+      events: stalled ? recordEvent(s.events, { at: now, kind: 'stall', key: stalled.runId, text: stalled.name ?? stalled.runId }) : s.events,
       workflowRun,
       agents: agents.filter(isListed),
       history: left.length > 0 ? addHistory(s.history, left) : s.history,
@@ -194,13 +204,16 @@ export async function refreshOnOpen($: EngineInterface): Promise<void> {
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
+  await refreshProcs($)
 }
 
 /** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
 export async function slowTick($: EngineInterface): Promise<void> {
   if (!isOpen) {
-    // The status line's agent badge reads the snapshot: while any agent is running, the local list (no model call) keeps it from staying lit for one that ended unseen.
-    if ((await read($, snapshot)).agents.some(a => a.status === 'running')) await tickClock($).catch(() => undefined)
+    // The status line's badges read the snapshot: while any agent is running, the local list (no model call) keeps the agent badge from staying lit for one that ended unseen;
+    // while a permission waits, the clock lets its `⚠` signal appear once it has waited long enough.
+    const s = await read($, snapshot)
+    if (s.agents.some(a => a.status === 'running') || s.claudeState?.kind === 'waiting') await tickClock($).catch(() => undefined)
     return
   }
   // The file is the proof the pane is open: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow or failing read cannot delay or skip it.
@@ -212,4 +225,5 @@ export async function slowTick($: EngineInterface): Promise<void> {
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
+  await refreshProcs($)
 }
