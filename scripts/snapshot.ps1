@@ -5,11 +5,13 @@
 .DESCRIPTION
   pwsh -NoProfile -File snapshot.ps1 -Since <tree|sha> [-Start <sha>] [-Dirty 'a,b']
 
-  Prints one line: {"tree":"<sha>","files":["a.cs",...],"churn":<n>}
+  Prints one line: {"tree":"<sha>","files":["a.cs",...],"churn":<n>,"big":[{"file":"a.cs","start":<n>,"now":<n>}]}
     tree   the working tree now, untracked files included (ignored ones are not), as a tree object
     files  repo-relative paths that differ between -Start and that tree (new untracked files are in it),
            minus the -Dirty entries; a moved file lists both paths (--no-renames)
     churn  insertions + deletions of `git diff --numstat <Since> <tree>` (binary files count 0)
+    big    the `files` (text only) past 600 lines now, or with 200+ lines at -Start that grew by 30% or more: the line
+           count at -Start (0 for a new file) and now; the loop turns each into a split proposal
 
   -Since  the tree (or commit) the change is measured from: the previous snapshot, or the start head the first time.
   -Start  the commit the whole change started from, the base of `files`; default HEAD. The deliver loop passes it
@@ -87,4 +89,24 @@ foreach ($line in (& git diff --numstat $Since $tree)) {
   foreach ($n in $cols[0..1]) { if ($n -match '^\d+$') { $churn += [int]$n } }
 }
 
-Write-Output ([ordered]@{ tree = $tree; files = $files; churn = $churn } | ConvertTo-Json -Compress)
+# a growth check made mechanical: a file past 600 lines, or 200+ at the start grown by 30% (binary files are "-" in numstat)
+$binary = @{}
+foreach ($line in (& git -c core.quotepath=off diff --no-renames --numstat $Start $tree)) {
+  $cols = $line -split "`t", 3
+  if ($cols.Count -eq 3 -and $cols[0] -eq '-') { $binary[$cols[2]] = $true }
+}
+function LineCount([string]$Rev, [string]$Path) {
+  & git cat-file -e "${Rev}:$Path" 2>$null
+  if ($LASTEXITCODE -ne 0) { return -1 }
+  return @(& git cat-file blob "${Rev}:$Path").Count
+}
+$big = @()
+foreach ($f in $files) {
+  if ($binary.ContainsKey($f)) { continue }
+  $now = LineCount $tree $f
+  if ($now -lt 0) { continue }
+  $was = [math]::Max(0, (LineCount $Start $f))
+  if ($now -gt 600 -or ($was -ge 200 -and $now -ge $was * 1.3)) { $big += [ordered]@{ file = $f; start = $was; now = $now } }
+}
+
+Write-Output ([ordered]@{ tree = $tree; files = $files; churn = $churn; big = @($big) } | ConvertTo-Json -Compress -Depth 4)

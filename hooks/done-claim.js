@@ -34,6 +34,10 @@
  * back once to rewrite the verdict table with fresh output (or "non verificato"); a cut turn whose message holds
  * such a table is judged even when no edit is visible in the part read (the edit may be in the part not read).
  *
+ * A verdict table that passes those checks is still sent back once while the repo's `deliver` perimeter is
+ * `status: active` on the current branch (`payload.cwd`): the loop's findings log is written by
+ * `perimeter.ps1 -Close -FindingsLog` before the verdict (the log notes `perimeter-open`).
+ *
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -60,6 +64,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
@@ -119,6 +124,28 @@ function unprovenRows(rows, resultsText) {
 }
 
 const allow = () => process.exit(0);
+
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
+
+/** True when the repo at `cwd` has a `deliver` perimeter still `status: active` for the branch checked out now. */
+function perimeterOpen(cwd) {
+  try {
+    if (typeof cwd !== 'string' || !cwd) return false;
+    const text = fs.readFileSync(path.join(git(cwd, 'rev-parse', '--absolute-git-dir'), 'deliver', 'perimeter.md'), 'utf8');
+    const branch = /^branch:\s*(.+)$/im.exec(text);
+    return /^status:\s*active\s*$/im.test(text) && !!branch && branch[1].trim() === git(cwd, 'branch', '--show-current');
+  } catch {
+    return false;
+  }
+}
+
+/** A verdict table with the perimeter still active: the findings log was not written; send the turn back once. */
+function blockOpenPerimeter(payload, rows, message) {
+  if (!rows.length || !perimeterOpen(payload.cwd)) return;
+  log(payload, 'perimeter-open', 'verdict', message);
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: 'chiudi il perimetro con -FindingsLog prima del verdetto (perimeter.ps1 -Close -FindingsLog <json>, oppure -NoFindings se il loop non è girato), poi riscrivi il verdetto.' }));
+  process.exit(0);
+}
 
 /**
  * The JSON lines of the transcript from the end back to the start of the turn (the last genuine human prompt), read backward in
@@ -279,7 +306,7 @@ try {
   if (claimsRows) {
     // A verdict table is judged row by row against what the turn printed; the rest of the message does not excuse a row.
     const unproven = unprovenRows(rows, turn.results);
-    if (!unproven.length) allow();
+    if (!unproven.length) { blockOpenPerimeter(payload, rows, message); allow(); }
     if (!turn.complete) {
       // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
       log(payload, 'tail-cut', unproven[0].state, message);
@@ -301,7 +328,7 @@ try {
   }
 
   const word = unprovenClaim(message);
-  if (!word) allow();
+  if (!word) { blockOpenPerimeter(payload, rows, message); allow(); }
 
   if (turn.shellAfterEdit) {
     log(payload, 'shell-ran', word, message);    // counted, not blocked: the output is already in context

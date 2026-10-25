@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -376,4 +376,40 @@ test('a later human prompt ends the turn a delegate armed', () => {
   const claim = verdict(row('Passed: 48, Failed: 0'));
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), say(claim)]).reason, '');
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), tool('Agent'), notification('Passed: 48, Failed: 0'), say(claim)]).reason, '');
+});
+
+// The perimeter of the change must be closed (with its findings log) before the verdict.
+const repoWithPerimeter = (status) => {
+  const repo = mkdtempSync(join(tmpdir(), 'done-repo-'));
+  created.push(repo);
+  const git = (...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: repo, encoding: 'utf8' });
+  git('init', '-b', 'trunk');
+  git('commit', '--allow-empty', '-m', 'init');
+  mkdirSync(join(repo, '.git', 'deliver'));
+  writeFileSync(join(repo, '.git', 'deliver', 'perimeter.md'), `branch: trunk\nstatus: ${status}\n- a.cs\n`);
+  return repo;
+};
+
+test('a proven verdict table is sent back once while the perimeter is still active on this branch', () => {
+  const repo = repoWithPerimeter('active');
+  const final = verdict(row('Passed: 48'));
+  const { reason, dir } = stop(edited(final, 'Passed: 48'), { extra: { cwd: repo } });
+  assert.match(reason, /chiudi il perimetro con -FindingsLog/);
+  assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim()).rule, 'perimeter-open');
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
+});
+
+test('a closed perimeter, another branch, no cwd or no verdict table: silent', () => {
+  const final = verdict(row('Passed: 48'));
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repoWithPerimeter('closed') } }).reason, '');
+  const other = repoWithPerimeter('active');
+  writeFileSync(join(other, '.git', 'deliver', 'perimeter.md'), 'branch: elsewhere\nstatus: active\n- a.cs\n');
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: other } }).reason, '');
+  assert.equal(stop(edited(final, 'Passed: 48')).reason, '');
+  assert.equal(stop(edited('Ho letto il codice, nessuna modifica necessaria.'), { extra: { cwd: repoWithPerimeter('active') } }).reason, '');
+});
+
+test('a verdict of only "non verificato" rows still asks to close an active perimeter', () => {
+  const final = `${head}\n${row('-', 'non verificato: serve staging')}`;
+  assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /chiudi il perimetro/);
 });

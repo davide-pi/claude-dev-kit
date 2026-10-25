@@ -53,7 +53,8 @@ test('snapshot.ps1: a new untracked file and an edit appear in files; the real i
   const out = json(snapshot(repo, '-Since', head, '-Start', head));
   assert.deepEqual([...out.files].sort(), ['a.txt', 'new.txt']);
   assert.equal(out.churn, 6);
-  assert.deepEqual(Object.keys(out), ['tree', 'files', 'churn']);
+  assert.deepEqual(Object.keys(out), ['tree', 'files', 'churn', 'big']);
+  assert.deepEqual(out.big, []);
   assert.equal(git(repo, 'cat-file', '-t', out.tree), 'tree');
   assert.equal(git(repo, 'show', `${out.tree}:new.txt`), 'x\ny');        // the untracked file is in the tree
   assert.ok(readFileSync(join(repo, '.git', 'index')).equals(indexBefore), 'the real index is byte-identical');
@@ -103,6 +104,33 @@ test('snapshot.ps1: usage errors exit 2: no -Since, outside a repository, an unk
   assert.equal(snapshot(repo, '-Since', head, '-Start', 'no-such-rev').status, 2);
   assert.equal(snapshot(sandbox, '-Since', head).status, 2);
   assert.match(snapshot(repo).stderr, /snapshot\.ps1: /);
+});
+
+const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`).join('\n') + '\n';
+
+test('snapshot.ps1: big lists a changed file past 600 lines, or 200+ lines at the start grown by 30%; small, binary and dirty files stay out', { skip }, () => {
+  const { repo } = repoWith('big');
+  writeFileSync(join(repo, 'mid.txt'), lines(200));
+  writeFileSync(join(repo, 'steady.txt'), lines(200));
+  writeFileSync(join(repo, 'huge.txt'), lines(700));
+  git(repo, 'add', '-A');
+  git(repo, 'commit', '-m', 'seed');
+  const start = git(repo, 'rev-parse', 'HEAD');
+  writeFileSync(join(repo, 'mid.txt'), lines(260));                       // 200 -> 260 = +30%
+  writeFileSync(join(repo, 'steady.txt'), lines(259));                    // 200 -> 259 = +29.5%
+  writeFileSync(join(repo, 'huge.txt'), lines(650));                      // shrunk but still past 600
+  writeFileSync(join(repo, 'brand-new.txt'), lines(601));                 // new, past 600
+  writeFileSync(join(repo, 'small-new.txt'), lines(600));                 // new, exactly 600: not past
+  writeFileSync(join(repo, 'a.txt'), 'one\ntwo\nthree\nfour\nfive\n');    // a tiny file grew a lot: under 200 at the start
+  writeFileSync(join(repo, 'blob.bin'), Buffer.alloc(5000, 0));
+  const out = json(snapshot(repo, '-Since', start, '-Start', start));
+  const byFile = Object.fromEntries(out.big.map((b) => [b.file, b]));
+  assert.deepEqual(Object.keys(byFile).sort(), ['brand-new.txt', 'huge.txt', 'mid.txt']);
+  assert.deepEqual(byFile['mid.txt'], { file: 'mid.txt', start: 200, now: 260 });
+  assert.deepEqual(byFile['huge.txt'], { file: 'huge.txt', start: 700, now: 650 });
+  assert.deepEqual(byFile['brand-new.txt'], { file: 'brand-new.txt', start: 0, now: 601 });
+  // a -Dirty file is the user's work, never a proposal
+  assert.deepEqual(json(snapshot(repo, '-Since', start, '-Start', start, '-Dirty', 'mid.txt,huge.txt,brand-new.txt')).big, []);
 });
 
 test('snapshot.ps1: a moved file lists both its old and its new path', { skip }, () => {
