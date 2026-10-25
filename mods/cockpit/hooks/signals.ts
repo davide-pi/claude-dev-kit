@@ -50,14 +50,14 @@ export type Signal = { kind: SignalKind; key: string; label?: string; n?: number
 /** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
 export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
 
-/** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. */
-export type AgentCost = { id: string; type: string; description?: string; model?: string; tokens: number; usd: number; hit?: number }
+/** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. `ms` is the duration of a finished agent, `startedAt` lets a running one be timed; `isFailed` only for a finished one. */
+export type AgentCost = { id: string; type: string; description?: string; effort?: string | number; isRunning?: boolean; isFailed?: boolean; startedAt?: number; ms?: number; model?: string; tokens: number; usd: number; hit?: number }
 
 /** The agents of the session with their cost: live ones from their usage, finished ones (gone from the list) from the agent events. */
 export function agentCosts(agents: readonly CockpitAgent[], events: readonly CockpitEvent[] | undefined): AgentCost[] {
-  const live = agents.map((a): AgentCost => ({ id: a.id, type: a.type, description: a.description?.trim() || undefined, model: a.model, tokens: a.tokens, usd: usdOf(a.model, a.usage), hit: cacheHit(a.usage) }))
+  const live = agents.map((a): AgentCost => ({ id: a.id, type: a.type, description: a.description?.trim() || undefined, effort: a.effort, isRunning: a.status === 'running', isFailed: a.isFailed, startedAt: a.startedAt, ms: a.endedAt === undefined ? undefined : a.endedAt - a.startedAt, model: a.model, tokens: a.tokens, usd: usdOf(a.model, a.usage), hit: cacheHit(a.usage) }))
   const gone = (events ?? []).flatMap((e): AgentCost[] =>
-    e.kind === 'agent' && e.id !== undefined && !live.some(a => a.id === e.id) ? [{ id: e.id, type: e.text ?? '?', description: e.desc?.trim() || undefined, model: e.model, tokens: e.tokens ?? 0, usd: e.usd ?? 0, hit: e.hit }] : [],
+    e.kind === 'agent' && e.id !== undefined && !live.some(a => a.id === e.id) ? [{ id: e.id, type: e.text ?? '?', description: e.desc?.trim() || undefined, effort: e.effort, isFailed: e.isFailed, ms: e.ms, model: e.model, tokens: e.tokens ?? 0, usd: e.usd ?? 0, hit: e.hit }] : [],
   )
   return [...live, ...gone]
 }

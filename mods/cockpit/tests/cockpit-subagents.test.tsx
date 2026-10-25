@@ -1,7 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import { spanText, spanWidth, textCells } from '../hooks/shared'
-import { subagentDetails } from '../hooks/view-agents'
+import { agentCosts } from '../hooks/signals'
+import { agentCostDetails, agentCostRow, subagentDetails } from '../hooks/view-agents'
 import {
   MIN,
   SPAWN,
@@ -618,58 +619,84 @@ test('Subagents: every agent of the session is listed, no cap and no … +n, at 
   }
 })
 
-// ── Context: TOP AGENTS says which agent it was ──
+// ── Context: TOP AGENTS, one row per agent that expands on a press ──
 
-test('Context: a TOP AGENTS row names the agent by its spawn description, the type dim beside it, and by the type alone without one', async ($, on) => {
-  world(on, { listed: [{ id: 'a1', status: 'running' }, { id: 'a2', status: 'running' }] })
+const HIGH = '\u{F12A3}'
+const USAGE = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
+
+/** Two agents (a1 with a description and an effort, a2 with neither) ended; a3 keeps running so the ended ones leave the list after two minutes. */
+async function endedAgents($: Parameters<typeof mountPane>[0], on: Parameters<typeof world>[0]) {
+  const clock = world(on, { listed: [{ id: 'a3', status: 'running' }] })
   spawns(on)
+  on('turn.step', async function* (_, e) {
+    yield { kind: 'text', index: 0, text: 'x' }
+    return { turnId: e.turnId, index: e.index, answer: 'x', toolUses: [], stopReason: 'end_turn', usage: USAGE }
+  })
+  on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review doc XYZ' })
   await $.agent.spawn({ ...SPAWN, subagentType: 'Explore' })
-  const rows = (await paneRows($, 70, 'context')).rows
-  expect(rows.some(r => /^TOP AGENTS/.test(r))).toBe(true)
-  expect(rows.find(r => /Review doc XYZ/.test(r))).toMatch(/^Review doc XYZ reviewer +son 5\.5 +\$0\.00/)
-  expect(rows.find(r => /^Explore/.test(r))).toMatch(/^Explore +son 5\.5 +\$0\.00/)
-  // narrow: the description is cut, the row stays one line within the width
-  const narrow = (await paneRows($, 30, 'context')).rows.find(r => /^Review/.test(r)) ?? ''
-  expect(textCells(narrow)).toBeLessThanOrEqual(30)
+  await spawnAgent($, 'other')
+  for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', effort: 'high', messageCount: 1, agentId: 'a1' })) void chunk
+  await clock.advance(65_000)
+  for (const id of ['a1', 'a2']) await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: `${id}-t`, agentId: id, reason: 'answer', usage: USAGE })
+  return clock
+}
+
+test('Context: a TOP AGENTS row is one line at 30 and 58 columns: name, model word, effort icon, $ and cache hit', async ($, on) => {
+  const clock = await endedAgents($, on)
+  for (let i = 0; i < 3; i++) await clock.advance(60_000)
+  for (const width of [30, 58]) {
+    const ui = await mountPane($, width)
+    await ui.press({ key: 'tab:context' })
+    const row = rowTexts(await ui.drawn()).find(r => r.includes(HIGH) && r.startsWith('review')) ?? ''
+    expect(textCells(row)).toBeLessThanOrEqual(width)
+    expect(row).toMatch(/\$\d/)
+    expect(row.startsWith('review')).toBe(true) // the name keeps at least 5 visible characters, whatever the width
+    if (width === 30) expect(row).not.toMatch(/cache/) // too narrow: the cache hit gives way to the name
+    if (width === 58) expect(row).toMatch(/^reviewer +sonnet \S \$\d+\.\d+ {2}cache 90%$/u)
+    await ui.unmount()
+  }
 })
 
-test('Context: a finished agent that left the list keeps its description in TOP AGENTS through its event', async ($, on) => {
-  const clock = world(on, { listed: [{ id: 'a2', status: 'running' }] })
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review doc XYZ' })
-  await spawnAgent($, 'other')
-  await finishAgent($, 'a1')
-  await clock.advance(130_000)
-  const ui = await mountPane($, 70)
-  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined() // gone from the list: the row below comes from the event
+test('Context: a press on a TOP AGENTS row expands its description, tokens, time, outcome and share of the session cost; a second press collapses; the Agents tab is not opened', async ($, on) => {
+  await endedAgents($, on)
+  const ui = await mountPane($, 58)
   await ui.press({ key: 'tab:context' })
-  expect(rowTexts(await ui.drawn()).find(r => /Review doc XYZ/.test(r))).toMatch(/^Review doc XYZ reviewer/)
+  const rows = async () => rowTexts(await ui.drawn())
+  expect((await rows()).some(r => /Review doc XYZ/.test(r))).toBe(false)
+  await ui.press({ key: 'cost:a1' })
+  const open = await rows()
+  const at = open.findIndex(r => /^reviewer /.test(r))
+  expect(open[at + 1]).toBe('  Review doc XYZ')
+  expect(open[at + 2]).toMatch(/^ {2}tokens /)
+  expect(open[at + 3]).toMatch(/^ {2}time /)
+  expect(open[at + 4]).toBe('  done')
+  await ui.press({ key: 'cost:a1' })
+  expect((await rows()).some(r => /Review doc XYZ/.test(r))).toBe(false)
+  await ui.press({ key: 'cost:a1' })
+  await ui.press({ key: 'tab:agents' })
+  expect((await rows()).some(r => /Review doc XYZ/.test(r))).toBe(false) // the Agents tab's own rows stay collapsed
   await ui.unmount()
 })
 
-test('Context: a TOP AGENTS row of a finished agent with a cache hit stays within a 30 column pane, the model dropped when it does not fit; a blank description shows the type', async ($, on) => {
-  const clock = world(on, { listed: [{ id: 'a3', status: 'running' }] })
-  spawns(on)
-  on('turn.complete', () => ({ text: '' }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review the orders filter and every test around it' })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'Explore', description: '   ' })
-  await spawnAgent($, 'other')
-  const usage = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
-  for (const id of ['a1', 'a2']) await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: `${id}-t`, agentId: id, reason: 'answer', usage })
-  await clock.advance(130_000)
-  const rows = (await paneRows($, 30, 'context')).rows
-  const at = rows.findIndex(r => /^TOP AGENTS/.test(r))
-  const agentRows = rows.slice(at + 2, at + 4)
-  expect(agentRows).toHaveLength(2)
-  for (const r of agentRows) {
-    expect(textCells(r)).toBeLessThanOrEqual(30)
-    expect(r).toMatch(/cache 90%$/)
-    expect(r).not.toMatch(/son 5/)
-  }
-  expect(agentRows.some(r => /^Explo/.test(r))).toBe(true)
+test('Context: a finished agent shows its effort and its duration through its event', async ($, on) => {
+  const clock = await endedAgents($, on)
+  for (let i = 0; i < 3; i++) await clock.advance(60_000)
+  const ui = await mountPane($, 58)
+  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined() // gone from the list: everything below comes from the event
+  await ui.press({ key: 'tab:context' })
+  expect(rowTexts(await ui.drawn()).some(r => /^reviewer /.test(r) && r.includes(HIGH))).toBe(true)
+  await ui.press({ key: 'cost:a1' })
+  expect(rowTexts(await ui.drawn()).some(r => /^ {2}time 1m/.test(r))).toBe(true)
+  await ui.unmount()
+})
+
+test('Context: a TOP AGENTS entry from an event without the newer fields renders, the missing rows left out', () => {
+  const event = { at: 1, kind: 'agent' as const, id: 'old', text: 'Explore', tokens: 5, usd: 0.5 }
+  const [old] = agentCosts([], [event])
+  expect(old).toBeDefined()
+  if (!old) return
+  expect(textCells(spanText(agentCostRow(old, 40)))).toBeLessThanOrEqual(40)
+  expect(agentCostDetails(old, 0, undefined, '  ', 40).map(spanText)).toEqual(['  tokens 5'])
 })

@@ -115,7 +115,7 @@ test('agentCosts: a live agent priced from its counters, a finished one from its
     { at: 2, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
   ]
   expect(agentCosts([live], events)).toEqual([
-    { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', tokens: 10, usd: 2, hit: 0 },
+    { id: 'a1', type: 'implementer', isRunning: true, startedAt: 0, model: 'claude-sonnet-5-5', tokens: 10, usd: 2, hit: 0 },
     { id: 'a2', type: 'Explore', description: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
   ])
 })

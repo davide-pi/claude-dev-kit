@@ -615,7 +615,7 @@ export const register: Register = on => {
           agents,
           modelUse: usage && ended?.model ? addModelUse(s.modelUse, ended.model, usageOf(usage)) : s.modelUse,
           events: ended
-            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
+            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
             : s.events,
         }
       })

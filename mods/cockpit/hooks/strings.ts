@@ -50,6 +50,8 @@ const EN = {
   // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   lastTool: 'last tool ',
+  /** The rows of an expanded TOP AGENTS entry (Context tab). */
+  costDetail: { tokens: (n: string) => `tokens ${n}`, time: (d: string) => `time ${d}`, share: (pct: string) => `${pct} of the session cost`, outcome: { running: 'running', done: 'done', failed: 'failed' } },
   openAgentView: 'open transcript',
   historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
@@ -152,6 +154,7 @@ const IT: Strings = {
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
+  costDetail: { tokens: (n: string) => `token ${n}`, time: (d: string) => `tempo ${d}`, share: (pct: string) => `${pct} del costo della sessione`, outcome: { running: 'in corso', done: 'finito', failed: 'fallito' } },
   openAgentView: 'apri trascrizione',
   historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,

@@ -11,7 +11,7 @@ import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
-import { agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
+import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar } from './view-context'
@@ -232,26 +232,27 @@ export function signalsBlocks(k: Kit): Block[] {
 
 export function contextBlocks(k: Kit): Block[] {
   const { ui, s, width, gap, title, actions } = k
-  const { Button } = ui
+  const { Button, Text } = ui
   const S = t()
 
   // $ and cache hit per model and per agent, priced from the usage counters
   const nameW = Math.max(6, width - 24)
-  const costTail = (usd: number, hit: number | undefined) => [sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)]
-  const costRow = (name: string, usd: number, hit: number | undefined) => line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), ...costTail(usd, hit)])
-  // An agent says what it was: its spawn description, then its type (dim, when it fits) and its model; the type alone without a description
-  const agentCostRow = (a: AgentCost) => {
-    const model = shortModel(a.model)
-    const tail = model && textCells(` ${model}`) < nameW ? ` ${model}` : ''
-    const room = Math.max(1, nameW - textCells(tail))
-    const head = truncEnd(a.description ?? a.type, room)
-    const type = a.description !== undefined && textCells(head) + textCells(` ${a.type}`) <= room ? ` ${a.type}` : ''
-    return line(ui, [sp(head), dim(type), sp(' '.repeat(room - textCells(head) - textCells(type))), sp(tail), ...costTail(a.usd, a.hit)])
-  }
+  const costRow = (name: string, usd: number, hit: number | undefined) =>
+    line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)])
   const models = modelRows(s.modelUse).slice(0, MAX_MODEL_ROWS)
   const modelsBlock: Block = models.length > 0 ? [gap(), title(S.costModelsTitle), gap(), models.map(m => costRow(shortModel(m.model) || m.model, m.usd, m.hit))] : []
   const agents = agentCosts(s.agents, s.events).sort((a, b) => b.usd - a.usd).slice(0, MAX_AGENT_COST_ROWS)
-  const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(agentCostRow)] : []
+  // Each agent is one row, a button: a press expands what it was asked and how it went (its own `cost:` entry of the open list, apart from the Agents tab's)
+  const agentRows = (a: AgentCost): Block => {
+    const id = `cost:${a.id}`
+    return [
+      <Button key={id} plain onPress={() => actions.toggleAgent(id)}>
+        <Text wrap="truncate">{spanNodes(ui, agentCostRow(a, width))}</Text>
+      </Button>,
+      s.agentsOpen?.includes(id) === true && agentCostDetails(a, s.now, s.cost.usd, '  ', width).map(spans => line(ui, spans)),
+    ]
+  }
+  const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(agentRows)] : []
 
   const context = s.context
   const ctxRounds = s.ctxRounds ?? []

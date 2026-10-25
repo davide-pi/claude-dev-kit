@@ -1,6 +1,7 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, abbrevTokens, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans } from './shared'
+import type { AgentCost } from './signals'
+import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -105,6 +106,40 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
     ],
     width,
   )
+}
+
+const COST_W = 7
+/** The TOP AGENTS name is worth keeping to this many cells before the cache hit, then the model, give way. */
+const MIN_NAME_W = 6
+
+/** An agent of the TOP AGENTS list in exactly one row of `width` cells: name (cut with `…` to fit), model, effort icon, then its cost and cache hit; a pane too narrow to leave the name its minimum drops the cache hit, then the model. */
+export function agentCostRow(a: AgentCost, width: number): Span[] {
+  const effort = effortSpans(a.effort)
+  const cost = sp(` ${fmtCost(a.usd).padStart(COST_W)}`, COLORS.yellow)
+  const hit = (gap: string) => dim(a.hit === undefined ? '' : `${gap}${t().costCacheHit} ${a.hit}%`)
+  const model = [sp(' '), sp(padCells(rowModel(a.model), MODEL_W), undefined, a.isRunning)]
+  const icon = [sp(' '), ...(effort.length ? effort : [sp(' ')])]
+  const tails = [[...model, ...icon, cost, hit('  ')], [...model, ...icon, cost, hit(' ')], [...model, ...icon, cost], [...icon, cost]]
+  const minName = Math.min(MIN_NAME_W, textCells(a.type))
+  const tail = tails.find(x => width - spanWidth(x) >= minName) ?? tails[tails.length - 1] ?? []
+  const nameW = Math.max(1, width - spanWidth(tail))
+  return truncateSpans([sp(padCells(truncEnd(a.type, nameW), nameW), undefined, a.isRunning), ...tail], width)
+}
+
+/** The rows under an expanded TOP AGENTS entry: what it was asked, its tokens, its time, how it ended and its share of the session cost; each left out when unknown. */
+export function agentCostDetails(a: AgentCost, now: number, sessionUsd: number | undefined, indent: string, width: number): Span[][] {
+  const D = t().costDetail
+  const ms = a.ms ?? (a.startedAt === undefined ? undefined : now - a.startedAt)
+  const outcome = a.isRunning ? 'running' : a.isFailed === undefined ? undefined : a.isFailed ? 'failed' : 'done'
+  const share = sessionUsd === undefined ? undefined : tokenShare(a.usd, sessionUsd)
+  const row = (text: string | undefined, color?: string): Span[] | undefined => (text === undefined ? undefined : truncateSpans([sp(indent), color ? sp(text, color) : dim(text)], width))
+  return [
+    row(a.description?.replace(/\s+/g, ' ')),
+    row(D.tokens(abbrevTokens(a.tokens))),
+    row(ms === undefined ? undefined : D.time(duration(ms))),
+    row(outcome && D.outcome[outcome], outcome === 'failed' ? COLORS.red : undefined),
+    row(share === undefined ? undefined : D.share(share)),
+  ].filter((r): r is Span[] => r !== undefined)
 }
 
 /** `left` and `right` on one row of `width` cells: a gap between them, the left cut to leave the right whole; a row too short for both is cut. */
