@@ -29,7 +29,7 @@ const BLD = esc("1");   // bold
 // escape sequences carry zero display width — stripAnsi/truncateAnsi skip them.
 const link = (url, label) => (url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label);
 
-// The cockpit mod's palette (hooks/format.ts COLORS), so the status line and the pane read as one.
+// The cockpit mod's palette (hooks/shared.ts COLORS), so the status line and the pane read as one.
 const C = {
   gray:     esc("38;2;140;140;140"),
   dim:      esc("38;2;154;160;170"),
