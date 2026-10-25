@@ -17,14 +17,14 @@ import {
 // ── Compaction instructions, the worklog scope, the deliver perimeter ──
 
 const KEEP =
-  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+  "Keep: tasks in progress, decisions made with the user and why, open questions, files touched and their state, commands with the output line that settles them, next steps. Don't keep: tool output that's already summarised, superseded attempts."
 
 const task = (id: string, subject: string, status: 'pending' | 'in_progress' | 'completed') => ({ id, subject, status })
 
 test('compactInstructions: the keep/drop sentence alone when nothing else is known', () => {
   expect(compactInstructions({})).toBe(KEEP)
   expect(compactInstructions({ tasks: [], perimeter: [] })).toBe(KEEP)
-  // finished tasks are not "in corso"
+  // finished tasks are not open
   expect(compactInstructions({ tasks: [task('1', 'fatto', 'completed')] })).toBe(KEEP)
 })
 
@@ -40,20 +40,20 @@ test('compactInstructions: the open tasks (in progress first, at most 3) and the
     perimeter: ['src/a.ts', 'src/b/', 'tests/**/a*.ts', 'docs/x.md'],
   })
   expect(text.startsWith(KEEP)).toBe(true)
-  expect(text).toContain('Task aperti: in corso; primo pending; terzo.')
+  expect(text).toContain('Open tasks: in corso; primo pending; terzo.')
   expect(text).not.toContain('quarto')
   expect(text).not.toContain('chiuso')
-  expect(text).toContain('Perimetro deliver (4 voci): src/a.ts, src/b/.')
+  expect(text).toContain('Deliver perimeter (4 entries): src/a.ts, src/b/.')
   expect(text).not.toContain('tests/**/a*.ts')
   expect(text).not.toContain('docs/x.md')
-  expect(text).not.toContain('Workflow')
+  expect(text).not.toContain('Running workflow')
   expect(text.length).toBeLessThanOrEqual(400)
 })
 
 test('compactInstructions: a running workflow is named last, and only when it fits', () => {
-  expect(compactInstructions({ workflow: 'release-notes' })).toBe(`${KEEP} Workflow in corso: release-notes.`)
+  expect(compactInstructions({ workflow: 'release-notes' })).toBe(`${KEEP} Running workflow: release-notes.`)
   expect(compactInstructions({ tasks: [task('1', 'in corso', 'in_progress')], perimeter: ['a.ts'], workflow: 'wf' })).toBe(
-    `${KEEP} Task aperti: in corso. Perimetro deliver (1 voce): a.ts. Workflow in corso: wf.`,
+    `${KEEP} Open tasks: in corso. Deliver perimeter (1 entry): a.ts. Running workflow: wf.`,
   )
   const text = compactInstructions({ workflow: 'w'.repeat(500) })
   expect(text.startsWith(KEEP)).toBe(true)
@@ -61,7 +61,7 @@ test('compactInstructions: a running workflow is named last, and only when it fi
 })
 
 test('compactInstructions: each part is optional, and long titles never push it past 400 characters', () => {
-  expect(compactInstructions({ perimeter: ['a.ts'] })).toBe(`${KEEP} Perimetro deliver (1 voce): a.ts.`)
+  expect(compactInstructions({ perimeter: ['a.ts'] })).toBe(`${KEEP} Deliver perimeter (1 entry): a.ts.`)
   const long = 'x'.repeat(200)
   const text = compactInstructions({
     tasks: [task('1', long, 'in_progress'), task('2', long, 'pending'), task('3', long, 'pending')],

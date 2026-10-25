@@ -21,8 +21,6 @@ const SHARED = {
   cache: 'cache ',
   consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   taskTitle: 'TASK',
-  hookTitle: 'HOOK · done-claim',
-  prTitle: 'PR',
   diffTitle: (file: string) => `diff · ${file}`,
   tokenShare: ' token  ',
   /** The four counters of an agent's row. */
@@ -47,10 +45,8 @@ const EN = {
   noRateData: 'no rate-limit data',
   contextAt: (pct: number) => `⚠ context at ${pct}%`,
   requestsLeft: (n: number) => `~${n} ${plural(n, 'request', 'requests')}`,
-  unmapped: 'unmapped',
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
-  waitingSince: (seconds: number) => `waiting for ${seconds}s`,
 
   // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
@@ -94,8 +90,6 @@ const EN = {
   /** The engine's category names in this language; one not listed shows as the engine names it. */
   contextCategories: {} as Record<string, string>,
   consumersTitle: (n: number) => `CONSUMERS · top ${n}`,
-  skillsTitle: (used: number) => `SKILLS · ${used} used`,
-  skillsListed: (listed: number, total: number) => `${listed}/${total} listed`,
   trendTitle: (rounds: number) => `TREND · ${rounds} ${plural(rounds, 'round', 'rounds')}`,
   /** The one line of the trend: where the context went, how fast it grows per round and in how many rounds auto-compaction comes. */
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
@@ -121,45 +115,14 @@ const EN = {
     underTarget: 'under target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}d ${what} (${dates})`,
   },
-  branchTitle: 'BRANCH',
-  upstream: 'upstream ',
-  noUpstream: 'no upstream',
-  commitsFrom: (n: number, base: string) => `${n} ${plural(n, 'commit', 'commits')} from ${base}`,
   changesTitle: 'CHANGES',
   editedHere: '● this chat',
   noChanges: 'no changes',
   linksTitle: (n: number) => `LINKS · ${n}`,
   workItemsTitle: 'work item',
-  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
-  review: 'review ',
-  reviews: { approved: 'approved', changes: 'changes requested', pending: 'pending' },
-  checks: 'checks ',
 
-  // Insights
-  rhythmTitle: 'RHYTHM',
-  rhythm: { rounds: 'rounds', perRound: 'cost / round', costliest: 'costliest', compactions: 'compactions', compactCtx: 'context' },
+  // Context growth
   grewTitle: 'WHAT GREW THE CONTEXT',
-  lastErrorTitle: 'LAST ERROR',
-  timeTitle: 'TIME',
-  time: { model: 'model', tools: 'tools', wait: 'permissions' },
-  toolsTitle: (calls: number) => `TOOLS · ${calls} ${plural(calls, 'call', 'calls')}`,
-  lastTools: 'last',
-  efficiencyTitle: 'EFFICIENCY',
-  efficiency: { cacheHit: 'cache hit' },
-  hintsTitle: 'HINTS',
-  hints: {
-    rereads: (file: string, n: number) => `⚠ ${file} read ${n} times`,
-    coldCache: '⚠ cache under 50% for 3 rounds',
-    failures: (n: number) => `⚠ ${n} failed commands`,
-    subagents: (share: number) => `⚠ subagents used ${share}% of the tokens`,
-    longRound: (length: string) => `⚠ the last round took ${length}`,
-  },
-
-  // System
-  systemTitle: 'SYSTEM',
-  reading: 'reading…',
-  unavailable: 'unavailable',
-  diskFree: 'free',
 
   // Notes
   notesTitle: (n: number) => `NOTES · ${n}`,
@@ -201,9 +164,7 @@ const IT: Strings = {
   noRateData: 'nessun dato sui limiti',
   contextAt: (pct: number) => `⚠ contesto ${pctAfter('al', pct)}`,
   requestsLeft: (n: number) => `~${n} ${plural(n, 'richiesta', 'richieste')}`,
-  unmapped: 'non mappato',
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
-  waitingSince: (seconds: number) => `in attesa da ${seconds}s`,
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
@@ -252,8 +213,6 @@ const IT: Strings = {
     'Autocompact buffer': 'Riserva di compattazione',
   },
   consumersTitle: (n: number) => `CONSUMI · primi ${n}`,
-  skillsTitle: (used: number) => `SKILL · ${used} ${plural(used, 'usata', 'usate')}`,
-  skillsListed: (listed: number, total: number) => `${listed}/${total} elencate`,
   trendTitle: (rounds: number) => `ANDAMENTO · ${rounds} ${plural(rounds, 'giro', 'giri')}`,
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
     `${from} → ${to}${growth ? ` (+${growth}/giro)` : ''}${rounds === undefined ? '' : `, compattazione tra ~${rounds} ${plural(rounds, 'giro', 'giri')}`}`,
@@ -277,43 +236,14 @@ const IT: Strings = {
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
   },
-  branchTitle: 'RAMO',
-  upstream: 'upstream ',
-  noUpstream: 'nessun upstream',
-  commitsFrom: (n: number, base: string) => `${n} commit da ${base}`,
   changesTitle: 'MODIFICHE',
   editedHere: '● questa chat',
   noChanges: 'nessuna modifica',
   linksTitle: (n: number) => `LINK · ${n}`,
   workItemsTitle: 'work item',
-  prStates: { open: 'aperta', draft: 'bozza', merged: 'unita', closed: 'chiusa' },
-  review: 'revisione ',
-  reviews: { approved: 'approvata', changes: 'modifiche richieste', pending: 'in attesa' },
-  checks: 'check ',
 
-  rhythmTitle: 'RITMO',
-  rhythm: { rounds: 'giri', perRound: 'costo / giro', costliest: 'il più caro', compactions: 'compattazioni', compactCtx: 'contesto' },
   grewTitle: 'COSA HA GONFIATO IL CONTESTO',
-  lastErrorTitle: 'ULTIMO ERRORE',
-  timeTitle: 'TEMPO',
-  time: { model: 'modello', tools: 'tool', wait: 'permessi' },
-  toolsTitle: (calls: number) => `TOOL · ${calls} ${plural(calls, 'chiamata', 'chiamate')}`,
-  lastTools: 'ultimi',
-  efficiencyTitle: 'EFFICIENZA',
-  efficiency: { cacheHit: 'cache hit' },
-  hintsTitle: 'SUGGERIMENTI',
-  hints: {
-    rereads: (file: string, n: number) => `⚠ ${file} letto ${n} volte`,
-    coldCache: '⚠ cache sotto il 50% da 3 giri',
-    failures: (n: number) => `⚠ ${n} comandi falliti`,
-    subagents: (share: number) => `⚠ i subagent hanno usato ${pctAfter('il', share)} dei token`,
-    longRound: (length: string) => `⚠ l'ultimo giro è durato ${length}`,
-  },
 
-  systemTitle: 'SISTEMA',
-  reading: 'lettura…',
-  unavailable: 'non disponibile',
-  diskFree: 'liberi',
 
   notesTitle: (n: number) => `NOTE · ${n}`,
   notePlaceholder: 'nota rapida',

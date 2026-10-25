@@ -37,7 +37,7 @@ test('what reads the same in both languages is one value, shared by both bundles
     expect(it.tokenShare).toBe(en.tokenShare)
     expect(it.consumerKinds).toBe(en.consumerKinds)
     expect(it.diffTitle).toBe(en.diffTitle)
-    for (const key of ['cache', 'taskTitle', 'hookTitle', 'prTitle', 'costCacheHit', 'costRate'] as const) expect(it[key]).toBe(en[key])
+    for (const key of ['cache', 'taskTitle', 'costCacheHit', 'costRate'] as const) expect(it[key]).toBe(en[key])
     // the texts of the v4 views are not shared: each language has its own
     for (const key of ['tabs', 'signalText', 'summary', 'signalFields', 'buttons'] as const) expect(it[key]).not.toBe(en[key])
     expect(it.buttons.analyzeSuite).not.toBe(en.buttons.analyzeSuite)
@@ -65,9 +65,6 @@ test('Italian: the pace, the trend title and the context block title are transla
 test('Italian: a percent after its article elides it before a number read with a vowel', () => {
   try {
     setLang('it')
-    for (const [share, text] of [[61, 'il 61%'], [85, "l'85%"], [90, 'il 90%'], [100, 'il 100%'], [11, "l'11%"], [18, 'il 18%'], [80, "l'80%"], [89, "l'89%"]] as const) {
-      expect(t().hints.subagents(share)).toBe(`⚠ i subagent hanno usato ${text} dei token`)
-    }
     for (const [pct, text] of [[80, "all'80%"], [85, "all'85%"], [90, 'al 90%'], [100, 'al 100%']] as const) {
       expect(t().contextAt(pct)).toBe(`⚠ contesto ${text}`)
       expect(t().alertContext(pct)).toBe(`contesto ${text}`)
@@ -91,12 +88,12 @@ test('Italian: the context category names are translated, one the engine adds sh
   }
 })
 
-test('the insights and changes additions are translated', () => {
+test('the context growth and changes additions are translated', () => {
   try {
     setLang('en')
-    expect([t().grewTitle, t().lastErrorTitle, t().rhythm.compactCtx, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', 'LAST ERROR', 'context', '● this chat'])
+    expect([t().grewTitle, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', '● this chat'])
     setLang('it')
-    expect([t().grewTitle, t().lastErrorTitle, t().rhythm.compactCtx, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', 'ULTIMO ERRORE', 'contesto', '● questa chat'])
+    expect([t().grewTitle, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', '● questa chat'])
   } finally {
     setLang('en')
   }

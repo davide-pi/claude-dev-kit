@@ -1,13 +1,11 @@
-import type { CockpitAlm, CockpitSnapshot } from '../types'
-import { almText, parseReset, weeklyPace } from './session'
-import { COLORS, abbrevTokens, countdown, ctxColor, effortGlyph, pctCell, rateColor, truncMiddle } from './shared'
+import type { CockpitSnapshot } from '../types'
+import { parseReset, weeklyPace } from './session'
+import { abbrevTokens, countdown, ctxColor, effortGlyph, pctCell, rateColor } from './shared'
 import type { Span } from './shared'
 import { delta, dim, sp } from './view-base'
 
 const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
-
-const ALM_LABEL = 'ALM '
 
 export const effortSpans = (effort: string | number | undefined): Span[] => {
   const g = effortGlyph(effort)
@@ -66,12 +64,4 @@ export function contextText(s: CockpitSnapshot): Span[] {
 export function rateText(label: string, r: RateRow, now: number): Span[] {
   const cd = countdown(r.resetMs, now)
   return [...pctSpans(r.rem, r.color, r.isStale), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
-}
-
-/** The ALM row cut to `width`: dim label then the target, or `ALM non mappato` in red; empty for a root that names nothing. */
-export function almSpans(alm: CockpitAlm, width: number): Span[] {
-  const text = almText(alm)
-  if (text === '') return []
-  const target = truncMiddle(text, Math.max(0, width - ALM_LABEL.length))
-  return alm.isMapped ? [dim(ALM_LABEL), sp(target)] : [sp(ALM_LABEL + target, COLORS.red)]
 }

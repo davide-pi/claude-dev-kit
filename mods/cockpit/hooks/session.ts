@@ -2,9 +2,6 @@ import type { CockpitAlm, CockpitNote, CockpitRateLimit, CockpitSnapshot, Cockpi
 import { isRecord, shortDate } from './shared'
 import { t } from './strings'
 
-/** The worklog badge is red once the oldest pending day is more than a week old (`YYYY-MM-DD`, local noon). */
-export const isWorklogStale = (oldestIso: string, now: number): boolean => now - Date.parse(`${oldestIso}T12:00:00`) > 7 * 864e5
-
 /** How much should still be left now (`target`) and the signed gap to what is (`delta`, + is ahead). */
 export function weeklyPace(
   remainingPct: number,
@@ -126,13 +123,6 @@ function projectOf(entry: Record<string, unknown>, firstSubfolder: string): stri
     return typeof name === 'string' ? name : undefined
   }
   return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
-}
-
-/** The target alone, `<org> / <project> · <identity>`, each part only when known (empty when none is); `unmapped` when no root matches. */
-export function almText(alm: CockpitAlm): string {
-  if (!alm.isMapped) return t().unmapped
-  const target = [alm.org, alm.project].filter(Boolean).join(' / ')
-  return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
 
 /** The cockpit's tabs, in the order the bar draws them: Agents, Context, Notifications, Work, Notes. */

@@ -53,7 +53,7 @@ export function effortGlyph(effort: string | number | undefined): { icon: string
 export type Span = { t: string; c?: string; dim?: boolean; bold?: boolean; bg?: string }
 
 export const spanWidth = (spans: readonly Span[]): number =>
-  spans.reduce((n, s) => n + [...s.t].length, 0)
+  spans.reduce((n, s) => n + textCells(s.t), 0)
 
 export const spanText = (spans: readonly Span[]): string => spans.map(s => s.t).join('')
 
@@ -115,9 +115,9 @@ export function truncateSpans(spans: readonly Span[], max: number): Span[] {
   let room = max - 1
   for (const s of spans) {
     if (room <= 0) break
-    const chars = [...s.t]
-    out.push(chars.length <= room ? s : { ...s, t: chars.slice(0, room).join('') })
-    room -= chars.length
+    const w = textCells(s.t)
+    out.push(w <= room ? s : { ...s, t: takeCells(s.t, room) })
+    room -= w
   }
   out.push({ t: '…' })
   return out
@@ -204,19 +204,24 @@ export function cellWidth(ch: string): number {
 
 export const textCells = (s: string): number => [...s].reduce((n, ch) => n + cellWidth(ch), 0)
 
-/** Cut the end of a string to `max` cells with an ellipsis; short strings are untouched. */
-export function truncEnd(s: string, max: number): string {
-  if (textCells(s) <= max) return s
-  if (max <= 0) return ''
+/** The longest start of `s` that fits `max` cells. */
+function takeCells(s: string, max: number): string {
   let out = ''
   let used = 0
   for (const ch of s) {
     const w = cellWidth(ch)
-    if (used + w > max - 1) break
+    if (used + w > max) break
     out += ch
     used += w
   }
-  return out + '…'
+  return out
+}
+
+/** Cut the end of a string to `max` cells with an ellipsis; short strings are untouched. */
+export function truncEnd(s: string, max: number): string {
+  if (textCells(s) <= max) return s
+  if (max <= 0) return ''
+  return takeCells(s, max - 1) + '…'
 }
 
 /** Pads with spaces to `n` cells. */
@@ -314,14 +319,6 @@ export const shortDate = (iso: string): string => `${iso.slice(8, 10)}/${iso.sli
 export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
 
 export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
-
-/** `ms` as the local `HH:MM`; empty for a time that is no date. */
-export function hhmm(ms: number): string {
-  const d = new Date(ms)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getHours())}:${p(d.getMinutes())}`
-}
 
 export const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
 

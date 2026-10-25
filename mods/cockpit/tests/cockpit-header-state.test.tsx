@@ -6,12 +6,10 @@ import {
   gatedBash,
   headerOf,
   launchWorkflow,
-  loadSkill,
   mountPane,
   paneRows,
   permissionChecks,
   settleAll,
-  skillTool,
   workflowLaunches,
 } from './cockpit-fixtures'
 import { NOW, flagOf, world } from './cockpit-world'
@@ -253,6 +251,6 @@ test('events that really arrive: with the classic events never dispatched, the w
 
   const ui = await mountPane($)
   await ui.press({ key: 'bar:compact' })
-  expect(instructions[0]).toContain('Workflow in corso: release-notes.')
+  expect(instructions[0]).toContain('Running workflow: release-notes.')
   await ui.unmount()
 })

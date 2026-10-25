@@ -10,6 +10,8 @@ import { patch } from './store'
 const CONTEXT_DEBOUNCE_MS = 2000
 /** An exact count that has not answered after this long is given up on; the Context tab reads summaries again, and a late answer older than the summary read since is discarded. */
 const COUNT_TIMEOUT_MS = 60_000
+/** Opening the Context tab skips the exact count when the last one started less than this long ago. */
+const OPEN_COUNT_GUARD_MS = 15_000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -22,12 +24,14 @@ let countingSince: number | undefined
 let countRun = 0
 // A main turn ended on the Context tab while the exact count ran: its read was skipped, so the count's end makes it.
 let isTurnMissed = false
+// When the last exact count started: opening the tab does not repeat one that fresh.
+let lastCountAt: number | undefined
 // Every context read takes the next number when it starts; the snapshot keeps the number of the reading it holds.
 let contextSeq = 0
 
 /**
  * Reads the context breakdown for the Context tab. `summary` estimates locally and is free; `full` counts with the token-count
- * API and so runs only from the button. A failed read leaves the last reading. Reads overlap (an exact count takes seconds): the
+ * API and so runs from the button and when the tab opens. A failed read leaves the last reading. Reads overlap (an exact count takes seconds): the
  * one asked last wins, so an older answer that arrives after a newer one is dropped; a summary is therefore not read at all while
  * the exact count runs (whoever asks: the tab, the pane opening, a turn), or the count, answering last, would be dropped. An exact count
  * fixes the static rows for the session and every later summary reuses them; `isRound` (the read a main turn's end asks for) stamps the
@@ -57,19 +61,15 @@ async function refreshContext($: EngineInterface, detail: 'summary' | 'full', is
   }
 }
 
-// The session whose first exact count was started (or tried): one per session, a failed one is not asked again on every open.
-let exactTriedFor: string | undefined
-
 /**
- * The Context tab opens: a summary now (free) and, the first time in a session while Claude is idle, one exact count whose static rows
- * every later summary reuses. A tab opened while Claude works reads the summary only: the count waits for an idle opening.
+ * The Context tab opens: a summary now (free), then the same exact count the refresh button runs, so the data is exact on open. A
+ * count that started less than `OPEN_COUNT_GUARD_MS` ago, or one still running, is not started again (quick tab switching).
  */
 export async function openContext($: EngineInterface): Promise<void> {
   await refreshContext($, 'summary')
   const s = await read($, snapshot)
-  const isIdle = s.claudeState === undefined || s.claudeState.kind === 'idle'
-  if (s.sessionId === undefined || exactTriedFor === s.sessionId || s.contextStatic !== undefined || !isIdle || (await isCountRunning($))) return
-  exactTriedFor = s.sessionId
+  const now = await $.clock.now()
+  if (s.sessionId === undefined || (await isCountRunning($)) || (lastCountAt !== undefined && now - lastCountAt < OPEN_COUNT_GUARD_MS)) return
   await countExact($)
 }
 
@@ -93,6 +93,7 @@ async function countExact($: EngineInterface): Promise<void> {
   if (countingSince !== undefined && now - countingSince < COUNT_TIMEOUT_MS) return
   const run = ++countRun
   countingSince = now
+  lastCountAt = now
   try {
     await refreshContext($, 'full')
   } finally {

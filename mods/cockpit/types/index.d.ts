@@ -174,9 +174,6 @@ export type CockpitContext = {
   isExact: boolean
 }
 
-/** One tool call of the main loop, as the main loop's call list keeps it (the Insights tab draws the newest five): the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
-export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
-
 /** The view the pane draws, the tab bar's five buttons: `agents` is Agenti, `context` Contesto, `signals` Notifiche, `work` Lavoro, `notes` Note. */
 export type CockpitTab = 'agents' | 'context' | 'signals' | 'work' | 'notes'
 
@@ -299,8 +296,6 @@ export type CockpitSnapshot = {
   doneClaims?: CockpitDoneClaim[]
   /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
   prs?: CockpitPr[]
-  /** The last eight tool calls of the main loop, oldest first (the subagents' are theirs); per session, not persisted. The Insights tab lists the newest five. */
-  calls?: CockpitToolCall[]
   /** The Work tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
   /** The ring buffer of finished rounds and agents, oldest first. */

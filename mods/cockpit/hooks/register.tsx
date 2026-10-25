@@ -24,7 +24,6 @@ import {
 } from './events'
 import {
   readPathOf,
-  recordCall,
   recordCompaction,
   withContextReading,
   recordRoundEnd,
@@ -486,7 +485,6 @@ export const register: Register = on => {
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
       await patch($, s => ({
         ...s,
-        calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }),
         insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
       })).catch(() => undefined)
       const last = mainTools.at(-1)

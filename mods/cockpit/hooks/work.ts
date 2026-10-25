@@ -294,14 +294,6 @@ export function parseDoneClaims(text: string, sessionId: string | undefined): Co
 export const claimsOf = (claims: readonly CockpitDoneClaim[] | undefined, sessionId: string | undefined): CockpitDoneClaim[] =>
   sessionId === undefined ? [] : (claims ?? []).filter(c => c.session === sessionId).slice(0, CLAIMS_SHOWN)
 
-/** `22/10 09:05`: the log entry's day and time on the local clock; empty for a date that does not parse. */
-export function claimTime(at: string): string {
-  const d = new Date(at)
-  if (Number.isNaN(d.getTime())) return ''
-  const p = (n: number) => String(n).padStart(2, '0')
-  return `${p(d.getDate())}/${p(d.getMonth() + 1)} ${p(d.getHours())}:${p(d.getMinutes())}`
-}
-
 const GH_PR_CREATE = /\bgh\s+pr\s+create\b/
 const AZ_PR_CREATE = /\baz\s+repos\s+pr\s+create\b/
 

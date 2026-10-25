@@ -129,6 +129,9 @@ test('truncateSpans cuts to the width with an unstyled ellipsis and leaves a fit
   expect(spanWidth(truncateSpans(spans, 3))).toBe(3)
   expect(spanText(truncateSpans(spans, 1))).toBe('…')
   expect(truncateSpans(spans, 0)).toEqual([])
+  // wide characters count two cells: the cut row never outgrows the width
+  expect(spanWidth(truncateSpans([{ t: '日本語のエージェント' }], 7))).toBeLessThanOrEqual(7)
+  expect(spanText(truncateSpans([{ t: '日本語のエージェント' }], 7))).toBe('日本語…')
 })
 
 test('taskBarCells: full only when all are done, a task in progress never vanishes, never wider than the bar', () => {

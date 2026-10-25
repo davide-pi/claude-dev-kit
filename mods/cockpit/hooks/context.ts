@@ -150,14 +150,14 @@ export const openTasks = (s: Pick<CockpitSnapshot, 'tasks'>): CockpitTask[] => {
 }
 
 const COMPACT_KEEP =
-  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+  "Keep: tasks in progress, decisions made with the user and why, open questions, files touched and their state, commands with the output line that settles them, next steps. Don't keep: tool output that's already summarised, superseded attempts."
 const COMPACT_MAX = 400
 const COMPACT_ITEM_MAX = 40
 const COMPACT_LIST_MAX = 3
 const COMPACT_PERIMETER_MAX = 2
 
 /**
- * What the summary of `compact` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
+ * What the summary of `compact` should keep, in English and at most 400 characters: the fixed sentence, then what the
  * snapshot knows (the open task titles, the deliver perimeter: its size and first two entries, the name of the workflow
  * in flight), each part only when it fits.
  */
@@ -165,9 +165,9 @@ export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimete
   const cut = (items: readonly string[], max = COMPACT_LIST_MAX) => items.slice(0, max).map(i => truncEnd(i, COMPACT_ITEM_MAX))
   const perimeter = s.perimeter ?? []
   const parts = [
-    { head: 'Task aperti: ', items: cut(openTasks(s).map(t => t.subject)), sep: '; ' },
-    { head: `Perimetro deliver (${perimeter.length} ${perimeter.length === 1 ? 'voce' : 'voci'}): `, items: cut(perimeter, COMPACT_PERIMETER_MAX), sep: ', ' },
-    { head: 'Workflow in corso: ', items: cut(s.workflow ? [s.workflow] : []), sep: '' },
+    { head: 'Open tasks: ', items: cut(openTasks(s).map(t => t.subject)), sep: '; ' },
+    { head: `Deliver perimeter (${perimeter.length} ${perimeter.length === 1 ? 'entry' : 'entries'}): `, items: cut(perimeter, COMPACT_PERIMETER_MAX), sep: ', ' },
+    { head: 'Running workflow: ', items: cut(s.workflow ? [s.workflow] : []), sep: '' },
   ]
   let out = COMPACT_KEEP
   for (const { head, items, sep } of parts) {

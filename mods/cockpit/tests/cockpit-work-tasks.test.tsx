@@ -3,12 +3,12 @@ import type { Engine } from 'claude-code/testing'
 
 import {
   PERIMETER,
-  RED,
-  colorOf,
   createTask,
+  mountPane,
   openCockpit,
   paneRows,
   spawnAgent,
+  settleAll,
   spawns,
   taskRows,
   taskTools,
@@ -168,70 +168,22 @@ test('the list is empty again at session start (a /clear included)', async ($, o
   expect((JSON.parse(second?.[1] ?? 'null') as { tasks: unknown }).tasks).toBeNull()
 })
 
-/** The ALM line of the Work tab, where it sits since the header lost it. */
-const almRow = (rows: string[]): string | undefined => rows.find(r => /^ALM/.test(r))
-const workTab = async ($: Engine, bodyColumns = 50) => paneRows($, bodyColumns, 'work')
-
-test('ALM line at the top of the Work tab, not in the header: org / project and identity, resolved for the cwd', async ($, on) => {
-  world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
+test('Work: no ALM line; the log hours button is the first row of the tab', async ($, on) => {
+  world(on, { sessionId: () => 'chat-7', workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
+  taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(almRow((await paneRows($)).rows)).toBeUndefined()
-  const { rows } = await workTab($)
-  expect(almRow(rows)).toBe('ALM org-a / Alpha · id-a')
-  expect(rows.findIndex(r => /^ALM/.test(r))).toBeLessThan(rows.findIndex(r => /^CHANGES/.test(r)))
-})
-
-test('ALM line: a mapped root with no org, project or identity draws no line', async ($, on) => {
-  world(on, { workspaces: { roots: [{ path: '/work', platform: 'github' }] } })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { rows } = await workTab($)
-  expect(almRow(rows)).toBeUndefined()
-})
-
-test('ALM line is cut in the middle to the pane width', async ($, on) => {
-  const project = 'A-very-long-project-name-that-cannot-fit-in-a-narrow-pane'
-  world(on, { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project, identity: 'id-a' }] } })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const row = almRow((await workTab($, 40)).rows)
-  expect([...(row ?? '')].length).toBe(38)
-  expect(row).toMatch(/^ALM org-a.*….*id-a$/)
-})
-
-test('a workspaces.json that goes missing clears the ALM line; a malformed one too', async ($, on) => {
-  const options: World = { workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
-  const clock = world(on, options)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
-  options.workspacesFail = true
-  await clock.advance(30_000)
-  expect(almRow((await workTab($)).rows)).toBeUndefined()
-  options.workspacesFail = false
-  await clock.advance(30_000)
-  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
-  options.workspaces = 'not a map' // valid JSON, no roots
-  await clock.advance(30_000)
-  expect(almRow((await workTab($)).rows)).toBeUndefined()
-  // text that is not JSON at all: cut in the middle, as a half-written file is
-  options.workspaces = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
-  await clock.advance(30_000)
-  expect(almRow((await workTab($)).rows)).toBe('ALM org-a / Alpha · id-a')
-  options.workspacesRaw = '{ "roots": [ { "path": "/work", "org": '
-  await clock.advance(30_000)
-  expect(almRow((await workTab($)).rows)).toBeUndefined()
-})
-
-test('ALM line reads ALM unmapped in red when no root contains the cwd, and is absent without a map', async ($, on) => {
-  world(on, { workspaces: { roots: [{ path: '/elsewhere', platform: 'github', org: 'o' }] } })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { root, rows } = await workTab($)
-  expect(almRow(rows)).toBe('ALM unmapped')
-  expect(colorOf(root, /^ALM unmapped$/)).toBe(RED)
-})
-
-test('no workspaces map: no ALM line at all', async ($, on) => {
-  world(on)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(almRow((await workTab($)).rows)).toBeUndefined()
+  await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:work' })
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.some(r => /^ALM/.test(r))).toBe(false)
+  expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
+  // the button's row (empty text) comes right after the tab bar's rule, before the MAIN block
+  const main = rows.findIndex(r => /^MAIN/.test(r))
+  expect(rows[main - 3]).toBe('')
+  expect(rows[main - 2]).toMatch(/^─/)
+  await ui.unmount()
 })
 
 test('the other tabs draw the current sections: Agents the agents, Work tasks and worklog warnings, Notifications its own title', async ($, on) => {
@@ -257,12 +209,6 @@ test('the other tabs draw the current sections: Agents the agents, Work tasks an
 })
 
 // ── Phase 2 follow-ups ──
-
-test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
-  world(on, { workspacesRaw: '{ "roots": [ { "path": "/work", "org": ' })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
-})
 
 test('Work with no tasks, no worklog warnings and no git draws no section, and never processes or ports', async ($, on) => {
   world(on, { notRepo: true })

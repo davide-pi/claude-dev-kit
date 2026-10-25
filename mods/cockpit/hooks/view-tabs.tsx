@@ -15,7 +15,6 @@ import { agentIcon, agentRow, agentWarning, fitPair, modelCounts, orderAgents, s
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar, trendSpans } from './view-context'
-import { almSpans } from './view-header'
 import { bigResultSpans } from './view-insights'
 import { changeSpans, prSpans } from './view-work'
 import { repoRelative } from './work'
@@ -363,10 +362,6 @@ export function workBlocks(k: Kit): Block[] {
   const S = t()
   const wl = s.worklog
 
-  // The ALM target of the folder (absent without a workspaces map, or a mapped root that names nothing)
-  const almLine = s.alm ? almSpans(s.alm, width) : []
-  const almPart: Block = almLine.length > 0 ? [gap(), line(ui, almLine)] : []
-
   const counts = taskCounts(s)
   const open = openTasks(s)
   const taskPart: Block =
@@ -441,7 +436,7 @@ export function workBlocks(k: Kit): Block[] {
   ]
   const linksPart: Block = prs.length + items.length > 0 ? [gap(), title(S.linksTitle(prs.length + items.length)), gap(), linkRows] : []
 
-  // `log hours` logs the hours of this chat: here only, behind a confirmation
+  // `log hours` logs the hours of this chat: the first row of the tab, behind a confirmation
   const logPart: Block =
     s.sessionId === undefined
       ? []
@@ -456,7 +451,7 @@ export function workBlocks(k: Kit): Block[] {
               ]),
         ]
 
-  return [almPart, ...principalBlock, changesPart, linksPart, logPart].filter(b => b.length > 0)
+  return [logPart, ...principalBlock, changesPart, linksPart].filter(b => b.length > 0)
 }
 
 // ── Note ──

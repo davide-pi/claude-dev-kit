@@ -1,9 +1,9 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, abbrevTokens, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
-import { dim, pad, padStart, sp } from './view-base'
+import { dim, padStart, sp } from './view-base'
 import { effortSpans, headerEffort } from './view-header'
 
 const TASK_TIME_W = 6
@@ -81,9 +81,9 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
   return [
     agentIcon(a),
     sp(' '),
-    depth > 0 ? sp(pad(truncMiddle(prefix + a.type, nameW), nameW), COLORS.dim) : sp(pad(truncMiddle(a.type, nameW), nameW)),
+    depth > 0 ? sp(padCells(truncEnd(prefix + a.type, nameW), nameW), COLORS.dim) : sp(padCells(truncEnd(a.type, nameW), nameW)),
     sp(' '),
-    sp(pad(shortModel(a.model), 9), undefined, isRunning),
+    sp(padCells(truncEnd(shortModel(a.model), 9), 9), undefined, isRunning),
     sp(' '),
     ...(effortSpans(a.effort).length ? effortSpans(a.effort) : [sp(' ')]),
     sp(' '),

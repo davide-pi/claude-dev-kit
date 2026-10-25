@@ -7,7 +7,6 @@ import {
   azureRepo,
   capDiff,
   checkPerimeter,
-  claimTime,
   claimsOf,
   diffHunks,
   editedPathOf,
@@ -223,11 +222,6 @@ test('claimsOf: the last three blocks of the session, newest first; none without
   expect(claimsOf(list, 'c')).toEqual([])
   expect(claimsOf(list, undefined)).toEqual([])
   expect(claimsOf(undefined, 'a')).toEqual([])
-})
-
-test('claimTime: day/month and hour:minute of the log entry, in the local clock', () => {
-  expect(claimTime(new Date(2026, 9, 22, 9, 5).toISOString())).toBe('22/10 09:05')
-  expect(claimTime('garbage')).toBe('')
 })
 
 test('aheadBehindSpans: the commits ahead and behind the upstream, nothing when level or without one', () => {

@@ -2,7 +2,6 @@ import { expect, test } from 'claude-code/testing'
 
 import { TABS } from '../hooks/session'
 import { setLang } from '../hooks/strings'
-import type { CockpitTab } from '../types'
 import {
   IT_FILE,
   MIN,

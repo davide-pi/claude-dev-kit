@@ -129,9 +129,3 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
 /** The new tokens of the agents a history lists; undefined for an empty one. */
 export const historyTokens = (history: readonly { tokens: number }[] | undefined): number | undefined =>
   history === undefined || history.length === 0 ? undefined : history.reduce((n, h) => n + h.tokens, 0)
-
-/** The subagents' share of the session's tokens, in percent; undefined before any tokens were used. */
-export function subagentShare(s: Pick<CockpitSnapshot, 'mainTokens' | 'agents' | 'agentTokens'>): number | undefined {
-  const total = sessionTokens(s)
-  return total > 0 ? Math.round((100 * (total - (s.mainTokens ?? 0))) / total) : undefined
-}

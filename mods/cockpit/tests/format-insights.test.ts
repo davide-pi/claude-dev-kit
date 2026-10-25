@@ -1,12 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { subagentShare } from '../hooks/agents'
 import {
-  CALLS_KEEP,
   emptyInsights,
-  insightHints,
   readPathOf,
-  recordCall,
   recordCompaction,
   recordCtxAfter,
   recordRoundEnd,
@@ -15,10 +11,8 @@ import {
   resultTokens,
   withContextReading,
   roundCost,
-  timeSplit,
   toolArg,
 } from '../hooks/insights'
-import { INITIAL } from '../hooks/state'
 
 test('toolArg: the short argument of a tool call, one line, a file by its name; none when the call carries nothing to show', () => {
   expect(toolArg({ tool: 'Bash', command: 'git  status\n  --short' })).toBe('git status --short')
@@ -30,15 +24,6 @@ test('toolArg: the short argument of a tool call, one line, a file by its name; 
   expect(toolArg({ tool: 'TodoWrite', todos: [] })).toBeUndefined()
   expect(toolArg({ tool: 'Bash', command: '   ' })).toBeUndefined()
   expect(toolArg({ tool: 'Bash', command: 'x'.repeat(500) })?.length).toBe(120)
-})
-
-test('recordCall keeps the last eight calls, newest last', () => {
-  let calls = recordCall(undefined, { tool: 'Bash', isOk: true, at: 0 })
-  expect(calls).toEqual([{ tool: 'Bash', isOk: true, at: 0 }])
-  for (let i = 1; i <= 9; i++) calls = recordCall(calls, { tool: 'Read', arg: String(i), isOk: i % 2 === 0, at: i })
-  expect(CALLS_KEEP).toBe(8)
-  expect(calls).toHaveLength(8)
-  expect(calls.map(c => c.arg)).toEqual(['2', '3', '4', '5', '6', '7', '8', '9'])
 })
 
 test('toolArg: a search shows its pattern before the folder it looks in', () => {
@@ -85,39 +70,13 @@ test('insights: tool calls are counted by tool with their failures and running t
   expect(readPathOf({ tool: 'Read' })).toBeUndefined()
 })
 
-test('insights: the permission waits and the compactions add up; the time splits into model, tools and waiting', () => {
-  expect(timeSplit(emptyInsights())).toBeUndefined()
+test('insights: the permission waits and the compactions add up', () => {
   let ins = recordRoundEnd(undefined, { ms: 100_000 })
   ins = recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 30_000 })
   ins = recordWait(ins, 10_000)
   ins = recordWait(ins, -5)
   ins = recordCompaction(recordCompaction(ins))
   expect(ins).toMatchObject({ waitMs: 10_000, compactions: 2 })
-  expect(timeSplit(ins)).toEqual({ model: 60_000, tools: 30_000, wait: 10_000, total: 100_000 })
-  // tools that ran side by side can add up to more than the rounds: the total is then theirs
-  expect(timeSplit(recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 90_000 }))).toEqual({ model: 0, tools: 120_000, wait: 10_000, total: 130_000 })
-})
-
-test('insightHints: each hint shows only while its cause holds', () => {
-  const base = { ...INITIAL, sessionId: 's' }
-  expect(insightHints(base)).toEqual([])
-  const reads = (n: number) => ({ ...emptyInsights(), reads: { '/w/src/a.ts': n, '/w/b.ts': 2 } })
-  expect(insightHints({ ...base, insights: reads(5) })).toEqual([])
-  expect(insightHints({ ...base, insights: reads(6) })).toEqual([{ kind: 'rereads', file: 'a.ts', count: 6 }])
-  const shares = (list: number[]) => ({ ...emptyInsights(), cacheShares: list })
-  expect(insightHints({ ...base, insights: shares([10, 20]) })).toEqual([])
-  expect(insightHints({ ...base, insights: shares([90, 10, 20, 49]) })).toEqual([{ kind: 'coldCache' }])
-  expect(insightHints({ ...base, insights: shares([10, 20, 50]) })).toEqual([])
-  const failed = (n: number) => ({ ...emptyInsights(), tools: { Bash: { calls: 20, failed: n }, Read: { calls: 9, failed: 9 } } })
-  expect(insightHints({ ...base, insights: failed(6) })).toEqual([])
-  expect(insightHints({ ...base, insights: failed(7) })).toEqual([{ kind: 'failures', count: 7 }])
-  // subagents over 60 % of the tokens: 600 of 1000 is not over, 610 is
-  expect(subagentShare({ mainTokens: 400, agents: [], agentTokens: 600 })).toBe(60)
-  expect(insightHints({ ...base, mainTokens: 400, agentTokens: 600 })).toEqual([])
-  expect(insightHints({ ...base, mainTokens: 390, agentTokens: 610 })).toEqual([{ kind: 'subagents', share: 61 }])
-  expect(subagentShare({ agents: [], mainTokens: undefined, agentTokens: undefined })).toBeUndefined()
-  expect(insightHints({ ...base, lastRoundMs: 600_000 })).toEqual([])
-  expect(insightHints({ ...base, lastRoundMs: 600_001 })).toEqual([{ kind: 'longRound', ms: 600_001 }])
 })
 
 // ── Cockpit v2 follow-ups ──

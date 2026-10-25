@@ -83,7 +83,7 @@ export function spawns(on: On) {
 }
 
 export const KEEP_DROP =
-  "Tieni: task in corso, decisioni prese con l'utente e il loro perché, domande aperte, file toccati e stato, comandi con la riga di output che decide, prossimi passi. Butta: output di tool già riassunti, tentativi superati."
+  "Keep: tasks in progress, decisions made with the user and why, open questions, files touched and their state, commands with the output line that settles them, next steps. Don't keep: tool output that's already summarised, superseded attempts."
 
 // ── Work: the PRs, read in the background ──
 

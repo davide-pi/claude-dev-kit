@@ -1,7 +1,7 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitChange, CockpitDiff, CockpitPr } from '../types'
-import { COLORS, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, textCells, truncEnd, truncMiddle } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'

@@ -19,7 +19,6 @@ import {
   pctCell,
   signedPctCell,
   spanWidth,
-  textCells,
   truncMiddle,
   truncateSpans,
   ICONS,
@@ -30,7 +29,7 @@ import { t } from './strings'
 import { visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, delta, dim, line, sp } from './view-base'
 import type { Ui } from './view-base'
-import { almSpans, contextText, headerEffort, rateRow, rateText } from './view-header'
+import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit, tabBlocks } from './view-tabs'
 import type { Node, PaneActions } from './view-tabs'

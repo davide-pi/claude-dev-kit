@@ -1,14 +1,10 @@
-import type { CockpitInsights, CockpitSnapshot, CockpitToolCall } from '../types'
-import { subagentShare } from './agents'
+import type { CockpitInsights, CockpitSnapshot } from '../types'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
 import { THRESHOLDS } from './signals'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
-/** The main loop's tool calls kept, and the newest of them the Insights tab lists. */
-export const CALLS_KEEP = 8
-export const CALLS_SHOWN = 5
 const ARG_MAX = 120
 // What a tool call shows of itself, first match: a command, a file (by its name), a pattern (a Grep or Glob shows what it looks for, before the folder it looks in), a folder, an address, a query, a description.
 const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'description', 'skill'] as const
@@ -24,18 +20,9 @@ export function toolArg(input: { readonly [key: string]: unknown }): string | un
   return undefined
 }
 
-/** `calls` with `call` last, cut to the last `CALLS_KEEP`. */
-export const recordCall = (calls: readonly CockpitToolCall[] | undefined, call: CockpitToolCall): CockpitToolCall[] => [...(calls ?? []), call].slice(-CALLS_KEEP)
 
 // ── Insights: what the main loop's events add up to ──
 
-/** The hints' limits: a file read this many times, the cache under `COLD_CACHE_PCT` for `COLD_CACHE_ROUNDS` rounds, this many failed Bash calls, subagents over `SUBAGENT_SHARE_PCT` of the tokens, a round this long. */
-const REREAD_MIN = 6
-const COLD_CACHE_PCT = 50
-const COLD_CACHE_ROUNDS = 3
-const FAILED_COMMANDS_MIN = 7
-const SUBAGENT_SHARE_PCT = 60
-const LONG_ROUND_MS = 10 * 60_000
 /** Tool names and file paths the counts keep: past them a new name is not counted. */
 const INSIGHT_TOOLS_KEEP = 40
 const INSIGHT_READS_KEEP = 200
@@ -149,34 +136,3 @@ export const emptyInsights =(): CockpitInsights => ({ rounds: 0, usd: 0, compact
 /** The file a `Read` call opens, from its input; none for any other call. */
 export const readPathOf = (input: { readonly [key: string]: unknown }): string | undefined =>
   input.tool === 'Read' && typeof input.file_path === 'string' && input.file_path !== '' ? input.file_path.replace(/\\/g, '/') : undefined
-
-/** Where the rounds' time went: the tools' and the permission waits' share of it, the model taking the rest. Tools that ran side by side can add up to more than the rounds: the total then is theirs. Undefined before a round ended. */
-export function timeSplit(ins: CockpitInsights): { model: number; tools: number; wait: number; total: number } | undefined {
-  if (ins.roundMs <= 0) return undefined
-  const total = Math.max(ins.roundMs, ins.toolMs + ins.waitMs)
-  return { model: total - ins.toolMs - ins.waitMs, tools: ins.toolMs, wait: ins.waitMs, total }
-}
-
-/** One automatic hint of the Insights tab, with what it is about. */
-export type CockpitHint =
-  | { kind: 'rereads'; file: string; count: number }
-  | { kind: 'coldCache' }
-  | { kind: 'failures'; count: number }
-  | { kind: 'subagents'; share: number }
-  | { kind: 'longRound'; ms: number }
-
-/** The hints that apply now: each shows only while its cause holds. */
-export function insightHints(s: CockpitSnapshot): CockpitHint[] {
-  const ins = s.insights
-  const out: CockpitHint[] = []
-  const [file, count] = Object.entries(ins?.reads ?? {}).sort((a, b) => b[1] - a[1])[0] ?? []
-  if (file !== undefined && count !== undefined && count >= REREAD_MIN) out.push({ kind: 'rereads', file: baseName(file), count })
-  const last = (ins?.cacheShares ?? []).slice(-COLD_CACHE_ROUNDS)
-  if (last.length === COLD_CACHE_ROUNDS && last.every(share => share < COLD_CACHE_PCT)) out.push({ kind: 'coldCache' })
-  const failed = ins?.tools.Bash?.failed ?? 0
-  if (failed >= FAILED_COMMANDS_MIN) out.push({ kind: 'failures', count: failed })
-  const share = subagentShare(s)
-  if (share !== undefined && share > SUBAGENT_SHARE_PCT) out.push({ kind: 'subagents', share })
-  if (s.lastRoundMs !== undefined && s.lastRoundMs > LONG_ROUND_MS) out.push({ kind: 'longRound', ms: s.lastRoundMs })
-  return out
-}

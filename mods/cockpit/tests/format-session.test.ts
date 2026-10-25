@@ -3,7 +3,6 @@ import { expect, test } from 'claude-code/testing'
 import {
   TABS,
   activeAlerts,
-  almText,
   parseRateCache,
   parseReset,
   resolveAlm,
@@ -72,14 +71,6 @@ test('resolveAlm resolves a directory like the workspaces hook: longest root win
   expect(resolveAlm(undefined, '/w')).toBeUndefined()
   expect(resolveAlm({ roots: 'x' }, '/w')).toBeUndefined()
   expect(resolveAlm({}, '/w')).toBeUndefined()
-})
-
-test('almText: the target only, org / project and the identity; unmapped says so; mapped with nothing is empty', () => {
-  expect(almText({ isMapped: true, org: 'org-a', project: 'Alpha', identity: 'id-a' })).toBe('org-a / Alpha · id-a')
-  expect(almText({ isMapped: true, org: 'gh-org' })).toBe('gh-org')
-  expect(almText({ isMapped: true, identity: 'id-a' })).toBe('id-a')
-  expect(almText({ isMapped: true })).toBe('')
-  expect(almText({ isMapped: false })).toBe('unmapped')
 })
 
 test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
