@@ -277,6 +277,15 @@ test('a short deciding line is proven by whole words only', () => {
   assert.match(stop(edited(verdict(row('exit 0')), 'exit 10')).reason, /"fatto"/);
 });
 
+test('a deciding cell joining real output lines, or with a trailing note, is proven piece by piece; one absent piece blocks', () => {
+  const out = '# pass 673\n# fail 0\ninstalled workflows/impl-review-loop.js\n"permissionDecision":"deny"\nexplore-exit=0';
+  for (const line of ['`# pass 673` / `# fail 0`', '`# pass 673`, `# fail 0`', '`installed workflows/impl-review-loop.js` (e gli altri 3)', 'deny / deny / exit 0']) {
+    assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
+  }
+  assert.match(stop(edited(verdict(row('`# pass 673` / `# fail 1`')), '# pass 673\n# fail 0')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('deny / ok')), '"permissionDecision":"deny"')).reason, /"fatto"/);
+});
+
 test('a placeholder deciding line ("-", empty) is never proven, whatever the results hold', () => {
   assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('')), 'anything')).reason, /"fatto"/);

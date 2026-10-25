@@ -110,6 +110,23 @@ function verdictRows(message) {
   return rows;
 }
 
+/** `text` appears in `printed` as whole words only: a short line ("ok", "0") is not proven by "token" or "10". */
+function printedAsWords(printed, text) {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(printed);
+}
+
+/**
+ * A cell that joins real output lines (`a / b`, `a, b`, `a; b`, `a and b`) or adds a note (`(e gli altri 3)`): proven when it has
+ * at least one non-trivial piece (3+ chars, not a bare word like "deny") and every non-trivial piece is printed ("=" and ":" count as a space).
+ */
+function piecesPrinted(line, printed) {
+  const loose = (s) => s.replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
+  const looseText = loose(printed);
+  const pieces = line.replace(/\([^)]*\)/g, ' ').split(/\s\/\s|,\s|;\s|\sand\s/).map((p) => loose(p)).filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
+  return pieces.length > 0 && pieces.every((p) => printedAsWords(looseText, p));
+}
+
 /** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
 function unprovenRows(rows, resultsText) {
   const printed = normalise(resultsText);
@@ -117,9 +134,7 @@ function unprovenRows(rows, resultsText) {
     if (!PROOF_STATE.test(r.state)) return false;
     const line = normalise(r.line);
     if (!/[\p{L}\p{N}]/u.test(line)) return true;
-    // Whole words only: a short line ("ok", "0") is not proven by "token" or "10".
-    const escaped = line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return !new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(printed);
+    return !printedAsWords(printed, line) && !piecesPrinted(line, printed);
   });
 }
 
