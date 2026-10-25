@@ -1,7 +1,7 @@
 /**
  * PreToolUse hook on Agent|Task: keeps subagent spawns cheap and explicit.
  *
- * Denies a spawn with no `subagent_type`, and a `general-purpose` (or `claude`) spawn with no `model`:
+ * Denies a spawn with no `subagent_type`, and a `general-purpose`, `claude` or `Plan` spawn with no `model`:
  * it would inherit the session model, often Opus. Anything else passes in silence.
  *
  * Not a security guard: any error lets the spawn through. Always exits 0.
@@ -20,8 +20,8 @@ try {
     if (!type) {
       deny('Name the agent type (subagent_type): a kit agent (Explore, analyst, implementer, code-reviewer, …) or `fork`; general-purpose only with an explicit model.');
     }
-    if ((type === 'general-purpose' || type === 'claude') && !input.model) {
-      deny('general-purpose inherits the session model (often Opus): pass model, or use a kit agent with its own model.');
+    if (['general-purpose', 'claude', 'Plan'].includes(type) && !input.model) {
+      deny(`${type} has no model of its own here: pass model (Plan: opus for L, sonnet for M), or use a kit agent with its own model.`);
     }
   }
 } catch {
