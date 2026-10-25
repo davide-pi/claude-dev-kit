@@ -288,7 +288,7 @@ function unprovenClaim(message) {
   return found ? found[1] ?? found[2] : null;
 }
 
-function log(payload, rule, word, message) {
+function log(payload, rule, word, message, excerpt) {
   try {
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     const at = message.search(CLAIM);
@@ -298,7 +298,7 @@ function log(payload, rule, word, message) {
       cwd: payload.cwd,
       rule,
       word,
-      excerpt: message.slice(Math.max(0, at - 60), at + 60).replace(/\s+/g, ' '),
+      excerpt: excerpt ?? message.slice(Math.max(0, at - 60), at + 60).replace(/\s+/g, ' '),
     })}\n`);
   } catch {
     /* the log is for counting, never a reason to fail */
@@ -332,7 +332,8 @@ try {
       }));
       process.exit(0);
     }
-    log(payload, 'unproven-row', unproven[0].state, message);
+    // The excerpt is the failing row itself, so the log shows what the rule judged.
+    log(payload, 'unproven-row', unproven[0].state, message, `${unproven[0].command} | ${unproven[0].line}`.slice(0, 200));
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',

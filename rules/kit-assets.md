@@ -7,7 +7,7 @@ paths: "**/.claude/skills/**,**/.claude/agents/**,**/.claude/hooks/**,**/claude-
   settings. A user-invoked skill carries `disable-model-invocation: true`.
 - Skill skeleton: title, `## When` (+ `Not for:`), `## Decide`, `## Do`, `## Traps`,
   `## References`; caps: SKILL.md 120 lines, reference 200, rule 25, agent body 110; bytes: SKILL.md 7,000,
-  output style 2,500, `CLAUDE.md` 2,700.
+  output style 2,500, `CLAUDE.md` 2,750.
 - Description: opens `Use when`, trigger terms first, third person, short; never a content summary.
 - Rules: frontmatter `paths: "glob1,glob2"`, one comma-separated string (a YAML list is ignored);
   facts only, nothing that must survive `/compact`.
