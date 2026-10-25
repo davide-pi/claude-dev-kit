@@ -53,12 +53,10 @@ Not for: adding or changing logging (`dotnet-diagnostics`); investigating the ca
 | a file sink in `appsettings*.json` | log files |
 | none of the above | list what was checked and stop; never start the app to produce logs |
 
-### Report — returned to the caller, exactly your agent's four sections, ≤ 50 lines
+### Report
 
-`## Source` · `## Window` (window, filter, lines read, lines matched) · `## Lines` (≤ 40 verbatim,
-oldest first, exceptions whole, the middle elided with its count) · `## Reading` (≤ 5 Italian
-lines: the first distinct error, how often, since when). Nothing matched → the window and filter
-used, and the wider window to try next.
+Your agent's four sections, ≤ 50 lines. Nothing matched → the window and filter used, and the wider
+window to try next.
 
 ## Do
 
@@ -74,8 +72,6 @@ Follow command handed back, never run: `docker compose logs <service> -f --since
 
 ## Traps
 
-1. Empty result on a small window → it reads as a healthy service → widen `--since` and `-n` before
-   loosening the filter.
-2. A .NET exception cut to its first line → `-Context 0,N` too small → keep the frames.
-3. Grafana tools missing → the local MCP proxy is down → say so once, fall back to local sources.
-4. A token or connection string inside a matched line → quote it as `<redacted>` and say so.
+1. A .NET exception cut to its first line → `-Context 0,N` too small → keep the frames.
+2. Empty result, missing Grafana tools, a secret in a line: the narrow-first, tools-absent and redact rules
+   of your agent.

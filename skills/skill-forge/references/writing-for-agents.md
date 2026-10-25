@@ -99,3 +99,4 @@ The no-op test is model-relative, not reader-relative: settle a disagreement by 
    cover 80 % of cases.
 6. Every check the asset adds (a test, a hook, a validator rule) was seen failing once on a bad input: a
    check never seen failing proves nothing.
+7. Instructions are CLI first with the fallback stated; examples in PowerShell unless bash is genuinely better.

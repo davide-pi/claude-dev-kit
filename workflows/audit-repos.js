@@ -16,6 +16,7 @@ const root = typeof input.root === 'string' && input.root.trim() ? input.root.tr
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const effort = EFFORTS.includes(input.effort) ? input.effort : 'medium'
 const MAX_HITS = 10
+const MAX_REPOS = 12
 
 const RULE = [
   '1. Every repository gets the same question, verbatim, read-only.',
@@ -64,14 +65,17 @@ if (!repos) {
   const found = await agent(
     `List every git repository under ${root}: a directory that contains a .git entry, at most two levels deep. Return absolute paths. Read-only.`,
     { label: 'discover', phase: 'Discover', agentType: 'Explore', schema: REPOS },
-  )
-  repos = found?.repos ?? []
+  ).catch(() => null)
+  if (!found) return 'audit-repos: discovery step failed: pass repos explicitly or retry.'
+  repos = found.repos ?? []
 }
+repos = [...new Set(repos.map(r => r.trim().replace(/[\\/]+$/, '')).filter(Boolean))]
 if (!repos.length) return `audit-repos: no git repository found under ${root}.`
+if (repos.length > MAX_REPOS) return `audit-repos: ${repos.length} repositories is above the cap of ${MAX_REPOS}: pass repos explicitly.`
 log(`${repos.length} repositories -> ${repos.length} auditor(s), no merger agent: the rule ranks in the script`)
 
 const prompt = repo => [
-  `Repository: ${repo}. Work only inside it, read-only: Read, Grep, Glob, and git log/show/grep. Never edit, build, install or fetch.`,
+  `Repository: ${repo}. Work only inside it.`,
   `Question: ${question}`,
   `Effort: ${effort}.`,
   'Status: ISSUES (hits, each with repo-relative path:line and the quoted evidence), PASS (nothing found; `checked` names what you searched and how), BLOCKED (you could not answer; `blockedReason`).',
@@ -89,8 +93,13 @@ const settle = (result, repo) => {
 }
 
 phase('Audit')
+const parts = repo => repo.split(/[\\/]/).filter(Boolean)
+const base = repo => parts(repo).pop() ?? repo
+const dupes = new Set(repos.map(base).filter((b, i, all) => all.indexOf(b) !== i))
+// The same basename twice: prefix the parent folder so labels and the table stay unambiguous.
+const shortName = repo => dupes.has(base(repo)) ? parts(repo).slice(-2).join('/') : base(repo)
 const answers = await pipeline(repos, repo => agent(prompt(repo), {
-  label: repo.split(/[\\/]/).filter(Boolean).pop() ?? repo,
+  label: shortName(repo),
   phase: 'Audit',
   agentType: 'Explore',
   model: 'haiku',
@@ -101,7 +110,7 @@ const answers = await pipeline(repos, repo => agent(prompt(repo), {
 phase('Rank')
 const all = answers.map((a, i) => a ?? settle(null, repos[i]))
 const count = (a, p) => a.hits.filter(h => h.priority === p).length
-const name = a => a.repo.split(/[\\/]/).filter(Boolean).pop() ?? a.repo
+const name = a => shortName(a.repo)
 const withHits = all.filter(a => a.status !== 'BLOCKED' && a.hits.length)
   .sort((x, y) => count(y, 'P1') - count(x, 'P1') || count(y, 'P2') - count(x, 'P2')
     || y.hits.length - x.hits.length || name(x).localeCompare(name(y)))

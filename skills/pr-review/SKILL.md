@@ -44,7 +44,7 @@ Not for: the working diff without a PR (`/code-review`), writing the PR (`pr-cre
 | Effort (default `medium`) | Spawn, in **one message** |
 | --- | --- |
 | `low`, `medium` | `code-reviewer` (frontmatter model) |
-| `high`, `xhigh`, `max` | `code-reviewer` ×2 with the **same brief**, differing only in `model` (A: omitted → sonnet; B: `opus`) + `review-security` + `review-performance` |
+| `high`, `xhigh`, `max` | `code-reviewer` A (omitted → sonnet) + `review-security` + `review-performance`; from `xhigh` also B (`opus`), **same brief**, differing only in `model` |
 | `[focus]` given | the matching specialist alone — a focus overrides the effort (or the generalist told to hold that axis) |
 
 Same anchor and same defect from both models → `CONFIRMED`, sorted first; one model only →

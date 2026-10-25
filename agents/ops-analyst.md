@@ -3,7 +3,7 @@ name: ops-analyst
 description: >-
   Use when logs, metrics, profiles or traces of a running service are needed, or `/logs` runs:
   Grafana/Loki, compose, containers, kubectl, Aspire, log files.
-tools: Read, Grep, Glob, Bash, PowerShell, mcp__grafana-staging__*, mcp__grafana-prod__*
+tools: Read, Grep, Glob, Bash, PowerShell, Skill, mcp__grafana-staging__*, mcp__grafana-prod__*
 model: sonnet
 effort: medium
 mcpServers:
@@ -13,8 +13,6 @@ mcpServers:
   - grafana-prod:
       type: http
       url: http://localhost:8001/mcp
-skills:
-  - dotnet-diagnostics
 maxTurns: 30
 ---
 
@@ -24,7 +22,8 @@ maxTurns: 30
 deletes anything, never writes through Grafana · prose in Italian, log lines and names verbatim.
 
 You read logs, metrics, profiles and traces so the caller does not have to hold them. Grafana exists
-only here: its server is defined inline in this file and never reaches the main conversation.
+only here: its server is defined inline in this file and never reaches the main conversation. For a
+.NET service's counters, traces or dumps load the `dotnet-diagnostics` skill with the Skill tool when the task needs it.
 
 ## Input
 

@@ -60,17 +60,12 @@ Integrated security → `-E`. A password in a connection string is masked before
 | DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements, Redis writes | refuse: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is the user's to type |
 | `KEYS`, `MONITOR`, `CONFIG`, `DEBUG` | `SCAN` instead (`KEYS` blocks the server); `db-ro.ps1` refuses them on a read-only target |
 | a read on a table of unknown size | `COUNT(*)` first, then `TOP 50` / `LIMIT 50`, projected to the columns that answer |
-| a non-dev host | only `db-ro.ps1`, the statement in single quotes (`-Query 'SELECT …'`, a quote doubled): `$`, `(`, `@` or a backtick outside them prompts; exit `3` = read-only could not be proven → stop, report its message; exit `4` = the credential holds write grants → return the grant list and ask the caller **once per target**; on a yes re-run with `-AcceptWriteGrant` (the permission prompt asks the user, the hook never auto-approves it; the filter is then the only layer: say so in the report); never another route |
-| header `readonly=NO(local)` | a dev target opened for writes: run no writing statement the request did not ask for |
+| a non-dev host | only `db-ro.ps1`, by your agent's rules (probe, exit `3` stop, exit `4` ask the caller once per target, quoting); never another route |
 
-### Report — returned to the caller, ≤ 55 lines
+### Report
 
-1. One line: engine · host · database (never credentials).
-2. The statement exactly as run, fenced `sql`.
-3. The rows as a markdown table, real column names as headers; more than 50 → the count and the
-   first 50.
-4. One Italian reading line where the result is not self-explanatory. Empty → `0 righe` and what
-   that rules out.
+Your agent's `/db` mode output (≤ 55 lines), headed by one line: engine · host · database, never
+credentials. An empty result: `0 righe` and what that rules out.
 
 ## Do
 
@@ -86,8 +81,7 @@ sqlcmd -S <host> -d <db> -E -W -s "|" -Q "EXEC sp_help '<schema>.<table>'"
 psql -h <host> -U <user> -d <db> --no-psqlrc -c "\d+ <schema>.<table>"
 ```
 
-The client per host (dev direct or inside the container, everything else `db-ro.ps1`) is your agent
-table; follow it.
+The client per host is your agent's table.
 
 ## Traps
 

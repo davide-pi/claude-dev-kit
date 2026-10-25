@@ -4,7 +4,7 @@ description: >-
   Use when about to run `git commit`, or the user says "commit" or "committa": writes the Italian
   message from the diff. Never pushes.
 argument-hint: "[branch] | -b [new-branch] | -m \"message\""
-allowed-tools: Bash(git add*), Bash(git commit*), PowerShell(git add*), PowerShell(git commit*)
+allowed-tools: Bash(git add*), Bash(git commit*), Bash(git switch*), PowerShell(git add*), PowerShell(git commit*), PowerShell(git switch*)
 ---
 
 # commit — one commit, the message generated from the diff

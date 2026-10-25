@@ -1,8 +1,8 @@
 ---
 name: dotnet-diagnostics
 description: >-
-  Use when evidence is needed from a running .NET service: production logs, metrics, profiles,
-  counters, traces, dumps; or deciding what to log or instrument.
+  Use when evidence is needed from a running .NET service: metrics, profiles, counters,
+  traces, dumps; or deciding what to log or instrument.
 ---
 
 # dotnet-diagnostics — the instruments, production first

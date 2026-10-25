@@ -57,7 +57,9 @@ Close with one Italian line: the obvious next step and its owner (`plan-work`, `
 ## Do
 
 ```powershell
-az boards work-item show --id <id> --expand all --org https://dev.azure.com/<org> -o json
+# the fields the sections use; --fields cannot combine with --expand, so the links are a second call
+az boards work-item show --id <id> --org https://dev.azure.com/<org> --fields System.Id,System.WorkItemType,System.State,System.Title,System.AssignedTo,System.Description,Microsoft.VSTS.TCM.ReproSteps,Microsoft.VSTS.Common.AcceptanceCriteria,Microsoft.VSTS.Scheduling.Effort,Microsoft.VSTS.Common.Priority,System.AreaPath,System.IterationPath -o json
+az boards work-item show --id <id> --org https://dev.azure.com/<org> --expand relations --query "relations[].{rel:rel,url:url,name:attributes.name}" -o json
 # comments: no az verb — REST invoke, preview-only; the api-version that works lives in azdo-cli
 az devops invoke --area wit --resource comments --org https://dev.azure.com/<org> `
   --route-parameters project=<project> workItemId=<id> --api-version <preview-version> -o json

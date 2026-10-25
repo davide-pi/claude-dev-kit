@@ -21,12 +21,13 @@ const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 
 const AsyncFunction = (async () => {}).constructor;
 
 /** Runs the workflow on `count` fake files; returns what it spawned, logged and returned. */
-async function dryRun(count, extra = {}) {
-  const files = Array.from({ length: count }, (_, i) => `src/f${i}.cs`);
+async function dryRun(count, extra = {}, handler = null, noFiles = false) {
+  const files = noFiles ? undefined : Array.from({ length: count }, (_, i) => `src/f${i}.cs`);
   const spawned = [];
   const logs = [];
   const agent = async (_prompt, opts = {}) => {
-    spawned.push(opts);
+    spawned.push({ ...opts, prompt: _prompt });
+    if (handler) { const h = await handler(opts, _prompt); if (h !== undefined) return h; }
     return opts.label === 'merge' ? 'REPORT' : { status: 'PASS', checked: 'read it', findings: [] };
   };
   const parallel = (thunks) => Promise.all(thunks.map((t) => t()));
@@ -37,22 +38,22 @@ async function dryRun(count, extra = {}) {
   return { out, logs, reviewers, spawned };
 }
 
-test('30 files at high effort: 5 reviewers x 2 models, the count logged before any reviewer runs', async () => {
-  const { logs, reviewers, spawned } = await dryRun(30, { effort: 'high', modelB: 'opus' });
+test('30 files at xhigh effort: 5 reviewers x 2 models, the count logged before any reviewer runs', async () => {
+  const { logs, reviewers, spawned } = await dryRun(30, { effort: 'xhigh', modelB: 'opus' });
   assert.equal(reviewers.length, 10);
   assert.equal(reviewers.filter((r) => r.model === 'opus').length, 5);
   assert.equal(spawned.length, 11, '10 reviewers + the merger');
   assert.ok(logs.some((l) => /5 reviewers x 2 models/.test(l) && /11 agents/.test(l)), logs.join('\n'));
 });
 
-test('modelB is honoured only at high effort and above', async () => {
+test('modelB is honoured only at xhigh effort and above', async () => {
   const { reviewers } = await dryRun(12, { effort: 'medium', modelB: 'opus' });
   assert.equal(reviewers.length, 2, 'one model: 12 files / 6 per reviewer');
-  assert.ok(reviewers.every((r) => r.model === undefined), 'no second model below high');
+  assert.ok(reviewers.every((r) => r.model === undefined), 'no second model below xhigh');
 });
 
 test('above 8 reviewers it refuses, naming the two ways out', async () => {
-  for (const [count, extra] of [[60, { effort: 'high' }], [49, { effort: 'low' }]]) {
+  for (const [count, extra] of [[60, { effort: 'xhigh' }], [49, { effort: 'low' }]]) {
     const { out, spawned } = await dryRun(count, extra);
     assert.match(out, /above the cap of 8/);
     assert.match(out, /Narrow `files` or raise `filesPerReviewer`/);
@@ -64,4 +65,57 @@ test('raising filesPerReviewer brings a big diff under the cap', async () => {
   const { reviewers, out } = await dryRun(60, { effort: 'low', filesPerReviewer: 10 });
   assert.equal(reviewers.length, 6);
   assert.equal(out, 'REPORT');
+});
+
+test('reviewers get the effort; the merger runs on sonnet', async () => {
+  const { reviewers, spawned } = await dryRun(6, { effort: 'high' });
+  assert.ok(reviewers.every((r) => r.effort === 'high'));
+  assert.equal(spawned.find((o) => o.label === 'merge').model, 'sonnet');
+});
+
+test('modelB outside the allowed models is refused before any spawn', async () => {
+  const { out, spawned } = await dryRun(6, { effort: 'high', modelB: 'gpt' });
+  assert.match(out, /modelB "gpt" is not one of/);
+  assert.equal(spawned.length, 0);
+});
+
+test('a null scope agent is an error message, not "no changed files"', async () => {
+  const { out } = await dryRun(0, {}, (o) => (o.label === 'scope' ? null : undefined), true);
+  assert.match(out, /scope step failed: pass files or retry/);
+});
+
+test('a rejecting scope agent is the same error', async () => {
+  const { out } = await dryRun(0, {}, (o) => { if (o.label === 'scope') throw new Error('boom'); }, true);
+  assert.match(out, /scope step failed/);
+});
+
+test('an empty scope answer is still "no changed files"', async () => {
+  const { out } = await dryRun(0, {}, (o) => (o.label === 'scope' ? { files: [] } : undefined), true);
+  assert.match(out, /no changed files/);
+});
+
+test('a rejecting reviewer is a gap, the merger still runs', async () => {
+  const { out, spawned } = await dryRun(6, {}, (o) => { if (o.agentType === 'code-reviewer') throw new Error('boom'); });
+  assert.equal(out, 'REPORT');
+  const merge = spawned.find((o) => o.label === 'merge');
+  assert.match(merge.prompt, /BLOCKED/);
+});
+
+test('a null merger returns the raw findings table', async () => {
+  const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
+  const { out } = await dryRun(6, {}, (o) => (o.label === 'merge' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
+  assert.match(out, /merger returned nothing/);
+  assert.ok(out.includes('| 1 | P2 | PLAUSIBLE | correctness | src/a.cs:3 | Rotto | A |'), out);
+});
+
+test('A and B findings on the same anchor reach the merger as one CONFIRMED, checked is capped', async () => {
+  const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
+  const { spawned } = await dryRun(6, { effort: 'xhigh' }, (o) => (o.agentType === 'code-reviewer'
+    ? { status: 'ISSUES', checked: 'c'.repeat(1000), findings: [finding] } : undefined));
+  const prompt = spawned.find((o) => o.label === 'merge').prompt;
+  const input = JSON.parse(prompt.slice(prompt.indexOf('Results (JSON):') + 16));
+  assert.equal(input.findings.length, 1);
+  assert.equal(input.findings[0].foundBy, 'A+B');
+  assert.equal(input.findings[0].verdict, 'CONFIRMED');
+  assert.ok(input.workers.every((w) => w.checked.length === 300));
 });

@@ -13,7 +13,8 @@ import { readFileSync, readdirSync, existsSync, statSync } from 'node:fs';
 import { join, dirname, basename, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
+// VALIDATE_ROOT lets tools/validate.test.mjs run the rules against a fixture tree.
+const ROOT = process.env.VALIDATE_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..');
 const errors = [];
 const warnings = [];
 const fail = (file, msg) => errors.push(`${file}: ${msg}`);
@@ -28,6 +29,7 @@ function walk(dir = '', out = []) {
     if (['.git', 'node_modules', '.remember', '.claude'].includes(entry.name)) continue;
     const rel = dir ? `${dir}/${entry.name}` : entry.name;
     if (rel === 'evals/results') continue; // untracked run output of `claude plugin eval`
+    if (rel === 'tools/fixtures/validate') continue; // deliberately small kits for validate.test.mjs
     if (entry.isDirectory()) walk(rel, out);
     else out.push(rel);
   }
@@ -61,6 +63,13 @@ function frontMatter(rel) {
 }
 
 // ── 1. JSON parses, and settings.json points at things that exist ─────────────
+const HOOK_EVENTS = [
+  'PreToolUse', 'PostToolUse', 'PostToolUseFailure', 'PostToolBatch', 'PermissionRequest', 'PermissionDenied',
+  'UserPromptSubmit', 'UserPromptExpansion', 'Notification', 'Stop', 'StopFailure', 'SubagentStart', 'SubagentStop',
+  'TaskCreated', 'TaskCompleted', 'TeammateIdle', 'SessionStart', 'SessionEnd', 'Setup', 'InstructionsLoaded',
+  'ConfigChange', 'CwdChanged', 'FileChanged', 'WorktreeCreate', 'WorktreeRemove', 'PreCompact', 'PostCompact',
+  'Elicitation', 'ElicitationResult',
+];
 let settings = null;
 for (const rel of allFiles.filter((f) => f.endsWith('.json'))) {
   try {
@@ -72,8 +81,15 @@ for (const rel of allFiles.filter((f) => f.endsWith('.json'))) {
 }
 
 if (settings) {
+  for (const event of Object.keys(settings.hooks ?? {})) {
+    if (!HOOK_EVENTS.includes(event)) fail('settings.json', `hook event '${event}' is not a known event (a typo means the hook never fires)`);
+  }
   const hookEvents = Object.values(settings.hooks ?? {}).flat();
   for (const group of hookEvents) {
+    // An absent, empty or "*" matcher means every tool; anything else is compiled as a regex.
+    if (group.matcher && group.matcher !== '*') {
+      try { new RegExp(group.matcher); } catch (e) { fail('settings.json', `hook matcher '${group.matcher}' is not a valid regex — ${e.message}`); }
+    }
     for (const hook of group.hooks ?? []) {
       const line = [hook.command, ...(hook.args ?? [])].join(' ');
       // Hook scripts are resolved through CLAUDE_HOOKS (PowerShell `$env:CLAUDE_HOOKS\x.ps1`, or
@@ -112,11 +128,21 @@ if (settings) {
 // Every description of a skill and agent is loaded into every session's listing, so they share one
 // budget: a description that grows pushes the others out of view. Collected below, checked once
 // both kinds are read.
+// Only listed descriptions are paid every turn: agents, and skills that are neither `disable-model-invocation`
+// nor gated by `paths:`. The budget is skill-forge's: ~1 % of a 200 k window, in characters.
 const descriptionBudget = [];
-const DESCRIPTION_BUDGET_CHARS = 9500;  // ~60% of the total before the audit's cuts
+const hiddenDescriptions = [];
+const DESCRIPTION_BUDGET_CHARS = 8000;
+const DESCRIPTION_MAX_CHARS = 1536;  // skill-forge's per-description limit
 const SKILL_DESCRIPTION_WORDS = 25;
 const words = (text) => text.split(/\s+/).filter(Boolean).length;
 
+const TOOLS = new Set([
+  'Read', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit', 'Bash', 'PowerShell', 'Glob', 'Grep', 'LSP', 'Skill', 'Agent', 'Task',
+  'WebFetch', 'WebSearch', 'TodoWrite', 'AskUserQuestion', 'Monitor', 'ToolSearch', 'SendMessage', 'BashOutput', 'KillShell',
+  'TaskOutput', 'TaskStop', 'TaskCreate', 'TaskGet', 'TaskList', 'TaskUpdate', 'EnterPlanMode', 'ExitPlanMode',
+  'ListMcpResources', 'ReadMcpResource', 'Workflow', 'SubagentHandback',
+]);
 const AGENT_MODELS = ['sonnet', 'opus', 'haiku', 'fable', 'inherit'];
 const agentNames = new Set();
 
@@ -134,6 +160,9 @@ for (const rel of allFiles.filter((f) => f.startsWith('agents/') && f.endsWith('
   }
   if (fm.model && !AGENT_MODELS.includes(fm.model)) fail(rel, `model '${fm.model}' is not one of ${AGENT_MODELS.join(', ')}`);
   if (fm.tools !== undefined && fm.tools.trim() === '') fail(rel, '`tools` is present but empty — the agent would have no tools');
+  for (const tool of (fm.tools ?? '').split(',').map((t) => t.trim().replace(/\(.*$/, '')).filter(Boolean)) {
+    if (!tool.startsWith('mcp__') && !TOOLS.has(tool)) fail(rel, `tool '${tool}' is not a known tool name (an unknown name is silently ignored)`);
+  }
 
   // The contract line and the output section are what let a caller merge several agents' reports
   // without reading the prompt; `memory` is a place the agent writes to, so it needs a write tool.
@@ -182,7 +211,7 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
   else if (fm.name !== dir) fail(rel, `front-matter name '${fm.name}' does not match the directory '${dir}'`);
   if (!fm.description) fail(rel, 'front matter has no `description` — skills trigger from it');
   else {
-    if (fm.description.length > 1024) fail(rel, `description is ${fm.description.length} chars; keep it under 1024`);
+    if (fm.description.length > DESCRIPTION_MAX_CHARS) fail(rel, `description is ${fm.description.length} chars; keep it under ${DESCRIPTION_MAX_CHARS}`);
     if (EXPLICIT_TRIGGER.includes(dir) && !new RegExp(`/${dir}\\b`).test(fm.description)) {
       fail(rel, `is trigger-only but its description never names /${dir}, so it can fire unasked`);
     }
@@ -190,7 +219,8 @@ for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('
       fail(rel, `description is ${words(fm.description)} words; keep it to ${SKILL_DESCRIPTION_WORDS} — say when, not what`);
     }
     if (!/^Use when\b/.test(fm.description)) fail(rel, 'description must open with `Use when` — it is a trigger, not a summary');
-    descriptionBudget.push([rel, fm.description]);
+    if (fm['disable-model-invocation'] === 'true' || fm.paths) hiddenDescriptions.push([rel, fm.description]);
+    else descriptionBudget.push([rel, fm.description]);
   }
   if (EXPLICIT_TRIGGER.includes(dir) && fm['disable-model-invocation'] !== 'true') {
     fail(rel, 'is trigger-only but lacks `disable-model-invocation: true`, so the model can still invoke it');
@@ -219,11 +249,12 @@ for (const rel of allFiles.filter((f) => /^rules\/[\w.-]+\.md$/.test(f))) {
   if (lines > RULE_LINES) fail(rel, `${lines} lines against the ${RULE_LINES}-line cap for a rule — facts only, procedure in the skill`);
 }
 
+const hiddenTotal = hiddenDescriptions.reduce((sum, [, d]) => sum + d.length, 0);
 const descriptionTotal = descriptionBudget.reduce((sum, [, d]) => sum + d.length, 0);
 if (descriptionTotal > DESCRIPTION_BUDGET_CHARS) {
   const top = [...descriptionBudget].sort((a, b) => b[1].length - a[1].length).slice(0, 5)
     .map(([rel, d]) => `${rel} (${d.length})`).join(', ');
-  fail('descriptions', `skills + agents total ${descriptionTotal} chars against a budget of ${DESCRIPTION_BUDGET_CHARS}. Largest: ${top}`);
+  fail('descriptions', `listed skills + agents total ${descriptionTotal} chars against a budget of ${DESCRIPTION_BUDGET_CHARS}. Largest: ${top}`);
 }
 
 // ── 3. Nothing machine-specific or secret ────────────────────────────────────
@@ -485,12 +516,49 @@ for (const rel of textFiles) {
   }
 }
 
+// ── 6b. Relative requires and imports resolve ───────────────────────────────
+// A hook that requires a file nobody committed fails at its first run, on a machine that never saw the repo.
+// Test files are left out: they carry such specimens as strings.
+const RELATIVE_REF = /(?:\brequire\(\s*|\bimport\(\s*|\bfrom\s+|^\s*import\s+)['"](\.{1,2}\/[^'"]+)['"]/gm;
+for (const rel of allFiles.filter((f) => /^(?:hooks\/(?:lib\/)?[\w.-]+\.(?:js|cjs|mjs)|tools\/(?![\w.-]*\.test\.mjs)[\w.-]+\.mjs)$/.test(f))) {
+  const text = read(rel);
+  for (const m of text.matchAll(RELATIVE_REF)) {
+    const base = join(dirname(rel), m[1]).replace(/\\/g, '/');
+    const ok = [base, `${base}.js`, `${base}.mjs`, `${base}.cjs`, `${base}.json`, `${base}/index.js`].some((c) => {
+      const abs = join(ROOT, c);
+      return existsSync(abs) && statSync(abs).isFile();
+    });
+    if (!ok) fail(`${rel}:${text.slice(0, m.index).split('\n').length}`, `requires ${m[1]}, which does not resolve`);
+  }
+}
+
+// ── 6c. Byte caps: what is injected every session or invocation ─────────────
+// CLAUDE.md and the output style load every turn; a SKILL.md re-injects on invocation, cut from the bottom.
+// BYTE_CAP_WARN_ONLY lists files over a cap whose trim another change owns: they warn until trimmed.
+const BYTE_CAPS = [
+  [(f) => f === 'CLAUDE.md', 2700, 'CLAUDE.md'],
+  [(f) => /^output-styles\/[\w.-]+\.md$/.test(f), 2500, 'an output style'],
+  [(f) => /^skills\/[\w-]+\/SKILL\.md$/.test(f), 7000, 'SKILL.md'],
+];
+const BYTE_CAP_WARN_ONLY = new Set(['CLAUDE.md', 'skills/deliver/SKILL.md']);
+for (const rel of allFiles) {
+  for (const [matches, cap, kind] of BYTE_CAPS) {
+    if (!matches(rel)) continue;
+    const bytes = statSync(join(ROOT, rel)).size;
+    if (bytes <= cap) continue;
+    const msg = `${bytes} bytes against the ${cap}-byte cap for ${kind}`;
+    if (BYTE_CAP_WARN_ONLY.has(rel)) warn(rel, `${msg} — scheduled for the trim`);
+    else fail(rel, `${msg}. Move depth into references/ or cut restatements`);
+  }
+}
+
 // ── 7. Saved workflows ───────────────────────────────────────────────────────
 // The runtime strips `export` and runs the file as the body of an async function whose parameters are
 // the orchestration primitives. So `meta` must be the first statement, the body must compile there,
 // and nothing may be non-deterministic or imported: a workflow is replayed, and `Date.now()` or an
 // `import` would break the replay or the compile, silently, at the first `/<name>`.
 const AsyncFunction = (async () => {}).constructor;
+const BUILTIN_AGENTS = ['Explore', 'Plan', 'general-purpose'];
 const WORKFLOW_PARAMS = ['args', 'agent', 'parallel', 'pipeline', 'phase', 'log', 'budget', 'workflow'];
 for (const rel of allFiles.filter((f) => /^workflows\/[\w.-]+\.js$/.test(f))) {
   const src = read(rel);
@@ -498,6 +566,12 @@ for (const rel of allFiles.filter((f) => /^workflows\/[\w.-]+\.js$/.test(f))) {
   const code = src.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
   if (/\bDate\.now\s*\(|\bnew Date\s*\(|\bMath\.random\s*\(/.test(code)) fail(rel, 'uses Date.now, new Date or Math.random — a workflow must be deterministic');
   if (/^\s*import\s/m.test(code)) fail(rel, 'has an import — the body runs inside a function, where imports do not exist');
+  for (const m of code.matchAll(/\bagentType:\s*'([^']+)'/g)) {
+    if (!agentNames.has(m[1]) && !BUILTIN_AGENTS.includes(m[1])) fail(rel, `agentType '${m[1]}' is neither agents/${m[1]}.md nor a built-in agent`);
+  }
+  for (const m of code.matchAll(/\bmodel:\s*'([^']+)'/g)) {
+    if (!AGENT_MODELS.includes(m[1])) fail(rel, `model '${m[1]}' is not one of ${AGENT_MODELS.join(', ')}`);
+  }
   try {
     new AsyncFunction(...WORKFLOW_PARAMS, src.replace(/^export /, ''));
   } catch (e) {
@@ -507,7 +581,7 @@ for (const rel of allFiles.filter((f) => /^workflows\/[\w.-]+\.js$/.test(f))) {
 
 // ── Report ───────────────────────────────────────────────────────────────────
 const label = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
-console.log(`descriptions: ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars across ${descriptionBudget.length} skills and agents`);
+console.log(`descriptions: listed ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars (${descriptionBudget.length} agents and skills), hidden ${hiddenTotal} chars (${hiddenDescriptions.length} skills: user-invoked or paths-gated)`);
 
 // In Actions, also emit annotations so findings land on the file and line in the PR view.
 if (process.env.GITHUB_ACTIONS) {

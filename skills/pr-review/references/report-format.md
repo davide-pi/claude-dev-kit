@@ -9,7 +9,8 @@ so every report **ends** with the summary tables, after all the detail.
 | Request | Agents, spawned in one message |
 | --- | --- |
 | any review (`/pr-review`, `/code-review`, an ad-hoc "review this"), effort `low` / `medium` | `code-reviewer` subagent, never inline |
-| effort `high` or above | `code-reviewer` ×2 with the **same brief** — reviewer A and reviewer B on two different models — plus `review-security` and `review-performance`; merged |
+| effort `high` | `code-reviewer` A alone plus `review-security` and `review-performance`; merged |
+| effort `xhigh` or above | `code-reviewer` ×2 with the **same brief** — reviewer A and reviewer B on two different models — plus `review-security` and `review-performance`; merged |
 | "security review" / "performance review" | that specialist alone |
 | the built-in `/security-review` | only when the user names it; its output stays separate (different format) |
 

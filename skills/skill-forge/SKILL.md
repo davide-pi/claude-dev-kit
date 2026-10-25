@@ -47,7 +47,7 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | Description | ≤ 25 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
 | Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | review |
 | Skeleton | title, contract, `## When` (+ `Not for:`, ≤ 3 items), `## Decide`, `## Do`, `## Traps`, `## References` | validator |
-| Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 | validator |
+| Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 · bytes: SKILL.md 7,000, output style 2,500, `CLAUDE.md` 2,700 | validator |
 | Compaction | an invoked body re-injects capped at ~5 k tokens, cut from the bottom: `## Decide` near the top, nothing load-bearing after `## Do` | review |
 | Phrasing | the outcome, where the model already knows how; procedure only where the house way differs; the body is the 20 % of paths that cover 80 % of cases, rare branches go to a reference — every section earns its tokens | review |
 | Drop | restated `CLAUDE.md` rules (language, 80/20, change scope), version numbers, Traps restating a Decide row, why-prose a row already carries | review |
@@ -58,26 +58,12 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 Over a cap, split into a reference — never trim substance. A thin `## Decide` means the skill is not
 needed.
 
-### 3. Frontmatter that changes cost or behaviour
+### 3. Frontmatter and the listing budget
 
-| Field | Effect | Rule |
-| --- | --- | --- |
-| `disable-model-invocation: true` | not listed (0 bytes per turn); only `/<name>` loads it | every skill that posts, writes or logs; behaviour has varied across builds → keep a `/<name>` eval |
-| `context: fork` + `agent:` | runs in a subagent with **no history**: the body and the arguments only | the body restates every input it needs; `background: false` (a backgrounded fork arrives as a notification and loses `Agent`) |
-| `model:` | non-fork skill: full prompt-cache miss that turn · fork skill: the subagent's model | fork skills only |
-| `effort:` | cache-safe | when the job needs it |
-| `paths:` | hides the skill until a matching file is read, then lists it (smoke test passed) | file-type skills only; one needed before any file is read (`plan-work`, `skill-forge`) has none |
-| `argument-hint`, `allowed-tools` | autocomplete hint; pre-approved tools | user-invoked skills |
-
-Agent frontmatter (`tools`, `model`, `memory`, `maxTurns`, `omitClaudeMd`): `references/asset-templates.md`.
-
-### 4. The listing budget
-
-Auto-skill and agent descriptions are paid every turn of every session. Budget: ~1 % of the context
-window in characters (~8 k on a 200 k model), 1,536 characters per description; on overflow the
-least-invoked descriptions drop **silently**. Measure with `/doctor` (listing cost), `/skill-doctor`
-(never-invoked skills) and `/usage` (per-asset attribution). A skill nobody triggers has a
-description bug, not a body bug: `references/description-craft.md`.
+`disable-model-invocation` (0 bytes listed) for every skill that posts, writes or logs; `context: fork` +
+`agent:` + `background: false` for noisy work (the body restates every input); `model:` on fork skills only;
+`paths:` hides a skill until a matching file is read. Budget ~8 k characters listed, 1,536 per description,
+overflow drops silently: `references/frontmatter-and-budget.md`.
 
 ## Do
 
@@ -107,11 +93,10 @@ asset row · each new test or hook seen failing once: a check never seen failing
 5. A reference nobody opens → no `## References` line names its condition → add the line, or merge
    the file away.
 6. A version number in prose → it rots on the next release → say how to detect the version.
-7. MCP-first or bash-first instructions → CLI first (`az`, `gh`, `dotnet`, `docker`), the fallback
-   stated; PowerShell examples unless bash is genuinely better.
 
 ## References
 
+- `references/frontmatter-and-budget.md` — a frontmatter field or the listing budget is in question: effect and rule per field, byte caps.
 - `references/asset-templates.md` — writing a new asset: skeletons for auto, user-invoked and fork
   skills, rule, agent, hook; the eval section; the README row; the finish checklist.
 - `references/description-craft.md` — a skill misfires or never fires, or a description is being

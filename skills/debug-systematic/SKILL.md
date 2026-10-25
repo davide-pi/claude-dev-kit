@@ -59,8 +59,8 @@ kept deliberately — never left standing as the fix.
 ## Do
 
 ```powershell
-# Phase 1 — capture the failure verbatim before touching anything
-dotnet test --filter "FullyQualifiedName~<Test>" *> debug-repro.txt
+# Phase 1 — capture the failure verbatim before touching anything, outside the repo (scratchpad or temp)
+dotnet test --filter "FullyQualifiedName~<Test>" *> "$env:TEMP\debug-repro.txt"
 
 # Phase 2 — which commit did it
 git bisect start <badRef> <goodRef>
