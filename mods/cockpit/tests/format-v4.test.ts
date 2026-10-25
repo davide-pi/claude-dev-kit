@@ -93,8 +93,8 @@ test('workItemIds and workItemUrl: AB# ids of the branch and the PR titles, once
   const s = { git: { branch: 'feature/AB#512-reports' }, prs: [{ number: 1, title: 'Fix AB#512 and AB#7' }, { number: 2, title: 'none' }] } as Parameters<typeof workItemIds>[0]
   expect(workItemIds(s)).toEqual([512, 7])
   expect(workItemIds({})).toEqual([])
-  expect(workItemUrl({ isMapped: true, org: 'org-a', project: 'My Proj' }, 7)).toBe('https://dev.azure.com/org-a/My%20Proj/_workitems/edit/7')
-  expect(workItemUrl({ isMapped: true, org: 'https://dev.azure.com/org-a/', project: 'P' }, 7)).toBe('https://dev.azure.com/org-a/P/_workitems/edit/7')
-  expect(workItemUrl({ isMapped: true, org: 'org-a' }, 7)).toBeUndefined()
+  expect(workItemUrl({ isMapped: true, org: 'contoso', project: 'My Proj' }, 7)).toBe('https://dev.azure.com/contoso/My%20Proj/_workitems/edit/7')
+  expect(workItemUrl({ isMapped: true, org: 'https://dev.azure.com/contoso/', project: 'P' }, 7)).toBe('https://dev.azure.com/contoso/P/_workitems/edit/7')
+  expect(workItemUrl({ isMapped: true, org: 'contoso' }, 7)).toBeUndefined()
   expect(workItemUrl(undefined, 7)).toBeUndefined()
 })

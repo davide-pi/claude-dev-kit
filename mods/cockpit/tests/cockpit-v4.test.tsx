@@ -129,7 +129,7 @@ test('Context: the breakdown comes first, the costs below it (rounds, the deares
 // ── Work: links, no processes ──
 
 test('Work: the work item of the branch is a link to it (AB# in the branch name), with no state, checks or review, and no processes or ports', async ($, on) => {
-  world(on, { branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
+  world(on, { branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'contoso', project: 'Alpha', identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const ui = await mountPane($, 58)
@@ -139,6 +139,6 @@ test('Work: the work item of the branch is a link to it (AB# in the branch name)
   expect(rows.some(r => /^LINKS · 1/.test(r))).toBe(true)
   expect(rows.some(r => /^AB#512/.test(r))).toBe(true)
   expect(rows.some(r => /^PROCESS/.test(r))).toBe(false)
-  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toContain('https://dev.azure.com/org-a/Alpha/_workitems/edit/512')
+  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toContain('https://dev.azure.com/contoso/Alpha/_workitems/edit/512')
   await ui.unmount()
 })
