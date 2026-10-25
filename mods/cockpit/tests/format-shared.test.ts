@@ -18,6 +18,7 @@ import {
   pctCell,
   rangeSparkline,
   rateColor,
+  sameSnapshot,
   shade,
   shortModel,
   signedPctCell,
@@ -242,4 +243,18 @@ test('rangeSparkline: bars scaled between the lowest and the highest value; a fl
   expect(rangeSparkline([0, 100])).toBe('▁█')
   expect(rangeSparkline([5])).toBe('▁')
   expect(rangeSparkline([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007])).toBe('▁▂▃▄▅▆▇█')
+})
+
+test('sameSnapshot: equal data under other objects is the same, a changed field is not, and a part shared by reference is never serialised', () => {
+  let serialised = 0
+  const shared = { toJSON: () => (serialised++, 'big') }
+  expect(sameSnapshot({ a: 1, list: [1, 2], shared }, { a: 1, list: [1, 2], shared })).toBe(true)
+  expect(serialised).toBe(0)
+  expect(sameSnapshot({ a: 1, shared }, { a: 2, shared })).toBe(false)
+  expect(sameSnapshot({ a: 1, list: [1] }, { a: 1, list: [1, 2] })).toBe(false)
+  expect(sameSnapshot({ a: 1 }, { a: 1, extra: 1 })).toBe(false)
+  expect(sameSnapshot({ a: 1, gone: undefined }, { a: 1 })).toBe(true)
+  expect(serialised).toBe(0)
+  expect(sameSnapshot({ a: 1, shared: { toJSON: () => (serialised++, 'x') } }, { a: 1, shared: { toJSON: () => (serialised++, 'x') } })).toBe(true)
+  expect(serialised).toBe(2)
 })

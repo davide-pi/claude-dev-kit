@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CHECKS, MIN, RL_FILE, finishAgent, measureWith, rlCache, settleAll, spawnAgent, spawns } from './cockpit-fixtures'
+import { CHECKS, finishAgent, measureWith, MIN, mainTurnEnd, RL_FILE, rlCache, settleAll, spawnAgent, spawns } from './cockpit-fixtures'
 import { GH_SSH, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
@@ -64,17 +64,21 @@ test('alerts: PR checks that turned red toast once; green and red again is a new
   const toasts: string[] = []
   const options: World = { toasts, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { statusCheckRollup: CHECKS } }
   const clock = world(on, options)
+  on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(toasts).toEqual(['PR #42: checks failing'])
   await clock.advance(5 * MIN + 30_000) // read again, still red: the same episode
+  await mainTurnEnd($) // the branch is read again at the end of a main round
   await settleAll()
   expect(toasts).toHaveLength(1)
   options.prExtra = { statusCheckRollup: [{ __typename: 'CheckRun', status: 'COMPLETED', conclusion: 'SUCCESS' }] }
   await clock.advance(5 * MIN + 30_000)
+  await mainTurnEnd($) // the branch is read again at the end of a main round
   await settleAll()
   options.prExtra = { statusCheckRollup: CHECKS }
   await clock.advance(5 * MIN + 30_000)
+  await mainTurnEnd($) // the branch is read again at the end of a main round
   await settleAll()
   expect(toasts).toEqual(['PR #42: checks failing', 'PR #42: checks failing'])
 })

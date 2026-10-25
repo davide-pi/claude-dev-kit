@@ -160,7 +160,6 @@ export const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number)
     workflow: { runId, agentIndex },
   })
 
-export const WORKFLOW_TASK = { id: 'b2', type: 'workflow', status: 'running', description: 'x', name: 'impl-review-loop' }
 
 /** An `agent.spawn` input but for the agent type and its description. */
 export const SPAWN = {
@@ -331,4 +330,37 @@ export const roundHooks = (on: On) => {
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
+}
+
+// ── Permission asks: what really reaches the mod (`tool.check`), not the classic events a managed plugin swallows ──
+
+/** The checks beneath the mod: an ask a person has to answer settles `ask`, every other check `allow`. */
+export function permissionChecks(on: On) {
+  on('tool.check', (_, e) => ({ decision: e.approver === 'person' ? 'ask' : 'allow' }))
+}
+
+/** The check of the call `id` once the engine finds a person has to answer it. */
+export const askPerson = ($: Engine, id: string, tool = 'Bash') =>
+  $.tool.check({ tool, input: {}, approver: 'person', tool_use_id: id } as never)
+
+/** A tool call under a known id (the engine's own ids are random): the ask of that id ends with it. */
+export const callAs = ($: Engine, id: string, call: Record<string, unknown>) => $.tool.call({ ...call, tool_use_id: id } as never)
+
+/** The engine's answer to a launched workflow: its script's name and the run id the agents' spawns carry. */
+export function workflowLaunches(on: On, name: string, runId = 'wf_1') {
+  on('tool.call', { tool: 'Workflow' }, () => ({ result: { status: 'async_launched', taskId: 'wt', runId, workflowName: name } }))
+}
+
+export const launchWorkflow = ($: Engine, name: string) => $.tool.call({ tool: 'Workflow', name })
+
+/** The Skill tool answering: the skills a session loads reach the mod as this call. */
+export const skillTool = (on: On) => on('tool.call', { tool: 'Skill' }, () => ({ result: {} }))
+
+export const loadSkill = ($: Engine, skill: string) => $.tool.call({ tool: 'Skill', skill })
+
+/** Bash calls that hold until `release(command)` is called: the engine's tool takes as long as the test says. */
+export function gatedBash(on: On) {
+  const gates = new Map<string, () => void>()
+  on('tool.call', { tool: 'Bash' }, (_, e) => new Promise<{ result: object }>(resolve => void gates.set(e.command, () => resolve({ result: {} }))))
+  return (command: string) => gates.get(command)?.()
 }

@@ -12,6 +12,7 @@ import {
   mountPane,
   noteKeys,
   notesPane,
+  openCockpit,
   paneRows,
   rlCache,
   saveNote,
@@ -304,6 +305,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   id = 's-1'
   await $.session.end({ reason: 'resume', sessionId: 's-2', resume: { id: 's-2' } })
+  await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
   expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')

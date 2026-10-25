@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { CHECKS, GH_CREATED, MIN, bashResult, lavoroRows, mountPane, settleAll, workRows } from './cockpit-fixtures'
+import { CHECKS, GH_CREATED, MIN, bashResult, lavoroRows, mountPane, openCockpit, settleAll, workRows } from './cockpit-fixtures'
 import { GH_SSH, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
@@ -136,6 +136,7 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   for (let i = 0; i < 4; i++) await clock.advance(30_000) // four ticks, a minute: no new read
   await settleAll()
   expect(ghCalls).toHaveLength(1)
+  await openCockpit($)
   await clock.advance(5 * MIN)
   await settleAll()
   expect(ghCalls).toHaveLength(2)
@@ -180,6 +181,7 @@ test('PR: a detached HEAD or a folder without git forgets the PR read, so the br
   expect(ghCalls).toHaveLength(1)
 
   options.detached = true
+  await openCockpit($)
   await clock.advance(30_000)
   options.detached = false
   await clock.advance(30_000)
@@ -201,6 +203,7 @@ test('PR: a branch left and come back to is asked again, not served from the rea
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   options.branch = 'feature/other'
+  await openCockpit($)
   await clock.advance(30_000)
   await settleAll()
   options.branch = 'feature/orders-filter'
@@ -304,6 +307,7 @@ test('PR: a branch that changes between a refresh\'s git read and its patch is a
   options.holdRevParse = new Promise<void>(resolve => {
     release = resolve
   })
+  await openCockpit($)
   await clock.advance(30_000)
   await settleAll()
   options.detached = true
@@ -391,6 +395,7 @@ test('Work: the read of the branch updates a PR already listed (created, then me
   options.pr = 42
   options.prState = 'MERGED'
   options.prExtra = { url: GH_CREATED }
+  await openCockpit($)
   await clock.advance(5 * MIN + 30_000)
   await settleAll()
   const rows = await lavoroRows($)

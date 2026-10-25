@@ -5,9 +5,12 @@ import type { On } from 'claude-code'
 import { spanText, spanWidth, textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
 import { toolCallSpans } from '../hooks/view-insights'
-import { IT_FILE, insightsRows, roundHooks, settleAll, workRows } from './cockpit-fixtures'
+import { IT_FILE, askPerson, callAs, gatedBash, headerOf, insightsRows, paneRows, permissionChecks, roundHooks, settleAll, workRows } from './cockpit-fixtures'
 import { NOW, dataOf, world } from './cockpit-world'
 import type { World } from './cockpit-world'
+
+/** One compaction as the engine raises it, whole input (a test's `$.session.compact` takes no less). */
+const compact = ($: Engine) => $.session.compact({ trigger: 'auto', messages: [{ role: 'user', text: 'x', toolUses: [] }] } as never)
 
 test('Insights: the tools by type with their failures, and the last 5 main-loop calls, newest first, each with its short argument, outcome and time; a subagent call is not one', async ($, on) => {
   world(on)
@@ -100,14 +103,13 @@ test('Insights: before any round or call the tab says there is nothing to show',
 })
 
 test('Insights: the rhythm of the rounds (their number, the mean cost, the dearest with its length, the compactions) and the cache efficiency', async ($, on) => {
-  world(on)
+  world(on, { compacts: true })
   roundHooks(on)
-  on('classic.PostCompact', () => ({}))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await insightRound($, 5.02, 60_000, { read: 94_000, write: 5_400 }) // the session was at 4.82: 0.20
   await insightRound($, 6.22, 240_000, { read: 30_000, write: 69_400 }) // 1.20
-  await $.classic.PostCompact({ trigger: 'auto', compact_summary: 'summary' })
-  await $.classic.PostCompact({ trigger: 'manual', compact_summary: 'summary' })
+  await compact($)
+  await compact($)
   const rows = await insightsRows($)
   const i = rows.indexOf('RHYTHM')
   expect(i).toBeGreaterThan(0)
@@ -123,30 +125,21 @@ test('Insights: the rhythm of the rounds (their number, the mean cost, the deare
 test('Insights: the time of the rounds splits into the model, the tools and the waits on permissions', async ($, on) => {
   const clock = world(on)
   roundHooks(on)
-  let releaseTool = () => {}
-  let releaseAsk = () => {}
-  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
-  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
-  on('tool.call', { tool: 'Bash' }, async () => {
-    await toolGate
-    return { result: {} }
-  })
-  on('classic.PermissionRequest', async () => {
-    await askGate
-    return { decision: { behavior: 'allow' } }
-  })
+  permissionChecks(on)
+  const release = gatedBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't' })
-  const call = $.tool.call({ tool: 'Bash', command: 'sleep 30' })
+  const first = callAs($, 'c1', { tool: 'Bash', command: 'sleep 30' })
   await settleAll()
   await clock.advance(30_000)
-  releaseTool()
-  await call
-  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  release('sleep 30')
+  await first
+  const second = callAs($, 'c2', { tool: 'Bash', command: 'rm x' })
   await settleAll()
+  await askPerson($, 'c2')
   await clock.advance(10_000)
-  releaseAsk()
-  await ask
+  release('rm x')
+  await second
   await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
   const rows = await insightsRows($)
   const i = rows.indexOf('TIME')
@@ -157,64 +150,41 @@ test('Insights: the time of the rounds splits into the model, the tools and the 
 test('Insights: a permission wait inside a tool call counts once, as a wait, not also as tool time', async ($, on) => {
   const clock = world(on)
   roundHooks(on)
-  let releaseTool = () => {}
-  let releaseAsk = () => {}
-  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
-  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
-  on('tool.call', { tool: 'Bash' }, async () => {
-    await toolGate
-    return { result: {} }
-  })
-  on('classic.PermissionRequest', async () => {
-    await askGate
-    return { decision: { behavior: 'allow' } }
-  })
+  permissionChecks(on)
+  const release = gatedBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't' })
-  const call = $.tool.call({ tool: 'Bash', command: 'sleep 30' })
+  const call = callAs($, 'c1', { tool: 'Bash', command: 'sleep 30' })
   await settleAll()
-  await clock.advance(10_000)
-  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
-  await settleAll()
-  await clock.advance(10_000)
-  releaseAsk()
-  await ask
   await clock.advance(20_000)
-  releaseTool()
+  await askPerson($, 'c1')
+  await clock.advance(10_000)
+  release('sleep 30')
   await call
   await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
   const rows = await insightsRows($)
   const i = rows.indexOf('TIME')
-  expect(rows.slice(i + 2, i + 5)).toEqual(['model         60% 1m00s', 'tools         30% 30s', 'permissions   10% 10s'])
+  expect(rows.slice(i + 2, i + 5)).toEqual(['model         70% 1m10s', 'tools         20% 20s', 'permissions   10% 10s'])
 })
 
 test('Insights: a permission wait takes off a tool call only the part of it inside the call, so a call that began during the wait loses just that part', async ($, on) => {
   const clock = world(on)
   roundHooks(on)
-  let releaseTool = () => {}
-  let releaseAsk = () => {}
-  const toolGate = new Promise<void>(resolve => void (releaseTool = resolve))
-  const askGate = new Promise<void>(resolve => void (releaseAsk = resolve))
-  on('tool.call', { tool: 'Bash' }, async () => {
-    await toolGate
-    return { result: {} }
-  })
-  on('classic.PermissionRequest', async () => {
-    await askGate
-    return { decision: { behavior: 'allow' } }
-  })
+  permissionChecks(on)
+  const release = gatedBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't' })
-  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
+  const asked = callAs($, 'c1', { tool: 'Bash', command: 'rm x' })
   await settleAll()
+  await askPerson($, 'c1')
   await clock.advance(10_000)
-  const call = $.tool.call({ tool: 'Bash', command: 'sleep 90' })
+  const call = callAs($, 'c2', { tool: 'Bash', command: 'sleep 90' })
   await settleAll()
   await clock.advance(20_000)
-  releaseAsk()
-  await ask
+  release('rm x')
+  await asked
   await clock.advance(70_000)
-  releaseTool()
+  release('sleep 90')
   await call
   await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
   const rows = await insightsRows($)
@@ -339,22 +309,76 @@ test('Insights: the last failed call of the main loop, its error on one line wit
 })
 
 test('Insights: the context before and after each compaction, the last three, the after being the first reading that follows', async ($, on) => {
-  world(on)
+  world(on, { compacts: true })
   roundHooks(on)
-  on('classic.PostCompact', () => ({}))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const measure = (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
   await insightRound($, 1, 1000, { read: 100, write: 100 })
   for (const [before, after] of [[300_000, 30_000], [412_000, 38_000], [500_000, 45_000], [600_000, 50_000]] as const) {
     await measure(before)
-    await $.classic.PostCompact({ trigger: 'auto', compact_summary: 's' })
+    await compact($)
     await measure(after)
     await measure(after + 7000) // a later reading does not move it
   }
   await measure(700_000)
-  await $.classic.PostCompact({ trigger: 'manual', compact_summary: 's' }) // no reading since
+  await compact($) // no reading since
   const rows = await insightsRows($)
   const i = rows.findIndex(r => /^compactions +5$/.test(r))
   expect(i).toBeGreaterThan(0)
   expect(rows.slice(i + 1, i + 4).map(r => r.replace(/ +/g, ' '))).toEqual(['context 500k → 45k', ' 600k → 50k', ' 700k → …'])
+})
+
+test('Insights: an approved long tool counts as a wait up to its progress row and as tool time from there', async ($, on) => {
+  const clock = world(on)
+  roundHooks(on)
+  permissionChecks(on)
+  const release = gatedBash(on)
+  on('ui.render', { component: 'ToolProgress' }, ($, e) => {
+    const { Text } = $.ui.resolve(e)
+    return <Text>hint</Text>
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't' })
+  const call = callAs($, 'c1', { tool: 'Bash', command: 'sleep 40' })
+  await settleAll()
+  await askPerson($, 'c1')
+  await clock.advance(20_000) // the person thinks
+  // the approved tool runs: the terminal draws the progress line under its row
+  await $.ui.render({ surface: 'terminal', component: 'ToolProgress', requestId: 'c1', props: { tool_use_id: 'c1', kind: 'background_hint', hint: '(ctrl+b to run in background)' } } as never)
+  await clock.advance(40_000) // the run itself
+  release('sleep 40')
+  await call
+  await $.turn.complete({ answer: '', durationMs: 100_000, isAborted: false, turnId: 't', reason: 'answer' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('TIME')
+  expect(rows.slice(i + 2, i + 5)).toEqual(['model         40% 40s', 'tools         40% 40s', 'permissions   20% 20s'])
+})
+
+test('Insights: an ask the mode resolves at once and a quick tool leave a wait under one second and no waiting state', async ($, on) => {
+  const clock = world(on)
+  roundHooks(on)
+  permissionChecks(on)
+  const release = gatedBash(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't' })
+  const call = callAs($, 'c1', { tool: 'Bash', command: 'ls' })
+  await settleAll()
+  await askPerson($, 'c1')
+  await clock.advance(300)
+  release('ls')
+  await call
+  expect(headerOf((await paneRows($)).rows)[0] ?? '').not.toContain('waiting')
+  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't', reason: 'answer' })
+  const rows = await insightsRows($)
+  expect(rows.find(r => /^permissions/.test(r))).toMatch(/^permissions +\d+% 0s$|^permissions +\d+% 300ms$/)
+})
+
+test('Insights: a compaction the engine skipped is not counted', async ($, on) => {
+  world(on)
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await compact($) // the world skips it
+  await $.turn.start({ text: 'go', turnId: 't' })
+  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't', reason: 'answer' })
+  expect((await insightsRows($)).find(r => /^compactions/.test(r))).toMatch(/ 0$/)
 })

@@ -7,6 +7,7 @@ import {
   colorOf,
   createTask,
   insightsRows,
+  openCockpit,
   paneRows,
   spawnAgent,
   spawns,
@@ -27,6 +28,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
     tool: 'TodoWrite',
     todos: [todo('Done one', 'completed'), todo('Pending one', 'pending'), todo('Working on it', 'in_progress'), todo('Done two', 'completed')],
   })
+  await openCockpit($)
   await clock.advance(15_000 * 8) // 2m00s: the tick moves `now`
 
   const { rows, i } = await taskRows($)

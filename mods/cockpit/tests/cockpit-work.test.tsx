@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { PERIMETER, SPAWN, WORKFLOW_TASK, lavoroRows, mountPane, paneRows, settleAll, spawnWorkflowAgent, spawns, workRows } from './cockpit-fixtures'
+import { PERIMETER, SPAWN, lavoroRows, mountPane, paneRows, settleAll, spawnWorkflowAgent, spawns, workRows } from './cockpit-fixtures'
 import { PANE, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
@@ -71,11 +71,9 @@ test('MAIN: a failed git diff leaves the entry count alone: no file counts, no c
 test('Work: neither the workflow block nor subagent blocks; the Subagents tab holds the agents', async ($, on) => {
   world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
-  on('classic.Stop', () => ({}))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
   await spawnWorkflowAgent($, 'wf_1', 1)
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
   expect((await workRows($)).some(r => /WORKFLOW|^agents \d|code-reviewer|Review the orders filter/.test(r))).toBe(false)
   expect((await paneRows($, 50, 'agents')).rows.some(r => /code-reviewer/.test(r))).toBe(true)
 })

@@ -10,14 +10,20 @@ import {
   KEEP_DROP,
   breakdownRow,
   holds,
+  launchWorkflow,
+  loadSkill,
   mainTurnEnd,
   mountPane,
   openCockpit,
   paneRows,
   roundHooks,
   settleAll,
+  skillTool,
+  spawnWorkflowAgent,
+  spawns,
   taskTools,
   todo,
+  workflowLaunches,
 } from './cockpit-fixtures'
 import { rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
@@ -45,19 +51,21 @@ test('buttons row: the instructions name the open tasks and the active deliver p
   expect([...(instructions[0] ?? '')].length).toBeLessThanOrEqual(400)
 })
 
-test('buttons row: the instructions name the workflow the last Stop reported in flight, until a Stop reports none', async ($, on) => {
+test('buttons row: the instructions name the workflow the session launched, until its run ends', async ($, on) => {
   const instructions: (string | undefined)[] = []
   world(on, { instructions })
-  on('classic.Stop', () => ({}))
-  on('classic.SubagentStop', () => ({}))
+  workflowLaunches(on, 'release-notes')
+  spawns(on)
+  roundHooks(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const shell = { id: 'b1', type: 'shell', status: 'running', description: 'npm test' }
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [shell, { id: 'b2', type: 'workflow', status: 'running', description: 'x', name: 'release-notes' }] })
+  await launchWorkflow($, 'release-notes')
+  await spawnWorkflowAgent($, 'wf_1', 1)
   const ui = await mountPane($)
   await ui.press({ key: 'bar:compact' })
   expect(instructions[0]).toContain('Workflow in corso: release-notes.')
   expect([...(instructions[0] ?? '')].length).toBeLessThanOrEqual(400)
-  await $.classic.SubagentStop({ stop_hook_active: false, agent_id: 'a1', agent_transcript_path: '/t', agent_type: 'x', background_tasks: [shell] })
+  await mainTurnEnd($, 'a1')
+  await $.turn.start({ text: 'next', turnId: 't2' })
   await ui.press({ key: 'bar:compact' })
   await ui.unmount()
   expect(instructions[1]).toBe(KEEP_DROP)
@@ -176,11 +184,11 @@ test('Context: the top five static consumers by tokens, and the skills invoked t
       skills: { totalSkills: 60, includedSkills: 41, tokens: 4200, skillFrontmatter: [] },
     },
   })
-  on('skill.prompt', (_, e) => ({ text: e.text }))
+  skillTool(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(await $.skill.prompt({ skill: 'commit', text: 'go' })).toEqual({ text: 'go' }) // the hook passes the prompt through
-  await $.skill.prompt({ skill: 'react', text: 'go' })
-  await $.skill.prompt({ skill: 'commit', text: 'go' }) // a skill is listed once
+  await loadSkill($, 'commit')
+  await loadSkill($, 'react')
+  await loadSkill($, 'commit') // a skill is listed once
 
   const ui = await mountPane($, 50)
   await ui.press({ key: 'tab:context' })

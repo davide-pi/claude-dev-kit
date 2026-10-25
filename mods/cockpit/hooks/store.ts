@@ -4,6 +4,7 @@ import type { EngineInterface } from 'claude-code'
 import type { CockpitSnapshot } from '../types'
 import { activeAlerts } from './session'
 import { adoptSession, writeState } from './session-data'
+import { sameSnapshot } from './shared'
 import { INITIAL } from './state'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -14,7 +15,7 @@ export async function patch($: EngineInterface, next: (s: CockpitSnapshot) => Co
   // After a session's end (a /clear, a resume) no session start follows: the first change under another id adopts it.
   await adoptSession($).catch(() => undefined)
   const current = await read($, snapshot)
-  if (JSON.stringify(next(current)) === JSON.stringify(current)) return
+  if (sameSnapshot(current, next(current))) return
   await update($, snapshot, next)
   await writeState($)
   await raiseAlerts($)

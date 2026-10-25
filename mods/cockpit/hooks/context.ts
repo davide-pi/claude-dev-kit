@@ -159,9 +159,9 @@ const COMPACT_PERIMETER_MAX = 2
 /**
  * What the summary of `compact` should keep, in Italian and at most 400 characters: the fixed sentence, then what the
  * snapshot knows (the open task titles, the deliver perimeter: its size and first two entries, the name of the workflow
- * the last `Stop` reported in flight), each part only when it fits.
+ * in flight), each part only when it fits.
  */
-export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimeter' | 'workflow'>): string {
+export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimeter'> & { workflow?: string }): string {
   const cut = (items: readonly string[], max = COMPACT_LIST_MAX) => items.slice(0, max).map(i => truncEnd(i, COMPACT_ITEM_MAX))
   const perimeter = s.perimeter ?? []
   const parts = [

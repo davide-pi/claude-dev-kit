@@ -1,9 +1,10 @@
-import { atom, read } from 'claude-code'
+import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitAgent, CockpitClaudeState, CockpitSnapshot, CockpitTask, CockpitUsage, CockpitWorkflowRun } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitSnapshot, CockpitTask, CockpitUsage } from '../types'
 import { addUsage, newTokens } from './agents'
 import { NOTE_MAX } from './session'
+import { adoptSession, writeState } from './session-data'
 import { INITIAL } from './state'
 import { patch } from './store'
 import { editedPathOf, recordEdited } from './work'
@@ -11,55 +12,28 @@ import { editedPathOf, recordEdited } from './work'
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
-/**
- * Keeps the name of the first workflow among `tasks` (a stop's `background_tasks`) in the snapshot; none clears it. The
- * end of the main loop's turn (`isMainStop`) reporting none also ends the run whose agents were counted: a subagent's stop
- * can report none while the run's other agents still work.
- */
-export async function setWorkflow($: EngineInterface, tasks: readonly { type: string; name?: string }[] | undefined, isMainStop = false): Promise<void> {
-  const workflow = tasks?.find(t => t.type === 'workflow' && typeof t.name === 'string' && t.name !== '')?.name
-  const isRunEnd = isMainStop && workflow === undefined
-  try {
-    const now = await $.clock.now()
-    // The run's end is the other way a workflow's agents end, besides their own turn: the engine never lists them.
-    await patch($, s => ({
-      ...s,
-      workflow,
-      workflowRun: isRunEnd ? undefined : s.workflowRun,
-      agents: isRunEnd ? endRunAgents(s.agents, s.workflowRun, now) : s.agents,
-    }))
-  } catch {
-    // observing must never break the stop
-  }
-}
+// The state this module last wrote: what the writes compare with and what `only` is asked about. The snapshot cannot be asked: a read sees
+// the moment its hook run began, and the state moves from one hook to another (a tool.check raises the wait, the call's own hook ends it).
+let held: CockpitClaudeState | undefined
 
-/** The agents of `run` still running, finished at `now`. */
-function endRunAgents(agents: CockpitAgent[], run: CockpitWorkflowRun | undefined, now: number): CockpitAgent[] {
-  const ids = new Set(run?.agents.map(a => a.id))
-  return agents.map((a): CockpitAgent => (ids.has(a.id) && a.status === 'running' ? { ...a, status: 'done', endedAt: now } : a))
-}
+/** Tells this module the state a patch it did not make has written (the main turn's start). */
+export const markClaudeState = (state: CockpitClaudeState | undefined) => void (held = state)
 
-/** `id` joins the run `runId`; an agent of another run than the one kept starts a new count. */
-export function addWorkflowAgent(run: CockpitWorkflowRun | undefined, runId: string, id: string): CockpitWorkflowRun {
-  const kept = run?.runId === runId ? run.agents : []
-  return { runId, agents: kept.some(a => a.id === id) ? kept : [...kept, { id, isDone: false }] }
-}
-
-/** Marks agent `id` of the run finished; any other id leaves the run as it is. */
-export function finishWorkflowAgent(run: CockpitWorkflowRun | undefined, id: string): CockpitWorkflowRun | undefined {
-  return run?.agents.some(a => a.id === id && !a.isDone) ? { ...run, agents: run.agents.map(a => (a.id === id ? { ...a, isDone: true } : a)) } : run
-}
+/** The state this module last wrote. */
+export const readClaudeState = (): CockpitClaudeState | undefined => held
 
 /**
- * Keeps the main loop's state for the header's icon. It is told apart before patching: a thinking chunk repeats many times
- * a second, and a patch costs a session check and a state file check. `only` makes the change conditional on the state now held.
+ * Keeps the main loop's state for the header's icon. It is told apart before writing: a thinking chunk repeats many
+ * times a second, and a write costs a session check and a state file check. `only` makes the change conditional on the state now held.
  */
 export async function setClaudeState($: EngineInterface, state: CockpitClaudeState, only?: (now: CockpitClaudeState | undefined) => boolean): Promise<void> {
   try {
-    const { claudeState } = await read($, snapshot)
-    if (only && !only(claudeState)) return
-    if (claudeState?.kind === state.kind && claudeState.tool === state.tool) return
-    await patch($, s => ({ ...s, claudeState: state }))
+    if (only && !only(held)) return
+    if (held?.kind === state.kind && held.tool === state.tool) return
+    held = state
+    await update($, snapshot, s => ({ ...s, claudeState: state }))
+    await adoptSession($).catch(() => undefined)
+    await writeState($)
   } catch {
     // observing must never break the event
   }

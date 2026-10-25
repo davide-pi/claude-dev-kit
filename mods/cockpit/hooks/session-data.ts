@@ -202,7 +202,6 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   contextSeq: undefined,
   contextStatic: undefined,
   skillsUsed: undefined,
-  workflow: undefined,
   workflowRun: undefined,
   system: undefined,
 })

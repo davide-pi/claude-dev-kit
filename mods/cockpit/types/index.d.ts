@@ -121,8 +121,20 @@ export type CockpitTask = {
 /** The changed files of the worktree against HEAD (tracked and untracked) and those the active deliver perimeter does not cover. */
 export type CockpitPerimeterCheck = { files: number; outside: string[] }
 
-/** The agents of the workflow run in flight that the engine let the mod see (its spawns), and which of them finished. */
-export type CockpitWorkflowRun = { runId: string; agents: { id: string; isDone: boolean }[] }
+/**
+ * The workflow run in flight, as far as the engine lets the mod see it: its name (the `Workflow` tool's result), the agents it spawned
+ * and which of them finished, the label of the newest one (`phase`: the engine exposes no phase) and the round its `R<n>` names, and when
+ * any of its agents last did something. `endedAt` is set when a main turn starts or a clock tick finds every agent done (a silent run's agents are taken as done); a later spawn reopens the run.
+ */
+export type CockpitWorkflowRun = {
+  runId: string
+  name?: string
+  agents: { id: string; isDone: boolean }[]
+  phase?: string
+  round?: number
+  lastAt?: number
+  endedAt?: number
+}
 
 /** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
 export type CockpitDoneClaim = { at: string; session?: string; rule: string; excerpt: string }
@@ -133,9 +145,9 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
 /**
  * What Claude is doing now, derived from the events the mod hears (the engine has no state of its own): a main turn
  * starting or a text chunk is `working`, a thinking chunk `thinking`, a main-loop tool call in flight `tool` (its name),
- * a permission request or a notification `waiting`, the main turn's end `idle`.
+ * a tool call the person has to approve (`tool.check` asks) `waiting` until that call ends, the main turn's end `idle`.
  */
-export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string }
+export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string; /** `$.clock.now()` when the wait for the person began (`waiting` only). */ since?: number }
 
 /** One row of the Context tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
 export type CockpitContextRow = {
@@ -344,8 +356,6 @@ export type CockpitSnapshot = {
   noteEditing?: number
   /** The diff of the file pressed on the Work tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
   diff?: CockpitDiff
-  /** The name of a workflow in flight in the background, as the last `Stop` / `SubagentStop` reported it (`background_tasks`); absent when none was. */
-  workflow?: string
   /** The repo's default branch, as `origin/HEAD` names it: no pull request is looked for on it. Absent when `origin/HEAD` is not set. */
   defaultBranch?: string
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */

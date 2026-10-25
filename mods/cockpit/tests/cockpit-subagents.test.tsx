@@ -5,10 +5,10 @@ import { subagentDetails } from '../hooks/view-agents'
 import {
   MIN,
   SPAWN,
-  WORKFLOW_TASK,
   entry,
   fileOfSession,
   finishAgent,
+  launchWorkflow,
   mountPane,
   openCockpit,
   paneRows,
@@ -16,6 +16,7 @@ import {
   spawnAgent,
   spawnWorkflowAgent,
   spawns,
+  workflowLaunches,
 } from './cockpit-fixtures'
 import { NOW, dataOf, flagOf, rowTexts, world } from './cockpit-world'
 
@@ -79,6 +80,7 @@ test('Subagents: an agent the engine lists as killed or failed ends with ✗, on
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
+  await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
@@ -95,6 +97,7 @@ test('HISTORY lists every entry, no cap and no … +n', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (let n = 1; n <= 25; n++) await spawnAgent($, `agent-${n}`)
   for (let n = 1; n <= 25; n++) await finishAgent($, `a${n}`)
+  await openCockpit($)
   await clock.advance(135_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
@@ -188,12 +191,13 @@ test('HISTORY: entries a state file holds wrongly are left out, a file with no h
 
 test('pressing an agent row, live or in HISTORY, puts that agent in the main view', async ($, on) => {
   const viewed: (string | undefined)[] = []
-  const clock = world(on, { viewed, listed: [{ id: 'a3', status: 'running' }] })
+  const clock = world(on, { viewed, listed: [{ id: 'a2', status: 'running' }, { id: 'a3', status: 'running' }] })
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const type of ['one', 'two', 'three']) await spawnAgent($, type)
   await finishAgent($, 'a1')
+  await openCockpit($)
   await clock.advance(130_000)
   await finishAgent($, 'a2')
 
@@ -237,6 +241,7 @@ test('workflow agents: an explicit failed or killed listing ends them', async ($
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnWorkflowAgent($, 'wf_1', 1)
   await spawnWorkflowAgent($, 'wf_1', 2)
+  await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
@@ -245,19 +250,48 @@ test('workflow agents: an explicit failed or killed listing ends them', async ($
   await ui.unmount()
 })
 
-test('workflow agents: the end of their run (a main-loop Stop that reports none) ends the ones still running', async ($, on) => {
-  const clock = world(on)
+test('workflow agents: the end of their run (silence past the limit) ends the ones still running and closes the run; a step keeps it open', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  const clock = world(on, { instructions })
   spawns(on)
-  on('classic.Stop', () => ({}))
+  workflowLaunches(on, 'release-notes')
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await launchWorkflow($, 'release-notes')
   await spawnWorkflowAgent($, 'wf_1', 1)
-  await clock.advance(30_000)
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [WORKFLOW_TASK] })
-  const ui = await mountPane($)
+  await clock.advance(10 * 60_000)
+  await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'a1' }) // a step: the silence starts over
+  await clock.advance(10 * 60_000)
+  let ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^◐ implementer/)
-  await $.classic.Stop({ stop_hook_active: false, background_tasks: [] })
+  await ui.unmount()
+  await clock.advance(6 * 60_000)
+  ui = await mountPane($)
+  await ui.press({ key: 'tab:agents' })
   expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^✓ implementer/)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions.at(-1)).not.toContain('Workflow in corso')
+  await ui.unmount()
+})
+
+test('workflow agents: a run whose agents the listing ends closes with them, and a spawn after it reopens it', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  const clock = world(on, { instructions, listed: [{ id: 'a1', status: 'killed' }] })
+  spawns(on)
+  workflowLaunches(on, 'release-notes')
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await launchWorkflow($, 'release-notes')
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions.at(-1)).toContain('Workflow in corso: release-notes.')
+  await clock.advance(30_000)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions.at(-1)).not.toContain('Workflow in corso')
+  await spawnWorkflowAgent($, 'wf_1', 2)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions.at(-1)).toContain('Workflow in corso: release-notes.')
   await ui.unmount()
 })
 

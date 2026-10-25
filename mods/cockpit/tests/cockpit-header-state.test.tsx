@@ -1,9 +1,23 @@
 import { expect, test } from 'claude-code/testing'
 
-import { headerOf, mountPane, paneRows, settleAll } from './cockpit-fixtures'
+import {
+  askPerson,
+  callAs,
+  gatedBash,
+  headerOf,
+  insightsRows,
+  launchWorkflow,
+  loadSkill,
+  mountPane,
+  paneRows,
+  permissionChecks,
+  settleAll,
+  skillTool,
+  workflowLaunches,
+} from './cockpit-fixtures'
 import { NOW, flagOf, world } from './cockpit-world'
 
-test('header: the Claude state follows turn.start, a thinking chunk, a tool in flight, a permission request, a notification and the turn end', async ($, on) => {
+test('header: the Claude state follows turn.start, a thinking chunk, a tool in flight, a permission ask and the turn end', async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -21,12 +35,7 @@ test('header: the Claude state follows turn.start, a thinking chunk, a tool in f
     await toolGate
     return { result: {} }
   })
-  const askGate = gate('ask')
-  on('classic.PermissionRequest', async () => {
-    await askGate
-    return { decision: { behavior: 'allow' } }
-  })
-  on('classic.Notification', () => ({}))
+  permissionChecks(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
 
@@ -41,22 +50,15 @@ test('header: the Claude state follows turn.start, a thinking chunk, a tool in f
   for await (const chunk of stream) void chunk
   expect(await state()).toContain('working')
 
-  const call = $.tool.call({ tool: 'Bash', command: 'ls' })
+  const call = callAs($, 'c1', { tool: 'Bash', command: 'ls' })
   await settleAll()
   expect(await state()).toContain('Bash')
+  // the engine finds a person has to answer: waiting until that call ends (approved and run, or refused)
+  await askPerson($, 'c1')
+  expect(await state()).toContain('waiting')
   gates.tool?.()
   await call
   expect(await state()).toContain('working')
-
-  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
-  await settleAll()
-  expect(await state()).toContain('waiting')
-  gates.ask?.()
-  await ask
-  expect(await state()).toContain('working')
-
-  await $.classic.Notification({ message: 'Claude needs your attention', notification_type: 'permission_prompt' })
-  expect(await state()).toContain('waiting')
 
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
   expect(await state()).toContain('ready')
@@ -140,7 +142,7 @@ test('header: parallel main tool calls keep the state on a tool until none is le
   const gate = (name: string) => new Promise<void>(resolve => void (gates[name] = resolve))
   const bashGate = gate('bash')
   const readGate = gate('read')
-  const askGate = gate('ask')
+  permissionChecks(on)
   on('tool.call', { tool: 'Bash' }, async () => {
     await bashGate
     return { result: {} }
@@ -149,30 +151,21 @@ test('header: parallel main tool calls keep the state on a tool until none is le
     await readGate
     return { result: {} }
   })
-  on('classic.PermissionRequest', async () => {
-    await askGate
-    return { decision: { behavior: 'allow' } }
-  })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
   await $.turn.start({ text: 'go', turnId: 't1' })
 
-  const bash = $.tool.call({ tool: 'Bash', command: 'ls' })
+  const bash = callAs($, 'cb', { tool: 'Bash', command: 'ls' })
   await settleAll()
-  const read = $.tool.call({ tool: 'Read', file_path: '/a' })
+  const read = callAs($, 'cr', { tool: 'Read', file_path: '/a' })
   await settleAll()
   expect(await state()).toContain('Read')
 
+  // the person is asked about the Read: waiting until it ends, and then the state is on the tool still in flight
+  await askPerson($, 'cr', 'Read')
+  expect(await state()).toContain('waiting')
   gates.read?.()
   await read
-  // Bash is still in flight: not back to working, and the tool shown is the one left
-  expect(await state()).toContain('Bash')
-
-  const ask = $.classic.PermissionRequest({ tool_name: 'Bash', tool_input: {} })
-  await settleAll()
-  expect(await state()).toContain('waiting')
-  gates.ask?.()
-  await ask
   expect(await state()).toContain('Bash')
 
   gates.bash?.()
@@ -180,23 +173,29 @@ test('header: parallel main tool calls keep the state on a tool until none is le
   expect(await state()).toContain('working')
 })
 
-test('header: a notification while idle does not switch to waiting; while working it does', async ($, on) => {
+test('header: only a main-loop ask a person answers waits: a host approver, a subagent, an allow and a check with no call id do not', async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
-  on('turn.complete', () => ({ text: '' }))
-  on('classic.Notification', () => ({}))
+  let verdict: 'ask' | 'allow' = 'ask'
+  on('tool.check', () => ({ decision: verdict }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
-  const notify = () => $.classic.Notification({ message: 'Claude is waiting for your input', notification_type: 'idle_prompt' })
-
-  await notify() // before any event the state reads as idle
-  expect(await state()).toContain('ready')
   await $.turn.start({ text: 'go', turnId: 't1' })
-  await notify()
+  const check = (extra: Record<string, unknown>) => $.tool.check({ tool: 'Bash', input: {}, ...extra } as never)
+
+  await check({ approver: 'host', tool_use_id: 'x1' })
+  await check({ approver: 'person', tool_use_id: 'x2', agentId: 'a1' })
+  await check({ approver: 'person' })
+  expect(await state()).toContain('working')
+  verdict = 'allow'
+  await check({ approver: 'person', tool_use_id: 'x3' })
+  expect(await state()).toContain('working')
+  verdict = 'ask'
+  await check({ approver: 'person', tool_use_id: 'x4' })
   expect(await state()).toContain('waiting')
-  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
-  await notify()
-  expect(await state()).toContain('ready')
+  // a new turn forgets an ask whose call never ended (a crash, an interrupt)
+  await $.turn.start({ text: 'again', turnId: 't2' })
+  expect(await state()).toContain('working')
 })
 
 test('refresh tiers: the slow tick writes the heartbeat before the clock tick runs', async ($, on) => {
@@ -233,4 +232,31 @@ test('turn.step: the main loop\'s chunks read the snapshot once per change of st
   await run(0) // the first step also writes the model and the effort
   const one = await run(1)
   expect(await run(2)).toBe(one) // five more chunks of the same kind cost no read
+})
+
+test('events that really arrive: with the classic events never dispatched, skills, the wait for a person and the workflow name all still show', async ($, on) => {
+  const instructions: (string | undefined)[] = []
+  world(on, { instructions })
+  permissionChecks(on)
+  skillTool(on)
+  workflowLaunches(on, 'release-notes')
+  const release = gatedBash(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
+
+  await loadSkill($, 'commit')
+  await launchWorkflow($, 'release-notes')
+  const call = callAs($, 'c1', { tool: 'Bash', command: 'rm x' })
+  await settleAll()
+  await askPerson($, 'c1')
+  expect(await state()).toContain('waiting')
+  release('rm x')
+  await call
+  expect(await state()).not.toContain('waiting')
+
+  const ui = await mountPane($)
+  await ui.press({ key: 'bar:compact' })
+  expect(instructions[0]).toContain('Workflow in corso: release-notes.')
+  await ui.unmount()
+  expect((await insightsRows($)).some(r => /^SKILLS · 1 used/.test(r))).toBe(true)
 })

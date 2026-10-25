@@ -12,6 +12,7 @@ import { INITIAL } from './state'
 import { configDir, patch } from './store'
 import { langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
+import { endRun, expireRun, finishWorkflowAgent } from './workflow'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -136,14 +137,18 @@ async function tickClock($: EngineInterface): Promise<number> {
   const listed = await $.agent.list().catch(() => undefined)
   await patch($, s => {
     const inRun = new Set(s.workflowRun?.agents.map(a => a.id))
+    const isSilent = expireRun(s.workflowRun, now) !== s.workflowRun
     const agents = s.agents.map((a): CockpitAgent => {
-      // An agent the engine no longer lists as active has ended without a turn.complete we saw. A workflow's agents are never
-      // listed: theirs end by their own turn, an explicit failed or killed listing, or the end of their run.
+      // An agent the engine no longer lists as active has ended without a turn.complete we saw. A workflow's agents are not
+      // listed at all (the agent listing's own doc), so absent from the list says nothing about them: theirs end by their own
+      // turn, by a listing that names them ended, or when their run has been silent too long.
       const info = listed?.find(l => l.id === a.id)
-      const endedBy = inRun.has(a.id) ? ['failed', 'killed'] : ['completed', 'failed', 'killed']
-      const isEnded = listed !== undefined && a.status === 'running' && (info ? endedBy.includes(info.status) : !inRun.has(a.id))
+      const isEnded = a.status === 'running' && ((isSilent && inRun.has(a.id)) || (listed !== undefined && (info ? ['completed', 'failed', 'killed'].includes(info.status) : !inRun.has(a.id))))
       return isEnded ? { ...a, status: 'done', endedAt: now, isFailed: info?.status === 'failed' || info?.status === 'killed' } : a
     })
+    // The run's agents that ended here count as finished in it, and a run with none left open is closed.
+    const finished = agents.reduce((run, a, i) => (a.status !== s.agents[i]?.status && inRun.has(a.id) ? finishWorkflowAgent(run, a.id, now) : run), s.workflowRun)
+    const workflowRun = endRun(finished, now)
     const isListed = (a: CockpitAgent) => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)
     const gone = agents.filter(a => !isListed(a))
     const left = gone
@@ -153,6 +158,7 @@ async function tickClock($: EngineInterface): Promise<number> {
     return {
       ...s,
       now,
+      workflowRun,
       agents: agents.filter(isListed),
       history: left.length > 0 ? addHistory(s.history, left) : s.history,
       // An agent leaving the list (type `?` ones too: they used tokens) joins the count that the share keeps.
@@ -181,10 +187,24 @@ export async function mediumTick($: EngineInterface): Promise<void> {
   await refreshGit($)
 }
 
-/** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. */
+/** What opening the pane brings up to date once: the tiers do nothing while it is closed, so the first drawing would show what the last tick left. */
+export async function refreshOnOpen($: EngineInterface): Promise<void> {
+  const now = await tickClock($).catch(() => $.clock.now())
+  await refreshAlm($)
+  await refreshGit($)
+  await refreshWorklog($, now)
+  await refreshDoneClaims($)
+}
+
+/** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
 export async function slowTick($: EngineInterface): Promise<void> {
-  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow or failing read cannot delay or skip it.
-  if (isOpen) await writeState($, true, true)
+  if (!isOpen) {
+    // The status line's agent badge reads the snapshot: while any agent is running, the local list (no model call) keeps it from staying lit for one that ended unseen.
+    if ((await read($, snapshot)).agents.some(a => a.status === 'running')) await tickClock($).catch(() => undefined)
+    return
+  }
+  // The file is the proof the pane is open: a stale `at` lets the statusline ignore a leftover `open:true`. First, so a slow or failing read cannot delay or skip it.
+  await writeState($, true, true)
   // A failed clock tick must not skip the reads below.
   const now = await tickClock($).catch(() => $.clock.now())
   // The ALM line first: an Azure DevOps pull request is asked about with its org.

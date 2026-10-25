@@ -74,6 +74,8 @@ export type World = {
   ctxPercent?: number
   /** Receives `session.compact`, in order. */
   calls?: string[]
+  /** True: `session.compact` stands (the conversation compacted) instead of being skipped. */
+  compacts?: boolean
   /** Receives the `instructions` of every `session.compact`. */
   instructions?: (string | undefined)[]
   /** Receives the line of every `command.run` (`/<command> <args>`). */
@@ -324,7 +326,7 @@ export function world(on: On, options: World = {}) {
   on('session.compact', (_, e) => {
     options.calls?.push('compact')
     options.instructions?.push(e.instructions)
-    return { skip: 'test' }
+    return options.compacts ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } : { skip: 'test' }
   })
   on('command.run', { command: 'worklog' }, (_, e) => {
     options.commands?.push(`/${e.command} ${e.args}`)

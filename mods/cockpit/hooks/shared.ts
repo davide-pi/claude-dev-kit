@@ -341,3 +341,18 @@ export function fmtBytes(n: number): string {
 }
 
 export const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+
+/**
+ * Whether two snapshots hold the same data. A part both share by reference is the same without a look; only a part that was rebuilt is
+ * serialised, so a patch that changes one field pays for that field.
+ */
+export function sameSnapshot(a: object, b: object): boolean {
+  if (a === b) return true
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of keys) {
+    const x = (a as Record<string, unknown>)[key]
+    const y = (b as Record<string, unknown>)[key]
+    if (x !== y && JSON.stringify(x) !== JSON.stringify(y)) return false
+  }
+  return true
+}

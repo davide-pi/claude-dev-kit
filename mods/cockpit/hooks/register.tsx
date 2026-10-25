@@ -1,24 +1,23 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitHistoryEntry, CockpitProcSort, CockpitSnapshot, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitProcSort, CockpitSnapshot, CockpitTask } from '../types'
 import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
 import { compactInstructions, recordCtxSample, recordRound } from './context'
 import {
   addStepUsage,
-  addWorkflowAgent,
   applyTodos,
   bashOutput,
   createdTask,
-  finishWorkflowAgent,
   isOk,
   isRefused,
+  markClaudeState,
   noteEdit,
+  readClaudeState,
   removeOne,
   saveNote,
   sendNote,
   setClaudeState,
-  setWorkflow,
   toggled,
   upsertAgent,
 } from './events'
@@ -43,6 +42,7 @@ import {
   refreshDoneClaims,
   refreshLang,
   refreshLastRates,
+  refreshOnOpen,
   refreshUsage,
   refreshWorklog,
   slowTick,
@@ -58,6 +58,7 @@ import { PANE_MAX_COLUMNS, paneView } from './view'
 import type { PaneActions } from './view'
 import { diffView } from './view-work'
 import type { DiffActions } from './view-work'
+import { activeRun, addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
 import { parseCreatedPr, upsertPr } from './work'
 
 // The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
@@ -73,9 +74,24 @@ let mainTools: string[] = []
 // The last permission waits that ended, as [from, to]: a tool call takes off its running time only the part of them inside its own span (the wait is counted on its own).
 let waits: { from: number; to: number }[] = []
 const WAITS_KEPT = 50
+// The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
+const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
 
 const waitOverlap = (list: readonly { from: number; to: number }[], from: number, to: number): number =>
   list.reduce((sum, w) => sum + Math.max(0, Math.min(to, w.to) - Math.max(from, w.from)), 0)
+
+/** Ends the wait the call `id` raised, if it raised one: the state goes back to what the wait interrupted, and the wait is counted. */
+async function endAsk($: EngineInterface, id: string): Promise<void> {
+  const ask = asks.get(id)
+  if (!ask) return
+  asks.delete(id)
+  await setClaudeState($, stateAfterWait(ask.held, mainTools), now => now?.kind === 'waiting')
+  const waitTo = await $.clock.now().catch(() => undefined)
+  if (waitTo !== undefined) {
+    waits = [...waits, { from: ask.from, to: waitTo }].slice(-WAITS_KEPT)
+    await patch($, s => ({ ...s, insights: recordWait(s.insights, waitTo - ask.from) })).catch(() => undefined)
+  }
+}
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
@@ -88,7 +104,7 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   // The instructions are built from the snapshot as it is at the press.
   compact: () =>
     void read($, snapshot)
-      .then(s => $.session.compact({ instructions: compactInstructions(s) }))
+      .then(s => $.session.compact({ instructions: compactInstructions({ ...s, workflow: activeRun(s.workflowRun)?.name }) }))
       .catch(() => undefined),
   // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
   // `command.run` entry of the engine types).
@@ -137,6 +153,7 @@ const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit',
 async function open($: EngineInterface) {
   const opened = await openPane($)
   await setOpen($, opened.isPlaced)
+  if (opened.isPlaced) void refreshOnOpen($).catch(() => undefined)
   return opened
 }
 
@@ -150,6 +167,7 @@ export const register: Register = on => {
     const effort = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
     // The same session id (an enable, a respawn, a reload) keeps what the snapshot holds; another one starts its own.
     await adoptSession($, true)
+    markClaudeState(undefined)
     await patch($, s => ({
       ...s,
       now,
@@ -183,6 +201,7 @@ export const register: Register = on => {
   // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
     stopMonitor()
+    markClaudeState(undefined)
     let s: CockpitSnapshot | undefined
     try {
       s = await read($, snapshot)
@@ -260,12 +279,16 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       // A new turn has no tool in flight: one a crashed call left behind would hold the state on a tool for good.
       mainTools = []
+      asks.clear()
+      const now = await $.clock.now()
       await patch($, s => ({
         ...s,
         ctx: { ...s.ctx, startTokens: s.ctx.tokens ?? 0 },
         cost: { ...s.cost, startUsd: s.cost.usd ?? 0 },
         claudeState: { kind: 'working' },
+        workflowRun: endRun(s.workflowRun, now),
       }))
+      markClaudeState({ kind: 'working' })
     }
     return next(e)
   })
@@ -278,7 +301,7 @@ export const register: Register = on => {
       await patch($, s =>
         agentId === undefined
           ? { ...s, model, effort }
-          : { ...s, agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, model, effort })) },
+          : { ...s, workflowRun: touchRun(s.workflowRun, agentId, now), agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, model, effort })) },
       )
     } catch {
       // observing must never break the step
@@ -370,6 +393,27 @@ export const register: Register = on => {
     return ran
   })
 
+  // The skills the session loaded through the Skill tool (a typed `/skill` never reaches the mod), once each in the order they first ran.
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (isOk(ran)) {
+      try {
+        await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))
+      } catch {
+        // observing must never break the call
+      }
+    }
+    return ran
+  })
+
+  // A workflow the session launched: its result names the script and the run the agents' spawns carry.
+  on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
+    const ran = await next(e)
+    const launched = isOk(ran) ? launchedRun(ran.result) : undefined
+    if (launched) await patch($, s => ({ ...s, workflowRun: nameRun(s.workflowRun, launched) })).catch(() => undefined)
+    return ran
+  })
+
   // The tools of each subagent, from the tool events carrying its id: the one running now (from the call to its end) and the last
   // one. The main loop's calls are no agent's: while any runs the header shows a tool by name, and the end of the last one puts
   // the state back to working.
@@ -379,7 +423,12 @@ export const register: Register = on => {
       const forAgent = (change: (a: CockpitAgent) => CockpitAgent) => patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? change(a) : a)) }))
       try {
         // Only an agent the mod already knows: a call that outran the spawn makes no stub the spawn would later fill.
-        await forAgent(a => ({ ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool] }))
+        const at = await $.clock.now()
+        await patch($, s => ({
+          ...s,
+          workflowRun: touchRun(s.workflowRun, agentId, at),
+          agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool] } : a)),
+        }))
       } catch {
         // observing must never break the call
       }
@@ -404,6 +453,8 @@ export const register: Register = on => {
       outcome = { tokens: resultTokens(ran), error: ran.deny ?? ran.text }
       return ran
     } finally {
+      // An ask this call raised ends with it, whether the person approved (the tool ran) or refused.
+      await endAsk($, e.tool_use_id)
       mainTools = removeOne(mainTools, tool) ?? []
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
@@ -429,32 +480,42 @@ export const register: Register = on => {
     return ran
   })
 
-  // A permission request waits for the person: the state is waiting until it is answered. A notification only says that
-  // something wants attention: waiting until the next event moves the state on.
-  on('classic.PermissionRequest', async ($, e, next) => {
-    if (e.agent_id !== undefined) return next(e)
-    const held = (await read($, snapshot).catch(() => undefined))?.claudeState
-    const waitFrom = await $.clock.now().catch(() => undefined)
-    await setClaudeState($, { kind: 'waiting' })
+  // A call the person has to approve: `tool.check` settles on `ask` with a person to answer it, and the state is waiting from there.
+  // The engine raises no event when the answer comes: the permission dialog or classifier runs inside the `tool.call` chain, after
+  // `tool.check`, and the next thing the mod hears is the call's end. The earliest sign that the tool runs is the terminal's
+  // `ToolProgress` row under it (below); a tool that draws none (a quick one, any outside the terminal) keeps the wait to its end, and an
+  // ask the mode's classifier resolves cannot be told from a person's, so it counts as a wait for as long as its tool runs: known limits.
+  // A gating event: whatever fails here leaves the verdict as it was.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
     try {
-      return await next(e)
-    } finally {
-      await setClaudeState($, stateAfterWait(held, mainTools), now => now?.kind === 'waiting')
-      const waitTo = await $.clock.now().catch(() => undefined)
-      if (waitFrom !== undefined && waitTo !== undefined) {
-        waits = [...waits, { from: waitFrom, to: waitTo }].slice(-WAITS_KEPT)
-        await patch($, s => ({ ...s, insights: recordWait(s.insights, waitTo - waitFrom) })).catch(() => undefined)
+      if (verdict.decision === 'ask' && e.approver === 'person' && e.agentId === undefined && e.tool_use_id !== undefined) {
+        const held = readClaudeState()
+        const from = await $.clock.now()
+        asks.set(e.tool_use_id, { from, held })
+        await setClaudeState($, { kind: 'waiting', since: from })
       }
+    } catch {
+      // observing must never break the verdict
     }
+    return verdict
   })
-  on('classic.PostCompact', async ($, e, next) => {
-    if (e.agent_id === undefined) await patch($, s => ({ ...s, insights: recordCompaction(s.insights, s.ctx.tokens) })).catch(() => undefined)
+
+  // The call's row shows a progress line once the tool runs, so the approval is over: the wait ends there and the tool's own time starts.
+  on('ui.render', { component: 'ToolProgress' }, ($, e, next) => {
+    const id = e.props.tool_use_id
+    // Outside this drawing's dispatch, as the pane's own first write is.
+    if (asks.has(id)) $.clock.after(0, () => void endAsk($, id).catch(() => undefined))
     return next(e)
   })
-  on('classic.Notification', async ($, e, next) => {
-    // A notification while Claude is idle (or before anything happened) wants nothing from the person yet: it stays idle.
-    if (e.agent_id === undefined) await setClaudeState($, { kind: 'waiting' }, now => now !== undefined && now.kind !== 'idle')
-    return next(e)
+
+  // A compaction that stood (not a skip, not the ahead-of-time `precompute`), the main conversation's: the engine event, since the classic PostCompact never reaches the mod.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
+      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
+    }
+    return done
   })
 
   on('agent.spawn', async ($, e, next) => {
@@ -465,7 +526,7 @@ export const register: Register = on => {
       await patch($, s => ({
         ...s,
         // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
-        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id) : s.workflowRun,
+        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun,
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
@@ -511,10 +572,13 @@ export const register: Register = on => {
       }))
       await setClaudeState($, { kind: 'idle' })
       await scheduleContextRead($).catch(() => undefined)
+      // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
+      await refreshGit($)
+      await refreshDoneClaims($)
     } else {
       await patch($, s => ({
         ...s,
-        workflowRun: finishWorkflowAgent(s.workflowRun, agentId),
+        workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
         agents: upsertAgent(s.agents, agentId, now, a => {
           // The steps already counted their part: the turn's own total replaces it.
           const settled = settleUsage(a.usage, a.stepUsage, usage ? usageOf(usage) : undefined)
@@ -530,34 +594,16 @@ export const register: Register = on => {
         }),
       }))
     }
-    await refreshGit($)
-    return next(e)
-  })
-
-  // The skills the session invoked (typed, the Skill tool, a subagent's preload), once each in the order they first ran: the Insights tab lists them.
-  on('skill.prompt', async ($, e, next) => {
-    try {
-      await patch($, s => ({ ...s, skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill] }))
-    } catch {
-      // observing must never break the prompt
-    }
-    return next(e)
-  })
-
-  // The engine's classic Stop and SubagentStop carry the background work in flight: the name of a workflow among it is what
-  // `compact` names. It is the reading of the last stop, so it is dropped when a stop reports none.
-  on('classic.Stop', async ($, e, next) => {
-    await setWorkflow($, e.background_tasks, true)
-    return next(e)
-  })
-  on('classic.SubagentStop', async ($, e, next) => {
-    await setWorkflow($, e.background_tasks)
     return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     // A pane that waited undrawn is open from its first render; the write runs outside this drawing dispatch.
-    if (!isOpen) $.clock.after(0, () => void setOpen($, true).catch(() => undefined))
+    if (!isOpen) {
+      $.clock.after(0, () => {
+        void setOpen($, true).then(() => refreshOnOpen($)).catch(() => undefined)
+      })
+    }
     const ui = $.ui.resolve(e)
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
