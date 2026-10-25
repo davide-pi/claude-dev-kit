@@ -11,8 +11,9 @@
  * Fires when ALL hold:
  *   - `CLAUDE_DONE_CLAIM=1` (set in the kit's settings.json; anything else and the hook exits at once);
  *   - not `stop_hook_active` (it already sent the turn back once: never loop);
- *   - the turn since the last human prompt used an editing tool, or delegated (`Workflow`, `Agent`, `Task`:
- *     a delegate counts as an edit, its work is a change made now). The turn ends at the last genuine human
+ *   - the turn since the last human prompt used an editing tool, or delegated (`Workflow`, or an `Agent` / `Task`
+ *     that is not a read-only type such as Explore or a reviewer: an editing delegate counts as an edit, its work
+ *     is a change made now). The turn ends at the last genuine human
  *     prompt only: a workflow result or an agent hand-back arrives as a user entry holding a
  *     `<task-notification>` (or a cross-session message after a delegate), not as a `tool_result` block, and
  *     belongs to the turn, whether or not a delegate ran before it;
@@ -75,6 +76,12 @@ const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 /** Tools that hand work to a workflow or an agent: they arm the hook like an edit and their results come back as notifications. */
 const DELEGATE_TOOLS = new Set(['Workflow', 'Agent', 'Task']);
+/** `subagent_type`s that only read: an Agent / Task of one of these is not a change made now and does not arm the hook. */
+const READ_ONLY_AGENTS = new Set(['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']);
+/** A quoted span (straight, curly or guillemets, same line, short): a word mentioned, not claimed. */
+const QUOTED = /"[^"\n]{1,40}"|“[^”\n]{1,40}”|«[^»\n]{1,40}»/g;
+/** The Bash tool prints no exit code on success, so a row's `exit 0` is never in the output. */
+const EXIT_ZERO = /^exit(?: code)? 0$/;
 
 // No bare "passa": "passa per il controller" is the commonest sentence in a dev chat. "fatto" is a claim
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
@@ -121,10 +128,14 @@ function printedAsWords(printed, text) {
  * at least one non-trivial piece (3+ chars, not a bare word like "deny") and every non-trivial piece is printed ("=" and ":" count as a space).
  */
 function piecesPrinted(line, printed) {
-  const loose = (s) => s.replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
+  const loose = (s) => s.replace(/["']/g, '').replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
   const looseText = loose(printed);
-  const pieces = line.replace(/\([^)]*\)/g, ' ').split(/\s\/\s|,\s|;\s|\sand\s/).map((p) => loose(p)).filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
-  return pieces.length > 0 && pieces.every((p) => printedAsWords(looseText, p));
+  const elided = /…|\.{3}/.test(line);
+  const all = line.replace(/\([^)]*\)/g, ' ').split(/\s\/\s|,\s|;\s|\sand\s|\s·\s|\s*(?:…|\.{3})\s*/).map((p) => loose(p)).filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
+  // The exit code is not printed on success: dropped when something else is left to prove.
+  const pieces = all.some((p) => !EXIT_ZERO.test(p)) ? all.filter((p) => !EXIT_ZERO.test(p)) : all;
+  // An elided fragment may start or end inside a word (a path with its backslashes stripped): substring, not whole words.
+  return pieces.length > 0 && pieces.every((p) => (elided ? looseText.includes(p) : printedAsWords(looseText, p)));
 }
 
 /** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
@@ -268,7 +279,7 @@ function readTurn(entries, truncated = false) {
     // Walking backwards, so the first edit met is the last one made: a shell call seen before it is later.
     for (const b of [...blocks(entry)].reverse()) {
       if (b?.type !== 'tool_use' || armed) continue;
-      if (EDIT_TOOLS.has(b.name) || DELEGATE_TOOLS.has(b.name)) armed = true;
+      if (EDIT_TOOLS.has(b.name) || (DELEGATE_TOOLS.has(b.name) && !(b.name !== 'Workflow' && READ_ONLY_AGENTS.has(b.input?.subagent_type)))) armed = true;
       else if (SHELL_TOOLS.has(b.name)) shellAfterEdit = true;
     }
     if (!pastFinalMessage) {
@@ -283,12 +294,12 @@ function readTurn(entries, truncated = false) {
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
   if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
-  const prose = message.replace(/`[^`\n]*`/g, ' ');
+  const prose = message.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
   const found = prose.match(CLAIM);
   return found ? found[1] ?? found[2] : null;
 }
 
-function log(payload, rule, word, message) {
+function log(payload, rule, word, message, excerpt) {
   try {
     fs.mkdirSync(path.dirname(LOG), { recursive: true });
     const at = message.search(CLAIM);
@@ -298,7 +309,7 @@ function log(payload, rule, word, message) {
       cwd: payload.cwd,
       rule,
       word,
-      excerpt: message.slice(Math.max(0, at - 60), at + 60).replace(/\s+/g, ' '),
+      excerpt: excerpt ?? message.slice(Math.max(0, at - 60), at + 60).replace(/\s+/g, ' '),
     })}\n`);
   } catch {
     /* the log is for counting, never a reason to fail */
@@ -332,7 +343,8 @@ try {
       }));
       process.exit(0);
     }
-    log(payload, 'unproven-row', unproven[0].state, message);
+    // The excerpt is the failing row itself, so the log shows what the rule judged.
+    log(payload, 'unproven-row', unproven[0].state, message, `${unproven[0].command} | ${unproven[0].line}`.slice(0, 200));
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',

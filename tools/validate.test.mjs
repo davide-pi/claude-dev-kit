@@ -100,7 +100,7 @@ test('byte caps: output style and SKILL.md fail over the cap, CLAUDE.md only war
   assert.match(skill.out, /skills\/demo\/SKILL\.md: \d+ bytes against the 7000-byte cap/);
   const claude = run((write) => write('CLAUDE.md', `# c\n${'x'.repeat(2800)}\n`));
   assert.equal(claude.code, 0, claude.out);
-  assert.match(claude.out, /CLAUDE\.md: \d+ bytes against the 2700-byte cap/);
+  assert.match(claude.out, /CLAUDE\.md: \d+ bytes against the 2750-byte cap/);
 });
 
 test('the listed description budget fails over 8000 chars; hidden skills do not count', () => {

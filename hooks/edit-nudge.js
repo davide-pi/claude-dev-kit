@@ -23,6 +23,8 @@
  * A file under the system temp directory (`os.tmpdir()`, where Claude keeps its scratchpad at
  * `<tmp>/claude/…`) is not code to delegate: a report or a diff written there is never counted.
  *
+ * A doc or data file (.md, .json, .yml, .toml, .csv, .env, …) is not code to delegate either: it is never counted.
+ *
  * Counter files are pruned after a few days whenever the nudge fires, so one file per session never
  * accumulates for good. Always exits 0; any error is silence.
  *
@@ -59,6 +61,9 @@ function isScratch(file, cwd) {
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
+/** True for a doc or data file by extension: editing one is not code written by hand. */
+const isDocOrData = (file) => typeof file === 'string' && /\.(?:mdx?|txt|jsonc?|ya?ml|toml|ini|csv|xml|env)$/i.test(file);
+
 function readCount(file) {
   try {
     const { count } = JSON.parse(fs.readFileSync(file, 'utf8'));
@@ -81,6 +86,7 @@ function run(payload) {
   if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) return null;
   if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) return null;
   if (isScratch(payload.tool_input?.file_path, payload.cwd)) return null;
+  if (isDocOrData(payload.tool_input?.file_path)) return null;
 
   const count = readCount(file) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });

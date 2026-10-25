@@ -111,6 +111,19 @@ test('a Write or Edit of a scratch file under the system temp directory is not c
   assert.match(edit(config).additionalContext, /implementer/, 'third real edit');
 });
 
+test('doc and data files are not counted: three .md edits are silent, two .md plus three .js nudge on the third .js', () => {
+  const at = (config, file) => edit(config, { tool_input: { file_path: file } });
+  const quiet = sandbox();
+  for (const f of ['a.md', 'B.JSON', 'c.yml']) assert.equal(at(quiet, f), null, f);
+  assert.equal(at(quiet, 'd.js'), null, 'only the first code edit');
+  const config = sandbox();
+  assert.equal(at(config, 'a.md'), null);
+  assert.equal(at(config, 'b.md'), null);
+  assert.equal(at(config, 'a.js'), null, 'first js');
+  assert.equal(at(config, 'b.js'), null, 'second js');
+  assert.match(at(config, 'c.js').additionalContext, /implementer/, 'third js');
+});
+
 test('parallel sessions keep separate counts', () => {
   const config = sandbox();
   edit(config, { session_id: 'a' });

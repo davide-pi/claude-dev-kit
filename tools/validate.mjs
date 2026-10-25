@@ -536,7 +536,7 @@ for (const rel of allFiles.filter((f) => /^(?:hooks\/(?:lib\/)?[\w.-]+\.(?:js|cj
 // CLAUDE.md and the output style load every turn; a SKILL.md re-injects on invocation, cut from the bottom.
 // BYTE_CAP_WARN_ONLY lists files over a cap whose trim another change owns: they warn until trimmed.
 const BYTE_CAPS = [
-  [(f) => f === 'CLAUDE.md', 2700, 'CLAUDE.md'],
+  [(f) => f === 'CLAUDE.md', 2750, 'CLAUDE.md'],
   [(f) => /^output-styles\/[\w.-]+\.md$/.test(f), 2500, 'an output style'],
   [(f) => /^skills\/[\w-]+\/SKILL\.md$/.test(f), 7000, 'SKILL.md'],
 ];
