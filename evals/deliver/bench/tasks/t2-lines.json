@@ -1,0 +1,8 @@
+{
+  "id": "t2-lines",
+  "kind": "off-by-one",
+  "prompt": "Il totale di un ordine non conta mai l'ultima riga: un ordine con una sola riga risulta a zero. Correggi il calcolo.",
+  "seeds": [
+    { "file": "OrdersApi/Services/OrderService.cs", "find": "for (var i = 0; i < order.Lines.Count; i++)", "replace": "for (var i = 0; i < order.Lines.Count - 1; i++)" }
+  ]
+}

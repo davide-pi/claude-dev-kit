@@ -1,6 +1,6 @@
 # Writing for agents — the levers that make an asset predictable
 
-Applies to every text an agent consumes: a skill, a reference, a command, an agent prompt, a
+Applies to every text an agent consumes: a skill, a reference, an agent prompt, a
 `CLAUDE.md`. The goal is not the same output every run but the same **process** every run. Adapted
 from the `writing-for-agents` skill in `mattpocock/skills` — MIT License,
 Copyright (c) 2026 Matt Pocock.
@@ -26,8 +26,8 @@ pointer's wording — not the target's content — decides whether the material 
 | **Cognitive load** | the human | knowing which asset exists and when to call it |
 
 Material behind a pointer pays only the pointer's line. Material with no pointer at all is reached
-only if the human remembers it — spend that load where human judgement matters (explicit-trigger
-commands), remove it where it does not.
+only if the human remembers it — spend that load where human judgement matters (user-invoked
+skills), remove it where it does not.
 
 ## Information hierarchy
 
@@ -71,10 +71,10 @@ that is fast, deterministic, low-overhead), *blast radius*, *seam*.
 
 ## Positive phrasing
 
-A prohibition drags the forbidden behaviour into context and makes it *more* available ("don't think
-of an elephant"). State the target behaviour instead: "write one-line comments", not "don't write
+A prohibition drags the forbidden behaviour into context and makes it *more* available ("do not think
+of an elephant"). State the target behaviour instead: "write one-line comments", not "do not write
 long comments". A prohibition earns its place only as a hard guardrail with no positive form — the
-`Never` line of a command — and even then pair it with the positive target.
+`never` of a contract line — and even then pair it with the positive target.
 
 ## Pruning
 
@@ -95,4 +95,8 @@ The no-op test is model-relative, not reader-relative: settle a disagreement by 
 2. Every step has a clear, demanding completion criterion.
 3. Every prohibition either has a positive form or is a hard guardrail.
 4. No sentence is a no-op, a cache, or a duplicate of another asset.
-5. Reference that only some branches need sits behind a pointer.
+5. Reference that only some branches need sits behind a pointer: the body is the 20 % of paths that
+   cover 80 % of cases.
+6. Every check the asset adds (a test, a hook, a validator rule) was seen failing once on a bad input: a
+   check never seen failing proves nothing.
+7. Instructions are CLI first with the fallback stated; examples in PowerShell unless bash is genuinely better.

@@ -82,6 +82,27 @@ it the pragmatic answer for the second organization when switching sign-ins beco
 az account get-access-token --tenant <tenant-domain> --query accessToken -o tsv
 ```
 
+## One az identity per workspace root
+
+`az account set` and `az login` switch a **machine-global** default: two sessions on roots of
+different tenants flip each other mid-command. Never run `az account set`. Each identity owns a
+private config dir `~/.azure-<identity>` (signed in once into that dir); the SessionStart hook
+`workspace-context.js` reads `workspaces.json` and exports `AZURE_CONFIG_DIR` (Bash) and
+`AZ_IDENTITY` (PowerShell drops values holding `\`). The shell guard (`guard-shell.js`) then pins the
+identity itself: an `az` command the allow list already covers (the read-only queries), in a mapped
+directory, is rewritten to start with `$env:AZURE_CONFIG_DIR='<dir>'; ` (PowerShell) or
+`AZURE_CONFIG_DIR='<dir>' ` (Bash), unless it already sets one or ends in `# raw`.
+
+**Fallback, by hand.** Every other `az` call — a write, `cd x && az …`, a redirect, a pipe into a tool
+no allow rule names — is not rewritten, so in PowerShell prefix it yourself:
+
+```powershell
+$env:AZURE_CONFIG_DIR="$HOME\.azure-$env:AZ_IDENTITY"; az boards query --org https://dev.azure.com/<org> ...
+```
+
+Git credentials follow the same split, bound once per organization:
+`git credential-manager azure-repos bind <org> <user>`.
+
 ## Resolving the identity to assign to
 
 `--assigned-to` needs a value the **organization** can resolve, and that is not the machine's git
@@ -144,3 +165,12 @@ Run `az devops invoke` with no `--area`/`--resource` to list every area and reso
 organization exposes — the authoritative way to learn a name instead of guessing it. It enumerates
 the whole surface and is slow, so run it once and keep the output. If you cannot verify the area,
 resource and route this way, treat the capability as a genuine gap and read `mcp-fallback.md`.
+
+## Triage by symptom
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| prompts, or "before you can run…" | no credential for that org | `az login`, or `az devops login --org <url>` with a PAT |
+| signed in, yet the org is invisible | the org lives on another Entra tenant | `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in per tenant |
+| "not found" on something that exists | org/project defaulted elsewhere, or PAT scope | re-read the `ALM:` line, pass `--org` / `-p` |
+| wrong account used | the shared az config dir | the shell guard pins `AZURE_CONFIG_DIR` per root on the `az` commands it can (read-only ones); prefix the rest by hand; never `az account set` (machine-global) — `references/auth-and-config.md` |

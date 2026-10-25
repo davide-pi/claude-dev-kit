@@ -1,143 +1,100 @@
 ---
 name: user-story-standard
 description: >-
-  Use whenever item text is written, reworded, split or reviewed — a user story, PBI, bug,
-  impediment or TECH item, its description or acceptance criteria ("Dato che / Quando / Allora") —
-  even when the user only describes a feature, a malfunction or something to analyse without naming
-  an item.
+  Use when writing, splitting or reviewing item text or criteria, or describing a feature or
+  malfunction ("non so se è un bug"); not translation.
 ---
 
 # user-story-standard — the fixed shapes a work item's text must have
 
+**Contract.** Item text in one of four shapes, acceptance criteria only after an explicit yes ·
+never writes to the board, never fills a gap with an assumption · item text and chat Italian.
+
 ## When
 
-- A User Story, PBI, Bug, Impediment or TECH item has to be written, reworded or split.
-- Acceptance criteria have to be written or reviewed, for a new item or one already on the board.
-- The user describes a new feature, a malfunction, or something to be analysed before a fix can be
-  defined — even without naming a work item, a story or Azure DevOps.
-- Text already on the board does not follow the standard and has to be brought back to it.
-- A bulk-import file is genuinely wanted instead of creating the items one by one.
+- A User Story, PBI, Bug, Impediment or TECH item is written, reworded, split or reviewed.
+- Acceptance criteria are written or reviewed, new or already on the board.
+- The user describes a feature, a malfunction or something to analyse, without naming an item.
 
-Not for: putting items on the board — `workitem-create` owns how an item gets there (discovery, the
-confirmation tables, the CLI calls) and this skill never restates any of it; reading an item that
-already exists in order to plan the work (`/item`, `plan-work`); Azure DevOps CLI mechanics, auth,
-verbs and which real type fills each role (`azdo-cli`); testing a built item against its criteria
-(`items-qa`); hours (`worklog`).
+Not for: putting items on the board (`workitem-create`), which type fills a role (`azdo-cli`),
+testing a built item (`items-qa`).
 
 ## Decide
 
 ### 1. Classify first — exactly one of four
 
-| The request is | Role | Body shape | Acceptance criteria |
+| The request is | Role | Body | Criteria |
 | --- | --- | --- | --- |
-| an enhancement or new feature (*evolutiva*) | **User Story** | `Come … / voglio … / così da …`, nothing else | yes — but only after asking |
-| a malfunction with a clear expected behaviour (*malfunzionamento*) | **Bug** | `Comportamento attuale` / `Comportamento atteso` | yes — but only after asking |
-| a doubtful situation to be analysed or explained (*questione da analizzare*) | **Impediment** | free Description closing on a `Da analizzare:` line | **never** |
-| internal technical work, invisible to the end user (*attività tecnica interna*) | **TECH** | free Description, no fixed structure | **never** |
+| an enhancement or new feature (*evolutiva*) | **User Story** | `Come … / voglio … / così da …`, nothing else | yes — only after asking |
+| a malfunction with a clear expected behaviour | **Bug** | `Comportamento attuale` / `Comportamento atteso` | yes — only after asking |
+| a doubtful situation to analyse or explain | **Impediment** | free Description ending on a `Da analizzare:` line | **never** |
+| internal technical work, invisible to the end user | **TECH** | free Description: what and why | **never** |
 
-If it is not clear which of the four applies, **ask**. Never pick the most likely one and proceed:
-the role decides the body shape, and a wrong shape has to be rewritten from scratch.
-
-**These four are roles — the company's standard for the content — not Azure DevOps type names.** The
-work item **type** created for each is resolved per project through `azdo-cli`: it follows the
-process template and the mapping is not one-to-one — a Product Backlog Item *is* the User Story
-role, while `Issue` is the backlog item on one template and the analysis item on another. Resolve
-the type before creating anything; never read a name found on a board as the role it looks like.
-
-Full shapes, titling rules, what each role must **not** contain, and worked examples:
-`item-formats.md`.
+Unclear between two → **ask**; the role decides the shape, and a wrong shape is rewritten from
+scratch. These are **roles**, not type names: the type per project comes from `azdo-cli` (a PBI *is*
+the User Story role; `Issue` is backlog on one template, analysis on another). Full shapes, titles,
+what each must not contain, worked examples: `references/item-formats.md`.
 
 ### 2. Non-negotiables
 
 | Rule | Detail |
 | --- | --- |
-| Italian item text | every shape, field label and keyword below stays Italian — see *Language* |
-| The three lines and nothing else | a User Story body is title plus `Come / voglio / così da`; no criteria, no notes, no alternatives, no explanation |
-| A Bug is problem-oriented | `Comportamento attuale` and `Comportamento atteso`; never "Come utente" |
-| Impediment and TECH have no criteria | a single free Description; do not offer criteria as an extra |
-| Criteria never ship with the story | write the story, deliver it, then **ask** — see *Interaction* |
-| `Criteri di accettazione` | the section title, exactly that, on its own |
-| `Dato che / Quando / E / Allora` | never Given/When/Then; the `E` lines are optional |
-| `AC01`, `AC02` or `Scenario N` | never plain bullets, never a `1.` `2.` numbered list |
-| A clean block | no explanation before or after the criteria block that gets pasted |
-| 3 to 5 criteria for a simple case | precise enough to develop against, with no duplication |
-| No automatic refinement | a gap is a question, never an assumption |
+| User Story = three lines | title plus `Come / voglio / così da`; no criteria, notes or alternatives in the body |
+| Bug is problem-oriented | `Comportamento attuale`, `Comportamento atteso`; never "Come utente" |
+| Impediment and TECH | one free Description, no criteria offered |
+| Criteria never ship with the story | story first, delivered; criteria in a later message, after a yes |
+| Criteria format | section title `Criteri di accettazione`; `Dato che / Quando / E / Allora` (never Given/When/Then); labelled `AC01…` or `Scenario N`, never bullets or `1.` |
+| Clean block | nothing before or after the pasted criteria block; a note goes in the chat message |
+| Size | 3 to 5 criteria for a simple case, precise enough to develop against, no duplication |
+| No automatic refinement | a gap or a contradiction with known context (document, offer, decision) is a question, asked **before** writing |
+
+Language: item content is Italian — shapes, labels, keywords, examples — by company standard. Role
+names, resolved type names and CSV headers stay English.
 
 ### 3. Interaction
 
-- **Never generate the acceptance criteria together with the User Story.** Write the story, hand it
-  over, then ask whether to proceed. Not politeness: what looks like one story very often contains
-  several, and criteria written before the split are thrown away with it.
-- **When the request contradicts context already known** — a document, an offer, a decision taken —
-  **ask before writing**, not after. No automatic refinement, no filling a gap with an assumption.
-- **Respect the reviewer.** If the PM removes or declines a family of criteria, that is an explicit
-  and final decision: take it and move on. Never re-flag it and never quietly re-insert it later.
-- An Impediment or a TECH ends on a confirmation request, with nothing offered in addition.
+- What looks like one story often holds several: propose the split **before** any criteria.
+- The reviewer's removal of a family of criteria is final: never re-flag it, never re-insert it.
+- An uncovered pertinent family gets **one** note in chat, on the first proposal only.
+- Impediment and TECH end on a confirmation request, offering nothing more.
 
-### 4. Platform coverage is a project-level datum
+### 4. Platform coverage — a project datum
 
-Desktop only, mobile only, or both — and whether the behaviour differs between them — is settled
-once **per project**, not asked per item. Use it if already known (project memory or documentation).
-Ask **once** if the project has never defined it, record it, and from then on apply it silently.
-
-It applies to a User Story's criteria and to an Impediment's or a TECH's Description where there is
-a user interface, never to a Bug — the reason, and why desktop and mobile may never be assumed
-identical, is in `acceptance-criteria.md`.
-
-### 5. Language — deliberately mixed, do not "fix" it
-
-The item content this skill produces is **Italian**, because that is the company standard: the
-shapes, the field labels, the `Dato che / Quando / Allora` keywords, the section title
-`Criteri di accettazione` and every example. The skill's own prose — headings, rules and
-explanations addressed to the model — is **English**, and so is machine text: the four role names,
-whatever type a project resolves them to, and the CSV headers in `csv-import.md`.
+Desktop, mobile or both, and whether behaviour differs, is settled once **per project**: use it if
+known (memory, docs), else ask once and record it. It shapes a User Story's criteria and an
+Impediment's or TECH's Description where there is a UI — never a Bug. Why the two are never assumed
+identical: `references/acceptance-criteria.md`.
 
 ## Do
 
-1. Classify (section 1). Unclear between two roles → ask, then classify.
-2. Write the title and the body in the shape that role requires (`item-formats.md`). Simple,
-   functional Italian; no jargon without a real need.
-3. Deliver it and stop. For a User Story or a Bug, ask whether to proceed with the criteria; for an
-   Impediment or a TECH, ask for confirmation and offer nothing more.
-4. Only on confirmation, write the `Criteri di accettazione` block (`acceptance-criteria.md`), using
-   the four coverage families as a grid and labelling per platform where behaviour differs. On the
-   **first** proposal only, a pertinent family with no criteria gets one note in chat, outside it.
-5. Hand the block over clean and paste-ready. Getting it onto the board is `workitem-create`'s job.
+1. Classify (§1); unclear → ask.
+2. Write title and body in the role's shape (`references/item-formats.md`), plain functional Italian.
+3. Deliver and stop: Story or Bug → ask whether to write the criteria; Impediment or TECH → ask
+   for confirmation.
+4. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four
+   coverage families as the grid, per-platform labels where behaviour differs.
+5. Hand it over paste-ready; the board is `workitem-create`'s job. A bulk file only on a genuine
+   request (`references/csv-import.md`).
 
 ```powershell
-# Normally pasted or handed to workitem-create; only a genuine bulk import needs csv-import.md.
-Set-Clipboard -Value (Get-Content .\item-body.txt -Raw)
+Set-Clipboard -Value (Get-Content .\item-body.txt -Raw)    # paste-ready handover
 ```
 
 ## Traps
 
-1. Criteria arrive with the story → they were generated in the same pass → the story is one message,
-   the criteria a later one, after an explicit yes.
-2. A story is really three → the request was written as one sentence → propose the split before any
-   criteria; criteria on an unsplit story are wasted work.
-3. A Bug body opens with "Come utente" → the User Story shape was reused → a Bug is
-   problem-oriented: `Comportamento attuale`, then `Comportamento atteso`.
-4. An Impediment gets criteria → it read like a bug → an Impediment states what was observed, what
-   does not add up and the question; a criterion presumes an expected behaviour nobody agreed yet.
-5. A TECH gets the Impediment structure → "no criteria" was read as "same shape" → a TECH is a free
-   Description: what has to be done and why it is needed.
-6. The criteria block carries a preamble or a trailing comment → the note about an uncovered family
-   was written inside it → the block stays clean; the note goes in the chat message.
-7. A removed family comes back two messages later → it was treated as an oversight → the reviewer's
-   removal is final, and the signalling is one-shot, on the first proposal only.
-8. Desktop and mobile share one generic criterion → the platform datum was never established → ask
-   once per project, then label per platform inside the **same** item (`acceptance-criteria.md`).
-9. `Given/When/Then` or bullet points appear → an English or Gherkin habit took over → Italian
-   keywords, `AC01` or `Scenario N` labels, nothing else.
-10. Criteria are quietly "improved" past what was agreed → a gap looked obvious to fill → an
-    unstated rule is a question, not an assumption.
+1. An Impediment gets criteria → it read like a bug → it states what was observed, what does not
+   add up and the question; a criterion presumes an expected behaviour nobody agreed.
+2. A TECH gets the Impediment structure → "no criteria" was read as "same shape" → a TECH is what
+   has to be done and why.
+3. Desktop and mobile share one generic criterion → the platform datum was never set → ask once per
+   project, then label per platform inside the same item.
+4. A criteria set grows past what was agreed → an "obvious" gap was filled → it is a question.
 
 ## References
 
-- `item-formats.md` — the four roles in full: required body, title rules, what each one must not
-  contain, the Impediment signal, and a worked Italian example each. Open it before writing a body.
-- `acceptance-criteria.md` — the criteria rules: the four coverage families, the one-shot signalling
-  of an uncovered family, `Scenario N` and `AC01` structure, per-platform labelling and why it
-  matters, the `Dato che / Quando / Allora` format and examples. Open it once criteria are confirmed.
-- `csv-import.md` — the CSV bulk-import file, its exact headers per role, the Bug body-to-column
-  mapping, and its quoting rules. Open it only on a genuine request for a file.
+- `references/item-formats.md` — before writing any body: the four roles in full, title rules, what
+  each must not contain, the Impediment signal, a worked example each.
+- `references/acceptance-criteria.md` — once criteria are confirmed: coverage families, one-shot
+  signalling, `Scenario N` / `AC01`, per-platform labels, format and examples.
+- `references/csv-import.md` — only for a requested bulk-import file: headers per role, the Bug
+  column mapping, quoting.

@@ -1,0 +1,8 @@
+{
+  "id": "t4-double-confirm",
+  "kind": "concurrency-idempotency",
+  "prompt": "Ogni tanto i clienti ricevono due mail di conferma per lo stesso ordine, di solito quando cliccano due volte su Conferma. Una sola conferma deve partire, anche con due richieste insieme.",
+  "seeds": [
+    { "file": "OrdersApi/Services/OrderService.cs", "find": "if (!await _repo.TryConfirmAsync(id, ct)) throw new InvalidOperationException($\"Order {id} already confirmed\");", "replace": "await _repo.SetStatusAsync(id, OrderStatus.Confirmed, ct);" }
+  ]
+}

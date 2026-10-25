@@ -1,184 +1,181 @@
 # Asset templates and the finish checklist
 
-Copy the shape, then fill it. Deviating from the skeleton is a review rejection, not a style choice.
+Copy the shape, then fill it. The skeleton is the contract, not a style choice.
 
-## Skill
+## Auto skill
 
 ````markdown
 ---
 name: <same as the folder>
 description: >-
-  Use this skill whenever <situation>, <situation> or <situation> — even if the user never says
-  '<term>' but <the phrasing they type>.   # ≤ 50 words, situations only
-# Trigger-only skill instead: one line, "<what it does>. Explicit trigger: only when the user
-# types /<name>." plus the next line:
-# disable-model-invocation: true
+  Use when <situation>, <situation> or <symptom the user types> — <file types, if the skill owns
+  them>.            # ≤ 25 words, third person, trigger terms first
 ---
 
 # <name> — <one-line purpose>
 
+**Contract.** <what it produces> · <what it never does> · <output language>
+
 ## When
 
-- <situation>
-- <situation>
+- <situation, in the user's words>
 - <situation>
 
-Not for: <what it explicitly excludes, routing each exclusion to the asset or plugin that owns it>.
+Not for: <neighbour case> (`<owner>`), <neighbour case> (`<owner>`).
 
 ## Decide
 
-<The core: a decision table or a decision tree. This section earns the skill; if it is thin, the
-skill should not exist.>
+<The core: tables or a decision tree. This section earns the skill; it sits near the top because
+a compacted body is cut from the bottom.>
 
 ## Do
 
 ```powershell
-# Copy-pasteable PowerShell. Real flags, no pseudo-commands.
+# Copy-pasteable PowerShell, real flags, verified with --help.
 ```
 
 ## Traps
 
-1. **<symptom>** — <cause>. <fix>.
-2. **<symptom>** — <cause>. <fix>.
+1. <symptom> → <cause> → <fix>.        # never a restated Decide row
 
 ## References
 
 - `references/<topic>.md` — <the condition that sends you there>.
 ````
 
-Caps: 150 lines for the skill, 200 per reference. Over the cap, split — never trim substance.
+## User-invoked skill
 
-## Command
+Same body, plus:
+
+```yaml
+description: >-
+  Use when the user types /<name> [args] to <what one invocation does>.
+disable-model-invocation: true
+argument-hint: "[target] [effort]"
+```
+
+The contract line's "never" names the side effect it must not take unasked (post, merge, write
+hours, change State). Keep a `/<name>` case in the evals: the flag's behaviour has changed between
+builds.
+
+## Fork skill
+
+```yaml
+description: >-
+  Use when the user types /<name> <args> to <what comes back>.
+context: fork
+agent: <agent name | general-purpose>
+background: false
+model: sonnet            # allowed here: it sets the subagent's model, no main-thread cache miss
+argument-hint: "<args>"
+```
+
+The fork sees **only** the body and its arguments — no conversation, no earlier tool results. The
+body carries the house line ``Arguments: `$ARGUMENTS` `` right after the contract (it is substituted
+at invocation, so never write the placeholder anywhere else in a `SKILL.md`), and states: the
+argument grammar and how to parse it; every default the
+conversation would have supplied; which skills to load with the Skill tool; and the exact report
+shape, capped (≤ N lines), because that report is all the main thread receives.
+
+## Rule
 
 ```markdown
 ---
-description: <what one invocation does>
-argument-hint: [target] [effort] [focus]
+paths: "**/*.ext,**/Folder/**"
 ---
+# <topic> — facts
 
-# /<name> — <one-line purpose>
+- <fact or gotcha, one line, true of every matching file>
 
-<One paragraph at most: what it assumes is already decided.>
-
-## Procedure
-
-1. <step, with the exact CLI call>
-2. <step>
-3. <step, including what to report back and in what shape>
-
-**Never:** <post, force-push, drop, deploy, delete — whatever this command must not do, even when
-asked mid-run.>
+Procedure: skill `<name>`.
 ```
 
-Cap: 100 lines. A command assumes the decision is made; if it has to choose, it routes to a skill.
+≤ 25 lines. `paths` is one comma-separated **string** (a YAML list was silently ignored). Facts a
+re-read recovers: after `/compact` a `paths` rule is summarised away until the next matching read.
 
 ## Agent
 
 ```markdown
 ---
 name: <same as the filename>
-description: <when to spawn it, in the words the caller will use>
-tools: Read, Grep, Glob
+description: >-
+  Use proactively when <situation the caller is in>.      # ≤ 25 words
+tools: Read, Grep, Glob          # least privilege
 model: sonnet
+effort: medium
+maxTurns: 30                     # advisory, not enforced
+omitClaudeMd: true               # when the body defines everything it needs
 ---
 
-# <name>
+# <name> — <role in two lines>
 
-<What it is for, in two lines.>
-
-## Input
-
-<What the caller must provide, field by field. An agent that has to guess the intent returns noise.>
+## Ground rules (hard)
+- <≤ 6 bullets>
 
 ## Method
+<tables>
 
-1. <step>
-2. <step>
+## Output — ≤ N lines, exactly these sections
+<the exact shape; Italian prose, identifiers verbatim; what an empty result looks like>
 
-## Output contract
-
-<The exact shape the caller receives — the fields, their order, and what an empty result looks
-like. The caller parses this; it is the interface.>
-
-**This agent never edits, posts, commits or merges.**  <!-- read-only agents only -->
+## Never
+- <edits, posts, commits, merges — whatever applies>
 ```
 
-`tools` is least privilege: a read-only agent gets `Read, Grep, Glob` and nothing else. `model:
-sonnet` unless the job genuinely needs more. Add a routing line naming the agent in the skill or
-command that spawns it, or nothing can reach it.
+| Field | Rule |
+| --- | --- |
+| `memory: project` | only with Write or Edit in `tools` (otherwise nothing is ever written); scope resolves against the launch directory |
+| `mcpServers` | an **inline** definition keeps the server out of the main thread; a name reference shares the parent's connection |
+| `skills` | preload the stack skill the agent always needs |
+| body | ≤ 110 lines; a routing line in some skill or `CLAUDE.md` names the agent, or nothing reaches it |
 
 ## Hook
 
 | Decision | Rule |
-|----------|------|
+| --- | --- |
+| Type | command first; a `prompt` hook only where a regex cannot decide, and never on `SessionStart` |
 | Runtime | Node when it runs on every tool call; pwsh when it needs Windows APIs |
-| Exit code | Always 0, unless the block is deliberate |
-| Git state | Read from disk, never by shelling out |
-| Environment variables | Every one it reads is documented in the README |
-| Output | Quiet on the happy path; a hook that prints on every call becomes noise and gets disabled |
+| Exit | 0 unless the block is deliberate; quiet on the happy path |
+| Context | plain stdout reaches Claude on `SessionStart` and `UserPromptSubmit` (and two rarer events); elsewhere `hookSpecificOutput.additionalContext` |
+| `SessionStart` matcher | include `compact`, or the injected line vanishes after `/compact` |
+| State | git state read from disk; every environment variable documented in the README |
+| Tests | `tools/<hook>.test.mjs`, run with `node --test tools/*.test.mjs` |
 
-Registration lives in settings, and changing settings is `update-config`, not this skill.
+Registration lives in `settings.json` (`update-config`).
 
 ## Eval section
-
-Added to the kit's triggering evals for every new asset:
 
 ```markdown
 ### `<name>` — <one-line contract>
 
 | Prompt | Expected |
-|--------|----------|
-| "<natural phrasing>" | MUST load |
-| "<the trigger, if any>" | MUST load |
-| "<superficially similar request owned by a neighbour>" | MUST NOT (<why>) |
+| --- | --- |
+| "<natural phrasing, no keyword from the description>" | MUST load |
+| "/<name> <args>" | MUST load (user-invoked skills) |
+| "<near miss owned by a neighbour>" | MUST NOT (<why>) |
 ```
 
 ## README row
-
-One row per asset in the README table, matching the existing column shape:
 
 ```markdown
 | `skills/<name>/SKILL.md` | Skill | <one sentence: what it decides, and the two things it covers>. |
 ```
 
-## Language
-
-An asset of this kit is **written in English** — its prose addresses the model, and this repository
-is public — and it *says* "produce Italian" for everything a person reads: chat output, a
-classification line, the questions asked, reports, tables, verdicts, an evidence summary, a Decision
-Summary, the explanation of a diagnosis. State it once, near the top of the asset, and the exception
-that applies to it where the asset produces one.
-
-| Stays English | Why |
-|---------------|-----|
-| Source code, identifiers, code comments, test code | It lives with the code and follows the repository's conventions |
-| A project's technical documentation tree (`docs/tech*`, architecture maps, flow docs, its own `CLAUDE.md`) | Technical reference an AI session consumes, not prose a person reads |
-| Plan files and design specs | Technical artifacts a later session reads back |
-| Machine identifiers: command names and flags, `file:line`, test names, `CONFIRMED`/`PLAUSIBLE`, exception and type names, log lines, tool output | They are the format; translated output stops being evidence |
-
-An asset written *in* Italian is the failure mode this rule prevents — `worklog` is the one
-deliberate exception, and it says so.
-
 ## Finish checklist
 
 | # | Check | How |
-|---|-------|-----|
-| 1 | Inside the caps | Count the lines of the skill and every reference |
-| 2 | Skeleton complete and in order | The six headings, `## When` ending in a "Not for:" line |
-| 3 | `## Decide` carries real content | A table or a tree, not paragraphs |
-| 4 | No identity leaks | No organization names, absolute machine paths or addresses |
-| 5 | No version numbers | Detection rule or a docs-plugin route instead |
-| 6 | CLI before MCP | `az`, `gh`, `dotnet`, `docker`, `sqlcmd` first; the fallback is stated |
-| 7 | PowerShell examples | Bash only where it is genuinely better, and it says why |
-| 8 | No duplication of a plugin | Checked against the plugin coverage table |
-| 9 | Every reference reachable | A line in `## References` with its condition |
-| 10 | No link to a file that does not exist | Bare names in prose |
-| 11 | Validator clean | `node tools/validate.mjs` |
-| 12 | Eval section added | At least one MUST and one MUST NOT |
-| 13 | README row added | In the asset table |
-| 14 | Limits stated | Any asset that can write, post or delete says what it never does |
-| 15 | Output language stated | English prose that says "produce Italian", with the English exceptions named where the asset produces one |
-| 16 | Description fits the budget | ≤ 50 words, situations not contents; a trigger-only skill is one line plus `disable-model-invocation: true` |
-| 17 | No shadowing | The name collides with no project-level `.claude/skills/<name>` in the workspaces it serves |
-
-Sixteen out of seventeen is not finished.
+| --- | --- | --- |
+| 1 | Caps | SKILL.md ≤ 120, reference ≤ 200, rule ≤ 25, agent body ≤ 110 |
+| 2 | Skeleton | contract line, the six headings in order, `Not for:` with ≤ 3 items |
+| 3 | `## Decide` carries the substance | tables or a tree, in the top half |
+| 4 | Description | ≤ 25 words, `Use when …`, triggers first; `/<name>` and the flag on a user-invoked skill |
+| 5 | Fork skill self-contained | inputs, defaults and report shape restated; `background: false` |
+| 6 | No restatement | of `CLAUDE.md`, a plugin, or another asset — one owner, routing lines elsewhere |
+| 7 | Identity | placeholders only |
+| 8 | Versions | detection rule instead of a number |
+| 9 | CLI before MCP | fallback stated |
+| 10 | Every reference reachable | a `## References` line with its condition |
+| 11 | Limits | anything that writes, posts or deletes says what it never does |
+| 12 | Validator and tests | `node tools/validate.mjs`; `node --test tools/*.test.mjs`; every new check seen failing once on a bad input |
+| 13 | Eval section and README row | added |
+| 14 | No shadowing | no project skill with the same name in the workspaces it serves |

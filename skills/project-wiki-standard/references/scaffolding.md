@@ -10,9 +10,9 @@ resolved as `references/wiki-write-rules.md` describes and passed explicitly.
 
 ## Step A0 — Target and path
 
-1. Resolve organization and project from the current working directory through the workspace mapping
-   in the user's `CLAUDE.md`. Unmapped path, or no repository in sight → ask which Azure DevOps
-   project this wiki belongs to. Never read the target from `az devops configure`.
+1. Organization and project from the session's `ALM:` line. No line, unmapped, or no repository in
+   sight → ask which Azure DevOps project this wiki belongs to. Never read the target from
+   `az devops configure`.
 2. List the project's wikis (`azdo-cli`). No wiki → the project wiki has to be created first; a wiki
    that exists but is empty → carry on here.
 3. Read the page tree once (`recursionLevel=full`, `azdo-cli`) so that "empty" is a fact and not an

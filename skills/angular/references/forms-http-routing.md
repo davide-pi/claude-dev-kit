@@ -62,7 +62,7 @@ Rules that hold in both:
 - Prefer a resolver only when the screen genuinely cannot render without the data. Otherwise a
   loading state is better than a blocked navigation.
 - Preloading strategies are worth it for the next likely route; measure before adding one, and
-  measure with the `chrome-devtools-mcp` plugin rather than by feel.
+  measure in the real browser (`browser-use`) rather than by feel.
 
 ## Module federation, where present
 

@@ -67,7 +67,7 @@ Rules:
    squash commit; nessun impatto a runtime`.
 7. **`Verifica:`** — when a command or a check was run, the evidence before and after: the failing
    then passing test, the output, the screenshot path. Quote the command; never paraphrase a result
-   (`done-check`). Nothing was run → leave the block out rather than invent one.
+   (`plan-work`'s `evidence-by-stack.md`). Nothing was run → leave the block out rather than invent one.
 8. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
 
 ## Deriving it
@@ -135,29 +135,20 @@ name — that list is what makes the size of the change visible.
 
 ## Linking
 
-The PR carries at least one work item, and that item is the **parent backlog item** — a User Story
-or Product Backlog Item, a Bug, an Impediment, a TECH activity; on GitHub, the issue. A **Task** is
-never linked: it exists to carry hours (`worklog` owns them), not to state what was delivered. An id
-read off the branch name or a commit message is a candidate, not the answer — read its type first,
-and if it is a Task link its parent instead (`azdo-cli`). Nothing resolvable means the PR does not
-get opened: ask which item the change belongs to, or create it (`workitem-create`).
-
-- **Azure DevOps** — attach the parent item to the PR as a real link (`azdo-cli`). Policies and the
-  item's own state transition depend on that link; a URL in the body drives nothing.
-- **GitHub** — `Fixes #<n>` or `Closes #<n>` in the body closes the issue on merge. Use `Refs #<n>`
-  when the PR advances an issue without closing it.
-- Multiple parents: one link each, and if they sit under different Features say so in the body — the
-  branch is probably doing two things. Reference other PRs by number rather than describing them.
+The parent-item rule and its resolution steps are in `SKILL.md` §2. In the body: on GitHub the
+`Fixes #<n>` / `Refs #<n>` line goes last before the trailer; parents under different Features get
+one sentence saying so; other PRs are referenced by number, not described.
 
 ## The trailer
 
-When Claude opens the PR, the body ends with exactly one trailer line:
+When Claude opens the PR, the body ends with the attribution the session prescribes (the harness
+states it; the default is below), and nothing after it:
 
 ```
 🤖 Opened with [Claude Code](https://claude.com/claude-code)
 ```
 
-Nothing after it. It goes on the PR body only — never in the title, never in a commit message
+It goes on the PR body only — never in the title, never in a commit message
 unless the commit convention already asks for a co-author trailer.
 
 ## Draft PRs

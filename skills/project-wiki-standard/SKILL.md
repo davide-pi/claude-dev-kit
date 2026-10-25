@@ -1,38 +1,29 @@
 ---
 name: project-wiki-standard
 description: >-
-  Scaffold or maintain an Azure DevOps project wiki on the company's canonical structure. Explicit
-  trigger: only when the user types /project-wiki-standard.
+  Use when the user types /project-wiki-standard to scaffold or maintain an Azure DevOps project
+  wiki on the canonical structure.
 disable-model-invocation: true
 ---
 
 # project-wiki-standard — one shape for every project wiki, one place for every fact
 
-Why it exists: every project wiki is navigable the same way, so anyone — or any later session — can
-use it as a source of truth without guessing where something lives or disambiguating two copies of
-it. A client will have more than one product over time, so the structure has to hold several
-projects under the same client.
+**Contract.** A project wiki on the canonical tree, each fact on exactly one page, every write read
+back · never writes to a repository, never reorganises without page-by-page confirmation · wiki
+content and reports Italian; canonical page names verbatim.
 
-**Language.** This skill's instructions are English; everything it produces for a person is
-**Italian** — the wiki content, and equally the audit report and the structure map it presents before
-changing anything. The canonical page names (`Requisiti`, `Vincoli`, `Architettura`,
-`Domande aperte`, `Domande cliente`, `Domande terze parti`, `Chiusura progetto`, `Glossario`,
-`Casi limite`) never change: they are the structure itself, not prose. Do not "fix" them.
+Every wiki navigates the same way, so anyone — or a later session — finds a fact without guessing or
+disambiguating two copies. One client holds several projects over time; the tree allows for it.
 
 ## When
 
 - The user types `/project-wiki-standard`.
-- A new client or a new project needs its wiki created from nothing.
-- An open question got an answer and it has to land where it belongs.
-- A new feature or development has to be documented under `Requisiti`.
-- An existing wiki has drifted: pages missing, content in the wrong page, the same fact twice.
-- The project is closing and `Chiusura progetto` has been explicitly asked for.
+- A new client or project needs its wiki; a feature has to be documented under `Requisiti`.
+- An open question got an answer and has to land where it belongs.
+- A wiki has drifted: pages missing, content misplaced, a fact twice; or `Chiusura progetto` is asked for.
 
-Not for: a repository's own documentation tree — that belongs to `doc-keeper`, and neither touches
-the other's territory: this skill writes only to the Azure DevOps project wiki and never to files in
-a repository, while `doc-keeper` writes only inside a repository's docs tree and never to the wiki.
-Also not for: `az devops` verbs, auth and REST mechanics (`azdo-cli`), work items
-(`workitem-create`, `/item`), or wiki-wide full-text search. Never fires unasked.
+Not for: a repository's docs tree (`doc-keeper` — neither touches the other's territory), `az devops`
+mechanics (`azdo-cli`), work items (`workitem-create`).
 
 ## Decide
 
@@ -40,102 +31,76 @@ Also not for: `az devops` verbs, auth and REST mechanics (`azdo-cli`), work item
 
 | Rule | Detail |
 | --- | --- |
-| Zero duplication | one fact, one owning page; never a second "answers" page copying content |
-| An answered question migrates | the answer moves to its owning page and the question is **deleted**, not struck through — the wiki's git history already records how it was reached |
-| The root **is** the client page | who they are, sector and context, contacts including external technical third parties, written directly on `/`; never a separate "Cliente" page |
-| `Vincoli` is not `Architettura` | given facts against the decisions taken in response; mixing them makes it impossible, months later, to tell what was imposed from what was chosen |
-| Edge cases belong to their feature | `## Casi limite` as the last section of that feature's page, never a cross-cutting catalogue |
-| Italian content, canonical names | see the Language note above |
-| Org and project from the working directory | resolved through the workspace mapping in the user's `CLAUDE.md` and passed explicitly — never the `az devops configure` default, which may still point at a previous session's client. Path not mapped → ask |
-| Accented content is never written with the plain CLI | this wiki is Italian, so **every** write goes through the REST PUT with `charset=utf-8` that `azdo-cli` owns, and the page is read back afterwards to confirm the accents survived |
-| eTag discipline | an update carries the eTag from the **last** read or write; on a mismatch re-read, take the current eTag and retry — never force a stale one |
-| A reorganisation is confirmed page by page | it touches content other people are already using |
+| Zero duplication | one fact, one owning page; never a second "answers" page |
+| An answered question migrates | the answer moves to its owning page and the question is **deleted**, not struck through — the wiki's git history keeps the record |
+| The root **is** the client page | who, sector, context, contacts and external technical third parties, on `/`; never a separate "Cliente" page |
+| `Vincoli` is not `Architettura` | imposed facts against the decisions taken in response; mixed, nobody can later tell imposed from chosen |
+| Edge cases belong to their feature | `## Casi limite`, last section of the feature's page |
+| Canonical names never change | `Requisiti`, `Vincoli`, `Architettura`, `Domande aperte`, `Domande cliente`, `Domande terze parti`, `Chiusura progetto`, `Glossario`, `Casi limite` |
+| Target from the `ALM:` line | org and project passed explicitly on every call; no line or unmapped → ask; never the `az devops configure` default |
+| Writes through REST | every write is the REST `PUT` with `charset=utf-8` (`azdo-cli`), then the page is read back to prove the accents survived |
+| eTag discipline | an update carries the eTag of the **last** read or write; mismatch → re-read and retry, never force |
+| Reorganisation | presented as a map first, then confirmed page by page |
 
 ### 2. Which path
 
 | State of the target project | Path |
 | --- | --- |
-| no wiki, or a wiki that is empty or just created | **A — scaffolding**, `references/scaffolding.md` |
-| a wiki that already has content | **B — maintenance**, `references/maintenance.md` |
+| no wiki, or empty or just created | **A — scaffolding**, `references/scaffolding.md` |
+| a wiki with content | **B — maintenance**, `references/maintenance.md` |
 
-Resolve org, project and wiki first, then read the page tree once: both paths start from it.
+Both start from org, project and wiki resolved, then the page tree read once.
 
 ### 3. Which page owns the information
 
 | The information | Its one owning page |
 | --- | --- |
-| the client: who, sector, context, contacts and external technical third parties | the wiki root `/` |
-| a domain term, shared across all of that client's projects | `/Glossario` |
-| Scopo and Perimetro of a project | `<Progetto>/Requisiti`, written directly on it |
+| the client: who, sector, context, contacts, external technical third parties | the root `/` |
+| a domain term shared across the client's projects | `/Glossario` |
+| Scopo and Perimetro of a project | `<Progetto>/Requisiti`, on the page itself |
 | what one feature must do | `<Progetto>/Requisiti/<Funzionalità>` |
-| an edge case of that feature | `## Casi limite`, last section of that feature's page |
-| a fact imposed from outside (the client's infrastructure, a mandatory integration, the kind of devices in the field) | `<Progetto>/Vincoli` |
-| a choice made in response, its rejected alternatives and why | `<Progetto>/Architettura`, decision-record style |
+| an edge case of that feature | `## Casi limite` on that feature's page |
+| a fact imposed from outside (infrastructure, mandatory integration, field devices) | `<Progetto>/Vincoli` |
+| a choice made in response, rejected alternatives and why | `<Progetto>/Architettura`, decision-record style |
 | a question still open, per interlocutor | `Domande aperte/Domande cliente` or `.../Domande terze parti` |
-| a question that has been answered | its owning page above; the question itself is deleted |
-| delivered scope against planned, deviations, known debt, link to the final architecture | `<Progetto>/Chiusura progetto`, only on explicit request |
+| an answered question | its owning page above; the question is deleted |
+| delivered against planned, deviations, debt, link to the final architecture | `<Progetto>/Chiusura progetto`, only on explicit request |
 
-Full tree, page-by-page content and the Italian page skeletons: `references/canonical-structure.md`.
-
-### 4. Table of contents
-
-More than about four sections on a page → `[[_TOC_]]` on a line of its own, right after the
-introduction and before the first `##`. Short pages (one or two sections, as most feature subpages
-are) go without: there, an index is clutter rather than help.
+More than about four sections on a page → `[[_TOC_]]` on its own line after the introduction;
+short pages go without. Full tree and Italian skeletons: `references/canonical-structure.md`.
 
 ## Do
 
 ```powershell
-# 1. Resolve the target from the working directory, never from the CLI default.
-$cwd = (Get-Location).Path            # match its root against the workspace mapping in CLAUDE.md
-az devops configure --list            # informative only: what it reports is NOT the target
-$org = 'https://dev.azure.com/<org>'; $project = '<project>'   # from the mapping, or ask
-```
-
-The wiki calls themselves belong to `azdo-cli`: listing a project's wikis, reading the page tree
-with `recursionLevel=full` (there is no `az devops wiki page list` verb), and creating or updating a
-page through the REST PUT with `charset=utf-8`. Take the exact syntax from `azdo-cli`, and pass the
-organization and project explicitly on every call.
-
-```powershell
-# 2. After every write, read the page back and prove the accents survived.
+$org = 'https://dev.azure.com/<org>'; $project = '<project>'   # from the ALM: line, else ask
+az devops wiki list --org $org -p $project -o table
+# Tree: REST pages with recursionLevel=full (no `wiki page list` verb); writes: REST PUT, charset=utf-8 — azdo-cli references/wiki-rest.md
+# After every write, read the page back into $content and prove the accents survived:
 $canaries = @('più', 'città', 'perché')   # accented words actually present in what you wrote
-$canaries | Where-Object { $content -notlike "*$_*" }   # empty output = the write is clean
+$canaries | Where-Object { $content -notlike "*$_*" }   # empty output = clean
 if ($content -match [char]0xFFFD) { throw 'encoding corrupted: rewrite through the REST PUT' }
 ```
 
-Nothing is complete until its **Completo quando:** gate in the path reference is satisfied.
+Nothing is complete until its **Completo quando:** gate in the path reference holds.
 
 ## Traps
 
-1. Accents come back mangled → the plain `az devops wiki page create`/`update` re-reads the content
-   in the system codepage instead of UTF-8 → write through the REST PUT with `charset=utf-8`
-   (`azdo-cli`), and read the page back before calling the step done.
-2. A page looks childless → `az devops wiki page` has no `list` verb, and `show` returns a
-   `subPages` field without the subpages → read the tree with `recursionLevel=full` (`azdo-cli`).
-3. An update fails on `If-Match` → the eTag is stale because the page changed meanwhile → re-read,
-   take the current eTag, retry; never force.
-4. Content lands in the previous client's wiki → the `az devops configure` default was trusted →
-   resolve org and project from the working directory and pass them explicitly.
-5. An answered question is left in place, struck through → it feels like keeping the record → the
-   record is in the wiki's git history; delete the question once the answer is in its owning page.
-6. The same rule ends up described twice, then the copies diverge → an edge case was filed in a
-   cross-cutting page → edge cases live in `## Casi limite` on the feature's own page.
-7. `Vincoli` fills up with decisions → constraint and choice were written in one pass → what was
-   imposed goes to `Vincoli`, what was chosen to `Architettura`, with the alternatives rejected.
-8. A reorganisation lands before anyone agreed to it → the audit turned into edits in the same pass
-   → present the map first, then confirm page by page.
-9. `Chiusura progetto` gets filled early → it looked like a gap in the structure → it stays empty by
-   design and is filled only when explicitly asked for.
+1. Accents come back mangled → the plain `wiki page create`/`update` re-read the content in the
+   system codepage → REST `PUT` with `charset=utf-8`, read back.
+2. A page looks childless → `show` returns `subPages` without the subpages → read the tree with
+   `recursionLevel=full`.
+3. The same rule described twice, then diverging → an edge case went to a cross-cutting page → it
+   lives in `## Casi limite` on its feature's page.
+4. `Vincoli` fills with decisions → constraint and choice written in one pass → imposed to
+   `Vincoli`, chosen to `Architettura` with the rejected alternatives.
+5. `Chiusura progetto` filled early → it looked like a gap → it stays empty until asked for.
 
 ## References
 
-- `references/canonical-structure.md` — the full canonical tree, what each page owns, why `Vincoli`
-  and `Architettura` are separate, the TOC rule and the Italian page skeletons. Read it before
-  writing any page.
-- `references/scaffolding.md` — Path A: the client root, `Glossario`, then the whole structure under
-  the project page, with the gate for each step.
-- `references/maintenance.md` — Path B: the structure and duplication audit, closing an open
-  question, adding a feature subpage, filling `Chiusura progetto`, with the gate for each step.
-- `references/wiki-write-rules.md` — resolving org, project and wiki name; what `azdo-cli` owns and
-  what this skill never does; the read-back and eTag discipline. Read it on the first write.
+- `references/canonical-structure.md` — before writing any page: the full tree, what each page owns,
+  `Vincoli` against `Architettura`, the TOC rule, the Italian skeletons.
+- `references/scaffolding.md` — Path A: client root, `Glossario`, the project structure, each step's gate.
+- `references/maintenance.md` — Path B: the structure and duplication audit, closing a question,
+  adding a feature page, `Chiusura progetto`, each step's gate.
+- `references/wiki-write-rules.md` — on the first write: resolving org, project and wiki; what
+  `azdo-cli` owns; read-back and eTag discipline.

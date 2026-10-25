@@ -16,7 +16,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -54,6 +54,9 @@ function run(payload) {
   return result.stdout.trim();
 }
 
+/** An installed prettier, as the package manager leaves it: the shims of `.bin` (both spellings, one per platform). */
+const INSTALLED = { 'node_modules/.bin/prettier': '', 'node_modules/.bin/prettier.cmd': '' };
+
 const onFile = (file_path) => run({ tool_name: 'Write', tool_input: { file_path } });
 
 test('a C# file in a project that configures a style is formatted with the .NET formatter', () => {
@@ -64,30 +67,31 @@ test('a C# file in a project that configures a style is formatted with the .NET 
   });
   const plan = onFile(join(root, 'src/App/Orders/OrderService.cs'));
   assert.match(plan, /^dotnet format whitespace /);
-  assert.match(plan, /App\.csproj/, 'the nearest project scopes the run');
+  assert.match(plan, /whitespace .*[\\/]src[\\/]App --folder/, 'the nearest project directory scopes the run');
   assert.match(plan, /--include .*OrderService\.cs/, 'only the file just touched');
-  assert.match(plan, /--no-restore/, 'a hook must never restore packages mid-session');
+  assert.doesNotMatch(plan, /\.csproj/, 'files, not the project: no MSBuild load and no restore mid-session');
 });
 
-test('a web file in a project that configures a formatter goes through the local package runner', () => {
+test('a web file in a project that configures a formatter goes through its installed prettier, not a package runner', () => {
   const root = fixture({
     'package.json': '{ "name": "web", "devDependencies": {} }',
     '.prettierrc': '{ "singleQuote": true }',
-    'node_modules/': '',
+    ...INSTALLED,
     'src/app/order-list.component.ts': 'export class OrderList {}',
   });
   const plan = onFile(join(root, 'src/app/order-list.component.ts'));
-  assert.match(plan, /^npx --no-install prettier --write /);
+  assert.match(plan, /^prettier --write /);
+  assert.doesNotMatch(plan, /npx/);
   assert.match(plan, /order-list\.component\.ts/);
 });
 
 test('the formatter key may live in the package manifest instead of its own file', () => {
   const root = fixture({
     'package.json': '{ "name": "web", "prettier": { "printWidth": 100 } }',
-    'node_modules/': '',
+    ...INSTALLED,
     'src/main.tsx': 'export default function App() { return null; }',
   });
-  assert.match(onFile(join(root, 'src/main.tsx')), /^npx --no-install prettier/);
+  assert.match(onFile(join(root, 'src/main.tsx')), /^prettier --write /);
 });
 
 // ── Doing nothing is the common case, and the one that must never surprise ─────────────────────
@@ -109,7 +113,7 @@ test('a project with no style configured is left alone', () => {
   // A package.json but no formatter configured anywhere.
   const noFormatter = fixture({
     'package.json': '{ "name": "web" }',
-    'node_modules/': '',
+    ...INSTALLED,
     'src/main.ts': 'export {};',
   });
   assert.equal(onFile(join(noFormatter, 'src/main.ts')), '');
@@ -143,7 +147,7 @@ test('an extension with no formatter of its own is left alone', () => {
     '.editorconfig': 'root = true\n',
     'package.json': '{ "name": "web" }',
     '.prettierrc': '{}',
-    'node_modules/': '',
+    ...INSTALLED,
     'notes.txt': 'hello',
     'data.csv': 'a,b',
     'query.sql': 'SELECT 1',
@@ -161,4 +165,35 @@ test('anything unusable is a no-op rather than a failed tool call', () => {
   assert.equal(run({ tool_input: { file_path: '' } }), '');
   assert.equal(onFile(join(tmpdir(), 'does-not-exist-format-hook', 'Program.cs')), '');
   assert.equal(onFile(tmpdir()), '', 'a directory is not a file to format');
+});
+
+test('.json is never formatted, and a node_modules without prettier in it is left alone', () => {
+  const root = fixture({
+    'package.json': '{ "name": "web", "prettier": {} }',
+    ...INSTALLED,
+    'settings.json': '{}',
+    'src/data.jsonc': '{}',
+    'src/a.ts': 'export {};',
+  });
+  assert.equal(onFile(join(root, 'settings.json')), '');
+  assert.equal(onFile(join(root, 'package.json')), '');
+  assert.match(onFile(join(root, 'src/a.ts')), /^prettier --write /);
+
+  const bare = fixture({ 'package.json': '{ "name": "web", "prettier": {} }', 'node_modules/': '', 'src/a.ts': 'export {};' });
+  assert.equal(onFile(join(bare, 'src/a.ts')), '', 'no installed prettier: nothing to run, and nothing to download');
+});
+
+test('the installed prettier is run directly through its bin script, with the file and no package runner', () => {
+  const root = fixture({
+    'package.json': '{ "name": "web", "prettier": {} }',
+    'node_modules/prettier/package.json': '{ "name": "prettier", "bin": { "prettier": "bin/prettier.cjs" } }',
+    'node_modules/prettier/bin/prettier.cjs': "require('fs').writeFileSync(process.argv[1] + '.ran', process.argv.slice(2).join('|'));",
+    'src/a.ts': 'export {};',
+  });
+  const file = join(root, 'src/a.ts');
+  const result = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ tool_name: 'Write', tool_input: { file_path: file } }), encoding: 'utf8',
+  });
+  assert.equal(result.status, 0);
+  assert.equal(readFileSync(join(root, 'node_modules/prettier/bin/prettier.cjs.ran'), 'utf8'), `--write|${file}`);
 });

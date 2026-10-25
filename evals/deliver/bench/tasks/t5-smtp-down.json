@@ -1,0 +1,8 @@
+{
+  "id": "t5-smtp-down",
+  "kind": "error-path",
+  "prompt": "Quando il server SMTP e' giu' la conferma ordine fallisce con un 500, ma l'ordine risulta gia' confermato. La mail e' un di piu': se non parte, la conferma deve riuscire lo stesso.",
+  "seeds": [
+    { "file": "OrdersApi/Services/NotificationService.cs", "find": "catch (Exception ex)", "replace": "catch (InvalidOperationException ex)" }
+  ]
+}

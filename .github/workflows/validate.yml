@@ -14,6 +14,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 
@@ -24,11 +25,20 @@ jobs:
       - name: Validate assets, references, leaks and docs
         run: node tools/validate.mjs
 
+      # One test file at a time: several tests write fixtures to the temp directory and spawn
+      # shells, and a runner is small enough that the parallel speed-up is not worth a flaky run.
       - name: Test the hooks
-        run: node --test tools/*.test.mjs
+        run: node --test --test-concurrency=1 tools/*.test.mjs
 
       - name: Syntax-check the status line
         run: node --check statusline.js
+
+      - name: Syntax-check hooks and tools
+        run: |
+          for f in hooks/*.js hooks/lib/*.js tools/*.js tools/*.mjs; do
+            [ -e "$f" ] || continue
+            node --check "$f"
+          done
 
       - name: Parse every PowerShell script
         shell: pwsh

@@ -14,11 +14,18 @@
 
   Every asset is user-level. The kit is opinionated on technique and anonymous only on identity
   (Azure DevOps org and project names, absolute machine paths, e-mail addresses), so nothing is
-  project-scoped any more: agents/, commands/, hooks/ and skills/ are installed whole, plus the
-  root-level CLAUDE.md, settings.json and statusline.js.
+  project-scoped any more: agents/, hooks/ and skills/ are installed whole, plus the root-level
+  CLAUDE.md, settings.json and statusline.js. rules/, workflows/, scripts/, mods/ and output-styles/ are
+  installed the same way.
 
-  Assets are discovered, never listed: whatever the repo contains under those four directories is
+  Assets are discovered, never listed: whatever the repo contains under those directories is
   an asset, recursively, so a new skill folder with its references and scripts needs no edit here.
+  The exceptions are the local-only files (my-voice, workspaces.json, db-targets.json…): they live
+  in the live config only, -Check reports them as expected and -Pull never imports them.
+
+  Installing copies and never deletes on its own. What the kit retired (see $Retired: killed skills,
+  a hook, a script, and any commands/<name>.md that a skill of the same name replaced) is detected:
+  -Check reports it, a plain install asks before moving it to the backup folder.
 
 .EXAMPLE
   .\install.ps1 -Check
@@ -28,7 +35,8 @@
 param(
     [switch]$Check,
     [switch]$Pull,
-    # Skip the confirmation prompt when overwriting CLAUDE.md / settings.json.
+    # Skip the confirmation prompt when overwriting CLAUDE.md / settings.json and when moving a
+    # retired asset to the backup folder.
     [switch]$Force,
     [string]$ClaudeHome = (Join-Path $env:USERPROFILE '.claude')
 )
@@ -54,18 +62,34 @@ if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
 
 # The directories Claude Code loads assets from. Discovery recurses into them, so a new skill
 # folder, hook, agent or reference file is picked up without touching this file.
-$AssetDirs = @('agents', 'commands', 'hooks', 'skills')
+$AssetDirs = @('agents', 'hooks', 'mods', 'output-styles', 'rules', 'scripts', 'skills', 'workflows')
 
 # Repo-only root files: they configure the repo itself, not Claude Code. Every other file at the
 # root is a user-level asset, so a new repo-only file at the root belongs in this list.
-$RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json')
+# workspaces.example.json, db-targets.example.json and settings.overlay.example.json are the templates
+# of the local-only workspaces.json, db-targets.json and settings.overlay.json, not assets themselves.
+$RepoOnly = @('README.md', 'LICENSE', 'install.ps1', '.gitattributes', '.gitignore', 'package.json',
+              'workspaces.example.json', 'db-targets.example.json', 'settings.overlay.example.json')
 
 # Never an asset, on either side: install backups, editor and OS leftovers.
 $Ignored = @('*.bak', '*.bkp', '*.bak.*', '*~', 'Thumbs.db', '.DS_Store')
 
-# Folders under the asset directories that Claude Code itself manages — skills synced down from the
-# claude.ai account — so neither side owns them and -Pull must never import them.
-$ManagedDirs = @('skills/synced')
+# Live-config-only paths, relative to the config root, file or folder: personal identity (my-voice),
+# what Claude Code itself manages (skills synced from the claude.ai account, the trash), and
+# machine data (workspaces.json, db-targets.json), and the type declarations the plugin engine generates
+# inside a mod (mods/<name>/.claude-plugin/types) and the mod's tsconfig.json, which only extends them. Neither side owns them as an asset: -Pull never
+# imports them, install never writes them, and -Check reports them as expected.
+$LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.json', 'db-targets.json',
+               'settings.overlay.json', 'mods/cockpit/.claude-plugin/types', 'mods/cockpit/tsconfig.json')
+
+# Assets the kit used to ship and no longer does, relative to the config root, file or folder. Install
+# copies but never deletes, so on a machine that had an older kit they linger: a retired skill keeps
+# firing next to its replacement, a retired hook stays wired. -Pull never imports them, -Check lists
+# them, and a plain install moves them to the run's backup folder after asking. Commands are not
+# listed: every live commands/<name>.md that a skill of the same name replaced is found by name.
+$Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
+             'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
+             'hooks/az-identity.js', 'scripts/sql-ro.ps1')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
@@ -82,6 +106,16 @@ function Test-Ignorable([string]$Name) {
     return $false
 }
 
+function Test-LocalOnly([string]$Relative) {
+    foreach ($entry in $LocalOnly) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
+    return $false
+}
+
+function Test-Retired([string]$Relative) {
+    foreach ($entry in $Retired) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
+    return $false
+}
+
 function Get-DirAssets([string]$Root) {
     # Everything under the asset directories, recursively and whatever it is: a SKILL.md, a
     # reference file, a PowerShell helper next to its skill, an agent, a hook.
@@ -92,21 +126,22 @@ function Get-DirAssets([string]$Root) {
             Where-Object { -not (Test-Ignorable $_.Name) }
     }
     $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
-        Where-Object { $rel = $_; -not ($ManagedDirs | Where-Object { $rel -like "$_/*" }) }
+        Where-Object { -not (Test-LocalOnly $_) }
 }
 
 function Get-KitAssets {
     # Every user-level asset the repo ships, as repo-relative forward-slash paths.
     $root = Get-ChildItem -LiteralPath $RepoRoot -File |
-        Where-Object { -not (Test-Ignorable $_.Name) -and $_.Name -notin $RepoOnly } |
+        Where-Object { -not (Test-Ignorable $_.Name) -and $_.Name -notin $RepoOnly -and -not (Test-LocalOnly $_.Name) } |
         ForEach-Object { $_.Name }
     @($root) + @(Get-DirAssets $RepoRoot) | Sort-Object -Unique
 }
 
 function Get-InstalledAssets {
     # The live config, from the asset directories only: its root holds runtime state (session
-    # history, credentials, local settings) that the repo must never adopt.
-    @(Get-DirAssets $ClaudeHome) | Sort-Object -Unique
+    # history, credentials, local settings) that the repo must never adopt. Retired assets are left
+    # out too: they have a section of their own, and pulling one back would revive it.
+    @(Get-DirAssets $ClaudeHome | Where-Object { -not (Test-Retired $_) }) | Sort-Object -Unique
 }
 
 function Get-NormalizedHash([string]$Path) {
@@ -122,7 +157,7 @@ function Copy-Asset([string]$Relative, [string]$From, [string]$To) {
     $target = Join-Path $To $Relative.Replace('/', '\')
     $parent = Split-Path -Parent $target
     if (-not (Test-Path -LiteralPath $parent)) { New-Item -ItemType Directory -Force -Path $parent | Out-Null }
-    # Anything already in the live config is someone's work — `commands/commit.md` is a likely
+    # Anything already in the live config is someone's work — `skills/commit/SKILL.md` is a likely
     # collision — so keep a copy before overwriting. Copies go to one folder per run under
     # backups\, never next to the asset: a .bak beside a skill is loaded, listed and diffed as if it
     # were one, and seventy of them is how the live config became unreadable. Pulling into the repo
@@ -158,10 +193,9 @@ function Test-Environment {
 
     if (Get-Command git -ErrorAction SilentlyContinue) { Write-Ok 'git' } else { Write-Problem 'git not found in PATH' }
 
-    # settings.json hardcodes this path for the hooks.
-    $pwshPath = 'C:\Program Files\PowerShell\7\pwsh.exe'
-    if (Test-Path -LiteralPath $pwshPath) { Write-Ok 'pwsh 7 at the path settings.json expects' }
-    else { Write-Problem "pwsh 7 not at '$pwshPath' — the hooks in settings.json will not fire; fix the path there" }
+    # settings.json starts the browser-use hook as `pwsh`, by name.
+    if (Get-Command pwsh -ErrorAction SilentlyContinue) { Write-Ok 'pwsh on PATH' }
+    else { Write-Problem 'pwsh (PowerShell 7) not found in PATH — the browser-use hook and the worklog and database scripts will not run' }
 
     if (Get-Command claude -ErrorAction SilentlyContinue) { Write-Ok 'claude CLI' }
     else { Write-Info 'claude CLI not in PATH — register MCP servers from inside Claude Code instead' }
@@ -176,7 +210,10 @@ function Test-Environment {
     $userVar = [Environment]::GetEnvironmentVariable('CLAUDE_HOOKS', 'User')
     if ($userVar -and ($userVar.TrimEnd('\') -ieq $expected.TrimEnd('\'))) { Write-Ok "CLAUDE_HOOKS -> $userVar" }
     elseif ($userVar) { Write-Problem "CLAUDE_HOOKS points at '$userVar' instead of '$expected'" }
-    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) — the hooks fail silently, since they exit 0 by design" }
+    elseif ($Check -and ($expected.TrimEnd('\') -ieq (Join-Path $HOME '.claude\hooks').TrimEnd('\'))) {
+        Write-Ok 'CLAUDE_HOOKS not set — the hooks fall back to ~/.claude/hooks, which is where they are'
+    }
+    elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) and the hooks are not in ~/.claude/hooks — they would not be found: guard-shell and secret-scan block (onFailure: block), the other hooks fail silently since they exit 0 by design" }
     else {
         [Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', $expected, 'User')
         $env:CLAUDE_HOOKS = $expected
@@ -225,20 +262,88 @@ function Test-Toolchain {
     }
 
     $null = Test-Tool 'docker' 'docker' 'install with: winget install Docker.DockerDesktop'
-    $null = Test-Tool 'sqlcmd' 'sqlcmd' 'install with: winget install Microsoft.Sqlcmd'
+    Test-DbClients
+}
 
-    # Postgres and Redis have a real client in one platform only, and the kit's answer is the
-    # container, not a local install. Absent is the expected state here, never a problem.
-    foreach ($client in @(
-            @{ Name = 'psql';      Via = 'docker compose exec postgres psql' }
-            @{ Name = 'redis-cli'; Via = 'docker compose exec redis redis-cli' }
-        )) {
-        if (Get-Command $client.Name -ErrorAction SilentlyContinue) {
-            Write-Info "$($client.Name) installed locally — the kit still reaches for: $($client.Via)"
-        } else {
-            Write-Ok "$($client.Name) absent, by design — the kit uses containers: $($client.Via)"
+function Get-DbClientImages {
+    # The docker route's default images are scripts/db-ro.ps1's $DefaultImages: read them from there so
+    # the two cannot drift. A script that no longer carries the line falls back to the known pair.
+    $images = @{ 'psql' = 'postgres:17'; 'redis-cli' = 'redis:7' }
+    $dbRo = Join-Path $RepoRoot 'scripts\db-ro.ps1'
+    if (Test-Path -LiteralPath $dbRo) {
+        $line = Select-String -LiteralPath $dbRo -Pattern '^\$DefaultImages\s*=\s*@\{(.+)\}' | Select-Object -First 1
+        if ($line) {
+            foreach ($m in [regex]::Matches($line.Matches[0].Groups[1].Value, "'([\w-]+)'\s*=\s*'([^']+)'")) {
+                $images[$m.Groups[1].Value] = $m.Groups[2].Value
+            }
         }
     }
+    return $images
+}
+
+function Test-InWsl([string]$Name) {
+    # `wsl` exists on a machine with no distribution installed, and then `which` fails: that is "no".
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try { & wsl -e which $Name *> $null; return ($LASTEXITCODE -eq 0) } catch { return $false }
+    finally { $ErrorActionPreference = $previous }
+}
+
+function Get-LocalImage([string]$Repository) {
+    $previous = $ErrorActionPreference
+    $ErrorActionPreference = 'Continue'
+    try {
+        return (& docker image ls $Repository --format '{{.Repository}}:{{.Tag}}' 2>$null |
+            Where-Object { $_ -and $_ -notmatch '<none>' } | Select-Object -First 1)
+    } catch { return $null }
+    finally { $ErrorActionPreference = $previous }
+}
+
+function Test-DbClients {
+    # scripts/db-ro.ps1 drives three clients. psql and redis-cli run native, else in WSL, else through
+    # docker (an image already pulled, else its default); go-sqlcmd is native only. None of the three is
+    # a problem here: this says which route the database skill will take.
+    $docker = [bool](Get-Command docker -ErrorAction SilentlyContinue)
+    $wsl = [bool](Get-Command wsl -CommandType Application -ErrorAction SilentlyContinue)
+    $images = Get-DbClientImages
+
+    if (Get-Command sqlcmd -ErrorAction SilentlyContinue) { Write-Ok 'sqlcmd (native)' }
+    else { Write-Info 'sqlcmd not installed — SQL Server targets of db-ro.ps1 need it, native only: winget install Microsoft.Sqlcmd' }
+
+    foreach ($client in @(
+            @{ Name = 'psql';      Install = 'scoop install postgresql' }
+            @{ Name = 'redis-cli'; Install = 'WSL: apt install redis-tools' }
+        )) {
+        $name = $client.Name
+        if (Get-Command $name -ErrorAction SilentlyContinue) { Write-Ok "$name (native)"; continue }
+        if ($wsl -and (Test-InWsl $name)) { Write-Ok "$name (WSL)"; continue }
+        if ($docker) {
+            $local = Get-LocalImage ($images[$name].Split(':')[0])
+            if ($local) { Write-Info "$name not installed — via docker, image $local (already pulled)" }
+            else { Write-Info "$name not installed — via docker, image $($images[$name]) (pulled on first use)" }
+            continue
+        }
+        Write-Info "$name missing, and no WSL or docker to fall back on — install: $($client.Install)"
+    }
+}
+
+function Test-HookSyntax([string]$Path) {
+    # Parse only, never run: a hook executed here would act on the live session. `node --check` and the
+    # PowerShell parser read the file and stop.
+    $ErrorActionPreference = 'Continue'
+    $name = Split-Path -Leaf $Path
+    if ($Path -like '*.ps1') {
+        $tokens = $null; $errors = $null
+        [void][System.Management.Automation.Language.Parser]::ParseFile($Path, [ref]$tokens, [ref]$errors)
+        if ($errors) { Write-Problem "$name does not parse — $($errors[0].Message) (line $($errors[0].Extent.StartLineNumber))"; return $false }
+        return $true
+    }
+    $out = @(& node --check $Path 2>&1 | ForEach-Object { "$_" })
+    if ($LASTEXITCODE -ne 0) {
+        Write-Problem "$name fails node --check — $((@($out | Where-Object { $_ -match 'Error' }) + $out)[0])"
+        return $false
+    }
+    return $true
 }
 
 function Test-Hooks {
@@ -254,29 +359,88 @@ function Test-Hooks {
     # not installed yet, so a first run still validates the wiring.
     $settingsPath = Join-Path $ClaudeHome 'settings.json'
     if (-not (Test-Path -LiteralPath $settingsPath)) { $settingsPath = Join-Path $RepoRoot 'settings.json' }
+    # Every event under "hooks" is walked, whatever its name — a new event needs no edit here. A
+    # script wired on several events lists them all. A hook that runs no kit script (a prompt hook,
+    # an external executable) cannot be checked against the repo, so it is only counted.
     $wired = @{}
+    $unchecked = [ordered]@{}
     try {
         $settings = Get-Content -Raw -LiteralPath $settingsPath | ConvertFrom-Json
         foreach ($evt in $settings.hooks.PSObject.Properties) {
             foreach ($group in @($evt.Value)) {
                 foreach ($hook in @($group.hooks)) {
                     $line = (@($hook.command) + @($hook.args)) -join ' '
-                    foreach ($m in [regex]::Matches($line, '[\w.-]+\.(?:ps1|js|mjs|cjs)')) {
-                        $wired[$m.Value] = $evt.Name
+                    $files = @([regex]::Matches($line, '[\w.-]+\.(?:ps1|js|mjs|cjs)') | ForEach-Object { $_.Value })
+                    foreach ($file in $files) {
+                        if (-not $wired.ContainsKey($file)) { $wired[$file] = @() }
+                        if ($evt.Name -notin $wired[$file]) { $wired[$file] += $evt.Name }
                     }
+                    if (-not $files) { $unchecked[$evt.Name] = 1 + [int]$unchecked[$evt.Name] }
                 }
             }
         }
     } catch { Write-Problem "cannot read the hook wiring from $settingsPath — $($_.Exception.Message)" }
 
+    # nudges.js runs the nudges itself, so a script listed in its NUDGES table is wired through it.
+    if ($wired.ContainsKey('nudges.js')) {
+        $dispatcher = Get-Content -Raw -LiteralPath (Join-Path $hookDir 'nudges.js') -ErrorAction SilentlyContinue
+        $table = [regex]::Match("$dispatcher", '(?s)const NUDGES = \{(.*?)\};').Groups[1].Value
+        foreach ($file in @([regex]::Matches($table, '[\w.-]+\.js') | ForEach-Object { $_.Value } | Sort-Object -Unique)) {
+            if (-not $wired.ContainsKey($file)) { $wired[$file] = @('via nudges.js') }
+        }
+    }
+
+    $parsed = 0
+    $failed = 0
+    $canParse = $Check -and [bool](Get-Command node -ErrorAction SilentlyContinue)
+    if ($Check -and -not $canParse) { Write-Info 'node is not in PATH — the hook scripts are not syntax-checked' }
+
     foreach ($name in ($wired.Keys | Sort-Object)) {
+        $events = $wired[$name] -join ', '
         if ($name -notin $shipped) {
-            Write-Problem "settings.json wires $($wired[$name]) -> $name, which the repo does not ship"
+            Write-Problem "settings.json wires $events -> $name, which the repo does not ship"
             continue
         }
         # Wired and shipped is still not enough: the hook is resolved from the hooks directory.
-        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) { Write-Ok "$name ($($wired[$name]))" }
-        else { Write-Problem "$name is wired on $($wired[$name]) but not installed in $ClaudeHome\hooks — run .\install.ps1" }
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome "hooks\$name")) {
+            Write-Ok "$name ($events)"
+            if ($canParse) { if (Test-HookSyntax (Join-Path $ClaudeHome "hooks\$name")) { $parsed++ } else { $failed++ } }
+        }
+        else { Write-Problem "$name is wired on $events but not installed in $ClaudeHome\hooks — run .\install.ps1" }
+    }
+
+    # The libraries the .js hooks require are part of the same smoke test: a broken one fails every caller.
+    # Only when the repo ships hooks\lib. A lib the repo ships but the install lacks is a failure of its own,
+    # whether or not node can parse.
+    $installedLib = Join-Path $ClaudeHome 'hooks\lib'
+    $repoLib = Join-Path $RepoRoot 'hooks\lib'
+    if (Test-Path -LiteralPath $repoLib -PathType Container) {
+        if (-not (Test-Path -LiteralPath $installedLib -PathType Container)) {
+            Write-Problem "$installedLib is missing — the hooks cannot load their libraries; run .\install.ps1"
+            $failed++
+        }
+        else {
+            foreach ($shippedLib in @(Get-ChildItem -LiteralPath $repoLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+                if (-not (Test-Path -LiteralPath (Join-Path $installedLib $shippedLib.Name))) {
+                    Write-Problem "hooks\lib\$($shippedLib.Name) is shipped by the repo but not installed in $installedLib — run .\install.ps1"
+                    $failed++
+                }
+            }
+            if ($canParse) {
+                foreach ($lib in @(Get-ChildItem -LiteralPath $installedLib -Filter '*.js' -File -ErrorAction SilentlyContinue)) {
+                    if (Test-HookSyntax $lib.FullName) { $parsed++ } else { $failed++ }
+                }
+            }
+        }
+    }
+    if ($canParse) {
+        if ($failed -gt 0) { Write-Problem "$failed of the wired hook scripts and the top-level hooks\lib\*.js failed the smoke test, $parsed parsed" }
+        elseif ($parsed -eq 0) { Write-Info 'smoke test: nothing was checked (no wired hook script installed, no hooks\lib\*.js)' }
+        else { Write-Ok "$parsed script(s) parse: the wired hooks plus the top-level hooks\lib\*.js (node --check / PowerShell parser, nothing executed)" }
+    }
+
+    foreach ($evt in $unchecked.Keys) {
+        Write-Info "${evt}: $($unchecked[$evt]) hook(s) run no kit script (prompt hook or external command) — not checked"
     }
 
     foreach ($name in ($shipped | Where-Object { $_ -notin $wired.Keys })) {
@@ -287,6 +451,12 @@ function Test-Hooks {
     # empty is silence — the one state in which forgotten hours stay forgotten without a sign.
     if ($wired.ContainsKey('worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
         Write-Problem 'CLAUDE_WORKSPACE_ROOTS is empty in settings.json → env — worklog-pending.js will never report a day'
+    }
+
+    # Likewise the ALM line: without the local map the hook prints nothing and the session never learns
+    # its org, project or az identity.
+    if ($wired.ContainsKey('workspace-context.js') -and -not (Test-Path -LiteralPath (Join-Path $ClaudeHome 'workspaces.json'))) {
+        Write-Problem 'workspace-context.js is wired but workspaces.json is missing — no ALM line will appear; copy workspaces.example.json to workspaces.json and edit it'
     }
 }
 
@@ -334,6 +504,92 @@ function Test-McpServers {
 }
 
 # ── Asset sync ────────────────────────────────────────────────────────────────
+function Get-AssetKey([string]$Relative) {
+    # What a person calls "one asset": a skill is its whole folder, every other asset is its file.
+    if ($Relative -match '^(skills/[^/]+)/') { return $Matches[1] }
+    return $Relative
+}
+
+function Test-AssetDrift([string[]]$Paths) {
+    # One finding per asset, not per file: a skill the live config lacks entirely is one line, not
+    # thirty reference files burying every other issue. A partly drifted skill names its files.
+    foreach ($group in ($Paths | Group-Object { Get-AssetKey $_ })) {
+        $key = $group.Name
+        $files = @($group.Group)
+        $missing = @()
+        $differs = @()
+        foreach ($rel in $files) {
+            $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
+            $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
+            if ($repoHash -eq $homeHash) { continue }
+            if ($null -eq $homeHash) { $missing += $rel } else { $differs += $rel }
+        }
+
+        if (-not $missing -and -not $differs) { Write-Ok $(if ($files.Count -gt 1) { "$key/ ($($files.Count) files)" } else { $key }); continue }
+        if ($files.Count -eq 1) {
+            if ($missing) { Write-Problem "$key is not installed" } else { Write-Problem "$key differs between repo and the live config" }
+            continue
+        }
+        if ($missing.Count -eq $files.Count) { Write-Problem "$key/ is not installed ($($files.Count) file(s))"; continue }
+
+        $parts = @()
+        if ($differs) { $parts += "differs: $(($differs | ForEach-Object { $_.Substring($key.Length + 1) }) -join ', ')" }
+        if ($missing) { $parts += "not installed: $(($missing | ForEach-Object { $_.Substring($key.Length + 1) }) -join ', ')" }
+        Write-Problem "$key/ drifted — $($parts -join '; ')"
+    }
+}
+
+function Test-SettingsMerge([string]$Overlay) {
+    # tools/merge-settings.mjs: exit 0 the live settings.json is template + overlay, 1 it is not (the
+    # differing keys on stdout), 2 a file could not be read.
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { Write-Problem 'settings.json cannot be compared with template + overlay: node is not on PATH'; return }
+    $output = @(& $node.Source (Join-Path $RepoRoot 'tools\merge-settings.mjs') `
+        --template (Join-Path $RepoRoot 'settings.json') --overlay $Overlay `
+        --check (Join-Path $ClaudeHome 'settings.json') 2>&1)
+    switch ($LASTEXITCODE) {
+        0 { Write-Ok 'settings.json matches the template + overlay' }
+        1 {
+            Write-Problem 'settings.json differs from the template + overlay (~ differs, + missing from the live file, - only in it)'
+            foreach ($line in $output) { Write-Info "$line" }
+        }
+        default { Write-Problem "settings.json could not be compared with template + overlay: $($output -join ' ')" }
+    }
+}
+
+function Install-SettingsMerge([string]$Overlay) {
+    # With an overlay the live settings.json is generated, never copied: the template alone would
+    # drop your choices. A change the app wrote into the live file (/config, /plugin) shows in the
+    # diff below and is lost on Yes unless it is copied into the overlay first.
+    $node = Get-Command node -ErrorAction SilentlyContinue
+    if (-not $node) { Write-Problem 'settings.json not installed: node is not on PATH to merge template + overlay'; return }
+    $merge = Join-Path $RepoRoot 'tools\merge-settings.mjs'
+    $template = Join-Path $RepoRoot 'settings.json'
+    $live = Join-Path $ClaudeHome 'settings.json'
+    if (Test-Path -LiteralPath $live) {
+        $output = @(& $node.Source $merge --template $template --overlay $Overlay --check $live 2>&1)
+        if ($LASTEXITCODE -eq 0) { Write-Ok 'settings.json (template + overlay)'; return }
+        if ($LASTEXITCODE -ne 1) { Write-Problem "settings.json not installed: $($output -join ' ')"; return }
+        Write-Info 'settings.json differs from template + overlay (~ differs, + missing from the live file, - only in it):'
+        foreach ($line in $output) { Write-Info "  $line" }
+        if (-not $Force) {
+            try {
+                $answer = Read-Host '  Write template + overlay over settings.json? [y/N]'
+            } catch {
+                Write-Info 'settings.json differs, and this host cannot prompt — kept as is (pass -Force to write)'
+                return
+            }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info 'settings.json kept as is'; return }
+        }
+        $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\settings.json"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Copy-Item -Force -LiteralPath $live -Destination $backup
+    }
+    $output = @(& $node.Source $merge --template $template --overlay $Overlay --out $live 2>&1)
+    if ($LASTEXITCODE -eq 0) { Write-Change 'settings.json written from template + overlay' }
+    else { Write-Problem "settings.json not written: $($output -join ' ')" }
+}
+
 function Sync-Assets {
     Write-Section $(if ($Check) { 'Assets (repo vs installed)' } elseif ($Pull) { 'Assets (installed -> repo)' } else { 'Assets (repo -> installed)' })
 
@@ -342,37 +598,27 @@ function Sync-Assets {
     # whole skill folder with its reference files included — is exactly what it has to bring back.
     $paths = if ($Pull) { @(@(Get-KitAssets) + @(Get-InstalledAssets) | Sort-Object -Unique) } else { @(Get-KitAssets) }
 
-    # Check mode only: a skill the live config does not have at all is one finding, not one per
-    # reference file — thirty skills' worth of files would bury every other issue in the report.
-    # A partially installed skill still reports file by file, which is the case worth seeing.
-    $missingSkills = @{}
+    $overlay = Join-Path $ClaudeHome 'settings.overlay.json'
     if ($Check) {
-        foreach ($d in (Get-ChildItem -LiteralPath (Join-Path $RepoRoot 'skills') -Directory -ErrorAction SilentlyContinue)) {
-            if (-not (Test-Path -LiteralPath (Join-Path $ClaudeHome "skills\$($d.Name)"))) { $missingSkills[$d.Name] = $true }
-        }
+        # settings.json is the template you merged your own choices into, so it differs by design, unless
+        # the choices live in an overlay: then the live file has to be exactly template + overlay.
+        if (Test-Path -LiteralPath $overlay) { Test-SettingsMerge $overlay }
+        else { Write-Info 'settings.json is not compared: your copy is a personalised merge of the template, by design' }
+        Test-AssetDrift @($paths | Where-Object { $_ -ne 'settings.json' })
+        return
     }
 
     foreach ($rel in $paths) {
-        if ($Check -and ($rel -match '^skills/([^/]+)/') -and $missingSkills.ContainsKey($Matches[1])) {
-            $skill = $Matches[1]
-            if ($missingSkills[$skill]) {
-                $missingSkills[$skill] = $false   # report the folder once
-                $count = @($paths | Where-Object { $_ -like "skills/$skill/*" }).Count
-                Write-Problem "skills/$skill/ is not installed ($count file(s))"
-            }
+        if ($rel -eq 'settings.json' -and (Test-Path -LiteralPath $overlay)) {
+            # Generated, so neither copied nor pulled: a pull would put your choices into the public repo.
+            if ($Pull) { Write-Info 'settings.json not pulled: it is generated from template + overlay' }
+            else { Install-SettingsMerge $overlay }
             continue
         }
-
         $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
         $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
 
         if ($repoHash -eq $homeHash) { Write-Ok $rel; continue }
-
-        if ($Check) {
-            if ($null -eq $homeHash) { Write-Problem "$rel is not installed" }
-            else { Write-Problem "$rel differs between repo and the live config" }
-            continue
-        }
 
         if ($Pull) {
             if ($null -eq $homeHash) { Write-Info "$rel not installed — nothing to pull"; continue }
@@ -392,7 +638,7 @@ function Sync-Assets {
                 Write-Info "$rel differs, and this host cannot prompt — kept as is (pass -Force to overwrite)"
                 continue
             }
-            if ($answer -notmatch '^(y|yes)$') { Write-Info "$rel kept as is"; continue }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info "$rel kept as is"; continue }
         }
         Copy-Asset $rel $RepoRoot $ClaudeHome
         Write-Change "$rel installed"
@@ -423,6 +669,65 @@ function Test-InstalledOnlyAssets {
     }
 }
 
+function Get-RetiredInstalled {
+    # Retired assets still in the live config, as config-relative paths (a file or a whole folder).
+    $found = foreach ($entry in $Retired) {
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome $entry.Replace('/', '\'))) { $entry }
+    }
+    # Commands became skills. A live commands/<name>.md whose name the repo now ships as a skill is two
+    # assets for one name; any other command there is the user's own and is none of the kit's business.
+    $commands = Join-Path $ClaudeHome 'commands'
+    $shadowing = if (Test-Path -LiteralPath $commands) {
+        foreach ($file in Get-ChildItem -LiteralPath $commands -Filter '*.md' -File -ErrorAction SilentlyContinue) {
+            $name = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
+            if (Test-Path -LiteralPath (Join-Path $RepoRoot "skills\$name")) { "commands/$($file.Name)" }
+        }
+    }
+    return @($found) + @($shadowing)
+}
+
+function Test-RetiredAssets {
+    # Install copies and never deletes, so the retired ones have to be named. -Check reports each; a plain
+    # install moves it to the run's backup folder after asking (-Force skips the question, a host that
+    # cannot prompt keeps everything). A retired hook may still be wired in a settings.json you kept:
+    # Test-Hooks reports that separately.
+    Write-Section 'Retired assets (the kit no longer ships them)'
+    $retired = @(Get-RetiredInstalled | Where-Object { $_ })
+    if (-not $retired) { Write-Ok 'none in the live config'; return }
+
+    foreach ($rel in $retired) {
+        if ($Pull) { Write-Info "$rel is retired and still in the live config — not pulled"; continue }
+        if ($Check) { Write-Problem "$rel is retired but still in the live config — run .\install.ps1 to remove it"; continue }
+        if (-not $Force) {
+            try {
+                $answer = Read-Host "  $rel was retired by the kit. Move it to the backup folder? [y/N]"
+            } catch {
+                Write-Info "$rel is retired, and this host cannot prompt — kept (pass -Force to remove)"
+                continue
+            }
+            if ("$answer" -notmatch '^(y|yes)$') { Write-Info "$rel kept"; continue }
+        }
+        $source = Join-Path $ClaudeHome $rel.Replace('/', '\')
+        $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\$($rel.Replace('/', '\'))"
+        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+        Move-Item -LiteralPath $source -Destination $backup -Force
+        Write-Change "$rel retired (moved to backups\kit-install-$script:RunStamp)"
+    }
+}
+
+function Test-LocalOnlyAssets {
+    # Local-only paths are expected in the live config and never a finding there. The reverse is:
+    # one that has reached the repo carries identity or machine data into a shared kit.
+    Write-Section 'Local-only (never in the kit)'
+    foreach ($entry in $LocalOnly) {
+        $relPath = $entry.Replace('/', '\')
+        if (Test-Path -LiteralPath (Join-Path $RepoRoot $relPath)) {
+            Write-Problem "$entry is local-only but exists in the repo — remove it from the repo"
+        }
+        if (Test-Path -LiteralPath (Join-Path $ClaudeHome $relPath)) { Write-Info "$entry — local-only (expected)" }
+    }
+}
+
 # ── Run ───────────────────────────────────────────────────────────────────────
 Write-Host "claude-dev-kit  ·  $(if ($Check) { 'check' } elseif ($Pull) { 'pull' } else { 'install' })  ·  home: $ClaudeHome"
 
@@ -434,6 +739,8 @@ if (-not (Test-Path -LiteralPath $ClaudeHome)) {
 
 Sync-Assets
 Test-InstalledOnlyAssets
+Test-RetiredAssets
+if ($Check) { Test-LocalOnlyAssets }
 Test-Environment
 Test-LanguageServers
 Test-Toolchain
@@ -453,6 +760,6 @@ if ($Pull) {
     exit 0
 }
 
-Write-Host '  done — restart Claude Code so it picks up agents, commands, skills and settings.' -ForegroundColor Green
+Write-Host '  done — restart Claude Code so it picks up agents, skills, workflows and settings.' -ForegroundColor Green
 if ($script:Problems -gt 0) { Write-Host "  $($script:Problems) environment item(s) still need attention (see ISSUE above)" -ForegroundColor Yellow }
 exit 0

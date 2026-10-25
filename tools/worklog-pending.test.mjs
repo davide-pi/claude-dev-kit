@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -51,7 +51,7 @@ function pendingCandidate() {
 const DAY = pendingCandidate();
 
 /** A config dir with `prompts` history lines per project on DAY, and an optional audit. */
-function config({ projects = [`${ROOT}product\\api`], prompts = 3, audit } = {}) {
+function config({ projects = [`${ROOT}product\\api`], prompts = 3, audit, targets } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'wlp-'));
   created.push(dir);
   const lines = [];
@@ -59,10 +59,9 @@ function config({ projects = [`${ROOT}product\\api`], prompts = 3, audit } = {})
     for (let i = 0; i < prompts; i++) lines.push(JSON.stringify({ timestamp: DAY.getTime() + i, project }));
   }
   writeFileSync(join(dir, 'history.jsonl'), `${lines.join('\n')}\n`);
-  if (audit) {
-    mkdirSync(join(dir, 'worklog'));
-    writeFileSync(join(dir, 'worklog', 'pushed.json'), JSON.stringify(audit));
-  }
+  if (audit || targets) mkdirSync(join(dir, 'worklog'));
+  if (audit) writeFileSync(join(dir, 'worklog', 'pushed.json'), JSON.stringify(audit));
+  if (targets) writeFileSync(join(dir, 'worklog', 'targets.json'), JSON.stringify(targets));
   return dir;
 }
 
@@ -84,6 +83,18 @@ test('roots unset → silent, however much work the history shows', { skip }, ()
 test('a worked day under a root, with no audit → named in the reminder', { skip }, () => {
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
   assert.match(out, new RegExp(`${iso(DAY)} \\(product\\)`));
+});
+
+test('the reminder stays short and keeps the one instruction: hours are written only via /worklog', { skip }, () => {
+  const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+  assert.match(out, /Only \/worklog writes hours\.$/);
+  assert.ok(out.length < 200, `${out.length} chars`);
+});
+
+test('settings.json runs it on session start only, not on resume, clear or compact', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const group = settings.hooks.SessionStart.find((g) => g.hooks.some((h) => (h.args ?? []).join(' ').includes('worklog-pending.js')));
+  assert.equal(group?.matcher, 'startup');
 });
 
 test('roots match case- and slash-insensitively, trailing separator optional', { skip }, () => {
@@ -114,4 +125,40 @@ test('the snapshot for the statusline is written either way', { skip }, () => {
   const dir = config();
   run(dir);
   assert.ok(existsSync(join(dir, '.worklog-pending.json')));
+});
+
+// ── under target: logged, but more than an hour short of the day's target ───────────────────────
+
+const logged = (hours) => [{ periodFrom: iso(DAY), periodTo: iso(DAY), itemId: 1, hoursLogged: hours }];
+
+test('a logged day more than an hour short of 8h → named as under target, with its hours', { skip }, () => {
+  const out = run(config({ audit: logged(2) }), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+  assert.ok(out.includes(`Under target on 1 day: ${iso(DAY)} (2/8h)`), out);
+  assert.doesNotMatch(out, /Unlogged hours/);
+});
+
+test('exactly an hour short is close enough → silent', { skip }, () => {
+  assert.equal(run(config({ audit: logged(7) }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
+});
+
+test('a date target in targets.json wins: 0 for an event day → silent', { skip }, () => {
+  const targets = { targetHours: 8, days: { [iso(DAY)]: { hours: 0, note: 'evento' } } };
+  assert.equal(run(config({ audit: logged(2), targets }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
+});
+
+test('a reduced date target is measured against its own hours', { skip }, () => {
+  const targets = { days: { [iso(DAY)]: 6 } };
+  const out = run(config({ audit: logged(4.5), targets }), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+  assert.match(out, /\(4\.5\/6h\)/);
+});
+
+test('roots unset → no under-target line either', { skip }, () => {
+  assert.equal(run(config({ audit: logged(2) })), '');
+});
+
+test('the snapshot carries the under-target days for the statusline', { skip }, () => {
+  const dir = config({ audit: logged(2) });
+  run(dir, { CLAUDE_WORKSPACE_ROOTS: ROOT });
+  const snap = JSON.parse(readFileSync(join(dir, '.worklog-pending.json'), 'utf8'));
+  assert.deepEqual(snap.underTarget, [{ date: iso(DAY), logged: 2, target: 8 }]);
 });

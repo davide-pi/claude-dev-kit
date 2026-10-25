@@ -95,5 +95,5 @@ Get-Content package.json | Select-String "jest|vitest|karma|jasmine"
 | the error contract at a boundary (`IsSuccess`, an error status) | a log message string |
 | idempotency: the same input twice leaves one effect | an ordering the code never promised |
 
-To close a large gap deliberately, fan out the `test-writer` agent over the highest-risk classes, one
-class per agent, each told to follow the patterns already in the repository.
+To close a large gap deliberately, fan out the `implementer` agent over the highest-risk classes, one
+class per agent, each brief naming this skill and a sibling test to copy.

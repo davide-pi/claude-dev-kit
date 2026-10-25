@@ -1,138 +1,113 @@
 ---
 name: azdo-cli
 description: >-
-  Use whenever an Azure DevOps board, work item, pull request, wiki or pipeline is read or changed
-  from a shell, when an org, project, item type or assignee must be resolved, or when
-  an `az devops` call fails on auth or "not found". CLI first; owns the MCP-fallback gap list.
+  Use when an Azure DevOps item, PR, wiki or pipeline is written via `az`, a type name is
+  resolved, or an `az` call fails.
 ---
 
-# azdo-cli — Azure DevOps through `az`, with the MCP servers as the documented fallback
+# azdo-cli — Azure DevOps through `az`, MCP only for a proven gap
+
+**Contract.** Exact `az` calls with explicit `--org` and `-p` · never the `az devops configure`
+default, never an MCP call before the gap is proven · chat Italian, commands and output verbatim.
 
 ## When
 
-- A board, repository, pull request, wiki or pipeline has to be read or written from a shell — or
-  the organization, the project or the work item **type** it belongs to has to be resolved first.
-- Another asset needs the exact verb and flags: `workitem-create`, `pr-review`, `pr-create`,
-  `branch-flow`, `worklog`, `items-qa`, `/item`, `/fix-ci`.
-- A call fails on authentication, or cannot see a project or repository it should.
-- A capability might not exist in the CLI and the fallback decision has to be made honestly, or a
-  flag, a field reference name or a **type name** is about to be guessed from memory.
+- A board, work item, repository, PR, wiki or pipeline is written from a shell, or read beyond a plain
+  item view (a plain item read is `item`).
+- Another asset needs the verb and flags: `workitem-create`, `pr-create`, `pr-review`,
+  `branch-flow`, `worklog`, `items-qa`, `estimate`.
+- A type name, field reference or flag is about to be typed, or a call fails on auth or "not found".
 
-Not for: GitHub, which is `gh` (`branch-flow`, `pr-create`); authoring pipeline YAML (`pipeline`);
-deciding *what* a work item should say (`user-story-standard`) or whether one is ready to build
-(`plan-work`); reconstructing and logging hours (`worklog`); reviewing a diff (`pr-review`).
+Not for: GitHub (`gh`, in `branch-flow` and `pr-create`); pipeline YAML (`pipeline`); what an item
+should say (`user-story-standard`).
 
 ## Decide
 
-### 1. The organization and the project outrank every other rule here
+### 1. Target — the `ALM:` line, passed on every call
 
-**Never hardcode an organization or a project, and never trust the configured default.** The
-`az devops configure` defaults may still point at the previous session's client, which is how work
-lands in the wrong customer's project. Resolve both from the **current working directory**, through
-the workspace-to-platform mapping the user keeps in their `CLAUDE.md`, and pass them with `--org`
-and `-p` on every command. If the path is not mapped, **ask** — never let `--detect` or the machine
-default fill the hole. `-p` is not a filter either: **`az boards query --project` does not scope
-reliably**, having returned items of other projects, so every WIQL repeats the scope itself,
-`WHERE [System.TeamProject] = '<project>'`, in addition to `-p`.
+Org, project and az identity come from the session's `ALM:` line (written at start by the
+`workspace-context.js` hook from the local `workspaces.json`). Pass `--org` and `-p` on **every**
+command. No line, `unmapped`, or a directory added later → **ask**; never let `--detect` or the
+machine default fill the hole — it may still point at the previous client. `-p` does not scope a
+query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
 
 ### 2. Which surface owns the call
 
 | Task | Group | Catalogue |
 | --- | --- | --- |
-| Organization level: projects, users, raw REST | `az devops` | `references/auth-and-config.md` |
+| Org level: projects, users, raw REST | `az devops` | `references/auth-and-config.md` |
 | Work items, queries, areas, iterations | `az boards` | `references/boards-catalogue.md` |
 | Which type name fills a role here | `az devops invoke` | `references/work-item-roles.md` |
-| Work item fields, attachments, inline images | `az boards` + REST | `references/workitem-content.md` |
-| Wiki: page tree, read, create, update | `az devops wiki` + REST | `references/wiki-rest.md` |
-| Repositories, pull requests, refs, branch policies | `az repos` | `references/repos-and-prs.md` |
-| Pipeline definitions, runs, variables, releases | `az pipelines` | `references/pipelines-catalogue.md` |
+| Fields, attachments, inline images | `az boards` + REST | `references/workitem-content.md` |
+| Wiki tree, read, create, update | `az devops wiki` + REST | `references/wiki-rest.md` |
+| Repos, PRs, refs, branch policies | `az repos` | `references/repos-and-prs.md` |
+| Pipelines, runs, variables, logs | `az pipelines` | `references/pipelines-catalogue.md` |
 
-`az devops invoke` is the raw REST escape hatch **inside** the CLI — reach for it before any MCP
-tool, as for a REST call bearing the token of the current `az login` (the resource id is in `Do`).
+`az devops invoke` reaches any REST route with the current login — it is still the CLI. For a call
+with no verb at all, the bearer token of `az login` drives plain REST (resource id in `## Do`).
 
-### 3. CLI first — and the gaps are known, not guessed
+### 3. CLI first — gaps are a list, not a feeling
 
-`references/mcp-fallback.md` is the **single owner** of what is a real gap; every other asset points
-there instead of keeping its own list. Types and states, a work item's discussion, PR threads and a
-run's step logs are **not** gaps (`az devops invoke`), nor are attachments, inline images and wiki
-writes (REST with the `az login` token). **A real gap needs both signals**: `--help` lists no verb,
-and `invoke` would need a route you cannot verify.
+`references/mcp-fallback.md` is the **single owner** of the gap list; other assets point there. Not
+gaps: types and states, a work item's discussion, PR threads, run logs (`invoke`); attachments,
+inline images, wiki writes (REST with the login token). A real gap needs both: `--help` lists no
+verb **and** no `invoke` route can be verified. The `azdo-*` MCP servers sit behind an `ask`
+permission: before the call, say in one line which capability and which CLI route failed.
 
-### 4. A work item type name is discovered, never assumed
+### 4. A type name is discovered, never assumed
 
-Type names come from the project's **process template** and are **case-sensitive**; the
-technical-activity type is usually **custom**, so it exists only where someone created it.
-**Query the project's own type list before any command, WIQL predicate or confirmation table that
-names a type; a name from the role table is used only after that query has returned it, spelled
-identically.** That query is `invoke --area wit --resource workItemTypes`, and the role-to-type
-table in `references/work-item-roles.md` is a hypothesis to confirm, never a source of names.
-
-`Issue` is why this is not advisory: in **Agile** it fills the *analysis* role, in **Basic** it is
-the *backlog item* — one name, two meanings, so a name taken from a table without checking lands in
-the wrong place. When the project has no type for a role, **say so and ask**; never substitute the
-closest one. Two facts the rest of the kit routes here for: the time role (`Task`) is the **only**
-type that carries hours, and a pull request never links a Task — a PR links the backlog item, defect
-or analysis item above it. Walking that hierarchy: `references/work-item-roles.md`, sections 5-6.
+Type names come from the process template and are case-sensitive; the technical-activity type is
+often custom. **Before any `--type`, WIQL predicate or confirmation table that names a type, list the
+project's types** (`invoke --area wit --resource workItemTypes`) and use a name only as returned. The
+role table in `references/work-item-roles.md` is a hypothesis to confirm. `Issue` is the *analysis*
+role on Agile and the *backlog item* on Basic. No type fills a role → say so and ask; never
+substitute the nearest. Only the time role (`Task`) carries hours; a PR links the item above a Task
+(`references/work-item-roles.md` §5–6).
 
 ### 5. Verify before typing
 
-Never write a flag, a field reference name or a type name you have not seen in output this session.
-
 | Question | Answer it with |
 | --- | --- |
-| Does this verb exist? | `az <group> --help` — read `Commands:` and `Subgroups:` |
-| Does this flag exist, is it required, what values does it take? | `az <group> <verb> --help` — enums print as `Allowed values:` |
-| What does the response actually contain? | run the read verb once with `-o json`, then add `--query` |
-| Does this project have that type, and the type that field? | never assume a process — `references/work-item-roles.md` §1, then `references/workitem-content.md` §1 |
+| Does this verb exist? | `az <group> --help` — `Commands:` and `Subgroups:` |
+| Does this flag exist, which values? | `az <group> <verb> --help` — enums print as `Allowed values:` |
+| What does the response contain? | the read verb once with `-o json`, then `--query` |
+| Does this type have that field? | `references/work-item-roles.md` §1, then `references/workitem-content.md` §1 |
 
 ### 6. Authentication triage
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| `az devops` prompts, or "before you can run..." | no credential for that organization | `az login`, or `az devops login --org <url>` with a PAT |
-| Signed in, yet the organization is invisible, or one organization works and the next does not | the organization is backed by a **different Entra tenant** than the current sign-in | sign in naming the tenant: `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in or PAT **per tenant** |
-| "not found" on a project or repository that exists | the org/project passed (or defaulted) points elsewhere, or the PAT lacks that scope | re-resolve per decision 1, then pass `--org` / `-p` explicitly |
+Prompts, an org that is invisible after sign-in, "not found" on something that exists, the wrong account:
+the symptom table in `references/auth-and-config.md` § Triage by symptom.
 
 ## Do
 
 ```powershell
-$org = 'https://dev.azure.com/<org>'; $proj = '<project>'   # resolved from the path — decision 1
-az account show --query "{user:user.name, tenant:tenantId}" -o jsonc   # who and which tenant
-az devops configure --list        # inspect the machine default; never rely on it
-az devops invoke --org $org --area wit --resource workItemTypes --route-parameters project=$proj --query "value[].name" -o tsv   # the types this project really has — before any --type
-# Reads, most useful first. The scope lives in the WIQL, not only in -p.
+$org = 'https://dev.azure.com/<org>'; $proj = '<project>'   # from the ALM: line
+az account show --query "{user:user.name, tenant:tenantId}" -o jsonc
+az devops invoke --org $org --area wit --resource workItemTypes --route-parameters project=$proj --query "value[].name" -o tsv
 $w = "SELECT [System.Id],[System.Title],[System.State] FROM WorkItems WHERE [System.TeamProject] = '$proj' AND [System.Id] = <id>"
 az boards query --org $org -p $proj --wiql $w -o table
-az boards work-item show --org $org --id <id> --expand all -o jsonc
+az boards work-item show --org $org --id <id> --fields System.Title,System.State -o jsonc
 az repos pr show --org $org --id <pr> --query "{title:title,status:status,tgt:targetRefName}" -o jsonc
-$token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv   # bearer for the REST steps with no verb
+$token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv   # REST bearer
 ```
 
 ## Traps
 
-1. A query returns items nobody recognises → `--project` did not scope it → repeat
-   `[System.TeamProject] = '<project>'` inside the WIQL, every time.
-2. Works in one repository, fails in the next → machine-wide defaults → pass `--org` / `-p` always.
-3. An organization stays invisible after a clean `az login` → its Entra tenant differs → `az login
-   --tenant <tenant-domain> --allow-no-subscriptions`.
-4. A WIQL query returns nothing a saved query returns → `az boards query` is **flat**-only → rewrite
-   it flat, or query the link table separately.
-5. `--type` is rejected, or the item lands as the wrong kind of thing → the name came from another
-   process template → list `workItemTypes` first; `Issue` is *analysis* on Agile, *backlog* on Basic.
-6. A created item looks empty, or an image on a Bug goes unnoticed → the text went into a field the
-   form does not show (a Bug has no Description at all), and an `AttachedFile` relation shows only in
-   the Attachments tab → discover the type's real fields, and inline the `<img>` into the field HTML.
-7. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
-   system codepage → write over REST with `charset=utf-8`, then read the page back.
-8. `--fields` ignored → `show` wants a **comma** list, `create`/`update` **space**-separated `field=value`.
-9. Hours logged on the wrong item, or a PR linked to a Task → only the time role carries hours, and
-   a PR links the item above it → `references/work-item-roles.md`, section 5.
-10. A PR completes by accident → `--status completed` merges at once; it, abandon, `--bypass-policy`: confirm.
+1. A WIQL returns nothing a saved query returns → `az boards query` is flat-only → rewrite it flat,
+   or query the link table separately.
+2. A created item looks empty, or its image goes unnoticed → the text went into a field the form
+   does not show (a Bug has no Description) and an `AttachedFile` shows only in Attachments →
+   discover the type's fields; inline the `<img>` into the field HTML.
+3. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
+   system codepage → REST `PUT` with `charset=utf-8`, then read it back.
+4. `--fields` ignored → `show` wants a comma list, `create`/`update` space-separated `field=value`.
+5. A PR completes by accident → `--status completed` merges at once → confirm it, abandon and
+   `--bypass-policy` with the user first.
 
 ## References
 
-- `references/auth-and-config.md` — any auth or "not found" failure: sign-in, PAT versus Entra, tenants,
-  and resolving the identity to assign to.
+- `references/auth-and-config.md` — any auth or "not found" failure: sign-in, PAT versus Entra,
+  tenants, the per-root config dir, the identity to assign to.
 - `references/boards-catalogue.md` — before any WIQL or work item write: queries, reads, updates, links.
 - `references/work-item-roles.md` — before naming a type: role-to-type per template, the confirming query.
 - `references/workitem-content.md` — before writing any field: real field names, the Bug form, images.

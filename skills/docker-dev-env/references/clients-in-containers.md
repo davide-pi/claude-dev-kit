@@ -1,12 +1,19 @@
 # Running a client that is not installed on this machine
 
-`psql` and `redis-cli` do not exist on this machine, and no attempt should be made to install them:
-every image already ships the matching client, and using it removes a whole class of problem — a
-client older or newer than its server, a protocol mismatch, a flag that does not exist yet.
+Detect before choosing: `Get-Command psql, redis-cli, sqlcmd -ErrorAction SilentlyContinue` and
+`wsl -e which psql redis-cli`. `sqlcmd` is usually native; `psql` and `redis-cli` often are not (a
+native Windows `redis-cli` with TLS does not exist in a current release). First found wins:
 
-`sqlcmd` **is** installed locally, so SQL Server can be reached either way. Prefer the local one
-when the server is reachable on a published port, because the output comes back to PowerShell
-without a container in the middle.
+| Order | Form | When |
+| --- | --- | --- |
+| 1 | native client | installed and reaching the published port |
+| 2 | `wsl <client> …` | the WSL distribution has it (`apt install postgresql-client redis-tools`) |
+| 3 | the service's own container (`docker compose exec -T`) | the server runs in compose — client and server always match |
+| 4 | a throwaway container of the server's image | nothing else; `--rm`, explicit network |
+
+These forms are for **dev hosts only**. Any other host goes through `/db` (the `db-analyst` agent
+and `db-ro.ps1`, which makes the same native → wsl → docker choice); the shell hook recognises the
+client inside `docker run|exec` and `wsl` too, and denies it at a non-dev host.
 
 ## The decision, in one table
 
@@ -15,7 +22,7 @@ without a container in the middle.
 | a service in the compose file, currently up          | `docker compose exec` — no image to choose, no network to find    |
 | a container not managed by this compose file         | `docker exec` on the container name                               |
 | a container that is **down**, or none at all         | a throwaway `docker run --rm` on the same network                 |
-| a remote or managed instance                         | a throwaway client, or the locally installed tool if there is one |
+| a remote, managed or shared instance                 | not here: `/db` (read-only, through `db-ro.ps1`)                  |
 | a host tool (a GUI, a .NET app, `sqlcmd`)            | `localhost` and the **published** port                            |
 
 ## exec into the running service
@@ -122,9 +129,11 @@ Without them, a broken migration script reports success and the pipeline or the 
 | `sqlcmd` (in the image) | `docker compose exec -T <svc> bash -lc 'ls -d /opt/mssql-tools*/bin'` then call that path with the same flags | the tools path is versioned — glob it, never hardcode it |
 | `psql` | `docker compose exec -T -e PGPASSWORD=$env:PGPASSWORD <svc> psql -U <user> -d <db> -v ON_ERROR_STOP=1 -At -c "<sql>"` | `-At` gives unaligned, header-less output for parsing |
 | `pg_dump` | `docker compose exec -T <svc> pg_dump -U <user> -d <db> --schema-only` | binary formats need `-AsByteStream` on the host side |
-| `redis-cli` | `docker compose exec -T -e REDISCLI_AUTH=$env:REDIS_PASSWORD <svc> redis-cli <command>` | read-only commands only on a shared instance |
+| `psql` (no stack) | `wsl psql -h localhost -p <port> -U <user> -d <db> -c "<sql>"` or `docker run --rm -i -e PGPASSWORD=$env:PGPASSWORD postgres:<tag> psql -h host.docker.internal -p <port> -U <user> -d <db> -c "<sql>"` | `<tag>` from the compose file or the server's `SELECT version()` |
+| `redis-cli` | `docker compose exec -T -e REDISCLI_AUTH=$env:REDIS_PASSWORD <svc> redis-cli <command>` | any command on a local cache; `FLUSHALL` / `FLUSHDB` ask; `SCAN`, not `KEYS` |
+| `redis-cli` (no stack) | `wsl redis-cli -h localhost -p <port> <command>` or `docker run --rm -i -e REDISCLI_AUTH=$env:REDIS_PASSWORD redis:<tag> redis-cli -h host.docker.internal -p <port> [--tls] <command>` | the image's client is the TLS-capable one |
 | `rabbitmqctl` | `docker compose exec -T <svc> rabbitmqctl list_queues --vhost <vhost> name messages consumers` | node-local; needs no credentials inside the container |
 | `rabbitmqadmin` | `docker compose exec -T <svc> rabbitmqadmin -V <vhost> get queue=<q> count=1 ackmode=reject_requeue_true` | the management plugin must be enabled; this ackmode is the only non-destructive one |
 
 What to type into each client — queries, plans, stream and queue diagnosis — belongs to the domain
-skills: `sql-server` (both SQL engines), `redis-dotnet`, `rabbitmq`.
+skills: `sql-server` (both SQL engines), `dotnet-backend` (its Redis reference), `rabbitmq`.

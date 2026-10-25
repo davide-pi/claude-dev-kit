@@ -8,8 +8,8 @@ commands themselves belong to `azdo-cli`.
 
 | Question | Answer |
 | --- | --- |
-| Which organization and project? | resolved from the **current working directory**, matched against the workspace-to-platform mapping in the user's `CLAUDE.md`, on the root of the path (the mapping holds for every subfolder and repository below it) |
-| Directory not in the mapping? | **ask.** Do not guess an org from a repository name, a remote or a previous session |
+| Which organization and project? | the session's `ALM:` line (the `workspace-context.js` hook resolves the working directory against the local `workspaces.json`) |
+| No `ALM:` line, `unmapped`, or a directory added later? | **ask.** Do not guess an org from a repository name, a remote or a previous session |
 | Directory not under a workspace at all? | ask which Azure DevOps project the wiki belongs to |
 | Can `az devops configure --defaults` be used? | **no.** It is machine-wide and may still point at a previous session's client. Reading `--list` is fine as information; it is never the target |
 | How are they passed? | explicitly on every call — the org in the URL for a REST call, `--org` and `-p` for a CLI call |

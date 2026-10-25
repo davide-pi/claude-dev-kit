@@ -61,7 +61,7 @@ per-keystroke re-rendering is measurable — and only then.
 | resetting | a `key` on the form remounts it clean — cheaper and more reliable than resetting every field |
 | numbers, dates | keep the input's own string as the state, parse at the edge; parsing on each keystroke fights the user (a half-typed number is not a number) |
 | files | uncontrolled by necessity; read from the input's ref on submit |
-| accessibility | label association, error announcement and focus management matter, and auditing them is the `chrome-devtools-mcp` plugin's job |
+| accessibility | label association, error announcement and focus management matter, and auditing them in a real browser is `browser-use`'s job |
 
 Do not reach for a form library for a login screen or a filter bar. Reach for it when cross-field
 async validation and dozens of fields arrive together — the threshold in the skill body.

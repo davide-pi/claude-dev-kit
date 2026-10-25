@@ -22,17 +22,19 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseSegments } = require('./segments');
+const { parseSegments, expandTexts } = require('./shell-parse');
+const { findGitDir, readRef, currentBranch } = require('./git-dir');
 
 /**
  * Blank out the values of message-carrying flags, including combined ones (-am, -sm), so a branch
  * name inside a commit message is never read as a ref. The short form is capped at a real flag
  * cluster and may not start mid-word: `-[a-zA-Z]*m` also matched `-upstream`, which then swallowed
- * the token after `--set-upstream` and could have hidden the ref that follows it.
+ * the token after `--set-upstream` and could have hidden the ref that follows it. No flag may start
+ * mid-word at all: `-F` inside a `-C` path (`...\guard-Fx2`) swallowed the path.
  */
 function scrubMessages(command) {
   return command.replace(
-    /(--message|--reuse-message|--file|-F|(?:(?<![-\w])-[a-zA-Z]{0,3}m))(\s*=?\s*)("[^"]*"|'[^']*'|\S+)/g,
+    /(?<![-\w])(--message|--reuse-message|--file|-F|(?:-[a-zA-Z]{0,3}m))(\s*=?\s*)("[^"]*"|'[^']*'|\S+)/g,
     (_, flag, sep) => `${flag}${sep}MSG`,
   );
 }
@@ -88,39 +90,17 @@ function pushesEveryRef(call) {
   return call.args.includes('--all') || call.args.includes('--mirror');
 }
 
-/** Walk up from `start` to the repo root and return its resolved .git directory. */
-function findGitDir(start) {
-  let dir = path.resolve(start);
-  for (;;) {
-    const candidate = path.join(dir, '.git');
-    if (fs.existsSync(candidate)) {
-      const stat = fs.statSync(candidate);
-      if (stat.isDirectory()) return candidate;
-      // A worktree or submodule: `.git` is a file containing `gitdir: <path>`.
-      const pointer = fs.readFileSync(candidate, 'utf8').match(/^gitdir:\s*(.+)$/m);
-      if (!pointer) return null;
-      const resolved = path.resolve(dir, pointer[1].trim());
-      return fs.existsSync(resolved) ? resolved : null;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
-function readRef(gitDir, relative) {
+/**
+ * Where refs live. A linked worktree keeps only its own HEAD in `.git/worktrees/<name>`; branches,
+ * packed-refs and origin/HEAD are in the common directory that `commondir` points at.
+ */
+function commonDir(gitDir) {
   try {
-    return fs.readFileSync(path.join(gitDir, relative), 'utf8').trim();
+    const pointer = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    return pointer ? path.resolve(gitDir, pointer) : gitDir;
   } catch {
-    return null;
+    return gitDir;
   }
-}
-
-/** The checked-out branch, or null when HEAD is detached. */
-function currentBranch(gitDir) {
-  const head = readRef(gitDir, 'HEAD');
-  const m = head && head.match(/^ref:\s*refs\/heads\/(.+)$/);
-  return m ? m[1] : null;
 }
 
 /** The repo's default branch: origin/HEAD if it is set, else whichever of main/master exists. */
@@ -149,8 +129,8 @@ function checkDefaultBranch(command, cwd) {
   if (!/\b(?:commit|push)\b/.test(scan)) return null;
 
   // Only the calls that really run a commit/push, dry runs excluded one command at a time.
-  const calls = parseSegments(scan)
-    .map(parseGitCall)
+  const calls = expandTexts(command)
+    .flatMap((text) => parseSegments(scrubMessages(text)).map(parseGitCall))
     .filter((call) => call
       && (call.subcommand === 'commit' || call.subcommand === 'push')
       && !isDryRun(call));
@@ -163,11 +143,12 @@ function checkDefaultBranch(command, cwd) {
   const repo = calls.find((call) => call.dashC)?.dashC || cwd;
   if (!repo || !fs.existsSync(repo)) return null;
 
-  const gitDir = findGitDir(repo);
-  if (!gitDir) return null;
+  const found = findGitDir(repo);
+  if (!found) return null;
+  const { gitDir } = found;
 
   const current = currentBranch(gitDir);
-  const fallback = defaultBranch(gitDir);
+  const fallback = defaultBranch(commonDir(gitDir));
   if (!current || !fallback) return null;
 
   if (current !== fallback) {

@@ -33,7 +33,7 @@
 
 'use strict';
 
-const { splitSegments } = require('./segments');
+const { splitSegments, expandTexts, hasSubstitution, SEARCHERS } = require('./shell-parse');
 
 /**
  * Cheap gate. If none of these words is anywhere in the line, no rule below can fire, so the
@@ -42,17 +42,17 @@ const { splitSegments } = require('./segments');
  * `purge_queue` / `delete_queue` are listed in full because `_` is a word character, so `\bpurge\b`
  * does not match inside them — the broker CLIs would have slipped straight through the gate.
  */
-const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|down|nuke)\b/i;
+const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|ri|rd|rmdir|del|erase|down|nuke|clear|expire|push|switch|checkout|restore|clean|reset|branch|update-ref|filter-branch|gc|rmi)\b/i;
 /** A flag cluster carrying `-D`: force-delete. Case-sensitive, because `-d` is the safe form. */
 const DANGER_FLAG = /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/;
 
-const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text);
+/** `az account set` loses no data, but the default it flips is machine-global (see skills/azdo-cli). */
+const AZ_ACCOUNT_SET = /(?<![-\w])az\s+account\s+set\b/i;
 
-/** Commands that look for a string instead of acting on it: never destructive, whatever they find. */
-const SEARCHERS = new Set([
-  'grep', 'egrep', 'fgrep', 'rg', 'ripgrep', 'ack', 'ag', 'findstr', 'select-string', 'sls',
-  'get-help', 'man', 'help', 'which', 'where', 'get-command',
-]);
+const isDangerous = (text) => DANGER_WORDS.test(text) || DANGER_FLAG.test(text) || AZ_ACCOUNT_SET.test(text);
+
+/** Commands that look for a string or a help page instead of acting on it: never destructive, whatever they find. */
+const LOOKUPS = new Set([...SEARCHERS, 'get-help', 'man', 'help', 'which', 'where', 'get-command']);
 
 /** Flags that make the whole chained command a no-op. */
 const NOOP_FLAGS = /(?<![-\w])(?:--dry-run|--dryrun|--dry_run|--what-if|--whatif|-whatif|--noop|--no-op|--help|--usage|--version)\b/i;
@@ -94,10 +94,14 @@ function leadingCommand(segment) {
     .toLowerCase();
 }
 
-/** `git grep` / `git log --grep=…` are searchers too, but the verb is the second token. */
+/**
+ * `git grep` / `git log --grep=…` are searchers too, but the verb is the second token. A searcher
+ * that carries a substitution (`grep foo $(rm -rf x)`) runs something else, so it is not skipped.
+ */
 function isSearcher(segment) {
+  if (hasSubstitution(segment)) return false;
   const command = leadingCommand(segment);
-  if (SEARCHERS.has(command)) return true;
+  if (LOOKUPS.has(command)) return true;
   if (command === 'git') {
     const verb = segment.trim().split(/\s+/)[1];
     return ['grep', 'log', 'show', 'blame', 'diff'].includes(verb);
@@ -112,13 +116,49 @@ function isSearcher(segment) {
  */
 const READ_ONLY_SQL = /^\s*(?:select|with|explain|show|describe|desc|print|use|set)\b/i;
 
+/** A SQL client anywhere in the segment, also behind `docker exec` / `sudo`: only then does `--` start a comment. */
+const SQL_CLIENT = /(?<![-\w])(?:sqlcmd|invoke-sqlcmd|osql|isql|bcp|sqlpackage|psql|pg_restore|mysql|mariadb|usql|sqlite3?|sqlplus|cqlsh|mongosh|duckdb|clickhouse-client)(?![-\w])/i;
+
+/**
+ * The value of a flag that carries prose: a title, a body, a commit message. Quoted (`"..."`, `'...'`,
+ * the `"$(cat <<'EOF' ... EOF)"` commit heredoc) or one bare word. A value holding a substitution is
+ * left alone: the shell runs it.
+ */
+const MESSAGE_FLAG = /(?<![-\w])(--title|--description|--discussion|--body|--message|(?:-[a-zA-Z]{0,3}m))(\s*=\s*|\s+)(?="|'|\S)/g;
+const HEREDOC_VALUE = /^"\$\(cat\s+<<-?\s*'(\w+)'[\s\S]*?\n[ \t]*\1[ \t]*\r?\n?[ \t]*\)"/;
+function messageValueLength(rest) {
+  const heredoc = HEREDOC_VALUE.exec(rest);
+  if (heredoc) return heredoc[0].length;
+  const quoted = /^"(?:[^"\\]|\\.)*"|^'[^']*'/.exec(rest);
+  const value = quoted ? quoted[0] : /^\S+/.exec(rest)?.[0] ?? '';
+  return /\$\(|`/.test(value) ? 0 : value.length;
+}
+
+/** Blank the value of every message-like flag, so a danger word in a title or a commit message is inert. */
+function blankMessages(segment) {
+  let out = segment;
+  for (const m of segment.matchAll(MESSAGE_FLAG)) {
+    const start = m.index + m[0].length;
+    out = blank(out, start, start + messageValueLength(segment.slice(start)));
+  }
+  return out;
+}
+
+/** The string arguments of a plain `echo` / `Write-Output` / `printf` that is not piped on: text, not a command. */
+function blankEchoArgs(segment) {
+  const m = /^(\s*(?:echo|write-output|write-host|printf)\s+)/i.exec(segment);
+  return m ? blank(segment, m[1].length, segment.length) : segment;
+}
+
 /**
  * Blank everything inside a segment that cannot be an instruction to destroy something:
  * comments, file paths, SQL string literals and read-only SQL statements. Offsets are preserved so
  * the result can still be reported against the original text.
  */
-function prepare(segment) {
-  let scan = segment;
+function prepare(segment, blankPaths = true, echoIsData = false) {
+  let scan = blankMessages(segment);
+  if (echoIsData) scan = blankEchoArgs(scan);
+  const sql = SQL_CLIENT.test(segment);
 
   // 1. `#` comments outside quotes (bash and PowerShell), from a token boundary to end of line.
   {
@@ -141,8 +181,11 @@ function prepare(segment) {
     let body = scan.slice(span.start, span.end);
     const offset = span.start;
 
-    body = body.replace(/--[^\n]*/g, (m) => ' '.repeat(m.length));
-    body = body.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length));
+    // SQL comments only exist for a SQL client: `--force` inside `bash -c "git push --force"` is a flag.
+    if (sql) {
+      body = body.replace(/--[^\n]*/g, (m) => ' '.repeat(m.length));
+      body = body.replace(/\/\*[\s\S]*?\*\//g, (m) => ' '.repeat(m.length));
+    }
     // A single-quoted literal inside a double-quoted argument is data, not a statement.
     body = body.replace(/'[^']*'/g, (m) => ' '.repeat(m.length));
 
@@ -157,7 +200,7 @@ function prepare(segment) {
   }
 
   // 3. Path-shaped tokens *outside* quotes: `scripts/drop-old.sql`, `./teardown.ps1`, `C:\db\x.bak`.
-  {
+  if (blankPaths) {
     const inQuote = new Array(scan.length).fill(false);
     for (const span of quotedSpans(scan)) {
       for (let i = span.start; i < span.end; i += 1) inQuote[i] = true;
@@ -171,9 +214,108 @@ function prepare(segment) {
   return scan;
 }
 
-/** Every rule: a predicate over the prepared segment, and what the user is asked. */
+/**
+ * Every rule: a predicate and what the user is asked. It receives the prepared segment (`scan`, paths
+ * blanked), the same text with its paths kept (`keep`: a refspec like `+feature/x` is a path to `scan`)
+ * and the raw segment.
+ */
 const has = (re) => (scan) => re.test(scan);
-const all = (...tests) => (scan) => tests.every((t) => t(scan));
+const all = (...tests) => (...args) => tests.every((t) => t(...args));
+
+/** The command a segment runs, after `sudo`, `xargs`, `env VAR=x` and their options. */
+function effectiveCommand(segment) {
+  const tokens = segment.trim().split(/\s+/);
+  const wrappers = ['sudo', 'xargs', 'env', 'command', 'nohup', 'time', 'exec'];
+  let i = 0;
+  while (i < tokens.length && (/^[A-Za-z_]\w*=/.test(tokens[i]) || wrappers.includes(tokens[i].toLowerCase()))) {
+    i += 1;
+    while (i < tokens.length && tokens[i].startsWith('-')) i += 1;
+  }
+  return leadingCommand(tokens.slice(i).join(' '));
+}
+
+/** A pipeline stage that runs a script block per item: `ls | % { rm $_ }`. */
+const PIPE_LOOPS = new Set(['%', 'foreach', 'foreach-object']);
+const DELETER_WORD = /(?<![-\w])(?:remove-item|rm|ri|del|erase|rd|rmdir)(?![-\w])/i;
+const DELETERS = new Set(['rm', 'ri', 'del', 'rd', 'rmdir', 'erase', 'remove-item']);
+/** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. */
+function deletesRecursively(scan, keep, segment) {
+  const command = effectiveCommand(segment);
+  if (!DELETERS.has(command)) return false;
+  if (command === 'rm') return /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep);
+  return /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
+}
+
+/** `git [-c k=v] <verb> …`: the verb is the first word after git and its options, never a word inside a message. */
+const GIT_VERB = /\bgit\s+(?:(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(checkout|restore|clean|reset|branch|update-ref|filter-branch|gc)(?![\w-])/i;
+function gitCall(text) {
+  const m = GIT_VERB.exec(text);
+  return m ? { verb: m[1].toLowerCase(), rest: text.slice(m.index + m[0].length) } : null;
+}
+const flagCluster = (letter) => new RegExp(`(?<![-\\w])-[a-zA-Z]*${letter}[a-zA-Z]*(?![\\w-])`);
+
+/** `git checkout -- <path>`, `git checkout .`, `git checkout -f`: the working tree is overwritten from the index or a commit. */
+function checkoutDiscards(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'checkout') return false;
+  return /(?<!\S)--(?!\S)\s*\S/.test(call.rest) || /(?<!\S)\.(?!\S)/.test(call.rest)
+    || flagCluster('f').test(call.rest) || /(?<![-\w])--force(?![\w-])/.test(call.rest);
+}
+
+/** `git restore` writes the working tree unless it is only `--staged` (an unstage). */
+function restoreDiscards(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'restore') return false;
+  const staged = /(?<![-\w])--staged(?![\w-])/.test(call.rest) || flagCluster('S').test(call.rest);
+  const worktree = /(?<![-\w])--worktree(?![\w-])/.test(call.rest) || flagCluster('W').test(call.rest);
+  return !staged || worktree;
+}
+
+/** `git clean` that really deletes: forced and not a dry run (`-n` anywhere in a cluster). */
+function cleanDeletes(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'clean') return false;
+  return (flagCluster('f').test(call.rest) || /(?<![-\w])--force(?![\w-])/.test(call.rest)) && !flagCluster('n').test(call.rest);
+}
+
+/** `git reset --hard` moves the branch and rewrites the working tree: uncommitted work is gone. */
+function resetsHard(scan, keep) {
+  const call = gitCall(keep);
+  return call?.verb === 'reset' && /(?<![-\w])--hard(?![\w-])/.test(call.rest);
+}
+
+/** `git branch` that moves, renames, copies over or deletes a branch (any branch, merged or not). */
+function branchRewrites(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'branch') return false;
+  return /(?<!\S)-[a-zA-Z]*[fmMdD][a-zA-Z]*(?![\w-])/.test(call.rest)
+    || /(?<!\S)--(?:force|delete|move)(?![\w-])/.test(call.rest);
+}
+
+/** `git update-ref -d`, `git filter-branch`, `git gc --prune=now`: refs or objects with no way back. */
+function rewritesHistory(scan, keep) {
+  const call = gitCall(keep);
+  if (!call) return false;
+  if (call.verb === 'filter-branch') return true;
+  if (call.verb === 'update-ref') return /(?<!\S)(?:-d|--delete)(?![\w-])/.test(call.rest);
+  return call.verb === 'gc' && /(?<!\S)--prune=(?:now|all)(?!\S)/.test(call.rest);
+}
+
+/** `docker rm -f|-v`, `docker container rm -f`, `docker rmi -f`: a running container or image is removed, volumes with it. */
+function dockerRemoves(scan, keep) {
+  const m = /\b(?:docker|podman|nerdctl)(?:\.exe)?\s+(?:(?:container|image|compose)\s+)?(rm|rmi)(?![-\w])(.*)$/i.exec(keep);
+  if (!m) return false;
+  const forced = /(?<!\S)-[a-zA-Z]*f[a-zA-Z]*(?![\w-])|(?<!\S)--force(?![\w-])/.test(m[2]);
+  const volumes = m[1].toLowerCase() === 'rm' && (/(?<!\S)-[a-zA-Z]*v[a-zA-Z]*(?![\w-])|(?<!\S)--volumes(?![\w-])/.test(m[2]));
+  return forced || volumes;
+}
+
+/** `find … -delete`,`find … -exec rm …`: the walk itself deletes what it matches. */
+function findDeletes(scan, keep, segment) {
+  if (effectiveCommand(segment) !== 'find') return false;
+  return /(?<![\w-])-delete(?![\w-])/.test(keep)
+    || /(?<![\w-])-exec(?:dir)?\s+(?:\S*[\\/])?(?:rm|rmdir|del|unlink|shred)(?![\w-])/i.test(keep);
+}
 
 const RULES = [
   {
@@ -233,9 +375,16 @@ const RULES = [
       + 'consumer bound to it stops receiving. Confirm?',
   },
   {
-    test: all(has(/\bdelete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
+    // `delete` as a command word (`delete`, `delete-batch`), not inside a flag: `--delete-source-branch`
+    // is the house squash-and-delete PR setting, and asking on it made every compliant PR create prompt.
+    test: all(has(/(?<![\w-])delete\b/i), has(/(?<![-\w])az(?![\w-])/i)),
     reason: 'This deletes a cloud or Azure DevOps resource. Deletion there is server-side and '
       + 'immediate. Confirm?',
+  },
+  {
+    test: has(AZ_ACCOUNT_SET),
+    reason: 'This switches the Azure CLI default account for the whole machine, so every other session '
+      + 'flips with it mid-command. Pin the identity per command with AZURE_CONFIG_DIR instead. Confirm?',
   },
   {
     test: all(has(/\bdelete\b/i), has(/\bkubectl\b/i)),
@@ -255,8 +404,20 @@ const RULES = [
     reason: 'This deletes a cloud resource. Deletion there is server-side and immediate. Confirm?',
   },
   {
-    test: has(/\bgh\s+(?:repo|release|secret|run|cache|gist)\s+delete\b/i),
+    test: has(/\bgh\s+(?:[\w-]+\s+)?delete\b|\bgh\s+api\b.*(?:-X\s*|--method[=\s]\s*)DELETE\b/i),
     reason: 'This deletes something on the remote host, not locally. Confirm?',
+  },
+  {
+    test: dockerRemoves,
+    reason: 'This force-removes a container or image, or its volumes: running state and volume data are lost. Confirm?',
+  },
+  {
+    test: resetsHard,
+    reason: 'This hard reset moves the branch and rewrites the working tree: uncommitted work is lost. Confirm?',
+  },
+  {
+    test: rewritesHistory,
+    reason: 'This deletes a ref or prunes objects (update-ref -d, filter-branch, gc --prune=now): git has no undo for it. Confirm?',
   },
   {
     // Case-sensitive: `-D` force-deletes, `-d` refuses to delete an unmerged branch.
@@ -268,23 +429,95 @@ const RULES = [
     reason: 'This force-deletes a branch, unmerged commits included. If the branch was never '
       + 'pushed, those commits are only in the reflog. Confirm?',
   },
+  {
+    test: branchRewrites,
+    reason: 'This moves, renames or deletes a branch. Commits only that branch reached are left in the reflog. Confirm?',
+  },
+  {
+    test: all(has(/\bgit\b/i), has(/\bstash\s+(?:drop|clear)\b/i)),
+    reason: 'This drops stashed work. A stash has no branch and no remote: once dropped, it is only '
+      + 'recoverable from an unreachable commit until git collects it. Confirm?',
+  },
+  {
+    test: all(has(/\bworktree\s+remove\b/i), has(/(?<![-\w])(?:--force|-f+)(?![\w-])/)),
+    reason: 'This force-removes a worktree, uncommitted and untracked changes included. Confirm?',
+  },
+  {
+    // Every way `git push` removes or overwrites a remote ref: a flag in any cluster (`-fu`), a `+ref`
+    // (forced) or a `:ref` (delete) refspec.
+    test: (scan, keep) => /\bgit\b/i.test(scan) && /\bpush\b/.test(scan)
+      && (/(?<![-\w])(?:--delete|--force[\w-]*|-[a-zA-Z]*[df][a-zA-Z]*)(?![\w-])/.test(keep) || /(?<=\s)[+:]\S/.test(keep)),
+    reason: 'This push deletes or force-overwrites a remote ref. Other people\'s commits on it can be lost, '
+      + 'and the server has no undo. Confirm?',
+  },
+  {
+    test: deletesRecursively,
+    reason: 'This deletes files recursively or by force, and there is no recycle bin for it. Confirm?',
+  },
+  {
+    // The segment split loses the pipe, so `piped` says the deleter takes its paths from the line before it.
+    test: (scan, keep, segment, piped) => piped && (DELETERS.has(effectiveCommand(segment))
+      || (PIPE_LOOPS.has(effectiveCommand(segment)) && DELETER_WORD.test(keep))),
+    reason: 'This deletes whatever the previous command of the pipeline lists (`… | Remove-Item`), '
+      + 'without a recycle bin. Confirm?',
+  },
+  {
+    test: findDeletes,
+    reason: 'This find deletes every file it matches (`-delete`, `-exec rm`), and there is no recycle bin for it. Confirm?',
+  },
+  {
+    test: checkoutDiscards,
+    reason: 'This checkout overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
+  },
+  {
+    test: restoreDiscards,
+    reason: 'This restore overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
+  },
+  {
+    test: cleanDeletes,
+    reason: 'This git clean deletes untracked files for good, and they are in no commit. Confirm?',
+  },
+  {
+    // `-f` / `--discard-changes` throw away the uncommitted work in the files the switch touches.
+    test: all(has(/\bgit\b/i), has(/\bswitch\b/), has(/(?<![-\w])(?:--force|--discard-changes|-[a-zA-Z]*f[a-zA-Z]*)(?![\w-])/)),
+    reason: 'This switches branch and discards local changes: whatever was uncommitted is lost. Confirm?',
+  },
+  {
+    test: has(/\breflog\s+expire\b/i),
+    reason: 'This expires reflog entries, the only way back to commits no branch points to. Confirm?',
+  },
 ];
 
-/** The confirmation reason for the first action with no undo in `command`, else null. */
-function checkDestructive(command) {
-  // Fast path: nothing here can be one of the rules.
-  if (!isDangerous(command)) return null;
-
+/** The reason for the first action with no undo in one command string (a whole line or a nested one), else null. */
+function checkText(command) {
+  let at = 0;
   for (const segment of splitSegments(command)) {
+    at = command.indexOf(segment, at);
+    const before = command.slice(0, at).trimEnd();
+    const piped = before.endsWith('|') && !before.endsWith('||');
+    at += segment.length;
+    const pipesOut = /^\s*\|(?!\|)/.test(command.slice(at));
     if (isSearcher(segment)) continue;
     if (NOOP_FLAGS.test(segment)) continue;
 
-    const scan = prepare(segment);
+    const scan = prepare(segment, true, !pipesOut);
+    const keep = prepare(segment, false, !pipesOut);
     // The preparation may have blanked the only occurrence (a comment, a path, a read-only query).
-    if (!isDangerous(scan)) continue;
+    if (!isDangerous(scan) && !isDangerous(keep)) continue;
 
-    const rule = RULES.find((r) => r.test(scan));
+    const rule = RULES.find((r) => r.test(scan, keep, segment, piped));
     if (rule) return rule.reason;
+  }
+  return null;
+}
+
+/** The confirmation reason for the first action with no undo in `command`, nested wrappers included, else null. */
+function checkDestructive(command) {
+  // Fast path: nothing here can be one of the rules.
+  if (!isDangerous(command)) return null;
+  for (const text of expandTexts(command)) {
+    const reason = checkText(text);
+    if (reason) return reason;
   }
   return null;
 }
