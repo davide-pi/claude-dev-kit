@@ -24,20 +24,22 @@ import { fileURLToPath } from 'node:url';
 
 const GUARD = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'guard-shell.js');
 const created = [];
+/** A mapped path in the running OS's form: the Windows literal as is, else drive-less with forward slashes. */
+const p = (win) => (process.platform === 'win32' ? win : win.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/'));
 process.on('exit', () => {
   for (const dir of created) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
 });
 
 const ROOTS = [
-  { path: 'D:\\work\\product', platform: 'azure-devops', org: 'org-a', project: 'Product', identity: 'work' },
-  { path: 'D:\\work\\gh', platform: 'github', org: 'gh-org' },
-  { path: 'D:\\work\\ghost', platform: 'azure-devops', org: 'org-b', project: 'Ghost', identity: 'absent' },
+  { path: p('D:\\work\\product'), platform: 'azure-devops', org: 'org-a', project: 'Product', identity: 'work' },
+  { path: p('D:\\work\\gh'), platform: 'github', org: 'gh-org' },
+  { path: p('D:\\work\\ghost'), platform: 'azure-devops', org: 'org-b', project: 'Ghost', identity: 'absent' },
 ];
 const ALLOW = [
   'Bash(az boards query*)', 'Bash(az account show*)', 'Bash(ls *)',
   'PowerShell(az boards query*)', 'PowerShell(az account show*)', 'PowerShell(Get-ChildItem *)',
 ];
-const MAPPED = 'D:\\work\\product\\repo-a';
+const MAPPED = p('D:\\work\\product\\repo-a');
 
 /** A sandbox: config dir (map + settings), a home with the listed az dirs. */
 function sandbox({ homeName = 'home', map = { roots: ROOTS }, settings = { permissions: { allow: ALLOW } }, azDirs = ['work'] } = {}) {
@@ -125,9 +127,9 @@ test('left alone: a command that already chooses its config dir, and `# raw`', (
 
 test('left alone: an unmapped directory, a root with no identity, an identity whose dir is missing', () => {
   const box = sandbox();
-  assert.equal(guard(box, 'az account show', { cwd: 'E:\\elsewhere' }), null);
-  assert.equal(guard(box, 'az account show', { cwd: 'D:\\work\\gh\\tool' }), null, 'a github root has no identity');
-  assert.equal(guard(box, 'az account show', { cwd: 'D:\\work\\ghost\\x' }), null, '~/.azure-absent does not exist');
+  assert.equal(guard(box, 'az account show', { cwd: p('E:\\elsewhere') }), null);
+  assert.equal(guard(box, 'az account show', { cwd: p('D:\\work\\gh\\tool') }), null, 'a github root has no identity');
+  assert.equal(guard(box, 'az account show', { cwd: p('D:\\work\\ghost\\x') }), null, '~/.azure-absent does not exist');
 });
 
 test('left alone: no map, a malformed map, no settings, no allow list', () => {

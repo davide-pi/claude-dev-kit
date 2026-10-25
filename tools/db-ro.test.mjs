@@ -528,7 +528,7 @@ test('db-ro.ps1: a missing envFile is skipped and the values come from the envir
   assert.match(unset.err, /\$\{DBRO_T_PWD\}, which is not set/);
 });
 
-test('db-ro.ps1: the ~ of envFile is the profile folder, never HOME or USERPROFILE', { skip }, async () => {
+test('db-ro.ps1: the ~ of envFile is the profile folder, never HOME or USERPROFILE', { skip: skip || (process.platform !== 'win32' && 'off Windows the profile folder is $HOME') }, async () => {
   // A dotenv in a fake home turns the host into a dev host; read, it would unlock write mode. The real profile has no
   // such file, so the host comes from the process environment and the write is refused.
   const home = mkdtempSync(join(tmpdir(), 'db-ro-envhome-'));

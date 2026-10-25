@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'workspace-context.js');
 const created = [];
+/** A mapped path in the running OS's form: the Windows literal as is, else drive-less with forward slashes. */
+const p = (win) => (process.platform === 'win32' ? win : win.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/'));
 
 process.on('exit', () => {
   for (const dir of created) {
@@ -29,11 +31,11 @@ process.on('exit', () => {
 });
 
 const ROOTS = [
-  { path: 'D:\\work\\product', platform: 'azure-devops', org: 'org-a', project: 'Product', identity: 'work' },
-  { path: 'D:\\work\\clients', platform: 'azure-devops', org: 'org-b', projects: { acme: 'Acme' }, identity: 'labs' },
-  { path: 'D:\\work\\gh', platform: 'github', org: 'gh-org', note: 'hours on a sheet' },
-  { path: 'D:\\work\\gh\\moved', platform: 'azure-devops', org: 'org-b', project: 'Moved', identity: 'labs' },
-  { path: 'D:\\work\\open', platform: 'azure-devops', org: 'org-a', project: 'ask' },
+  { path: p('D:\\work\\product'), platform: 'azure-devops', org: 'org-a', project: 'Product', identity: 'work' },
+  { path: p('D:\\work\\clients'), platform: 'azure-devops', org: 'org-b', projects: { acme: 'Acme' }, identity: 'labs' },
+  { path: p('D:\\work\\gh'), platform: 'github', org: 'gh-org', note: 'hours on a sheet' },
+  { path: p('D:\\work\\gh\\moved'), platform: 'azure-devops', org: 'org-b', project: 'Moved', identity: 'labs' },
+  { path: p('D:\\work\\open'), platform: 'azure-devops', org: 'org-a', project: 'ask' },
 ];
 
 /** A fresh sandbox: config dir with the map, a home with the listed az dirs, an empty env file. */
@@ -71,7 +73,7 @@ function run(box, cwd, { source = 'startup', env = {} } = {}) {
 
 test('mapped root → ALM line with org, project, identity; env file pinned', () => {
   const box = sandbox();
-  const { context, envFile } = run(box, 'D:\\work\\product\\repo-a\\src');
+  const { context, envFile } = run(box, p('D:\\work\\product\\repo-a\\src'));
   assert.match(context, /^ALM: Azure DevOps · org org-a · project Product · az identity work /);
   assert.match(context, /AZ_IDENTITY/);
   assert.match(context, /az outside the allow list.*prefix/, 'the manual prefix is for the az the guard does not pin');
@@ -85,7 +87,7 @@ test('a home directory with a space, a quote or a dollar sign survives being sou
   if (bash.status !== 0) return; // no bash here: the quoting is checked by the previous test's shape
   for (const homeName of ['my home', "o'neil", 'dollar$HOME']) {
     const box = sandbox({ homeName });
-    run(box, 'D:\\work\\product\\repo-a');
+    run(box, p('D:\\work\\product\\repo-a'));
     const sourced = spawnSync('bash', ['-c', `. "$ENVFILE"; printf %s "$AZURE_CONFIG_DIR"`], {
       encoding: 'utf8', env: { ...process.env, ENVFILE: box.envFile.replace(/\\/g, '/') },
     });
@@ -94,71 +96,71 @@ test('a home directory with a space, a quote or a dollar sign survives being sou
 });
 
 test('cwd case does not matter', () => {
-  const { context } = run(sandbox(), 'd:\\WORK\\Product\\repo');
+  const { context } = run(sandbox(), p('d:\\WORK\\Product\\repo'));
   assert.match(context, /project Product/);
 });
 
 test('per-subfolder root: listed subfolder → its project, case-insensitive', () => {
-  const { context } = run(sandbox(), 'D:\\work\\clients\\ACME\\api');
+  const { context } = run(sandbox(), p('D:\\work\\clients\\ACME\\api'));
   assert.match(context, /org org-b · project Acme/);
 });
 
 test('per-subfolder root: unlisted subfolder → resolve against the org, else ask', () => {
-  const { context } = run(sandbox(), 'D:\\work\\clients\\globex');
+  const { context } = run(sandbox(), p('D:\\work\\clients\\globex'));
   assert.match(context, /project to resolve: subfolder "globex"/);
   assert.match(context, /ask/);
 });
 
 test('per-subfolder root itself → ask', () => {
-  const { context } = run(sandbox(), 'D:\\work\\clients');
+  const { context } = run(sandbox(), p('D:\\work\\clients'));
   assert.match(context, /project: ask/);
 });
 
 test('project "ask" → ask', () => {
-  const { context } = run(sandbox(), 'D:\\work\\open\\x');
+  const { context } = run(sandbox(), p('D:\\work\\open\\x'));
   assert.match(context, /project: ask/);
 });
 
 test('github root → GitHub line with the note, no project, no env', () => {
   const box = sandbox();
-  const { context, envFile } = run(box, 'D:\\work\\gh\\tool');
+  const { context, envFile } = run(box, p('D:\\work\\gh\\tool'));
   assert.equal(context, 'ALM: GitHub · org gh-org · hours on a sheet');
   assert.equal(envFile, '');
 });
 
 test('nested root wins over its parent (longest path)', () => {
-  const { context, envFile } = run(sandbox(), 'D:\\work\\gh\\moved\\repo');
+  const { context, envFile } = run(sandbox(), p('D:\\work\\gh\\moved\\repo'));
   assert.match(context, /^ALM: Azure DevOps · org org-b · project Moved · az identity labs/);
   assert.match(envFile, /AZ_IDENTITY=labs/);
 });
 
 test('a sibling sharing the prefix is not a match', () => {
-  const { context } = run(sandbox(), 'D:\\work\\productive');
+  const { context } = run(sandbox(), p('D:\\work\\productive'));
   assert.equal(context, 'ALM: unmapped — ask');
 });
 
 test('unmapped cwd with a map → unmapped, nothing pinned', () => {
   const box = sandbox();
-  const { context, envFile } = run(box, 'E:\\elsewhere');
+  const { context, envFile } = run(box, p('E:\\elsewhere'));
   assert.equal(context, 'ALM: unmapped — ask');
   assert.equal(envFile, '');
 });
 
 test('identity dir missing → said so, env file untouched', () => {
   const box = sandbox({ azDirs: [] });
-  const { context, envFile } = run(box, 'D:\\work\\product');
+  const { context, envFile } = run(box, p('D:\\work\\product'));
   assert.match(context, /az identity work assente/);
   assert.equal(envFile, '');
 });
 
 test('compact source still prints the line', () => {
-  const { context } = run(sandbox(), 'D:\\work\\product', { source: 'compact' });
+  const { context } = run(sandbox(), p('D:\\work\\product'), { source: 'compact' });
   assert.match(context, /^ALM: Azure DevOps/);
 });
 
 test('no CLAUDE_ENV_FILE → line still printed', () => {
   const box = sandbox();
-  const { context } = run(box, 'D:\\work\\product', { env: { CLAUDE_ENV_FILE: '' } });
+  const { context } = run(box, p('D:\\work\\product'), { env: { CLAUDE_ENV_FILE: '' } });
   assert.match(context, /project Product/);
   assert.equal(readFileSync(box.envFile, 'utf8'), '');
 });
@@ -166,17 +168,17 @@ test('no CLAUDE_ENV_FILE → line still printed', () => {
 test('no workspaces.json → silent', () => {
   const box = sandbox({ map: null });
   assert.ok(!existsSync(join(box.config, 'workspaces.json')));
-  const { context, envFile } = run(box, 'D:\\work\\product');
+  const { context, envFile } = run(box, p('D:\\work\\product'));
   assert.equal(context, '');
   assert.equal(envFile, '');
 });
 
 test('malformed workspaces.json → silent', () => {
-  const { context } = run(sandbox({ map: '{ not json' }), 'D:\\work\\product');
+  const { context } = run(sandbox({ map: '{ not json' }), p('D:\\work\\product'));
   assert.equal(context, '');
 });
 
 test('map without roots → silent', () => {
-  const { context } = run(sandbox({ map: { other: 1 } }), 'D:\\work\\product');
+  const { context } = run(sandbox({ map: { other: 1 } }), p('D:\\work\\product'));
   assert.equal(context, '');
 });

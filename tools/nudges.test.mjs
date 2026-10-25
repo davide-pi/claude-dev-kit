@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'nudges.js');
 const created = [];
+// An edit is scratch when its file sits under the temp dir, where the sandboxes live: resolve the relative file against the repo instead.
+const REPO = join(dirname(HOOK), '..');
 process.on('exit', () => {
   for (const dir of created) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
 });
@@ -51,7 +53,7 @@ function fire(config, payload) {
 }
 
 const prompt = (config, id = 'sess-1') => fire(config, { session_id: id, hook_event_name: 'UserPromptSubmit', prompt: 'x' });
-const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' } });
+const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO });
 
 test('UserPromptSubmit: the context nudge speaks once per band', () => {
   const config = sandbox();
@@ -131,7 +133,7 @@ function viaRequire(config, hook, payload) {
 
 test('an older settings.json that requires a nudge directly still gets its output', () => {
   const config = sandbox();
-  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' } };
+  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO };
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.match(viaRequire(config, 'edit-nudge.js', edit).additionalContext, /\bimplementer\b/);
