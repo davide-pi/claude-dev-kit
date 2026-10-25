@@ -1,214 +1,164 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
-import { AGENT_KEEP_MS, parseGitStatus, parseWorktree, worklogDays } from './format'
-import type { WorklogSnapshot } from './format'
-import { INITIAL, PANE } from './state'
-import { PANE_MAX_COLUMNS, agentCounts, paneView, taskCounts } from './view'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
+import { addHistory, addModelUse, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import { compactInstructions, recordCtxSample, recordRound } from './context'
+import {
+  addStepUsage,
+  applyTodos,
+  bashOutput,
+  createdTask,
+  isOk,
+  isRefused,
+  markClaudeState,
+  noteEdit,
+  readClaudeState,
+  removeOne,
+  saveNote,
+  sendNote,
+  setClaudeState,
+  toggled,
+  upsertAgent,
+} from './events'
+import {
+  readPathOf,
+  recordCompaction,
+  withContextReading,
+  recordRoundEnd,
+  recordToolCall,
+  recordWait,
+  resultTokens,
+  roundCost,
+  toolArg,
+} from './insights'
+import {
+  fastTick,
+  mediumTick,
+  refreshAlm,
+  refreshAutoCompact,
+  refreshDoneClaims,
+  refreshLang,
+  refreshLastRates,
+  refreshOnOpen,
+  refreshUsage,
+  refreshWorklog,
+  slowTick,
+} from './refresh'
+import { cacheHit, usdOf } from './pricing'
+import { openContext, pressRefresh, scheduleContextRead } from './refresh-context'
+import { refreshGit, refreshRepo, showDiff } from './refresh-git'
+import { NOTE_MAX, normalizeNewlines } from './session'
+import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
+import { signalId, signalsOf } from './signals'
+import { DIFF_PANE, INITIAL, PANE } from './state'
+import { configDir, patch } from './store'
+import { t } from './strings'
+import { recordAgentEvent, recordEvent } from './timeline'
+import { PANE_MAX_COLUMNS, paneView } from './view'
+import type { PaneActions } from './view'
+import { diffView } from './view-work'
+import type { DiffActions } from './view-work'
+import { activeRun, addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
+import { parseCreatedPr, upsertPr } from './work'
 
-const TICK_MS = 15_000
+// The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
+const FAST_MS = 2000
+const MEDIUM_MS = 10_000
+const SLOW_MS = 30_000
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
-/** Writes `next(current)`, unless it equals the current value: a no-op must not redraw the readers. */
-async function patch($: EngineInterface, next: (s: CockpitSnapshot) => CockpitSnapshot): Promise<void> {
-  const current = await read($, snapshot)
-  if (JSON.stringify(next(current)) === JSON.stringify(current)) return
-  await update($, snapshot, next)
-  await writeState($)
-}
+// The main loop's tools in flight (a `tool.call` seen before its `next` answered), in start order: the header's tool state lasts while any is left.
+let mainTools: string[] = []
+// The last permission waits that ended, as [from, to]: a tool call takes off its running time only the part of them inside its own span (the wait is counted on its own).
+let waits: { from: number; to: number }[] = []
+const WAITS_KEPT = 50
+/** The error text a Cronologia row keeps. */
+// The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
+const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
 
-const sumUsage = (u: { input_tokens: number; output_tokens: number; cache_creation_input_tokens: number }) =>
-  u.input_tokens + u.output_tokens + u.cache_creation_input_tokens
+const waitOverlap = (list: readonly { from: number; to: number }[], from: number, to: number): number =>
+  list.reduce((sum, w) => sum + Math.max(0, Math.min(to, w.to) - Math.max(from, w.from)), 0)
 
-// ── Collection helpers (each one swallows its own failure: a missing datum stays absent) ──
-
-async function refreshGit($: EngineInterface): Promise<void> {
-  try {
-    const cwd = await $.session.cwd()
-    const base = ['git', '-C', cwd, '--no-optional-locks']
-    const status = await $.process.run([...base, 'status', '--porcelain', '-b'], { timeoutMs: 2000 })
-    const parsed = status.exitCode === 0 ? parseGitStatus(status.stdout) : undefined
-    if (!parsed) return void (await patch($, s => ({ ...s, cwd, git: undefined })))
-    const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
-    const worktreeRoot = tree.exitCode === 0 ? parseWorktree(tree.stdout) : undefined
-    await patch($, s => ({ ...s, cwd, git: { ...parsed, worktreeRoot } }))
-  } catch {
-    // git missing or too slow: keep the last reading
+/** Ends the wait the call `id` raised, if it raised one: the state goes back to what the wait interrupted, and the wait is counted. */
+async function endAsk($: EngineInterface, id: string): Promise<void> {
+  const ask = asks.get(id)
+  if (!ask) return
+  asks.delete(id)
+  await setClaudeState($, stateAfterWait(ask.held, mainTools), now => now?.kind === 'waiting')
+  const waitTo = await $.clock.now().catch(() => undefined)
+  if (waitTo !== undefined) {
+    waits = [...waits, { from: ask.from, to: waitTo }].slice(-WAITS_KEPT)
+    await patch($, s => ({ ...s, insights: recordWait(s.insights, waitTo - ask.from) })).catch(() => undefined)
   }
 }
 
-async function configDir($: EngineInterface): Promise<string | undefined> {
-  const explicit = await $.env.get('CLAUDE_CONFIG_DIR')
-  if (explicit) return explicit
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-  return home ? `${home}/.claude` : undefined
-}
-
-// ── The statusline's state file ──
-// `<configDir>/.cache/cockpit-<sessionId>.json`: what the user's statusline reads to hide itself while the pane is open
-// and to show the last turn's cost and the agent counts. Same id rule as the statusline's context snapshot.
-
-const STATE_MIN_MS = 3000
-const SESSION_ID = /^[\w-]{1,128}$/
-
-// Not an atom: the first render of a pane that waited undrawn must set it, and a render cannot write state.
-// The pane starts closed, `/cockpit` opens it, the person's close shuts it. A reload starts these over.
-let isOpen = false
-let lastWritten = ''
-let lastWriteAt = 0
-let isWriteScheduled = false
+/** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
+const paneActions = ($: EngineInterface): PaneActions => ({
+  // The Lavoro tab's git read and the Costi tab's breakdown run while the tab is selected: the press starts them.
+  selectTab: tab =>
+    void patch($, s => ({ ...s, tab, confirm: undefined, signalOpen: undefined, seenSignals: s.tab === 'signals' || tab === 'signals' ? signalsOf(s).map(signalId) : s.seenSignals }))
+      .then(async () => {
+        if (tab === 'work') await refreshRepo($)
+        else if (tab === 'context') await openContext($)
+      })
+      .catch(() => undefined),
+  // The instructions are built from the snapshot as it is at the press.
+  compact: () =>
+    void read($, snapshot)
+      .then(s => $.session.compact({ instructions: compactInstructions({ ...s, workflow: activeRun(s.workflowRun)?.name }) }))
+      .catch(() => undefined),
+  // A button that sends something waits for its confirmation; the answer runs it or drops it.
+  ask: kind => void patch($, s => ({ ...s, confirm: kind })).catch(() => undefined),
+  // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
+  // `command.run` entry of the engine types). The worklog is the skill's `sessione <id>` scope: the hours of this chat.
+  answer: isYes =>
+    void read($, snapshot)
+      .then(async s => {
+        const asked = s.confirm
+        await patch($, x => ({ ...x, confirm: undefined }))
+        if (!isYes) return
+        if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
+        if (asked === 'suite') await $.command.run({ command: 'retro' })
+        if (typeof asked === 'string' && asked.startsWith('note:')) {
+          const id = Number(asked.slice(5))
+          await patch($, x => {
+            const notes = (x.notes ?? []).filter(n => n.id !== id)
+            return { ...x, notes: notes.length > 0 ? notes : undefined, noteEditing: x.noteEditing === id ? undefined : x.noteEditing }
+          })
+        }
+      })
+      .catch(() => undefined),
+  openDiff: change => void showDiff($, change),
+  openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
+  toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
+  toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
+  toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
+  refresh: () => void pressRefresh($).catch(() => undefined),
+  toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
+  setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
+  saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
+  editNote: id =>
+    void patch($, s => {
+      const note = s.notes?.find(n => n.id === id)
+      return note ? { ...s, noteDraft: note.text, noteEditing: id } : s
+    }).catch(() => undefined),
+  sendNote: id => void sendNote($, id).catch(() => undefined),
+  deleteNote: id => void patch($, s => ({ ...s, confirm: `note:${id}` })).catch(() => undefined),
+})
 
 /**
- * Writes the state file when its content changed, at most once per `STATE_MIN_MS`: a change inside the window is
- * written when it ends. `isForced` skips the window (open, close, session start). `isHeartbeat` rewrites unchanged
- * content with a fresh `at`: the statusline trusts `open:true` only while `at` is recent. A failure leaves the file as it was.
+ * What the diff pane's button does: forgets the diff, then closes the pane. A plugin's own `$.ui.close` does not reach its
+ * own `ui.close` hook, which is what forgets the diff when the person closes the pane instead.
  */
-async function writeState($: EngineInterface, isForced = false, isHeartbeat = false): Promise<void> {
-  try {
-    const dir = await configDir($)
-    const id = await $.session.id()
-    if (!dir || !SESSION_ID.test(id)) return
-    const s = await read($, snapshot)
-    const { usd, startUsd } = s.cost
-    const counts = taskCounts(s)
-    const content = {
-      open: isOpen,
-      lastTurnUsd: usd !== undefined && startUsd !== undefined ? Math.round((usd - startUsd) * 100) / 100 : null,
-      agents: agentCounts(s),
-      effort: typeof s.effort === 'string' ? s.effort : null,
-      tasks: counts ? { done: counts.done, total: counts.total } : null,
-    }
-    const file = `${dir}/.cache/cockpit-${id}.json`
-    const key = `${file} ${JSON.stringify(content)}`
-    if (key === lastWritten && !isHeartbeat) return
-    const now = await $.clock.now()
-    const wait = STATE_MIN_MS - (now - lastWriteAt)
-    if (!isForced && wait > 0) {
-      if (!isWriteScheduled) {
-        isWriteScheduled = true
-        $.clock.after(wait, () => {
-          isWriteScheduled = false
-          void writeState($).catch(() => undefined)
-        })
-      }
-      return
-    }
-    const { open, ...rest } = content
-    await $.fs.write(file, JSON.stringify({ open, at: now, ...rest }))
-    lastWritten = key
-    lastWriteAt = now
-  } catch {
-    // best-effort: the statusline simply shows what it showed
-  }
-}
-
-async function setOpen($: EngineInterface, value: boolean): Promise<void> {
-  isOpen = value
-  await writeState($, true)
-}
-
-async function refreshWorklog($: EngineInterface, now: number): Promise<void> {
-  try {
-    const dir = await configDir($)
-    if (!dir) return
-    const text = await $.fs.read(`${dir}/.worklog-pending.json`)
-    const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
-    if (typeof parsed !== 'object' || parsed === null) return
-    // Narrowed once here: the file is written by the worklog hook, read as that shape.
-    const snap: WorklogSnapshot = parsed
-    const audit = await $.fs.stat(`${dir}/worklog/pushed.json`).catch(() => undefined)
-    const d = new Date(now)
-    const p = (n: number) => String(n).padStart(2, '0')
-    const today = `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
-    const worklog = worklogDays(snap, audit?.mtimeMs, today)
-    await patch($, s => ({ ...s, worklog }))
-  } catch {
-    // no snapshot yet: no badge
-  }
-}
-
-async function refreshUsage($: EngineInterface): Promise<void> {
-  try {
-    const u = await $.session.usage()
-    await patch($, s => ({
-      ...s,
-      ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
-      cost: { ...s.cost, usd: u.cost?.usd },
-      rateLimits: u.rateLimits,
-    }))
-  } catch {
-    // not measured yet
-  }
-}
-
-/** Ticks: the clock the countdowns and durations count from, finished agents pruned, the rest re-read. */
-async function tick($: EngineInterface): Promise<void> {
-  const now = await $.clock.now()
-  const listed = await $.agent.list().catch(() => undefined)
-  await patch($, s => ({
-    ...s,
-    now,
-    agents: s.agents
-      .map((a): CockpitAgent => {
-        // An agent the engine no longer lists as active has ended without a turn.complete we saw.
-        const info = listed?.find(l => l.id === a.id)
-        const isEnded = listed !== undefined && a.status === 'running' && (!info || ['completed', 'failed', 'killed'].includes(info.status))
-        return isEnded ? { ...a, status: 'done', endedAt: now } : a
-      })
-      .filter(a => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)),
-  }))
-  await refreshGit($)
-  await refreshWorklog($, now)
-  // While the pane is open the file is the proof of it: a stale `at` lets the statusline ignore a leftover `open:true`.
-  if (isOpen) await writeState($, true, true)
-}
-
-/** Applies `change` to the agent `id`; an agent whose events outran its spawn gets a stub the spawn later fills. */
-function upsertAgent(agents: CockpitAgent[], id: string, now: number, change: (a: CockpitAgent) => CockpitAgent): CockpitAgent[] {
-  const stub: CockpitAgent = { id, type: '?', status: 'running', startedAt: now, tokens: 0 }
-  return agents.some(a => a.id === id)
-    ? agents.map(a => (a.id === id ? change(a) : a))
-    : [...agents, change(stub)]
-}
-
-// ── Tasks: the main thread's task tools and TodoWrite, one merged list ──
-
-const TODO_PREFIX = 'todo:'
-
-/** TodoWrite sends the whole list: it replaces the TodoWrite items, the task-tool items stay. */
-function applyTodos(
-  tasks: readonly CockpitTask[],
-  todos: readonly { content: string; status: CockpitTask['status'] }[],
-  now: number,
-): CockpitTask[] {
-  const before = new Map(tasks.map(t => [t.id, t]))
-  const written = todos.map((todo): CockpitTask => {
-    const id = TODO_PREFIX + todo.content
-    const wasActive = before.get(id)?.status === 'in_progress'
-    const startedAt = todo.status === 'in_progress' ? (wasActive ? before.get(id)?.startedAt : undefined) ?? now : undefined
-    return { id, subject: todo.content, status: todo.status, startedAt }
-  })
-  return [...tasks.filter(t => !t.id.startsWith(TODO_PREFIX)), ...written]
-}
-
-/** A call that answered without error and was not refused. */
-const isOk = (ran: { deny?: string; isError?: boolean }) => ran.deny === undefined && ran.isError !== true
-
-/** A TaskUpdate result that says it did not apply (`success: false`), narrowed from `unknown`. */
-function isRefused(result: unknown): boolean {
-  return typeof result === 'object' && result !== null && 'success' in result && result.success === false
-}
-
-/** The `task` a TaskCreate result carries, narrowed once here: the result reaches a hook as `unknown`. */
-function createdTask(result: unknown): { id: string; subject: string } | undefined {
-  if (typeof result !== 'object' || result === null || !('task' in result)) return undefined
-  const { task } = result
-  if (typeof task !== 'object' || task === null || !('id' in task) || !('subject' in task)) return undefined
-  return typeof task.id === 'string' && typeof task.subject === 'string' ? { id: task.id, subject: task.subject } : undefined
-}
+const diffActions = ($: EngineInterface): DiffActions => ({
+  close: () =>
+    void patch($, s => ({ ...s, diff: undefined }))
+      .then(() => $.ui.close({ id: DIFF_PANE }))
+      .catch(() => undefined),
+})
 
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
 
@@ -216,47 +166,83 @@ const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit',
 async function open($: EngineInterface) {
   const opened = await openPane($)
   await setOpen($, opened.isPlaced)
+  if (opened.isPlaced) void refreshOnOpen($).catch(() => undefined)
   return opened
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
+    // First: the command registered below is described in the language read here.
+    await refreshLang($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
     const effort = await $.settings.read({ key: 'effortLevel' }).catch(() => undefined)
+    // The same session id (an enable, a respawn, a reload) keeps what the snapshot holds; another one starts its own.
+    await adoptSession($, true)
+    markClaudeState(undefined)
     await patch($, s => ({
       ...s,
       now,
       model,
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
-      tasks: [],
+      isLangRead: true,
+      startedAt: s.startedAt ?? now,
     }))
+    await refreshLastRates($)
     await refreshUsage($)
+    await refreshAutoCompact($)
+    await refreshAlm($)
     await refreshGit($)
     await refreshWorklog($, now)
-    // Every start, `/clear` included, has its own session id and so its own file.
+    await refreshDoneClaims($)
     await writeState($, true)
 
-    await $.command.register({ name: 'cockpit', description: 'Apre il pannello cockpit' })
-    $.clock.every(TICK_MS, () => void tick($).catch(() => undefined))
+    await $.command.register({ name: 'cockpit', description: t().commandDescription })
+    $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
+    $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
+    $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
     // The pane starts closed: `/cockpit` opens it.
     return next(e)
   })
 
-  // The ending session's file is left closed and empty, so the statusline drops its segments at once; the
-  // statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot delete). Best-effort: skipped when
-  // the exit's short budget is nearly spent, and any failure is swallowed.
+  // The ending session's file is left closed and empty, so the statusline drops its segments at once, with every
+  // finished agent in its history; the statusline's hourly prune removes the file itself after 3 days (`$.fs` cannot
+  // delete). Best-effort: the write is skipped when the exit's short budget is nearly spent, and any failure is swallowed.
+  // The snapshot lets go of the session first (any reason), from the reading taken here, so a write cut short cannot
+  // leave it in the atom: its agents go to its own history (the ones still running as `interrupted`), and the ended id
+  // is remembered, since the engine answers it until it switches to the next one. The next change adopts that one.
   on('session.end', async ($, e, next) => {
+    markClaudeState(undefined)
+    let s: CockpitSnapshot | undefined
     try {
-      const dir = await configDir($)
-      if (dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
-        const content = { open: false, at: await $.clock.now(), lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
-        await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
+      s = await read($, snapshot)
+      if (s.sessionId === e.sessionId || s.sessionId === undefined) {
+        await update($, snapshot, x => ({ ...withoutSession(x), endedSessionId: e.sessionId }))
       }
     } catch {
-      // the file ages out on its own
+      // the snapshot keeps the old id: writeState writes nothing for another one
+    }
+    try {
+      const dir = await configDir($)
+      if (s && dir && SESSION_ID.test(e.sessionId) && next.budget.remainingMs > 500) {
+        const own = s.sessionId === e.sessionId ? s : undefined
+        const at = await $.clock.now()
+        const left = (own?.agents ?? [])
+          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a))
+          .filter((h): h is CockpitHistoryEntry => h !== undefined)
+          .sort((a, b) => b.endedAt - a.endedAt)
+        const history = addHistory(own?.history, left)
+        // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
+        const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', mainTokens: own?.mainTokens, agentTokens }
+        await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
+        // The history takes the running agents as interrupted; a snapshot that is not this session's has nothing of it to write.
+        if (own) await $.fs.write(`${dir}/.cache/cockpit-data-${e.sessionId}.json`, JSON.stringify(sessionData(own, history)))
+      }
+    } catch {
+      // the files age out on their own (the data file goes with the transcript)
     }
     return next(e)
   })
@@ -264,7 +250,20 @@ export const register: Register = on => {
   // `/cockpit` opens the pane; a command-initiated open is placed at any width.
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)
-    return { text: opened.isPlaced ? 'cockpit aperto' : `cockpit in attesa: ${opened.reason}` }
+    return { text: opened.isPlaced ? t().commandOpen : t().commandWaiting(opened.reason) }
+  })
+
+  // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
+  on('ui.render', { component: 'Pane', requestId: DIFF_PANE }, async ($, e) => {
+    const ui = $.ui.resolve(e)
+    const s = await read($, snapshot)
+    return diffView(ui, s.diff, e.props.bodyColumns, diffActions($))
+  })
+
+  on('ui.close', { id: DIFF_PANE }, async ($, e, next) => {
+    const closed = await next(e)
+    await patch($, s => ({ ...s, diff: undefined })).catch(() => undefined)
+    return closed
   })
 
   // Any close, whoever asked for it: the pane stays closed until `/cockpit`.
@@ -278,6 +277,9 @@ export const register: Register = on => {
     await patch($, s => ({
       ...s,
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
+      // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
+      lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
+      ...withContextReading(s, e.context.tokens),
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
     }))
@@ -287,11 +289,18 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     // The deltas count from where the main loop's turn began.
     if (e.agentId === undefined) {
+      // A new turn has no tool in flight: one a crashed call left behind would hold the state on a tool for good.
+      mainTools = []
+      asks.clear()
+      const now = await $.clock.now()
       await patch($, s => ({
         ...s,
         ctx: { ...s.ctx, startTokens: s.ctx.tokens ?? 0 },
         cost: { ...s.cost, startUsd: s.cost.usd ?? 0 },
+        claudeState: { kind: 'working' },
+        workflowRun: endRun(s.workflowRun, now),
       }))
+      markClaudeState({ kind: 'working' })
     }
     return next(e)
   })
@@ -304,12 +313,32 @@ export const register: Register = on => {
       await patch($, s =>
         agentId === undefined
           ? { ...s, model, effort }
-          : { ...s, agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, model, effort })) },
+          : { ...s, workflowRun: touchRun(s.workflowRun, agentId, now), agents: upsertAgent(s.agents, agentId, now, a => ({ ...a, model, effort })) },
       )
     } catch {
       // observing must never break the step
     }
-    return yield* next(e)
+    // The main loop's chunks tell what Claude is doing: a thinking chunk is thinking, text or a tool's start is working. A chunk
+    // repeats many times a second: the state is written when the kind it derives changes, with no snapshot read in between.
+    const stream = next(e)
+    let lastKind: 'thinking' | 'working' | undefined
+    for await (const chunk of stream) {
+      if (e.agentId === undefined) {
+        const kind = chunk.kind === 'thinking' ? 'thinking' : chunk.kind === 'text' || chunk.kind === 'tool' ? 'working' : undefined
+        if (kind !== undefined && kind !== lastKind) {
+          lastKind = kind
+          await setClaudeState($, { kind })
+        }
+      }
+      yield chunk
+    }
+    // The response's own usage: the four counters of an agent, live per step, and the session's share.
+    try {
+      const { usage } = await stream.result
+      if (usage) await addStepUsage($, e.agentId, usageOf(usage))
+    } catch {
+      // observing must never break the step
+    }
   })
 
   // Tasks: TodoWrite is a per-agent list, so only the main thread (no `agentId`) feeds it; a call that failed changes nothing.
@@ -376,6 +405,133 @@ export const register: Register = on => {
     return ran
   })
 
+  // The skills the session loaded through the Skill tool (a typed `/skill` never reaches the mod), once each in the order they first ran.
+  on('tool.call', { tool: 'Skill' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (isOk(ran)) {
+      try {
+        await patch($, s => ({
+          ...s,
+          skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill],
+        }))
+      } catch {
+        // observing must never break the call
+      }
+    }
+    return ran
+  })
+
+  // A workflow the session launched: its result names the script and the run the agents' spawns carry.
+  on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
+    const ran = await next(e)
+    const launched = isOk(ran) ? launchedRun(ran.result) : undefined
+    if (launched) await patch($, s => ({ ...s, workflowRun: nameRun(s.workflowRun, launched) })).catch(() => undefined)
+    return ran
+  })
+
+  // The tools of each subagent, from the tool events carrying its id: the one running now (from the call to its end) and the last
+  // one. The main loop's calls are no agent's: while any runs the header shows a tool by name, and the end of the last one puts
+  // the state back to working.
+  on('tool.call', async ($, e, next) => {
+    const { agentId, tool } = e
+    if (agentId !== undefined) {
+      const forAgent = (change: (a: CockpitAgent) => CockpitAgent) => patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? change(a) : a)) }))
+      try {
+        // Only an agent the mod already knows: a call that outran the spawn makes no stub the spawn would later fill.
+        const at = await $.clock.now()
+        await patch($, s => ({
+          ...s,
+          workflowRun: touchRun(s.workflowRun, agentId, at),
+          agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool] } : a)),
+        }))
+      } catch {
+        // observing must never break the call
+      }
+      try {
+        const ran = await next(e)
+        await noteEdit($, e, ran)
+        return ran
+      } finally {
+        await forAgent(a => ({ ...a, activeTools: removeOne(a.activeTools, tool) })).catch(() => undefined)
+      }
+    }
+    mainTools = [...mainTools, tool]
+    await setClaudeState($, { kind: 'tool', tool })
+    // A clock that fails leaves the call without a time: the row draws none, and the call adds no running time.
+    const at = await $.clock.now().catch(() => undefined)
+    let isSuccess = false
+    let outcome: { tokens: number; error?: string } | undefined
+    try {
+      const ran = await next(e)
+      isSuccess = isOk(ran)
+      await noteEdit($, e, ran)
+      outcome = { tokens: resultTokens(ran), error: ran.deny ?? ran.text }
+      return ran
+    } finally {
+      // An ask this call raised ends with it, whether the person approved (the tool ran) or refused.
+      await endAsk($, e.tool_use_id)
+      mainTools = removeOne(mainTools, tool) ?? []
+      // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
+      const ended = await $.clock.now().catch(() => undefined)
+      const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
+      await patch($, s => ({
+        ...s,
+        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
+      })).catch(() => undefined)
+      const last = mainTools.at(-1)
+      await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
+    }
+  })
+
+  // A pull request this chat created (`gh pr create`, `az repos pr create`; a subagent's call too: the PR is the chat's) is
+  // told by what the command printed.
+  on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    const ran = await next(e)
+    if (isOk(ran) && /\bpr\s+create\b/.test(e.command)) {
+      const pr = parseCreatedPr(e.command, bashOutput(ran))
+      if (pr) await patch($, s => ({ ...s, prs: upsertPr(s.prs, pr) })).catch(() => undefined)
+    }
+    return ran
+  })
+
+  // A call the person has to approve: `tool.check` settles on `ask` with a person to answer it, and the state is waiting from there.
+  // The engine raises no event when the answer comes: the permission dialog or classifier runs inside the `tool.call` chain, after
+  // `tool.check`, and the next thing the mod hears is the call's end. The earliest sign that the tool runs is the terminal's
+  // `ToolProgress` row under it (below); a tool that draws none (a quick one, any outside the terminal) keeps the wait to its end, and an
+  // ask the mode's classifier resolves cannot be told from a person's, so it counts as a wait for as long as its tool runs: known limits.
+  // A gating event: whatever fails here leaves the verdict as it was.
+  on('tool.check', async ($, e, next) => {
+    const verdict = await next(e)
+    try {
+      if (verdict.decision === 'ask' && e.approver === 'person' && e.agentId === undefined && e.tool_use_id !== undefined) {
+        const held = readClaudeState()
+        const from = await $.clock.now()
+        asks.set(e.tool_use_id, { from, held })
+        await setClaudeState($, { kind: 'waiting', since: from })
+      }
+    } catch {
+      // observing must never break the verdict
+    }
+    return verdict
+  })
+
+  // The call's row shows a progress line once the tool runs, so the approval is over: the wait ends there and the tool's own time starts.
+  on('ui.render', { component: 'ToolProgress' }, ($, e, next) => {
+    const id = e.props.tool_use_id
+    // Outside this drawing's dispatch, as the pane's own first write is.
+    if (asks.has(id)) $.clock.after(0, () => void endAsk($, id).catch(() => undefined))
+    return next(e)
+  })
+
+  // A compaction that stood (not a skip, not the ahead-of-time `precompute`), the main conversation's: the engine event, since the classic PostCompact never reaches the mod.
+  on('session.compact', async ($, e, next) => {
+    const done = await next(e)
+    if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
+      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
+    }
+    return done
+  })
+
   on('agent.spawn', async ($, e, next) => {
     const spawned = await next(e)
     if (spawned.agentId !== undefined) {
@@ -383,10 +539,13 @@ export const register: Register = on => {
       const startedAt = await $.clock.now()
       await patch($, s => ({
         ...s,
+        // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
+        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun,
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
           type: e.subagentType,
+          description: e.description,
           requested: e.model,
           model: spawned.model,
           // events that outran the spawn keep their status, tokens, effort and start
@@ -401,26 +560,84 @@ export const register: Register = on => {
     const agentId = e.agentId
     const usage = e.usage
     const now = await $.clock.now()
-    if (agentId !== undefined) {
-      await patch($, s => ({
-        ...s,
-        agents: upsertAgent(s.agents, agentId, now, a => ({
-          ...a,
-          status: 'done',
-          endedAt: now,
-          tokens: a.tokens + (usage ? sumUsage(usage) : 0),
-        })),
-      }))
+    if (agentId === undefined) {
+      // The main loop's turn: how much of its input the prompt cache served. An empty turn leaves the last share.
+      const total = usage ? usage.input_tokens + usage.cache_read_input_tokens + usage.cache_creation_input_tokens : 0
+      let cacheShare: number | undefined
+      if (usage && total > 0) {
+        cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
+        const share = cacheShare
+        // The turn's usage sums every request of the turn: the context size is the engine's last reading, whose growth the autocompact forecast averages.
+        await patch($, s => ({
+          ...s,
+          cacheShare: share,
+          ctxSamples: s.ctx.tokens ? recordCtxSample(s.ctxSamples, s.ctx.tokens) : s.ctxSamples,
+        }))
+      }
+      // The steps already counted their part of the session's tokens: the turn's own total replaces it.
+      await patch($, s => {
+        const insights = recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare, endedAt: now })
+        return {
+          ...s,
+          mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
+          mainStepTokens: undefined,
+          lastRoundMs: e.durationMs,
+          // Every main turn is a round of the Costi sparkline: the context the engine last measured.
+          ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
+          insights,
+          modelUse: usage && s.model ? addModelUse(s.modelUse, s.model, usageOf(usage)) : s.modelUse,
+          events: recordEvent(s.events, { at: now, kind: 'round', key: String(insights.rounds), usd: roundCost(s.cost), ms: e.durationMs }),
+        }
+      })
+      await setClaudeState($, { kind: 'idle' })
+      await scheduleContextRead($).catch(() => undefined)
+      // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
+      await refreshGit($)
+      await refreshDoneClaims($)
+    } else {
+      await patch($, s => {
+        const agents = upsertAgent(s.agents, agentId, now, a => {
+          // The steps already counted their part: the turn's own total replaces it.
+          const settled = settleUsage(a.usage, a.stepUsage, usage ? usageOf(usage) : undefined)
+          return {
+            ...a,
+            status: 'done',
+            endedAt: now,
+            isFailed: e.reason !== 'answer',
+            usage: settled,
+            stepUsage: undefined,
+            tokens: usage ? a.tokens - newTokens(a.stepUsage) + newTokens(usageOf(usage)) : a.tokens,
+          }
+        })
+        const ended = agents.find(a => a.id === agentId)
+        return {
+          ...s,
+          workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
+          agents,
+          modelUse: usage && ended?.model ? addModelUse(s.modelUse, ended.model, usageOf(usage)) : s.modelUse,
+          events: ended
+            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
+            : s.events,
+        }
+      })
     }
-    await refreshGit($)
     return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     // A pane that waited undrawn is open from its first render; the write runs outside this drawing dispatch.
-    if (!isOpen) $.clock.after(0, () => void setOpen($, true).catch(() => undefined))
+    if (!isOpen) {
+      $.clock.after(0, () => {
+        void setOpen($, true).then(() => refreshOnOpen($)).catch(() => undefined)
+      })
+    }
     const ui = $.ui.resolve(e)
     const s = await read($, snapshot)
-    return paneView(ui, s, e.props.bodyColumns)
+    // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
+    if (!s.isLangRead) {
+      await refreshLang($)
+      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
+    }
+    return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
 }

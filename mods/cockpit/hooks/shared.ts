@@ -1,6 +1,8 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
+import type { CockpitGit } from '../types'
+
 export const COLORS = {
   text: '#d6d8dc',
   dim: '#9aa0aa',
@@ -21,14 +23,17 @@ export const COLORS = {
   gray: '#8c8c8c',
 } as const
 
-/** How long a finished agent stays listed. */
-export const AGENT_KEEP_MS = 120_000
-
 export const ICONS = {
-  folder: '\u{F024B}', // nf-md-folder
-  tree: '\u{F0253}', // nf-md-folder_multiple: a worktree, another checkout of the same repo
+  folder: '\u{F024B}', // nf-md-folder: a folder that is not a repository
+  repo: '\u{F0CCF}', // nf-md-source_repository: a repository's own checkout
+  tree: '\u{F0CD0}', // nf-md-source_repository_multiple: a linked worktree, another checkout of the same repo
   branch: '\u{F062C}', // nf-md-source_branch
+  disk: '\u{F02CA}', // nf-md-harddisk
 } as const
+
+/** The folder glyph by what the folder is: a linked worktree, a repository's checkout, or a plain folder (no git). */
+export const folderIcon = (git: Pick<CockpitGit, 'root' | 'worktreeRoot'> | undefined): string =>
+  git?.worktreeRoot ? ICONS.tree : git ? ICONS.repo : ICONS.folder
 
 // Nerd Font Material Design glyphs (supplementary private use area, hence \u{...}).
 const EFFORT: Record<string, { icon: string; color: string }> = {
@@ -45,10 +50,10 @@ export function effortGlyph(effort: string | number | undefined): { icon: string
 }
 
 /** A run of text with one style: the unit both views are built from. */
-export type Span = { t: string; c?: string; dim?: boolean; bold?: boolean }
+export type Span = { t: string; c?: string; dim?: boolean; bold?: boolean; bg?: string }
 
 export const spanWidth = (spans: readonly Span[]): number =>
-  spans.reduce((n, s) => n + [...s.t].length, 0)
+  spans.reduce((n, s) => n + textCells(s.t), 0)
 
 export const spanText = (spans: readonly Span[]): string => spans.map(s => s.t).join('')
 
@@ -61,18 +66,21 @@ export function abbrevTokens(n: number | undefined, isUpper = false): string {
   return String(Math.round(n))
 }
 
-/** Time to a reset as `3d6h`, `2h14m`, `14m`; empty when the reset is past or unknown. */
-export function countdown(resetsAtMs: number | undefined, now: number): string {
-  if (resetsAtMs === undefined) return ''
-  const diff = resetsAtMs - now
-  if (diff <= 0) return ''
-  const totalMin = Math.floor(diff / 60000)
+/** A time span in 6 cells, right-aligned: `   45m` under an hour, ` 2h14m` / `13h45m` under a day, ` 3d06h` beyond (minutes and hours in two digits). */
+function fixedSpan(ms: number): string {
+  const totalMin = Math.floor(ms / 60000)
   const d = Math.floor(totalMin / 1440)
   const h = Math.floor((totalMin % 1440) / 60)
   const m = totalMin % 60
-  if (d > 0) return `${d}d${h}h`
-  if (h > 0) return `${h}h${m}m`
-  return `${m}m`
+  const two = (n: number) => String(n).padStart(2, '0')
+  const text = d > 0 ? `${d}d${two(h)}h` : h > 0 ? `${h}h${two(m)}m` : `${m}m`
+  return text.padStart(6)
+}
+
+/** Time to a reset in `fixedSpan`'s 6 cells; empty when the reset is past or unknown. */
+export function countdown(resetsAtMs: number | undefined, now: number): string {
+  if (resetsAtMs === undefined || resetsAtMs - now <= 0) return ''
+  return fixedSpan(resetsAtMs - now)
 }
 
 /** Elapsed time: `41s`, `2m14s`, `1h02m`. */
@@ -99,9 +107,6 @@ export function rateColor(used: number, resetsAtMs: number | undefined, windowSe
   return projected <= 80 ? COLORS.green : projected <= 100 ? COLORS.yellow : COLORS.red
 }
 
-/** The worklog badge is red once the oldest pending day is more than a week old (`YYYY-MM-DD`, local noon). */
-export const isWorklogStale = (oldestIso: string, now: number): boolean => now - Date.parse(`${oldestIso}T12:00:00`) > 7 * 864e5
-
 /** Cut spans to `max` cells: the cut leaves an unstyled `…` as its last cell (as the statusline's truncateAnsi). */
 export function truncateSpans(spans: readonly Span[], max: number): Span[] {
   if (spanWidth(spans) <= max) return [...spans]
@@ -110,30 +115,19 @@ export function truncateSpans(spans: readonly Span[], max: number): Span[] {
   let room = max - 1
   for (const s of spans) {
     if (room <= 0) break
-    const chars = [...s.t]
-    out.push(chars.length <= room ? s : { ...s, t: chars.slice(0, room).join('') })
-    room -= chars.length
+    const w = textCells(s.t)
+    out.push(w <= room ? s : { ...s, t: takeCells(s.t, room) })
+    room -= w
   }
   out.push({ t: '…' })
   return out
 }
 
-/** How much should still be left now (`target`) and the signed gap to what is (`delta`, + is ahead). */
-export function weeklyPace(
-  remainingPct: number,
-  resetsAtMs: number | undefined,
-  windowSec: number,
-  now: number,
-): { target: number; delta: number } | undefined {
-  if (resetsAtMs === undefined) return undefined
-  const remainSec = (resetsAtMs - now) / 1000
-  if (remainSec <= 0 || remainSec > windowSec) return undefined
-  const target = Math.round((remainSec / windowSec) * 100)
-  return { target, delta: remainingPct - target }
-}
-
 /** `+5%` / `−5%` (true minus sign, as the mockup). */
 export const signedPct = (delta: number): string => `${delta < 0 ? '−' : '+'}${Math.abs(delta)}%`
+
+/** A signed percentage in the 4-cell column of the other percentages (` −5%`, `−12%`); a wider one keeps its width. */
+export const signedPctCell = (delta: number): string => signedPct(delta).padStart(4)
 
 /** Cost with precision that scales down; `$0.00` for an untouched session. */
 export function fmtCost(usd: number | undefined): string {
@@ -210,19 +204,24 @@ export function cellWidth(ch: string): number {
 
 export const textCells = (s: string): number => [...s].reduce((n, ch) => n + cellWidth(ch), 0)
 
-/** Cut the end of a string to `max` cells with an ellipsis; short strings are untouched. */
-export function truncEnd(s: string, max: number): string {
-  if (textCells(s) <= max) return s
-  if (max <= 0) return ''
+/** The longest start of `s` that fits `max` cells. */
+function takeCells(s: string, max: number): string {
   let out = ''
   let used = 0
   for (const ch of s) {
     const w = cellWidth(ch)
-    if (used + w > max - 1) break
+    if (used + w > max) break
     out += ch
     used += w
   }
-  return out + '…'
+  return out
+}
+
+/** Cut the end of a string to `max` cells with an ellipsis; short strings are untouched. */
+export function truncEnd(s: string, max: number): string {
+  if (textCells(s) <= max) return s
+  if (max <= 0) return ''
+  return takeCells(s, max - 1) + '…'
 }
 
 /** Pads with spaces to `n` cells. */
@@ -268,74 +267,72 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
   return out
 }
 
+/** `spans` with their first `cells` cells on a `bg` background: a row that carries its own bar. */
+export function withBackground(spans: readonly Span[], cells: number, bg: string): Span[] {
+  const out: Span[] = []
+  let left = Math.max(0, cells)
+  for (const s of spans) {
+    const chars = [...s.t]
+    if (left <= 0) out.push(s)
+    else if (chars.length <= left) out.push({ ...s, bg })
+    else out.push({ ...s, t: chars.slice(0, left).join(''), bg }, { ...s, t: chars.slice(left).join('') })
+    left -= chars.length
+  }
+  return out
+}
+
+/** `color` (`#rrggbb`) darkened to `factor` of its brightness: a background that text of any color stays readable on. */
+export function shade(color: string, factor: number): string {
+  const channel = (i: number) => Math.round(parseInt(color.slice(1 + 2 * i, 3 + 2 * i), 16) * factor)
+  return `#${[0, 1, 2].map(i => channel(i).toString(16).padStart(2, '0')).join('')}`
+}
+
 /** Context color by fill: green, yellow, red (no orange: too close to red). */
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
 
-/** `git status --porcelain -b` -> branch and dirty counts; undefined outside a repository. */
-export function parseGitStatus(out: string): { branch: string; staged: number; modified: number; untracked: number } | undefined {
-  const lines = out.split('\n').filter(l => l.length > 0)
-  const header = lines[0]?.startsWith('## ') ? (lines.shift() ?? '').slice(3) : ''
-  const branch = (header.replace(/^(?:No commits yet|Initial commit) on /, '').split('...')[0] ?? '')
-    .replace(/ \(no branch\)$/, '')
-    .trim()
-  if (!branch) return undefined
-  let staged = 0
-  let modified = 0
-  let untracked = 0
-  for (const line of lines) {
-    if (line.length < 2) continue
-    const x = line[0]
-    const y = line[1]
-    if (x !== ' ' && x !== '?') staged++
-    if (y !== ' ' && y !== '?') modified++
-    if (line.startsWith('??')) untracked++
-  }
-  return { branch, staged, modified, untracked }
+/** The cache hit of the last turn by thresholds: green from 80 %, amber from 50 to 79, red below. */
+export const cacheColor = (pct: number): string => (pct >= 80 ? COLORS.green : pct >= 50 ? COLORS.amber : COLORS.red)
+
+const SPARK = '▁▂▃▄▅▆▇█'
+
+/** One block per value, scaled to `max` (the tallest of them when not given; a value of 0 is the lowest block, one above `max` the highest); empty without values. */
+export function sparkline(values: readonly number[], max: number = Math.max(0, ...values)): string {
+  return values.map(v => SPARK[max > 0 ? Math.min(SPARK.length - 1, Math.round((Math.max(0, v) / max) * (SPARK.length - 1))) : 0]).join('')
 }
 
-/** `rev-parse --git-dir --git-common-dir --show-toplevel` -> the worktree root inside a linked worktree. */
-export function parseWorktree(out: string): string | undefined {
-  const [gitDir, commonDir, root] = out.split('\n').map(l => l.trim())
-  if (!gitDir || !commonDir || !root) return undefined
-  const norm = (p: string) => p.replace(/\\/g, '/').replace(/\/+$/, '').toLowerCase()
-  return norm(gitDir) === norm(commonDir) ? undefined : root
+/** One block per value, scaled between the lowest and the highest of them: a flat series draws the lowest block (nothing to tell apart), never noise; empty without values. */
+export function rangeSparkline(values: readonly number[]): string {
+  if (values.length === 0) return ''
+  const min = Math.min(...values)
+  const span = Math.max(...values) - min
+  return values.map(v => SPARK[span > 0 ? Math.round(((v - min) / span) * (SPARK.length - 1)) : 0]).join('')
 }
 
 export const baseName = (p: string): string =>
   p.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) ?? p
 
-export type WorklogSnapshot = {
-  day?: string
-  auditMtime?: number
-  pending?: { date: string }[]
-  underTarget?: { date: string }[]
-}
-
-/**
- * The worklog days to flag, with the statusline's staleness rule: a snapshot from another day, or
- * from before /worklog last wrote its audit, is silent (which is how the badge clears itself).
- */
-export function worklogDays(
-  snap: WorklogSnapshot,
-  auditMtimeMs: number | undefined,
-  todayIso: string,
-): { pending: string[]; underTarget: string[] } {
-  const none = { pending: [], underTarget: [] }
-  if (snap.day !== todayIso) return none
-  if (snap.auditMtime === undefined || auditMtimeMs === undefined) return none
-  if (Math.abs(snap.auditMtime - auditMtimeMs) >= 1) return none
-  return {
-    pending: (snap.pending ?? []).map(d => d.date),
-    underTarget: (snap.underTarget ?? []).map(d => d.date),
-  }
-}
-
 /** `2026-10-12` -> `12/10`. */
 export const shortDate = (iso: string): string => `${iso.slice(8, 10)}/${iso.slice(5, 7)}`
 
-/** The `wl` / `worklog:` text of the footer for one kind of day. */
-export function worklogLabel(kind: 'pending' | 'underTarget', dates: readonly string[]): string {
-  const what = kind === 'pending' ? 'da registrare' : 'sotto target'
-  return `worklog: ${dates.length}d ${what} (${dates.map(shortDate).join(', ')})`
+/** A percentage in a 4-cell column (`  7%`, ` 87%`, `100%`) so one-, two- and three-digit values line up. */
+export const pctCell = (n: number): string => `${String(n).padStart(3)}%`
+
+export const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+export const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
+
+/**
+ * Whether two snapshots hold the same data. A part both share by reference is the same without a look; only a part that was rebuilt is
+ * serialised, so a patch that changes one field pays for that field.
+ */
+export function sameSnapshot(a: object, b: object): boolean {
+  if (a === b) return true
+  const keys = new Set([...Object.keys(a), ...Object.keys(b)])
+  for (const key of keys) {
+    const x = (a as Record<string, unknown>)[key]
+    const y = (b as Record<string, unknown>)[key]
+    if (x !== y && JSON.stringify(x) !== JSON.stringify(y)) return false
+  }
+  return true
 }

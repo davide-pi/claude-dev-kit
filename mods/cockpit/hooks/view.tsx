@@ -1,255 +1,120 @@
-import type { Elements, RenderElement, RenderSurface } from 'claude-code'
+import type { RenderElement } from 'claude-code'
 
-import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
+import type { CockpitSnapshot, CockpitTab } from '../types'
+import { claudeStateSpans } from './agents'
+import { autocompactForecast } from './context'
+import { TABS } from './session'
 import {
-  AGENT_KEEP_MS,
   COLORS,
-  ICONS,
-  abbrevTokens,
   barCells,
   baseName,
-  countdown,
+  cacheColor,
   ctxColor,
   displayModel,
   duration,
-  effortGlyph,
   fmtCost,
   fmtCostDelta,
+  folderIcon,
   gridWidths,
-  modelFamily,
-  rateColor,
-  shortModel,
-  signedPct,
+  pctCell,
+  signedPctCell,
   spanWidth,
-  padCells,
-  taskBarCells,
-  truncEnd,
+  textCells,
   truncMiddle,
-  weeklyPace,
-  worklogLabel,
-} from './format'
-import type { ModelFamily, Span } from './format'
+  truncateSpans,
+  ICONS,
+} from './shared'
+import type { Span } from './shared'
+import { signalId, signalsOf } from './signals'
+import { t } from './strings'
+import { visibleAgents } from './view-agents'
+import { BUTTON_GAP, buttonRowWidth, delta, dim, line, sp } from './view-base'
+import type { Ui } from './view-base'
+import { contextText, headerEffort, rateRow, rateText } from './view-header'
+import type { RateRow } from './view-header'
+import { makeKit, tabBlocks } from './view-tabs'
+import type { Node, PaneActions } from './view-tabs'
+import { aheadBehindSpans } from './work'
 
-/** The elements the views draw with; every surface's table has them. */
-export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text'>
+export type { PaneActions } from './view-tabs'
 
 const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
-const FIVE_HOURS = 18000
-const SEVEN_DAYS = 604800
-const MAX_AGENT_ROWS = 10
-const MAX_TASK_ROWS = 6
-const TASK_TIME_W = 6
 
-// ── Spans ────────────────────────────────────────────────────────────────────
-
-const dim = (t: string): Span => ({ t, dim: true })
-const sp = (t: string, c?: string, bold?: boolean): Span => ({ t, c, bold })
-
-function line({ Text }: Ui, spans: readonly Span[]): RenderElement {
-  return (
-    <Text wrap="truncate">
-      {spans.map(s => (
-        <Text color={s.c} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
-          {s.t}
-        </Text>
-      ))}
-    </Text>
-  )
-}
-
-const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
-const padStart = (s: string, n: number) => ' '.repeat(Math.max(0, n - [...s].length)) + s
-
-const effortSpans = (effort: string | number | undefined): Span[] => {
-  const g = effortGlyph(effort)
-  return g ? [sp(g.icon, g.color)] : []
-}
-
-// The session's effort in the header: icon and level name, both in the level's color.
-const headerEffort = (effort: string | number | undefined): Span[] => {
-  const g = effortGlyph(effort)
-  return g && typeof effort === 'string' ? [sp(' '), sp(`${g.icon} ${effort.toUpperCase()}`, g.color, true)] : []
-}
-
-// ── Data derived from the snapshot ───────────────────────────────────────────
-
-type RateRow = { rem: number; color: string; resetMs: number | undefined; pace?: { target: number; delta: number } }
-
-function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow | undefined {
-  const w = s.rateLimits.find(r => r.kind === kind)
-  if (!w) return undefined
-  const parsed = w.resetsAt ? Date.parse(w.resetsAt) : Number.NaN
-  const resetMs = Number.isNaN(parsed) ? undefined : parsed
-  const windowSec = kind === 'five_hour' ? FIVE_HOURS : SEVEN_DAYS
-  const rem = Math.max(0, Math.min(100, Math.round(100 - w.percentUsed)))
-  return {
-    rem,
-    resetMs,
-    color: rateColor(w.percentUsed, resetMs, windowSec, s.now),
-    pace: kind === 'seven_day' ? weeklyPace(rem, resetMs, windowSec, s.now) : undefined,
-  }
-}
-
-// An agent only seen through its events (no spawn yet, or an engine fork nothing lists) has type '?': not shown.
-const visibleAgents = (s: CockpitSnapshot): CockpitAgent[] =>
-  s.agents.filter(a => a.type !== '?').filter(a => a.status === 'running' || (a.endedAt !== undefined && s.now - a.endedAt < AGENT_KEEP_MS))
-
-/** `chiesto fable → sonnet (env)` when the model asked for is not the one the agent runs on. */
-export function agentWarning(a: CockpitAgent, isForced: boolean): string | undefined {
-  const asked = modelFamily(a.requested)
-  const got = modelFamily(a.model)
-  if (!asked || !got || asked === got) return undefined
-  return `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`
-}
-
-/** What the statusline's cockpit segment shows: agents running, and agents that run on another model than asked. */
-export function agentCounts(s: CockpitSnapshot): { running: number; modelWarnings: number } {
-  const agents = visibleAgents(s)
-  return {
-    running: agents.filter(a => a.status === 'running').length,
-    modelWarnings: agents.filter(a => agentWarning(a, s.isSubagentModelForced) !== undefined).length,
-  }
-}
-
-/** Tasks by state, and the `done/total` the statusline shows; null when there are none. */
-export function taskCounts(s: CockpitSnapshot): { inProgress: number; pending: number; done: number; total: number } | null {
-  const tasks = s.tasks ?? []
-  if (tasks.length === 0) return null
-  const n = (status: CockpitTask['status']) => tasks.filter(t => t.status === status).length
-  return { inProgress: n('in_progress'), pending: n('pending'), done: n('completed'), total: tasks.length }
-}
-
-/** The open tasks the pane lists: in progress first, then pending, each in the order it arrived. */
-export const openTasks = (s: CockpitSnapshot): CockpitTask[] => {
-  const tasks = s.tasks ?? []
-  return [...tasks.filter(t => t.status === 'in_progress'), ...tasks.filter(t => t.status === 'pending')]
-}
-
-/** One task row: icon, subject cut with `…` to fit, and for a task in progress the time since it started. */
-export function taskRow(t: CockpitTask, now: number, width: number): Span[] {
-  const isActive = t.status === 'in_progress'
-  const subjectW = Math.max(4, width - 2 - 1 - TASK_TIME_W)
-  const subject = padCells(truncEnd(t.subject, subjectW), subjectW)
-  const elapsed = isActive && t.startedAt !== undefined ? duration(now - t.startedAt) : ''
-  return [
-    isActive ? sp('◐', COLORS.blue) : dim('○'),
-    sp(' '),
-    isActive ? sp(subject) : dim(subject),
-    sp(' '),
-    dim(padStart(elapsed, TASK_TIME_W)),
-  ]
-}
-
-/** Parents first, each followed by its children; an orphan counts as a root. */
-export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgent; depth: number }[] {
-  const ids = new Set(list.map(a => a.id))
-  const out: { agent: CockpitAgent; depth: number }[] = []
-  const walk = (parent: string | undefined, depth: number) => {
-    for (const a of list) {
-      const isRoot = parent === undefined && (a.parentId === undefined || !ids.has(a.parentId))
-      if (isRoot || (parent !== undefined && a.parentId === parent)) {
-        out.push({ agent: a, depth })
-        walk(a.id, depth + 1)
-      }
-    }
-  }
-  walk(undefined, 0)
-  return out
-}
-
-const delta = (now: number | undefined, start: number | undefined): number | undefined =>
-  now !== undefined && start !== undefined ? now - start : undefined
-
-// ── Row builders (pure: spans in, spans out) ─────────────────────────────────
-
-export function contextText(s: CockpitSnapshot): Span[] {
-  const { tokens, window, percent, startTokens } = s.ctx
-  // Before the first response nothing is measured: the fill reads as empty, not as missing.
-  const pct = percent ?? 0
-  const out: Span[] = [sp(`${pct}%`, ctxColor(pct), true), sp(` ${abbrevTokens(tokens ?? 0, true)}`)]
-  if (window) out.push(dim(`/${abbrevTokens(window, true)}`))
-  const grown = delta(tokens, startTokens)
-  if (grown !== undefined && grown > 0) out.push(dim(` +${abbrevTokens(grown, true)}`))
-  return out
-}
-
-function rateText(label: string, r: RateRow, now: number): Span[] {
-  const cd = countdown(r.resetMs, now)
-  return [dim(label), sp(' '), sp(`${r.rem}%`, r.color, true), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
-}
-
-export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
-  const nameW = Math.max(6, width - 27)
-  const prefix = depth > 0 ? `${'  '.repeat(depth - 1)}└ ` : ''
-  const isRunning = a.status === 'running'
-  const end = a.endedAt ?? now
-  return [
-    isRunning ? sp('◐', COLORS.blue) : sp('✓', COLORS.green),
-    sp(' '),
-    depth > 0 ? sp(pad(truncMiddle(prefix + a.type, nameW), nameW), COLORS.dim) : sp(pad(truncMiddle(a.type, nameW), nameW)),
-    sp(' '),
-    sp(pad(shortModel(a.model), 9), undefined, isRunning),
-    sp(' '),
-    ...(effortSpans(a.effort).length ? effortSpans(a.effort) : [sp(' ')]),
-    sp(' '),
-    sp(padStart(duration(end - a.startedAt), 6)),
-    sp(' '),
-    sp(padStart(isRunning ? '' : abbrevTokens(a.tokens), 5)),
-  ]
-}
-
-const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [
-  { family: 'sonnet', label: 'son', color: COLORS.blue },
-  { family: 'opus', label: 'opus', color: COLORS.amber },
-  { family: 'fable', label: 'fable', color: COLORS.lavender },
-  { family: 'haiku', label: 'haiku', color: COLORS.green },
-]
-
-export function modelCounts(list: readonly CockpitAgent[]): Span[] {
-  const out: Span[] = []
-  for (const { family, label, color } of COUNT_ORDER) {
-    const n = list.filter(a => modelFamily(a.model) === family).length
-    if (out.length) out.push(sp(' '))
-    out.push(n > 0 ? sp(`${label} ×${n}`, color) : dim(`${label} ×0`))
-  }
-  return out
-}
+/** The context fill from which the header warns. */
+const CTX_WARN_PCT = 80
 
 // ── Pane ─────────────────────────────────────────────────────────────────────
 
 /** The pane's content stops here; a wider dock leaves the rest empty on the left. */
 export const PANE_MAX_COLUMNS = 60
+/** Columns of margin on each side of the content. */
+const PANE_PADDING_X = 1
 
-export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): RenderElement {
-  const { Box, Text } = ui
-  const width = Math.min(bodyColumns, PANE_MAX_COLUMNS)
+/** Cells a tab button takes: its label, a border and a space each side, and the dot after it. */
+const tabCells = (label: string, hasDot: boolean): number => textCells(label) + 4 + (hasDot ? 2 : 0)
+
+/**
+ * The tab bar's labels, always for one row of `width` cells; each step is tried when the one before does not fit: full names with counters,
+ * Context short, every short name, the first 3 cells of each short name. The selected tab always keeps its full name. A counter past 9 reads `9+`.
+ */
+export function tabBarLabels(active: CockpitTab, counts: Partial<Record<CockpitTab, number>>, dots: Partial<Record<CockpitTab, boolean>>, width: number): Record<CockpitTab, string> {
+  const S = t()
+  const badge = (id: CockpitTab) => {
+    const n = counts[id] ?? 0
+    return n > 0 ? ` ${n > 9 ? '9+' : n}` : ''
+  }
+  const steps: ((id: CockpitTab) => string)[] = [
+    id => S.tabs[id],
+    id => (id === 'context' && id !== active ? S.tabsShort[id] : S.tabs[id]),
+    id => (id === active ? S.tabs[id] : S.tabsShort[id]),
+    id => (id === active ? S.tabs[id] : S.tabsShort[id].slice(0, 3)),
+  ]
+  const build = (name: (id: CockpitTab) => string) => Object.fromEntries(TABS.map(id => [id, name(id) + badge(id)])) as Record<CockpitTab, string>
+  const total = (labels: Record<CockpitTab, string>) => TABS.reduce((n, id) => n + tabCells(labels[id], dots[id] === true), 0) + TABS.length - 1
+  const fitting = steps.map(build).find(labels => total(labels) <= width)
+  return fitting ?? build(steps[steps.length - 1] as (id: CockpitTab) => string)
+}
+
+export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
+  const { Box, Text, Button } = ui
+  const S = t()
+  // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
+  const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
+  const width = Math.max(0, block - 2 * PANE_PADDING_X)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
-  const title = (label: string, right: Span[] = []) => (
-    <Box justifyContent="space-between">
-      {line(ui, [sp(label, COLORS.title)])}
-      {line(ui, right)}
-    </Box>
-  )
-  const split = (left: RenderElement, leftW: number, right: Span[]) => (
-    <Box>
-      <Box width={leftW}>{left}</Box>
-      <Box marginLeft={1}>{line(ui, right)}</Box>
+  const kit = makeKit(ui, s, width, actions)
+  const { gap, title, split } = kit
+
+  const tab: CockpitTab = s.tab ?? 'agents'
+  const running = visibleAgents(s).filter(a => a.status === 'running')
+  const wl = s.worklog
+  const hasWorklog = wl.pending.length + wl.underTarget.length > 0
+  // The notifications the person has not seen: counted on the tab label until the tab is opened
+  const seen = new Set(s.seenSignals)
+  const newSignals = tab === 'signals' ? 0 : signalsOf(s).filter(sig => !seen.has(signalId(sig))).length
+
+  // ── Tab bar: every tab shows its name; the selected one is the primary button ──
+  const counts = { agents: running.length, signals: newSignals }
+  const labels = tabBarLabels(tab, counts, { work: hasWorklog }, width)
+  const tabButton = (id: CockpitTab, hasDot = false) => {
+    const label = labels[id]
+    const variant = tab === id ? 'primary' : 'secondary'
+    return hasDot ? (
+      <Button key={`tab:${id}`} variant={variant} onPress={() => actions.selectTab(id)}>
+        {label}
+        <Text color={COLORS.yellow}> ●</Text>
+      </Button>
+    ) : (
+      <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />
+    )
+  }
+  const tabBar = (
+    <Box columnGap={1}>
+      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog))}
     </Box>
   )
 
-  // Breathing room: an empty row between sections and under a title.
-  const gap = () => <Text> </Text>
-
-  // Header: model + effort | session cost (always: `$0.00` before the first turn) and the last turn's delta
-  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
-  const header = (
-    <Box justifyContent="space-between">
-      {line(ui, [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort)])}
-      {line(ui, [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])])}
-    </Box>
-  )
-
-  // Folder · branch · diffs grid
+  // ── Header: folder · branch (ahead/behind) · compact git state ──
   const g = s.git
   const diffs: Span[] = []
   if (g && g.staged > 0) diffs.push(sp(`+${g.staged}`, COLORS.green))
@@ -259,13 +124,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
   const w = gridWidths(width, spanWidth(diffText))
   const dirty = g !== undefined && (g.staged > 0 || g.modified > 0)
   const folderName = g?.worktreeRoot ? baseName(g.worktreeRoot) : baseName(s.cwd)
+  const arrows = g ? aheadBehindSpans(g) : []
   const grid = (
     <Box columnGap={1}>
-      <Box width={w.folder}>
-        {line(ui, [sp(truncMiddle(`${g?.worktreeRoot ? ICONS.tree : ICONS.folder} ${folderName}`, w.folder), COLORS.folder)])}
-      </Box>
+      <Box width={w.folder}>{line(ui, [sp(truncMiddle(`${folderIcon(g)} ${folderName}`, w.folder), COLORS.folder)])}</Box>
       <Box width={w.branch}>
-        {g ? line(ui, [sp(truncMiddle(`${ICONS.branch} ${g.branch}`, w.branch), dirty ? COLORS.yellow : COLORS.lavender)]) : line(ui, [])}
+        {g
+          ? line(ui, [sp(truncMiddle(`${ICONS.branch} ${g.branch}`, Math.max(0, w.branch - spanWidth(arrows))), dirty ? COLORS.yellow : COLORS.lavender), ...arrows])
+          : line(ui, [])}
       </Box>
       <Box width={w.diffs} justifyContent="flex-end">
         {line(ui, diffText)}
@@ -273,94 +139,121 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number): Rende
     </Box>
   )
 
-  // CONTESTO (the right of the title would carry the cache state: not obtainable, so omitted)
-  const ctxText = contextText(s)
-  const textCol = Math.max(CTX_TEXT_MIN, spanWidth(ctxText))
-  const barW = Math.max(4, width - textCol - 1)
-  const pct = s.ctx.percent ?? 0
-  const ctxBar = line(ui, barCells(barW, [{ pct, color: ctxColor(pct) }]))
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn), the last round's delta and duration
+  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
+  // the last main round's length, once a second or more of it ran
+  const roundSpans: Span[] = s.lastRoundMs !== undefined && s.lastRoundMs >= 1000 ? [dim(' · '), dim(duration(s.lastRoundMs))] : []
+  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : []), ...roundSpans]
+  const modelSpans = truncateSpans(
+    [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
+    Math.max(0, width - spanWidth(costSpans) - 1),
+  )
+  const modelLine = (
+    <Box justifyContent="space-between">
+      {line(ui, modelSpans)}
+      {line(ui, costSpans)}
+    </Box>
+  )
 
-  // CREDITI RESIDUI
+  // The one bar width of the context and credit rows: what is left of the widest readout.
   const five = rateRow(s, 'five_hour')
   const seven = rateRow(s, 'seven_day')
+  const fiveText = five && rateText('5h', five, s.now)
+  const sevenText = seven && rateText('7d', seven, s.now)
+  const ctxText = contextText(s)
+  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(text => spanWidth(text ?? [])))
+  const barW = Math.max(4, width - textCol - 1)
+
+  // CONTEXT: from 80% a red line
+  const pct = s.ctx.percent ?? 0
+  const shownPct = s.ctx.percent ?? s.lastCtx?.percent ?? 0
+  const ctxBar = line(ui, barCells(barW, [{ pct: shownPct, color: ctxColor(shownPct) }]))
+  const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
+
+  // Right of the CONTEXT title: the prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
+  const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
+  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(S.requestsLeft(forecast))]
+  const contextRight: Span[] = [...cacheSpans, ...(cacheSpans.length > 0 && forecastSpans.length > 0 ? [sp('  ')] : []), ...forecastSpans]
+
+  // CREDITS: the pace of the week sits right of the title
   const paceDelta = seven?.pace?.delta
   const paceSpans: Span[] =
-    paceDelta === undefined
-      ? []
-      : [dim('vs atteso 7d '), sp(signedPct(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
-  const creditRow = (label: string, r: RateRow) => {
-    const gap = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
-    const parts = [{ pct: r.rem, color: r.color }, ...(gap ? [{ pct: gap, color: COLORS.gap }] : [])]
-    return split(line(ui, barCells(barW, parts)), barW, rateText(label, r, s.now))
+    paceDelta === undefined ? [] : [dim(S.vsExpected), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
+  const creditRow = (r: RateRow, text: Span[]) => {
+    const gapPct = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
+    const parts = [{ pct: r.rem, color: r.color }, ...(gapPct ? [{ pct: gapPct, color: COLORS.gap }] : [])]
+    return split(line(ui, barCells(barW, parts)), barW, text)
   }
 
-  // AGENTS
-  const agents = visibleAgents(s)
-  const rows = orderAgents(agents)
-  const running = agents.filter(a => a.status === 'running').length
-  const agentRows = rows.slice(0, MAX_AGENT_ROWS).flatMap(({ agent, depth }) => {
-    const warn = agentWarning(agent, s.isSubagentModelForced)
-    const out = [line(ui, agentRow(agent, depth, s.now, width))]
-    if (warn) out.push(line(ui, [sp(`${'  '.repeat(depth + 1)}⚠ ${warn}`, COLORS.yellow)]))
-    return out
-  })
+  // The footer, the last row of every tab: compact, analizza suite (behind a confirm: it sends /retro to the model), segna ore (behind a confirm; the hours of this chat, so only with a session).
+  // The row stacks when its buttons do not fit the pane side by side.
+  const hasLog = s.sessionId !== undefined
+  const barLabels = [S.buttons.compact, S.buttons.analyzeSuite, ...(hasLog ? [S.buttons.logHours] : [])]
+  const buttonsRow =
+    s.confirm === 'suite' || (s.confirm === 'worklog' && hasLog) ? (
+      <Box flexDirection="column">
+        {line(ui, truncateSpans([sp(s.confirm === 'suite' ? S.confirmSuite : S.confirmLog, COLORS.yellow)], width))}
+        <Box columnGap={BUTTON_GAP}>
+          <Button key="confirm:yes" onPress={() => actions.answer(true)}>
+            {S.buttons.yes}
+          </Button>
+          <Button key="confirm:no" onPress={() => actions.answer(false)}>
+            {S.buttons.no}
+          </Button>
+        </Box>
+      </Box>
+    ) : (
+      <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+        <Button key="bar:compact" onPress={() => actions.compact()}>
+          {S.buttons.compact}
+        </Button>
+        <Button key="bar:suite" onPress={() => actions.ask('suite')}>
+          {S.buttons.analyzeSuite}
+        </Button>
+        {hasLog && (
+          <Button key="bar:worklog" onPress={() => actions.ask('worklog')}>
+            {S.buttons.logHours}
+          </Button>
+        )}
+      </Box>
+    )
 
-  // TASK (omitted with no tasks)
-  const counts = taskCounts(s)
-  const open = openTasks(s)
-  const taskSection =
-    counts === null
-      ? []
-      : [
-          rule,
-          gap(),
-          title(`TASK · ${counts.done}/${counts.total}`, [
-            sp(`◐ ${counts.inProgress}`, COLORS.blue),
-            sp('  '),
-            dim(`○ ${counts.pending}`),
-            sp('  '),
-            sp(`✓ ${counts.done}`, COLORS.green),
-          ]),
-          gap(),
-          line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
-          ...open.slice(0, MAX_TASK_ROWS).map(t => line(ui, taskRow(t, s.now, width))),
-          ...(open.length > MAX_TASK_ROWS ? [line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)])] : []),
-          ...(counts.done > 0 ? [line(ui, [sp('✓', COLORS.green), dim(` ${counts.done} completati`)])] : []),
-        ]
-
-  const wl = s.worklog
-  const wlRows = [
-    ...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []),
-    ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : []),
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, the three blocks told apart by a rule, each title with an empty row on both sides
+  const headerRows: Node[] = [
+    modelLine,
+    grid,
+    rule,
+    gap(),
+    title(S.contextTitle, contextRight),
+    gap(),
+    split(ctxBar, barW, ctxText),
+    ctxWarning,
+    rule,
+    gap(),
+    title(S.creditsTitle, paceSpans),
+    gap(),
+    five && fiveText && creditRow(five, fiveText),
+    five && seven && gap(),
+    seven && sevenText && creditRow(seven, sevenText),
+    !five && !seven && line(ui, [dim(S.noRateData)]),
   ]
 
+  // Only the selected tab is built. Blocks are told apart by a rule; an empty tab says so.
+  const blocks = tabBlocks(tab, kit)
+  const body: Node[] = blocks.length > 0 ? blocks.flatMap((b, i) => [...(i > 0 ? [rule] : []), ...b.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
+
   return (
-    <Box flexDirection="column" width={width} marginLeft={bodyColumns - width}>
-      {header}
-      {grid}
+    <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>
+      {headerRows}
       {rule}
-      {gap()}
-      {title('CONTESTO')}
-      {gap()}
-      {split(ctxBar, barW, ctxText)}
+      {tabBar}
       {rule}
-      {gap()}
-      {title('CREDITI RESIDUI', paceSpans)}
-      {gap()}
-      {five && creditRow('5h', five)}
-      {five && seven && gap()}
-      {seven && creditRow('7d', seven)}
-      {!five && !seven && line(ui, [dim('nessun dato sui limiti')])}
+      {body}
+      {/* The spacer takes what the tab leaves of the pane height: the buttons sit on its last row, or follow a taller tab. */}
+      <Box flexGrow={1} />
       {rule}
-      {gap()}
-      {title(`AGENTS · ${running} in corso`, modelCounts(agents))}
-      {rows.length > 0 && gap()}
-      {agentRows}
-      {rows.length > MAX_AGENT_ROWS && line(ui, [dim(`… +${rows.length - MAX_AGENT_ROWS}`)])}
-      {taskSection}
-      {wlRows.length > 0 && rule}
-      {wlRows.length > 0 && gap()}
-      {wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))}
+      {buttonsRow}
     </Box>
   )
 }

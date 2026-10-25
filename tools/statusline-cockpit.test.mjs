@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
@@ -64,6 +64,27 @@ test('pane open but stale (no heartbeat for over 45 s): the normal line', () => 
   assert.match(out, /\+\$0\.38/);
 });
 
+// ── Folder icon ──────────────────────────────────────────────────────────────
+
+test('folder segment: a linked worktree shows nf-md-source_repository_multiple (U+F0CD0), a main checkout the folder icon', () => {
+  const base = mkdtempSync(join(tmpdir(), 'statusline-worktree-'));
+  const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci', ...args], { cwd, stdio: 'ignore' });
+  try {
+    const main = join(base, 'main');
+    const linked = join(base, 'linked');
+    mkdirSync(main);
+    git(main, 'init', '-q');
+    git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
+    git(main, 'worktree', 'add', '-q', linked, '-b', 'linked-branch');
+    const inWorktree = render(undefined, { ...SAMPLE, cwd: linked });
+    assert.ok(inWorktree.includes('\u{F0CD0}'), 'worktree icon');
+    assert.ok(!inWorktree.includes('\u{F0253}'), 'the old worktree icon is gone');
+    const inMain = render(undefined, { ...SAMPLE, cwd: main });
+    assert.ok(inMain.includes('\u{F024B}'), 'folder icon');
+    assert.ok(!inMain.includes('\u{F0CD0}'), 'no worktree icon in the main checkout');
+  } finally { rmSync(base, { recursive: true, force: true }); }
+});
+
 // ── Cache pruning ────────────────────────────────────────────────────────────
 
 const HOUR = 3600_000;
@@ -112,6 +133,39 @@ test('prune: old files of each kind go, fresh ones stay, the current session and
   });
 });
 
+/** Writes `<projects>/<project>/<session>.jsonl`: the transcript the session data file lives by. */
+function transcript(dir, project, session) {
+  mkdirSync(join(dir, 'projects', project), { recursive: true });
+  writeFileSync(join(dir, 'projects', project, `${session}.jsonl`), '');
+}
+
+test('prune: the session data file is not a 3-day handshake file: kept while its transcript exists, deleted once it is gone', () => {
+  withCache((dir, has) => {
+    const sid = SAMPLE.session_id;
+    transcript(dir, 'p1', 'alive');
+    transcript(dir, 'p2', 'alive-too');
+    put(dir, 'cockpit-data-alive.json', 40 * 24 * HOUR);
+    put(dir, 'cockpit-data-alive-too.json', 40 * 24 * HOUR);
+    put(dir, 'cockpit-data-gone.json', 1 * HOUR);
+    put(dir, `cockpit-data-${sid}.json`, 40 * 24 * HOUR); // the current session's: never touched, transcript or not
+    put(dir, 'cockpit-old.json', 4 * 24 * HOUR);
+    run(dir);
+    assert.equal(has('cockpit-data-alive.json'), true, 'transcript in one project');
+    assert.equal(has('cockpit-data-alive-too.json'), true, 'transcript in another project');
+    assert.equal(has(`cockpit-data-${sid}.json`), true, 'current session');
+    assert.equal(has('cockpit-data-gone.json'), false, 'no transcript left');
+    assert.equal(has('cockpit-old.json'), false, 'the handshake file still ages out after 3 days');
+  });
+});
+
+test('prune: with no readable projects folder no data file is deleted', () => {
+  withCache((dir, has) => {
+    put(dir, 'cockpit-data-orphan.json', 40 * 24 * HOUR);
+    run(dir);
+    assert.equal(has('cockpit-data-orphan.json'), true);
+  });
+});
+
 test('prune: throttled to once an hour by the marker file', () => {
   withCache((dir, has) => {
     run(dir);
@@ -131,4 +185,38 @@ test('prune: a marker dated in the future does not block pruning', () => {
     run(dir);
     assert.equal(has('context-old.json'), false);
   });
+});
+
+// ── Cache hit of the last turn ───────────────────────────────────────────────
+
+/** The raw output (colours kept) of a render with `current_usage` in the context window; undefined: no usage. */
+function renderUsage(usage) {
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-hit-'));
+  try {
+    const payload = { ...SAMPLE, context_window: { ...SAMPLE.context_window, ...(usage === undefined ? {} : { current_usage: usage }) } };
+    const r = spawnSync(process.execPath, [STATUSLINE], {
+      input: JSON.stringify(payload), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, COLUMNS: '200' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return r.stdout;
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+const plain = (s) => s.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+const GREEN = '\x1b[38;2;126;198;153m', AMBER = '\x1b[38;2;232;163;90m', RED = '\x1b[38;2;240;122;111m';
+
+test('cache hit: read / (read + creation + input) of the last turn, right of the context readout, coloured by band', () => {
+  // 90 / (90 + 5 + 5) = 90 % green; 60 / 100 = 60 % amber; 10 / 100 = 10 % red
+  for (const [read, creation, input, pct, col] of [[90, 5, 5, 90, GREEN], [60, 30, 10, 60, AMBER], [10, 80, 10, 10, RED], [80, 10, 10, 80, GREEN], [50, 40, 10, 50, AMBER]]) {
+    const raw = renderUsage({ cache_read_input_tokens: read, cache_creation_input_tokens: creation, input_tokens: input, output_tokens: 7 });
+    assert.ok(plain(raw).includes("(248K/1M) ⚡" + pct + "%"), plain(raw));
+    assert.ok(raw.includes(`${col}⚡${pct}%`), `${pct} % is coloured ${col}`);
+  }
+});
+
+test('cache hit: absent with no usage, a null usage, a zero total or a bad number', () => {
+  for (const usage of [undefined, null, {}, { cache_read_input_tokens: 0, cache_creation_input_tokens: 0, input_tokens: 0 }, { cache_read_input_tokens: 'x', input_tokens: 5 }]) {
+    assert.doesNotMatch(plain(renderUsage(usage)), /⚡/);
+  }
+  // a provider that reports no cache tokens but plain input: 0 % is a reading, not an absence
+  assert.match(plain(renderUsage({ input_tokens: 100 })), /⚡0%/);
 });

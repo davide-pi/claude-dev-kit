@@ -29,7 +29,7 @@ const BLD = esc("1");   // bold
 // escape sequences carry zero display width — stripAnsi/truncateAnsi skip them.
 const link = (url, label) => (url ? `\x1b]8;;${url}\x07${label}\x1b]8;;\x07` : label);
 
-// The cockpit mod's palette (hooks/format.ts COLORS), so the status line and the pane read as one.
+// The cockpit mod's palette (hooks/shared.ts COLORS), so the status line and the pane read as one.
 const C = {
   gray:     esc("38;2;140;140;140"),
   dim:      esc("38;2;154;160;170"),
@@ -186,7 +186,7 @@ function cachedByCwd(name, cwd, fn) {
 // survives copy/paste badly. Comments give each icon's Nerd Font class name.
 const ICONS = {
   folder: "\u{F024B}", // nf-md-folder          - cwd, outside a linked worktree
-  tree:   "\u{F0253}", // nf-md-folder_multiple - worktree, replaces cwd inside one
+  tree:   "\u{F0CD0}", // nf-md-source_repository_multiple - worktree, replaces cwd inside one
   branch: "\u{F062C}", // nf-md-source_branch  - git branch
   brain:  "\u{F09D1}", // nf-md-brain    - context window (Material Design set: fa-brain is missing from the font)
   gauge:  "\u{F029A}", // nf-md-gauge    - rate limits (fa-gauge is missing from the font)
@@ -282,6 +282,20 @@ function abbrevTokens(n) {
   return String(Math.round(n));
 }
 
+// Prompt-cache hit of the last main turn, from the usage the payload already carries (no file read):
+// cache_read / (cache_read + cache_creation + input), coloured like the cockpit (80 / 50). Nothing when
+// the usage is absent (before the first call, after /compact), a field is not a number, or the total is 0.
+function segCacheHit(usage) {
+  if (!usage || typeof usage !== "object") return "";
+  const part = (v) => (v == null ? 0 : v);
+  const read = part(usage.cache_read_input_tokens);
+  const total = read + part(usage.cache_creation_input_tokens) + part(usage.input_tokens);
+  if (![read, total].every((n) => Number.isFinite(n) && n >= 0) || total === 0) return "";
+  const pct = Math.round(read / total * 100);
+  const col = pct >= 80 ? C.green : pct >= 50 ? C.amber : C.red;
+  return ` ${col}⚡${pct}%${R}`;
+}
+
 // The percentage alone doesn't say how much room is left in absolute terms, and
 // the window size varies by model: 62% of 200k and 62% of 1M are different
 // decisions. The token pair is rendered only when the payload carries both.
@@ -296,7 +310,7 @@ function segContext(ctx) {
   const used   = abbrevTokens(ctx?.total_input_tokens);
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
-  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}`;
+  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}${segCacheHit(ctx?.current_usage)}`;
 }
 
 // Per-session context snapshot for hooks/context-nudge.js, which runs on
@@ -346,8 +360,26 @@ const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const PRUNE_RULES = [
   { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 5 s only
   { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // the nudge distrusts it past 6 h
-  { re: /^cockpit-[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 },       // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
+  { re: /^cockpit-(?!data-)[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 }, // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
 ];
+// The cockpit's session data (history, PRs, note, context samples) lives as long as the session can be resumed: no age rule,
+// it goes when `projects/*/<session>.jsonl` is gone.
+const SESSION_DATA_RE = /^cockpit-data-([\w-]+)\.json$/;
+
+/** The ids of the sessions that still have a transcript (one readdir of `projects/` and of each project folder); undefined when that cannot be told. */
+function transcriptIds() {
+  try {
+    const root = path.join(CONFIG_DIR, "projects");
+    const ids = new Set();
+    for (const project of fs.readdirSync(root, { withFileTypes: true })) {
+      if (!project.isDirectory()) continue;
+      for (const name of fs.readdirSync(path.join(root, project.name))) {
+        if (name.endsWith(".jsonl")) ids.add(name.slice(0, -".jsonl".length));
+      }
+    }
+    return ids;
+  } catch { return undefined; }  // a folder that cannot be listed hides transcripts: delete nothing
+}
 
 function pruneCache(currentSessionId) {
   try {
@@ -360,8 +392,16 @@ function pruneCache(currentSessionId) {
     // The folder exists by now (the snapshot and the git caches create it); if the marker cannot be written, skip.
     try { fs.writeFileSync(marker, ""); } catch { return; }
     const keep = new Set(typeof currentSessionId === "string"
-      ? [`context-${currentSessionId}.json`, `cockpit-${currentSessionId}.json`] : []);
+      ? [`context-${currentSessionId}.json`, `cockpit-${currentSessionId}.json`, `cockpit-data-${currentSessionId}.json`] : []);
+    let transcripts;  // read at the first data file, once
     for (const name of fs.readdirSync(dir)) {
+      const data = SESSION_DATA_RE.exec(name);
+      if (data) {
+        if (keep.has(name)) continue;
+        transcripts ??= transcriptIds() ?? null;
+        try { if (transcripts && !transcripts.has(data[1])) fs.unlinkSync(path.join(dir, name)); } catch { /* next hour */ }
+        continue;
+      }
       const rule = PRUNE_RULES.find((r) => r.re.test(name));
       if (!rule || keep.has(name)) continue;
       try {
