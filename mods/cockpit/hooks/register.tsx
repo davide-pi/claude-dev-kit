@@ -54,7 +54,7 @@ import { signalId, signalsOf } from './signals'
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
-import { recordAgentEvent, recordEvent } from './timeline'
+import { recordAgentEvent } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
 import type { PaneActions } from './view'
 import { diffView } from './view-work'
@@ -132,7 +132,6 @@ const paneActions = ($: EngineInterface): PaneActions => ({
       })
       .catch(() => undefined),
   openDiff: change => void showDiff($, change),
-  openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
   toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
   toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
@@ -582,11 +581,10 @@ export const register: Register = on => {
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           lastRoundMs: e.durationMs,
-          // Every main turn is a round of the Costi sparkline: the context the engine last measured.
+          // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
           modelUse: usage && s.model ? addModelUse(s.modelUse, s.model, usageOf(usage)) : s.modelUse,
-          events: recordEvent(s.events, { at: now, kind: 'round', key: String(insights.rounds), usd: roundCost(s.cost), ms: e.durationMs }),
         }
       })
       await setClaudeState($, { kind: 'idle' })
@@ -616,7 +614,7 @@ export const register: Register = on => {
           agents,
           modelUse: usage && ended?.model ? addModelUse(s.modelUse, ended.model, usageOf(usage)) : s.modelUse,
           events: ended
-            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
+            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
             : s.events,
         }
       })

@@ -15,7 +15,6 @@ import {
   folderIcon,
   gridWidths,
   pctCell,
-  rangeSparkline,
   rateColor,
   sameSnapshot,
   shade,
@@ -23,7 +22,6 @@ import {
   signedPctCell,
   spanText,
   spanWidth,
-  sparkline,
   taskBarCells,
   textCells,
   truncEnd,
@@ -185,20 +183,6 @@ test('cacheColor: green from 80 %, amber from 50 to 79, red below 50', () => {
   expect([49, 0].map(cacheColor)).toEqual([COLORS.red, COLORS.red])
 })
 
-test('sparkline: one block per round, scaled to the tallest; empty without rounds', () => {
-  expect(sparkline([])).toBe('')
-  expect(sparkline([1, 2, 4, 8])).toBe('▂▃▅█')
-  expect(sparkline([0, 8])).toBe('▁█')
-  expect(sparkline([0, 0])).toBe('▁▁')
-})
-
-test('sparkline: a given maximum fixes the scale, so a quiet reading stays low', () => {
-  expect(sparkline([5, 5], 100)).toBe('▁▁')
-  expect(sparkline([0, 50, 100], 100)).toBe('▁▅█')
-  expect(sparkline([5, 5])).toBe('██')
-  expect(sparkline([150], 100)).toBe('█')
-})
-
 test('withBackground: the first cells of a row on a background, a span cut where the cells end', () => {
   const row: Span[] = [{ t: '■ ', c: 'x' }, { t: 'abcdef', dim: true }]
   expect(withBackground(row, 5, '#111')).toEqual([{ t: '■ ', c: 'x', bg: '#111' }, { t: 'abc', dim: true, bg: '#111' }, { t: 'def', dim: true }])
@@ -214,15 +198,6 @@ test('shade: a color at a fraction of its brightness, as #rrggbb', () => {
 })
 
 // ── v3.1 ──
-
-test('rangeSparkline: bars scaled between the lowest and the highest value; a flat series draws the lowest bar, never noise', () => {
-  expect(rangeSparkline([])).toBe('')
-  expect(rangeSparkline([20, 40, 60])).toBe('▁▅█')
-  expect(rangeSparkline([30, 30, 30])).toBe('▁▁▁')
-  expect(rangeSparkline([0, 100])).toBe('▁█')
-  expect(rangeSparkline([5])).toBe('▁')
-  expect(rangeSparkline([1000, 1001, 1002, 1003, 1004, 1005, 1006, 1007])).toBe('▁▂▃▄▅▆▇█')
-})
 
 test('sameSnapshot: equal data under other objects is the same, a changed field is not, and a part shared by reference is never serialised', () => {
   let serialised = 0

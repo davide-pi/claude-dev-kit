@@ -17,12 +17,10 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
   costCacheHit: 'cache',
-  costRate: (perHour: string) => `${perHour}/h`,
   cache: 'cache ',
   consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   taskTitle: 'TASK',
   diffTitle: (file: string) => `diff · ${file}`,
-  tokenShare: ' token  ',
   /** The four counters of an agent's row. */
   tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
 }
@@ -51,7 +49,8 @@ const EN = {
   // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   lastTool: 'last tool ',
-  openAgentView: 'open transcript',
+  /** The rows of an expanded TOP AGENTS entry (Context tab). */
+  costDetail: { tokens: (n: string) => `tokens ${n}`, time: (d: string) => `time ${d}`, share: (pct: string) => `${pct} of the session cost`, outcome: { running: 'running', done: 'done', failed: 'failed' } },
   historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
@@ -76,12 +75,8 @@ const EN = {
   },
 
   // Costs
-  costRounds: (n: number) => `COST PER ROUND · ${n}`,
-  costTop: 'top 3',
   costAgentsTitle: 'TOP AGENTS',
   costModelsTitle: 'BY MODEL',
-  creditsHold: '5h credits hold to the reset',
-  creditsRunOut: (left: string) => `5h credits out in ~${left}`,
   exact: 'exact',
   someExact: '✓ = exact',
   estimate: 'estimate',
@@ -90,10 +85,6 @@ const EN = {
   /** The engine's category names in this language; one not listed shows as the engine names it. */
   contextCategories: {} as Record<string, string>,
   consumersTitle: (n: number) => `CONSUMERS · top ${n}`,
-  trendTitle: (rounds: number) => `TREND · ${rounds} ${plural(rounds, 'round', 'rounds')}`,
-  /** The one line of the trend: where the context went, how fast it grows per round and in how many rounds auto-compaction comes. */
-  trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
-    `${from} → ${to}${growth ? ` (+${growth}/round)` : ''}${rounds === undefined ? '' : `, compact in ~${rounds} ${plural(rounds, 'round', 'rounds')}`}`,
   refreshIn: (seconds: number) => `refresh ${seconds}s`,
 
   // Work
@@ -161,7 +152,7 @@ const IT: Strings = {
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
-  openAgentView: 'apri trascrizione',
+  costDetail: { tokens: (n: string) => `token ${n}`, time: (d: string) => `tempo ${d}`, share: (pct: string) => `${pct} del costo della sessione`, outcome: { running: 'in corso', done: 'finito', failed: 'fallito' } },
   historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
@@ -183,12 +174,8 @@ const IT: Strings = {
     permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
   },
 
-  costRounds: (n: number) => `COSTO PER GIRO · ${n}`,
-  costTop: 'primi 3',
   costAgentsTitle: 'AGENTI PIÙ CARI',
   costModelsTitle: 'PER MODELLO',
-  creditsHold: 'i crediti 5h reggono fino al reset',
-  creditsRunOut: (left: string) => `crediti 5h finiti tra ~${left}`,
   exact: 'esatto',
   someExact: '✓ = esatto',
   estimate: 'stima',
@@ -206,9 +193,6 @@ const IT: Strings = {
     'Autocompact buffer': 'Riserva di compattazione',
   },
   consumersTitle: (n: number) => `CONSUMI · primi ${n}`,
-  trendTitle: (rounds: number) => `ANDAMENTO · ${rounds} ${plural(rounds, 'giro', 'giri')}`,
-  trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
-    `${from} → ${to}${growth ? ` (+${growth}/giro)` : ''}${rounds === undefined ? '' : `, compattazione tra ~${rounds} ${plural(rounds, 'giro', 'giri')}`}`,
   refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
 
   mainTitle: 'PRINCIPALE',

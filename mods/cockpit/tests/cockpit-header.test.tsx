@@ -66,12 +66,8 @@ test('the pane shows header, context, credits and an agent that finished before 
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('✓ code-reviewer')
     expect(row).toContain('sonnet')
-    // the rest (facts, the four counters) is one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
-    if ((await ui.find({ key: 'open:a1' })) === undefined) {
-      expect(await text(/^ *in 30k/)).toBeUndefined()
-      await ui.press({ key: 'agent:a1' })
-    }
-    expect(await text(/son 5\.5/)).toContain('son 5.5')
+    // the rest (the four counters) is one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
+    if ((await text(/^ *in 30k/)) === undefined) await ui.press({ key: 'agent:a1' })
     expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')
     expect(await text(/asked/)).toContain('asked fable \u2192 sonnet')
     expect(await text(/SUBAGENTS/)).toBe('SUBAGENTS \u00b7 0 running')

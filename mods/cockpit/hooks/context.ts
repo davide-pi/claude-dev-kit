@@ -31,9 +31,9 @@ export function ctxGrowth(samples: readonly number[] | undefined): number | unde
   return growth > 0 ? growth : undefined
 }
 
-// ── The Context tab: the breakdown, the sparkline of rounds, when to compact ──
+// ── The Context tab: the breakdown, when to compact ──
 
-/** Main turns the sparkline keeps. */
+/** Main turns the compact hint keeps. */
 export const ROUNDS_KEEP = 20
 /** How long the Context tab's `refresh` waits after a press: an exact count spends token-count requests. */
 export const REFRESH_COOLDOWN_MS = 60_000
