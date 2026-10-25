@@ -145,7 +145,8 @@ async function run(args, reviews, implementers = [], extra = {}) {
     calls.push({ prompt, opts });
     // an Error in a queue is an agent() that throws (turn cap, no StructuredOutput)
     const isFinal = /\(final\)$/.test(opts.label ?? '');
-    let answer = opts.agentType === 'implementer'
+    let answer = opts.label === 'probe' ? (extra.probe ?? null)
+      : opts.agentType === 'implementer'
       ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : /^R\d+ S$/.test(opts.label ?? '') ? (watchers ? (watchers.length ? watchers.shift() : review([])) : 'watcher' in extra ? extra.watcher : review([]))
       : isFinal && !finals.length ? review([...prompt.matchAll(/^- ([FV]\d+) \[/gm)].map((m) => ({ id: m[1], status: 'closed' })))
@@ -516,6 +517,26 @@ test('script: an implementer that returns nothing is a resumable STALL, on the f
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.resume, /resumeFromRunId/);
   assert.doesNotMatch(fix.out.resume, /WITHOUT/);
+});
+
+test('script: an implementer with no report but changes in the perimeter goes on to review with a note; with none it stalls', async () => {
+  const { out, calls } = await run({ ...ARGS, changed: ['src/Orders/OrdersQuery.cs'] }, [review([])], [null], { probe: { files: ['src/Orders/OrdersQuery.cs', 'src/Other.cs'] } });
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.files, ['src/Orders/OrdersQuery.cs']);
+  assert.match(out.gaps.join(' '), /returned no report/);
+  assert.match(out.outOfScope.map((n) => n.text).join(' '), /ran out of turns/);
+  assert.match(calls.find((c) => c.opts.label === 'R1 A').prompt, /list the implementer declared \(src\/Orders\/OrdersQuery\.cs\)/);
+  const none = await run(ARGS, [], [null], { probe: { files: ['src/Other.cs'] } });
+  assert.equal(none.out.status, 'STALL');
+  assert.equal(none.out.stall.round, 0);
+});
+
+test('script: a reviewer carries defaults (no question, no stall) and both prompts name the weight rule', async () => {
+  const { out, calls } = await run(ARGS, [{ ...review([]), defaults: [{ choice: 'kept the name', alternative: 'rename', path: 'src/Orders/OrdersQuery.cs' }] }]);
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.defaults.map((d) => d.choice), ['kept the name']);
+  assert.match(calls.find((c) => c.opts.label === 'R1 A').prompt, /only when the answer changes behaviour, a public contract, data or security/);
+  assert.match(calls[0].prompt, /before the turn budget runs out/);
 });
 
 test('script: inline, the session edited: no implementer on the first step, the changed files are reviewed', async () => {

@@ -57,7 +57,7 @@ tool-call budget; it runs only the tests the change touches while it works, and 
 
 P-weight: a doubt or a choice reaches the owner only when it changes what the owner sees or uses, touches a contract
 (API, event, schema) or data, costs or risks something, or goes against an owner decision. The rest the agents decide
-and do not report; non-trivial choices the brief did not state come back as `defaults`.
+and do not report; non-trivial choices the brief did not state come back as `defaults`, from reviewers too.
 
 Criteria with proof (step 2): per criterion, the proof and what it asserts: an automated test; else run the thing
 (browser screenshot, HTTP call, read-only query, CLI output); else "the owner tests". The matrix runs on the final
@@ -110,7 +110,8 @@ round restarts its count, `retry` does not.
 | `not-reproduced` | the fixer could not reproduce it and the reviewer kept it with steps; never goes back to the fixer |
 
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
-cached implementer report: relaunch WITHOUT `resumeFromRunId`. A red implementer verify at round 0 is no stall: it
+cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report but changed files in the
+perimeter is no stall: those files go to review, with a gap and a note that the work may be partial. A red implementer verify at round 0 is no stall: it
 becomes a synthetic P1 `V<n>` that heads the fixer's list. A reviewer or a fixer that stops without its structured
 result (turn cap) counts as no answer: a reviewer is a `gaps` line, no reviewer at all or the fixer is a `STALL`. A group
 reviewer that returned nothing while no whole-change reviewer answered stalls naming the unreviewed files, never `OK`.

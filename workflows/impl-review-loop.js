@@ -455,6 +455,7 @@ const writerTail = (budget, cleaning = false) => [
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
   RULES,
   budget ?? '',
+  'Time: when the work is long, return the structured output before the turn budget runs out, with the work done so far and what is left under `openQuestions`: a partial report beats none, and a run that ends without it is lost.',
   'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.',
   snapshotText(lastTree),
 ]
@@ -500,7 +501,8 @@ const REVIEW = obj(['previous', 'found', 'checked', 'filesReviewed'], {
   found: arr(FINDING_IN, 'NEW defects only, never one that matches a previous id'),
   checked: str('passes run and what was read'),
   filesReviewed: arr(str(), 'every file you actually read'),
-  questions: arr(QUESTION, 'for the owner, never for the fixer: the brief departs from the request, an edit contradicts an owner decision, or a hunk the owner asked for would be reverted'),
+  questions: arr(QUESTION, 'for the owner, never for the fixer: the brief departs from the request, an edit contradicts an owner decision, or a hunk the owner asked for would be reverted; only when the answer changes behaviour, a public contract, data or security'),
+  defaults: arr(obj(['choice', 'alternative', 'path'], { choice: str(), alternative: str(), path: str() }), 'an obvious choice you decided yourself instead of asking: the owner reads the list in the verdict (no stall)'),
 })
 
 const known = {}
@@ -631,6 +633,17 @@ const askWithQuestions = async (build, opts, at, resolution) => {
   return { report: { ...second, files: merged, rejected: [...second.rejected, ...carried] }, stale }
 }
 
+// An implementer that stopped without a report may still have changed the tree: the files in the perimeter go to review.
+const recoverChanges = async () => {
+  const since = startHead || 'HEAD'
+  const skip = dirty.length ? `, minus the files already modified before the start (${dirty.join(', ')}; an entry ending with "/" is a whole directory)` : ''
+  const r = await ask([
+    `List the files changed in the working tree since ${since}: \`git diff ${since} --name-only\` plus \`git ls-files -o --exclude-standard\`${skip}. Read only, change nothing; return them in \`files\`.`,
+    RULES,
+  ].join('\n\n'), { label: 'probe', phase: 'Implement', agentType: 'Explore', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
+  return strings(r?.files).filter(f => inPerimeter(f, files, repoRoot))
+}
+
 if (!inline) {
   phase('Implement')
   const implOpts = { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
@@ -639,11 +652,17 @@ if (!inline) {
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
   if (asked0.stall) return asked0.stall
   const impl = asked0.report
-  if (!impl) return stallAgain(0, `the implementer returned nothing (stopped or failed${why('implement')})`)
-  const implStall = absorb(impl)
+  if (!impl) {
+    const left = await recoverChanges()
+    if (!left.length) return stallAgain(0, `the implementer returned nothing (stopped or failed${why('implement')})`)
+    left.forEach(f => changed.add(f))
+    gaps.push(`the implementer returned no report: the tree shows ${left.length} changed file(s) in the perimeter, reviewed as they are (the verify was not reported)`)
+    addNotes(['the implementer ran out of turns before its report: the work may be partial, check what is left against the brief'])
+  }
+  const implStall = impl ? absorb(impl) : null
   if (implStall) return verifyStall(0, implStall)
 
-  if (previewText && sizeFor(givenSize, changed.size) !== 'S') {
+  if (impl && previewText && sizeFor(givenSize, changed.size) !== 'S') {
     const previewQuestion = {
       text: `Preview: show the owner ${previewText} (a screenshot or a sample of the output) and ask whether it is right; "ok" goes on to the review, any other answer is a direction for one more implementer pass`,
       default: 'ok',
@@ -762,10 +781,12 @@ while (true) {
     `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(r, groups),
     challengeBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
+    'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     budgetText(35),
   ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
+  alive.forEach(takeDefaults)
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
   const owedNow = round === 1 ? expected : only ? [] : final ? [...fixFiles] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))

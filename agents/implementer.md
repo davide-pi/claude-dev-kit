@@ -72,6 +72,7 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 | a finding to fix is marked PLAUSIBLE | reproduce it first (a failing test or a run that shows it); cannot → no edit, under Rejected as `not-reproduced` |
 | you judge a finding to fix wrong | no edit; under Rejected as `wrong`, with your reason |
 | the scope turns out bigger than briefed | stop at the briefed part; the rest under Noticed |
+| the work is long (the turn budget is near) | run the verify, then the snapshot and report what is done; what is left goes under Open questions: a partial report beats none, a run that ends without it is lost |
 | two sibling styles disagree | follow the one nearer to the owned files; say which |
 | a test is needed and none exists nearby | load `dotnet-testing`; copy the closest test's shape |
 
