@@ -1,0 +1,8 @@
+{
+  "id": "t3-customer-gone",
+  "kind": "null-path",
+  "prompt": "Se il cliente di un ordine e' stato cancellato dall'anagrafica, la conferma ordine risponde 500 con una NullReferenceException. L'ordine deve confermarsi comunque, solo senza mail.",
+  "seeds": [
+    { "file": "OrdersApi/Services/OrderService.cs", "find": "if (customer is not null)", "replace": "if (order.Status == OrderStatus.Confirmed)" }
+  ]
+}
