@@ -21,11 +21,11 @@ import {
 } from './cockpit-fixtures'
 import { NOW, dataOf, flagOf, rowTexts, world } from './cockpit-world'
 
-/** The share of the session's tokens each Subagents row ends with, as `12% token`, in the order the rows draw them. */
+/** The share of the session's tokens each Subagents row ends with, as `12%`, in the order the rows draw them. */
 const shares = (rows: string[]) =>
   rows.flatMap(r => {
-    const m = /(<?\d+%) token {2}\S+$/.exec(r)
-    return m ? [`${m[1]} token`] : []
+    const m = /^[◐✓✗■] .* (<?\d+%) +\S+$/.exec(r)
+    return m ? [m[1] ?? ''] : []
   })
 
 test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, collapsed by default, newest first, with its outcome', async ($, on) => {
@@ -116,7 +116,7 @@ test('HISTORY survives a reload: the session id reads its history from its state
   let ui = await mountPane($)
   expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')
   await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +sonnet +5\.4k +1m00s$/)
+  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +sonnet +5\.4k +\d+% +1m00s$/)
   expect((await ui.find({ key: 'history:a8' }))?.text).toMatch(/^✗ reviewer/)
   await ui.unmount()
 
@@ -190,7 +190,7 @@ test('HISTORY: entries a state file holds wrongly are left out, a file with no h
   await ui.unmount()
 })
 
-test('an agent row, live or in HISTORY, expands on a press and collapses on the next; its open button puts that agent in the main view', async ($, on) => {
+test('an agent row, live or in HISTORY, expands on a press and collapses on the next; the expansion has no model/effort/time row and no open-transcript button', async ($, on) => {
   const viewed: (string | undefined)[] = []
   const clock = world(on, { viewed, listed: [{ id: 'a2', status: 'running' }, { id: 'a3', status: 'running' }] })
   spawns(on)
@@ -200,26 +200,40 @@ test('an agent row, live or in HISTORY, expands on a press and collapses on the 
   await finishAgent($, 'a1')
   await openCockpit($)
   await clock.advance(130_000)
-  await finishAgent($, 'a2')
 
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  // collapsed: one row each, nothing to open
+  const rows = async () => rowTexts(await ui.drawn())
+  await ui.press({ key: 'agent:a3' }) // live: its description opens under it
+  expect((await rows()).some(r => /^ +go$/.test(r))).toBe(true)
   expect(await ui.find({ key: 'open:a3' })).toBeUndefined()
-  await ui.press({ key: 'agent:a3' }) // live
-  expect(viewed).toEqual([])
-  expect(await ui.find({ key: 'open:a3' })).toBeDefined()
-  await ui.press({ key: 'open:a3' })
+  expect((await rows()).some(r => /^ +(sonnet|son 5\.5)/.test(r))).toBe(false) // no second row with the model, effort and time
   await ui.press({ key: 'agent:a3' })
-  expect(await ui.find({ key: 'open:a3' })).toBeUndefined()
-  await ui.press({ key: 'agent:a2' }) // finished, still listed
-  await ui.press({ key: 'open:a2' })
+  expect((await rows()).some(r => /^ +go$/.test(r))).toBe(false)
   await ui.press({ key: 'history' })
+  await ui.press({ key: 'history:a1' })
   expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
-  await ui.press({ key: 'history:a1' }) // in the history
-  await ui.press({ key: 'open:a1' })
-  expect(viewed).toEqual(['a3', 'a2', 'a1'])
+  expect(viewed).toEqual([])
   await ui.unmount()
+})
+
+test('Subagents: a row ends with the agent\'s share of the session tokens before its time, and stays within 30 and 58 columns', async ($, on) => {
+  world(on, { listed: [{ id: 'a1', status: 'running' }] })
+  spawns(on)
+  on('turn.step', async function* (_, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn', usage: STEP_USAGE }
+  })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'reviewer')
+  for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', messageCount: 1, agentId: 'a1' })) void chunk
+  for (const width of [30, 58]) {
+    const ui = await mountPane($, width)
+    await ui.press({ key: 'tab:agents' })
+    const row = rowTexts(await ui.drawn()).find(r => /^◐ /.test(r)) ?? ''
+    expect(textCells(row)).toBeLessThanOrEqual(width)
+    expect(row).toMatch(/ 1\.7k +100% +0s$/)
+    await ui.unmount()
+  }
 })
 
 // ── Agent lifecycle ──
@@ -349,7 +363,10 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   const rows = async () => rowTexts(await ui.drawn())
-  const facts = async () => /(\d+% token {2}\d+s)$/.exec((await rows()).find(r => /% token/.test(r)) ?? '')?.[1]
+  const facts = async () => {
+    const m = /(\d+%) +(\d+s)$/.exec((await rows()).find(r => /^[◐✓] code-reviewer/.test(r)) ?? '')
+    return m && `${m[1]} ${m[2]}`
+  }
   const counters = /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/
 
   // before any step the counters are not drawn: nothing is faked
@@ -357,10 +374,10 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
 
   await step('a1')
   let now = await rows()
-  // collapsed: one row, the model a word, the effort an icon, the tokens and the time; nothing else of the agent
-  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^◐ code-reviewer +sonnet \u{F12A3} +1\.7k +0s$/u)
-  expect(now.some(r => counters.test(r) || /^ +go$/.test(r) || /% token/.test(r))).toBe(false)
-  // a press expands it: what it was asked, the facts and the four counters; the next press collapses it
+  // collapsed: one row, the model a word, the effort an icon, the tokens, their share of the session and the time; nothing else of the agent
+  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^◐ code-reviewer +sonnet \u{F12A3} +1\.7k +100% +0s$/u)
+  expect(now.some(r => counters.test(r) || /^ +go$/.test(r))).toBe(false)
+  // a press expands it: what it was asked and the four counters; the next press collapses it
   await ui.press({ key: 'agent:a1' })
   now = await rows()
   expect(now.some(r => counters.test(r))).toBe(true)
@@ -368,18 +385,16 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await ui.press({ key: 'agent:a1' })
   expect((await rows()).some(r => counters.test(r))).toBe(false)
   await ui.press({ key: 'agent:a1' })
-  now = await rows()
-  expect(now.find(r => /son 5\.5/.test(r))).toMatch(/^ +son 5\.5 .* HIGH/)
-  expect(await facts()).toBe('100% token  0s')
+  expect(await facts()).toBe('100% 0s')
 
   // the main loop's step counts in the session: the agent is half of it
   await step()
-  expect(await facts()).toBe('50% token  0s')
+  expect(await facts()).toBe('50% 0s')
 
   // the elapsed time moves with the fast tier
   await clock.advance(2000)
   await settleAll()
-  expect(await facts()).toBe('50% token  2s')
+  expect(await facts()).toBe('50% 2s')
 
   // the tool in flight, then the last one
   const call = $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' })
@@ -421,7 +436,7 @@ test('Subagenti: the turn\'s own total replaces what its steps added, a turn tha
   const rows = rowTexts(await ui.drawn())
   expect(rows.filter(r => /^ +in 1k {2}out 300 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
   expect(rows.filter(r => /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
-  expect(shares(rows)).toEqual(['51% token', '49% token'])
+  expect(shares(rows)).toEqual(['51%', '49%'])
   await ui.unmount()
 })
 
@@ -440,7 +455,7 @@ test('Subagenti: after a reload the share keeps the main loop\'s tokens and the 
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'agent:a1' })
-  expect(shares(rowTexts(await ui.drawn()))).toEqual(['10% token'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['10%'])
   await ui.unmount()
   // a main step is written, for the next reload
   for await (const chunk of $.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 })) void chunk
@@ -503,7 +518,7 @@ test('Subagenti: an agent that leaves the list joins a cumulative counter that t
   await ui.press({ key: 'tab:agents' })
   // 1700 of 100000 + 1700 + 1700 (the agent has run for minutes by now)
   await ui.press({ key: 'agent:a2' })
-  expect(shares(rowTexts(await ui.drawn()))).toEqual(['2% token'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['2%'])
   await ui.unmount()
 })
 
@@ -522,7 +537,7 @@ test('Subagenti: the tool line (the one running, or the last) is cut to the widt
 
 // ── Phase 9: Subagents rows are one cut line each ──
 
-test('Subagents: every row is one line cut to the width, at 40, 58 and 80 columns: the agent row with its fixed columns, then (expanded) the description, the facts, the warning and the tool', async ($, on) => {
+test('Subagents: every row is one line cut to the width, at 40, 58 and 80 columns: the agent row with its fixed columns, then (expanded) the description, the warning and the tool', async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
@@ -543,7 +558,7 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     const row = collapsed.filter(r => /^◐ a-code/.test(r))
     expect(row).toHaveLength(1)
     expect(textCells(row[0] ?? '')).toBe(width)
-    expect(row[0]).toMatch(/^◐ a-code[^ ]*… +sonnet +\S* *\S+ +2m00s$/)
+    expect(row[0]).toMatch(/^◐ a-code[^ ]*… +sonnet +\S* *\S+(?: +\d+%)? +2m00s$/)
     expect(collapsed.some(r => /Review the orders|last tool|⚠/.test(r))).toBe(false)
 
     // expanded: every row of the block is one line, none wider than the pane
@@ -552,8 +567,7 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     expect(expanded.length).toBeGreaterThan(collapsed.length + 2)
     for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
     expect(expanded.find(r => /^ +Review the orders/.test(r))).toMatch(/…$/)
-    // the facts row is exactly the width: the model on the left, the time on the right
-    expect(textCells(expanded.find(r => /son 5\.5/.test(r)) ?? '')).toBe(width)
+    expect(expanded.some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
     expect(expanded.some(r => /^ +⚠ asked fable/.test(r))).toBe(true)
     expect(expanded.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
 
@@ -593,17 +607,12 @@ test('Subagents: the history rows are one row each, the name cut by display widt
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'history' })
   const rows = rowTexts(await ui.drawn())
-  for (const re of [/^✓ a-reviewer/, /^✓ 日本語/]) {
+  for (const re of [/^✓ a-review/, /^✓ 日本語/]) {
     const row = rows.find(r => re.test(r)) ?? ''
     expect(textCells(row)).toBe(38)
     expect(row).toMatch(/…/)
-    expect(row).toMatch(/ +1\.2k +30s$/)
+    expect(row).toMatch(/ +1\.2k +\d+% +30s$/)
   }
-  expect(await ui.find({ key: 'open:h1' })).toBeUndefined()
-  await ui.press({ key: 'history:h1' })
-  expect(await ui.find({ key: 'open:h1' })).toBeDefined()
-  await ui.press({ key: 'history:h1' })
-  expect(await ui.find({ key: 'open:h1' })).toBeUndefined()
   await ui.unmount()
 })
 

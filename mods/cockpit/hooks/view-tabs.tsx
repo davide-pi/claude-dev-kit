@@ -11,7 +11,7 @@ import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
-import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
+import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar } from './view-context'
@@ -30,8 +30,6 @@ export type PaneActions = {
   ask: (kind: 'suite' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
-  /** Puts the agent's transcript in the main view. */
-  openAgent: (agentId: string) => void
   toggleHistory: () => void
   /** Expands or collapses an agent row (live or in the history). */
   toggleAgent: (agentId: string) => void
@@ -124,7 +122,7 @@ export function agentsBlocks(k: Kit): Block[] {
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
 
-  // Every agent is one row (state, name, model, effort, tokens, time); pressing it expands what else there is to know. Live and history alike.
+  // Every agent is one row (state, name, model when it fits, effort, tokens, share, time); pressing it expands what else there is to know. Live and history alike.
   const sessionTotal = sessionTokens(s)
   const agentBlock = (key: string, agent: CockpitAgent, depth: number): Block => {
     const indent = '  '.repeat(depth + 1)
@@ -132,15 +130,11 @@ export function agentsBlocks(k: Kit): Block[] {
     const warn = agentWarning(agent, s.isSubagentModelForced)
     return [
       <Button key={key} plain onPress={() => actions.toggleAgent(agent.id)}>
-        <Text wrap="truncate">{spanNodes(ui, agentRow(agent, depth, s.now, width))}</Text>
+        <Text wrap="truncate">{spanNodes(ui, agentRow(agent, depth, s.now, width, sessionTotal))}</Text>
       </Button>,
       isOpen && [
-        line(ui, subagentFacts(agent, s.now, sessionTotal, indent, width)),
         warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
         ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
-        <Button key={`open:${agent.id}`} plain onPress={() => actions.openAgent(agent.id)}>
-          <Text wrap="truncate" color={COLORS.title}>{`${indent}↗ ${S.openAgentView}`}</Text>
-        </Button>,
         gap(),
       ],
     ]

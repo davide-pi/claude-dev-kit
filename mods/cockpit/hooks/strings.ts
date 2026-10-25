@@ -21,7 +21,6 @@ const SHARED = {
   consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   taskTitle: 'TASK',
   diffTitle: (file: string) => `diff · ${file}`,
-  tokenShare: ' token  ',
   /** The four counters of an agent's row. */
   tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
 }
@@ -52,7 +51,6 @@ const EN = {
   lastTool: 'last tool ',
   /** The rows of an expanded TOP AGENTS entry (Context tab). */
   costDetail: { tokens: (n: string) => `tokens ${n}`, time: (d: string) => `time ${d}`, share: (pct: string) => `${pct} of the session cost`, outcome: { running: 'running', done: 'done', failed: 'failed' } },
-  openAgentView: 'open transcript',
   historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
@@ -155,7 +153,6 @@ const IT: Strings = {
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
   costDetail: { tokens: (n: string) => `token ${n}`, time: (d: string) => `tempo ${d}`, share: (pct: string) => `${pct} del costo della sessione`, outcome: { running: 'in corso', done: 'finito', failed: 'fallito' } },
-  openAgentView: 'apri trascrizione',
   historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>

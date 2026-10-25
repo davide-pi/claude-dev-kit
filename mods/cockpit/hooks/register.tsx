@@ -132,7 +132,6 @@ const paneActions = ($: EngineInterface): PaneActions => ({
       })
       .catch(() => undefined),
   openDiff: change => void showDiff($, change),
-  openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
   toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
   toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),

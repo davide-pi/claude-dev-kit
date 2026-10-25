@@ -1,11 +1,11 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
 import type { AgentCost } from './signals'
-import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
-import { effortSpans, headerEffort } from './view-header'
+import { effortSpans } from './view-header'
 
 const TASK_TIME_W = 6
 
@@ -76,16 +76,21 @@ export const agentIcon = (a: CockpitAgent): Span =>
 
 const MODEL_W = 6
 const TOKENS_W = 5
+/** A name is worth this many cells before a row gives up other columns (the model, on the Subagents tab; the cache hit then the model, in TOP AGENTS). */
+const MIN_NAME_W = 6
+const SHARE_W = 4
 const TIME_W = 6
-// icon, gap, name, then gap + model, gap + effort, gap + tokens, gap + time
-const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + TOKENS_W + 1 + TIME_W
+// icon, gap, name, then gap + model, gap + effort, gap + tokens, gap + share of the session's tokens, gap + time
+const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + TOKENS_W + 1 + SHARE_W + 1 + TIME_W
 
 /** The model as a word (`opus`, `sonnet`, `haiku`); a name this build does not know is cut to the column. */
 const rowModel = (model: string | undefined): string => modelFamily(model) ?? (model ? truncEnd(model, MODEL_W) : '—')
 
-/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, tokens, time. */
-export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
-  const nameW = Math.max(1, width - ROW_FIXED_W)
+/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, tokens, their share of the session's `total` (blank when unknown), time. */
+export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number): Span[] {
+  // a pane too narrow for the name drops the model column: the share and the time matter more
+  const hasModel = width - ROW_FIXED_W >= MIN_NAME_W
+  const nameW = Math.max(1, width - (hasModel ? ROW_FIXED_W : ROW_FIXED_W - MODEL_W - 1))
   const prefix = depth > 0 ? `${'  '.repeat(depth - 1)}└ ` : ''
   const isRunning = a.status === 'running'
   const name = padCells(truncEnd(prefix + a.type, nameW), nameW)
@@ -96,11 +101,12 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
       sp(' '),
       depth > 0 ? sp(name, COLORS.dim) : sp(name, undefined, isRunning),
       sp(' '),
-      sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning),
-      sp(' '),
+      ...(hasModel ? [sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning), sp(' ')] : []),
       ...(effort.length ? effort : [sp(' ')]),
       sp(' '),
       sp(padStart(abbrevTokens(a.tokens), TOKENS_W)),
+      sp(' '),
+      sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
       sp(' '),
       sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
     ],
@@ -109,8 +115,6 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
 }
 
 const COST_W = 7
-/** The TOP AGENTS name is worth keeping to this many cells before the cache hit, then the model, give way. */
-const MIN_NAME_W = 6
 
 /** An agent of the TOP AGENTS list in exactly one row of `width` cells: name (cut with `…` to fit), model, effort icon, then its cost and cache hit; a pane too narrow to leave the name its minimum drops the cache hit, then the model. */
 export function agentCostRow(a: AgentCost, width: number): Span[] {
@@ -154,18 +158,8 @@ export function pairRow(left: readonly Span[], right: readonly Span[], width: nu
 export const fitPair = (left: readonly Span[], right: readonly Span[], width: number): Span[] =>
   spanWidth(left) + 1 + spanWidth(right) <= width ? pairRow(left, right, width) : truncateSpans(left, width)
 
-/** The Subagents tab's second row of an agent, `width` cells: model and effort on the left; its share of the session's tokens and its elapsed time on the right. */
-export function subagentFacts(a: CockpitAgent, now: number, total: number, indent: string, width: number): Span[] {
-  const share = tokenShare(a.tokens, total)
-  return pairRow(
-    [sp(indent), a.model ? sp(shortModel(a.model), undefined, a.status === 'running') : dim('—'), ...headerEffort(a.effort)],
-    [...(share ? [sp(share, undefined, true), dim(t().tokenShare)] : []), sp(duration((a.endedAt ?? now) - a.startedAt))],
-    width,
-  )
-}
-
 /**
- * The rows under an agent's facts on the Subagents tab once it is expanded: what it was asked, the four counters, then the tool running
+ * The rows under an agent's row on the Subagents tab once it is expanded: what it was asked, the four counters, then the tool running
  * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
  */
 export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
