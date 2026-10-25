@@ -28,7 +28,7 @@ process.on('exit', () => {
 
 const prompt = (text) => ({ type: 'user', message: { role: 'user', content: text } });
 const say = (text) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text }] } });
-const tool = (name) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name, input: {} }] } });
+const tool = (name, input = {}) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name, input }] } });
 /** A tool result; `text` is what the tool printed (a string, or `[{ type: 'text', text }]` blocks). */
 const result = (text = 'ok') => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't', content: text }] } });
 
@@ -421,4 +421,70 @@ test('a closed perimeter, another branch, no cwd or no verdict table: silent', (
 test('a verdict of only "non verificato" rows still asks to close an active perimeter', () => {
   const final = `${head}\n${row('-', 'non verificato: serve staging')}`;
   assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /Close the perimeter/);
+});
+
+// ── Verdict-row parser: separators, ellipsis, quotes, exit 0 (#114) ──
+
+test('a deciding cell joined by " · " or an ellipsis is proven piece by piece', () => {
+  const hash = 'd7c6d87db8ea51eaa2715129949ae6979c7a33be';
+  assert.equal(stop(edited(verdict(row(`\`completed\` · \`succeeded\` · \`${hash}\``)), `status completed\nsucceeded\n${hash}`)).reason, '');
+  assert.equal(stop(edited(verdict(row('`queued=4106 … distinctIds=111`')), 'queued=4106 total\nfound distinctIds=111')).reason, '');
+  assert.equal(stop(edited(verdict(row('`queued=4106 ... distinctIds=111`')), 'queued=4106 total\nfound distinctIds=111')).reason, '');
+  const threads = '`PR 2815 thread 16860: comment id=2 status=fixed` … `PR 2802 thread 16878: comment id=2 status=fixed`';
+  assert.equal(stop(edited(verdict(row(threads)), 'PR 2815 thread 16860: comment id=2 status=fixed\nPR 2802 thread 16878: comment id=2 status=fixed')).reason, '');
+  assert.match(stop(edited(verdict(row(threads)), 'PR 2815 thread 16860: comment id=2 status=fixed')).reason, /"fatto"/);
+});
+
+test('an ellipsis inside a piece is elided text: each fragment must be printed', () => {
+  const line = '`ModuleV3SportsState -> ...\bin\Release\ModuleV3.Sports.State.dll`';
+  const out = 'ModuleV3SportsState -> C:\repo\bin\Release\ModuleV3.Sports.State.dll';
+  assert.equal(stop(edited(verdict(row(line)), out)).reason, '');
+  assert.match(stop(edited(verdict(row(line)), 'ModuleV3SportsState -> C:\repo\bin\Release\Other.dll')).reason, /"fatto"/);
+});
+
+test('quotes do not matter when comparing a deciding cell with the output', () => {
+  assert.equal(stop(edited(verdict(row('"File created successfully"')), 'File created successfully')).reason, '');
+  assert.equal(stop(edited(verdict(row('`status: OK`, `open: []`')), '{"status": "OK", "open": []}')).reason, '');
+  assert.match(stop(edited(verdict(row('`status: OK`, `open: []`')), '{"status": "OK", "open": [1]}')).reason, /"fatto"/);
+});
+
+test('an "exit 0" piece is dropped when other pieces exist, never proof alone', () => {
+  const line = '`ModuleV3SportsState -> ...\ModuleV3.Sports.State.dll`, exit 0';
+  const out = 'ModuleV3SportsState -> C:\repo\bin\ModuleV3.Sports.State.dll';
+  assert.equal(stop(edited(verdict(row(line)), out)).reason, '');
+  assert.equal(stop(edited(verdict(row('`# pass 3`, exit=0')), '# pass 3')).reason, '');
+  assert.equal(stop(edited(verdict(row('`# pass 3`, exit code 0')), '# pass 3')).reason, '');
+  assert.match(stop(edited(verdict(row('exit 0')), 'built')).reason, /"fatto"/);
+});
+
+test('rows that must stay unproven', () => {
+  assert.match(stop(edited(verdict(row('file creati')), 'created 3 files')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('nessun output, quindi nessun giorno in sospeso')), 'ok')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('copied 62, nessun DIFF')), 'copied 62')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('`0` (bilanciati)')), '0')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
+});
+
+// ── Read-only delegates do not arm the hook (#115) ──
+
+test('an Agent or Task of a read-only type does not arm; an editing or untyped one does; Workflow always does', () => {
+  const claim = 'La review è arrivata, ho verificato il punto centrale.';
+  const turn = (name, input) => [prompt('x'), tool(name, input), result('launched'), say(claim)];
+  for (const name of ['Agent', 'Task']) {
+    for (const type of ['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']) {
+      assert.equal(stop(turn(name, { subagent_type: type })).reason, '', `${name} ${type}`);
+    }
+    assert.match(stop(turn(name, { subagent_type: 'implementer' })).reason, /"verificato"/, name);
+    assert.match(stop(turn(name, {})).reason, /"verificato"/, name);
+  }
+  assert.match(stop(turn('Workflow', { subagent_type: 'Explore' })).reason, /"verificato"/);
+});
+
+// ── A quoted claim word is not a claim (#116) ──
+
+test('a claim word inside quotes is mentioned, not claimed; bold or unquoted still claims', () => {
+  assert.equal(stop(edited('La regola ora dice esplicitamente che "fatto" e "verificato" vanno provati.')).reason, '');
+  assert.equal(stop(edited('La regola dice che “fatto” e «verificato» vanno provati.')).reason, '');
+  assert.match(stop(edited('Ho aggiornato la regola. **Fatto**')).reason, /"Fatto"/);
+  assert.match(stop(edited('Ho verificato la regola.')).reason, /"verificato"/);
 });
