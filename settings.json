@@ -676,6 +676,21 @@
   "hooks": {
     "PreToolUse": [
       {
+        "matcher": "Agent|Task",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/agent-guard.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 15,
+            "statusMessage": "Checking the subagent spawn..."
+          }
+        ]
+      },
+      {
         "matcher": "mcp__plugin_browser-use_browser-use__.*",
         "hooks": [
           {
