@@ -22,7 +22,9 @@
  *
  *   - a *placeholder*: `Password=<your-password>`, `Password=changeme`, `AccountKey=***`.
  *   - a *variable reference*: `Password=$env:DB_PASSWORD`, `Password=${DB_PASSWORD}`,
- *     `Password=" + password`, `Password=%DB_PASS%` — the value is a hole, not a secret.
+ *     `Password=" + password`, `Password=%DB_PASS%` — the value is a hole, not a secret. A call
+ *     (`get_key(`, a cmdlet such as `Read-Host`) is one too; so is, in a test file, a value that names
+ *     itself a fixture (`ValidPassword1!`).
  *   - a *detector*: the regex or the grep that hunts for secrets contains, by construction, the
  *     very shapes it looks for. A line carrying regex syntax is read as a pattern, not a value, and
  *     a scanner file (this one, the validator) is skipped whole — otherwise the hook would make
@@ -131,12 +133,18 @@ const PLACEHOLDER_WORD = new RegExp(
   + 'placeholder|redacted|removed|hidden|masked|omitted|'
   + 'dummy|fake|sample|example[-_\\w]*|test|testing|foo|bar|baz|'
   + 'secret|password|passwd|pwd|pass|token|apikey|api[-_]key|key|value|string|'
-  + 'null|none|nil|empty|undefined'
+  + 'null|none|nil|empty|undefined|'
+  // RabbitMQ's built-in local account, documented everywhere.
+  + 'guest'
   + ')$',
   'i',
 );
 /** `example`, `sample`, `redacted`… anywhere in the value: it is documentation, not a credential. */
 const EXAMPLE_MARKER = /example|sample|placeholder|redacted|changeme|dummy|myuser|mypassword/i;
+/** A test source file: `tests/…`, `__tests__/…`, `*Tests.cs`, `*.test.ts`, `*.spec.js`. */
+const TEST_FILE = /(?:^|[\\/])(?:tests?|__tests__|specs?)[\\/]|(?:Tests?|[.-]test|[.-]spec)\.\w+$/i;
+/** In a test file, a value that names itself a fixture (`ValidPassword1!`, `wrong-secret`) is test data. */
+const FIXTURE_WORD = /valid|wrong|bad|fake|test|password|secret/i;
 /** A mask: `***`, `xxxx`, `…`, `--`. */
 const MASK = /^[*x.\-_•…\s]+$/i;
 
@@ -146,9 +154,10 @@ const MASK = /^[*x.\-_•…\s]+$/i;
  * patterns: a signed token is three dot-separated word runs, which is exactly the shape of a
  * member access, and treating it as a reference let a real token straight through.
  */
-function isPlaceholder(value, reference) {
+function isPlaceholder(value, reference, inTest = false) {
   const v = value.trim().replace(/^["'`]|["'`]$/g, '');
   if (!v) return true;
+  if (inTest && FIXTURE_WORD.test(v)) return true;
   if (INTERPOLATION.test(v)) return true;
   if (MASK.test(v)) return true;
   if (PLACEHOLDER_WORD.test(v)) return true;
@@ -157,6 +166,8 @@ function isPlaceholder(value, reference) {
   if (MEMBER_ACCESS.test(v)) return true;
   // A URL is an endpoint, not a credential (a password inside one has its own pattern); `get_key(` is a call.
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^@?[A-Za-z_][\w.]*\(/.test(v)) return true;
+  // A PowerShell cmdlet (`Read-Host`, `Get-Secret`) is a call too.
+  if (/^[A-Z][a-z]+-[A-Z][A-Za-z]+$/.test(v)) return true;
   // `env:DB_PASSWORD`, `ENV.DB_PASSWORD`, `process.env.DB_PASSWORD`, `Secrets:Db:Password`
   if (/^(?:env[.:]|process\.env|secrets?[.:]|vault[.:])/i.test(v)) return true;
   // A SCREAMING_SNAKE name is a variable, never a password anybody typed.
@@ -212,7 +223,7 @@ try {
       re.lastIndex = 0;
       for (const m of line.matchAll(re)) {
         const found = value ? m[value] : m[0];
-        if (isPlaceholder(found, value !== undefined)) continue;
+        if (isPlaceholder(found, value !== undefined, TEST_FILE.test(filePath))) continue;
         findings.push(`  line ${i + 1}: ${label} — ${redact(found)}`);
         break;                                   // one finding per pattern per line is enough
       }

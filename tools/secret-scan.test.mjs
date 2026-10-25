@@ -333,3 +333,18 @@ test('the scanner exemption covers code files only', () => {
     assert.equal(write(`const token = "${providerToken}";`, file).decision, 'deny', file);
   }
 });
+
+test('a cmdlet, a default dev account or an obvious fixture in a test file is not a credential', () => {
+  // A PowerShell cmdlet is a call: `Password=Read-Host -AsSecureString`.
+  allows('$cred = Password=Read-Host -AsSecureString', 'docs/certificate.md');
+  // `guest` is RabbitMQ's built-in local account, documented everywhere.
+  allows('amqp: User=guest;Password=guest', 'scripts/run-ab.ps1');
+  // A test file whose value names itself a fixture; assembled, so validate.mjs sees no literal.
+  const fixture = 'Valid' + 'Password' + '1!';
+  for (const file of ['tests/Api.Tests/AuthEndpointsTests.cs', 'src/auth/login.test.ts', 'src/__tests__/db.spec.js']) {
+    allows(`var cs = "Server=.;Password=${fixture}";`, file);
+  }
+  // The same value outside a test file, or a real-looking one inside a test file, still blocks.
+  blocks(`var cs = "Server=.;Password=${fixture}";`, /password in a connection string/, 'src/App/Program.cs');
+  blocks(`var cs = "Server=.;Password=${PW}";`, /password in a connection string/, 'tests/Api.Tests/AuthEndpointsTests.cs');
+});
