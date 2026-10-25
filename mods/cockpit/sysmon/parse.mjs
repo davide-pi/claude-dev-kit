@@ -116,26 +116,6 @@ export function shapeProcesses(procs, keep) {
   return procs.filter(p => !isHelper(p.name)).sort(byCpu).slice(0, keep)
 }
 
-// Win32_Battery.BatteryStatus: on AC (2), fully charged (3), charging (6-9), partly charged (11).
-const ON_AC = [2, 3, 6, 7, 8, 9, 11]
-
-/**
- * `Get-CimInstance Win32_Battery | Select-Object EstimatedChargeRemaining,BatteryStatus | ConvertTo-Json -Compress`: no output
- * is a machine with no battery (wired); else the charge and whether the power is plugged in. None for text that is neither.
- */
-export function parseBattery(text) {
-  if (text.trim() === '') return { kind: 'wired' }
-  let parsed
-  try {
-    parsed = JSON.parse(text)
-  } catch {
-    return undefined
-  }
-  const battery = Array.isArray(parsed) ? parsed[0] : parsed
-  if (!isRecord(battery) || !isCount(battery.EstimatedChargeRemaining) || !isCount(battery.BatteryStatus)) return undefined
-  return { kind: 'battery', percent: Math.min(100, battery.EstimatedChargeRemaining), isCharging: ON_AC.includes(battery.BatteryStatus) }
-}
-
 /** The pid of the `~/.claude/sessions/<pid>.json` file (given as texts) whose `sessionId` is `sessionId`; none when no file names it. */
 export function findSessionPid(texts, sessionId) {
   for (const text of texts) {

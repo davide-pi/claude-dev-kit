@@ -5,11 +5,10 @@
 //   every 10 s  { procs: [{ pid, name, ports, cpu?, ram? }] }   the session's descendant processes (service helpers hidden, the
 //               busiest first) with their listening ports, CPU share since the last read and working set
 //   every 30 s  { disk: { free, total, label } }    the drive of the working directory
-//   once        { power: { kind: 'wired' } | { kind: 'battery', percent, isCharging } }
 //   a part that cannot be read: { off: ['net', ...] } (the mod draws "unavailable"; the monitor never throws for it)
 //
 // Environment: COCKPIT_SESSION_ID (the session whose ~/.claude/sessions/<pid>.json names the Claude pid) and
-// COCKPIT_CONFIG_DIR (the config folder, ~/.claude when absent). Network, processes and power are read on Windows only.
+// COCKPIT_CONFIG_DIR (the config folder, ~/.claude when absent). Network and processes are read on Windows only.
 //
 // Cost of the Windows reads, measured on the owner's machine (median of three, one process each, from node):
 //   netstat -e 30 ms, netstat -ano 35 ms                         -> every tick / every 10 s
@@ -17,7 +16,6 @@
 //                                                                   the working set: 76 KB, measured 469 ms; with CommandLine 214 KB for
 //                                                                   the same time, so it is left out)
 //   Get-WmiObject 780 ms, tasklist 650 ms (and no parent pid), wmic: not installed
-//   Win32_Battery 265 ms                                         -> once
 // A PowerShell per tick would cost a quarter of every 2 s; one CIM query per 10 s, started without waiting for the tick, costs ~5 %.
 
 import { execFile } from 'node:child_process'
@@ -25,7 +23,7 @@ import { readFile, readdir, statfs } from 'node:fs/promises'
 import { cpus, freemem, homedir, totalmem } from 'node:os'
 import { join, parse } from 'node:path'
 
-import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, shapeProcesses, withPorts } from './parse.mjs'
+import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseProcesses, shapeProcesses, withPorts } from './parse.mjs'
 
 const TICK_MS = 2000
 /** Ticks between two reads of the processes (10 s) and of the disk (30 s). */
@@ -101,12 +99,6 @@ async function readDisk() {
   }
 }
 
-async function readPower() {
-  const out = await powershell('Get-CimInstance Win32_Battery | Select-Object EstimatedChargeRemaining,BatteryStatus | ConvertTo-Json -Compress')
-  const power = out === undefined ? undefined : parseBattery(out)
-  emit(power === undefined ? { off: ['power'] } : { power })
-}
-
 async function readNet() {
   const out = await run('netstat', ['-e'], 3000)
   const now = Date.now()
@@ -150,7 +142,6 @@ async function readTick() {
 // The stdout pipe closing ends the monitor (the engine also kills it when the mod stops reading).
 process.stdout.on('error', () => process.exit(0))
 
-if (isWindows) void readPower()
-else emit({ off: ['net', 'procs', 'power'] })
+if (!isWindows) emit({ off: ['net', 'procs'] })
 void tick()
 setInterval(() => void tick(), TICK_MS)

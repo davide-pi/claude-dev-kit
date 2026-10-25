@@ -3738,7 +3738,6 @@ const FULL_LINE = sysLine({
     { pid: 7240, name: 'node', ports: [3000, 5173] },
   ],
   disk: { free: 120 * GIB, total: 266 * GIB, label: 'D:' },
-  power: { kind: 'battery', percent: 87, isCharging: true },
 })
 
 /** The System tab's rows after `lines` came from the monitor. */
@@ -3835,7 +3834,7 @@ const wrapRows = (el: unknown): string[] => {
   return (o.children ?? []).flatMap(wrapRows)
 }
 
-test('System: CPU, RAM and network on one row, disk and power on the next, no sparkline, and the process table with its ports', async ($, on) => {
+test('System: CPU, RAM and network on one row, the disk on the next, no sparkline, and the process table with its ports', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -3850,7 +3849,7 @@ test('System: CPU, RAM and network on one row, disk and power on the next, no sp
   const drawn = await ui.drawn()
   await ui.unmount()
   // a Box each, so the disk never rises to the first row when the network is quiet
-  expect(wrapRows(drawn)).toEqual(['CPU 80%  RAM 44%  NET ↓0 B/s ↑0 B/s', `${ICONS.disk} D: 120 GB free  ${ICONS.charging} 87% charging`])
+  expect(wrapRows(drawn)).toEqual(['CPU 80%  RAM 44%  NET ↓0 B/s ↑0 B/s', `${ICONS.disk} D: 120 GB free`])
   const rows = rowTexts(drawn)
   const i = rows.indexOf('SYSTEM')
   expect(i).toBeGreaterThan(0)
@@ -3871,7 +3870,7 @@ test('System: the numbers are the last reading, and a line split across two chun
   expect(rows.find(r => /^CPU/.test(r))).toMatch(/^CPU 100%  /)
 })
 
-test('System: power drawn as wired, and a disk with little room left in red', async ($, on) => {
+test('System: a disk with little room left in red', async ($, on) => {
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -3880,11 +3879,11 @@ test('System: power drawn as wired, and a disk with little room left in red', as
   await settleAll()
   await ui.press({ key: 'tab:system' })
   await until(() => m.spawns.length === 1)
-  m.push(sysLine({ disk: { free: 5 * GIB, total: 100 * GIB, label: 'D:' }, power: { kind: 'wired' } }))
+  m.push(sysLine({ disk: { free: 5 * GIB, total: 100 * GIB, label: 'D:' } }))
   await until(() => m.queue.length === 0)
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows.some(r => r.endsWith(`${ICONS.disk} D: 5.0 GB free  ${ICONS.plug} mains`))).toBe(true)
+  expect(rows.some(r => r.endsWith(`${ICONS.disk} D: 5.0 GB free`))).toBe(true)
   expect(colorOf(await ui.drawn(), /D: 5\.0 GB free/)).toBe(RED)
   await ui.unmount()
 })
@@ -3898,7 +3897,7 @@ test('System: before the first line the tab says it is reading', async ($, on) =
   expect(rows).toContain('reading…')
 })
 
-test('System: a monitor that cannot start: CPU, RAM, network, disk, power and the processes all read unavailable', async ($, on) => {
+test('System: a monitor that cannot start: CPU, RAM, network, disk and the processes all read unavailable', async ($, on) => {
   const m = fakeMonitor(on, { isBroken: true })
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -3910,7 +3909,7 @@ test('System: a monitor that cannot start: CPU, RAM, network, disk, power and th
   await settleAll()
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('CPU unavailable  RAM unavailable  NET unavailable')
-  expect(rows).toContain(`${ICONS.disk} unavailable  ${ICONS.battery} unavailable`)
+  expect(rows).toContain(`${ICONS.disk} unavailable`)
   expect(rows).toContain('unavailable')
   expect(rows).toContain('PROCESSES')
   await ui.unmount()
@@ -3920,7 +3919,7 @@ test('System: a part the monitor reports off (network on another platform) reads
   const m = fakeMonitor(on)
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await sistemaRows($, m, [sysLine({ cpu: 20, ram: { used: GIB, total: 8 * GIB }, off: ['net', 'procs', 'power'] })])
+  const rows = await sistemaRows($, m, [sysLine({ cpu: 20, ram: { used: GIB, total: 8 * GIB }, off: ['net', 'procs'] })])
   expect(rows.find(r => /^CPU/.test(r))).toBe('CPU 20%  RAM 13%  NET unavailable')
   expect(rows).toContain('PROCESSES')
   expect(rows).toContain('unavailable')
@@ -3970,7 +3969,6 @@ test('System: every row fits the pane at 30, 40, 58 and 80 columns, a long proce
     net: { rx: 900 * 1024 ** 2, tx: 900 * 1024 ** 2 },
     procs: [{ pid: 123456, name: 'a-very-long-process-name-indeed', ports: [3000, 3001, 3002, 3003, 3004, 3005] }],
     disk: { free: 900 * GIB, total: 1000 * GIB, label: 'D:' },
-    power: { kind: 'battery', percent: 100, isCharging: false },
   })
   for (const columns of [30, 40, 58, 80]) {
     const rows = await sistemaRows($, m, [long, long, long], columns)
@@ -5680,4 +5678,92 @@ test('Subagents: every agent of the session is listed, no cap and no … +n, at 
     for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`◐ agent-${n} `))]).toEqual([n, true])
     expect(rows.some(r => /^… \+\d+$/.test(r))).toBe(false)
   }
+})
+
+// ── Cockpit v2 follow-ups: what grew the context, the last error, the context around compactions, this chat's edits ──
+
+test('Insights: the five largest results of the main loop, with the tool, its short argument and the estimated tokens; a subagent call is not counted', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Read' }, (_, e) => ({ result: {}, text: 'x'.repeat(e.file_path.endsWith('big.ts') ? 152_000 : 400) }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const name of ['a', 'b', 'c', 'd', 'e', 'f']) await $.tool.call({ tool: 'Read', file_path: `/w/${name}.ts` })
+  await $.tool.call({ tool: 'Read', file_path: '/w/big.ts' })
+  await $.tool.call({ tool: 'Read', file_path: '/w/sub.ts', agentId: 'a1' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('WHAT GREW THE CONTEXT')
+  expect(i).toBeGreaterThan(0)
+  const listed = rows.slice(i + 2, i + 7)
+  expect(listed[0]).toMatch(/^Read +big\.ts +\+38k$/)
+  expect(listed.slice(1)).toHaveLength(4)
+  for (const row of listed.slice(1)) expect(row).toMatch(/^Read +[a-f]\.ts +\+100$/)
+  expect(rows[i + 7]).not.toMatch(/^Read/)
+})
+
+test('Insights: the last failed call of the main loop, its error on one line with the tool; none while nothing failed', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Bash' }, (_, e) => (e.command === 'bad' ? { result: {}, isError: true, text: `exit 1\n${'boom '.repeat(30)}` } : { result: {}, text: 'ok' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'fine' })
+  expect(await insightsRows($)).not.toContain('LAST ERROR')
+  await $.tool.call({ tool: 'Bash', command: 'bad' })
+  const rows = await insightsRows($)
+  const i = rows.indexOf('LAST ERROR')
+  expect(i).toBeGreaterThan(0)
+  expect(rows[i + 2]).toMatch(/^✗ Bash +exit 1 boom boom .*…$/)
+  expect(textCells(rows[i + 2] ?? '')).toBeLessThanOrEqual(48)
+  await $.tool.call({ tool: 'Bash', command: 'fine' }) // a later success leaves the last failure on show
+  expect(await insightsRows($)).toContain('LAST ERROR')
+})
+
+test('Insights: the context before and after each compaction, the last three, the after being the first reading that follows', async ($, on) => {
+  world(on)
+  roundHooks(on)
+  on('classic.PostCompact', () => ({}))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const measure = (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  await insightRound($, 1, 1000, { read: 100, write: 100 })
+  for (const [before, after] of [[300_000, 30_000], [412_000, 38_000], [500_000, 45_000], [600_000, 50_000]] as const) {
+    await measure(before)
+    await $.classic.PostCompact({ trigger: 'auto', compact_summary: 's' })
+    await measure(after)
+    await measure(after + 7000) // a later reading does not move it
+  }
+  await measure(700_000)
+  await $.classic.PostCompact({ trigger: 'manual', compact_summary: 's' }) // no reading since
+  const rows = await insightsRows($)
+  const i = rows.findIndex(r => /^compactions +5$/.test(r))
+  expect(i).toBeGreaterThan(0)
+  expect(rows.slice(i + 1, i + 4).map(r => r.replace(/ +/g, ' '))).toEqual(['context 500k → 45k', ' 600k → 50k', ' 700k → …'])
+})
+
+test('Work: the files this chat edited (a subagent too) carry a marker on the changes, made repo-relative; it is kept in the session data and survives a resume', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, numstat: [['1', '1', 'src/a.ts'], ['2', '0', 'src/b.ts'], ['3', '3', 'other.ts']] })
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Edit', file_path: '/work/example-repo/src/a.ts', old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: 'Write', file_path: '/work/example-repo/src/b.ts', content: '' , agentId: 'a1' })
+  await $.tool.call({ tool: 'Edit', file_path: '/elsewhere/x.ts', old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: 'Read', file_path: '/work/example-repo/other.ts' }) // a read is not an edit
+  const rows = await workRows($)
+  expect(rows.find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts ●$/)
+  expect(rows.find(r => /src\/b\.ts/.test(r))).toMatch(/src\/b\.ts ●$/)
+  expect(rows.find(r => /other\.ts/.test(r))).toMatch(/other\.ts$/)
+  expect(rows.some(r => /^CHANGES · 3● this chat$/.test(r))).toBe(true)
+  await clock.advance(5000) // past the write throttle
+  expect(dataOf(writes)?.edited).toEqual(['/work/example-repo/src/a.ts', '/work/example-repo/src/b.ts', '/elsewhere/x.ts'])
+})
+
+test('Work: a resumed session marks the files its data file lists', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [], edited: ['/work/example-repo/src/a.ts', 7, ''] }), numstat: [['1', '1', 'src/a.ts']] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await workRows($)).find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts ●$/)
+})
+
+test('Work: with no edited file there is no marker and no legend', async ($, on) => {
+  world(on, { numstat: [['1', '1', 'src/a.ts']] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await workRows($)
+  expect(rows.find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts$/)
+  expect(rows.some(r => /this chat/.test(r))).toBe(false)
 })

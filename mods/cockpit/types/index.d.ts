@@ -176,13 +176,10 @@ export type CockpitContext = {
 export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
 
 /** The parts of the System tab the monitor reads, in the order the tab draws them. */
-export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk' | 'power'
+export type CockpitSystemPart = 'cpu' | 'ram' | 'net' | 'procs' | 'disk'
 
 /** A process of the session's tree with the TCP ports it listens on, its CPU share (percent of every core, since the monitor's last read) and its working set in bytes; the last two are absent until read. */
 export type CockpitSysProc = { pid: number; name: string; ports: number[]; cpu?: number; ram?: number }
-
-/** Where the machine's power comes from: the wall, or a battery with its charge and whether it is plugged in. */
-export type CockpitPower = { kind: 'wired' } | { kind: 'battery'; percent: number; isCharging: boolean }
 
 /** The free and total bytes of the working directory's drive, and its short name (`D:`, `/`). */
 export type CockpitDisk = { free: number; total: number; label?: string }
@@ -196,7 +193,6 @@ export type CockpitSysLine = {
   net?: { rx: number; tx: number }
   procs?: CockpitSysProc[]
   disk?: CockpitDisk
-  power?: CockpitPower
   off?: CockpitSystemPart[]
 }
 
@@ -209,7 +205,6 @@ export type CockpitSystem = {
   tx: number[]
   procs?: CockpitSysProc[]
   disk?: CockpitDisk
-  power?: CockpitPower
   /** The parts that read "unavailable": the tool is missing or failed, or the monitor itself could not run. */
   off: CockpitSystemPart[]
 }
@@ -239,6 +234,12 @@ export type CockpitInsights = {
   reads: Record<string, number>
   /** The cache hit of the last twenty main turns, oldest first. */
   cacheShares: number[]
+  /** The five main-loop calls whose result was the largest, biggest first: the tool, its short argument and the result's estimated tokens (characters / 4). */
+  biggest?: { tool: string; arg?: string; tokens: number }[]
+  /** The last main-loop call that failed: the tool and its error message on one line. */
+  lastError?: { tool: string; text: string }
+  /** The context before and after each of the last three compactions, oldest first; `after` is the first reading that followed (absent until one did). */
+  compactCtx?: { before: number; after?: number }[]
 }
 
 /** How the System tab's process table is sorted: by the working set (the default) or the CPU share. */
@@ -277,6 +278,8 @@ export type CockpitSnapshot = {
   ctxSamples?: number[]
   /** The context size at the end of each of the last twenty main turns, newest last: the Context tab's trend line. A shrinking context stays in it (a compaction shows as a drop). */
   ctxRounds?: number[]
+  /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: the Work tab marks them among the changes. Kept in the session data file. */
+  edited?: string[]
   /** The Context tab's last reading of the context breakdown; absent until the tab was opened. */
   context?: CockpitContext
   /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */

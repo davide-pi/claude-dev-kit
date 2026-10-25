@@ -90,3 +90,14 @@ test('Italian: the context category names are translated, one the engine adds sh
     setLang('en')
   }
 })
+
+test('the insights and changes additions are translated', () => {
+  try {
+    setLang('en')
+    expect([t().grewTitle, t().lastErrorTitle, t().rhythm.compactCtx, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', 'LAST ERROR', 'context', '● this chat'])
+    setLang('it')
+    expect([t().grewTitle, t().lastErrorTitle, t().rhythm.compactCtx, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', 'ULTIMO ERRORE', 'contesto', '● questa chat'])
+  } finally {
+    setLang('en')
+  }
+})

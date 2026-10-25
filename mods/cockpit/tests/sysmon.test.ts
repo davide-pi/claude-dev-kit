@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseBattery, parseProcesses, shapeProcesses, withPorts } from '../sysmon/parse.mjs'
+import { cpuPercent, cpuShares, cpuTimes, cpuTimesOf, findSessionPid, listeningPorts, netBytes, netRate, parseProcesses, shapeProcesses, withPorts } from '../sysmon/parse.mjs'
 
 // Recorded outputs of the Windows tools the monitor reads (trimmed to the lines the parsers use).
 
@@ -111,16 +111,6 @@ test('withPorts: each process takes the ports it listens on, sorted', () => {
     { pid: 7240, name: 'node', ports: [3000, 5173] },
     { pid: 8800, name: 'dotnet', ports: [8080] },
   ])
-})
-
-test('parseBattery: no battery is wired power; a battery reads its charge and whether it charges; garbage is none', () => {
-  expect(parseBattery('')).toEqual({ kind: 'wired' })
-  expect(parseBattery('\r\n')).toEqual({ kind: 'wired' })
-  expect(parseBattery('{"EstimatedChargeRemaining":87,"BatteryStatus":2}')).toEqual({ kind: 'battery', percent: 87, isCharging: true })
-  expect(parseBattery('{"EstimatedChargeRemaining":40,"BatteryStatus":1}')).toEqual({ kind: 'battery', percent: 40, isCharging: false })
-  expect(parseBattery('[{"EstimatedChargeRemaining":55,"BatteryStatus":6}]')).toEqual({ kind: 'battery', percent: 55, isCharging: true })
-  expect(parseBattery('{"BatteryStatus":2}')).toBeUndefined()
-  expect(parseBattery('oops')).toBeUndefined()
 })
 
 test('findSessionPid: the pid of the session file whose sessionId matches; none otherwise', () => {

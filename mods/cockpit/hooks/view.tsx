@@ -61,6 +61,7 @@ import {
   spanWidth,
   padCells,
   rangeSparkline,
+  repoRelative,
   shade,
   textCells,
   timeSplit,
@@ -114,6 +115,8 @@ const NOTE_INPUT_ROWS = 6
 /** Cells of a tool row: the tool's name, and the time it started (`HH:MM`). */
 const CALL_TOOL_W = 7
 const CALL_TIME_W = 5
+/** Cells of a largest result's tokens (`+38k`). */
+const GREW_TOKENS_W = 6
 const MAX_SKILL_ROWS = 6
 /** The Insights tab: the cells of a row's label, and the tool types listed. */
 const INSIGHT_LABEL_W = 13
@@ -375,14 +378,27 @@ export function modelCounts(list: readonly CockpitAgent[]): Span[] {
   return out
 }
 
-/** One changed file's row: its added and deleted lines (`bin` for a binary file, `?` for an untracked one), then its path cut to fit. */
-export function changeSpans(c: CockpitChange, width: number): Span[] {
+/** One changed file's row: its added and deleted lines (`bin` for a binary file, `?` for an untracked one), then its path cut to fit, and `●` after it when this chat edited the file. */
+export function changeSpans(c: CockpitChange, width: number, isEdited = false): Span[] {
   const counts: Span[] = c.isUntracked
     ? [dim(padStart('?', 5)), sp(' '.repeat(6))]
     : c.isBinary
       ? [dim(padStart('bin', 5)), sp(' '.repeat(6))]
       : [sp(padStart(`+${c.added ?? 0}`, 5), COLORS.green), sp(' '), sp(padStart(`-${c.deleted ?? 0}`, 5), COLORS.red)]
-  return [...counts, sp(' '), sp(truncMiddle(c.path, Math.max(4, width - CHANGE_COUNTS_W)))]
+  const pathW = Math.max(4, width - CHANGE_COUNTS_W - (isEdited ? 2 : 0))
+  return [...counts, sp(' '), sp(truncMiddle(c.path, pathW)), ...(isEdited ? [sp(' ●', COLORS.lavender)] : [])]
+}
+
+/** One of the largest results: the tool, its short argument cut to fit, and the result's estimated tokens. */
+export function bigResultSpans(r: { tool: string; arg?: string; tokens: number }, width: number): Span[] {
+  const argW = Math.max(0, width - CALL_TOOL_W - 1 - 1 - GREW_TOKENS_W)
+  return [
+    sp(padCells(truncEnd(r.tool, CALL_TOOL_W), CALL_TOOL_W)),
+    sp(' '),
+    dim(padCells(truncEnd(r.arg ?? '', argW), argW)),
+    sp(' '),
+    sp(padStart(`+${abbrevTokens(r.tokens)}`, GREW_TOKENS_W), COLORS.yellow),
+  ]
 }
 
 /** One tool call of the main loop: how it ended, the tool, its short argument cut to fit, the time it started (none when the clock could not give it). */
@@ -528,20 +544,8 @@ function diskSpans(sys: CockpitSystem): Span[] {
   return [dim(`${ICONS.disk} `), sp(`${disk.label ? `${disk.label} ` : ''}${fmtBytes(disk.free)} ${t().diskFree}`, color)]
 }
 
-/** Where the power comes from, with its icon. */
-function powerSpans(sys: CockpitSystem): Span[] {
-  const { power } = sys
-  if (sys.off.includes('power')) return [dim(`${ICONS.battery} `), dim(t().unavailable)]
-  if (!power) return [dim(`${ICONS.battery} `), dim('…')]
-  if (power.kind === 'wired') return [sp(`${ICONS.plug} `, COLORS.green), sp(t().mains)]
-  return [
-    sp(`${power.isCharging ? ICONS.charging : ICONS.battery} `, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : power.percent <= 30 ? COLORS.yellow : undefined),
-    sp(`${Math.round(power.percent)}%${power.isCharging ? t().charging : ''}`, power.isCharging ? COLORS.green : power.percent <= 15 ? COLORS.red : undefined),
-  ]
-}
-
-/** The System tab's two rows of numbers, one item each (the pane lays an item out beside the last, wrapping where they do not fit): CPU, RAM and network; disk and power. */
-export const systemRowItems = (sys: CockpitSystem): Span[][][] => [usageItems(sys), [diskSpans(sys), powerSpans(sys)]]
+/** The System tab's two rows of numbers, one item each (the pane lays an item out beside the last, wrapping where they do not fit): CPU, RAM and network; the disk. */
+export const systemRowItems = (sys: CockpitSystem): Span[][][] => [usageItems(sys), [diskSpans(sys)]]
 
 /** A CPU share in its cell: a tenth under 10 %, whole above (`0.4%`, `12%`); empty until two reads gave one. */
 const cpuCell = (cpu: number | undefined): string => (cpu === undefined ? '' : cpu >= 10 ? `${Math.round(cpu)}%` : `${cpu.toFixed(1)}%`)
@@ -1027,16 +1031,17 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       : []
   // The files changed on the branch and not committed yet. A changed file is a Button: a press draws its diff in the second pane.
   const repo = s.repo
+  const edited = new Set((s.edited ?? []).flatMap(p => repoRelative(s.git?.root, p) ?? []))
   const changesPart: Block = repo
     ? [
         gap(),
-        title(`${S.changesTitle} · ${repo.total}`),
+        title(`${S.changesTitle} · ${repo.total}`, edited.size > 0 ? [dim(S.editedHere)] : []),
         gap(),
         repo.files.length === 0
           ? line(ui, [dim(S.noChanges)])
           : repo.files.slice(0, MAX_FILE_ROWS).map(c => (
               <Button key={`file:${c.path}`} plain onPress={() => actions.openDiff(c)}>
-                {spanNodes(ui, changeSpans(c, width))}
+                {spanNodes(ui, changeSpans(c, width, edited.has(c.path)))}
               </Button>
             )),
         repo.total > MAX_FILE_ROWS && line(ui, [dim(`… +${repo.total - MAX_FILE_ROWS}`)]),
@@ -1098,6 +1103,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           ins.usd > 0 && fact(S.rhythm.perRound, sp(fmtCost(ins.usd / ins.rounds), COLORS.yellow)),
           ins.costliest && fact(S.rhythm.costliest, sp(fmtCost(ins.costliest.usd), COLORS.yellow), dim(` · ${duration(ins.costliest.ms)}`)),
           fact(S.rhythm.compactions, sp(String(ins.compactions))),
+          (ins.compactCtx ?? []).map((c, i) => fact(i === 0 ? S.rhythm.compactCtx : '', sp(`${abbrevTokens(c.before)} → ${c.after === undefined ? '…' : abbrevTokens(c.after)}`))),
         ]
       : []
   const spent = ins && timeSplit(ins)
@@ -1124,6 +1130,17 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           lastCalls.map(c => line(ui, toolCallSpans(c, width))),
         ]
       : []
+  const biggest = ins?.biggest ?? []
+  const grewPart: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), biggest.map(r => line(ui, bigResultSpans(r, width)))] : []
+  const lastError = ins?.lastError
+  const errorPart: Block = lastError
+    ? [
+        gap(),
+        title(S.lastErrorTitle),
+        gap(),
+        line(ui, [sp('✗ ', COLORS.red), sp(padCells(truncEnd(lastError.tool, CALL_TOOL_W), CALL_TOOL_W)), sp(' '), dim(truncEnd(lastError.text, Math.max(0, width - 2 - CALL_TOOL_W - 1)))]),
+      ]
+    : []
   const shares = ins?.cacheShares ?? []
   const meanCache = shares.length > 0 ? Math.round(shares.reduce((a, b) => a + b, 0) / shares.length) : undefined
   const efficiencyPart: Block =
@@ -1148,7 +1165,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
           skillsUsed.length > MAX_SKILL_ROWS && line(ui, [dim(`… +${skillsUsed.length - MAX_SKILL_ROWS}`)]),
         ]
       : []
-  const insightsBlocks: Block[] = [rhythmPart, timePart, toolsPart, efficiencyPart, hintsPart, skillsPart, ...claimsBlock].filter(b => b.length > 0)
+  const insightsBlocks: Block[] = [rhythmPart, timePart, toolsPart, grewPart, errorPart, efficiencyPart, hintsPart, skillsPart, ...claimsBlock].filter(b => b.length > 0)
 
   // System: what the monitor child prints, drawn while the tab is selected; none yet reads as such, a part it cannot read says so. Every
   // process is listed (the pane's own window scrolls what the height cannot show), by RAM unless the CPU header was pressed; a listening

@@ -87,6 +87,7 @@ const EN = {
   noUpstream: 'no upstream',
   commitsFrom: (n: number, base: string) => `${n} ${plural(n, 'commit', 'commits')} from ${base}`,
   changesTitle: 'CHANGES',
+  editedHere: '● this chat',
   noChanges: 'no changes',
   prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   review: 'review ',
@@ -95,7 +96,9 @@ const EN = {
 
   // Insights
   rhythmTitle: 'RHYTHM',
-  rhythm: { rounds: 'rounds', perRound: 'cost / round', costliest: 'costliest', compactions: 'compactions' },
+  rhythm: { rounds: 'rounds', perRound: 'cost / round', costliest: 'costliest', compactions: 'compactions', compactCtx: 'context' },
+  grewTitle: 'WHAT GREW THE CONTEXT',
+  lastErrorTitle: 'LAST ERROR',
   timeTitle: 'TIME',
   time: { model: 'model', tools: 'tools', wait: 'permissions' },
   toolsTitle: (calls: number) => `TOOLS · ${calls} ${plural(calls, 'call', 'calls')}`,
@@ -118,8 +121,6 @@ const EN = {
   unavailable: 'unavailable',
   noChildProcess: 'no child process',
   diskFree: 'free',
-  mains: 'mains',
-  charging: ' charging',
 
   // Notes
   notesTitle: (n: number) => `NOTES · ${n}`,
@@ -208,6 +209,7 @@ const IT: Strings = {
   noUpstream: 'nessun upstream',
   commitsFrom: (n: number, base: string) => `${n} commit da ${base}`,
   changesTitle: 'MODIFICHE',
+  editedHere: '● questa chat',
   noChanges: 'nessuna modifica',
   prStates: { open: 'aperta', draft: 'bozza', merged: 'unita', closed: 'chiusa' },
   review: 'revisione ',
@@ -215,7 +217,9 @@ const IT: Strings = {
   checks: 'check ',
 
   rhythmTitle: 'RITMO',
-  rhythm: { rounds: 'giri', perRound: 'costo / giro', costliest: 'il più caro', compactions: 'compattazioni' },
+  rhythm: { rounds: 'giri', perRound: 'costo / giro', costliest: 'il più caro', compactions: 'compattazioni', compactCtx: 'contesto' },
+  grewTitle: 'COSA HA GONFIATO IL CONTESTO',
+  lastErrorTitle: 'ULTIMO ERRORE',
   timeTitle: 'TEMPO',
   time: { model: 'modello', tools: 'tool', wait: 'permessi' },
   toolsTitle: (calls: number) => `TOOL · ${calls} ${plural(calls, 'chiamata', 'chiamate')}`,
@@ -237,8 +241,6 @@ const IT: Strings = {
   unavailable: 'non disponibile',
   noChildProcess: 'nessun processo figlio',
   diskFree: 'liberi',
-  mains: 'rete',
-  charging: ' in carica',
 
   notesTitle: (n: number) => `NOTE · ${n}`,
   notePlaceholder: 'nota rapida',

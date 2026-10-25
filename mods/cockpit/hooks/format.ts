@@ -62,9 +62,6 @@ export const ICONS = {
   tree: '\u{F0CD0}', // nf-md-source_repository_multiple: a linked worktree, another checkout of the same repo
   branch: '\u{F062C}', // nf-md-source_branch
   disk: '\u{F02CA}', // nf-md-harddisk
-  battery: '\u{F0079}', // nf-md-battery
-  charging: '\u{F0084}', // nf-md-battery_charging
-  plug: '\u{F06A5}', // nf-md-power_plug
 } as const
 
 /** The folder glyph by what the folder is: a linked worktree, a repository's checkout, or a plain folder (no git). */
@@ -1311,7 +1308,7 @@ export const SYSTEM_KEEP = 30
 const PROCS_KEEP = 200
 
 /** The parts of the tab, in the order it draws them. */
-const SYSTEM_PARTS: readonly CockpitSystemPart[] = ['cpu', 'ram', 'net', 'procs', 'disk', 'power']
+const SYSTEM_PARTS: readonly CockpitSystemPart[] = ['cpu', 'ram', 'net', 'procs', 'disk']
 
 /** Bytes as `512 B`, `850 KB`, `1.2 MB`, `45 MB`, `1.2 GB` (base 1024, a decimal only under ten). */
 export function fmtBytes(n: number): string {
@@ -1341,7 +1338,7 @@ export function parseSysLine(text: string): CockpitSysLine | undefined {
     return undefined
   }
   if (!isRecord(parsed)) return undefined
-  const { cpu, ram, net, procs, disk, power, off } = parsed
+  const { cpu, ram, net, procs, disk, off } = parsed
   const out: CockpitSysLine = {}
   if (isCount(cpu)) out.cpu = Math.min(100, cpu)
   if (isRecord(ram) && isCount(ram.used) && isCount(ram.total)) out.ram = { used: ram.used, total: ram.total }
@@ -1354,10 +1351,6 @@ export function parseSysLine(text: string): CockpitSysLine | undefined {
     )
   }
   if (isRecord(disk) && isCount(disk.free) && isCount(disk.total)) out.disk = { free: disk.free, total: disk.total, ...(typeof disk.label === 'string' && { label: disk.label }) }
-  if (isRecord(power) && power.kind === 'wired') out.power = { kind: 'wired' }
-  else if (isRecord(power) && power.kind === 'battery' && isCount(power.percent) && typeof power.isCharging === 'boolean') {
-    out.power = { kind: 'battery', percent: power.percent, isCharging: power.isCharging }
-  }
   if (Array.isArray(off)) out.off = SYSTEM_PARTS.filter(part => off.includes(part))
   return out
 }
@@ -1380,14 +1373,12 @@ export function recordSystem(system: CockpitSystem | undefined, line: CockpitSys
   }
   if (line.procs) next.procs = line.procs
   if (line.disk) next.disk = line.disk
-  if (line.power) next.power = line.power
   const carried = new Set<CockpitSystemPart>([
     ...(line.cpu !== undefined ? ['cpu' as const] : []),
     ...(line.ram ? ['ram' as const] : []),
     ...(line.net ? ['net' as const] : []),
     ...(line.procs ? ['procs' as const] : []),
     ...(line.disk ? ['disk' as const] : []),
-    ...(line.power ? ['power' as const] : []),
   ])
   const off = new Set([...s.off.filter(part => !carried.has(part)), ...(line.off ?? [])])
   if (off.has('cpu')) next.cpu = []
@@ -1395,7 +1386,6 @@ export function recordSystem(system: CockpitSystem | undefined, line: CockpitSys
   if (off.has('net')) Object.assign(next, { rx: [], tx: [] })
   if (off.has('procs')) next.procs = undefined
   if (off.has('disk')) next.disk = undefined
-  if (off.has('power')) next.power = undefined
   next.off = SYSTEM_PARTS.filter(part => off.has(part))
   return next
 }
@@ -1481,18 +1471,37 @@ export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: 
   }
 }
 
-/** `ins` after a main-loop tool call ended: counted by tool (and as a failure when it did not run clean), its running time added, a successful `Read` counted by file. */
-export function recordToolCall(ins: CockpitInsights | undefined, call: { tool: string; isOk: boolean; ms: number; readPath?: string }): CockpitInsights {
+/** The largest results and the cut of an error message the insights keep. */
+const BIGGEST_KEEP = 5
+const COMPACT_CTX_KEEP = 3
+const ERROR_MAX = 200
+
+/** The tokens a tool result weighs for the model, estimated from its text (characters / 4); a result with no text is measured on its JSON. */
+export function resultTokens(ran: { text?: unknown; result?: unknown }): number {
+  const text = typeof ran.text === 'string' ? ran.text : (JSON.stringify(ran.result) ?? '')
+  return Math.ceil(text.length / 4)
+}
+
+/** `ins` after a main-loop tool call ended: counted by tool (and as a failure when it did not run clean, its message kept), its running time added, a successful `Read` counted by file, its result among the largest. */
+export function recordToolCall(
+  ins: CockpitInsights | undefined,
+  call: { tool: string; isOk: boolean; ms: number; readPath?: string; arg?: string; tokens?: number; error?: string },
+): CockpitInsights {
   const now = ins ?? emptyInsights()
   const known = now.tools[call.tool]
   const tools = known || Object.keys(now.tools).length < INSIGHT_TOOLS_KEEP ? { ...now.tools, [call.tool]: { calls: (known?.calls ?? 0) + 1, failed: (known?.failed ?? 0) + (call.isOk ? 0 : 1) } } : now.tools
   const path = call.isOk ? call.readPath : undefined
   const isReadKept = path !== undefined && (path in now.reads || Object.keys(now.reads).length < INSIGHT_READS_KEEP)
+  const error = call.error?.replace(/\s+/g, ' ').trim().slice(0, ERROR_MAX)
   return {
     ...now,
     tools,
     toolMs: now.toolMs + Math.max(0, call.ms),
     reads: isReadKept ? { ...now.reads, [path]: (now.reads[path] ?? 0) + 1 } : now.reads,
+    ...(call.tokens !== undefined && call.tokens > 0 && {
+      biggest: [...(now.biggest ?? []), { tool: call.tool, ...(call.arg !== undefined && { arg: call.arg }), tokens: call.tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, BIGGEST_KEEP),
+    }),
+    ...(!call.isOk && error !== undefined && error !== '' && { lastError: { tool: call.tool, text: error } }),
   }
 }
 
@@ -1502,10 +1511,48 @@ export const recordWait = (ins: CockpitInsights | undefined, ms: number): Cockpi
   return { ...now, waitMs: now.waitMs + Math.max(0, ms) }
 }
 
-/** `ins` with one more compaction. */
-export const recordCompaction = (ins: CockpitInsights | undefined): CockpitInsights => {
+/** `ins` with one more compaction, and the context reading it started from (none when there was no reading). */
+export const recordCompaction = (ins: CockpitInsights | undefined, before?: number): CockpitInsights => {
   const now = ins ?? emptyInsights()
-  return { ...now, compactions: now.compactions + 1 }
+  return {
+    ...now,
+    compactions: now.compactions + 1,
+    ...(before !== undefined && before > 0 && { compactCtx: [...(now.compactCtx ?? []), { before }].slice(-COMPACT_CTX_KEEP) }),
+  }
+}
+
+/** `ins` after a context reading: the last compaction still waiting for one takes it as its `after`, unless it is the very reading the compaction started from. */
+export function recordCtxAfter(ins: CockpitInsights | undefined, tokens: number | undefined): CockpitInsights | undefined {
+  const last = ins?.compactCtx?.at(-1)
+  if (!ins?.compactCtx || !last || last.after !== undefined || !tokens || tokens === last.before) return ins
+  return { ...ins, compactCtx: [...ins.compactCtx.slice(0, -1), { before: last.before, after: tokens }] }
+}
+
+const EDIT_TOOLS = ['Edit', 'Write', 'MultiEdit', 'NotebookEdit']
+export const EDITED_KEEP = 200
+
+/** The file an edit call writes, from its input (forward slashes); none for any other call. */
+export function editedPathOf(input: { readonly [key: string]: unknown }): string | undefined {
+  const path = typeof input.file_path === 'string' ? input.file_path : input.notebook_path
+  return typeof input.tool === 'string' && EDIT_TOOLS.includes(input.tool) && typeof path === 'string' && path !== '' ? path.replace(/\\/g, '/') : undefined
+}
+
+/** `list` with `path` added once; the oldest go past `EDITED_KEEP`. */
+export const recordEdited = (list: readonly string[] | undefined, path: string): string[] =>
+  list?.includes(path) ? [...list] : [...(list ?? []), path].slice(-EDITED_KEEP)
+
+/** `path` made relative to `root` (the checkout's top level), the way git lists a file; none when it lies outside. The match ignores case: Windows paths do. */
+export function repoRelative(root: string | undefined, path: string): string | undefined {
+  if (!root) return undefined
+  const base = root.replace(/\\/g, '/').replace(/\/+$/, '')
+  return path.toLowerCase().startsWith(`${base.toLowerCase()}/`) ? path.slice(base.length + 1) : undefined
+}
+
+/** The saved edited paths out of a parsed data file: the strings of the list, the newest `EDITED_KEEP`; none for anything else. */
+export function parseEdited(value: unknown): string[] | undefined {
+  if (!Array.isArray(value)) return undefined
+  const paths = value.filter((v): v is string => typeof v === 'string' && v !== '').slice(-EDITED_KEEP)
+  return paths.length > 0 ? paths : undefined
 }
 
 export const emptyInsights = (): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })

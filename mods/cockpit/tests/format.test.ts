@@ -99,7 +99,13 @@ import {
   insightHints,
   parseCommits,
   readPathOf,
+  editedPathOf,
+  parseEdited,
   recordCompaction,
+  recordCtxAfter,
+  recordEdited,
+  repoRelative,
+  resultTokens,
   recordRoundEnd,
   recordToolCall,
   recordWait,
@@ -1159,12 +1165,8 @@ test('parseSysLine: one JSON line of the monitor, narrowed field by field; a bad
       { pid: 2, name: 'dotnet', ports: [] },
     ],
   })
-  expect(parseSysLine('{"disk":{"free":10,"total":100,"label":"D:"},"power":{"kind":"battery","percent":87,"isCharging":true}}')).toEqual({
-    disk: { free: 10, total: 100, label: 'D:' },
-    power: { kind: 'battery', percent: 87, isCharging: true },
-  })
-  expect(parseSysLine('{"power":{"kind":"wired"}}')).toEqual({ power: { kind: 'wired' } })
-  expect(parseSysLine('{"power":{"kind":"solar"},"disk":{"free":1}}')).toEqual({})
+  expect(parseSysLine('{"disk":{"free":10,"total":100,"label":"D:"}}')).toEqual({ disk: { free: 10, total: 100, label: 'D:' } })
+  expect(parseSysLine('{"disk":{"free":1}}')).toEqual({})
   expect(parseSysLine('{"off":["net","bogus","procs"]}')).toEqual({ off: ['net', 'procs'] })
 })
 
@@ -1181,14 +1183,14 @@ test('recordSystem: samples go into rings of the last thirty, a part reported of
   expect(off.rx).toEqual([])
   expect(off.tx).toEqual([])
   expect(recordSystem(off, { net: { rx: 1, tx: 2 } }).off).toEqual([])
-  const slow = recordSystem(first, { procs: [{ pid: 1, name: 'node', ports: [3000] }], disk: { free: 5, total: 10 }, power: { kind: 'wired' } })
+  const slow = recordSystem(first, { procs: [{ pid: 1, name: 'node', ports: [3000] }], disk: { free: 5, total: 10 } })
   expect(slow.procs).toEqual([{ pid: 1, name: 'node', ports: [3000] }])
   expect(recordSystem(slow, { cpu: 1 }).procs).toEqual(slow.procs)
   expect(recordSystem(slow, { off: ['procs'] }).procs).toBeUndefined()
 })
 
 test('systemOff: every part marked unavailable, no samples', () => {
-  expect(systemOff()).toEqual({ cpu: [], ram: [], rx: [], tx: [], off: ['cpu', 'ram', 'net', 'procs', 'disk', 'power'] })
+  expect(systemOff()).toEqual({ cpu: [], ram: [], rx: [], tx: [], off: ['cpu', 'ram', 'net', 'procs', 'disk'] })
 })
 
 // ── v3.1 ──
@@ -1276,4 +1278,60 @@ test('parseSysLine: a process carries its CPU share and working set when they ar
       { pid: 2, name: 'x', ports: [] },
     ],
   })
+})
+
+// ── Cockpit v2 follow-ups ──
+
+test('recordToolCall: keeps the five largest results (tool, argument, tokens), biggest first, and the last failure on one line', () => {
+  let ins = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, arg: 'a.ts', tokens: 10 })
+  for (const tokens of [50, 30, 40, 20, 60]) ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0, tokens })
+  expect(ins.biggest?.map(b => b.tokens)).toEqual([60, 50, 40, 30, 20])
+  expect(ins.biggest?.[0]).toEqual({ tool: 'Grep', tokens: 60 })
+  expect(recordToolCall(undefined, { tool: 'Bash', isOk: true, ms: 0, tokens: 0 }).biggest).toBeUndefined()
+  expect(ins.lastError).toBeUndefined()
+  ins = recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 0, error: 'exit 1\n  boom   here ' })
+  expect(ins.lastError).toEqual({ tool: 'Bash', text: 'exit 1 boom here' })
+  expect(recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 0 }).lastError).toEqual(ins.lastError)
+  expect(recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 0, error: 'x'.repeat(500) }).lastError?.text).toHaveLength(200)
+})
+
+test('resultTokens: the characters of the text over four, rounded up; the JSON of the result when there is no text', () => {
+  expect(resultTokens({ text: 'x'.repeat(10) })).toBe(3)
+  expect(resultTokens({ result: { a: 'xxxx' } })).toBe(3)
+  expect(resultTokens({})).toBe(0)
+})
+
+test('recordCompaction / recordCtxAfter: the context before each compaction, the first reading after it, the last three', () => {
+  let ins = recordCompaction(undefined, 400_000)
+  expect(ins.compactCtx).toEqual([{ before: 400_000 }])
+  expect(recordCtxAfter(ins, 400_000)).toBe(ins) // the reading the compaction started from
+  expect(recordCtxAfter(ins, undefined)).toBe(ins)
+  ins = recordCtxAfter(ins, 38_000) ?? ins
+  expect(ins.compactCtx).toEqual([{ before: 400_000, after: 38_000 }])
+  expect(recordCtxAfter(ins, 90_000)).toBe(ins) // only the first one
+  for (const before of [1, 2, 3]) ins = recordCompaction(ins, before * 1000)
+  expect(ins.compactCtx?.map(c => c.before)).toEqual([1000, 2000, 3000])
+  expect(ins.compactions).toBe(4)
+  expect(recordCompaction(undefined).compactCtx).toBeUndefined()
+  expect(recordCtxAfter(undefined, 5)).toBeUndefined()
+})
+
+test('editedPathOf / recordEdited / repoRelative / parseEdited: the files an edit call writes, once each, made relative to the checkout', () => {
+  expect(editedPathOf({ tool: 'Edit', file_path: '/w/a.ts' })).toBe('/w/a.ts')
+  expect(editedPathOf({ tool: 'Write', file_path: ['', 'w', 'b.ts'].join(String.fromCharCode(92)) })).toBe('/w/b.ts')
+  expect(editedPathOf({ tool: 'MultiEdit', file_path: '/w/c.ts' })).toBe('/w/c.ts')
+  expect(editedPathOf({ tool: 'NotebookEdit', notebook_path: '/w/n.ipynb' })).toBe('/w/n.ipynb')
+  expect(editedPathOf({ tool: 'Read', file_path: '/w/a.ts' })).toBeUndefined()
+  expect(editedPathOf({ tool: 'Edit', file_path: '' })).toBeUndefined()
+  expect(recordEdited(recordEdited(undefined, '/w/a.ts'), '/w/a.ts')).toEqual(['/w/a.ts'])
+  expect(recordEdited(Array.from({ length: 200 }, (_, i) => `/f${i}`), '/new').at(-1)).toBe('/new')
+  expect(recordEdited(Array.from({ length: 200 }, (_, i) => `/f${i}`), '/new')).toHaveLength(200)
+  expect(repoRelative('/w/repo', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/w/repo/', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/W/Repo', '/w/repo/src/a.ts')).toBe('src/a.ts')
+  expect(repoRelative('/w/repo', '/w/repo2/a.ts')).toBeUndefined()
+  expect(repoRelative(undefined, '/w/repo/a.ts')).toBeUndefined()
+  expect(parseEdited(['/a', 7, '', '/b'])).toEqual(['/a', '/b'])
+  expect(parseEdited('x')).toBeUndefined()
+  expect(parseEdited([])).toBeUndefined()
 })

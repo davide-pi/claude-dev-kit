@@ -34,6 +34,7 @@ import {
   compactInstructions,
   contextOf,
   diffHunks,
+  editedPathOf,
   isAzureRemote,
   historyTokens,
   isDefaultBranch,
@@ -48,6 +49,7 @@ import {
   parseCommits,
   parseCounts,
   parseCtx,
+  parseEdited,
   parseHistory,
   parseNotes,
   parseNumstat,
@@ -59,11 +61,14 @@ import {
   readPathOf,
   recordCall,
   recordCompaction,
+  recordCtxAfter,
   recordCtxSample,
+  recordEdited,
   recordRoundEnd,
   recordRound,
   recordToolCall,
   recordWait,
+  resultTokens,
   roundCost,
   recordSystem,
   resolveAlm,
@@ -469,7 +474,7 @@ const waitOverlap = (list: readonly { from: number; to: number }[], from: number
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the saved notes, the context samples and the last measured context; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the saved notes, the context samples, the files the chat edited and the last measured context; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
 const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
@@ -482,6 +487,7 @@ const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[]
     ...(s.notes !== undefined && { notes: s.notes }),
     ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
+    ...(s.edited !== undefined && { edited: s.edited }),
     ...(ctx && { ctx }),
   }
 }
@@ -567,6 +573,7 @@ type Saved = {
   notes?: CockpitNote[]
   ctxSamples?: number[]
   ctxRounds?: number[]
+  edited?: string[]
   ctx?: { tokens: number; window: number; percent: number }
 }
 
@@ -596,6 +603,7 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       notes: parseNotes(data?.notes, data?.note),
       ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
+      edited: parseEdited(data?.edited),
       ctx: parseCtx(data?.ctx),
     }
   } catch {
@@ -626,6 +634,7 @@ const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   claudeState: undefined,
   ctxSamples: undefined,
   ctxRounds: undefined,
+  edited: undefined,
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
   lastCtx: undefined,
@@ -652,7 +661,7 @@ async function adoptSession($: EngineInterface, isStart = false): Promise<void> 
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
   )
   // The monitor looked for the pid of the session it was started for: another one's gets its own, if the tab is still wanted.
   stopMonitor()
@@ -813,6 +822,7 @@ async function refreshUsage($: EngineInterface): Promise<void> {
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
+      insights: recordCtxAfter(s.insights, u.context.tokens),
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
     }))
@@ -1096,6 +1106,12 @@ function bashOutput(ran: { result?: unknown; text?: string }): string {
   return typeof result === 'object' && result !== null && 'stdout' in result && typeof result.stdout === 'string' ? result.stdout : (ran.text ?? '')
 }
 
+/** An edit call that ran clean adds its file to the ones this chat edited (a subagent's edit too), for the Work tab's marker. */
+async function noteEdit($: EngineInterface, input: { readonly [key: string]: unknown }, ran: { deny?: string; isError?: boolean }): Promise<void> {
+  const path = editedPathOf(input)
+  if (path !== undefined && isOk(ran)) await patch($, s => ({ ...s, edited: recordEdited(s.edited, path) })).catch(() => undefined)
+}
+
 /** A TaskUpdate result that says it did not apply (`success: false`), narrowed from `unknown`. */
 function isRefused(result: unknown): boolean {
   return typeof result === 'object' && result !== null && 'success' in result && result.success === false
@@ -1312,6 +1328,7 @@ export const register: Register = on => {
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
       lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
+      insights: recordCtxAfter(s.insights, e.context.tokens),
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
     }))
@@ -1447,7 +1464,9 @@ export const register: Register = on => {
         // observing must never break the call
       }
       try {
-        return await next(e)
+        const ran = await next(e)
+        await noteEdit($, e, ran)
+        return ran
       } finally {
         await forAgent(a => ({ ...a, activeTools: removeOne(a.activeTools, tool) })).catch(() => undefined)
       }
@@ -1457,9 +1476,12 @@ export const register: Register = on => {
     // A clock that fails leaves the call without a time: the row draws none, and the call adds no running time.
     const at = await $.clock.now().catch(() => undefined)
     let isSuccess = false
+    let outcome: { tokens: number; error?: string } | undefined
     try {
       const ran = await next(e)
       isSuccess = isOk(ran)
+      await noteEdit($, e, ran)
+      outcome = { tokens: resultTokens(ran), error: ran.deny ?? ran.text }
       return ran
     } finally {
       mainTools = removeOne(mainTools, tool) ?? []
@@ -1469,7 +1491,7 @@ export const register: Register = on => {
       await patch($, s => ({
         ...s,
         calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }),
-        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e) }),
+        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
       })).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
@@ -1506,7 +1528,7 @@ export const register: Register = on => {
     }
   })
   on('classic.PostCompact', async ($, e, next) => {
-    if (e.agent_id === undefined) await patch($, s => ({ ...s, insights: recordCompaction(s.insights) })).catch(() => undefined)
+    if (e.agent_id === undefined) await patch($, s => ({ ...s, insights: recordCompaction(s.insights, s.ctx.tokens) })).catch(() => undefined)
     return next(e)
   })
   on('classic.Notification', async ($, e, next) => {
