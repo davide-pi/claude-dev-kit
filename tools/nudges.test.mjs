@@ -58,7 +58,7 @@ test('UserPromptSubmit: the context nudge speaks once per band', () => {
   snapshot(config, 'sess-1', 210_000);
   const out = prompt(config);
   assert.equal(out.hookEventName, 'UserPromptSubmit');
-  assert.match(out.additionalContext, /^Contesto a 210k token/);
+  assert.match(out.additionalContext, /^Context at 210k tokens/);
   assert.equal(prompt(config), null, 'same band: already said');
 });
 
@@ -79,7 +79,7 @@ test('PostToolUse: the third edit nudges towards the implementer, never the cont
   const third = edit(config);
   assert.equal(third.hookEventName, 'PostToolUse');
   assert.match(third.additionalContext, /\bimplementer\b/);
-  assert.doesNotMatch(third.additionalContext, /Contesto/);
+  assert.doesNotMatch(third.additionalContext, /Context at/);
 });
 
 test('PostToolUse: the formatter runs in the same process as the nudges', () => {
@@ -137,5 +137,5 @@ test('an older settings.json that requires a nudge directly still gets its outpu
   assert.match(viaRequire(config, 'edit-nudge.js', edit).additionalContext, /\bimplementer\b/);
   snapshot(config, 'sess-2', 210_000);
   const out = viaRequire(config, 'context-nudge.js', { session_id: 'sess-2', hook_event_name: 'UserPromptSubmit', prompt: 'x' });
-  assert.match(out.additionalContext, /^Contesto a 210k token/);
+  assert.match(out.additionalContext, /^Context at 210k tokens/);
 });

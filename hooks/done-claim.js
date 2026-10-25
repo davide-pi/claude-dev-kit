@@ -158,7 +158,7 @@ function perimeterOpen(cwd) {
 function blockOpenPerimeter(payload, rows, message) {
   if (!rows.length || !perimeterOpen(payload.cwd)) return;
   log(payload, 'perimeter-open', 'verdict', message);
-  process.stdout.write(JSON.stringify({ decision: 'block', reason: 'chiudi il perimetro con -FindingsLog prima del verdetto (perimeter.ps1 -Close -FindingsLog <json>, oppure -NoFindings se il loop non è girato), poi riscrivi il verdetto.' }));
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));
   process.exit(0);
 }
 
@@ -327,8 +327,8 @@ try {
       log(payload, 'tail-cut', unproven[0].state, message);
       process.stdout.write(JSON.stringify({
         decision: 'block',
-        reason: 'Il turno è troppo lungo per verificare le righe del verdetto contro l\'output dei comandi. '
-          + 'Riscrivi il verdetto come tabella "Livello | Comando | Riga che decide | Stato" con l\'output di comandi eseguiti ora, oppure scrivi "non verificato: <motivo>" nello Stato di ogni riga.',
+        reason: 'The turn is too long to check the verdict rows against the command output. '
+          + 'Rewrite the verdict as a "Livello | Comando | Riga che decide | Stato" table with the output of commands run now, or write "non verificato: <motivo>" in the Stato of each row.',
       }));
       process.exit(0);
     }
@@ -336,8 +336,8 @@ try {
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',
-      reason: `${unproven.length} righe del verdetto dicono "${unproven[0].state}" ma la riga che decide non compare in nessun output del turno: ${shown}. `
-        + 'Cita l\'output vero del comando (rieseguilo se non l\'hai visto), oppure scrivi "non verificato: <motivo>" nello Stato di quella riga.',
+      reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
+        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" in the Stato of that row.',
     }));
     process.exit(0);
   }
@@ -352,9 +352,9 @@ try {
   log(payload, 'claim-without-evidence', word, message);
   process.stdout.write(JSON.stringify({
     decision: 'block',
-    reason: `Dichiari un esito ("${word}") senza prova. Metti il comando eseguito e la riga di output che lo `
-      + 'conferma nella tabella "Livello | Comando | Riga che decide | Stato" (tabella markdown semplice, mai in un blocco di codice), '
-      + 'oppure scrivi "non verificato" e perché. Non rieseguire nulla se l\'output è già sopra: citalo nella tabella.',
+    reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
+      + 'confirms it in the "Livello | Comando | Riga che decide | Stato" table (a plain markdown table, never in a code block), '
+      + 'or write "non verificato" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
 } catch {

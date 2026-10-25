@@ -293,7 +293,7 @@ test('3 runs since the last retro add the /retro line; 0 or 2 add nothing', () =
   findingsLog(root, [runLine(), runLine()]);
   assert.equal(runsOf(run(root)).length, 0);
   findingsLog(root, [runLine(), runLine(), { run: 'r3' }]);
-  assert.deepEqual(runsOf(run(root)), ["`/retro`: 3 run nuovi dall'ultima revisione del flow."]);
+  assert.deepEqual(runsOf(run(root)), ["`/retro`: 3 new runs since the last flow review."]);
 });
 
 test('a retro marker resets the run count and malformed lines are not runs', () => {
@@ -301,7 +301,7 @@ test('a retro marker resets the run count and malformed lines are not runs', () 
   findingsLog(root, [runLine(), runLine(), runLine(), { retro: '2026-10-21' }, runLine(), 'not json', '{"other": 1}', '[1]', runLine()]);
   assert.equal(runsOf(run(root)).length, 0);
   findingsLog(root, [runLine(), { retro: '2026-10-21' }, runLine(), runLine(), 'not json', runLine(), runLine()]);
-  assert.match(runsOf(run(root))[0], /: 4 run nuovi/);
+  assert.match(runsOf(run(root))[0], /: 4 new runs/);
 });
 
 test('the run line is never dropped: it follows a full four-line brief', () => {
@@ -318,5 +318,5 @@ test('beside a findings-log line the count is appended to that line, not a line 
   const lines = run(root);
   assert.equal(lines.length, 5);
   assert.equal(runsOf(lines).length, 0);
-  assert.match(nudgeOf(lines)[0], /; \/retro: 3 run nuovi$/);
+  assert.match(nudgeOf(lines)[0], /; \/retro: 3 new runs$/);
 });

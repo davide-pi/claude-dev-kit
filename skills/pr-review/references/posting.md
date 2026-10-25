@@ -21,7 +21,7 @@ Whatever carries the call, one thread per question, and the payload always needs
 
 Also true here:
 
-- **Threads cannot be deleted.** A wrong comment can be closed (by-design / won't-fix) but not
+- **Threads cannot be deleted.** A wrong comment can be closed (by-design / wontFix) but not
   removed: tell the user it needs the web UI or a REST delete if they want it gone.
 - Replying to an existing thread and resolving one are the same capability as creating: same route,
   same fallback.

@@ -107,12 +107,12 @@ function run(payload) {
   if (!perimeter || perimeter.entries.some((e) => entryRegex(e).test(rel))) return null;
 
   const what = payload.agent_id
-    ? 'annotalo sotto Noticed e non toccarlo: un subagent non chiede all\'utente.'
-    : 'annotalo come proposta e chiedi all\'utente prima di tenere la modifica.';
+    ? 'note it under Noticed and leave it alone: a subagent does not ask the user.'
+    : 'note it as a proposal and ask the user before keeping the change.';
   return {
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
-      additionalContext: `Fuori perimetro: \`${rel}\` non è nel perimetro attivo (branch \`${perimeter.branch}\`); ${what}`,
+      additionalContext: `Out of perimeter: \`${rel}\` is not in the active perimeter (branch \`${perimeter.branch}\`); ${what}`,
     },
   };
 }

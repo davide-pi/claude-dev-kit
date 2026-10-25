@@ -241,20 +241,20 @@ function list(items, fmt) {
   return items.slice(0, MAX_LISTED).map(fmt).join(', ') + rest;
 }
 
-const days = (n) => `${n} giorn${n === 1 ? 'o' : 'i'}`;
+const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
 
 /** One line, naming the days and where they were spent, because a bare count invites postponing. */
 function line({ pending, underTarget }) {
   const parts = [];
   if (pending.length) {
-    parts.push(`Ore non registrate su ${days(pending.length)}: `
-      + `${list(pending, (p) => `${p.date} (${label(p.workspaces)})`)} — chiudili con /worklog <data>.`);
+    parts.push(`Unlogged hours on ${days(pending.length)}: `
+      + `${list(pending, (p) => `${p.date} (${label(p.workspaces)})`)} — close them with /worklog <date>.`);
   }
   if (underTarget.length) {
-    parts.push(`Sotto target su ${days(underTarget.length)}: `
-      + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — completali con /worklog <data>.`);
+    parts.push(`Under target on ${days(underTarget.length)}: `
+      + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — complete them with /worklog <date>.`);
   }
-  return `⏱ ${parts.join(' ')} Le ore le scrive solo /worklog.`;
+  return `⏱ ${parts.join(' ')} Only /worklog writes hours.`;
 }
 
 const snapshot = compute();

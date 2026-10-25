@@ -57,7 +57,7 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
   assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
-  assert.match(reason, /mai in un blocco/);
+  assert.match(reason, /never in a code block/);
   assert.doesNotMatch(reason, /in un blocco ```/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(log.length, 1);
@@ -366,7 +366,7 @@ test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table 
   const filler = Array.from({ length: 90 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 9 MB
   const claim = say(verdict(row('Passed: 48, Failed: 0')));
   const { reason, dir } = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
-  assert.match(reason, /troppo lungo/);
+  assert.match(reason, /too long/);
   assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n')[0]).rule, 'tail-cut');
   // a row whose proof is in the part read is still proven
@@ -403,7 +403,7 @@ test('a proven verdict table is sent back once while the perimeter is still acti
   const repo = repoWithPerimeter('active');
   const final = verdict(row('Passed: 48'));
   const { reason, dir } = stop(edited(final, 'Passed: 48'), { extra: { cwd: repo } });
-  assert.match(reason, /chiudi il perimetro con -FindingsLog/);
+  assert.match(reason, /Close the perimeter with -FindingsLog/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim()).rule, 'perimeter-open');
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
 });
@@ -420,5 +420,5 @@ test('a closed perimeter, another branch, no cwd or no verdict table: silent', (
 
 test('a verdict of only "non verificato" rows still asks to close an active perimeter', () => {
   const final = `${head}\n${row('-', 'non verificato: serve staging')}`;
-  assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /chiudi il perimetro/);
+  assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /Close the perimeter/);
 });

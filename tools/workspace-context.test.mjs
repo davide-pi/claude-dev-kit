@@ -74,7 +74,7 @@ test('mapped root → ALM line with org, project, identity; env file pinned', ()
   const { context, envFile } = run(box, 'D:\\work\\product\\repo-a\\src');
   assert.match(context, /^ALM: Azure DevOps · org org-a · project Product · az identity work /);
   assert.match(context, /AZ_IDENTITY/);
-  assert.match(context, /az fuori dalla allow list.*anteponi/, 'the manual prefix is for the az the guard does not pin');
+  assert.match(context, /az outside the allow list.*prefix/, 'the manual prefix is for the az the guard does not pin');
   assert.doesNotMatch(context, /ad az/, 'not "every az command": the guard pins the allowed ones');
   assert.match(envFile, /^export AZURE_CONFIG_DIR='.*\/\.azure-work'\nexport AZ_IDENTITY=work\n$/);
   assert.doesNotMatch(envFile, /\\/);
@@ -105,18 +105,18 @@ test('per-subfolder root: listed subfolder → its project, case-insensitive', (
 
 test('per-subfolder root: unlisted subfolder → resolve against the org, else ask', () => {
   const { context } = run(sandbox(), 'D:\\work\\clients\\globex');
-  assert.match(context, /project da risolvere: sottocartella "globex"/);
-  assert.match(context, /chiedi/);
+  assert.match(context, /project to resolve: subfolder "globex"/);
+  assert.match(context, /ask/);
 });
 
 test('per-subfolder root itself → ask', () => {
   const { context } = run(sandbox(), 'D:\\work\\clients');
-  assert.match(context, /project: chiedi/);
+  assert.match(context, /project: ask/);
 });
 
 test('project "ask" → ask', () => {
   const { context } = run(sandbox(), 'D:\\work\\open\\x');
-  assert.match(context, /project: chiedi/);
+  assert.match(context, /project: ask/);
 });
 
 test('github root → GitHub line with the note, no project, no env', () => {
@@ -134,13 +134,13 @@ test('nested root wins over its parent (longest path)', () => {
 
 test('a sibling sharing the prefix is not a match', () => {
   const { context } = run(sandbox(), 'D:\\work\\productive');
-  assert.equal(context, 'ALM: non mappato — chiedi');
+  assert.equal(context, 'ALM: unmapped — ask');
 });
 
-test('unmapped cwd with a map → non mappato, nothing pinned', () => {
+test('unmapped cwd with a map → unmapped, nothing pinned', () => {
   const box = sandbox();
   const { context, envFile } = run(box, 'E:\\elsewhere');
-  assert.equal(context, 'ALM: non mappato — chiedi');
+  assert.equal(context, 'ALM: unmapped — ask');
   assert.equal(envFile, '');
 });
 

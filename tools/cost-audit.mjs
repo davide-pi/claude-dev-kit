@@ -40,12 +40,12 @@ const THRESHOLDS = [200_000, 300_000];
 /** Text a hook's injected line starts with → the hook that wrote it. Anything else is named by event. */
 const HOOK_MARKERS = [
   [/^⏱/, 'worklog-pending'],
-  [/^Contesto (?:a|al) /, 'context-nudge'],
-  [/^Terzo edit/, 'edit-nudge'],
+  [/^(?:Contesto (?:a|al)|Context at) /, 'context-nudge'],
+  [/^(?:Terzo|Third) edit/, 'edit-nudge'],
   [/^ALM:/, 'workspace-context'],
   [/^branch /, 'session-brief'],
   [/^detached HEAD at /, 'session-brief'],
-  [/^Fuori perimetro/, 'scope-guard'],
+  [/^(?:Fuori perimetro|Out of perimeter)/, 'scope-guard'],
 ];
 const MAX_TRANSCRIPT_BYTES = 256 * 1024 * 1024;
 

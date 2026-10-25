@@ -311,7 +311,7 @@ function findingsNudge({ findings }) {
 /** The findings line with the run count appended, or the run line alone, or the findings line unchanged. */
 function withRuns(nudge, { runs }) {
   if (runs < RETRO_RUNS) return nudge;
-  return nudge ? `${nudge}; /retro: ${runs} run nuovi` : `\`/retro\`: ${runs} run nuovi dall'ultima revisione del flow.`;
+  return nudge ? `${nudge}; /retro: ${runs} new runs` : `\`/retro\`: ${runs} new runs since the last flow review.`;
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────

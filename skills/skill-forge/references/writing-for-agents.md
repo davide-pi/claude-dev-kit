@@ -71,8 +71,8 @@ that is fast, deterministic, low-overhead), *blast radius*, *seam*.
 
 ## Positive phrasing
 
-A prohibition drags the forbidden behaviour into context and makes it *more* available ("don't think
-of an elephant"). State the target behaviour instead: "write one-line comments", not "don't write
+A prohibition drags the forbidden behaviour into context and makes it *more* available ("do not think
+of an elephant"). State the target behaviour instead: "write one-line comments", not "do not write
 long comments". A prohibition earns its place only as a hard guardrail with no positive form — the
 `never` of a contract line — and even then pair it with the positive target.
 

@@ -92,8 +92,8 @@ function run(payload) {
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
       additionalContext:
-        `Terzo edit in questo turno: se lo scope è deciso, delega a \`implementer\` e rivedi il suo diff `
-        + 'invece di scrivere il codice qui.',
+        `Third edit this turn: if the scope is decided, delegate to \`implementer\` and review its diff `
+        + 'instead of writing the code here.',
     },
   };
 }

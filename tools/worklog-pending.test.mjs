@@ -87,7 +87,7 @@ test('a worked day under a root, with no audit → named in the reminder', { ski
 
 test('the reminder stays short and keeps the one instruction: hours are written only via /worklog', { skip }, () => {
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
-  assert.match(out, /Le ore le scrive solo \/worklog\.$/);
+  assert.match(out, /Only \/worklog writes hours\.$/);
   assert.ok(out.length < 200, `${out.length} chars`);
 });
 
@@ -133,8 +133,8 @@ const logged = (hours) => [{ periodFrom: iso(DAY), periodTo: iso(DAY), itemId: 1
 
 test('a logged day more than an hour short of 8h → named as under target, with its hours', { skip }, () => {
   const out = run(config({ audit: logged(2) }), { CLAUDE_WORKSPACE_ROOTS: ROOT });
-  assert.ok(out.includes(`Sotto target su 1 giorno: ${iso(DAY)} (2/8h)`), out);
-  assert.doesNotMatch(out, /Ore non registrate/);
+  assert.ok(out.includes(`Under target on 1 day: ${iso(DAY)} (2/8h)`), out);
+  assert.doesNotMatch(out, /Unlogged hours/);
 });
 
 test('exactly an hour short is close enough → silent', { skip }, () => {

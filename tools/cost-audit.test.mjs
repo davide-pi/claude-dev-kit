@@ -46,7 +46,7 @@ function fixture() {
   const write = (file, entries) => writeFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
   write(join(project, 'sess-1.jsonl'), [
     hook(1, 'SessionStart', '⏱ Ore non registrate su 1 giorno: 2026-10-01 (x) — chiudili con /worklog <data>.'),
-    hook(1, 'UserPromptSubmit', 'Contesto a 210k token. A fine risposta, una riga.'),
+    hook(1, 'UserPromptSubmit', 'Context at 210k tokens. At the end of the reply, one line.'),
     hook(1, 'SessionStart', 'something unrecognised'),
     turn('m1', 1, { input: 2, create: 40_000, read: 10_000 }, [use('t1', 'Skill', { skill: 'commit' })]),
     // the same message written again for its second content block: counted once

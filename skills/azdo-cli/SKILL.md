@@ -27,7 +27,7 @@ should say (`user-story-standard`).
 
 Org, project and az identity come from the session's `ALM:` line (written at start by the
 `workspace-context.js` hook from the local `workspaces.json`). Pass `--org` and `-p` on **every**
-command. No line, `non mappato`, or a directory added later → **ask**; never let `--detect` or the
+command. No line, `unmapped`, or a directory added later → **ask**; never let `--detect` or the
 machine default fill the hole — it may still point at the previous client. `-p` does not scope a
 query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
 

@@ -67,10 +67,10 @@ function run(payload) {
   let level;                                     // how the context is named in the message
   if (Number.isFinite(tokens)) {
     band = bandOf(tokens, steps);
-    level = `Contesto a ${Math.round(tokens / 1000)}k token`;
+    level = `Context at ${Math.round(tokens / 1000)}k tokens`;
   } else if (Number.isFinite(pct) && !(snapshot.window > PERCENT_FALLBACK_MAX_WINDOW)) {
     band = bandOf(pct, PERCENT_BANDS);
-    level = `Contesto al ${Math.round(pct)} %`;
+    level = `Context at ${Math.round(pct)} %`;
   } else {
     return null;
   }
@@ -87,8 +87,8 @@ function run(payload) {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext:
-        `${level}. A fine risposta, una riga all'utente: `
-        + '`/compact <focus>` (proponi tu il focus del task in corso) oppure `/clear` prima di un argomento nuovo.',
+        `${level}. At the end of the reply, one line to the user: `
+        + '`/compact <focus>` (you propose the focus of the task in progress) or `/clear` before a new topic.',
     },
   };
 }
