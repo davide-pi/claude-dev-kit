@@ -129,9 +129,18 @@ test('notes: delete removes the note; deleting the one in the field leaves the n
   await saveNote(ui, 'two')
   await ui.press({ key: 'note:delete:1' })
   await settleAll()
+  expect(await noteKeys(ui, 'delete')).toEqual(['note:delete:1', 'note:delete:2']) // asked, not yet gone
+  await ui.press({ key: 'confirm:no' })
+  await settleAll()
+  expect(await ui.find({ key: 'confirm:yes' })).toBeUndefined()
+  expect(await noteKeys(ui, 'delete')).toEqual(['note:delete:1', 'note:delete:2'])
+  await ui.press({ key: 'note:delete:1' })
+  await ui.press({ key: 'confirm:yes' })
+  await settleAll()
   expect(await noteKeys(ui, 'delete')).toEqual(['note:delete:2'])
   await ui.press({ key: 'note:edit:2' })
   await ui.press({ key: 'note:delete:2' })
+  await ui.press({ key: 'confirm:yes' })
   await settleAll()
   expect(await noteKeys(ui, 'delete')).toEqual([])
   expect(rowTexts(await ui.drawn())).toContain('no saved notes')
@@ -182,7 +191,7 @@ test('notes: a note shows its first 3 lines and `▸ +N lines`; a press opens th
   await ui.unmount()
 })
 
-test('notes: the lines of a note are cut to the pane width, never wrapped, and the italian label reads righe', async ($, on) => {
+test('notes: the lines of a note wrap by display width (a Text that does not truncate), and the italian label reads righe', async ($, on) => {
   const long = 'a very long line of a note that cannot fit in a narrow pane of the cockpit at all'
   const options: World = { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: `${long}\n${long}\nshort\nmore` }] }) }
   world(on, options)
@@ -191,14 +200,85 @@ test('notes: the lines of a note are cut to the pane width, never wrapped, and t
       options.files = files
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
       const ui = await notesPane($, 40)
-      // each long line is one Text that truncates (its span inside it has no wrap of its own)
-      expect((await ui.findAll({ type: 'Text', text: long })).filter(n => n.props.wrap === 'truncate')).toHaveLength(2)
+      const longs = await ui.findAll({ type: 'Text', text: long })
+      expect(longs.filter(n => n.props.wrap === 'wrap')).toHaveLength(2)
+      expect(longs.filter(n => n.props.wrap === 'truncate')).toHaveLength(0)
       expect((await ui.find({ key: 'note:more:1' }))?.text).toBe(files === IT_FILE ? '▸ +1 riga' : '▸ +1 line')
       await ui.unmount()
     }
   } finally {
     setLang('en')
   }
+})
+
+// ── Multi-line notes ──
+
+test('notes: the field is the engine\'s multi-line Input (rows, Enter submits, a newline is typed as in the prompt box)', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  const input = await ui.find({ type: 'Input', key: 'note' })
+  expect(Number(input?.props.rows)).toBeGreaterThan(1)
+  await ui.unmount()
+})
+
+test('notes: a paste keeps its lines; CRLF and CR become LF; empty lines and indentation survive; the saved text is the exact string', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, sessionId: () => 's-1' })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await saveNote(ui, 'a\r\n\r\n    indented\rlast\n\n')
+  await ui.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'a\n\n    indented\nlast\n\n' }] })
+})
+
+test('notes: edit then save without a change gives back the identical string; send inserts it exactly', async ($, on) => {
+  const text = '  one\n\n\ttwo  \n日本語 😀\nend\n'
+  const fills: { text: string; mode?: string }[] = []
+  const writes = new Map<string, string>()
+  world(on, { fills, writes, sessionId: () => 's-1', dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 3, text }] }) })
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await ui.press({ key: 'note:send:3' })
+  await settleAll()
+  expect(fills).toEqual([{ text, mode: 'append' }])
+  await ui.press({ key: 'note:edit:3' })
+  await settleAll()
+  const value = (await ui.find({ type: 'Input', key: 'note' }))?.props.value
+  expect(value).toBe(text)
+  await ui.press({ key: 'note:save' })
+  await settleAll()
+  await ui.unmount()
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 3, text }] })
+})
+
+test('notes: a long note is collapsed with a toggle; blank lines and indentation are drawn as written', async ($, on) => {
+  const lines = ['l1', '', '  l3', 'l4', 'l5', 'l6', 'l7', 'l8']
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: lines.join('\n') }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  const texts = async () => (await ui.findAll({ type: 'Text' })).map(n => n.text)
+  expect(await texts()).not.toContain('l8')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('▸ +5 lines')
+  await ui.press({ key: 'note:more:1' })
+  await settleAll()
+  expect(await texts()).toContain('  l3')
+  expect(await texts()).toContain('l8')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('▾ −5 lines')
+  await ui.unmount()
+})
+
+test('notes: a whitespace-only field saves nothing, newlines included', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await saveNote(ui, ' \n\r\n\t\n')
+  expect(await noteKeys(ui, 'send')).toEqual([])
+  await ui.unmount()
 })
 
 test('scoping: the notes of a session are not the next one\'s, and stay in the first one\'s data file', async ($, on) => {

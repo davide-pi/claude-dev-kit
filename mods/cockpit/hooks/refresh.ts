@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { CockpitAgent, CockpitHistoryEntry } from '../types'
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
-import { recordCtxAfter } from './insights'
+import { withContextReading } from './insights'
 import { refreshProcs } from './procs'
 import { isStalled } from './signals'
 import { recordEvent } from './timeline'
@@ -113,7 +113,7 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
-      insights: recordCtxAfter(s.insights, u.context.tokens),
+      ...withContextReading(s, u.context.tokens, now),
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
     }))

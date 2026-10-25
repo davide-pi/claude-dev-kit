@@ -7,6 +7,7 @@ import {
   headerOf,
   launchWorkflow,
   loadSkill,
+  measureWith,
   mountPane,
   openCockpit,
   paneRows,
@@ -215,4 +216,43 @@ test('Lavoro: the work item of the branch is a link to it (AB# in the branch nam
   expect(rows.some(r => /^AB#512/.test(r))).toBe(true)
   expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toContain('https://dev.azure.com/org-a/Alpha/_workitems/edit/512')
   await ui.unmount()
+})
+
+// ── Compactions read from the context drop (the harness skips session.compact for this mod) ──
+
+const measureTokens = ($: Parameters<typeof measureWith>[0], tokens: number) =>
+  $.session.measure({ context: { window: 1_000_000, tokens, percent: Math.round(tokens / 10_000) }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+
+test('Cronologia: a context drop of more than 40 % and 50k tokens is one compaction, with session.compact never dispatched', async ($, on) => {
+  world(on)
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await measureTokens($, 400_000)
+  await settleAll()
+  await measureTokens($, 420_000)
+  await measureTokens($, 380_000) // a small dip: not a compaction
+  await settleAll()
+  expect((await paneRows($, 58, 'history')).rows.some(r => /compattazione/.test(r))).toBe(false)
+  await measureTokens($, 40_000)
+  await settleAll()
+  await measureTokens($, 45_000) // growing again: still the same single compaction
+  await settleAll()
+  const rows = (await paneRows($, 58, 'history')).rows
+  expect(rows.filter(r => /compattazione/.test(r))).toHaveLength(1)
+  await measureTokens($, 60_000) // a drop under 50k tokens is no compaction
+  await measureTokens($, 20_000)
+  await settleAll()
+  expect((await paneRows($, 58, 'history')).rows.filter(r => /compattazione/.test(r))).toHaveLength(1)
+})
+
+test('Cronologia: a compaction the engine event recorded and the drop that follows it count once', async ($, on) => {
+  world(on, { compacts: true })
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await measureTokens($, 400_000)
+  await settleAll()
+  await $.session.compact({ messages: [{ role: 'user', text: 'x', toolUses: [] }], instructions: 'keep', trigger: 'manual' })
+  await measureTokens($, 40_000)
+  await settleAll()
+  expect((await paneRows($, 58, 'history')).rows.filter(r => /compattazione/.test(r))).toHaveLength(1)
 })

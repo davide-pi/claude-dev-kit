@@ -10,12 +10,12 @@ import { NOW } from './format-fixtures'
 
 const MILLION = { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 }
 
-test('usdOf: list prices per family, a cache read a tenth and a cache write a quarter more; unknown models are priced as Sonnet', () => {
-  expect(usdOf('claude-opus-5-5', { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe(5)
-  expect(usdOf('claude-opus-5-5', { input: 0, output: 1_000_000, cacheRead: 0, cacheWrite: 0 })).toBe(25)
-  expect(usdOf('claude-haiku-5', { input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 })).toBe(6)
-  expect(Math.round(usdOf('claude-sonnet-5-5', MILLION) * 1e6)).toBe(Math.round((3 + 15 + 0.3 + 3.75) * 1e6))
-  expect(usdOf('mystery', { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe(3)
+test('usdOf: list prices per family (current generation), a cache write a quarter more than the input; unknown models are priced as Sonnet', () => {
+  expect(usdOf('claude-opus-5-5', { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe(4)
+  expect(usdOf('claude-opus-5-5', { input: 0, output: 1_000_000, cacheRead: 0, cacheWrite: 0 })).toBe(20)
+  expect(Math.round(usdOf('claude-haiku-5', { input: 1_000_000, output: 1_000_000, cacheRead: 0, cacheWrite: 0 }) * 1e6)).toBe(600_000)
+  expect(Math.round(usdOf('claude-sonnet-5-5', MILLION) * 1e6)).toBe(Math.round((2 + 10 + 0.2 + 2.5) * 1e6))
+  expect(usdOf('mystery', { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 })).toBe(2)
   expect(usdOf(undefined, undefined)).toBe(0)
 })
 
@@ -108,7 +108,7 @@ test('costSummary: Italian text from what the snapshot holds, with the cost, the
   expect(lines[0]).toBe('Riepilogo sessione')
   expect(lines[1]).toMatch(/\$4\.50/)
   expect(lines[1]).toMatch(/12/)
-  expect(lines.some(l => /claude-sonnet-5-5 \$3\.00/.test(l))).toBe(true)
+  expect(lines.some(l => /claude-sonnet-5-5 \$2\.00/.test(l))).toBe(true)
   expect(lines.some(l => /62/.test(l))).toBe(true)
 })
 

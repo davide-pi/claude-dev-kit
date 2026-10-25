@@ -26,7 +26,7 @@ import {
   readPathOf,
   recordCall,
   recordCompaction,
-  recordCtxAfter,
+  withContextReading,
   recordRoundEnd,
   recordToolCall,
   recordWait,
@@ -51,7 +51,7 @@ import { cacheHit, usdOf } from './pricing'
 import { refreshProcs } from './procs'
 import { openContext, pressRefresh, scheduleContextRead } from './refresh-context'
 import { refreshGit, refreshRepo, showDiff } from './refresh-git'
-import { NOTE_MAX } from './session'
+import { NOTE_MAX, normalizeNewlines } from './session'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
@@ -125,6 +125,13 @@ const paneActions = ($: EngineInterface): PaneActions => ({
         if (!isYes) return
         if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
         if (asked === 'suite') await $.command.run({ command: 'retro' })
+        if (typeof asked === 'string' && asked.startsWith('note:')) {
+          const id = Number(asked.slice(5))
+          await patch($, x => {
+            const notes = (x.notes ?? []).filter(n => n.id !== id)
+            return { ...x, notes: notes.length > 0 ? notes : undefined, noteEditing: x.noteEditing === id ? undefined : x.noteEditing }
+          })
+        }
       })
       .catch(() => undefined),
   copySummary: () =>
@@ -142,7 +149,7 @@ const paneActions = ($: EngineInterface): PaneActions => ({
   refresh: () => void pressRefresh($).catch(() => undefined),
   toggleUsage: id => void patch($, s => ({ ...s, usageOpen: toggled(s.usageOpen, id) })).catch(() => undefined),
   toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
-  setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : text.slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
+  setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
   saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
   editNote: id =>
     void patch($, s => {
@@ -150,11 +157,7 @@ const paneActions = ($: EngineInterface): PaneActions => ({
       return note ? { ...s, noteDraft: note.text, noteEditing: id } : s
     }).catch(() => undefined),
   sendNote: id => void sendNote($, id).catch(() => undefined),
-  deleteNote: id =>
-    void patch($, s => {
-      const notes = (s.notes ?? []).filter(n => n.id !== id)
-      return { ...s, notes: notes.length > 0 ? notes : undefined, noteEditing: s.noteEditing === id ? undefined : s.noteEditing }
-    }).catch(() => undefined),
+  deleteNote: id => void patch($, s => ({ ...s, confirm: `note:${id}` })).catch(() => undefined),
 })
 
 /**
@@ -288,7 +291,7 @@ export const register: Register = on => {
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
       lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
-      insights: recordCtxAfter(s.insights, e.context.tokens),
+      ...withContextReading(s, e.context.tokens, now),
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
     }))

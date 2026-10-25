@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { CockpitAgent, CockpitClaudeState, CockpitSnapshot, CockpitTask, CockpitUsage } from '../types'
 import { addUsage, newTokens } from './agents'
-import { NOTE_MAX } from './session'
+import { NOTE_MAX, normalizeNewlines } from './session'
 import { adoptSession, writeState } from './session-data'
 import { INITIAL } from './state'
 import { patch } from './store'
@@ -134,7 +134,7 @@ export function toggled<T>(list: readonly T[] | undefined, item: T): T[] | undef
  * or, when the field was loaded from a note (`noteEditing`) that is still there, that note's text replaced. The field is emptied; a blank text changes nothing.
  */
 export function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
-  const text = (typed ?? s.noteDraft ?? '').slice(0, NOTE_MAX)
+  const text = normalizeNewlines(typed ?? s.noteDraft ?? '').slice(0, NOTE_MAX)
   if (text.trim() === '') return s
   const notes = s.notes ?? []
   const isEdit = notes.some(n => n.id === s.noteEditing)

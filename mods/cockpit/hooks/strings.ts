@@ -23,6 +23,7 @@ const SHARED = {
   tabs: { agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' },
   confirmLog: 'registrare le ore di questa chat?',
   confirmSuite: 'analizzare la suite? invia /retro al modello',
+  confirmNoteDelete: 'eliminare questa nota?',
   summaryCopied: 'riepilogo nel prompt',
   waitingSince: (seconds: number) => `in attesa da ${seconds}s`,
   toolRunning: 'tool in corso',

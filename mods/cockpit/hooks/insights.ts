@@ -3,6 +3,7 @@ import { subagentShare } from './agents'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
 import { THRESHOLDS } from './signals'
+import { recordEvent } from './timeline'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
@@ -127,7 +128,27 @@ export function recordCtxAfter(ins: CockpitInsights | undefined, tokens: number 
   return { ...ins, compactCtx: [...ins.compactCtx.slice(0, -1), { before: last.before, after: tokens }] }
 }
 
-export const emptyInsights = (): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })
+/** A context drop that counts as a compaction: more than 40 % of the last reading and more than 50k tokens. */
+const COMPACT_DROP_RATIO = 0.4
+const COMPACT_DROP_TOKENS = 50_000
+
+/**
+ * The snapshot after a context measurement of the main loop. The harness skips `session.compact` for this mod, so a compaction is
+ * read from the data that does arrive: a drop between consecutive readings, recorded once (a compaction the engine event already
+ * recorded, still waiting for its `after`, is the same one).
+ */
+export function withContextReading(s: CockpitSnapshot, tokens: number | undefined, at: number): Pick<CockpitSnapshot, 'insights' | 'events'> {
+  const prev = s.ctx.tokens
+  const pending = s.insights?.compactCtx?.at(-1)?.after === undefined && (s.insights?.compactCtx?.length ?? 0) > 0
+  const isDrop = prev !== undefined && tokens !== undefined && !pending && prev - tokens > COMPACT_DROP_TOKENS && prev - tokens > prev * COMPACT_DROP_RATIO
+  const base = isDrop ? recordCompaction(s.insights, prev) : s.insights
+  return {
+    insights: recordCtxAfter(base, tokens),
+    events: isDrop ? recordEvent(s.events, { at, kind: 'compaction' }) : s.events,
+  }
+}
+
+export const emptyInsights =(): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })
 
 /** The file a `Read` call opens, from its input; none for any other call. */
 export const readPathOf = (input: { readonly [key: string]: unknown }): string | undefined =>

@@ -168,6 +168,9 @@ export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
 /** A note's longest text. */
 export const NOTE_MAX = 2000
 
+/** A note's text with CRLF and lone CR as LF: a paste from Windows or a file keeps its lines, never a stray `\r`. */
+export const normalizeNewlines = (text: string): string => text.replace(/\r\n?/g, '\n')
+
 /**
  * The saved notes out of a parsed data file: the `notes` list (entries with a numeric id and a text, each cut to `NOTE_MAX`; a blank
  * one, a repeated id or anything else is left out). A file from before the list holds one `note` text: that becomes the first entry.
@@ -178,10 +181,10 @@ export function parseNotes(notes: unknown, legacyNote?: unknown): CockpitNote[] 
     for (const entry of notes as unknown[]) {
       const { id, text } = (typeof entry === 'object' && entry !== null ? entry : {}) as { id?: unknown; text?: unknown }
       if (typeof id !== 'number' || !Number.isSafeInteger(id) || typeof text !== 'string' || text.trim() === '' || list.some(n => n.id === id)) continue
-      list.push({ id, text: text.slice(0, NOTE_MAX) })
+      list.push({ id, text: normalizeNewlines(text).slice(0, NOTE_MAX) })
     }
   } else if (typeof legacyNote === 'string' && legacyNote.trim() !== '') {
-    list.push({ id: 1, text: legacyNote.slice(0, NOTE_MAX) })
+    list.push({ id: 1, text: normalizeNewlines(legacyNote).slice(0, NOTE_MAX) })
   }
   return list.length > 0 ? list : undefined
 }

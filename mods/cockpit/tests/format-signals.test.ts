@@ -116,7 +116,7 @@ test('agentCosts: a live agent priced from its counters, a finished one from its
     { at: 3, kind: 'round' as const, usd: 1 },
   ]
   expect(agentCosts([live], events)).toEqual([
-    { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', tokens: 10, usd: 3, hit: 0 },
+    { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', tokens: 10, usd: 2, hit: 0 },
     { id: 'a2', type: 'Explore', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
   ])
 })

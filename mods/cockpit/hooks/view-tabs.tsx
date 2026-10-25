@@ -575,12 +575,14 @@ export function notesBlocks(k: Kit): Block[] {
     const hidden = Math.max(0, lines.length - NOTE_LINES_SHOWN)
     return (
       <Box flexDirection="column">
-        {(isOpen ? lines : lines.slice(0, NOTE_LINES_SHOWN)).map(text => line(ui, [sp(text === '' ? ' ' : text)]))}
+        {/* a note's lines wrap by display width (the Text's own wrap), indentation and empty lines kept */}
+        {(isOpen ? lines : lines.slice(0, NOTE_LINES_SHOWN)).map(text => <Text wrap="wrap">{spanNodes(ui, [sp(text === '' ? ' ' : text)])}</Text>)}
         {hidden > 0 && (
           <Button key={`note:more:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
             <Text color={COLORS.title}>{isOpen ? S.lessLines(hidden) : S.moreLines(hidden)}</Text>
           </Button>
         )}
+        {s.confirm === `note:${n.id}` && confirmRow(k, S.confirmNoteDelete)}
         <Box flexDirection={buttonRowWidth(noteButtons) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
           <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
             {S.buttons.edit}
