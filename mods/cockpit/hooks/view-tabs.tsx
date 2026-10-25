@@ -1,36 +1,22 @@
 import type { RenderElement } from 'claude-code'
 
-import type { CockpitAgent, CockpitChange, CockpitEvent, CockpitEventKind, CockpitNote, CockpitSnapshot, CockpitSysProc, CockpitTab } from '../types'
-import { claudeStateSpans, sessionTokens } from './agents'
+import type { CockpitAgent, CockpitChange, CockpitNote, CockpitSnapshot, CockpitTab } from '../types'
+import { sessionTokens } from './agents'
 import { REFRESH_COOLDOWN_MS, autocompactForecast, ctxGrowth, openTasks, shouldCompact } from './context'
 import { creditProjection, modelRows, perHour, roundCosts, topRounds } from './costs'
 import { workItemIds, workItemUrl } from './links'
 import { worklogLabel } from './session'
-import { COLORS, abbrevTokens, countdown, ctxColor, duration, fmtCost, hhmm, shortModel, spanWidth, sparkline, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, ctxColor, duration, fmtCost, shortModel, spanWidth, sparkline, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
 import type { Span } from './shared'
-import { agentCosts, signalsOf } from './signals'
+import { agentCosts, signalId, signalsOf } from './signals'
 import type { Signal } from './signals'
 import { t } from './strings'
-import { EVENT_KINDS, visibleEvents } from './timeline'
-import {
-  agentIcon,
-  agentRow,
-  agentWarning,
-  fitPair,
-  modelCounts,
-  orderAgents,
-  subagentDetails,
-  subagentFacts,
-  taskCounts,
-  taskRow,
-  visibleAgents,
-} from './view-agents'
+import { agentIcon, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar, trendSpans } from './view-context'
 import { almSpans } from './view-header'
 import { bigResultSpans } from './view-insights'
-import { procParts } from './view-system'
 import { changeSpans, prSpans } from './view-work'
 import { repoRelative } from './work'
 import { activeRun } from './workflow'
@@ -50,16 +36,16 @@ export type PaneActions = {
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
-  /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests): the Costi tab's `refresh`, once a minute. */
-  refresh: () => void
   /** Opens or closes the four token counters of an agent. */
   toggleUsage: (agentId: string) => void
+  /** Opens or closes the why and what-to-do of a notification (`kind:key`). */
+  toggleSignal: (id: string) => void
+  /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests): the Context tab's `refresh`, once a minute. */
+  refresh: () => void
   /** Opens or closes a note beyond its first lines. */
   toggleNote: (id: number) => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
-  /** Shows only one kind of event in the Cronologia (none: all). */
-  filterEvents: (kind: CockpitEventKind | undefined) => void
   /** Keeps what the Note tab's field holds as the person types it. */
   setNoteDraft: (text: string) => void
   /** Saves the field as a note (replacing the one it was loaded from, if any): the text of the field on Enter, the kept draft when none is given. */
@@ -110,52 +96,37 @@ export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: Pane
   }
 }
 
+const MAX_SIGNAL_ROWS = 8
+const MAX_MODEL_ROWS = 4
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
 const MAX_FILE_ROWS = 8
 const MAX_LINK_ROWS = 4
-const MAX_AGENT_COST_ROWS = 6
+const MAX_AGENT_COST_ROWS = 3
 const SPARK_MAX = 40
 const NOTE_LINES_SHOWN = 3
 /** The height of the note field: multi-line notes are common. */
 const NOTE_INPUT_ROWS = 6
 
-// ── Ora: what is happening now ──
+// ── Agents: the workflow run in one row, every agent listed, the history behind a toggle ──
 
-/** The workflow run in flight with what it has cost so far (its agents' cost), or none. */
+/** The workflow run in flight in one row: name, phase, round, finished agents out of all and what they cost so far (its agents' cost). */
 function workflowBlock(k: Kit): Block {
-  const { s, width, gap, title, ui } = k
+  const { s, width, gap, ui } = k
   const run = activeRun(s.workflowRun)
   if (!run) return []
-  const S = t()
   const ids = new Set(run.agents.map(a => a.id))
   const usd = agentCosts(s.agents, s.events).filter(a => ids.has(a.id)).reduce((sum, a) => sum + a.usd, 0)
   const done = run.agents.filter(a => a.isDone).length
-  return [
-    gap(),
-    title(run.name ? `${S.workflowTitle} · ${run.name}` : S.workflowTitle),
-    gap(),
-    line(ui, truncateSpans([sp(S.workflowLine(run.phase ?? '—', run.round, done, run.agents.length)), dim(' · '), sp(S.workflowCost(fmtCost(usd)), COLORS.yellow)], width)),
-  ]
+  return [gap(), line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))]
 }
 
-export function nowBlocks(k: Kit): Block[] {
+export function agentsBlocks(k: Kit): Block[] {
   const { ui, s, width, gap, actions } = k
   const { Button, Text } = ui
   const S = t()
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
-
-  // What Claude is doing: its state (and how long it has waited for an answer), the tool in flight, the last error
-  const state = s.claudeState
-  const waited = state?.kind === 'waiting' && state.since !== undefined ? Math.max(0, Math.floor((s.now - state.since) / 1000)) : undefined
-  const lastError = s.insights?.lastError
-  const stateBlock: Block = [
-    gap(),
-    line(ui, [...claudeStateSpans(state), ...(waited !== undefined ? [dim(`  ${S.waitingSince(waited)}`)] : [])]),
-    state?.kind === 'tool' && state.tool ? line(ui, [sp('▸ ', COLORS.blue), dim(`${S.toolRunning} `), sp(state.tool)]) : undefined,
-    lastError && line(ui, truncateSpans([sp('✗ ', COLORS.red), dim(`${lastError.tool}: `), dim(lastError.text)], width)),
-  ]
 
   const agentButton = (key: string, a: CockpitAgent, depth: number) => (
     <Button key={key} plain onPress={() => actions.openAgent(a.id)}>
@@ -163,7 +134,7 @@ export function nowBlocks(k: Kit): Block[] {
     </Button>
   )
 
-  // ── Subagents: every agent listed (finished ones for two minutes), a block each ──
+  // Every agent listed (finished ones for two minutes), a block each
   const rows = orderAgents(agents)
   const sessionTotal = sessionTokens(s)
   const agentRows = rows.flatMap(({ agent, depth }, i) => {
@@ -215,14 +186,14 @@ export function nowBlocks(k: Kit): Block[] {
             isHistoryOpen && history.map(h => agentButton(`history:${h.id}`, { ...h, status: 'done' }, 0)),
           ],
         ]
-  const agentBlocks: Block[] = [
+  return [
+    workflowBlock(k),
     [gap(), line(ui, fitPair([sp(S.subagentsTitle(running.length), COLORS.title)], modelCounts(agents), width)), rows.length > 0 && gap(), agentRows],
     ...historyBlock,
-  ]
-  return [stateBlock, workflowBlock(k), ...agentBlocks].filter(b => b.length > 0)
+  ].filter(b => b.length > 0)
 }
 
-// ── Segnali ──
+// ── Notifications ──
 
 /** The three lines of a signal: what, why it matters, what to do. */
 export function signalText(sig: Signal): { what: string; why: string; todo: string } {
@@ -251,93 +222,62 @@ export function signalText(sig: Signal): { what: string; why: string; todo: stri
   }
 }
 
+/** One row per active notification (what); the pressed one also tells why and what to do. */
 export function signalsBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title } = k
+  const { ui, s, width, gap, title, actions } = k
+  const { Button, Text } = ui
   const S = t()
   const signals = signalsOf(s)
-  if (signals.length === 0) return [[gap(), title(S.signalsTitle(0)), gap(), line(ui, [dim(S.noSignals)])]]
+  if (signals.length === 0) return [[gap(), line(ui, [dim(S.noSignals)])]]
+  const idOf = signalId
   return [
     [
       gap(),
       title(S.signalsTitle(signals.length)),
-      signals.flatMap(sig => {
+      gap(),
+      signals.slice(0, MAX_SIGNAL_ROWS).flatMap(sig => {
         const text = signalText(sig)
+        const isOpen = s.signalOpen === idOf(sig)
         return [
-          gap(),
-          line(ui, [sp('⚠ ', COLORS.yellow), sp(truncEnd(text.what, Math.max(4, width - 2)), COLORS.yellow, true)]),
-          line(ui, [dim(`  ${S.signalFields.why}${text.why}`)]),
-          line(ui, [dim(`  ${S.signalFields.todo}${text.todo}`)]),
+          <Button key={`signal:${idOf(sig)}`} plain onPress={() => actions.toggleSignal(idOf(sig))}>
+            <Text wrap="truncate">{spanNodes(ui, [sp(`${isOpen ? '▾' : '▸'} ${truncEnd(text.what, Math.max(4, width - 2))}`, COLORS.yellow, true)])}</Text>
+          </Button>,
+          isOpen && line(ui, [dim(`  ${S.signalFields.why}${text.why}`)]),
+          isOpen && line(ui, [dim(`  ${S.signalFields.todo}${text.todo}`)]),
         ]
       }),
+      signals.length > MAX_SIGNAL_ROWS && line(ui, [dim(`… +${signals.length - MAX_SIGNAL_ROWS}`)]),
     ],
   ]
 }
 
-// ── Cronologia ──
+// ── Context: the breakdown, then what the session costs ──
 
-const EVENT_COLORS: Record<CockpitEventKind, string | undefined> = {
-  round: undefined,
-  skill: COLORS.lavender,
-  agent: COLORS.blue,
-  compaction: COLORS.amber,
-  error: COLORS.red,
-  block: COLORS.yellow,
-  stall: COLORS.red,
-}
-
-/** One event's text, from its kind's words. */
-export function eventText(e: CockpitEvent): string {
-  const R = t().eventRow
-  switch (e.kind) {
-    case 'round':
-      return R.round(fmtCost(e.usd), duration(e.ms ?? 0))
-    case 'skill':
-      return R.skill(e.text ?? '?')
-    case 'agent':
-      return R.agent(e.text ?? '?', shortModel(e.model) || '—', fmtCost(e.usd))
-    case 'compaction':
-      return R.compaction
-    case 'error':
-      return R.error(e.text ?? '')
-    case 'block':
-      return R.block(e.text ?? '')
-    case 'stall':
-      return R.stall(e.text ?? '')
-  }
-}
-
-export function historyBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title, actions } = k
-  const { Box, Button } = ui
-  const S = t()
-  const all = s.events ?? []
-  const shown = visibleEvents(all, s.eventFilter)
-  const filters = (
-    <Box columnGap={1} flexWrap="wrap">
-      <Button key="filter:all" variant={s.eventFilter === undefined ? 'primary' : 'secondary'} label={S.filterAll} onPress={() => actions.filterEvents(undefined)} />
-      {EVENT_KINDS.map(kind => (
-        <Button key={`filter:${kind}`} variant={s.eventFilter === kind ? 'primary' : 'secondary'} label={S.eventKinds[kind]} onPress={() => actions.filterEvents(kind)} />
-      ))}
-    </Box>
-  )
-  return [
-    [
-      gap(),
-      title(S.eventsTitle(shown.length, all.length)),
-      gap(),
-      filters,
-      gap(),
-      shown.length === 0 ? line(ui, [dim(S.noEvents)]) : shown.map(e => line(ui, truncateSpans([dim(`${hhmm(e.at)} `), sp(eventText(e), EVENT_COLORS[e.kind])], width))),
-    ],
-  ]
-}
-
-// ── Costi ──
-
-export function costsBlocks(k: Kit): Block[] {
+export function contextBlocks(k: Kit): Block[] {
   const { ui, s, width, gap, title, actions } = k
   const { Button } = ui
   const S = t()
+
+  // The session: what it cost, the $/h and where the 5h credits go at this pace (the status line's rate cache stands in while the engine reports none)
+  const rate = perHour(s.cost.usd, s.startedAt, s.now)
+  const projection = creditProjection(s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? []), s.now)
+  const sessionBlock: Block =
+    (s.cost.usd ?? 0) > 0 || rate !== undefined || projection !== undefined
+      ? [
+          gap(),
+          line(
+            ui,
+            truncateSpans(
+              [
+                sp(fmtCost(s.cost.usd), COLORS.yellow, true),
+                ...(rate === undefined ? [] : [dim(' · '), sp(S.costRate(fmtCost(rate)), COLORS.yellow)]),
+                ...(projection === undefined ? [] : [dim(' · '), projection.kind === 'hold' ? sp(S.creditsHold, COLORS.green) : sp(S.creditsRunOut(duration(projection.inMs)), COLORS.red)]),
+              ],
+              width,
+            ),
+          ),
+        ]
+      : []
 
   // $ per round: a sparkline of the last rounds and the three dearest
   const rounds = roundCosts(s.events)
@@ -353,36 +293,15 @@ export function costsBlocks(k: Kit): Block[] {
         ]
       : []
 
-  // $ and cache hit per agent and per model, priced from the usage counters
+  // $ and cache hit per model and per agent, priced from the usage counters
   const nameW = Math.max(6, width - 24)
   const costRow = (name: string, usd: number, hit: number | undefined) =>
     line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)])
+  const models = modelRows(s.modelUse).slice(0, MAX_MODEL_ROWS)
+  const modelsBlock: Block = models.length > 0 ? [gap(), title(S.costModelsTitle), gap(), models.map(m => costRow(shortModel(m.model) || m.model, m.usd, m.hit))] : []
   const agents = agentCosts(s.agents, s.events).sort((a, b) => b.usd - a.usd).slice(0, MAX_AGENT_COST_ROWS)
   const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(a => costRow(`${a.type} ${shortModel(a.model)}`.trim(), a.usd, a.hit))] : []
-  const models = modelRows(s.modelUse)
-  const modelsBlock: Block = models.length > 0 ? [gap(), title(S.costModelsTitle), gap(), models.map(m => costRow(shortModel(m.model) || m.model, m.usd, m.hit))] : []
 
-  // $/h and where the 5h credits go at this pace (the status line's rate cache stands in while the engine reports none)
-  const rate = perHour(s.cost.usd, s.startedAt, s.now)
-  const projection = creditProjection(s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? []), s.now)
-  const rateBlock: Block =
-    rate !== undefined || projection !== undefined
-      ? [
-          gap(),
-          title(S.costProjectionTitle, rate === undefined ? [] : [sp(S.costRate(fmtCost(rate)), COLORS.yellow)]),
-          gap(),
-          projection &&
-            line(
-              ui,
-              truncateSpans(
-                projection.kind === 'hold' ? [sp(S.creditsHold, COLORS.green)] : [sp(S.creditsRunOut(duration(projection.inMs), countdown(projection.resetsAt, s.now)), COLORS.red)],
-                width,
-              ),
-            ),
-        ]
-      : []
-
-  // ── Context by category (the old Context tab), with the exact count behind `refresh` ──
   const context = s.context
   const ctxRounds = s.ctxRounds ?? []
   const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
@@ -412,12 +331,10 @@ export function costsBlocks(k: Kit): Block[] {
       : []
   const trend = trendSpans(ctxRounds, ctxGrowth(s.ctxSamples), forecast, ctxColor(s.ctx.percent ?? 0), width)
   const trendBlock: Block = trend.length > 0 ? [gap(), title(S.trendTitle(ctxRounds.length)), gap(), line(ui, trend)] : []
-  // the five outputs that grew the context since the last compaction
   const biggest = s.insights?.biggest ?? []
   const grewBlock: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), biggest.map(r => line(ui, bigResultSpans(r, width)))] : []
-
-  const blocks = [roundsBlock, agentsBlock, modelsBlock, rateBlock, breakdownBlock, consumersBlock, trendBlock, grewBlock].filter(b => b.length > 0)
-  return rounds.length + agents.length + models.length === 0 && rateBlock.length === 0 ? [[gap(), line(ui, [dim(S.noCosts)])], ...blocks] : blocks
+  // The context first (categories, consumers, trend, the compact hint), then what the session costs, then the outputs that grew the context
+  return [breakdownBlock, consumersBlock, trendBlock, sessionBlock, modelsBlock, agentsBlock, roundsBlock, grewBlock].filter(b => b.length > 0)
 }
 
 // ── Lavoro ──
@@ -524,25 +441,6 @@ export function workBlocks(k: Kit): Block[] {
   ]
   const linksPart: Block = prs.length + items.length > 0 ? [gap(), title(S.linksTitle(prs.length + items.length)), gap(), linkRows] : []
 
-  // The session's processes with the ports they listen on: read only while this tab is open; a port is a link to it on localhost
-  const procs = s.procs ?? []
-  const procRow = (p: CockpitSysProc) => {
-    const { head, ports, more } = procParts(p, width)
-    return (
-      <Text wrap="truncate">
-        {spanNodes(ui, head)}
-        {ports.flatMap(port => [<Text> </Text>, <Link href={`http://localhost:${port}`}>{`:${port}`}</Link>])}
-        {more && <Text dimColor> …</Text>}
-      </Text>
-    )
-  }
-  const procsPart: Block = [
-    gap(),
-    title(procs.length > 0 ? `${S.procsTitle} · ${procs.length}` : S.procsTitle),
-    gap(),
-    s.isProcsOff === true ? line(ui, [dim(S.procsOff)]) : procs.length === 0 ? line(ui, [dim(S.noProcs)]) : procs.map(procRow),
-  ]
-
   // `log hours` logs the hours of this chat: here only, behind a confirmation
   const logPart: Block =
     s.sessionId === undefined
@@ -558,7 +456,7 @@ export function workBlocks(k: Kit): Block[] {
               ]),
         ]
 
-  return [almPart, ...principalBlock, changesPart, linksPart, procsPart, logPart].filter(b => b.length > 0)
+  return [almPart, ...principalBlock, changesPart, linksPart, logPart].filter(b => b.length > 0)
 }
 
 // ── Note ──
@@ -619,13 +517,11 @@ export function notesBlocks(k: Kit): Block[] {
 export function tabBlocks(tab: CockpitTab, k: Kit): Block[] {
   switch (tab) {
     case 'agents':
-      return nowBlocks(k)
+      return agentsBlocks(k)
     case 'signals':
       return signalsBlocks(k)
-    case 'history':
-      return historyBlocks(k)
     case 'context':
-      return costsBlocks(k)
+      return contextBlocks(k)
     case 'work':
       return workBlocks(k)
     case 'notes':

@@ -622,12 +622,6 @@ function segTasks(cockpit) {
   return `${DIM}☐${R} ${done === total ? C.green : ""}${done}/${total}${R}`;
 }
 
-// Signals the cockpit pane's detectors raised (state file `signals`): `⚠ n`, nothing at zero or without the field.
-function segSignals(cockpit) {
-  const n = cockpit?.signals;
-  return Number.isInteger(n) && n > 0 ? `${C.yellow}⚠ ${n}${R}` : "";
-}
-
 // Working days that had real work and never reached a work item. The snapshot is
 // written by hooks/worklog-pending.js at session start; this only renders it, so
 // the statusline never pays for the scan. Stale means silent rather than wrong:
@@ -725,7 +719,6 @@ process.stdin.on("end", () => {
     segCost(data.cost?.total_cost_usd, cockpit?.lastTurnUsd),
     segAgents(cockpit),
     segTasks(cockpit),
-    segSignals(cockpit),
   ].filter(Boolean).join(sepStr);
 
   const line2 = [

@@ -3,7 +3,6 @@ import { subagentShare } from './agents'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
 import { THRESHOLDS } from './signals'
-import { recordEvent } from './timeline'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
@@ -137,15 +136,12 @@ const COMPACT_DROP_TOKENS = 50_000
  * read from the data that does arrive: a drop between consecutive readings, recorded once (a compaction the engine event already
  * recorded, still waiting for its `after`, is the same one).
  */
-export function withContextReading(s: CockpitSnapshot, tokens: number | undefined, at: number): Pick<CockpitSnapshot, 'insights' | 'events'> {
+export function withContextReading(s: CockpitSnapshot, tokens: number | undefined): Pick<CockpitSnapshot, 'insights'> {
   const prev = s.ctx.tokens
   const pending = s.insights?.compactCtx?.at(-1)?.after === undefined && (s.insights?.compactCtx?.length ?? 0) > 0
   const isDrop = prev !== undefined && tokens !== undefined && !pending && prev - tokens > COMPACT_DROP_TOKENS && prev - tokens > prev * COMPACT_DROP_RATIO
   const base = isDrop ? recordCompaction(s.insights, prev) : s.insights
-  return {
-    insights: recordCtxAfter(base, tokens),
-    events: isDrop ? recordEvent(s.events, { at, kind: 'compaction' }) : s.events,
-  }
+  return { insights: recordCtxAfter(base, tokens) }
 }
 
 export const emptyInsights =(): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })

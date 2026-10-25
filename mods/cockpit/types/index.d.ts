@@ -177,16 +177,13 @@ export type CockpitContext = {
 /** One tool call of the main loop, as the main loop's call list keeps it (the Insights tab draws the newest five): the tool, its short argument, whether it ran without error or refusal, and when it started (absent when the clock could not be read: the row then draws no time). */
 export type CockpitToolCall = { tool: string; arg?: string; isOk: boolean; at?: number }
 
-/** A process of the session's tree with the TCP ports it listens on and its working set in bytes (absent until read). */
-export type CockpitSysProc = { pid: number; name: string; ports: number[]; ram?: number }
+/** The view the pane draws, the tab bar's five buttons: `agents` is Agenti, `context` Contesto, `signals` Notifiche, `work` Lavoro, `notes` Note. */
+export type CockpitTab = 'agents' | 'context' | 'signals' | 'work' | 'notes'
 
-/** The view the pane draws, the tab bar's six buttons: `agents` is Ora, `signals` Segnali, `history` Cronologia, `context` Costi, `work` Lavoro, `notes` Note. */
-export type CockpitTab = 'agents' | 'signals' | 'history' | 'context' | 'work' | 'notes'
+/** What an entry of the event ring buffer is about: a finished main round or a finished agent (the Context tab prices them). */
+export type CockpitEventKind = 'round' | 'agent'
 
-/** What an entry of the Cronologia's ring buffer is about. */
-export type CockpitEventKind = 'round' | 'skill' | 'agent' | 'compaction' | 'error' | 'block' | 'stall'
-
-/** One row of the Cronologia: when, what, and the numbers that kind carries (`usd` and `ms` of a round, the model, tokens and cache hit of an agent; `text` is the skill, agent type, error or rule). `key` makes an entry once-only. */
+/** One entry of the event buffer: when, what, and the numbers that kind carries (`usd` and `ms` of a round, the model, tokens and cache hit of an agent; `text` is the agent type). `key` makes an entry once-only. */
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; usd?: number; ms?: number; model?: string; tokens?: number; hit?: number; id?: string }
 
 /**
@@ -284,6 +281,10 @@ export type CockpitSnapshot = {
   history?: CockpitHistoryEntry[]
   /** The HISTORY list is expanded; absent is collapsed. */
   isHistoryOpen?: boolean
+  /** The notification whose why and what-to-do are shown (`kind:key`); absent shows none. */
+  signalOpen?: string
+  /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
+  seenSignals?: string[]
   git?: CockpitGit
   worklog: CockpitWorklog
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
@@ -302,14 +303,8 @@ export type CockpitSnapshot = {
   calls?: CockpitToolCall[]
   /** The Work tab's changed files; absent until that tab was selected, and without git. */
   repo?: CockpitRepo
-  /** The session's processes with their listening ports, read while the Lavoro tab is open; absent until read. */
-  procs?: CockpitSysProc[]
-  /** True when the processes cannot be read here (not Windows, or the read failed). */
-  isProcsOff?: boolean
-  /** The Cronologia's ring buffer, oldest first. */
+  /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
-  /** The Cronologia shows only this kind; absent shows all. */
-  eventFilter?: CockpitEventKind
   /** The usage counters of every finished turn by model id: the Costi tab prices them. */
   modelUse?: Record<string, CockpitUsage>
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
@@ -318,7 +313,7 @@ export type CockpitSnapshot = {
   confirm?: 'suite' | 'worklog' | `note:${number}`
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights
-  /** The agents whose four token counters are expanded on the Subagents tab (the others show a line to open them). */
+  /** The agents whose four token counters are expanded on the Agents tab (the others show a line to open them). */
   usageOpen?: string[]
   /** The notes shown in full on the Notes tab (the others show their first lines). */
   notesOpen?: number[]

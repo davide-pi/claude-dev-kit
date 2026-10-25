@@ -95,10 +95,10 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
 
-  await ui.press({ key: 'tab:history' })
+  await ui.press({ key: 'tab:notes' })
   await settleAll()
   reset()
-  await clock.advance(3000) // t = 9 s: Cronologia has no clock and git is not due yet
+  await clock.advance(3000) // t = 9 s: Notes has no clock and git is not due yet
   expect(listCalls).toHaveLength(0)
   expect(statusCalls).toHaveLength(0)
   await clock.advance(1500) // t = 10.5 s: the medium timer ticked
@@ -233,17 +233,15 @@ test('turn.step: the main loop\'s chunks read the snapshot once per change of st
   expect(await run(2)).toBe(one) // five more chunks of the same kind cost no read
 })
 
-test('events that really arrive: with the classic events never dispatched, skills, the wait for a person and the workflow name all still show', async ($, on) => {
+test('events that really arrive: with the classic events never dispatched, the wait for a person and the workflow name still show', async ($, on) => {
   const instructions: (string | undefined)[] = []
   world(on, { instructions })
   permissionChecks(on)
-  skillTool(on)
   workflowLaunches(on, 'release-notes')
   const release = gatedBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const state = async () => headerOf((await paneRows($)).rows)[0] ?? ''
 
-  await loadSkill($, 'commit')
   await launchWorkflow($, 'release-notes')
   const call = callAs($, 'c1', { tool: 'Bash', command: 'rm x' })
   await settleAll()
@@ -257,5 +255,4 @@ test('events that really arrive: with the classic events never dispatched, skill
   await ui.press({ key: 'bar:compact' })
   expect(instructions[0]).toContain('Workflow in corso: release-notes.')
   await ui.unmount()
-  expect((await paneRows($, 50, 'history')).rows.some(r => /commit/.test(r))).toBe(true)
 })

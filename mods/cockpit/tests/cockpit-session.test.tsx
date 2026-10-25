@@ -45,9 +45,8 @@ test('the state file is written at session start with open:false and the session
     effort: 'high',
     tasks: null,
     tab: 'agents',
-    signals: 0,
   })
-  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab', 'signals'])
+  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
   // what must survive a resume is in the session data file
   expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX })
 })
@@ -427,7 +426,7 @@ test('session data: a resume brings back the history, the PRs, the notes and the
   await ui.press({ key: 'tab:notes' })
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:3', 'note:send:5'])
   await ui.press({ key: 'tab:work' })
-  expect(rowTexts(await ui.drawn())).toContain('LINK · 1')
+  expect(rowTexts(await ui.drawn())).toContain('LINKS · 1')
   await ui.unmount()
   // written back as it was read
   expect(dataOf(writes)).toMatchObject({ notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }], ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })

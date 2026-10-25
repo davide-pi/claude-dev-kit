@@ -323,23 +323,6 @@ export function hhmm(ms: number): string {
   return `${p(d.getHours())}:${p(d.getMinutes())}`
 }
 
-/** Bytes as `512 B`, `850 KB`, `1.2 MB`, `45 MB`, `1.2 GB` (base 1024, a decimal only under ten). */
-export function fmtBytes(n: number): string {
-  if (!Number.isFinite(n) || n <= 0) return '0 B'
-  const units = ['B', 'KB', 'MB', 'GB', 'TB']
-  let v = n
-  let i = 0
-  // The unit is chosen on the rounded value: 1023.6K is 1.0M, never 1024K.
-  while (i < units.length - 1 && Math.round(v) >= 1024) {
-    v /= 1024
-    i++
-  }
-  if (i === 0) return `${Math.round(v)} B`
-  // A tenth that rounds up to ten reads as a whole number: 10 KB, not 10.0 KB.
-  const tenth = Math.round(v * 10) / 10
-  return `${tenth < 10 ? tenth.toFixed(1) : Math.round(v)} ${units[i]}`
-}
-
 export const isCount = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0
 
 /**

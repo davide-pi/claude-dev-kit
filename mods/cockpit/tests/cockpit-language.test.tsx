@@ -1,19 +1,53 @@
 import { expect, test } from 'claude-code/testing'
 
 import { textCells } from '../hooks/shared'
-import { setLang } from '../hooks/strings'
+import { setLang, t } from '../hooks/strings'
 import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
 import { iso, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-test('English: the tab labels and the footer are Italian text; the other titles are English', async ($, on) => {
+test('English is the default: the tab labels, the footer and the titles', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:work'), await label('bar:compact'), await label('bar:suite'), await label('bar:summary')]).toEqual(['Ora', 'Costi', 'Lavoro', 'compact', 'analizza suite', 'copia riepilogo'])
+  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:suite'), await label('bar:summary')]).toEqual(['Agents', 'Context', 'Notifications', 'Work', 'Notes', 'compact', 'analyze suite', 'copy summary'])
   expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
   await ui.unmount()
+})
+
+test('both languages draw every tab, with every label of the bundles in both and no key missing', async ($, on) => {
+  const options: World = { sessionId: () => 'chat-7', branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
+  world(on, options)
+  const keys = (o: unknown, prefix = ''): string[] =>
+    Object.entries(o as Record<string, unknown>).flatMap(([k, v]) => (v !== null && typeof v === 'object' ? keys(v, prefix + k + '.') : [prefix + k]))
+  try {
+    setLang('en')
+    const named = (k: string) => !k.startsWith('contextCategories.') // the engine's own names stay as they are in English
+    const en = keys(t()).filter(named).sort()
+    setLang('it')
+    expect(keys(t()).filter(named).sort()).toEqual(en)
+    for (const [lang, files, tabs] of [
+      ['en', {}, ['Agents', 'Context', 'Notifications', 'Work', 'Notes']],
+      ['it', IT_FILE, ['Agenti', 'Contesto', 'Notifiche', 'Lavoro', 'Note']],
+    ] as const) {
+      options.files = files
+      await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+      const ui = await mountPane($, 58)
+      const ids = ['agents', 'context', 'signals', 'work', 'notes']
+      for (const [i, id] of ids.entries()) {
+        expect((await ui.find({ key: 'tab:' + id }))?.text).toBe(tabs[i])
+        await ui.press({ key: 'tab:' + id })
+        const drawn = rowTexts(await ui.drawn()).join('\n')
+        // an undefined or raw key would show as "undefined" or a dotted path
+        expect(drawn, lang + ' ' + id).not.toMatch(/undefined|\[object|\bbuttons\.|\bsignalText\./)
+      }
+      expect(rowTexts(await ui.drawn()).some(r => (lang === 'en' ? /^no saved notes/ : /^nessuna nota salvata/).test(r))).toBe(true)
+      await ui.unmount()
+    }
+  } finally {
+    setLang('en')
+  }
 })
 
 test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {

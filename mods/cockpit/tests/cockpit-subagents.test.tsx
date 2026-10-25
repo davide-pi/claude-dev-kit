@@ -447,8 +447,8 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await clock.advance(4000)
   await settleAll()
   expect(await elapsed()).toBe('4s')
-  await ui.press({ key: 'tab:history' })
-  await clock.advance(4000) // Cronologia has no clock: the agent's time stands where it was
+  await ui.press({ key: 'tab:notes' })
+  await clock.advance(4000) // Notes has no clock: the agent's time stands where it was
   await settleAll()
   await ui.press({ key: 'tab:agents' })
   expect(await elapsed()).toBe('4s')

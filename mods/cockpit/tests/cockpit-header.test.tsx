@@ -86,7 +86,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:agents', 'tab:signals', 'tab:history', 'tab:context', 'tab:work', 'tab:notes', 'bar:compact', 'bar:suite', 'bar:summary'])
+  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:signals', 'tab:work', 'tab:notes', 'bar:compact', 'bar:suite', 'bar:summary'])
   await ui.unmount()
 })
 
@@ -576,16 +576,16 @@ const LANGUAGES = [
     bareTabs: () => barLabels(),
     buttons: { compact: 'compact', save: 'save', edit: 'edit', send: 'send', delete: 'delete' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], signals: [/^SEGNALI · 0/], history: [/^CRONOLOGIA/], context: [/^CONTEXT DETAILS · 248K\/1M/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
     files: IT_FILE,
-    tabs: barLabels({ work: ' ●' }),
-    bareTabs: () => barLabels(),
+    tabs: barLabels({ work: ' ●' }, 'it'),
+    bareTabs: () => barLabels({}, 'it'),
     buttons: { compact: 'compatta', save: 'salva', edit: 'modifica', send: 'invia', delete: 'elimina' },
     header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], signals: [/^SEGNALI · 0/], history: [/^CRONOLOGIA/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 

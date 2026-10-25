@@ -26,7 +26,6 @@ export function weeklyPace(
  */
 export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
   switch (tab ?? 'agents') {
-    case 'history':
     case 'notes':
       return { fast: false }
     default:
@@ -136,14 +135,14 @@ export function almText(alm: CockpitAlm): string {
   return [target, alm.identity].filter(Boolean).join(' \u00b7 ')
 }
 
-/** The cockpit's tabs, in the order the bar draws them: Ora, Segnali, Cronologia, Costi, Lavoro, Note. */
-export const TABS: readonly CockpitTab[] = ['agents', 'signals', 'history', 'context', 'work', 'notes']
+/** The cockpit's tabs, in the order the bar draws them: Agents, Context, Notifications, Work, Notes. */
+export const TABS: readonly CockpitTab[] = ['agents', 'context', 'signals', 'work', 'notes']
 
 export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
 
-/** The tab a state file names; the tabs of the older versions went where their content did (Insights to Costi, System to Lavoro). */
+/** The tab a state file names; the tabs of the older versions went where their content did (Insights to Context, System to Work, History to Agents). */
 export const savedTab = (v: unknown): CockpitTab | undefined =>
-  v === 'session' ? 'agents' : v === 'repo' || v === 'system' ? 'work' : v === 'insights' ? 'context' : isTab(v) ? v : undefined
+  v === 'session' || v === 'history' ? 'agents' : v === 'repo' || v === 'system' ? 'work' : v === 'insights' ? 'context' : isTab(v) ? v : undefined
 
 // ── Alerts (D4) and the session data file ──
 

@@ -178,7 +178,7 @@ test('ALM line at the top of the Work tab, not in the header: org / project and 
   expect(almRow((await paneRows($)).rows)).toBeUndefined()
   const { rows } = await workTab($)
   expect(almRow(rows)).toBe('ALM org-a / Alpha · id-a')
-  expect(rows.findIndex(r => /^ALM/.test(r))).toBeLessThan(rows.findIndex(r => /^PROCESSI E PORTE/.test(r)))
+  expect(rows.findIndex(r => /^ALM/.test(r))).toBeLessThan(rows.findIndex(r => /^CHANGES/.test(r)))
 })
 
 test('ALM line: a mapped root with no org, project or identity draws no line', async ($, on) => {
@@ -234,7 +234,7 @@ test('no workspaces map: no ALM line at all', async ($, on) => {
   expect(almRow((await workTab($)).rows)).toBeUndefined()
 })
 
-test('the other tabs draw the current sections: Ora the agents, Lavoro tasks and worklog warnings, Cronologia its own title', async ($, on) => {
+test('the other tabs draw the current sections: Agents the agents, Work tasks and worklog warnings, Notifications its own title', async ($, on) => {
   world(on, { hasWorklog: true })
   taskTools(on)
   spawns(on)
@@ -251,9 +251,9 @@ test('the other tabs draw the current sections: Ora the agents, Lavoro tasks and
   expect(work.some(r => /worklog: 1d to log/.test(r))).toBe(true)
   expect(work.some(r => /^SUBAGENTS/.test(r))).toBe(false)
 
-  const history = (await paneRows($, 50, 'history')).rows
-  expect(history.some(r => /^CRONOLOGIA/.test(r))).toBe(true)
-  expect(history.some(r => /^SUBAGENTS/.test(r) || /^TASK/.test(r))).toBe(false)
+  const notifications = (await paneRows($, 50, 'signals')).rows
+  expect(notifications.some(r => /^no notifications/.test(r))).toBe(true)
+  expect(notifications.some(r => /^SUBAGENTS/.test(r) || /^TASK/.test(r))).toBe(false)
 })
 
 // ── Phase 2 follow-ups ──
@@ -264,11 +264,11 @@ test('a workspaces.json that is not JSON draws no ALM line', async ($, on) => {
   expect((await paneRows($)).rows.some(r => /^ALM/.test(r))).toBe(false)
 })
 
-test('Lavoro with no tasks, no worklog warnings and no git draws only the processes block', async ($, on) => {
+test('Work with no tasks, no worklog warnings and no git draws no section, and never processes or ports', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 50, 'work')
-  expect(rows.some(r => /^PROCESSI E PORTE/.test(r))).toBe(true)
+  expect(rows.some(r => /^(PROCESSI|PROCESSES)/.test(r))).toBe(false)
   expect(rows.some(r => /^(MAIN|CHANGES|LINK)/.test(r))).toBe(false)
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })
@@ -290,13 +290,13 @@ test('MAIN: the perimeter, the session tasks and the worklog warnings are one bl
   expect((await paneRows($, 50, 'agents')).rows.some(r => /^TASK/.test(r))).toBe(false)
 })
 
-/** The Cronologia tab's rows. */
-const historyRows = async ($: Engine) => (await paneRows($, 50, 'history')).rows
+/** The Notifications tab's rows. */
+const notificationRows = async ($: Engine) => (await paneRows($, 50, 'signals')).rows
 
 const claim = (n: number, rule: string, excerpt: string, session = 's-1') =>
   JSON.stringify({ at: new Date(2026, 9, 22, 8 + n, 5).toISOString(), session, cwd: '/w', rule, word: 'fatto', excerpt })
 
-test('hook triggers: the blocks of done-claim.log that belong to this session are Cronologia rows, once each, filterable by kind', async ($, on) => {
+test('hook triggers: the blocks of done-claim.log that belong to this session are one notification once there are two, and never reach Work', async ($, on) => {
   const doneClaims = [
     claim(1, 'unproven-row', 'primo'),
     claim(2, 'unproven-row', 'secondo'),
@@ -307,32 +307,21 @@ test('hook triggers: the blocks of done-claim.log that belong to this session ar
   ].join('\n')
   world(on, { doneClaims })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = (await historyRows($)).filter(r => /blocco /.test(r))
-  expect(rows).toHaveLength(3)
-  expect(rows[0]).toMatch(/blocco tail-cut$/) // newest first
-  expect(rows.filter(r => /blocco unproven-row$/.test(r))).toHaveLength(2)
-  expect((await historyRows($)).some(r => /shell-ran/.test(r))).toBe(false)
-  expect((await workRows($)).some(r => /blocco|done-claim/.test(r))).toBe(false)
-
-  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  await ui.press({ key: 'tab:history' })
-  await ui.press({ key: 'filter:round' })
-  expect(rowTexts(await ui.drawn()).some(r => /blocco/.test(r))).toBe(false)
-  await ui.press({ key: 'filter:block' })
-  expect(rowTexts(await ui.drawn()).filter(r => /blocco/.test(r))).toHaveLength(3)
-  await ui.unmount()
+  const rows = await notificationRows($)
+  expect(rows.some(r => /3 done-claim blocks/.test(r))).toBe(true)
+  expect((await workRows($)).some(r => /done-claim/.test(r))).toBe(false)
 })
 
 test('hook triggers: the blocks of another session or no block at all draw nothing', async ($, on) => {
   world(on, { doneClaims: `${claim(1, 'unproven-row', 'altra', 's-2')}\n${claim(2, 'shell-ran', 'contato')}\n` })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await historyRows($)).some(r => /blocco/.test(r))).toBe(false)
+  expect((await notificationRows($)).some(r => /done-claim/.test(r))).toBe(false)
 })
 
 test('hook triggers: no log (or an empty one) draws no block', async ($, on) => {
   world(on, { doneClaims: '' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await historyRows($)).some(r => /blocco/.test(r))).toBe(false)
+  expect((await notificationRows($)).some(r => /done-claim/.test(r))).toBe(false)
 })
 
 // ── done-claim.log is read again only when it changed ──
@@ -346,7 +335,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   expect(claimReads).toHaveLength(1)
   for (let i = 0; i < 4; i++) await clock.advance(30_000)
   expect(claimReads).toHaveLength(1)
-  expect((await historyRows($)).some(r => /blocco/.test(r))).toBe(true)
+  expect((await notificationRows($)).some(r => /done-claim/.test(r))).toBe(false) // one block is no notification yet
 
   mtime = 2 // same size, new time
   await clock.advance(30_000)
@@ -355,7 +344,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   options.doneClaims = `${claim(1, 'unproven-row', 'primo')}\n${claim(2, 'unproven-row', 'secondo')}\n` // another size
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
-  expect((await historyRows($)).filter(r => /blocco/.test(r)).length === 2).toBe(true)
+  expect((await notificationRows($)).some(r => /2 done-claim blocks/.test(r))).toBe(true)
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
 })

@@ -25,7 +25,7 @@ import {
   ICONS,
 } from './shared'
 import type { Span } from './shared'
-import { signalsOf } from './signals'
+import { signalId, signalsOf } from './signals'
 import { t } from './strings'
 import { visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, delta, dim, line, sp } from './view-base'
@@ -64,6 +64,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const running = visibleAgents(s).filter(a => a.status === 'running')
   const wl = s.worklog
   const hasWorklog = wl.pending.length + wl.underTarget.length > 0
+  // The notifications the person has not seen: counted on the tab label until the tab is opened
+  const seen = new Set(s.seenSignals)
+  const newSignals = tab === 'signals' ? 0 : signalsOf(s).filter(sig => !seen.has(signalId(sig))).length
 
   // ── Tab bar: every tab shows its name; the selected one is the primary button ──
   const tabButton = (id: CockpitTab, hasDot = false, count = 0) => {
@@ -80,7 +83,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   }
   const tabBar = (
     <Box columnGap={1} flexWrap="wrap">
-      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog, id === 'agents' ? running.length : 0))}
+      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog, id === 'agents' ? running.length : id === 'signals' ? newSignals : 0))}
     </Box>
   )
 
@@ -109,14 +112,13 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // Header line 1: model + effort + the Claude state + the signals badge | session cost (always: `$0.00` before the first turn), the last round's delta and duration
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn), the last round's delta and duration
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
   // the last main round's length, once a second or more of it ran
   const roundSpans: Span[] = s.lastRoundMs !== undefined && s.lastRoundMs >= 1000 ? [dim(' · '), dim(duration(s.lastRoundMs))] : []
   const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : []), ...roundSpans]
-  const signalCount = signalsOf(s).length
   const modelSpans = truncateSpans(
-    [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState), ...(signalCount > 0 ? [sp(`  ⚠ ${signalCount}`, COLORS.yellow, true)] : [])],
+    [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
     Math.max(0, width - spanWidth(costSpans) - 1),
   )
   const modelLine = (

@@ -4,10 +4,8 @@ import type { EngineInterface } from 'claude-code'
 import type { CockpitHistoryEntry, CockpitNote, CockpitPr, CockpitSnapshot, CockpitTab } from '../types'
 import { historyTokens, parseHistory } from './agents'
 import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
-import { refreshProcs } from './procs'
 import { openContext } from './refresh-context'
 import { parseNotes, savedTab } from './session'
-import { signalsOf } from './signals'
 import { INITIAL } from './state'
 import { configDir } from './store'
 import { agentCounts, taskCounts } from './view-agents'
@@ -74,8 +72,6 @@ export async function writeState($: EngineInterface, isForced = false, isHeartbe
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
       tab: s.tab ?? 'agents',
-      // what the status line's `⚠ n` badge counts: the signals the Segnali tab lists
-      signals: signalsOf(s).length,
       // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
       mainTokens: s.mainTokens,
       agentTokens: s.agentTokens,
@@ -186,6 +182,8 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   calls: undefined,
   insights: undefined,
   usageOpen: undefined,
+  signalOpen: undefined,
+  seenSignals: undefined,
   notesOpen: undefined,
   refreshedAt: undefined,
   tasks: [],
@@ -206,10 +204,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   contextStatic: undefined,
   skillsUsed: undefined,
   workflowRun: undefined,
-  procs: undefined,
-  isProcsOff: undefined,
   events: undefined,
-  eventFilter: undefined,
   modelUse: undefined,
   startedAt: undefined,
   confirm: undefined,
@@ -236,9 +231,8 @@ export async function setOpen($: EngineInterface, value: boolean): Promise<void>
   isOpen = value
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
-  // The Costi tab is read when it opens, and the Lavoro tab's processes with it: a pane that opens on one of them (the tab is kept with the session) is the
-  // same moment. The reads are not waited for: a slow one must not hold the open (or the close) back.
+  // The Costi tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment.
+  // The read is not waited for: a slow one must not hold the open (or the close) back.
   const tab = value ? (await read($, snapshot)).tab : undefined
   if (tab === 'context') void openContext($).catch(() => undefined)
-  if (tab === 'work') void refreshProcs($).catch(() => undefined)
 }

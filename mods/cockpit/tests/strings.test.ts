@@ -34,12 +34,13 @@ test('what reads the same in both languages is one value, shared by both bundles
     setLang('it')
     const it = t()
     expect(it.tokenLabels).toBe(en.tokenLabels)
+    expect(it.tokenShare).toBe(en.tokenShare)
     expect(it.consumerKinds).toBe(en.consumerKinds)
     expect(it.diffTitle).toBe(en.diffTitle)
-    for (const key of ['cache', 'tokenShare', 'taskTitle', 'hookTitle', 'prTitle'] as const) expect(it[key]).toBe(en[key])
-    // the Cockpit v4 texts are Italian whatever the language
-    for (const key of ['tabs', 'signalText', 'eventKinds', 'eventRow', 'summary'] as const) expect(it[key]).toBe(en[key])
-    expect(it.buttons.analyzeSuite).toBe(en.buttons.analyzeSuite)
+    for (const key of ['cache', 'taskTitle', 'hookTitle', 'prTitle', 'costCacheHit', 'costRate'] as const) expect(it[key]).toBe(en[key])
+    // the texts of the v4 views are not shared: each language has its own
+    for (const key of ['tabs', 'signalText', 'summary', 'signalFields', 'buttons'] as const) expect(it[key]).not.toBe(en[key])
+    expect(it.buttons.analyzeSuite).not.toBe(en.buttons.analyzeSuite)
   } finally {
     setLang('en')
   }
@@ -52,10 +53,10 @@ test('Italian: the pace, the trend title and the context block title are transla
     expect(t().trendTitle(1)).toBe('ANDAMENTO · 1 giro')
     expect(t().trendTitle(5)).toBe('ANDAMENTO · 5 giri')
     expect(t().contextDetailsTitle).toBe('DETTAGLI CONTESTO')
-    expect(t().tabs).toEqual({ agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' })
+    expect(t().tabs).toEqual({ agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' })
     setLang('en')
     expect(t().contextDetailsTitle).toBe('CONTEXT DETAILS')
-    expect(t().tabs.history).toBe('Cronologia')
+    expect(t().tabs).toEqual({ agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' })
   } finally {
     setLang('en')
   }

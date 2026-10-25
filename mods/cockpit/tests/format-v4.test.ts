@@ -5,7 +5,8 @@ import { workItemIds, workItemUrl } from '../hooks/links'
 import { cacheHit, usdOf } from '../hooks/pricing'
 import { emptyInsights } from '../hooks/insights'
 import { INITIAL } from '../hooks/state'
-import { EVENTS_KEEP, recordAgentEvent, recordEvent, visibleEvents } from '../hooks/timeline'
+import { setLang } from '../hooks/strings'
+import { EVENTS_KEEP, recordAgentEvent, recordEvent } from '../hooks/timeline'
 import { NOW } from './format-fixtures'
 
 const MILLION = { input: 1_000_000, output: 1_000_000, cacheRead: 1_000_000, cacheWrite: 1_000_000 }
@@ -26,14 +27,14 @@ test('cacheHit: the share of the input a cache served, none without input', () =
 })
 
 test('recordEvent: oldest first, a key seen again is not added, a row older than the newest takes its place by time', () => {
-  let list = recordEvent(undefined, { at: 10, kind: 'skill', text: 'commit' })
-  list = recordEvent(list, { at: 30, kind: 'block', key: 'k1', text: 'unproven-row' })
-  list = recordEvent(list, { at: 30, kind: 'block', key: 'k1', text: 'again' })
+  let list = recordEvent(undefined, { at: 10, kind: 'agent', text: 'commit' })
+  list = recordEvent(list, { at: 30, kind: 'round', key: 'k1', text: 'unproven-row' })
+  list = recordEvent(list, { at: 30, kind: 'round', key: 'k1', text: 'again' })
   expect(list.map(e => e.text)).toEqual(['commit', 'unproven-row'])
-  list = recordEvent(list, { at: 20, kind: 'block', key: 'k0', text: 'older' })
+  list = recordEvent(list, { at: 20, kind: 'round', key: 'k0', text: 'older' })
   expect(list.map(e => e.at)).toEqual([10, 20, 30])
   // the same key under another kind is another row
-  expect(recordEvent(list, { at: 40, kind: 'round', key: 'k1' })).toHaveLength(4)
+  expect(recordEvent(list, { at: 40, kind: 'agent', key: 'k1' })).toHaveLength(4)
 })
 
 test('recordEvent: a ring buffer of 300, the oldest go first', () => {
@@ -44,20 +45,17 @@ test('recordEvent: a ring buffer of 300, the oldest go first', () => {
   expect(list.at(-1)?.at).toBe(EVENTS_KEEP + 49)
 })
 
-test('visibleEvents: newest first, one kind when filtered; recordAgentEvent: an agent that ended twice is one row', () => {
+test('recordAgentEvent: an agent that ended twice is one row', () => {
   let list = recordEvent(undefined, { at: 1, kind: 'round', usd: 1 })
-  list = recordEvent(list, { at: 2, kind: 'error', text: 'Bash: failed' })
   list = recordAgentEvent(list, { at: 3, kind: 'agent', id: 'a1', usd: 1 })
   list = recordAgentEvent(list, { at: 4, kind: 'agent', id: 'a1', usd: 2 })
-  expect(visibleEvents(list, undefined).map(e => e.kind)).toEqual(['agent', 'error', 'round'])
-  expect(visibleEvents(list, 'agent').map(e => e.usd)).toEqual([2])
-  expect(visibleEvents(list, 'stall')).toEqual([])
-  expect(visibleEvents(undefined, undefined)).toEqual([])
+  expect(list.map(e => e.kind)).toEqual(['round', 'agent'])
+  expect(list.filter(e => e.kind === 'agent').map(e => e.usd)).toEqual([2])
 })
 
 test('roundCosts and topRounds: the rounds with a cost, the three dearest first, the earlier round on a tie', () => {
   const events = [1, 5, 3, 5, 2].map((usd, i) => ({ at: i, kind: 'round' as const, key: String(i + 1), usd, ms: 1000 }))
-  const rounds = roundCosts([...events, { at: 9, kind: 'skill' as const, text: 'x' }])
+  const rounds = roundCosts([...events, { at: 9, kind: 'agent' as const, text: 'x' }])
   expect(rounds.map(r => r.usd)).toEqual([1, 5, 3, 5, 2])
   expect(topRounds(rounds).map(r => r.n)).toEqual([2, 4, 3])
   expect(roundCosts(undefined)).toEqual([])
@@ -94,8 +92,8 @@ test('modelRows: the counters per model priced and ranked, dearest first', () =>
   expect(modelRows(undefined)).toEqual([])
 })
 
-test('costSummary: Italian text from what the snapshot holds, with the cost, the models, the credits and the signals count', () => {
-  const text = costSummary({
+test('costSummary: text in the language in force from what the snapshot holds, with the cost, the models, the credits and the notifications count', () => {
+  const summary = () => costSummary({
     ...INITIAL,
     now: NOW + 3_600_000,
     startedAt: NOW,
@@ -104,12 +102,21 @@ test('costSummary: Italian text from what the snapshot holds, with the cost, the
     modelUse: { 'claude-sonnet-5-5': { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 } },
     rateLimits: [{ kind: 'five_hour', percentUsed: 62 }],
   })
-  const lines = text.split(String.fromCharCode(10))
-  expect(lines[0]).toBe('Riepilogo sessione')
+  const lines = summary().split(String.fromCharCode(10))
+  expect(lines[0]).toBe('Session summary')
   expect(lines[1]).toMatch(/\$4\.50/)
-  expect(lines[1]).toMatch(/12/)
+  expect(lines[1]).toMatch(/12 rounds/)
   expect(lines.some(l => /claude-sonnet-5-5 \$2\.00/.test(l))).toBe(true)
-  expect(lines.some(l => /62/.test(l))).toBe(true)
+  expect(lines.some(l => /5h credits used: 62%/.test(l))).toBe(true)
+  try {
+    setLang('it')
+    const it = summary().split(String.fromCharCode(10))
+    expect(it[0]).toBe('Riepilogo sessione')
+    expect(it[1]).toMatch(/12 giri/)
+    expect(it.some(l => /crediti 5h usati: 62%/.test(l))).toBe(true)
+  } finally {
+    setLang('en')
+  }
 })
 
 test('workItemIds and workItemUrl: AB# ids of the branch and the PR titles, once each; a URL needs the org and the project', () => {

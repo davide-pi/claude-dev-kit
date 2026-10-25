@@ -170,10 +170,6 @@ export type World = {
   promptReadFails?: boolean
   /** The commit `git merge-base HEAD <default branch>` answers; absent, there is none (the branch has no default branch to count from). */
   mergeBase?: string
-  /** What the process reader (`node sysmon/procs.mjs`) prints; absent, it prints nothing and exits 1. */
-  procsLine?: string
-  /** Receives the argv (joined by spaces) of every run of the process reader. */
-  procsCalls?: string[]
   /** Receives the arguments (joined by spaces, after the `-C <dir> --no-optional-locks` prefix) of every git call that reads the Work tab. */
   repoCalls?: string[]
 }
@@ -247,10 +243,6 @@ export function world(on: On, options: World = {}) {
       options.azEnvs?.push(e.init?.env)
       if (options.noAz) throw new Error('spawn az ENOENT')
       return answer(JSON.stringify(options.azPr ?? []))
-    }
-    if (e.argv[0] === 'node') {
-      options.procsCalls?.push(e.argv.join(' '))
-      return options.procsLine === undefined ? answer('', 1) : answer(options.procsLine)
     }
     if (options.notRepo) return answer('', 128)
     if (e.argv.includes('merge-base')) return options.mergeBase === undefined ? answer('', 1) : answer(`${options.mergeBase}

@@ -142,7 +142,7 @@ test('Context: a main turn reads the breakdown again, debounced, only while the 
   await ui.unmount()
 })
 
-test('Context: the fast tier runs while the tab is selected (the refresh countdown), and not on the Cronologia tab', async ($, on) => {
+test('Context: the fast tier runs while the tab is selected (the refresh countdown), and not on the Notes tab', async ($, on) => {
   const listCalls: string[] = []
   const clock = world(on, { listCalls })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -154,7 +154,7 @@ test('Context: the fast tier runs while the tab is selected (the refresh countdo
   await clock.advance(6000)
   await settleAll()
   expect(listCalls.length).toBeGreaterThan(0)
-  await ui.press({ key: 'tab:history' })
+  await ui.press({ key: 'tab:notes' })
   await settleAll()
   listCalls.length = 0
   await clock.advance(3000) // t = 9 s: before the medium tier's tick

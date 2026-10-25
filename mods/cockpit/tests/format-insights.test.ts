@@ -13,6 +13,7 @@ import {
   recordToolCall,
   recordWait,
   resultTokens,
+  withContextReading,
   roundCost,
   timeSplit,
   toolArg,
@@ -153,4 +154,13 @@ test('recordCompaction / recordCtxAfter: the context before each compaction, the
   expect(ins.compactions).toBe(4)
   expect(recordCompaction(undefined).compactCtx).toBeUndefined()
   expect(recordCtxAfter(undefined, 5)).toBeUndefined()
+})
+
+test('withContextReading: a fall of the context well past the threshold is one compaction, and the next reading is its after', () => {
+  const snap = (tokens: number | undefined, insights?: ReturnType<typeof emptyInsights>) => ({ ctx: { tokens }, insights }) as unknown as Parameters<typeof withContextReading>[0]
+  const first = withContextReading(snap(300_000), 100_000)
+  expect(first.insights?.compactions).toBe(1)
+  expect(first.insights?.compactCtx?.at(-1)?.before).toBe(300_000)
+  expect(withContextReading(snap(100_000, first.insights as never), 120_000).insights?.compactions).toBe(1)
+  expect(withContextReading(snap(300_000), 290_000).insights?.compactions).toBeUndefined()
 })

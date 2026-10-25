@@ -7,12 +7,12 @@ import type { World } from './cockpit-world'
 
 const tabButtons = async (ui: Awaited<ReturnType<typeof mountPane>>) => (await ui.findAll({ type: 'Button' })).filter(b => /^tab:/.test(b.key ?? ''))
 
-test('tab bar: six text buttons in order, Ora selected by default; a press on Lavoro draws only the Lavoro view', async ($, on) => {
-  world(on)
+test('tab bar: five text buttons in order, Agents selected by default; a press on Work draws only the Work view', async ($, on) => {
+  world(on, { sessionId: () => 'chat-7' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  expect((await tabButtons(ui)).map(b => b.key)).toEqual(['tab:agents', 'tab:signals', 'tab:history', 'tab:context', 'tab:work', 'tab:notes'])
-  expect((await tabButtons(ui)).map(b => b.text)).toEqual(['Ora', 'Segnali', 'Cronologia', 'Costi', 'Lavoro', 'Note'])
+  expect((await tabButtons(ui)).map(b => b.key)).toEqual(['tab:agents', 'tab:context', 'tab:signals', 'tab:work', 'tab:notes'])
+  expect((await tabButtons(ui)).map(b => b.text)).toEqual(['Agents', 'Context', 'Notifications', 'Work', 'Notes'])
   const selected = async () => (await tabButtons(ui)).filter(b => b.props.variant === 'primary').map(b => b.key)
   expect(await selected()).toEqual(['tab:agents'])
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined()
@@ -21,25 +21,25 @@ test('tab bar: six text buttons in order, Ora selected by default; a press on La
   await ui.press({ key: 'tab:work' })
   expect(await selected()).toEqual(['tab:work'])
   expect(await ui.find({ type: 'Text', text: /^SUBAGENTS/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /^PROCESSI E PORTE/ })).toBeDefined()
+  expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
   expect(await ui.find({ type: 'Text', text: /Opus 5\.5/ })).toBeDefined() // the header stays on every tab
 
   await ui.press({ key: 'tab:signals' })
-  expect(await ui.find({ type: 'Text', text: /^PROCESSI E PORTE/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /^SEGNALI · 0/ })).toBeDefined()
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^no notifications/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('tab labels: Ora counts the running agents, Lavoro carries a dot when the worklog needs attention', async ($, on) => {
+test('tab labels: Agents counts the running agents, Work carries a dot when the worklog needs attention', async ($, on) => {
   world(on, { hasWorklog: true })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await spawnAgent($, 'code-reviewer')
   await spawnAgent($, 'implementer')
   const ui = await mountPane($, 80)
-  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Ora 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Lavoro ●')
-  expect((await ui.find({ key: 'tab:history' }))?.text).toBe('Cronologia')
+  expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Agents 2')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Work ●')
+  expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notifications')
   await ui.unmount()
 })
 
@@ -53,7 +53,7 @@ test('tab bar: the labels fit at 40, 58 and 80 columns and the bar wraps rather 
   }
 })
 
-// ── Footer: compact, analizza suite, copia riepilogo: the last row of every tab ──
+// ── Footer: compact, analyze suite, copy summary: the last row of every tab ──
 
 test('footer: compact compacts with the instructions and sends nothing else', async ($, on) => {
   const calls: string[] = []
@@ -63,9 +63,9 @@ test('footer: compact compacts with the instructions and sends nothing else', as
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'bar:compact' }))?.text).toBe('compact')
-  expect((await ui.find({ key: 'bar:suite' }))?.text).toBe('analizza suite')
-  expect((await ui.find({ key: 'bar:summary' }))?.text).toBe('copia riepilogo')
-  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined() // log hours lives in Lavoro only
+  expect((await ui.find({ key: 'bar:suite' }))?.text).toBe('analyze suite')
+  expect((await ui.find({ key: 'bar:summary' }))?.text).toBe('copy summary')
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined() // log hours lives in Work only
   await ui.press({ key: 'bar:compact' })
   expect(calls).toEqual(['compact'])
   expect(instructions).toEqual([KEEP_DROP])
@@ -73,13 +73,13 @@ test('footer: compact compacts with the instructions and sends nothing else', as
   await ui.unmount()
 })
 
-test('footer: analizza suite asks first; yes sends /retro, no sends nothing', async ($, on) => {
+test('footer: analyze suite asks first; yes sends /retro, no sends nothing', async ($, on) => {
   const commands: string[] = []
   world(on, { commands })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   await ui.press({ key: 'bar:suite' })
-  expect(rowTexts(await ui.drawn()).some(r => /analizzare la suite/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /analyze the suite/.test(r))).toBe(true)
   expect(await ui.find({ key: 'bar:suite' })).toBeUndefined()
   expect(commands).toEqual([])
 
@@ -95,7 +95,7 @@ test('footer: analizza suite asks first; yes sends /retro, no sends nothing', as
   await ui.unmount()
 })
 
-test('footer: copia riepilogo appends the session cost summary to the prompt box, with no command and no model call', async ($, on) => {
+test('footer: copy summary appends the session cost summary to the prompt box, with no command and no model call', async ($, on) => {
   const fills: { text: string; mode?: string }[] = []
   const commands: string[] = []
   const toasts: string[] = []
@@ -107,7 +107,7 @@ test('footer: copia riepilogo appends the session cost summary to the prompt box
   await until(() => fills.length > 0)
   expect(fills).toHaveLength(1)
   expect(fills[0]?.mode).toBe('append')
-  expect(fills[0]?.text).toMatch(/^\nRiepilogo sessione\n/)
+  expect(fills[0]?.text).toMatch(/^\nSession summary\n/)
   expect(fills[0]?.text).toMatch(/\$4\.82/)
   expect(commands).toEqual([])
   expect(calls).toEqual([])
@@ -157,26 +157,26 @@ test('footer: the buttons close the pane height, whatever the tab: a column box 
   }
 })
 
-// ── Lavoro: log hours behind a confirmation ──
+// ── Work: log hours behind a confirmation ──
 
 for (const [name, options] of [
   ['a feature branch', { branch: 'feature/orders-filter' }],
   ['the default branch', { branch: 'main' }],
   ['no git', { notRepo: true }],
 ] as const) {
-  test(`Lavoro: log hours on ${name} asks first, then runs /worklog oggi sessione with the id of this chat`, async ($, on) => {
+  test(`Work: log hours on ${name} asks first, then runs /worklog oggi sessione with the id of this chat`, async ($, on) => {
     const commands: string[] = []
     const w: World = { commands, sessionId: () => 'chat-7', ...options }
     world(on, w)
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
     const ui = await mountPane($)
-    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined() // not on Ora
+    expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined() // not on Agents
     await ui.press({ key: 'tab:work' })
     expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
     await ui.press({ key: 'bar:worklog' })
     expect(commands).toEqual([])
-    expect(rowTexts(await ui.drawn()).some(r => /registrare le ore/.test(r))).toBe(true)
+    expect(rowTexts(await ui.drawn()).some(r => /log the hours/.test(r))).toBe(true)
     await ui.press({ key: 'confirm:no' })
     expect(commands).toEqual([])
     await ui.press({ key: 'bar:worklog' })
@@ -187,7 +187,7 @@ for (const [name, options] of [
   })
 }
 
-test('Lavoro: between two sessions (no id) log hours is not offered', async ($, on) => {
+test('Work: between two sessions (no id) log hours is not offered', async ($, on) => {
   world(on)
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

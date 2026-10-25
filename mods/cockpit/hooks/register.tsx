@@ -48,11 +48,11 @@ import {
   slowTick,
 } from './refresh'
 import { cacheHit, usdOf } from './pricing'
-import { refreshProcs } from './procs'
 import { openContext, pressRefresh, scheduleContextRead } from './refresh-context'
 import { refreshGit, refreshRepo, showDiff } from './refresh-git'
 import { NOTE_MAX, normalizeNewlines } from './session'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
+import { signalId, signalsOf } from './signals'
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
@@ -78,7 +78,6 @@ let mainTools: string[] = []
 let waits: { from: number; to: number }[] = []
 const WAITS_KEPT = 50
 /** The error text a Cronologia row keeps. */
-const ERROR_EVENT_MAX = 80
 // The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
 const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
 
@@ -100,11 +99,11 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
 
 /** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
 const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Lavoro tab's git and process reads and the Costi tab's breakdown run while the tab is selected: the press starts them.
+  // The Lavoro tab's git read and the Costi tab's breakdown run while the tab is selected: the press starts them.
   selectTab: tab =>
-    void patch($, s => ({ ...s, tab, confirm: undefined, procs: tab === 'work' ? s.procs : undefined, isProcsOff: tab === 'work' ? s.isProcsOff : undefined }))
+    void patch($, s => ({ ...s, tab, confirm: undefined, signalOpen: undefined, seenSignals: s.tab === 'signals' || tab === 'signals' ? signalsOf(s).map(signalId) : s.seenSignals }))
       .then(async () => {
-        if (tab === 'work') await Promise.all([refreshRepo($), refreshProcs($)])
+        if (tab === 'work') await refreshRepo($)
         else if (tab === 'context') await openContext($)
       })
       .catch(() => undefined),
@@ -142,12 +141,12 @@ const paneActions = ($: EngineInterface): PaneActions => ({
         $.ui.toast(t().summaryCopied)
       })
       .catch(() => undefined),
-  filterEvents: kind => void patch($, s => ({ ...s, eventFilter: kind })).catch(() => undefined),
   openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
-  refresh: () => void pressRefresh($).catch(() => undefined),
   toggleUsage: id => void patch($, s => ({ ...s, usageOpen: toggled(s.usageOpen, id) })).catch(() => undefined),
+  toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
+  refresh: () => void pressRefresh($).catch(() => undefined),
   toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
   setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
   saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
@@ -285,13 +284,12 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
-    const now = await $.clock.now()
     await patch($, s => ({
       ...s,
       ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
       // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
       lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
-      ...withContextReading(s, e.context.tokens, now),
+      ...withContextReading(s, e.context.tokens),
       cost: { ...s.cost, usd: e.cost?.usd },
       rateLimits: e.rateLimits,
     }))
@@ -422,11 +420,9 @@ export const register: Register = on => {
     const ran = await next(e)
     if (isOk(ran)) {
       try {
-        const at = await $.clock.now()
         await patch($, s => ({
           ...s,
           skillsUsed: s.skillsUsed?.includes(e.skill) ? s.skillsUsed : [...(s.skillsUsed ?? []), e.skill],
-          events: recordEvent(s.events, { at, kind: 'skill', text: e.skill }),
         }))
       } catch {
         // observing must never break the call
@@ -488,11 +484,9 @@ export const register: Register = on => {
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
-      const failure = isSuccess ? undefined : outcome?.error?.replace(/\s+/g, ' ').trim().slice(0, ERROR_EVENT_MAX)
       await patch($, s => ({
         ...s,
         calls: recordCall(s.calls, { tool, arg: toolArg(e), isOk: isSuccess, at }),
-        events: failure === undefined ? s.events : recordEvent(s.events, { at: ended ?? at ?? s.now, kind: 'error', text: `${tool}: ${failure}` }),
         insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
       })).catch(() => undefined)
       const last = mainTools.at(-1)
@@ -544,12 +538,7 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
-      const at = await $.clock.now().catch(() => undefined)
-      await patch($, s => ({
-        ...s,
-        insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens),
-        events: recordEvent(s.events, { at: at ?? s.now, kind: 'compaction' }),
-      })).catch(() => undefined)
+      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
     }
     return done
   })

@@ -10,7 +10,6 @@ import {
   displayModel,
   duration,
   effortGlyph,
-  fmtBytes,
   fmtCost,
   fmtCostDelta,
   folderIcon,
@@ -195,29 +194,6 @@ test('sparkline: a given maximum fixes the scale, so a quiet reading stays low',
   expect(sparkline([0, 50, 100], 100)).toBe('▁▅█')
   expect(sparkline([5, 5])).toBe('██')
   expect(sparkline([150], 100)).toBe('█')
-})
-
-test('fmtBytes: base 1024, a space and the unit (B, KB, MB, GB), a decimal only under ten', () => {
-  expect(fmtBytes(0)).toBe('0 B')
-  expect(fmtBytes(512)).toBe('512 B')
-  expect(fmtBytes(850 * 1024)).toBe('850 KB')
-  expect(fmtBytes(1536)).toBe('1.5 KB')
-  expect(fmtBytes(Math.round(1.2 * 1024 ** 2))).toBe('1.2 MB')
-  expect(fmtBytes(45 * 1024 ** 2)).toBe('45 MB')
-  expect(fmtBytes(340 * 1024 ** 2)).toBe('340 MB')
-  expect(fmtBytes(Math.round(1.2 * 1024 ** 3))).toBe('1.2 GB')
-  expect(fmtBytes(12.4 * 1024 ** 3)).toBe('12 GB')
-  expect(fmtBytes(-5)).toBe('0 B')
-})
-
-test('fmtBytes: the value is rounded before the unit is chosen, so it never reads 1024 KB or 10.0 KB', () => {
-  expect(fmtBytes(1024 ** 2 - 1)).toBe('1.0 MB')
-  expect(fmtBytes(1023.6)).toBe('1.0 KB')
-  expect(fmtBytes(10 * 1024 - 1)).toBe('10 KB')
-  expect(fmtBytes(Math.round(9.96 * 1024 ** 2))).toBe('10 MB')
-  expect(fmtBytes(1024 ** 3 - 1)).toBe('1.0 GB')
-  expect(fmtBytes(9.94 * 1024)).toBe('9.9 KB')
-  expect(fmtBytes(1023.4)).toBe('1023 B')
 })
 
 test('withBackground: the first cells of a row on a background, a span cut where the cells end', () => {

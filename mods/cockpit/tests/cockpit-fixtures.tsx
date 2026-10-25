@@ -133,11 +133,14 @@ export const tabsAt = async ($: Engine, columns: number) => {
   return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
 }
 
-/** The tab labels: Italian text in both languages. */
-export const NAMES: Record<CockpitTab, string> = { agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' }
+/** The tab labels in each language. */
+export const NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
+  en: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
+  it: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
+}
 
 /** The tab bar's labels: every tab's name; `extras` adds a badge (` 1`, ` ●`) after a label. */
-export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}) => TABS.map(tab => `${NAMES[tab]}${extras[tab] ?? ''}`)
+export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}, lang: 'en' | 'it' = 'en') => TABS.map(tab => `${NAMES[lang][tab]}${extras[tab] ?? ''}`)
 
 // ── Phase 4: Work, per agent ──
 

@@ -47,6 +47,9 @@ export type SignalKind =
 /** One thing that looks wrong: its kind, a key that tells two of a kind apart, and the number or name the text names. */
 export type Signal = { kind: SignalKind; key: string; label?: string; n?: number }
 
+/** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
+export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
+
 /** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. */
 export type AgentCost = { id: string; type: string; model?: string; tokens: number; usd: number; hit?: number }
 

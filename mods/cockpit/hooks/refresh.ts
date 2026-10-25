@@ -4,9 +4,6 @@ import type { EngineInterface } from 'claude-code'
 import type { CockpitAgent, CockpitHistoryEntry } from '../types'
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
 import { withContextReading } from './insights'
-import { refreshProcs } from './procs'
-import { isStalled } from './signals'
-import { recordEvent } from './timeline'
 import { refreshGit } from './refresh-git'
 import { parseRateCache, resolveAlm, tabNeeds, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
@@ -79,11 +76,9 @@ export async function refreshDoneClaims($: EngineInterface): Promise<void> {
     if (lastClaimsStat?.size === size && lastClaimsStat.mtimeMs === mtimeMs && lastClaimsStat.sessionId === sessionId) return
     const text = await $.fs.read(file)
     const claims = parseDoneClaims(typeof text === 'string' ? text : '', sessionId)
-    // every block the hook fired is a Cronologia row, once (its key is its time and rule)
     await patch($, s => ({
       ...s,
       doneClaims: claims.length > 0 ? claims : undefined,
-      events: [...claims].reverse().reduce((events, c) => recordEvent(events, { at: Date.parse(c.at) || s.now, kind: 'block', key: `${c.at}|${c.rule}`, text: c.rule }), s.events),
     }))
     lastClaimsStat = { size, mtimeMs, sessionId }
   } catch {
@@ -108,12 +103,11 @@ export async function refreshLastRates($: EngineInterface): Promise<void> {
 export async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
-    const now = await $.clock.now()
     await patch($, s => ({
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
-      ...withContextReading(s, u.context.tokens, now),
+      ...withContextReading(s, u.context.tokens),
       cost: { ...s.cost, usd: u.cost?.usd },
       rateLimits: u.rateLimits,
     }))
@@ -163,11 +157,9 @@ async function tickClock($: EngineInterface): Promise<number> {
       .map(toHistory)
       .filter((h): h is CockpitHistoryEntry => h !== undefined)
       .sort((a, b) => b.endedAt - a.endedAt)
-    const stalled = s.workflowRun && isStalled(s.workflowRun, now) ? s.workflowRun : undefined
     return {
       ...s,
       now,
-      events: stalled ? recordEvent(s.events, { at: now, kind: 'stall', key: stalled.runId, text: stalled.name ?? stalled.runId }) : s.events,
       workflowRun,
       agents: agents.filter(isListed),
       history: left.length > 0 ? addHistory(s.history, left) : s.history,
@@ -204,7 +196,6 @@ export async function refreshOnOpen($: EngineInterface): Promise<void> {
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
-  await refreshProcs($)
 }
 
 /** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
@@ -225,5 +216,4 @@ export async function slowTick($: EngineInterface): Promise<void> {
   await refreshGit($)
   await refreshWorklog($, now)
   await refreshDoneClaims($)
-  await refreshProcs($)
 }

@@ -20,7 +20,7 @@ test('PR: a GitHub pull request of the branch as a link: number, title and addre
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const rows = await lavoroRows($)
-  const i = rows.findIndex(r => r === 'LINK · 1')
+  const i = rows.findIndex(r => r === 'LINKS · 1')
   expect(i).toBeGreaterThan(0)
   expect(rows[i - 1]).toBe(' ')
   expect(rows.slice(i + 1, i + 3)).toEqual([' ', '#42 Fix the orders filter'])
@@ -49,7 +49,7 @@ for (const { name, options, isGhAsked } of [
     world(on, { ghCalls, branch: 'feature/orders-filter', ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await lavoroRows($)).some(r => /^LINK ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
     expect(ghCalls).toEqual(isGhAsked ? [GH_PR_ARGS] : [])
   })
 }
@@ -68,7 +68,7 @@ test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM l
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const rows = await lavoroRows($)
-  const i = rows.findIndex(r => r === 'LINK · 1')
+  const i = rows.findIndex(r => r === 'LINKS · 1')
   expect(i).toBeGreaterThan(0)
   expect(rows.slice(i + 1, i + 3)).toEqual([' ', '#7 Faster orders'])
   expect(rows.some(r => /review|checks/.test(r))).toBe(false)
@@ -106,7 +106,7 @@ for (const { name, options, workspaces } of [
     world(on, { azCalls, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces, ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await lavoroRows($)).some(r => /^LINK ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
     // without an org the CLI is not asked at all: never the configured default
     expect(azCalls.length).toBe(name === 'no ALM org to ask' ? 0 : 1)
   })
@@ -152,7 +152,7 @@ test('PR: the PR of a branch left behind stays listed on the next one, which add
   await clock.advance(30_000)
   await settleAll()
   const rows = await lavoroRows($)
-  expect(rows).toContain('LINK · 1')
+  expect(rows).toContain('LINKS · 1')
   expect(rows).toContain('#42 Fix the orders filter')
 })
 
@@ -244,7 +244,7 @@ test('az: on Windows an argument cmd would read as more than text (a branch name
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(windows).toEqual([])
-  expect((await lavoroRows($)).some(r => /^LINK ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
 })
 
 for (const { name, env, prefix } of [
@@ -317,7 +317,7 @@ test('Work: a PR created in the session (gh pr create) is a Link, and is kept in
   await ui.press({ key: 'tab:work' })
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain('LINK · 1')
+  expect(rows).toContain('LINKS · 1')
   expect(rows.some(r => /^#42 Add filter$/.test(r))).toBe(true)
   expect((await ui.find({ type: 'Link' }))?.props.href).toBe(GH_CREATED)
   await ui.unmount()
@@ -350,7 +350,7 @@ test('Work: a create that failed, was refused or printed no url adds no PR', asy
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
   answer = { ...bashResult(GH_CREATED), isError: true }
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
-  expect((await lavoroRows($)).some(r => /^LINK ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
 })
 
 test('Work: the PRs of a session come back with it (the state file), as links', async ($, on) => {
@@ -362,7 +362,7 @@ test('Work: the PRs of a session come back with it (the state file), as links', 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain('LINK · 2')
+  expect(rows).toContain('LINKS · 2')
   expect(rows.some(r => /^#7 Old work$/.test(r))).toBe(true)
   expect(rows.some(r => /^#8 Checks$/.test(r))).toBe(true)
   expect(rows.some(r => /review|checks 1/.test(r))).toBe(false)
@@ -384,7 +384,7 @@ test('Work: the read of the branch updates a PR already listed (created, then re
   await clock.advance(5 * MIN + 30_000)
   await settleAll()
   const rows = await lavoroRows($)
-  expect(rows).toContain('LINK · 1')
+  expect(rows).toContain('LINKS · 1')
   expect(rows.filter(r => /^#42 /.test(r))).toEqual(['#42 Fix the orders filter'])
 })
 

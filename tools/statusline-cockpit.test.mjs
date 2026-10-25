@@ -54,14 +54,8 @@ test('pane closed: last turn cost, agents and tasks badges', () => {
   assert.match(out, /☐ 3\/7/);
 });
 
-test('pane closed: the signals count shows as `⚠ n`, nothing at zero or without the field', () => {
-  assert.match(render({ ...STATE, open: false, at: Date.now(), signals: 3 }), /⚠ 3/);
-  assert.doesNotMatch(render({ ...STATE, open: false, at: Date.now(), signals: 0 }), /⚠ \d/);
-  assert.doesNotMatch(render({ ...STATE, open: false, at: Date.now() }), /⚠ \d/);
-});
-
 test('pane open with a fresh heartbeat: a zero-width line', () => {
-  assert.equal(render({ ...STATE, open: true, at: Date.now(), signals: 2 }), '\u200B\n');
+  assert.equal(render({ ...STATE, open: true, at: Date.now() }), '\u200B\n');
 });
 
 test('pane open but stale (no heartbeat for over 45 s): the normal line', () => {

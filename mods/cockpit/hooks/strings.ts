@@ -14,88 +14,30 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
   return `${isVowel ? (article === 'il' ? "l'" : "all'") : `${article} `}${n}%`
 }
 
-/** Footer buttons and confirmations that read the same in both languages (Italian). */
-const BUTTONS = { analyzeSuite: 'analizza suite', copySummary: 'copia riepilogo', yes: 'sì', no: 'no' }
-
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
-  /** Every tab's label, in the bar: text, never an icon alone. */
-  tabs: { agents: 'Ora', signals: 'Segnali', history: 'Cronologia', context: 'Costi', work: 'Lavoro', notes: 'Note' },
-  confirmLog: 'registrare le ore di questa chat?',
-  confirmSuite: 'analizzare la suite? invia /retro al modello',
-  confirmNoteDelete: 'eliminare questa nota?',
-  summaryCopied: 'riepilogo nel prompt',
-  waitingSince: (seconds: number) => `in attesa da ${seconds}s`,
-  toolRunning: 'tool in corso',
-  noToolRunning: 'nessun tool in corso',
-  workflowTitle: 'WORKFLOW',
-  workflowLine: (phase: string, round: number | undefined, done: number, total: number) => `${phase}${round === undefined ? '' : ` · giro ${round}`} · agenti ${done}/${total}`,
-  workflowCost: (usd: string) => `${usd} finora`,
-  lastError: 'ultimo errore',
-  signalsTitle: (n: number) => `SEGNALI · ${n}`,
-  noSignals: 'nessun segnale: tutto nella norma',
-  signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
-  eventsTitle: (shown: number, total: number) => `CRONOLOGIA · ${shown === total ? total : `${shown}/${total}`}`,
-  noEvents: 'nessun evento ancora',
-  filterAll: 'tutti',
-  eventKinds: { round: 'giri', skill: 'skill', agent: 'agenti', compaction: 'compattazioni', error: 'errori', block: 'blocchi', stall: 'stall' },
-  eventRow: {
-    round: (usd: string, duration: string) => `giro ${usd} · ${duration}`,
-    skill: (name: string) => `skill ${name}`,
-    agent: (type: string, model: string, usd: string) => `agente ${type} · ${model} · ${usd}`,
-    compaction: 'compattazione',
-    error: (text: string) => `errore ${text}`,
-    block: (rule: string) => `blocco ${rule}`,
-    stall: (name: string) => `STALL workflow ${name}`,
-  },
-  costRounds: (n: number) => `COSTO PER GIRO · ${n}`,
-  costTop: 'primi 3',
-  costAgentsTitle: 'PER AGENTE',
-  costModelsTitle: 'PER MODELLO',
   costCacheHit: 'cache',
   costRate: (perHour: string) => `${perHour}/h`,
-  costProjectionTitle: 'RITMO E CREDITI 5h',
-  creditsHold: 'i crediti 5h reggono fino al reset',
-  creditsRunOut: (left: string, reset: string) => `crediti 5h finiti tra ~${left}, prima del reset (${reset})`,
-  noCosts: 'nessun costo ancora',
-  linksTitle: (n: number) => `LINK · ${n}`,
-  workItemsTitle: 'WORK ITEM',
-  procsTitle: 'PROCESSI E PORTE',
-  procsOff: 'processi non leggibili qui',
-  noProcs: 'nessun processo figlio',
-  summaryTitle: 'Riepilogo sessione',
-  summary: {
-    cost: (usd: string, rounds: number, perHour?: string) => `costo ${usd} in ${rounds} giri${perHour === undefined ? '' : `, ${perHour}/h`}`,
-    models: (list: string) => `modelli: ${list}`,
-    credits: (pct: number) => `crediti 5h usati: ${pct}%`,
-    signals: (n: number) => `segnali: ${n}`,
-  },
   cache: 'cache ',
-  tokenShare: ' token  ',
-  /** The four counters of an agent's row. */
-  tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
   consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   taskTitle: 'TASK',
   hookTitle: 'HOOK · done-claim',
   prTitle: 'PR',
   diffTitle: (file: string) => `diff · ${file}`,
-  signalText: {
-    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} pesa ${Math.round(n / 1000)}k token o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
-    opusReadOnly: (a: string) => ({ what: `Opus su un agente di sola lettura (${a})`, why: 'Opus costa molto di più e una lettura non ne ha bisogno', todo: 'imposta model sonnet o haiku per questo tipo di agente' }),
-    bigResult: (tool: string, chars: number) => ({ what: `risultato di ${tool} da ${Math.round(chars / 1000)}k caratteri`, why: 'resta nel contesto a ogni giro e lo gonfia', todo: "limita l'output (filtra, usa head/offset) o compatta" }),
-    reread: (file: string, n: number) => ({ what: `${file} letto ${n} volte`, why: 'ogni lettura ripaga token già spesi', todo: 'ricorda cosa serve del file o leggine solo la parte utile' }),
-    failedCommand: (cmd: string, n: number) => ({ what: `comando fallito ${n} volte: ${cmd}`, why: 'si ripete lo stesso errore senza cambiare approccio', todo: "leggi l'errore, correggi la causa invece di rilanciare" }),
-    coldAfterIdle: (share: number) => ({ what: `cache al ${share}% dopo una pausa lunga`, why: 'la cache è scaduta: il giro ha ripagato tutto il contesto', todo: 'con pause lunghe compatta prima di riprendere' }),
-    ctxGrowth: (n: number) => ({ what: `contesto +${Math.round(n / 1000)}k in pochi giri`, why: 'si avvicina alla compattazione e ogni giro costa di più', todo: 'trova cosa lo ha gonfiato (Costi) e compatta' }),
-    doneClaims: (n: number) => ({ what: `${n} blocchi done-claim`, why: 'il modello dichiara finito senza prove, più volte', todo: 'chiedi la prova (comando e output) prima di accettare' }),
-    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow fermo (STALL)', why: 'nessun agente ha fatto nulla da minuti: forse perso un evento', todo: 'controlla gli agenti in Ora; interrompi o rilancia' } : { what: `workflow al giro ${n}`, why: 'oltre il terzo giro il lavoro non converge', todo: 'fermati e rivedi il perimetro o il criterio' }),
-    permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
-  },
+  tokenShare: ' token  ',
+  /** The four counters of an agent's row. */
+  tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
 }
 
 const EN = {
   ...SHARED,
-  buttons: { ...BUTTONS, compact: 'compact', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
+  /** Every tab's label, in the bar: text, never an icon alone. */
+  tabs: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
+  buttons: { compact: 'compact', analyzeSuite: 'analyze suite', copySummary: 'copy summary', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
+  confirmLog: 'log the hours of this chat?',
+  confirmSuite: 'analyze the suite? sends /retro to the model',
+  confirmNoteDelete: 'delete this note?',
+  summaryCopied: 'summary in the prompt',
 
   // Header
   contextTitle: 'CONTEXT',
@@ -108,15 +50,42 @@ const EN = {
   unmapped: 'unmapped',
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
+  waitingSince: (seconds: number) => `waiting for ${seconds}s`,
 
-  // Subagents
+  // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
-  askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   lastTool: 'last tool ',
   tokensToggle: 'tokens',
   historyTitle: 'HISTORY',
+  askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
+  /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
+  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
+    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · round ${round}`} · ${done}/${total} · ${usd}`,
 
-  // Context
+  // Notifications
+  signalsTitle: (n: number) => `NOTIFICATIONS · ${n}`,
+  noSignals: 'no notifications',
+  signalFields: { why: 'why: ', todo: 'what to do: ' },
+  signalText: {
+    heavyAgent: (a: string, n: number) => ({ what: `subagent ${a} weighs ${Math.round(n / 1000)}k tokens or too much of the spend`, why: 'it burns budget and context out of sight', todo: 'check what it does; narrow the task or change the model' }),
+    opusReadOnly: (a: string) => ({ what: `Opus on a read-only agent (${a})`, why: 'Opus costs far more and a read does not need it', todo: 'set model sonnet or haiku for this agent type' }),
+    bigResult: (tool: string, chars: number) => ({ what: `${tool} result of ${Math.round(chars / 1000)}k characters`, why: 'it stays in the context every round and swells it', todo: 'limit the output (filter, use head/offset) or compact' }),
+    reread: (file: string, n: number) => ({ what: `${file} read ${n} times`, why: 'every read pays again for tokens already spent', todo: 'remember what you need from the file or read only the useful part' }),
+    failedCommand: (cmd: string, n: number) => ({ what: `command failed ${n} times: ${cmd}`, why: 'the same error repeats without a change of approach', todo: 'read the error and fix the cause instead of rerunning' }),
+    coldAfterIdle: (share: number) => ({ what: `cache at ${share}% after a long pause`, why: 'the cache expired: the round paid for the whole context again', todo: 'with long pauses, compact before resuming' }),
+    ctxGrowth: (n: number) => ({ what: `context +${Math.round(n / 1000)}k in a few rounds`, why: 'it nears compaction and every round costs more', todo: 'find what swelled it (Context) and compact' }),
+    doneClaims: (n: number) => ({ what: `${n} done-claim blocks`, why: 'the model says it is done without proof, more than once', todo: 'ask for the proof (command and output) before accepting' }),
+    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow stalled (STALL)', why: 'no agent has done anything for minutes: an event may have been lost', todo: 'check the agents in the Agents tab; stop or rerun' } : { what: `workflow at round ${n}`, why: 'past the third round the work is not converging', todo: 'stop and review the perimeter or the criterion' }),
+    permissionWait: (seconds: number) => ({ what: `permission waiting for ${seconds}s`, why: 'the work is stopped until you answer', todo: 'answer the request in the terminal' }),
+  },
+
+  // Costs
+  costRounds: (n: number) => `COST PER ROUND · ${n}`,
+  costTop: 'top 3',
+  costAgentsTitle: 'TOP AGENTS',
+  costModelsTitle: 'BY MODEL',
+  creditsHold: '5h credits hold to the reset',
+  creditsRunOut: (left: string) => `5h credits out in ~${left}`,
   exact: 'exact',
   someExact: '✓ = exact',
   estimate: 'estimate',
@@ -132,6 +101,13 @@ const EN = {
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
     `${from} → ${to}${growth ? ` (+${growth}/round)` : ''}${rounds === undefined ? '' : `, compact in ~${rounds} ${plural(rounds, 'round', 'rounds')}`}`,
   refreshIn: (seconds: number) => `refresh ${seconds}s`,
+  summaryTitle: 'Session summary',
+  summary: {
+    cost: (usd: string, rounds: number, perHour?: string) => `cost ${usd} in ${rounds} ${plural(rounds, 'round', 'rounds')}${perHour === undefined ? '' : `, ${perHour}/h`}`,
+    models: (list: string) => `models: ${list}`,
+    credits: (pct: number) => `5h credits used: ${pct}%`,
+    signals: (n: number) => `signals: ${n}`,
+  },
 
   // Work
   mainTitle: 'MAIN',
@@ -152,6 +128,8 @@ const EN = {
   changesTitle: 'CHANGES',
   editedHere: '● this chat',
   noChanges: 'no changes',
+  linksTitle: (n: number) => `LINKS · ${n}`,
+  workItemsTitle: 'work item',
   prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   review: 'review ',
   reviews: { approved: 'approved', changes: 'changes requested', pending: 'pending' },
@@ -179,10 +157,8 @@ const EN = {
 
   // System
   systemTitle: 'SYSTEM',
-  processesTitle: 'PROCESSES',
   reading: 'reading…',
   unavailable: 'unavailable',
-  noChildProcess: 'no child process',
   diskFree: 'free',
 
   // Notes
@@ -211,7 +187,12 @@ export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  buttons: { ...BUTTONS, compact: 'compatta', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
+  tabs: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
+  buttons: { compact: 'compatta', analyzeSuite: 'analizza suite', copySummary: 'copia riepilogo', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
+  confirmLog: 'registrare le ore di questa chat?',
+  confirmSuite: 'analizzare la suite? invia /retro al modello',
+  confirmNoteDelete: 'eliminare questa nota?',
+  summaryCopied: 'riepilogo nel prompt',
 
   contextTitle: 'CONTESTO',
   contextDetailsTitle: 'DETTAGLI CONTESTO',
@@ -222,13 +203,38 @@ const IT: Strings = {
   requestsLeft: (n: number) => `~${n} ${plural(n, 'richiesta', 'richieste')}`,
   unmapped: 'non mappato',
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
+  waitingSince: (seconds: number) => `in attesa da ${seconds}s`,
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
-  askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   lastTool: 'ultimo tool ',
   tokensToggle: 'token',
   historyTitle: 'STORICO',
+  askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
+  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
+    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · giro ${round}`} · ${done}/${total} · ${usd}`,
 
+  signalsTitle: (n: number) => `NOTIFICHE · ${n}`,
+  noSignals: 'nessuna notifica',
+  signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
+  signalText: {
+    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} pesa ${Math.round(n / 1000)}k token o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
+    opusReadOnly: (a: string) => ({ what: `Opus su un agente di sola lettura (${a})`, why: 'Opus costa molto di più e una lettura non ne ha bisogno', todo: 'imposta model sonnet o haiku per questo tipo di agente' }),
+    bigResult: (tool: string, chars: number) => ({ what: `risultato di ${tool} da ${Math.round(chars / 1000)}k caratteri`, why: 'resta nel contesto a ogni giro e lo gonfia', todo: "limita l'output (filtra, usa head/offset) o compatta" }),
+    reread: (file: string, n: number) => ({ what: `${file} letto ${n} volte`, why: 'ogni lettura ripaga token già spesi', todo: 'ricorda cosa serve del file o leggine solo la parte utile' }),
+    failedCommand: (cmd: string, n: number) => ({ what: `comando fallito ${n} volte: ${cmd}`, why: 'si ripete lo stesso errore senza cambiare approccio', todo: "leggi l'errore, correggi la causa invece di rilanciare" }),
+    coldAfterIdle: (share: number) => ({ what: `cache al ${share}% dopo una pausa lunga`, why: 'la cache è scaduta: il giro ha ripagato tutto il contesto', todo: 'con pause lunghe compatta prima di riprendere' }),
+    ctxGrowth: (n: number) => ({ what: `contesto +${Math.round(n / 1000)}k in pochi giri`, why: 'si avvicina alla compattazione e ogni giro costa di più', todo: 'trova cosa lo ha gonfiato (Contesto) e compatta' }),
+    doneClaims: (n: number) => ({ what: `${n} blocchi done-claim`, why: 'il modello dichiara finito senza prove, più volte', todo: 'chiedi la prova (comando e output) prima di accettare' }),
+    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow fermo (STALL)', why: 'nessun agente ha fatto nulla da minuti: forse perso un evento', todo: 'controlla gli agenti in Agenti; interrompi o rilancia' } : { what: `workflow al giro ${n}`, why: 'oltre il terzo giro il lavoro non converge', todo: 'fermati e rivedi il perimetro o il criterio' }),
+    permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
+  },
+
+  costRounds: (n: number) => `COSTO PER GIRO · ${n}`,
+  costTop: 'primi 3',
+  costAgentsTitle: 'AGENTI PIÙ CARI',
+  costModelsTitle: 'PER MODELLO',
+  creditsHold: 'i crediti 5h reggono fino al reset',
+  creditsRunOut: (left: string) => `crediti 5h finiti tra ~${left}`,
   exact: 'esatto',
   someExact: '✓ = esatto',
   estimate: 'stima',
@@ -252,6 +258,13 @@ const IT: Strings = {
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
     `${from} → ${to}${growth ? ` (+${growth}/giro)` : ''}${rounds === undefined ? '' : `, compattazione tra ~${rounds} ${plural(rounds, 'giro', 'giri')}`}`,
   refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
+  summaryTitle: 'Riepilogo sessione',
+  summary: {
+    cost: (usd: string, rounds: number, perHour?: string) => `costo ${usd} in ${rounds} ${plural(rounds, 'giro', 'giri')}${perHour === undefined ? '' : `, ${perHour}/h`}`,
+    models: (list: string) => `modelli: ${list}`,
+    credits: (pct: number) => `crediti 5h usati: ${pct}%`,
+    signals: (n: number) => `segnali: ${n}`,
+  },
 
   mainTitle: 'PRINCIPALE',
   tasksDone: (n: number) => ` ${n} ${plural(n, 'fatto', 'fatti')}`,
@@ -271,6 +284,8 @@ const IT: Strings = {
   changesTitle: 'MODIFICHE',
   editedHere: '● questa chat',
   noChanges: 'nessuna modifica',
+  linksTitle: (n: number) => `LINK · ${n}`,
+  workItemsTitle: 'work item',
   prStates: { open: 'aperta', draft: 'bozza', merged: 'unita', closed: 'chiusa' },
   review: 'revisione ',
   reviews: { approved: 'approvata', changes: 'modifiche richieste', pending: 'in attesa' },
@@ -296,10 +311,8 @@ const IT: Strings = {
   },
 
   systemTitle: 'SISTEMA',
-  processesTitle: 'PROCESSI',
   reading: 'lettura…',
   unavailable: 'non disponibile',
-  noChildProcess: 'nessun processo figlio',
   diskFree: 'liberi',
 
   notesTitle: (n: number) => `NOTE · ${n}`,

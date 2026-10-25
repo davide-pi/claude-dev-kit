@@ -86,16 +86,16 @@ test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs 
   expect(tabNeeds('agents')).toEqual({ fast: true })
   expect(tabNeeds('signals')).toEqual({ fast: true })
   expect(tabNeeds('work')).toEqual({ fast: true })
-  expect(tabNeeds('history')).toEqual({ fast: false })
   expect(tabNeeds('notes')).toEqual({ fast: false })
   expect(tabNeeds('context')).toEqual({ fast: true }) // the refresh countdown
   expect(tabNeeds(undefined)).toEqual({ fast: true })
 })
 
-test('savedTab: the six tabs, and the older ones a state file may still hold mapped to where their content went', () => {
-  expect(TABS).toEqual(['agents', 'signals', 'history', 'context', 'work', 'notes'])
+test('savedTab: the five tabs, and the older ones a state file may still hold mapped to where their content went', () => {
+  expect(TABS).toEqual(['agents', 'context', 'signals', 'work', 'notes'])
   for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
   expect(savedTab('session')).toBe('agents')
+  expect(savedTab('history')).toBe('agents')
   expect(savedTab('repo')).toBe('work')
   expect(savedTab('system')).toBe('work')
   expect(savedTab('insights')).toBe('context')
