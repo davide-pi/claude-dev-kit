@@ -32,7 +32,8 @@
  * line per `deliver` run ({ at, run, size, rounds, minutes, findings: [{ category, priority, path, closed }] })
  * and a `{ "retro": <date> }` line each time a retro was settled. Counting only what follows the last retro
  * line, a category that recurs RECURRING times or a file holding OPEN_P3 open P3 findings adds one line
- * pointing at /retro. A missing or unreadable log adds nothing.
+ * pointing at /retro. A missing or unreadable log adds nothing. Failing that, RETRO_RUNS or more run lines since the
+ * last retro add their count to that line, or a plainer `/retro` line of their own: never dropped, like the findings line.
  *
  * Always exits 0, and prints nothing at all rather than an error.
  *
@@ -62,6 +63,10 @@ const MAX_LINES = 4;
 /** A category seen this many times since the last retro, or a file with this many open P3 findings, is worth a retro. */
 const RECURRING = 5;
 const OPEN_P3 = 3;
+/** Run lines since the last retro that make the flow worth a review. */
+const RETRO_RUNS = 3;
+/** A log bigger than this is not read at session start. */
+const MAX_LOG_BYTES = 1024 * 1024;
 
 /** Print nothing and get out of the way. */
 function silent() {
@@ -262,24 +267,31 @@ function buildLines(found) {
 
 // ── The findings log ─────────────────────────────────────────────────────────────────────────────────────
 
-/** The entries of the log after its last retro marker; a line that is not a JSON object is skipped. */
-function findingsSinceRetro(gitDir) {
+/** The findings and the run-line count after the log's last retro marker; a line that is not a JSON object is skipped. */
+function sinceRetro(gitDir) {
+  let since = { findings: [], runs: 0 };
+  try {
+    if (fs.statSync(path.join(gitDir, 'deliver', 'findings.jsonl')).size > MAX_LOG_BYTES) return since;
+  } catch {
+    return since;
+  }
   const raw = readFile(gitDir, 'deliver', 'findings.jsonl');
-  if (!raw) return [];
-  let since = [];
+  if (!raw) return since;
   for (const line of raw.split('\n')) {
     let entry;
     try { entry = JSON.parse(line); } catch { continue; }
     if (!entry || typeof entry !== 'object') continue;
-    if (entry.retro) since = [];
-    else if (Array.isArray(entry.findings)) since.push(...entry.findings.filter((f) => f && typeof f === 'object'));
+    if (entry.retro) since = { findings: [], runs: 0 };
+    else if (entry.findings !== undefined || entry.run !== undefined) {
+      since.runs++;
+      if (Array.isArray(entry.findings)) since.findings.push(...entry.findings.filter((f) => f && typeof f === 'object'));
+    }
   }
   return since;
 }
 
 /** The one line the log earns, or null. */
-function findingsNudge(gitDir) {
-  const findings = findingsSinceRetro(gitDir);
+function findingsNudge({ findings }) {
   const count = (key) => {
     const seen = new Map();
     for (const f of findings) seen.set(key(f), (seen.get(key(f)) ?? 0) + 1);
@@ -294,6 +306,12 @@ function findingsNudge(gitDir) {
     if (file && n >= OPEN_P3) reasons.push(`${file} holds ${n} open P3 findings`);
   }
   return reasons.length ? `findings log: ${reasons.join('; ')} - /retro current findings can propose implementer rules` : null;
+}
+
+/** The findings line with the run count appended, or the run line alone, or the findings line unchanged. */
+function withRuns(nudge, { runs }) {
+  if (runs < RETRO_RUNS) return nudge;
+  return nudge ? `${nudge}; /retro: ${runs} run nuovi` : `\`/retro\`: ${runs} run nuovi dall'ultima revisione del flow.`;
 }
 
 // ── Cache ────────────────────────────────────────────────────────────────────
@@ -327,7 +345,8 @@ try {
   const key = found.gitDir;
   const entry = cache[key];
 
-  const nudge = findingsNudge(found.gitDir);
+  const since = sinceRetro(found.gitDir);
+  const nudge = withRuns(findingsNudge(since), since);
   if (entry && Date.now() - entry.at < TTL_MS && Array.isArray(entry.lines)) {
     emit(entry.lines, nudge);
   }
