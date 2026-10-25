@@ -177,11 +177,11 @@ export type CockpitContext = {
 /** The view the pane draws, the tab bar's five buttons: `agents` is Agenti, `context` Contesto, `signals` Notifiche, `work` Lavoro, `notes` Note. */
 export type CockpitTab = 'agents' | 'context' | 'signals' | 'work' | 'notes'
 
-/** What an entry of the event ring buffer is about: a finished main round or a finished agent (the Context tab prices them). */
-export type CockpitEventKind = 'round' | 'agent'
+/** What an entry of the event ring buffer is about: a finished agent (the Context tab prices it). */
+export type CockpitEventKind = 'agent'
 
-/** One entry of the event buffer: when, what, and the numbers that kind carries (`usd` and `ms` of a round, the model, tokens and cache hit of an agent; `text` is the agent type). `key` makes an entry once-only. */
-export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; usd?: number; ms?: number; model?: string; tokens?: number; hit?: number; id?: string }
+/** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, tokens and cache hit; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
+export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; usd?: number; model?: string; tokens?: number; hit?: number; id?: string }
 
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine

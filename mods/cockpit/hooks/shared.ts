@@ -294,21 +294,6 @@ export const ctxColor = (pct: number): string =>
 /** The cache hit of the last turn by thresholds: green from 80 %, amber from 50 to 79, red below. */
 export const cacheColor = (pct: number): string => (pct >= 80 ? COLORS.green : pct >= 50 ? COLORS.amber : COLORS.red)
 
-const SPARK = '▁▂▃▄▅▆▇█'
-
-/** One block per value, scaled to `max` (the tallest of them when not given; a value of 0 is the lowest block, one above `max` the highest); empty without values. */
-export function sparkline(values: readonly number[], max: number = Math.max(0, ...values)): string {
-  return values.map(v => SPARK[max > 0 ? Math.min(SPARK.length - 1, Math.round((Math.max(0, v) / max) * (SPARK.length - 1))) : 0]).join('')
-}
-
-/** One block per value, scaled between the lowest and the highest of them: a flat series draws the lowest block (nothing to tell apart), never noise; empty without values. */
-export function rangeSparkline(values: readonly number[]): string {
-  if (values.length === 0) return ''
-  const min = Math.min(...values)
-  const span = Math.max(...values) - min
-  return values.map(v => SPARK[span > 0 ? Math.round(((v - min) / span) * (SPARK.length - 1)) : 0]).join('')
-}
-
 export const baseName = (p: string): string =>
   p.replace(/[\\/]+$/, '').split(/[\\/]/).filter(Boolean).at(-1) ?? p
 

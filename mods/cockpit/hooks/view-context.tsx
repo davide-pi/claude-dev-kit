@@ -4,20 +4,14 @@ import {
   abbrevTokens,
   barCells,
   padCells,
-  rangeSparkline,
   shade,
-  textCells,
   truncEnd,
   truncMiddle,
-  truncateSpans,
   withBackground,
 } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
 import { dim, pad, padStart, sp } from './view-base'
-
-/** The most bars the Context trend line draws before its text, and the most lines a note shows before `▸ +N lines`. */
-const TREND_BARS_MAX = 8
 
 /** Cells of the Context rows: a category's tokens and share of the window, what follows them (the exact mark and the change of the last round) and a consumer's kind label. */
 const CTX_TOKENS_W = 6
@@ -69,19 +63,6 @@ export function categoryRows(c: CockpitContext, width: number): Span[][] {
     // the free space is drawn from a dim gray, whose own square is nearly invisible
     return [categorySpans(r, color, shade(r.kind === 'free' ? COLORS.gray : color, r.kind === 'free' ? 0.2 : 0.32), c.max, width)]
   })
-}
-
-/**
- * The context's trend as one line: the last rounds as bars (as many as fit before the text, at most eight, none under two) then where the
- * context went, how fast it grows per round and in how many rounds auto-compaction comes (`forecast`); cut to `width`. Empty without a round.
- */
-export function trendSpans(rounds: readonly number[], growth: number | undefined, forecast: number | undefined, color: string, width: number): Span[] {
-  const first = rounds[0]
-  const last = rounds.at(-1)
-  if (first === undefined || last === undefined) return []
-  const text = t().trendLine(abbrevTokens(first), abbrevTokens(last), growth === undefined ? undefined : abbrevTokens(Math.round(growth)), forecast)
-  const bars = Math.min(rounds.length, TREND_BARS_MAX, width - 2 - textCells(text))
-  return truncateSpans([...(bars >= 2 ? [sp(rangeSparkline(rounds.slice(-bars)), color), sp('  ')] : []), sp(text)], width)
 }
 
 /** A static consumer row: its kind, its name cut to fit, its tokens. */

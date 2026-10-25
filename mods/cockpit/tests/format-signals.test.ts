@@ -112,13 +112,18 @@ test('agentCosts: a live agent priced from its counters, a finished one from its
   const live = { id: 'a1', type: 'implementer', status: 'running' as const, startedAt: 0, tokens: 10, model: 'claude-sonnet-5-5', usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 } }
   const events = [
     { at: 1, kind: 'agent' as const, id: 'a1', text: 'implementer', usd: 99 },
-    { at: 2, kind: 'agent' as const, id: 'a2', text: 'Explore', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
-    { at: 3, kind: 'round' as const, usd: 1 },
+    { at: 2, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
   ]
   expect(agentCosts([live], events)).toEqual([
     { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', tokens: 10, usd: 2, hit: 0 },
-    { id: 'a2', type: 'Explore', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
+    { id: 'a2', type: 'Explore', description: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
   ])
+})
+
+test('agentCosts: a blank description is none, live or from the event, so the row falls back to the type', () => {
+  const live = { id: 'a1', type: 'implementer', description: '  ', status: 'running' as const, startedAt: 0, tokens: 0 }
+  const events = [{ at: 1, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: '' }]
+  expect(agentCosts([live], events).map(a => a.description)).toEqual([undefined, undefined])
 })
 
 test('signalsOf: every detector from the snapshot alone; a quiet snapshot has none, the thresholds block names every limit', () => {

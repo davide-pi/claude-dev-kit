@@ -218,25 +218,19 @@ const contextRound = async ($: Engine, tokens: number, percent: number) => {
   })
 }
 
-test('Context: the sparkline holds the context at each main turn, the last twenty; worth compacting from 70 % with three rounds each over 5 % up', async ($, on) => {
+test('Context: worth compacting from 70 % with three rounds each over 5 % up', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const view = async () => (await paneRows($, 50, 'context')).rows
-  expect((await view()).some(r => /^[▁-█]+/.test(r))).toBe(false) // no round yet: no sparkline
-
   for (let i = 0; i < 20; i++) await contextRound($, 100_000, 10)
   let rows = await view()
-  // one line: the last rounds as bars (a flat run is the lowest bar), where the context went; no growth, so no rate
-  expect(rows.find(r => /^[▁-█]{8} /.test(r))).toMatch(/^▁{8} {2}100k → 100k$/)
   expect(rows.some(r => /worth compacting/.test(r))).toBe(false)
 
   // 72 % and three rounds up by more than 5 % each: 100k, 106k, 113k, 120k
   for (const [tokens, percent] of [[106_000, 70], [113_000, 71], [120_000, 72]] as const) await contextRound($, tokens, percent)
   rows = await view()
-  // eight bars, the oldest rounds gone; the rate is the growth per round of the samples the forecast uses (4k over the last five)
-  expect(rows.find(r => /^[▁-█]{8} /.test(r))).toMatch(/^▁{5}▃▆█ {2}100k → 120k \(\+4k\/round\)$/)
   expect(rows.some(r => /worth compacting/.test(r))).toBe(true)
 })
 
@@ -411,19 +405,6 @@ test('Context: every row carries a background bar in proportion to its share of 
   expect(barred(500_000)).toBe(24)
   expect(barred(100)).toBe(1)
   expect(barred(0)).toBe(0)
-})
-
-test('Context: the trend is one line: the bars, where the context went, the growth per round and the rounds left before compaction', async ($, on) => {
-  world(on, { autoCompactAt: 150_000 })
-  roundHooks(on)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (const tokens of [100_000, 110_000, 120_000]) await contextRound($, tokens, 10)
-  const line = (columns: number) => paneRows($, columns, 'context').then(r => r.rows.find(x => /→/.test(x)))
-  expect(await line(58)).toBe('▁▅█  100k → 120k (+10k/round), compact in ~3 rounds')
-  // too narrow for bars and the whole text: the text goes first, cut at the end
-  const narrow = (await line(40)) ?? ''
-  expect(narrow.startsWith('100k → 120k (+10k/round)')).toBe(true)
-  expect(textCells(narrow)).toBeLessThanOrEqual(38)
 })
 
 test('Context: a reload that restarts the read counter does not leave the tab behind the number of the reading the snapshot kept', async ($, on) => {

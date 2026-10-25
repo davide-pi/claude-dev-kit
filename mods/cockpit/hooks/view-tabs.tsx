@@ -2,19 +2,19 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitAgent, CockpitChange, CockpitNote, CockpitSnapshot, CockpitTab } from '../types'
 import { sessionTokens } from './agents'
-import { REFRESH_COOLDOWN_MS, autocompactForecast, ctxGrowth, openTasks, shouldCompact } from './context'
-import { creditProjection, modelRows, perHour, roundCosts, topRounds } from './costs'
+import { REFRESH_COOLDOWN_MS, autocompactForecast, openTasks, shouldCompact } from './context'
+import { modelRows } from './costs'
 import { workItemIds, workItemUrl } from './links'
 import { worklogLabel } from './session'
-import { COLORS, abbrevTokens, ctxColor, duration, fmtCost, shortModel, spanWidth, sparkline, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, fmtCost, shortModel, spanWidth, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
 import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
-import type { Signal } from './signals'
+import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
 import { agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
-import { categoryRows, consumerSpans, contextBar, trendSpans } from './view-context'
+import { categoryRows, consumerSpans, contextBar } from './view-context'
 import { bigResultSpans } from './view-insights'
 import { changeSpans, prSpans } from './view-work'
 import { repoRelative } from './work'
@@ -100,7 +100,6 @@ const MAX_OUTSIDE_ROWS = 5
 const MAX_FILE_ROWS = 8
 const MAX_LINK_ROWS = 4
 const MAX_AGENT_COST_ROWS = 3
-const SPARK_MAX = 40
 const NOTE_LINES_SHOWN = 3
 /** The height of the note field: multi-line notes are common. */
 const NOTE_INPUT_ROWS = 6
@@ -236,49 +235,23 @@ export function contextBlocks(k: Kit): Block[] {
   const { Button } = ui
   const S = t()
 
-  // The session: what it cost, the $/h and where the 5h credits go at this pace (the status line's rate cache stands in while the engine reports none)
-  const rate = perHour(s.cost.usd, s.startedAt, s.now)
-  const projection = creditProjection(s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? []), s.now)
-  const sessionBlock: Block =
-    (s.cost.usd ?? 0) > 0 || rate !== undefined || projection !== undefined
-      ? [
-          gap(),
-          line(
-            ui,
-            truncateSpans(
-              [
-                sp(fmtCost(s.cost.usd), COLORS.yellow, true),
-                ...(rate === undefined ? [] : [dim(' · '), sp(S.costRate(fmtCost(rate)), COLORS.yellow)]),
-                ...(projection === undefined ? [] : [dim(' · '), projection.kind === 'hold' ? sp(S.creditsHold, COLORS.green) : sp(S.creditsRunOut(duration(projection.inMs)), COLORS.red)]),
-              ],
-              width,
-            ),
-          ),
-        ]
-      : []
-
-  // $ per round: a sparkline of the last rounds and the three dearest
-  const rounds = roundCosts(s.events)
-  const top = topRounds(rounds)
-  const roundsBlock: Block =
-    rounds.length > 0
-      ? [
-          gap(),
-          title(S.costRounds(rounds.length), [dim(S.costTop)]),
-          gap(),
-          line(ui, [sp(sparkline(rounds.slice(-SPARK_MAX).map(r => r.usd)), COLORS.yellow)]),
-          top.map(r => line(ui, [dim(`#${r.n} `), sp(fmtCost(r.usd), COLORS.yellow), dim(` · ${duration(r.ms)}`)])),
-        ]
-      : []
-
   // $ and cache hit per model and per agent, priced from the usage counters
   const nameW = Math.max(6, width - 24)
-  const costRow = (name: string, usd: number, hit: number | undefined) =>
-    line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)])
+  const costTail = (usd: number, hit: number | undefined) => [sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)]
+  const costRow = (name: string, usd: number, hit: number | undefined) => line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), ...costTail(usd, hit)])
+  // An agent says what it was: its spawn description, then its type (dim, when it fits) and its model; the type alone without a description
+  const agentCostRow = (a: AgentCost) => {
+    const model = shortModel(a.model)
+    const tail = model && textCells(` ${model}`) < nameW ? ` ${model}` : ''
+    const room = Math.max(1, nameW - textCells(tail))
+    const head = truncEnd(a.description ?? a.type, room)
+    const type = a.description !== undefined && textCells(head) + textCells(` ${a.type}`) <= room ? ` ${a.type}` : ''
+    return line(ui, [sp(head), dim(type), sp(' '.repeat(room - textCells(head) - textCells(type))), sp(tail), ...costTail(a.usd, a.hit)])
+  }
   const models = modelRows(s.modelUse).slice(0, MAX_MODEL_ROWS)
   const modelsBlock: Block = models.length > 0 ? [gap(), title(S.costModelsTitle), gap(), models.map(m => costRow(shortModel(m.model) || m.model, m.usd, m.hit))] : []
   const agents = agentCosts(s.agents, s.events).sort((a, b) => b.usd - a.usd).slice(0, MAX_AGENT_COST_ROWS)
-  const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(a => costRow(`${a.type} ${shortModel(a.model)}`.trim(), a.usd, a.hit))] : []
+  const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(agentCostRow)] : []
 
   const context = s.context
   const ctxRounds = s.ctxRounds ?? []
@@ -307,12 +280,10 @@ export function contextBlocks(k: Kit): Block[] {
     context && context.consumers.length > 0
       ? [gap(), title(S.consumersTitle(context.consumers.length)), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
       : []
-  const trend = trendSpans(ctxRounds, ctxGrowth(s.ctxSamples), forecast, ctxColor(s.ctx.percent ?? 0), width)
-  const trendBlock: Block = trend.length > 0 ? [gap(), title(S.trendTitle(ctxRounds.length)), gap(), line(ui, trend)] : []
   const biggest = s.insights?.biggest ?? []
   const grewBlock: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), biggest.map(r => line(ui, bigResultSpans(r, width)))] : []
-  // The context first (categories, consumers, trend, the compact hint), then what the session costs, then the outputs that grew the context
-  return [breakdownBlock, consumersBlock, trendBlock, sessionBlock, modelsBlock, agentsBlock, roundsBlock, grewBlock].filter(b => b.length > 0)
+  // The context first (categories, consumers, the compact hint), then what the models and agents cost, then the outputs that grew the context
+  return [breakdownBlock, consumersBlock, modelsBlock, agentsBlock, grewBlock].filter(b => b.length > 0)
 }
 
 // ── Lavoro ──
