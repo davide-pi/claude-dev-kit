@@ -35,7 +35,7 @@
 const fs = require('fs');
 const path = require('path');
 
-const { splitSegments } = require('./segments');
+const { splitSegments, unquotedHas } = require('./shell-parse');
 const { RAW_OPT_OUT } = require('./output-filter');
 const { CONFIG_DIR, readRoots, resolveDir, matchRoot, azConfigDir } = require('./workspaces');
 
@@ -46,14 +46,7 @@ const UNQUOTED_TRICKS = new Set(['>', '<', '`', '(', ')', '{', '}']);
 
 /** True when the line does more than run its chained commands: it redirects, substitutes or nests. */
 function hasShellTricks(command) {
-  if (command.includes('$(')) return true;
-  let quote = null;
-  for (const c of command) {
-    if (quote) { if (c === quote) quote = null; continue; }
-    if (c === '"' || c === "'") quote = c;
-    else if (UNQUOTED_TRICKS.has(c)) return true;
-  }
-  return quote !== null;
+  return command.includes('$(') || unquotedHas(command, UNQUOTED_TRICKS);
 }
 
 /**

@@ -25,16 +25,23 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
+import { createRequire } from 'node:module';
+
+// The guards read the workspace map, settings and the error log from the config directory: point it at an
+// empty one before they load, so neither the machine's own map nor its log takes part in a test.
+const configDir = mkdtempSync(join(tmpdir(), 'guard-config-'));
+process.env.CLAUDE_CONFIG_DIR = configDir;
+const { evaluate } = createRequire(import.meta.url)('../hooks/lib/guard.js');
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'guard-shell.js');
 const SHA = '0'.repeat(40);
-const created = [];
+const created = [configDir];
 
 /** A repo checked out on `current`, whose origin/HEAD names `defaultBranch`. */
-function fixture(current, defaultBranch = 'main') {
-  const root = mkdtempSync(join(tmpdir(), 'guard-'));
+function fixture(current, defaultBranch = 'main', prefix = 'guard-') {
+  const root = mkdtempSync(join(tmpdir(), prefix));
   created.push(root);
   const gitDir = join(root, '.git');
   mkdirSync(join(gitDir, 'refs', 'remotes', 'origin'), { recursive: true });
@@ -57,8 +64,26 @@ process.on('exit', () => {
   }
 });
 
-/** Run the hook on raw stdin and return its decision. */
+/** The hook's decision as the tests read it: approve (silent), ask, deny or allow (a rewrite). */
+function decisionOf(result) {
+  if (!result) return { decision: 'approve', reason: '' };
+  if (result.rewrite) return { decision: 'allow', reason: undefined, updatedInput: result.rewrite };
+  return { decision: result.decision, reason: result.reason };
+}
+
+/**
+ * Run the guards in-process on a payload: the same `evaluate` the hook calls, without a Node start-up
+ * per case (that was ~80 ms each, most of the file's run time). Input that is not JSON is what the hook
+ * reads as no payload at all. `spawnRaw` keeps the real process for what only a process can show.
+ */
 function runRaw(input) {
+  let payload = null;
+  try { payload = JSON.parse(input); } catch { /* the hook approves unreadable input */ }
+  return decisionOf(evaluate(payload));
+}
+
+/** Run the hook as a process on raw stdin and return its decision: the exit code and the JSON protocol. */
+function spawnRaw(input) {
   const result = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8' });
   assert.equal(result.status, 0, 'the hook must always exit 0, whatever happens');
   if (!result.stdout.trim()) return { decision: 'approve', reason: '' };
@@ -190,6 +215,16 @@ test('`git -C` picks the repo the command really acts on', () => {
   assert.match(run(`git -C ${onDefault} commit -m "wip"`, onFeature).reason, /default branch/);
 });
 
+test('`git -C` reads a path that holds a message-like flag whole (the flaky `-F` in a random temp name)', () => {
+  // Regression: `-F` mid-path was read as the --file flag and its "value" replaced, about 1 run in 30.
+  for (const prefix of ['guard-F', 'guard-m', 'guard-am', 'guard--file']) {
+    const feature = fixture('feature/x', 'main', prefix);
+    const main = fixture('main', 'main', prefix);
+    assert.equal(run(`git -C ${feature} commit -m "wip"`, main).decision, 'approve', prefix);
+    assert.match(run(`git -C ${main} commit -m "wip"`, feature).reason, /default branch/, prefix);
+  }
+});
+
 test('a repo whose default branch is not main is handled by name', () => {
   const trunk = fixture('feature/y', 'release/v1');
   assert.match(run('git push origin release/v1', trunk).reason, /pushes to 'release\/v1'/);
@@ -197,11 +232,9 @@ test('a repo whose default branch is not main is handled by name', () => {
 });
 
 test('anything unusable is approved rather than blocking the work', () => {
-  assert.equal(runRaw('').decision, 'approve');
-  assert.equal(runRaw('not json at all').decision, 'approve');
-  assert.equal(runRaw('{}').decision, 'approve');
-  assert.equal(runRaw(JSON.stringify({ tool_input: {} })).decision, 'approve');
-  assert.equal(runRaw(JSON.stringify({ tool_input: { command: '   ' } })).decision, 'approve');
+  for (const input of ['', 'not json at all', '{}', JSON.stringify({ tool_input: {} }), JSON.stringify({ tool_input: { command: '   ' } })]) {
+    assert.equal(spawnRaw(input).decision, 'approve', input);
+  }
   assert.equal(run('git commit -m "wip"', join(tmpdir(), 'does-not-exist-guard')).decision, 'approve');
   assert.equal(run('git commit -m "wip"', tmpdir()).decision, 'approve'); // outside any repo
 });
@@ -378,8 +411,6 @@ test('the everyday commands stay silent', () => {
     'docker compose down',
     'docker compose restart api',
     'docker ps -a',
-    'git branch -d feature/merged',
-    'git branch --delete feature/merged',
     'git push origin feature/x',
     'git status',
     'az pipelines runs list --top 5',
@@ -457,7 +488,7 @@ test('settings.json: deletes ask instead of deny, the unrecoverable ones stay de
     }
     assert.ok(!ask.includes(`${shell}(git push*)`), 'a plain push is left to default-branch.js and the classifier');
     assert.ok(!ask.includes(`${shell}(docker exec *)`), 'docker exec is read by sql-target.js and destructive.js');
-    assert.ok(allow.includes(`${shell}(az repos pr update*)`), 'the PR update the hook gates is allowed');
+    assert.ok(allow.includes(`${shell}(az repos pr update *)`), 'the PR update the hook gates is allowed');
   }
   assert.ok(ask.includes('Bash(rm -rf *)') && ask.includes('Bash(rm -fr *)') && ask.includes('Bash(rm -r *)'));
 });
@@ -575,7 +606,7 @@ test('settings.json: the broad find allow rule is gone, yarn and pnpm are narrow
     for (const rule of ['yarn *', 'pnpm *', 'git tag *', 'git remote *']) assert.ok(!allow.includes(`${shell}(${rule})`), `${shell}(${rule})`);
     for (const tool of ['yarn', 'pnpm']) {
       for (const sub of ['test', 'run', 'build', 'lint', 'typecheck', 'list', 'ls', 'why', 'outdated']) {
-        assert.ok(allow.includes(`${shell}(${tool} ${sub}*)`), `${shell}(${tool} ${sub}*)`);
+        assert.ok(allow.includes(`${shell}(${tool} ${sub})`) && allow.includes(`${shell}(${tool} ${sub} *)`), `${shell}(${tool} ${sub} *)`);
       }
       for (const rule of ['i', 'i *', 'install', 'install *']) assert.ok(allow.includes(`${shell}(${tool} ${rule})`), `${shell}(${tool} ${rule})`);
       for (const rule of ['exec*', 'i*', 'install*', 'dlx*']) assert.ok(!allow.includes(`${shell}(${tool} ${rule})`), `${shell}(${tool} ${rule})`);
@@ -601,7 +632,8 @@ test('settings.json: no script-block cmdlet in the allow list, db-ro matched by 
   for (const shell of ['Bash', 'PowerShell']) {
     assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *)`), shell);
     assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files *)`), shell);
-    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close*)`), shell);
+    assert.ok(allow.includes(`${shell}(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -LogRun *)`), shell);
   }
   // No allow rule may start with a wildcard after -File: that would approve any script.
   assert.deepEqual(allow.filter((r) => /-File \*/.test(r)), []);
@@ -705,4 +737,183 @@ test('settings.json blocks when guard-shell.js cannot run: onFailure block, no f
     .find((h) => (h.args ?? []).join(' ').includes('guard-shell.js'));
   assert.equal(hook?.onFailure, 'block');
   assert.ok(!(hook.args ?? []).join(' ').includes('catch'));
+});
+
+// ── Shell wrappers: the rules read what `bash -c`, `docker exec … sh -c`, `ssh` and `$(…)` run ──────────
+
+test('a destructive command wrapped in a shell, a container exec or ssh still asks', () => {
+  asks('bash -c "git push --force origin main"', /deletes or force-overwrites a remote ref/);
+  asks("sh -c 'git push --force origin feature/x'", /remote ref/);
+  asks('docker exec db sh -c "rm -rf /data"', /deletes files recursively/);
+  asks('pwsh -c "Remove-Item -Recurse -Force x"', /deletes files recursively/);
+  asks('powershell -Command "Remove-Item -Recurse x"');
+  asks('cmd /c rd /s /q x');
+  asks('ssh host "rm -rf /var/app"');
+  asks('ssh -p 2222 -i key host rm -rf /var/app');
+  asks('sudo bash -c "git clean -fd"');
+  asks('bash -c "echo $(rm -rf x)"');
+  asks('echo `rm -rf x`');
+});
+
+test('a wrapped push to the default branch asks from a working branch, and from the default branch', () => {
+  assert.match(run('bash -c "git push origin main"', onFeature).reason, /pushes to 'main'/);
+  assert.match(run('docker exec ci sh -c "git push origin main"', onFeature).reason, /pushes to 'main'/);
+  assert.match(run('ssh host "git push origin main"', onFeature).reason, /pushes to 'main'/);
+  assert.match(run('pwsh -c "git commit -m wip"', onDefault).reason, /default branch/);
+  assert.equal(run('bash -c "git push origin feature/x"', onFeature).decision, 'approve');
+});
+
+test('`--` is a SQL comment only for a SQL client: a flag inside any other quoted span still counts', () => {
+  asks('bash -c "git push --force origin main"');
+  approves('sqlcmd -S localhost -Q "SELECT 1 -- DROP TABLE x"');
+  asks('sqlcmd -S localhost -Q "SELECT 1; DROP TABLE x -- tidy"');
+});
+
+test('a searcher with a substitution is not skipped', () => {
+  asks('grep foo $(rm -rf x)', /deletes files recursively/);
+  asks('grep foo `rm -rf x`');
+  asks('rg x <(rm -rf y)');
+  approves('grep -rn "rm -rf" .');
+  approves("grep -rn '$(rm -rf x)' .");
+});
+
+// ── More actions with no undo ──────────────────────────────────────────────────────────────────
+
+test('git reset --hard asks with options before the verb', () => {
+  asks('git reset --hard', /hard reset/);
+  asks('git -C . reset --hard HEAD~3', /hard reset/);
+  asks('git -c x=1 reset --hard');
+  asks('git --no-pager reset --hard origin/main');
+  approves('git reset --soft HEAD~1');
+  approves('git reset HEAD file.txt');
+  approves('git -C . reset --mixed HEAD~1');
+});
+
+test('git branch asks when it moves, renames or deletes any branch, and not when it lists', () => {
+  for (const command of [
+    'git branch -f foo HEAD~2', 'git branch -m old new', 'git branch -M old new', 'git branch -d merged',
+    'git branch --delete merged', 'git branch --force foo', 'git -C . branch -dr origin/x',
+  ]) asks(command, /branch/);
+  for (const command of ['git branch', 'git branch -vv', 'git branch -a', 'git branch --sort=-committerdate', 'git branch --show-current', 'git branch --list "fe*"', 'git branch feature/new']) {
+    approves(command);
+  }
+});
+
+test('update-ref -d, filter-branch and gc --prune=now ask', () => {
+  asks('git update-ref -d refs/heads/x', /deletes a ref/);
+  asks('git update-ref --delete refs/heads/x');
+  asks('git filter-branch --tree-filter "rm f" HEAD');
+  asks('git gc --prune=now');
+  asks('git -C repo gc --prune=all');
+  approves('git update-ref refs/heads/x HEAD');
+  approves('git gc');
+  approves('git gc --auto');
+});
+
+test('gh deletes ask, whatever the object, and so does a DELETE through gh api', () => {
+  for (const command of [
+    'gh issue delete 5', 'gh variable delete X', 'gh label delete bug', 'gh repo delete a/b --yes',
+    'gh api -X DELETE /repos/a/b', 'gh api repos/a/b --method DELETE', 'gh api -XDELETE /repos/a/b/issues/1', 'gh api --method=DELETE /x',
+  ]) asks(command, /remote host/);
+  approves('gh api repos/a/b');
+  approves('gh issue list');
+});
+
+test('docker rm / rmi that force or take volumes ask', () => {
+  for (const command of ['docker rm -f c1', 'docker rm -v c1', 'docker rm -fv c1', 'docker container rm -f c1', 'docker rmi -f img', 'docker image rm --force img', 'docker rm --volumes c1']) {
+    asks(command, /container or image/);
+  }
+  for (const command of ['docker rm c1', 'docker rmi img', 'docker run --rm -v a:/b img', 'docker ps -a']) approves(command);
+});
+
+// ── False positives: prose is not a command ────────────────────────────────────────────────────
+
+test('a danger word in a title, a body, a message or an echo is inert', () => {
+  for (const command of [
+    'echo "git clean -fd"',
+    'Write-Output "rm -rf /"',
+    "printf 'DROP TABLE x\n'",
+    'az boards work-item create --title "Delete user flow" --assigned-to me --type Task',
+    'az repos pr create --title "Delete obsolete" --delete-source-branch true --squash true --work-items 1',
+    'git commit -m "feat: drop table support"',
+    'git commit -am "remove the purge step"',
+    'gh pr create --title x --body "never run git clean -fd"',
+    'gh pr create --title="Delete all" --body=\'git push --force\'',
+    'git commit -m "$(cat <<\'EOF\'\nfeat: drop table support\n\nnever run git clean -fd\nEOF\n)"',
+  ]) approves(command);
+});
+
+test('a real delete verb or a real command still asks next to a message', () => {
+  asks('az boards work-item delete --id 4 --yes');
+  asks('az group delete --name rg --yes');
+  asks('git commit -m "x" && git clean -fd');
+  asks('echo "DROP TABLE x" | sqlcmd -S localhost');
+  asks('git commit -m "$(rm -rf x)"');
+});
+
+test('the process contract: the hook exits 0 and speaks the PreToolUse JSON, and agrees with the in-process guards', () => {
+  const sample = ['git push origin main', 'bash -c "git push --force origin feature/x"', 'git status', 'cat .env', 'dotnet test --no-build'];
+  for (const command of sample) {
+    const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: onFeature });
+    assert.deepEqual(spawnRaw(input).decision, runRaw(input).decision, command);
+  }
+  assert.equal(spawnRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'cat .env' }, cwd: onFeature })).decision, 'deny');
+});
+
+// ── Self-protection: a shell write into ~/.claude hooks, settings and CLAUDE.md asks ───────────
+
+test('a shell write into the Claude configuration asks, whatever the spelling of the path', () => {
+  const absolute = join(homedir(), '.claude', 'hooks', 'x.js').replaceAll(String.fromCharCode(92), '/');
+  const writes = [
+    'echo x > ~/.claude/hooks/guard-shell.js', 'echo x >> $HOME/.claude/settings.json', 'echo x >> ${HOME}/.claude/settings.local.json',
+    'echo x | tee ~/.claude/CLAUDE.md', 'echo x | tee -a ~/.claude/hooks/a.js', 'Set-Content -Path $env:USERPROFILE\\.claude\\settings.json -Value x',
+    'Add-Content ~/.claude/hooks/a.js "x"', '"x" | Out-File ~/.claude/CLAUDE.md', 'Out-File -FilePath "$env:USERPROFILE/.claude/hooks/x.js" -InputObject x',
+    'sed -i s/a/b/ ~/.claude/settings.json', 'sed --in-place s/a/b/ ~/.claude/hooks/x.js', 'cp evil.js ~/.claude/hooks/guard-shell.js',
+    'Copy-Item evil.js -Destination $HOME\\.claude\\hooks\\x.js', 'mv new.json ~/.claude/settings.json', `echo x > ${absolute}`,
+    'bash -c "echo x > ~/.claude/hooks/y.js"', 'docker exec c sh -c "tee ~/.claude/CLAUDE.md"', 'echo x 1> ~/.claude/CLAUDE.md', 'echo x >~/.claude/CLAUDE.md',
+  ];
+  for (const command of writes) asks(command, /Claude configuration/);
+});
+
+test('a relative path inside ~/.claude counts, and reads, listings and other files there do not', () => {
+  const inClaude = (command) => run(command, join(homedir(), '.claude'));
+  assert.equal(inClaude('echo x > hooks/x.js').decision, 'ask');
+  assert.equal(inClaude('echo x > settings.json').decision, 'ask');
+  assert.equal(inClaude('echo x > notes.txt').decision, 'approve');
+  for (const command of [
+    'cat ~/.claude/settings.json', 'ls ~/.claude/hooks', 'cp ~/.claude/settings.json /tmp/backup.json', 'Get-Content ~/.claude/CLAUDE.md',
+    'echo x > ~/.claude/other.txt', 'echo x > notes.txt', 'echo x > ~/.claude/hooks-notes/a.md', 'git diff 2>&1', 'tee out.log',
+  ]) approves(command);
+});
+
+// ── A swallowed error leaves one line in the cache's error log ─────────────────────────────────
+
+test('a check that throws is skipped, the others still answer, and the error is logged as one capped line', () => {
+  const config = mkdtempSync(join(tmpdir(), 'guard-log-'));
+  created.push(config);
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: config };
+  // A non-string cwd makes the docker-cp check throw; the destructive check on the same line must still ask.
+  const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'docker cp api:/x ./y && git clean -fd' }, cwd: {} });
+  const r = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8', env });
+  assert.equal(r.status, 0);
+  assert.equal(JSON.parse(r.stdout).hookSpecificOutput.permissionDecision, 'ask');
+  const log = join(config, '.cache', 'hook-errors.log');
+  const lines = readFileSync(log, 'utf8').trim().split('\n');
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /^\d{4}-\d\d-\d\dT[\d:.]+Z guard-shell\/docker-cp: /);
+
+  // Capped: a flood of errors never grows the file past its limit.
+  const flood = spawnSync(process.execPath, ['-e', `const { logError } = require(${JSON.stringify(join(dirname(HOOK), 'lib', 'cache.js'))});
+    for (let i = 0; i < 400; i += 1) logError('flood', new Error('x'.repeat(250)));`], { encoding: 'utf8', env });
+  assert.equal(flood.status, 0, flood.stderr);
+  assert.ok(readFileSync(log, 'utf8').length < 20 * 1024, 'the log stays under its cap');
+  assert.match(readFileSync(log, 'utf8').trim().split('\n').at(-1), / flood: /);
+});
+
+test('a missing file is an ordinary state and is not logged (no workspace map for az-pin)', () => {
+  const config = mkdtempSync(join(tmpdir(), 'guard-log-'));
+  created.push(config);
+  const input = JSON.stringify({ tool_name: 'Bash', tool_input: { command: 'az boards query --wiql x' }, cwd: onFeature });
+  spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config } });
+  assert.throws(() => readFileSync(join(config, '.cache', 'hook-errors.log'), 'utf8'), /ENOENT/);
 });

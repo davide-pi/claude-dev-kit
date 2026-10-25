@@ -16,7 +16,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const { CONFIG_DIR } = require('./cache');
 
 /** Every root of the map, longest path first, each with its lowercased absolute `root`. */
 function readRoots() {

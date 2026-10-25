@@ -86,7 +86,8 @@ test('PostToolUse: the formatter runs in the same process as the nudges', () => 
   const config = sandbox();
   const project = mkdtempSync(join(tmpdir(), 'nudges-fmt-'));
   created.push(project);
-  mkdirSync(join(project, 'node_modules'));
+  mkdirSync(join(project, 'node_modules', '.bin'), { recursive: true });
+  for (const shim of ['prettier', 'prettier.cmd']) writeFileSync(join(project, 'node_modules', '.bin', shim), '');
   writeFileSync(join(project, 'package.json'), '{ "name": "web" }');
   writeFileSync(join(project, '.prettierrc'), '{}');
   writeFileSync(join(project, 'main.ts'), 'export {};');
@@ -95,7 +96,7 @@ test('PostToolUse: the formatter runs in the same process as the nudges', () => 
     input: JSON.stringify(payload), encoding: 'utf8', cwd: config, env: { ...process.env, CLAUDE_CONFIG_DIR: config },
   });
   assert.equal(r.status, 0, r.stderr);
-  assert.match(r.stdout, /^npx --no-install prettier --write .*main\.ts$/m, 'format-on-edit ran inside nudges.js');
+  assert.match(r.stdout, /^prettier --write .*main\.ts$/m, 'format-on-edit ran inside nudges.js');
 });
 
 test('settings.json: one PostToolUse node for the edits, with the formatter timeout', () => {

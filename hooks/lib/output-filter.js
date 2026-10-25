@@ -42,6 +42,7 @@
 'use strict';
 
 const fs = require('fs');
+const { unquotedHas } = require('./shell-parse');
 
 const RAW_OPT_OUT = /#\s*raw\b/i;
 /**
@@ -68,13 +69,7 @@ const MODES = [
 
 /** True when the line has a shell operator outside quotes. */
 function isCompound(command) {
-  let quote = null;
-  for (const c of command) {
-    if (quote) { if (c === quote) quote = null; continue; }
-    if (c === '"' || c === "'") quote = c;
-    else if (COMPOUND.has(c)) return true;
-  }
-  return quote !== null;
+  return unquotedHas(command, COMPOUND);
 }
 
 /** The rewritten command line, or null when this command is left alone. */

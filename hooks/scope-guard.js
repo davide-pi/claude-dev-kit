@@ -42,6 +42,7 @@
 const fs = require('fs');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { repoRoot, gitDirOf, currentBranch } = require('./lib/git-dir');
 
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const MAX_BYTES = 64 * 1024;
@@ -54,17 +55,6 @@ function canonical(file, base) {
   try { return fs.realpathSync.native(abs); } catch { return abs; }
 }
 
-/** The directory holding `.git` (a folder, or a file in a worktree) at or above `dir`, or null. */
-function repoRoot(dir) {
-  let cur = dir;
-  for (;;) {
-    if (fs.existsSync(path.join(cur, '.git'))) return cur;
-    const up = path.dirname(cur);
-    if (up === cur) return null;
-    cur = up;
-  }
-}
-
 /** A perimeter entry as a regex over a repo-relative, slash-separated path (anchored, case-insensitive). */
 function entryRegex(entry) {
   let e = slashes(entry.trim()).replace(/^\.\//, '');
@@ -72,24 +62,6 @@ function entryRegex(entry) {
   const src = e.replace(/[.+^${}()|[\]]/g, '\\$&')
     .replace(/\*\*/g, '\u0000').replace(/\*/g, '[^/]*').replace(/\u0000/g, '.*').replace(/\?/g, '[^/]');
   return new RegExp(`^${src}$`, 'i');
-}
-
-/** The git directory of the worktree at `root`: `.git` itself, or the target of a linked worktree's `.git` file. */
-function gitDir(root) {
-  const dot = path.join(root, '.git');
-  try {
-    if (fs.statSync(dot).isDirectory()) return dot;
-    const m = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(dot, 'utf8').slice(0, 1024));
-    return m ? path.resolve(root, m[1]) : null;
-  } catch { return null; }
-}
-
-/** The branch checked out in the git directory `dir` ('' when detached or unreadable). */
-function currentBranch(dir) {
-  try {
-    const m = /^ref:\s*refs\/heads\/(.+?)\s*$/m.exec(fs.readFileSync(path.join(dir, 'HEAD'), 'utf8').slice(0, 1024));
-    return m ? m[1] : '';
-  } catch { return ''; }
 }
 
 /** Parses the perimeter file: its branch, whether it is active, and its entries. */
@@ -109,7 +81,7 @@ function readPerimeter(text) {
 
 /** The active perimeter of the worktree at `root`: its entries and branch, or null (none, closed, another branch). */
 function activePerimeter(root) {
-  const dir = gitDir(root);
+  const dir = gitDirOf(root);
   if (!dir) return null;
   let text;
   try { text = fs.readFileSync(path.join(dir, 'deliver', 'perimeter.md'), 'utf8').slice(0, MAX_BYTES); } catch { return null; }

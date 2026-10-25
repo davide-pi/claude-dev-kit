@@ -17,14 +17,18 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'secret-scan.js');
+// The hook logs a swallowed error under the config directory: keep that out of the real one.
+const CONFIG = mkdtempSync(join(tmpdir(), 'secret-scan-config-'));
+process.on('exit', () => { try { rmSync(CONFIG, { recursive: true, force: true }); } catch { /* tmp */ } });
 
 function runRaw(input) {
-  const result = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8' });
+  const result = spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: CONFIG } });
   assert.equal(result.status, 0, 'the hook must always exit 0, whatever happens');
   if (!result.stdout.trim()) return { decision: 'approve', reason: '' };
   const { hookSpecificOutput: out } = JSON.parse(result.stdout);
@@ -262,4 +266,70 @@ test('anything unusable lets the write through rather than blocking the work', (
   assert.equal(runRaw('{}').decision, 'approve');
   assert.equal(runRaw(JSON.stringify({ tool_input: {} })).decision, 'approve');
   assert.equal(runRaw(JSON.stringify({ tool_input: { file_path: 'a.txt', content: '   ' } })).decision, 'approve');
+});
+
+// ── Env-style names, YAML scalars, PowerShell variables, masked tokens, narrower exemptions ────
+
+test('an environment-style name with a prefix is read like the bare one', () => {
+  blocks(`DB_PASSWORD=${PW}`, /password in a connection string/);
+  blocks(`MYSQL_ROOT_PASSWORD=${PW}`, /password in a connection string/);
+  blocks(`AZURE_CLIENT_SECRET=${LONG}`, /cloud access key in a connection string/);
+  blocks(`API_KEY=${LONG}`, /cloud access key in a connection string/);
+  blocks(`STRIPE_API_KEY=${LONG}`, /cloud access key in a connection string/);
+  blocks(`  "db_password": "${PW}"`, /quoted secret value/);
+});
+
+test('an unquoted YAML scalar is a credential in a YAML file, not in code', () => {
+  for (const file of ['config/app.yml', 'deploy/values.yaml']) blocks(`  password: ${PW}`, /unquoted secret value in YAML/, file);
+  blocks(`db:\n  db_password: ${PW}\n`, /in YAML/, 'compose.yml');
+  allows(`  password: ${PW}`, 'src/App/Program.cs');
+  for (const value of ['changeme', '${DB_PASSWORD}', '{{ .Values.db.password }}', '!vault |', '*anchor', 'string', '<your-password>', 'DB_PASSWORD', 'example-password']) {
+    allows(`  password: ${value}`, 'config/app.yml');
+  }
+  allows('  tokenUrl: https://login.example.com/oauth2/token', 'config/app.yml');
+});
+
+test('a PowerShell variable holding a literal secret is a credential', () => {
+  blocks(`$pw = "${PW}"`, /secret literal assigned to a variable/, 'scripts/deploy.ps1');
+  blocks(`$dbPassword = '${PW}'`, /assigned to a variable/, 'scripts/deploy.ps1');
+  blocks(`$env:X = 1; $apiToken = "${LONG}"`, /assigned to a variable/, 'scripts/deploy.ps1');
+  for (const line of [
+    '$pw = "changeme"', '$pw = $env:DB_PASSWORD', '$pw = Read-Host -AsSecureString', '$password = "$(Get-Secret db)"',
+    '$tokenUrl = "https://login.microsoftonline.com/x/oauth2/token"', '$name = "Str0ngLocalPass1"', '$pw = ""',
+  ]) allows(line, 'scripts/deploy.ps1');
+});
+
+test('`$` is a hole only as an interpolation: a password may contain it', () => {
+  blocks('Password=Pa$$w0rd9', /password in a connection string/);
+  blocks('Password=Abc$def99', /password in a connection string/);
+  for (const value of ['${DB_PASSWORD}', '$(Get-Secret db)', '$env:DB_PASSWORD', '$DB_PASSWORD', '$dbPassword']) allows(`Password=${value}`);
+});
+
+test('a provider token is caught on a line that looks like a pattern; the pattern itself is not', () => {
+  blocks(`grep -rn "x" . # ${providerToken}`, /provider token/);
+  blocks(`const re = /\bfoo\b/; const t = "${providerToken}";`, /provider token/);
+  blocks(`rg -n "${accessKeyId}" .`, /cloud access key id/);
+  allows('const LEAK = /\b(?:password|pwd)\s*=\s*[^;\'"\s|]{3,}/gi;');
+  allows('grep -rn "Password=Str0ngLocalPass1" ./src');
+  allows('Select-String -Path a.json -Pattern "AccountKey=Abcdefgh12345678"');
+  // A grep that is merely mentioned later in the line is not a pattern definition.
+  blocks(`Password=${PW} # not a grep`, /password in a connection string/);
+});
+
+test('a masked token or a bracketed hint is not a credential', () => {
+  for (const line of [
+    'token = "ghp_xxxxxxxxxxxx"', 'GH_TOKEN=ghp_************', 'key: AKIAXXXXXXXXXXXXXXXX', 'AWS_KEY=AKIA0000000000000000',
+    'Authorization: Bearer <your password>', 'Password=<your password>', '"password": "<your password>"', 'xoxb-0000-0000-xxxxxxxx',
+  ]) allows(line);
+});
+
+test('the scanner exemption covers code files only', () => {
+  // Paths are assembled: validate.mjs would otherwise want each of them to exist.
+  const at = (dir, name) => `${dir}/${name}`;
+  for (const file of [at('hooks', 'secret-scan.js'), at('tools', 'leak-check.mjs'), at('tools', 'scan-secrets.ps1'), at('tools', 'secret-scan.test.mjs')]) {
+    assert.equal(write(`const token = "${providerToken}";`, file).decision, 'approve', file);
+  }
+  for (const file of [at('hooks', 'secret-guard.json'), at('tools', 'validate.md'), at('tools', 'leak-fixtures.txt'), at('src/hooks', 'x.js')]) {
+    assert.equal(write(`const token = "${providerToken}";`, file).decision, 'deny', file);
+  }
 });

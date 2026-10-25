@@ -33,7 +33,7 @@
 
 'use strict';
 
-const { expandSegments } = require('./sql-target');
+const { expandSegments } = require('./shell-parse');
 
 /** Cheap gates: nothing below can fire without one of these. */
 const HINT = /\baz(?:\.cmd|\.exe)?\s[\s\S]*\b(?:repos|boards|devops)\b/i;

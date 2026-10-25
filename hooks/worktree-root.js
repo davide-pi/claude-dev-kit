@@ -132,6 +132,7 @@ try {
   else process.stdout.write(`${create(payload)}\n`);
   process.exit(0);
 } catch (error) {
+  try { require('./lib/cache').logError('worktree-root', error); } catch { /* the log is a courtesy */ }
   process.stderr.write(`worktree-root: ${error.message}\n`);
   process.exit(1);
 }

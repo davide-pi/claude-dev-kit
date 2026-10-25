@@ -13,6 +13,7 @@
  *                             delete, assignee), hours written outside /worklog, global defaults;
  *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
+ *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
  *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /
  *                             `db-ro.ps1` calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`…
@@ -42,51 +43,17 @@
 'use strict';
 
 const { approve, requestConfirmation, deny, rewrite, readPayload } = require('./lib/decision');
-const { checkDefaultBranch } = require('./lib/default-branch');
-const { checkDestructive } = require('./lib/destructive');
-const { checkSqlTarget } = require('./lib/sql-target');
-const { checkAlmContract } = require('./lib/alm-contract');
-const { checkSecretRead } = require('./lib/secret-read');
-const { checkDockerCp } = require('./lib/docker-cp');
-const { checkScriptArgs } = require('./lib/script-args');
-const { planFilter } = require('./lib/output-filter');
-const { planAzPin } = require('./lib/az-pin');
-
-/** Run one check, isolated: a bug in one must not silence the other. */
-function safely(check) {
-  try {
-    return check();
-  } catch {
-    return null;
-  }
-}
+const { evaluate } = require('./lib/guard');
+const { logError } = require('./lib/cache');
 
 try {
-  const payload = readPayload();
-  const command = payload?.tool_input?.command;
-  if (typeof command !== 'string' || !command.trim()) approve();
-
-  // The denials: a raw database client on a non-dev host, a shell read of a secret file. They come
-  // before the ask path.
-  const target = safely(() => checkSqlTarget(command)) ?? safely(() => checkSecretRead(command));
-  if (target) deny(target.reason);
-
-  const reasons = [
-    safely(() => checkDefaultBranch(command, payload.cwd)),
-    safely(() => checkDestructive(command)),
-    safely(() => checkAlmContract(command)),
-    safely(() => checkDockerCp(command, payload.cwd)),
-    safely(() => checkScriptArgs(command, payload.tool_name)),
-  ].filter(Boolean);
-
-  if (reasons.length) requestConfirmation(reasons.join('\n\n'));
-
-  // One updatedInput, whichever rewrite applies. They never meet: no filter mode is an `az` command.
-  const rewritten = safely(() => planAzPin(command, payload.tool_name, payload.cwd))
-    ?? safely(() => planFilter(command, payload.tool_name));
-  if (rewritten) rewrite({ ...payload.tool_input, command: rewritten });
-  approve();
-} catch {
+  const result = evaluate(readPayload());
+  if (!result) approve();
+  if (result.rewrite) rewrite(result.rewrite);
+  if (result.decision === 'deny') deny(result.reason);
+  requestConfirmation(result.reason);
+} catch (error) {
   // A bug in the hook must never get in the way of the work.
+  logError('guard-shell', error);
   approve();
 }

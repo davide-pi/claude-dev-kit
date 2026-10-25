@@ -42,17 +42,17 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 const zlib = require('zlib');
 const { spawnSync } = require('child_process');
+const { findGitDir, currentBranch } = require('./lib/git-dir');
+const { CONFIG_DIR } = require('./lib/cache');
 
 /**
  * Beside the statusline's own snapshot, in the Claude Code configuration directory — honouring
  * CLAUDE_CONFIG_DIR, Claude Code's own variable, so a relocated configuration keeps its cache with
  * it (and so the tests can point it at a temp directory instead of the real one).
  */
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const CACHE = path.join(CONFIG_DIR, '.session-brief-cache.json');
 /** Long enough that resume/compact/clear in one sitting are free, short enough to stay true. */
 const TTL_MS = 3 * 60 * 1000;
@@ -82,38 +82,12 @@ function emit(lines, extra) {
 
 // ── .git on disk ─────────────────────────────────────────────────────────────
 
-/** Walk up from `start` to the repo root and return its resolved .git directory. */
-function findGitDir(start) {
-  let dir = path.resolve(start);
-  for (;;) {
-    const candidate = path.join(dir, '.git');
-    if (fs.existsSync(candidate)) {
-      if (fs.statSync(candidate).isDirectory()) return { gitDir: candidate, root: dir };
-      // A worktree or submodule: `.git` is a file containing `gitdir: <path>`.
-      const pointer = fs.readFileSync(candidate, 'utf8').match(/^gitdir:\s*(.+)$/m);
-      if (!pointer) return null;
-      const resolved = path.resolve(dir, pointer[1].trim());
-      return fs.existsSync(resolved) ? { gitDir: resolved, root: dir } : null;
-    }
-    const parent = path.dirname(dir);
-    if (parent === dir) return null;
-    dir = parent;
-  }
-}
-
 function readFile(...parts) {
   try {
     return fs.readFileSync(path.join(...parts), 'utf8');
   } catch {
     return null;
   }
-}
-
-/** The checked-out branch, or null when HEAD is detached. */
-function currentBranch(gitDir) {
-  const head = readFile(gitDir, 'HEAD');
-  const m = head && head.match(/^ref:\s*refs\/heads\/(.+)$/m);
-  return m ? m[1].trim() : null;
 }
 
 /** A ref's sha, from the loose ref or from packed-refs. */

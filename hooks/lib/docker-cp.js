@@ -17,7 +17,7 @@
 
 const os = require('os');
 const path = require('path');
-const { expandSegments, baseName } = require('./sql-target');
+const { expandSegments, baseName } = require('./shell-parse');
 
 /** `name:/path` — a container reference. A drive letter (`C:\x`) is one letter, so it is not. */
 const CONTAINER_REF = /^[\w.-]{2,}:/;

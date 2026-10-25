@@ -39,10 +39,9 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const { CONFIG_DIR, readJson } = require('./lib/cache');
 const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
 const AUDIT = path.join(CONFIG_DIR, 'worklog', 'pushed.json');
 const TARGETS = path.join(CONFIG_DIR, 'worklog', 'targets.json');
@@ -116,14 +115,6 @@ function workspaceOf(project) {
   const rest = String(project).slice(root.length).split(/[\\/]/).filter(Boolean);
   if (!rest.length) return null;
   return NESTED.has(rest[0].toLowerCase()) && rest[1] ? `${rest[0]}/${rest[1]}` : rest[0];
-}
-
-function readJson(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
 }
 
 /**
