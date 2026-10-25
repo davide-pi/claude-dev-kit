@@ -70,7 +70,7 @@ A PR that already carries `[Claude AI Review]` comments is reviewed **incrementa
    tree, and a change that touches a previously reviewed function is in scope.
 3. **Pass the previous findings** (package item 5). Fixed by a new commit, or thread resolved **with
    a fix** → `done`; still present → `todo` on the same anchor. A thread closed as by-design /
-   won't-fix is **not** `done`: drop the finding and say so in one line under "Posted vs chat".
+   wontFix is **not** `done`: drop the finding and say so in one line under "Posted vs chat".
 4. **Never post a duplicate**: a `todo` that matches an open tagged thread stays in chat; if the
    author's answer opens a new doubt, reply in that thread.
 

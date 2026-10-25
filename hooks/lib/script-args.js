@@ -25,7 +25,7 @@
 
 'use strict';
 
-const { splitSegments } = require('./segments');
+const { splitSegments } = require('./shell-parse');
 
 const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](perimeter|snapshot|db-ro)\.ps1|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */

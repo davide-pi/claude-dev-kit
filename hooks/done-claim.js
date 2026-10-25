@@ -34,6 +34,10 @@
  * back once to rewrite the verdict table with fresh output (or "non verificato"); a cut turn whose message holds
  * such a table is judged even when no edit is visible in the part read (the edit may be in the part not read).
  *
+ * A verdict table that passes those checks is still sent back once while the repo's `deliver` perimeter is
+ * `status: active` on the current branch (`payload.cwd`): the loop's findings log is written by
+ * `perimeter.ps1 -Close -FindingsLog` before the verdict (the log notes `perimeter-open`).
+ *
  * Then `{"decision":"block","reason":…}` and one JSON line in `<config>/.cache/done-claim.log` naming
  * the `rule` that fired, so false positives can be counted before deciding on tier 2.
  *
@@ -60,6 +64,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const { execFileSync } = require('child_process');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
@@ -105,6 +110,23 @@ function verdictRows(message) {
   return rows;
 }
 
+/** `text` appears in `printed` as whole words only: a short line ("ok", "0") is not proven by "token" or "10". */
+function printedAsWords(printed, text) {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(printed);
+}
+
+/**
+ * A cell that joins real output lines (`a / b`, `a, b`, `a; b`, `a and b`) or adds a note (`(e gli altri 3)`): proven when it has
+ * at least one non-trivial piece (3+ chars, not a bare word like "deny") and every non-trivial piece is printed ("=" and ":" count as a space).
+ */
+function piecesPrinted(line, printed) {
+  const loose = (s) => s.replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
+  const looseText = loose(printed);
+  const pieces = line.replace(/\([^)]*\)/g, ' ').split(/\s\/\s|,\s|;\s|\sand\s/).map((p) => loose(p)).filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
+  return pieces.length > 0 && pieces.every((p) => printedAsWords(looseText, p));
+}
+
 /** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
 function unprovenRows(rows, resultsText) {
   const printed = normalise(resultsText);
@@ -112,13 +134,33 @@ function unprovenRows(rows, resultsText) {
     if (!PROOF_STATE.test(r.state)) return false;
     const line = normalise(r.line);
     if (!/[\p{L}\p{N}]/u.test(line)) return true;
-    // Whole words only: a short line ("ok", "0") is not proven by "token" or "10".
-    const escaped = line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    return !new RegExp(`(?<![\\p{L}\\p{N}])${escaped}(?![\\p{L}\\p{N}])`, 'u').test(printed);
+    return !printedAsWords(printed, line) && !piecesPrinted(line, printed);
   });
 }
 
 const allow = () => process.exit(0);
+
+const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
+
+/** True when the repo at `cwd` has a `deliver` perimeter still `status: active` for the branch checked out now. */
+function perimeterOpen(cwd) {
+  try {
+    if (typeof cwd !== 'string' || !cwd) return false;
+    const text = fs.readFileSync(path.join(git(cwd, 'rev-parse', '--absolute-git-dir'), 'deliver', 'perimeter.md'), 'utf8');
+    const branch = /^branch:\s*(.+)$/im.exec(text);
+    return /^status:\s*active\s*$/im.test(text) && !!branch && branch[1].trim() === git(cwd, 'branch', '--show-current');
+  } catch {
+    return false;
+  }
+}
+
+/** A verdict table with the perimeter still active: the findings log was not written; send the turn back once. */
+function blockOpenPerimeter(payload, rows, message) {
+  if (!rows.length || !perimeterOpen(payload.cwd)) return;
+  log(payload, 'perimeter-open', 'verdict', message);
+  process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));
+  process.exit(0);
+}
 
 /**
  * The JSON lines of the transcript from the end back to the start of the turn (the last genuine human prompt), read backward in
@@ -279,14 +321,14 @@ try {
   if (claimsRows) {
     // A verdict table is judged row by row against what the turn printed; the rest of the message does not excuse a row.
     const unproven = unprovenRows(rows, turn.results);
-    if (!unproven.length) allow();
+    if (!unproven.length) { blockOpenPerimeter(payload, rows, message); allow(); }
     if (!turn.complete) {
       // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
       log(payload, 'tail-cut', unproven[0].state, message);
       process.stdout.write(JSON.stringify({
         decision: 'block',
-        reason: 'Il turno è troppo lungo per verificare le righe del verdetto contro l\'output dei comandi. '
-          + 'Riscrivi il verdetto come tabella "Livello | Comando | Riga che decide | Stato" con l\'output di comandi eseguiti ora, oppure scrivi "non verificato: <motivo>" nello Stato di ogni riga.',
+        reason: 'The turn is too long to check the verdict rows against the command output. '
+          + 'Rewrite the verdict as a "Livello | Comando | Riga che decide | Stato" table with the output of commands run now, or write "non verificato: <motivo>" in the Stato of each row.',
       }));
       process.exit(0);
     }
@@ -294,14 +336,14 @@ try {
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',
-      reason: `${unproven.length} righe del verdetto dicono "${unproven[0].state}" ma la riga che decide non compare in nessun output del turno: ${shown}. `
-        + 'Cita l\'output vero del comando (rieseguilo se non l\'hai visto), oppure scrivi "non verificato: <motivo>" nello Stato di quella riga.',
+      reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
+        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" in the Stato of that row.',
     }));
     process.exit(0);
   }
 
   const word = unprovenClaim(message);
-  if (!word) allow();
+  if (!word) { blockOpenPerimeter(payload, rows, message); allow(); }
 
   if (turn.shellAfterEdit) {
     log(payload, 'shell-ran', word, message);    // counted, not blocked: the output is already in context
@@ -310,8 +352,9 @@ try {
   log(payload, 'claim-without-evidence', word, message);
   process.stdout.write(JSON.stringify({
     decision: 'block',
-    reason: `Dichiari un esito ("${word}") senza prova. Cita il comando eseguito e la riga di output che lo `
-      + 'conferma in un blocco ```, oppure scrivi "non verificato" e perché. Non rieseguire nulla se l\'output è già sopra: citalo.',
+    reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
+      + 'confirms it in the "Livello | Comando | Riga che decide | Stato" table (a plain markdown table, never in a code block), '
+      + 'or write "non verificato" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
 } catch {

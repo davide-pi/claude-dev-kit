@@ -9,8 +9,8 @@ Who is spawned and on which model: `report-format.md` § "Who reviews, on which 
 | --- | --- |
 | `low` | a quick pass over a small, low-risk diff |
 | `medium` | the default: defects, regressions, security basics, clean code, completeness |
-| `high` | the full two-model pair plus both specialists, each on its own axis |
-| `xhigh` | the same, told to follow call paths out of the diff |
+| `high` | reviewer A plus both specialists, each on its own axis |
+| `xhigh` | the full two-model pair plus both specialists, told to follow call paths out of the diff |
 | `max` | the same, exhaustive: every touched path, every caller |
 
 `[focus]` overrides the ladder: `security` → `review-security` alone, `performance` →

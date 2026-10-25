@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, existsSync, rmSync, mkdirSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -56,6 +56,9 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   const { reason, dir } = stop(edited('Fatto: il totale ora somma le righe.'));
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
+  assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
+  assert.match(reason, /never in a code block/);
+  assert.doesNotMatch(reason, /in un blocco ```/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(log.length, 1);
   assert.equal(JSON.parse(log[0]).word, 'Fatto');
@@ -274,6 +277,15 @@ test('a short deciding line is proven by whole words only', () => {
   assert.match(stop(edited(verdict(row('exit 0')), 'exit 10')).reason, /"fatto"/);
 });
 
+test('a deciding cell joining real output lines, or with a trailing note, is proven piece by piece; one absent piece blocks', () => {
+  const out = '# pass 673\n# fail 0\ninstalled workflows/impl-review-loop.js\n"permissionDecision":"deny"\nexplore-exit=0';
+  for (const line of ['`# pass 673` / `# fail 0`', '`# pass 673`, `# fail 0`', '`installed workflows/impl-review-loop.js` (e gli altri 3)', 'deny / deny / exit 0']) {
+    assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
+  }
+  assert.match(stop(edited(verdict(row('`# pass 673` / `# fail 1`')), '# pass 673\n# fail 0')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('deny / ok')), '"permissionDecision":"deny"')).reason, /"fatto"/);
+});
+
 test('a placeholder deciding line ("-", empty) is never proven, whatever the results hold', () => {
   assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('')), 'anything')).reason, /"fatto"/);
@@ -354,7 +366,7 @@ test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table 
   const filler = Array.from({ length: 90 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 9 MB
   const claim = say(verdict(row('Passed: 48, Failed: 0')));
   const { reason, dir } = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
-  assert.match(reason, /troppo lungo/);
+  assert.match(reason, /too long/);
   assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n')[0]).rule, 'tail-cut');
   // a row whose proof is in the part read is still proven
@@ -364,8 +376,49 @@ test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table 
   assert.equal(stop([prompt('x'), tool('Edit'), result('ok'), ...filler, say(verdict(row('-', 'non verificato: serve staging')))]).reason, '');
 });
 
+test('a verdict table whose deciding line the turn printed is the accepted evidence', () => {
+  const table = ['Fatto.', '', '| Livello | Comando | Riga che decide | Stato |', '| --- | --- | --- | --- |', '| test | `node --test` | 42 passed | fatto |'].join('\n');
+  assert.equal(stop(edited(table, '42 passed')).reason, '');
+});
+
 test('a later human prompt ends the turn a delegate armed', () => {
   const claim = verdict(row('Passed: 48, Failed: 0'));
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), say(claim)]).reason, '');
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), tool('Agent'), notification('Passed: 48, Failed: 0'), say(claim)]).reason, '');
+});
+
+// The perimeter of the change must be closed (with its findings log) before the verdict.
+const repoWithPerimeter = (status) => {
+  const repo = mkdtempSync(join(tmpdir(), 'done-repo-'));
+  created.push(repo);
+  const git = (...args) => spawnSync('git', ['-c', 'user.email=t@t', '-c', 'user.name=t', ...args], { cwd: repo, encoding: 'utf8' });
+  git('init', '-b', 'trunk');
+  git('commit', '--allow-empty', '-m', 'init');
+  mkdirSync(join(repo, '.git', 'deliver'));
+  writeFileSync(join(repo, '.git', 'deliver', 'perimeter.md'), `branch: trunk\nstatus: ${status}\n- a.cs\n`);
+  return repo;
+};
+
+test('a proven verdict table is sent back once while the perimeter is still active on this branch', () => {
+  const repo = repoWithPerimeter('active');
+  const final = verdict(row('Passed: 48'));
+  const { reason, dir } = stop(edited(final, 'Passed: 48'), { extra: { cwd: repo } });
+  assert.match(reason, /Close the perimeter with -FindingsLog/);
+  assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim()).rule, 'perimeter-open');
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
+});
+
+test('a closed perimeter, another branch, no cwd or no verdict table: silent', () => {
+  const final = verdict(row('Passed: 48'));
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repoWithPerimeter('closed') } }).reason, '');
+  const other = repoWithPerimeter('active');
+  writeFileSync(join(other, '.git', 'deliver', 'perimeter.md'), 'branch: elsewhere\nstatus: active\n- a.cs\n');
+  assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: other } }).reason, '');
+  assert.equal(stop(edited(final, 'Passed: 48')).reason, '');
+  assert.equal(stop(edited('Ho letto il codice, nessuna modifica necessaria.'), { extra: { cwd: repoWithPerimeter('active') } }).reason, '');
+});
+
+test('a verdict of only "non verificato" rows still asks to close an active perimeter', () => {
+  const final = `${head}\n${row('-', 'non verificato: serve staging')}`;
+  assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /Close the perimeter/);
 });

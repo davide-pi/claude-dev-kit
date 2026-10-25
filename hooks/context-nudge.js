@@ -30,11 +30,10 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const CACHE_DIR = path.join(CONFIG_DIR, '.cache');
+const { CACHE_DIR, readJson, prune } = require('./lib/cache');
+
 const PERCENT_BANDS = [50, 70, 85];
 /** Above this window a percentage band says little: without a token count, stay silent. */
 const PERCENT_FALLBACK_MAX_WINDOW = 250_000;
@@ -48,28 +47,8 @@ const SNAPSHOT_MAX_AGE_MS = 6 * 60 * 60 * 1000;
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const CACHE_FILE = /^(?:context|nudge)-[\w-]+\.json$/;
 
-function readJson(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
-}
-
 /** How many of the ascending `limits` the value has reached: 0 when under the first. */
 const bandOf = (value, limits) => limits.filter((l) => value >= l).length;
-
-function prune(now) {
-  try {
-    for (const name of fs.readdirSync(CACHE_DIR)) {
-      if (!CACHE_FILE.test(name)) continue;
-      const file = path.join(CACHE_DIR, name);
-      if (now - fs.statSync(file).mtimeMs > PRUNE_AFTER_MS) fs.rmSync(file, { force: true });
-    }
-  } catch {
-    /* best-effort */
-  }
-}
 
 /** The hook's output for one payload, or null when there is nothing to say. */
 function run(payload) {
@@ -88,10 +67,10 @@ function run(payload) {
   let level;                                     // how the context is named in the message
   if (Number.isFinite(tokens)) {
     band = bandOf(tokens, steps);
-    level = `Contesto a ${Math.round(tokens / 1000)}k token`;
+    level = `Context at ${Math.round(tokens / 1000)}k tokens`;
   } else if (Number.isFinite(pct) && !(snapshot.window > PERCENT_FALLBACK_MAX_WINDOW)) {
     band = bandOf(pct, PERCENT_BANDS);
-    level = `Contesto al ${Math.round(pct)} %`;
+    level = `Context at ${Math.round(pct)} %`;
   } else {
     return null;
   }
@@ -102,14 +81,14 @@ function run(payload) {
 
   fs.writeFileSync(stateFile, JSON.stringify({ band, at: now }));
   if (band < announced) return null;             // compacted or cleared: re-arm, say nothing
-  prune(now);                                    // once per step at most
+  prune(CACHE_FILE, now);                        // once per step at most
 
   return {
     hookSpecificOutput: {
       hookEventName: 'UserPromptSubmit',
       additionalContext:
-        `${level}. A fine risposta, una riga all'utente: `
-        + '`/compact <focus>` (proponi tu il focus del task in corso) oppure `/clear` prima di un argomento nuovo.',
+        `${level}. At the end of the reply, one line to the user: `
+        + '`/compact <focus>` (you propose the focus of the task in progress) or `/clear` before a new topic.',
     },
   };
 }

@@ -60,12 +60,12 @@ test('absolute steps: 120k, 200k and 320k fire once each on a 1M window', () => 
   tokenSnapshot(config, 'sess-1', 100_000);
   assert.equal(nudge(config), '', 'under 120k');
   tokenSnapshot(config, 'sess-1', 150_000);
-  assert.match(nudge(config), /^Contesto a 150k token.*\/compact <focus>/);
+  assert.match(nudge(config), /^Context at 150k tokens.*\/compact <focus>/);
   assert.equal(nudge(config), '', 'same band: silent');
   tokenSnapshot(config, 'sess-1', 210_000);
-  assert.match(nudge(config), /Contesto a 210k token/);
+  assert.match(nudge(config), /Context at 210k tokens/);
   tokenSnapshot(config, 'sess-1', 330_000);
-  assert.match(nudge(config), /Contesto a 330k token/);
+  assert.match(nudge(config), /Context at 330k tokens/);
 });
 
 test('a percentage alone on a 1M window stays silent (15 % is 150k, 50 % would be 500k)', () => {
@@ -83,7 +83,7 @@ test('off by default: without a valid CLAUDE_NUDGE_STEPS the hook is silent, eve
     return spawnSync(process.execPath, [HOOK], { input: JSON.stringify({ session_id: 'sess-1' }), encoding: 'utf8', env }).stdout;
   };
   for (const off of [undefined, '', 'abc', '250000,', '0', '-5']) assert.equal(run(off), '', `"${off}" is off`);
-  assert.match(run('250000'), /Contesto a 400k token/, 'a valid value turns it on');
+  assert.match(run('250000'), /Context at 400k tokens/, 'a valid value turns it on');
 });
 
 test('below 50 % → silent', () => {
@@ -95,12 +95,12 @@ test('below 50 % → silent', () => {
 test('crossing 50 / 70 / 85 → one line per band, once', () => {
   const config = sandbox();
   snapshot(config, 'sess-1', 51.4);
-  assert.match(nudge(config), /^Contesto al 51 %.*\/compact <focus>.*\/clear/);
+  assert.match(nudge(config), /^Context at 51 %.*\/compact <focus>.*\/clear/);
   assert.equal(nudge(config), '', 'same band: silent');
   snapshot(config, 'sess-1', 72);
-  assert.match(nudge(config), /Contesto al 72 %/);
+  assert.match(nudge(config), /Context at 72 %/);
   snapshot(config, 'sess-1', 90);
-  assert.match(nudge(config), /Contesto al 90 %/);
+  assert.match(nudge(config), /Context at 90 %/);
   assert.equal(nudge(config), '');
 });
 
@@ -172,7 +172,7 @@ test('statusline writes the snapshot the hook reads, null-safe', () => {
   assert.equal(snap.used_tokens, 146000, 'derived from the percentage and the window');
   assert.equal(snap.window, 200000);
   assert.equal(snap.warm, false);
-  assert.match(nudge(config, 'sl-1'), /Contesto a 146k token/);
+  assert.match(nudge(config, 'sl-1'), /Context at 146k tokens/);
 });
 
 test('statusline rewrites the snapshot only when a value changes, or once it is an hour old', () => {
@@ -247,7 +247,7 @@ test('CLAUDE_NUDGE_STEPS sets the steps: one nudge at 250k, none at 120k or 200k
   tokenSnapshot(config, 'sess-1', 210_000);
   assert.equal(run(config, '250000'), '');
   tokenSnapshot(config, 'sess-1', 255_000);
-  assert.match(run(config, '250000'), /Contesto a 255k token/);
+  assert.match(run(config, '250000'), /Context at 255k tokens/);
   tokenSnapshot(config, 'sess-1', 280_000);
   assert.equal(run(config, '250000'), '', 'once');
 });

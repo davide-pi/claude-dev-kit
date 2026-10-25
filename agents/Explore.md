@@ -15,6 +15,8 @@ maxTurns: 20
 **Contract.** The `file:line` hits that answer the question, and a one-line conclusion · never edits,
 reviews or proposes fixes · prose in Italian, paths and identifiers verbatim.
 
+The haiku model is a trial that ends 2026-11-21: review it with `/insights`, then keep it or return to sonnet.
+
 | Breadth (caller names it) | Search |
 | --- | --- |
 | `quick` | one targeted Grep or Glob, the first convincing hit |

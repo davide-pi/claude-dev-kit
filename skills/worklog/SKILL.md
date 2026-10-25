@@ -14,17 +14,9 @@ unconfirmed · Italian chat, tables and board text; field names, WIQL and engine
 ## When
 
 - `/worklog`, `/worklog ieri`, `/worklog <data>`, a range (default: today); or asked in prose ("segna le ore").
-- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text>`, or "segna le ore di questo item/PR": only
-  the topics whose branch, PR, item or label match go through Phases 3–7; the day's target, COPERTURA, gap
-  prompt and close/target rows are skipped (the rest of the day stays for a full run). Nothing matches → say so.
-  `sessione <id>` (also "segna le ore di questa chat", id = `${CLAUDE_SESSION_ID}`; unsubstituted →
-  ask the user, never take the newest `.jsonl`): Phase 2 runs the engine with `-SessionId <id>` over the
-  session's days (the engine finds the first day itself, prints `Sessione <id>: dal <data>`, runs to today unless a period is given); Phases 3–7 keep only the topics
-  its **Sessione** section lists, with their full-day minutes, items from that chat's branch, PRs, commits
-  and `AB#` mentions; a topic whose item cannot be told, or flagged `[anche altre sessioni]` (shared
-  branch: the minutes are not the chat's alone), goes to Table 2 as a question (candidates plus "altro"),
-  the `[S]` digest lines showing the chat's share, never guessed. The push and the audit stay as they
-  are: a row carries the item's day total, so re-runs and other chats stay idempotent.
+- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text> | sessione <id>` (or "segna le ore di questo item/PR/questa chat"):
+  only the matching topics go through Phases 3-7, the day's target, COPERTURA and gap prompt are skipped:
+  `scoping.md`.
 - The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
 - A day already logged is re-run: only the delta reaches the board.
 
@@ -110,6 +102,7 @@ open a transcript only for a missing detail.
 
 - `tempo-e-topic.md` — period, the engine's pause rules and GIORNO table, `targets.json`, topics,
   roles, rounding per day, NON FATTURATO and COPERTURA.
+- `scoping.md` — a run scoped to an item, PR, topic or session (`sessione <id>`): which topics stay, the engine flag.
 - `tabelle.md` — Table 1 with coverage, Table 2, link format, confirm loops, the recap.
 - `ore-gestione.md` — the gap prompt; management hours: fixed Feature/PBI, one Task per session.
 - `fonti-esterne.md` — board, git, Slack and calendar as proposals for an under-target day.

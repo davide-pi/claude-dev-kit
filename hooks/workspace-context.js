@@ -8,7 +8,7 @@
  * private Azure CLI config dir `~/.azure-<identity>`), `account`, `note`. Longest `path` wins.
  *
  * Output, one context line: `ALM: Azure DevOps · org <x> · project <y> · az identity <z>`, or
- * `ALM: non mappato — chiedi` when a map exists but no root matches. `az account set` is
+ * `ALM: unmapped — ask` when a map exists but no root matches. `az account set` is
  * machine-global, so the identity travels through CLAUDE_ENV_FILE as plain `export` lines:
  * AZURE_CONFIG_DIR reaches Bash, AZ_IDENTITY (no backslash) also reaches PowerShell.
  * No map, malformed map, any error: silent, exit 0. No network, no `az` call.
@@ -20,17 +20,17 @@ const path = require('path');
 const { readRoots, resolveDir, matchRoot } = require('./lib/workspaces');
 
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
-const PS_PREFIX = 'PowerShell: az fuori dalla allow list → anteponi $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; (il guard pinna gli altri), mai az account set';
+const PS_PREFIX = 'PowerShell: az outside the allow list → prefix $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; (the guard pins the others), never az account set';
 
 function projectOf(entry, dir) {
   if (entry.projects && typeof entry.projects === 'object') {
     const sub = path.relative(entry.root, dir).split(path.sep)[0];
-    if (!sub) return 'project: chiedi';
+    if (!sub) return 'project: ask';
     const key = Object.keys(entry.projects).find((k) => k.toLowerCase() === sub);
     if (key) return `project ${entry.projects[key]}`;
-    return `project da risolvere: sottocartella "${sub}" -> az devops project list, match case-insensitive; nessuno -> chiedi`;
+    return `project to resolve: subfolder "${sub}" -> az devops project list, case-insensitive match; none -> ask`;
   }
-  return !entry.project || entry.project === 'ask' ? 'project: chiedi' : `project ${entry.project}`;
+  return !entry.project || entry.project === 'ask' ? 'project: ask' : `project ${entry.project}`;
 }
 
 function describe(entry, dir, envFile) {
@@ -60,7 +60,7 @@ try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
   const dir = resolveDir(input.cwd);
   const hit = matchRoot(readRoots(), dir);
-  const line = hit ? describe(hit, dir, process.env.CLAUDE_ENV_FILE) : 'ALM: non mappato — chiedi';
+  const line = hit ? describe(hit, dir, process.env.CLAUDE_ENV_FILE) : 'ALM: unmapped — ask';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line },
   }));

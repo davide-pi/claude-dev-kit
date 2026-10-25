@@ -39,10 +39,9 @@
 'use strict';
 
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+const { CONFIG_DIR, readJson } = require('./lib/cache');
 const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
 const AUDIT = path.join(CONFIG_DIR, 'worklog', 'pushed.json');
 const TARGETS = path.join(CONFIG_DIR, 'worklog', 'targets.json');
@@ -116,14 +115,6 @@ function workspaceOf(project) {
   const rest = String(project).slice(root.length).split(/[\\/]/).filter(Boolean);
   if (!rest.length) return null;
   return NESTED.has(rest[0].toLowerCase()) && rest[1] ? `${rest[0]}/${rest[1]}` : rest[0];
-}
-
-function readJson(file) {
-  try {
-    return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch {
-    return null;
-  }
 }
 
 /**
@@ -250,20 +241,20 @@ function list(items, fmt) {
   return items.slice(0, MAX_LISTED).map(fmt).join(', ') + rest;
 }
 
-const days = (n) => `${n} giorn${n === 1 ? 'o' : 'i'}`;
+const days = (n) => `${n} day${n === 1 ? '' : 's'}`;
 
 /** One line, naming the days and where they were spent, because a bare count invites postponing. */
 function line({ pending, underTarget }) {
   const parts = [];
   if (pending.length) {
-    parts.push(`Ore non registrate su ${days(pending.length)}: `
-      + `${list(pending, (p) => `${p.date} (${label(p.workspaces)})`)} — chiudili con /worklog <data>.`);
+    parts.push(`Unlogged hours on ${days(pending.length)}: `
+      + `${list(pending, (p) => `${p.date} (${label(p.workspaces)})`)} — close them with /worklog <date>.`);
   }
   if (underTarget.length) {
-    parts.push(`Sotto target su ${days(underTarget.length)}: `
-      + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — completali con /worklog <data>.`);
+    parts.push(`Under target on ${days(underTarget.length)}: `
+      + `${list(underTarget, (u) => `${u.date} (${u.logged}/${u.target}h)`)} — complete them with /worklog <date>.`);
   }
-  return `⏱ ${parts.join(' ')} Le ore le scrive solo /worklog.`;
+  return `⏱ ${parts.join(' ')} Only /worklog writes hours.`;
 }
 
 const snapshot = compute();

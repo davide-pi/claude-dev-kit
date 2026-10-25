@@ -3,8 +3,9 @@ name: review-security
 description: >-
   Use when a change needs a security review, alone or beside code-reviewer: entry points, trust
   boundaries, taint, authz, secrets. Findings only.
-tools: Read, Grep, Glob, Bash, PowerShell
+tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
+effort: medium
 omitClaudeMd: true
 maxTurns: 50
 ---

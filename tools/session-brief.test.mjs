@@ -282,3 +282,41 @@ test('the nudge is still there when the brief itself is served from the cache', 
   assert.deepEqual(second, first);
   assert.equal(nudgeOf(second).length, 1);
 });
+
+// ── the run-count nudge ──────────────────────────────────────────────────────────────────────────────────
+
+const runsOf = (lines) => lines.filter((l) => l.startsWith('`/retro`'));
+
+test('3 runs since the last retro add the /retro line; 0 or 2 add nothing', () => {
+  const root = repo({ branch: 'feature/order-list', object: 'x' });   // no work-item line: room for one more
+  assert.equal(runsOf(run(root)).length, 0);
+  findingsLog(root, [runLine(), runLine()]);
+  assert.equal(runsOf(run(root)).length, 0);
+  findingsLog(root, [runLine(), runLine(), { run: 'r3' }]);
+  assert.deepEqual(runsOf(run(root)), ["`/retro`: 3 new runs since the last flow review."]);
+});
+
+test('a retro marker resets the run count and malformed lines are not runs', () => {
+  const root = repo({ branch: 'feature/order-list', object: 'x' });
+  findingsLog(root, [runLine(), runLine(), runLine(), { retro: '2026-10-21' }, runLine(), 'not json', '{"other": 1}', '[1]', runLine()]);
+  assert.equal(runsOf(run(root)).length, 0);
+  findingsLog(root, [runLine(), { retro: '2026-10-21' }, runLine(), runLine(), 'not json', runLine(), runLine()]);
+  assert.match(runsOf(run(root))[0], /: 4 new runs/);
+});
+
+test('the run line is never dropped: it follows a full four-line brief', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(), runLine(), runLine()]);
+  const lines = run(root);
+  assert.equal(lines.length, 5);
+  assert.equal(runsOf(lines).length, 1);
+});
+
+test('beside a findings-log line the count is appended to that line, not a line of its own', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(...Array.from({ length: 5 }, () => finding('regression'))), runLine(), runLine()]);
+  const lines = run(root);
+  assert.equal(lines.length, 5);
+  assert.equal(runsOf(lines).length, 0);
+  assert.match(nudgeOf(lines)[0], /; \/retro: 3 new runs$/);
+});

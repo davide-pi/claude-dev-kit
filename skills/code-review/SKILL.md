@@ -36,7 +36,7 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 | Request | Agents |
 | --- | --- |
 | `low`, `medium` | `code-reviewer` (frontmatter model) |
-| `high`, `xhigh`, `max` | `code-reviewer` **A** (`model` omitted → sonnet) + `code-reviewer` **B** (`model: opus`) + `review-security` + `review-performance` |
+| `high`, `xhigh`, `max` | `code-reviewer` **A** (`model` omitted → sonnet) + `review-security` + `review-performance`; from `xhigh` also `code-reviewer` **B** (`model: opus`) |
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 
@@ -44,10 +44,10 @@ Every Agent call (A, B, the specialists) passes the requested effort as its `eff
 the brief text.
 
 "advanced" / "agent `<model>`" from the user: the model table in
-`skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A and B
+`skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A (and B, from `xhigh`)
 unchanged: diff file path, base, intent (acceptance criteria verbatim), effort, which specialists
 run beside it, previous findings, "you may be one of two reviewers on different models: do not
-soften for agreement", and the output contract in one line: Finding blocks in your Output format, Italian
+soften for agreement" (only when B runs), and the output contract in one line: Finding blocks in your Output format, Italian
 prose, anchors on working-tree lines, one defect per block. Never review inline unless no subagent can be spawned — then say so; a
 missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
 `/review-large`, never launch it unasked.
@@ -62,7 +62,7 @@ cannot be judged without it.
 
 | Case | Result |
 | --- | --- |
-| A and B report the same defect at the same anchor | one finding, `CONFIRMED`, first within its priority |
+| A and B (from `xhigh`) report the same defect at the same anchor | one finding, `CONFIRMED`, first within its priority |
 | only A or only B | kept; `PLAUSIBLE` unless it quotes the evidence that settles it |
 | a specialist and a reviewer at the same anchor, same defect | keep one: the more specific category, the higher verdict |
 | same line, different failures | keep both |
@@ -116,5 +116,5 @@ and stop.
 2. Compiler or linter errors reported as findings → CI owns them → no build, no test run.
 3. Findings invented to fill the report → "nulla da segnalare, verificato: …" is a valid result.
 4. Summary table first → it scrolls away → tables are the last block.
-5. The pair returns identical findings in identical words → both ran on one model, or one read the
+5. At `xhigh`+ the pair returns identical findings in identical words → both ran on one model, or one read the
    other's output → separate spawns in one message, different `model`.

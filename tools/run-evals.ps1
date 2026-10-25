@@ -19,8 +19,8 @@
   database or the network.
 
   -Base defaults to the remote default branch (origin/HEAD), else `main`.
-  Exit codes: 0 all suites at or above -Threshold, 1 a case below it or a run error, 2 the cost cap
-  was hit (partial results), 3 usage error. -List prints the suites that would run and exits 0.
+  Exit codes: 0 all suites at or above -Threshold, 1 a case below it or a run error (wins over 2, even
+  when a later suite hit the cap), 2 the cost cap was hit and no case failed (partial results), 3 usage error. -List prints the suites that would run and exits 0.
 #>
 
 [CmdletBinding()]
@@ -86,7 +86,8 @@ if ($List) { exit 0 }
 
 $stamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 $out = Join-Path ([System.IO.Path]::GetTempPath()) "kit-evals\$stamp"
-$exit = 0
+$failed = $false   # a case below the threshold or a run error, in any suite
+$capHit = $false   # a suite stopped at -MaxCostUsd: partial results, not a failure by itself
 $total = 0.0
 
 foreach ($name in $selected) {
@@ -109,7 +110,8 @@ foreach ($name in $selected) {
     New-Item -ItemType Directory -Force -Path $out | Out-Null
     & claude @evalArgs
     $code = $LASTEXITCODE
-    if ($code -gt $exit) { $exit = $code }
+    if ($code -eq 2) { $capHit = $true }
+    elseif ($code -ne 0) { $failed = $true }
 
     $json = Join-Path $out "$name.json"
     if (Test-Path -LiteralPath $json) {
@@ -118,7 +120,8 @@ foreach ($name in $selected) {
         $total += [double]$result.costUsd
         foreach ($row in $result.cases) {
             foreach ($arm in $row.arms.with) {
-                $verdict = if ($arm.error) { "error: $($arm.error)" } else { '' }
+                $verdict = if ($arm.error) { $failed = $true; "error: $($arm.error)" } else { '' }
+                if ([double]$arm.score -lt $Threshold) { $failed = $true }
                 Write-Host ('  {0,-34} score {1:N2}  ${2:N2} {3}' -f $row.name, $arm.score, $arm.costUsd, $verdict)
                 foreach ($g in @($arm.graders | Where-Object { -not $_.passed })) { Write-Host "      FAIL $($g.name): $($g.explanation)" }
             }
@@ -126,5 +129,6 @@ foreach ($name in $selected) {
     }
 }
 
+$exit = if ($failed) { 1 } elseif ($capHit) { 2 } else { 0 }
 Write-Host ("`nreports and traces: {0}   total cost: `${1:N2}   exit: {2}" -f $out, $total, $exit)
 exit $exit

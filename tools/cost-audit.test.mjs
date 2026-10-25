@@ -46,7 +46,7 @@ function fixture() {
   const write = (file, entries) => writeFileSync(file, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
   write(join(project, 'sess-1.jsonl'), [
     hook(1, 'SessionStart', '⏱ Ore non registrate su 1 giorno: 2026-10-01 (x) — chiudili con /worklog <data>.'),
-    hook(1, 'UserPromptSubmit', 'Contesto a 210k token. A fine risposta, una riga.'),
+    hook(1, 'UserPromptSubmit', 'Context at 210k tokens. At the end of the reply, one line.'),
     hook(1, 'SessionStart', 'something unrecognised'),
     turn('m1', 1, { input: 2, create: 40_000, read: 10_000 }, [use('t1', 'Skill', { skill: 'commit' })]),
     // the same message written again for its second content block: counted once
@@ -143,4 +143,29 @@ test('the unproven-row and tail-truncated done-claim rules are counted with the 
   const r = audit({ projects, log, now: NOW });
   assert.deepEqual(Object.fromEntries(r.doneClaim), { 'unproven-row / fatto': 2, 'tail-truncated / failed': 1 });
   assert.match(report(r), /2\s+unproven-row \/ fatto/);
+});
+
+test('input and output are reported apart; the new hook markers are recognised per line', () => {
+  const { projects, log } = fixture();
+  writeFileSync(join(projects, 'proj-c.jsonl'), [
+    hook(1, 'SessionStart', 'ALM: x\ndetached HEAD at abc1234, clean'),
+    hook(1, 'PreToolUse', 'Fuori perimetro: `a.cs` non è nel perimetro'),
+    { ...turn('c1', 1, { input: 1, read: 1000 }), message: { id: 'c1', role: 'assistant', content: [], usage: { input_tokens: 1, cache_read_input_tokens: 1000, output_tokens: 700 } } },
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = audit({ projects, log, now: NOW });
+  assert.equal(r.share.output, 700);
+  assert.equal(r.hooks.get('scope-guard'), 1);
+  assert.equal(r.hooks.get('workspace-context'), 1, 'the first matching marker wins');
+  const text = report(r);
+  assert.match(text, /input volume by context size/);
+  assert.match(text, /output 0\.00M/);
+});
+
+test('an over-size or unreadable transcript is counted and printed, not swallowed', () => {
+  const { projects, log } = fixture();
+  const r = audit({ projects, log, now: NOW, maxBytes: 100 });
+  assert.ok(r.skipped.oversize.length >= 1);
+  assert.deepEqual(r.skipped.unreadable, []);
+  assert.match(report(r), /## Skipped transcripts: 0 unreadable, \d+ over/);
+  assert.doesNotMatch(report(audit({ projects, log, now: NOW })), /Skipped transcripts/);
 });

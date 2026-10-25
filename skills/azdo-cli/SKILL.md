@@ -1,7 +1,7 @@
 ---
 name: azdo-cli
 description: >-
-  Use when an Azure DevOps work item, PR, wiki or pipeline is read or written via `az`, a type
+  Use when an Azure DevOps item, PR, wiki or pipeline is written via `az`, a type name is
   resolved, or an `az` call fails.
 ---
 
@@ -12,7 +12,8 @@ default, never an MCP call before the gap is proven · chat Italian, commands an
 
 ## When
 
-- A board, work item, repository, PR, wiki or pipeline is read or written from a shell.
+- A board, work item, repository, PR, wiki or pipeline is written from a shell, or read beyond a plain
+  item view (a plain item read is `item`).
 - Another asset needs the verb and flags: `workitem-create`, `pr-create`, `pr-review`,
   `branch-flow`, `worklog`, `items-qa`, `estimate`.
 - A type name, field reference or flag is about to be typed, or a call fails on auth or "not found".
@@ -26,7 +27,7 @@ should say (`user-story-standard`).
 
 Org, project and az identity come from the session's `ALM:` line (written at start by the
 `workspace-context.js` hook from the local `workspaces.json`). Pass `--org` and `-p` on **every**
-command. No line, `non mappato`, or a directory added later → **ask**; never let `--detect` or the
+command. No line, `unmapped`, or a directory added later → **ask**; never let `--detect` or the
 machine default fill the hole — it may still point at the previous client. `-p` does not scope a
 query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
 
@@ -74,12 +75,8 @@ substitute the nearest. Only the time role (`Task`) carries hours; a PR links th
 
 ### 6. Authentication triage
 
-| Symptom | Cause | Fix |
-| --- | --- | --- |
-| prompts, or "before you can run…" | no credential for that org | `az login`, or `az devops login --org <url>` with a PAT |
-| signed in, yet the org is invisible | the org lives on another Entra tenant | `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in per tenant |
-| "not found" on something that exists | org/project defaulted elsewhere, or PAT scope | re-read the `ALM:` line, pass `--org` / `-p` |
-| wrong account used | the shared az config dir | the shell guard pins `AZURE_CONFIG_DIR` per root on the `az` commands it can (read-only ones); prefix the rest by hand; never `az account set` (machine-global) — `references/auth-and-config.md` |
+Prompts, an org that is invisible after sign-in, "not found" on something that exists, the wrong account:
+the symptom table in `references/auth-and-config.md` § Triage by symptom.
 
 ## Do
 
@@ -89,7 +86,7 @@ az account show --query "{user:user.name, tenant:tenantId}" -o jsonc
 az devops invoke --org $org --area wit --resource workItemTypes --route-parameters project=$proj --query "value[].name" -o tsv
 $w = "SELECT [System.Id],[System.Title],[System.State] FROM WorkItems WHERE [System.TeamProject] = '$proj' AND [System.Id] = <id>"
 az boards query --org $org -p $proj --wiql $w -o table
-az boards work-item show --org $org --id <id> --expand all -o jsonc
+az boards work-item show --org $org --id <id> --fields System.Title,System.State -o jsonc
 az repos pr show --org $org --id <pr> --query "{title:title,status:status,tgt:targetRefName}" -o jsonc
 $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 --query accessToken -o tsv   # REST bearer
 ```

@@ -1,0 +1,8 @@
+{
+  "id": "t6-first-page",
+  "kind": "cross-file-contract",
+  "prompt": "L'elenco ordini e' rotto: la prima pagina va in errore sul database e dalla seconda in poi mancano gli ordini della pagina precedente. Trova la causa e sistemala.",
+  "seeds": [
+    { "file": "OrdersApi/Services/OrderService.cs", "find": "return await _repo.ListByCustomerAsync(customerId, page, pageSize, ct);", "replace": "return await _repo.ListByCustomerAsync(customerId, page - 1, pageSize, ct);" }
+  ]
+}

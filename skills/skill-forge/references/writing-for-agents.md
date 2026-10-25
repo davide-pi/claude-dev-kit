@@ -71,8 +71,8 @@ that is fast, deterministic, low-overhead), *blast radius*, *seam*.
 
 ## Positive phrasing
 
-A prohibition drags the forbidden behaviour into context and makes it *more* available ("don't think
-of an elephant"). State the target behaviour instead: "write one-line comments", not "don't write
+A prohibition drags the forbidden behaviour into context and makes it *more* available ("do not think
+of an elephant"). State the target behaviour instead: "write one-line comments", not "do not write
 long comments". A prohibition earns its place only as a hard guardrail with no positive form — the
 `never` of a contract line — and even then pair it with the positive target.
 
@@ -99,3 +99,4 @@ The no-op test is model-relative, not reader-relative: settle a disagreement by 
    cover 80 % of cases.
 6. Every check the asset adds (a test, a hook, a validator rule) was seen failing once on a bad input: a
    check never seen failing proves nothing.
+7. Instructions are CLI first with the fallback stated; examples in PowerShell unless bash is genuinely better.

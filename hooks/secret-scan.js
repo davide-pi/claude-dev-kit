@@ -1,5 +1,5 @@
 /**
- * PreToolUse hook for Write / Edit / MultiEdit.
+ * PreToolUse hook for Write / Edit / MultiEdit / NotebookEdit.
  *
  * A credential that reaches a file is already halfway to the remote: the next `git add -A` takes
  * it, and once it is in the history it stays there. This hook is the last cheap moment to stop it,
@@ -8,9 +8,10 @@
  *
  * The catalogue is the one tools/validate.mjs already enforces on the kit's own files — provider
  * tokens, a cloud access key id, an API-key-shaped string, a password inside a connection string —
- * plus the two shapes a source file can carry that a config repo cannot: a private key block and a
- * signed token. Keeping the two lists in step matters: what the validator rejects in the repo is
- * exactly what must never be written into a project either.
+ * plus the shapes a source file can carry that a config repo cannot: a private key block, a signed
+ * token, a password in a URL (`scheme://user:secret@host`) and a quoted `"password": "literal"` pair.
+ * Keeping the two lists in step matters: what the validator rejects in the repo is exactly what must
+ * never be written into a project either.
  *
  * Node, not PowerShell: this runs before every Write and Edit, so ~150ms against ~370ms just to
  * start `pwsh`. No subprocess, no file system access beyond stdin — it only reads the text the tool
@@ -40,6 +41,7 @@
 'use strict';
 
 const { approve, deny, readPayload } = require('./lib/decision');
+const { logError } = require('./lib/cache');
 
 /**
  * The catalogue. `value` is the capture group holding the part that has to look like a real secret;
@@ -74,12 +76,36 @@ const PATTERNS = [
     label: 'a password in a connection string',
     // `|` is excluded from the value on purpose: a detector reads `Password=|Pwd=`, and a real
     // password never starts with an alternation.
-    re: /\b(?:password|pwd|user\s+password)\s*=\s*(?!<)([^;'"\s|,)}\]]{3,})/gi,
+    re: /(?<![A-Za-z0-9])(?:password|passwd|pwd|user\s+password)\s*=\s*(?!<)([^;'"\s|,)}\]]{3,})/gi,
     value: 1,
   },
   {
     label: 'a cloud access key in a connection string',
-    re: /\b(?:accountkey|sharedaccesskey|shared_access_key|aws_secret_access_key|client_secret|clientsecret)\s*=\s*(?!<)([^;'"\s|,)}\]]{8,})/gi,
+    re: /(?<![A-Za-z0-9])(?:accountkey|sharedaccesskey|shared_access_key|aws_secret_access_key|client_secret|clientsecret|api_?key|secret_?key)\s*=\s*(?!<)([^;'"\s|,)}\]]{8,})/gi,
+    value: 1,
+  },
+  {
+    label: 'a password in a URL',
+    re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@'"]+:([^\s@/'"]{3,})@[^\s'"]+/gi,
+    value: 1,
+  },
+  {
+    // Only a quoted literal: an unquoted value is as likely a reference or a type name as a secret.
+    label: 'a quoted secret value',
+    re: /["']?(?<![A-Za-z0-9])(?:password|passwd|pwd|secret|api_?key|token|client_?secret)["']?\s*:\s*["']([^"'\s]{6,})["']/gi,
+    value: 1,
+  },
+  {
+    // An unquoted YAML scalar, only in a YAML file where `password: value` is the whole syntax. In code
+    // the same text is as likely a type or a variable (`password: string`, `token: tokenValue`).
+    label: 'an unquoted secret value in YAML',
+    re: /(?<![A-Za-z0-9])(?:password|passwd|pwd|secret|api_?key|token|client_?secret)\s*:[ \t]+(?!["'!*&|>[{#])([^\s#'"]{6,})/gi,
+    value: 1,
+    files: /\.ya?ml$/i,
+  },
+  {
+    label: 'a secret literal assigned to a variable',
+    re: /\$\w*(?:pw|pwd|pass|passwd|password|secret|token|apikey|credential)\w*\s*=\s*["']([^"'\s]{6,})["']/gi,
     value: 1,
   },
 ];
@@ -91,7 +117,11 @@ const PATTERNS = [
 // Only the characters that genuinely mark a hole. `(`, `)`, `!` and `+` are deliberately absent:
 // they occur in real passwords, and the concatenation case (`"…Password=" + pwd`) is already
 // covered because the value may not contain a quote.
-const INTERPOLATION = /[<>{}$%`\\]|\[\[|::/;
+// `$` is a hole only as `${`, `$(`, `$env` or a leading `$name`: a password may well contain `Pa$$w0rd`.
+const INTERPOLATION = /[<>{}%`\\]|\[\[|::|\$\(|\$env\b|^\$[A-Za-z_]/i;
+/** A masked provider token (`ghp_xxxxxxxxxxxx`, `AKIA` + a run of one letter): nothing real has three distinct characters. */
+const TOKEN_PREFIX = /^(?:glsa_|ghp_|github_pat_|gho_|ghs_|ghu_|xoxb-|xoxp-|xapp-|sk-(?:ant|proj|live|test)?-?|AKIA|AIza)/;
+const looksMasked = (value) => new Set(value.replace(TOKEN_PREFIX, '').toLowerCase()).size <= 3 || MASK.test(value.replace(TOKEN_PREFIX, ''));
 /** `@Model.Password`, `config.db.password`: a member access is a reference, not a literal. */
 const MEMBER_ACCESS = /^@?[A-Za-z_]\w*(?:\.[A-Za-z_]\w*)+$/;
 const PLACEHOLDER_WORD = new RegExp(
@@ -123,8 +153,10 @@ function isPlaceholder(value, reference) {
   if (MASK.test(v)) return true;
   if (PLACEHOLDER_WORD.test(v)) return true;
   if (EXAMPLE_MARKER.test(v)) return true;
-  if (!reference) return false;
+  if (!reference) return looksMasked(v);
   if (MEMBER_ACCESS.test(v)) return true;
+  // A URL is an endpoint, not a credential (a password inside one has its own pattern); `get_key(` is a call.
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(v) || /^@?[A-Za-z_][\w.]*\(/.test(v)) return true;
   // `env:DB_PASSWORD`, `ENV.DB_PASSWORD`, `process.env.DB_PASSWORD`, `Secrets:Db:Password`
   if (/^(?:env[.:]|process\.env|secrets?[.:]|vault[.:])/i.test(v)) return true;
   // A SCREAMING_SNAKE name is a variable, never a password anybody typed.
@@ -137,15 +169,16 @@ function isPlaceholder(value, reference) {
  * secret, not the secret. Skipping it is what keeps a scanner, a test fixture list and a
  * `git grep` recipe writable.
  */
-const DETECTOR_LINE = /\(\?[:<=!]|\[A-Za-z|\[a-zA-Z|\[0-9|\[\^|\\b|\\s|\\d|\\w|\{\d+,|matchAll|RegExp|Select-String|-Pattern\b|\bgrep\b|\brg\s+-|\bregex/i;
+const DETECTOR_LINE = /\(\?[:<=!]|\[A-Za-z|\[a-zA-Z|\[0-9|\[\^|\\b|\\s|\\d|\\w|\{\d+,|matchAll|RegExp|^\s*(?:[$>#]\s*)?(?:git\s+grep|grep|egrep|rg|Select-String|sls)\b/i;
 
-/** Files whose whole job is to carry these patterns. Scanning them would lock them. */
-const SCANNER_FILE = /(?:^|[\\/])(?:hooks|tools)[\\/][\w.-]*(?:secret|leak|scan|validate|guard)[\w.-]*$/i;
+/** Files whose whole job is to carry these patterns, and only code: a `.json` named `secret-…` is data. */
+const SCANNER_FILE = /(?:^|[\\/])(?:hooks|tools)[\\/][\w.-]*(?:secret|leak|scan|validate|guard)[\w.-]*(?:\.(?:js|mjs|ps1)|\.test\.\w+)$/i;
 
 /** The text a Write or an Edit is about to introduce — never the text it removes. */
 function newText(input) {
   if (typeof input?.content === 'string') return input.content;
   if (typeof input?.new_string === 'string') return input.new_string;
+  if (typeof input?.new_source === 'string') return input.new_source;
   if (Array.isArray(input?.edits)) {
     return input.edits.map((e) => (typeof e?.new_string === 'string' ? e.new_string : '')).join('\n');
   }
@@ -160,7 +193,7 @@ function redact(value) {
 
 try {
   const payload = readPayload();
-  const filePath = payload?.tool_input?.file_path ?? '';
+  const filePath = payload?.tool_input?.file_path ?? payload?.tool_input?.notebook_path ?? '';
   const text = newText(payload?.tool_input);
   if (typeof text !== 'string' || !text.trim()) approve();
   if (SCANNER_FILE.test(filePath)) approve();
@@ -170,9 +203,12 @@ try {
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
     if (line.length > 4000) continue;           // a minified bundle is not hand-written config
-    if (DETECTOR_LINE.test(line)) continue;
+    // A pattern definition is not a value, but a provider token on the same line is still a token.
+    const detector = DETECTOR_LINE.test(line);
 
-    for (const { label, re, value } of PATTERNS) {
+    for (const { label, re, value, files } of PATTERNS) {
+      if (detector && value) continue;
+      if (files && !files.test(filePath)) continue;
       re.lastIndex = 0;
       for (const m of line.matchAll(re)) {
         const found = value ? m[value] : m[0];
@@ -195,7 +231,8 @@ try {
     + 'configuration key, or an explicit `<placeholder>`. If this really is a placeholder or a '
     + 'detection pattern, make it look like one and the write goes through.',
   );
-} catch {
+} catch (error) {
   // A bug in the hook must never get in the way of the work.
+  logError('secret-scan', error);
   approve();
 }

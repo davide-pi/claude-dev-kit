@@ -13,8 +13,8 @@ length limit). This file covers the behavioural half.
 
 ## Automated suites
 
-Thirteen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
-`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard` and the `paths:` skills (`angular`,
+Seventeen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
+`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard`, `deliver`, `commit`, `grill-me`, `item` and the `paths:` skills (`angular`,
 `react`, `ef-core`, `sql-server`, `rabbitmq`, `pipeline`, `docker-dev-env`, `dotnet-backend`). Their
 MUST / MUST NOT rows moved there, one case folder per row (`prompt.md` + `graders/*.md`); run them with
 `pwsh tools/run-evals.ps1` (only the suites whose skill changed) and see the README row for the flags.

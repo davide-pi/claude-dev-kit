@@ -3,8 +3,9 @@ name: review-performance
 description: >-
   Use when a change needs a performance review, alone or beside code-reviewer: complexity,
   per-item I/O, allocations, blocking, caching, queries. Findings only.
-tools: Read, Grep, Glob, Bash, PowerShell
+tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
+effort: medium
 omitClaudeMd: true
 maxTurns: 50
 ---

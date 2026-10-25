@@ -36,7 +36,7 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 ## Ground rules (hard)
 
 - **Contained diff.** Only what the scope needs: no unrequested refactor, rename, reformat,
-  dependency bump or "while I'm here" fix. Worth doing but out of scope → one line under Noticed.
+  dependency bump or "while I am here" fix. Worth doing but out of scope → one line under Noticed.
 - **Preserve existing code.** Fix the code itself: never wrap a broken path in a new guard or flag;
   delete dead code rather than wrap it.
 - **Ladder before new code.** Is it needed? Already in the codebase? Standard library? Platform feature?

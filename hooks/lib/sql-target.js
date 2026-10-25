@@ -44,26 +44,25 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { parseSegments } = require('./segments');
+const {
+  parseSegments, stripWrappers, baseName, SHELLS, CONTAINER_CLIS, innerSegments,
+} = require('./shell-parse');
 
 /** Local by definition: always dev hosts, whatever the registry lists. */
 const LOCAL_HOSTS = ['localhost', '127.0.0.1', '::1', '(local)', '(localdb)', '.', 'host.docker.internal'];
 
 /** Cheap gate: without one of these substrings no tool below can be present. */
-const TOOL_HINT = /sqlcmd|bcp|sqlpackage|psql|pg_dump|pg_restore|redis-cli/i;
+const TOOL_HINT = /sqlcmd|bcp|sqlpackage|psql|pg_dump|pg_restore|redis-cli|mysql|mariadb|usql|mongosh|dotnet(?:\.exe)?\s+ef/i;
 
 const SQLSERVER_TOOLS = new Set(['sqlcmd', 'invoke-sqlcmd', 'bcp', 'sqlpackage']);
 const POSTGRES_TOOLS = new Set(['psql', 'pg_dump', 'pg_dumpall', 'pg_restore']);
 const REDIS_TOOLS = new Set(['redis-cli']);
-const isTool = (name) => SQLSERVER_TOOLS.has(name) || POSTGRES_TOOLS.has(name) || REDIS_TOOLS.has(name);
+const MYSQL_TOOLS = new Set(['mysql', 'mariadb', 'mysqldump', 'mysqladmin', 'mariadb-dump']);
+/** Clients whose target is a URI / DSN positional argument rather than a host flag. */
+const URI_TOOLS = new Set(['usql', 'mongosh']);
+const isTool = (name) => SQLSERVER_TOOLS.has(name) || POSTGRES_TOOLS.has(name) || REDIS_TOOLS.has(name)
+  || MYSQL_TOOLS.has(name) || URI_TOOLS.has(name) || name === 'dotnet-ef';
 
-const CONTAINER_CLIS = new Set(['docker', 'podman', 'nerdctl']);
-const SHELLS = new Set(['pwsh', 'powershell', 'bash', 'sh', 'zsh', 'dash', 'ash', 'ksh', 'cmd']);
-const POWERSHELLS = new Set(['pwsh', 'powershell']);
-/** Words that put a command in command position without being the command. */
-const WRAPPERS = new Set(['sudo', 'call', 'command', 'env', 'time', 'nohup', 'start', 'start-process', 'exec']);
-/** Wrapper options that take a value (`sudo -u postgres psql`). */
-const WRAPPER_VALUE_OPTS = new Set(['-u', '-g', '-h', '-p', '-c', '-d', '--user', '--group']);
 /** Commands that name a tool in order to look at it, not to run it. */
 const NOT_LAUNCHERS = new Set([
   'which', 'where', 'whereis', 'type', 'ls', 'dir', 'cat', 'stat', 'file', 'test', 'get-command',
@@ -74,19 +73,6 @@ const CONTAINER_VALUE_OPTS = new Set([
   '--name', '-e', '--env', '--env-file', '--network', '--net', '-w', '--workdir', '-v', '--volume',
   '-u', '--user', '-h', '--hostname', '-l', '--label', '--mount', '--platform',
 ]);
-/** `wsl` options that take a value; `-e`, `--exec` and `--` end the options. */
-const WSL_VALUE_OPTS = new Set(['-d', '--distribution', '-u', '--user', '--cd', '--shell-type', '--distribution-id']);
-/**
- * The flag after which a shell takes its command, per family. POSIX shells accept it clustered with
- * other short options (`-ec`, `-xc`, `-lic`); PowerShell accepts any abbreviation of `-Command`
- * (`-c`, `-Comm`, `-CommandWithArgs`) but its other options (`-ExecutionPolicy`, `-NonInteractive`)
- * contain a `c` too, so it is matched by name; `cmd` takes `/c` and `/k`. A `--long` option is none.
- */
-const POSIX_SHELL_FLAG = /^-[A-Za-z]*c[A-Za-z]*$/;
-const POWERSHELL_FLAG = /^-(?:c|com\w*|cwa)$/i;
-const CMD_FLAG = /^[/-][ck]$/i;
-const shellFlag = (shell) => (POWERSHELLS.has(shell) ? POWERSHELL_FLAG : shell === 'cmd' ? CMD_FLAG : POSIX_SHELL_FLAG);
-const ASSIGNMENT = /^[A-Za-z_]\w*=/;
 const INFO_FLAGS = new Set(['--version', '--help']);
 
 /** psql / pg_dump / pg_restore / pg_dumpall short options that take a value. */
@@ -114,14 +100,6 @@ function readDevHosts() {
   return LOCAL_HOSTS;
 }
 
-/** A token as a command name: no directory, no extension, lowercase. */
-function baseName(token) {
-  return String(token)
-    .replace(/^.*[\\/]/, '')
-    .replace(/\.(?:exe|cmd|bat|ps1)$/i, '')
-    .toLowerCase();
-}
-
 /** `tcp:host\inst,1433` -> `host`; `tcp:[::1],1433` -> `::1`. */
 function sqlServerHost(server) {
   const bare = server.trim().replace(/^(?:tcp|np|lpc):/i, '');
@@ -140,7 +118,7 @@ function plainHost(host) {
 
 /** Hosts named by a `scheme://user:pw@h1:p,h2/db?host=x` URI; [] when it names none. */
 function uriHosts(uri) {
-  const rest = uri.replace(/^[a-z]+:\/\//i, '');
+  const rest = uri.replace(/^[a-z][a-z0-9+.-]*:\/\//i, '');
   const authority = rest.split(/[/?#]/)[0];
   const hostPart = authority.slice(authority.lastIndexOf('@') + 1);
   const hosts = hostPart ? hostPart.split(',') : [];
@@ -154,7 +132,7 @@ function uriHosts(uri) {
 
 /** `Server=x;Database=y` -> `x`, or null. */
 function serverFromConnectionString(text) {
-  const match = text.match(/(?:^|;)\s*(?:server|data source|address|addr|network address)\s*=\s*([^;]*)/i);
+  const match = text.match(/(?:^|;)\s*(?:server|data source|address|addr|network address|host)\s*=\s*([^;]*)/i);
   return match ? match[1] : null;
 }
 
@@ -249,6 +227,46 @@ function redisHosts(tokens) {
   return hosts;
 }
 
+/** Hosts a mysql / mariadb client names with `-h` / `--host`; [] = the local socket. */
+function mysqlHosts(tokens) {
+  const hosts = [];
+  for (let i = 1; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (t === '-h' || t === '--host') { hosts.push(plainHost(tokens[i + 1] ?? '')); i += 1; }
+    else if (t.startsWith('--host=')) hosts.push(plainHost(t.slice(7)));
+    else if (/^-h./.test(t)) hosts.push(plainHost(t.slice(2)));
+  }
+  return hosts;
+}
+
+/** Hosts a usql / mongosh invocation names: a URI / DSN, a `host:port/db` or `--host`; [] = local. */
+function uriToolHosts(tokens) {
+  const hosts = [];
+  for (let i = 1; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    if (t === '--host') { hosts.push(plainHost(tokens[i + 1] ?? '')); i += 1; continue; }
+    if (t.startsWith('--host=')) { hosts.push(plainHost(t.slice(7))); continue; }
+    if (t.startsWith('-')) continue;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(t)) hosts.push(...uriHosts(t));
+    else if (/^[\w.-]+:\d+(?:\/|$)|^[\w.-]+\.[\w.-]+\//.test(t)) hosts.push(plainHost(t.split('/')[0]));
+  }
+  return hosts;
+}
+
+/** Hosts in the `--connection <string>` of a `dotnet ef` call. */
+function efHosts(tokens) {
+  const hosts = [];
+  for (let i = 1; i < tokens.length; i += 1) {
+    const t = tokens[i];
+    const value = t === '--connection' ? tokens[i + 1] : t.startsWith('--connection=') ? t.slice(13) : null;
+    if (!value) continue;
+    if (/^[a-z][a-z0-9+.-]*:\/\//i.test(value)) { hosts.push(...uriHosts(value)); continue; }
+    const server = serverFromConnectionString(value);
+    if (server) hosts.push(...server.split(',').map((h) => sqlServerHost(h)));
+  }
+  return hosts;
+}
+
 /** The decision for one client invocation (`tokens[0]` is the tool), else null. */
 function evaluate(tool, tokens, command) {
   if (tokens.slice(1).some((t) => INFO_FLAGS.has(t))) return null;
@@ -276,45 +294,19 @@ function evaluate(tool, tokens, command) {
     return bad !== undefined ? denyHost(bad || 'empty host') : null;
   }
 
+  if (MYSQL_TOOLS.has(tool) || URI_TOOLS.has(tool) || tool === 'dotnet-ef') {
+    if (tokens.slice(1).includes('-V')) return null;
+    const hosts = MYSQL_TOOLS.has(tool) ? mysqlHosts(tokens) : tool === 'dotnet-ef' ? efHosts(tokens) : uriToolHosts(tokens);
+    const bad = offDev(hosts);
+    return bad !== undefined ? denyHost(bad || 'empty host') : null;
+  }
+
   // redis-cli
   if (tokens.slice(1).includes('-v')) return null;
   const hosts = redisHosts(tokens);
   const bad = offDev(hosts.length ? hosts : ['127.0.0.1']);
   if (bad !== undefined) return denyHost(bad || 'empty host');
   return null;
-}
-
-/** Skip `sudo [-u x]`, `env VAR=x`, `call`, ... until the real command. */
-function stripWrappers(tokens) {
-  let i = 0;
-  while (i < tokens.length) {
-    if (ASSIGNMENT.test(tokens[i])) { i += 1; continue; }
-    if (!WRAPPERS.has(baseName(tokens[i]))) break;
-    i += 1;
-    while (i < tokens.length && tokens[i].startsWith('-')) i += WRAPPER_VALUE_OPTS.has(tokens[i]) ? 2 : 1;
-  }
-  return tokens.slice(i);
-}
-
-/** Tokens that follow the shell's command flag: either one quoted command string, or the command itself. */
-function innerCommands(tokens, from, shell) {
-  const isFlag = shellFlag(shell);
-  const flag = tokens.findIndex((t, i) => i >= from && isFlag.test(t));
-  if (flag < 0) return [];
-  const rest = tokens.slice(flag + 1);
-  if (rest.length === 1 && /\s/.test(rest[0])) return parseSegments(rest[0]);
-  return rest.length ? [rest] : [];
-}
-
-/** `wsl [-d distro] [-u user] [-e|--exec|--] cmd ...` -> `cmd ...`. */
-function afterWsl(tokens) {
-  let i = 1;
-  while (i < tokens.length && tokens[i].startsWith('-')) {
-    const t = tokens[i];
-    if (t === '-e' || t === '--exec' || t === '--') { i += 1; break; }
-    i += WSL_VALUE_OPTS.has(t) ? 2 : 1;
-  }
-  return tokens.slice(i);
 }
 
 /** The decision for one chained command, else null. `depth` bounds `bash -c "bash -c ..."` chains. */
@@ -325,10 +317,9 @@ function scan(tokens, depth, command) {
 
   const name = baseName(cmd[0]);
   if (isTool(name)) return evaluate(name, cmd, command);
+  if (name === 'dotnet' && cmd.slice(1).some((t) => t.toLowerCase() === 'ef')) return evaluate('dotnet-ef', cmd, command);
 
-  if (name === 'wsl') return scan(afterWsl(cmd), depth + 1, command);
-
-  if (SHELLS.has(name)) return firstDecision(innerCommands(cmd, 1, name), depth + 1, command);
+  if (name === 'wsl' || name === 'ssh' || SHELLS.has(name)) return firstDecision(innerSegments(cmd), depth + 1, command);
 
   const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : -1;
   if (launch < 0) return null;
@@ -339,7 +330,7 @@ function scan(tokens, depth, command) {
     if (isTool(tool) && !NOT_LAUNCHERS.has(baseName(before)) && !CONTAINER_VALUE_OPTS.has(before)) {
       return evaluate(tool, cmd.slice(i), command);
     }
-    if (SHELLS.has(tool)) return firstDecision(innerCommands(cmd, i + 1, tool), depth + 1, command);
+    if (SHELLS.has(tool)) return firstDecision(innerSegments(cmd.slice(i)), depth + 1, command);
   }
   return null;
 }
@@ -353,31 +344,6 @@ function firstDecision(commands, depth, command) {
   return null;
 }
 
-/**
- * Every command of a line as a token list, the ones nested in `pwsh -c "..."`, `bash -c`, `wsl` and
- * `docker exec <ctr> sh -c` included, so a check that reads tokens also sees what a shell wrapper runs.
- */
-function expandSegments(command) {
-  const out = [];
-  const walk = (tokens, depth) => {
-    out.push(tokens);
-    if (depth > 3) return;
-    const cmd = stripWrappers(tokens);
-    if (!cmd.length) return;
-    const name = baseName(cmd[0]);
-    if (name === 'wsl') { walk(afterWsl(cmd), depth + 1); return; }
-    if (SHELLS.has(name)) { for (const inner of innerCommands(cmd, 1, name)) walk(inner, depth + 1); return; }
-    const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((x) => /^(?:exec|run)$/i.test(x)) : -1;
-    if (launch < 0) return;
-    for (let i = launch + 1; i < cmd.length; i += 1) {
-      const shell = baseName(cmd[i]);
-      if (SHELLS.has(shell)) { for (const inner of innerCommands(cmd, i + 1, shell)) walk(inner, depth + 1); return; }
-    }
-  };
-  for (const tokens of parseSegments(command)) walk(tokens, 0);
-  return out;
-}
-
 /** `{ decision: 'deny', reason }` for a database client the rules above stop, else null. */
 function checkSqlTarget(command) {
   try {
@@ -388,4 +354,4 @@ function checkSqlTarget(command) {
   }
 }
 
-module.exports = { checkSqlTarget, expandSegments, stripWrappers, baseName };
+module.exports = { checkSqlTarget };

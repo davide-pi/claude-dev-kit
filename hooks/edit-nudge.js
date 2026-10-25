@@ -35,8 +35,8 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
-const CACHE_DIR = path.join(CONFIG_DIR, '.cache');
+const { CACHE_DIR, prune } = require('./lib/cache');
+
 const THRESHOLD = 3;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
@@ -57,18 +57,6 @@ function isScratch(file, cwd) {
   const tmp = canonical(os.tmpdir());
   const rel = path.relative(tmp, canonical(file, cwd));
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
-}
-
-function prune(now) {
-  try {
-    for (const name of fs.readdirSync(CACHE_DIR)) {
-      if (!COUNTER_FILE.test(name)) continue;
-      const file = path.join(CACHE_DIR, name);
-      if (now - fs.statSync(file).mtimeMs > PRUNE_AFTER_MS) fs.rmSync(file, { force: true });
-    }
-  } catch {
-    /* best-effort */
-  }
 }
 
 function readCount(file) {
@@ -99,13 +87,13 @@ function run(payload) {
   fs.writeFileSync(file, JSON.stringify({ count }));
   if (count !== THRESHOLD) return null;
 
-  prune(Date.now());
+  prune(COUNTER_FILE);
   return {
     hookSpecificOutput: {
       hookEventName: 'PostToolUse',
       additionalContext:
-        `Terzo edit in questo turno: se lo scope è deciso, delega a \`implementer\` e rivedi il suo diff `
-        + 'invece di scrivere il codice qui.',
+        `Third edit this turn: if the scope is decided, delegate to \`implementer\` and review its diff `
+        + 'instead of writing the code here.',
     },
   };
 }

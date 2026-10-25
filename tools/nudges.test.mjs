@@ -15,13 +15,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'nudges.js');
 const created = [];
+// An edit is scratch when its file sits under the temp dir, where the sandboxes live: resolve the relative file against the repo instead.
+const REPO = join(dirname(HOOK), '..');
 process.on('exit', () => {
   for (const dir of created) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
 });
@@ -51,14 +53,14 @@ function fire(config, payload) {
 }
 
 const prompt = (config, id = 'sess-1') => fire(config, { session_id: id, hook_event_name: 'UserPromptSubmit', prompt: 'x' });
-const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' } });
+const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO });
 
 test('UserPromptSubmit: the context nudge speaks once per band', () => {
   const config = sandbox();
   snapshot(config, 'sess-1', 210_000);
   const out = prompt(config);
   assert.equal(out.hookEventName, 'UserPromptSubmit');
-  assert.match(out.additionalContext, /^Contesto a 210k token/);
+  assert.match(out.additionalContext, /^Context at 210k tokens/);
   assert.equal(prompt(config), null, 'same band: already said');
 });
 
@@ -79,7 +81,33 @@ test('PostToolUse: the third edit nudges towards the implementer, never the cont
   const third = edit(config);
   assert.equal(third.hookEventName, 'PostToolUse');
   assert.match(third.additionalContext, /\bimplementer\b/);
-  assert.doesNotMatch(third.additionalContext, /Contesto/);
+  assert.doesNotMatch(third.additionalContext, /Context at/);
+});
+
+test('PostToolUse: the formatter runs in the same process as the nudges', () => {
+  const config = sandbox();
+  const project = mkdtempSync(join(tmpdir(), 'nudges-fmt-'));
+  created.push(project);
+  mkdirSync(join(project, 'node_modules', '.bin'), { recursive: true });
+  for (const shim of ['prettier', 'prettier.cmd']) writeFileSync(join(project, 'node_modules', '.bin', shim), '');
+  writeFileSync(join(project, 'package.json'), '{ "name": "web" }');
+  writeFileSync(join(project, '.prettierrc'), '{}');
+  writeFileSync(join(project, 'main.ts'), 'export {};');
+  const payload = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: join(project, 'main.ts') } };
+  const r = spawnSync(process.execPath, [HOOK, '--dry-run'], {
+    input: JSON.stringify(payload), encoding: 'utf8', cwd: config, env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^prettier --write .*main\.ts$/m, 'format-on-edit ran inside nudges.js');
+});
+
+test('settings.json: one PostToolUse node for the edits, with the formatter timeout', () => {
+  const { hooks } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const group = hooks.PostToolUse.find((g) => g.matcher === 'Write|Edit|MultiEdit');
+  assert.equal(group.hooks.length, 1);
+  assert.ok(group.hooks[0].args.join(' ').includes('nudges.js'));
+  assert.equal(group.hooks[0].timeout, 30);
+  assert.ok(!JSON.stringify(hooks).includes('format-on-edit.js'), 'no separate formatter entry');
 });
 
 test('an unknown event, a bad payload or an empty one → silent, exit 0', () => {
@@ -105,11 +133,11 @@ function viaRequire(config, hook, payload) {
 
 test('an older settings.json that requires a nudge directly still gets its output', () => {
   const config = sandbox();
-  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' } };
+  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO };
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.match(viaRequire(config, 'edit-nudge.js', edit).additionalContext, /\bimplementer\b/);
   snapshot(config, 'sess-2', 210_000);
   const out = viaRequire(config, 'context-nudge.js', { session_id: 'sess-2', hook_event_name: 'UserPromptSubmit', prompt: 'x' });
-  assert.match(out.additionalContext, /^Contesto a 210k token/);
+  assert.match(out.additionalContext, /^Context at 210k tokens/);
 });

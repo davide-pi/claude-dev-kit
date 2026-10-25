@@ -77,3 +77,26 @@ test('docker cp onto the host outside the cwd or under ~/.claude asks; inside th
   assert.equal(run('docker cp ./seed.sql db:/tmp/seed.sql').decision, 'approve', 'into a container');
   assert.equal(run('docker ps').decision, 'approve');
 });
+
+test('a secret read through a pipeline, a transformer, a copy or git history is denied', () => {
+  const denied = [
+    'Get-ChildItem -Filter .env | Get-Content', 'ls .env | xargs cat', 'Get-ChildItem . -Filter *.pem | Select-String BEGIN',
+    'sed -n 1p .env', 'sed s/a/b/ .env.local', 'awk -F= \'{print $2}\' .env', 'cut -d= -f2 .env', 'sort .env', 'base64 id_rsa', 'jq . .env.json',
+    'cp .env backup/', 'copy .env C:\tmp', 'Copy-Item .env ../x', 'Copy-Item -Path .env -Destination x', 'cp ~/.ssh/id_ecdsa /tmp/k',
+    'git show HEAD:.env', 'git show :.env', 'git show HEAD~2:config/.env.production', 'git log -p -- .env', 'git diff -- .env', 'git -C repo diff HEAD~1 .env',
+    'cat .e?v', 'cat .en[v]', 'cat id_?sa', 'cat < .env', 'sort <.env',
+    'cat ~/.aws/credentials', 'cat .npmrc', 'type ~/.pgpass', 'cat ~/.netrc', 'cat ~/.kube/config', 'Get-Content kubeconfig', 'cat secrets.json',
+    'cat id_dsa', 'cat ~/.ssh/id_ecdsa', 'tail store.jks', 'bash -c "Get-ChildItem -Filter .env | Get-Content"',
+  ];
+  for (const command of denied) assert.equal(run(command).decision, 'deny', command);
+});
+
+test('samples with a further suffix, program text and plain copies stay readable', () => {
+  const quiet = [
+    'cat .env.example.local', 'cat .env.sample.bak', 'Get-Content .env.template', 'cp .env.example .env', 'Copy-Item .env.example .env',
+    "jq '.env' package.json", "sed -n '/env/p' README.md", "awk '/.env/ {print}' notes.txt", 'cat *.json', 'cat *',
+    'git show HEAD:README.md', 'git log -p -- src/a.cs', 'git diff -- .env.example', 'git log --oneline', 'ls .env | sort',
+    'Get-ChildItem -Filter .env', 'cat config.json.md', 'git show HEAD:docs/.env.example',
+  ];
+  for (const command of quiet) assert.equal(run(command).decision, 'approve', command);
+});

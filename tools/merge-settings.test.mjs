@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -102,6 +102,20 @@ test('the same command with other args is another hook', () => {
   assert.deepEqual(merged.hooks.Stop[0].hooks.map((h) => h.args[1]), ['done', 'other']);
 });
 
+test('fallbackModel is a choice: the overlay replaces it, it is not appended', () => {
+  const merged = mergeSettings({ fallbackModel: ['sonnet', 'haiku'], other: ['a'] }, { fallbackModel: ['haiku'], other: ['b'] });
+  assert.deepEqual(merged.fallbackModel, ['haiku']);
+  assert.deepEqual(merged.other, ['a', 'b'], 'other string arrays stay a union');
+  assert.deepEqual(mergeSettings({ fallbackModel: ['sonnet'] }, {}).fallbackModel, ['sonnet']);
+});
+
+test('the same hook in the overlay overrides the template hook other fields', () => {
+  const template = { hooks: { Stop: [{ hooks: [hook('done', { timeout: 5, statusMessage: 'old', onFailure: 'block' })] }] } };
+  const merged = mergeSettings(template, { hooks: { Stop: [{ hooks: [hook('done', { timeout: 60, statusMessage: 'new' })] }] } });
+  assert.equal(merged.hooks.Stop[0].hooks.length, 1);
+  assert.deepEqual(merged.hooks.Stop[0].hooks[0], hook('done', { timeout: 60, statusMessage: 'new', onFailure: 'block' }));
+});
+
 test('an overlay key set to null removes it, at any depth', () => {
   const merged = mergeSettings(TEMPLATE, { model: null, env: { A: null }, hooks: { Stop: null }, absent: null });
   assert.ok(!('model' in merged));
@@ -152,6 +166,17 @@ test('CLI: prints the merge, writes it with --out, and --check passes on its own
   const checked = run('--template', box.template, '--overlay', box.overlay, '--check', out);
   assert.equal(checked.status, 0, checked.stdout + checked.stderr);
   assert.equal(checked.stdout, '');
+});
+
+test('CLI: --out is atomic: it goes through <out>.tmp and leaves no temp file behind', () => {
+  const box = sandbox({ template: TEMPLATE, overlay: { model: 'sonnet' } });
+  const out = join(box.dir, 'live.json');
+  writeFileSync(out, 'old');
+  writeFileSync(`${out}.tmp`, 'stale');
+  const r = run('--template', box.template, '--overlay', box.overlay, '--out', out);
+  assert.equal(r.status, 0, r.stderr);
+  assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), mergeSettings(TEMPLATE, { model: 'sonnet' }));
+  assert.ok(!existsSync(`${out}.tmp`), 'the temp file was renamed away');
 });
 
 test('CLI: --check exits 1 and prints the differing keys when the live file has drifted', () => {

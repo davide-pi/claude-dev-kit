@@ -46,7 +46,7 @@ function run(command) {
 
 function expect(decision, commands, reasonPattern) {
   for (const command of commands) {
-    const got = run(command);
+    const got = run(command.replaceAll('<at>', '@')); // user<at>host: validate.mjs reads a literal one as an e-mail address
     assert.equal(got.decision, decision, command);
     if (reasonPattern) assert.match(got.reason, reasonPattern, command);
   }
@@ -249,4 +249,50 @@ test('the db-ro.ps1 allow rules match the one invocation form the agent document
     assert.ok(globs.length, `${tool} has a db-ro.ps1 allow rule`);
     assert.ok(globs.some((g) => toRegExp(g).test(invocation)), `${tool}: no allow rule matches "${invocation}"`);
   }
+});
+
+// ── mysql / mariadb / usql / mongosh / dotnet ef ───────────────────────────────────────────────
+
+test('mysql and mariadb: a dev host or the local socket passes, a named non-dev host is denied', () => {
+  expect('approve', [
+    'mysql -u root -e "SELECT 1"', 'mysql -h localhost -u root', 'mysql -h127.0.0.1 -uroot', 'mariadb --host=host.docker.internal',
+    'docker exec -i db mysql -u root -e "SELECT 1"', 'mysql --version', 'mysql -V', 'which mysql',
+  ]);
+  expect('deny', [
+    'mysql -h prod-db.example.com -u app -p', 'mysql --host prod-db.example.com', 'mysql --host=prod-db.example.com', 'mysql -hprod-db.example.com',
+    'mariadb -h db.internal -e "SELECT 1"', 'mysqldump -h prod-db.example.com sales', 'bash -c "mysql -h prod-db.example.com"',
+    'docker exec api mysql -h prod-db.example.com', 'ssh bastion "mysql -h prod-db.example.com"',
+  ], /db-ro\.ps1/);
+});
+
+test('usql and mongosh: the host comes from the URI, `host:port/db` or --host', () => {
+  expect('approve', [
+    'mongosh', 'mongosh mydb', 'mongosh mongodb://localhost:27017/app', 'mongosh --host localhost', 'usql pg://app@localhost/sales', 'usql sqlite:./local.db',
+    'mongosh --version', 'usql --version',
+  ]);
+  expect('deny', [
+    'mongosh mongodb://app:pw<at>prod-mongo.example.com/app', 'mongosh "mongodb+srv://u:p<at>cluster0.mongodb.net/db"', 'mongosh prod-mongo.example.com:27017/app',
+    'mongosh --host prod-mongo.example.com', 'mongosh --host=prod-mongo.example.com', 'usql pg://app<at>prod-pg.example.com/sales',
+    'usql mysql://app<at>prod-db.example.com/sales', 'usql sqlserver://sa<at>prod-sql.example.com',
+  ], /db-ro\.ps1/);
+});
+
+test('dotnet ef --connection at a non-local host is denied; a local one and no connection pass', () => {
+  expect('approve', [
+    'dotnet ef database update', 'dotnet ef database update --connection "Server=localhost;Database=Sales"',
+    'dotnet ef migrations add Init --project src/Data', 'dotnet ef database update --connection "Host=127.0.0.1;Database=sales"',
+    'dotnet --info', 'dotnet ef --version',
+  ]);
+  expect('deny', [
+    'dotnet ef database update --connection "Server=prod-sql.example.com;Database=Sales"',
+    'dotnet ef database update --connection="Server=tcp:prod-sql.example.com,1433;Database=Sales"',
+    'dotnet ef database update --connection "Host=prod-pg.example.com;Database=sales;Username=app"',
+    'dotnet ef database update --connection "postgres://app:pw<at>prod-pg.example.com/sales"',
+    'dotnet.exe ef database update -p src/Data --connection "Data Source=prod-sql;Initial Catalog=x"',
+  ], /db-ro\.ps1/);
+});
+
+test('a client behind ssh is read too', () => {
+  expect('deny', ['ssh host "psql -h prod-pg.example.com"', 'ssh -p 22 host redis-cli -h cache-prod.example.com'], /db-ro\.ps1/);
+  expect('approve', ['ssh host "psql -h localhost"', 'ssh host ls']);
 });

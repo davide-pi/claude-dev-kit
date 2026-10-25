@@ -165,3 +165,12 @@ Run `az devops invoke` with no `--area`/`--resource` to list every area and reso
 organization exposes — the authoritative way to learn a name instead of guessing it. It enumerates
 the whole surface and is slow, so run it once and keep the output. If you cannot verify the area,
 resource and route this way, treat the capability as a genuine gap and read `mcp-fallback.md`.
+
+## Triage by symptom
+
+| Symptom | Cause | Fix |
+| --- | --- | --- |
+| prompts, or "before you can run…" | no credential for that org | `az login`, or `az devops login --org <url>` with a PAT |
+| signed in, yet the org is invisible | the org lives on another Entra tenant | `az login --tenant <tenant-domain> --allow-no-subscriptions`; one sign-in per tenant |
+| "not found" on something that exists | org/project defaulted elsewhere, or PAT scope | re-read the `ALM:` line, pass `--org` / `-p` |
+| wrong account used | the shared az config dir | the shell guard pins `AZURE_CONFIG_DIR` per root on the `az` commands it can (read-only ones); prefix the rest by hand; never `az account set` (machine-global) — `references/auth-and-config.md` |

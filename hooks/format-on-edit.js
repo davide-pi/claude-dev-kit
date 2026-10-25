@@ -21,7 +21,12 @@
  *     that is absent, broken or slow is simply skipped.
  *
  * Detection is version-agnostic: the formatter is whatever the project configures, discovered from
- * the files on disk, and it is invoked through the local package runner so nothing is downloaded.
+ * the files on disk, and it is the project's own installed binary (no package runner, no download).
+ * `.json` is deliberately not formatted: a manifest or a settings file rewritten by a hook is a diff
+ * nobody asked for.
+ *
+ * Wired through `nudges.js` (one node process for every PostToolUse hook, this one included); run alone
+ * (`node hooks/format-on-edit.js`) it reads stdin and runs for itself.
  *
  * `--dry-run` prints the formatter invocation that would run instead of running it. That is how
  * tools/format-on-edit.test.mjs asserts the routing without the SDK or a node_modules tree.
@@ -45,7 +50,7 @@ const EXCLUDED_PATH = /[\\/](?:node_modules|bin|obj|dist|out|coverage|\.git|\.vs
 const DOTNET_EXT = new Set(['.cs', '.vb', '.razor', '.cshtml']);
 const WEB_EXT = new Set([
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.mts', '.cts',
-  '.json', '.jsonc', '.css', '.scss', '.less', '.html', '.vue', '.svelte',
+  '.jsonc', '.css', '.scss', '.less', '.html', '.vue', '.svelte',
 ]);
 
 /** A formatter configured in the package manifest, in any of the forms it is written in. */
@@ -60,8 +65,6 @@ const WEB_FORMATTER_CONFIG = [
  * sense worth formatting, and an unbounded walk would hit the filesystem root on every edit.
  */
 const MAX_DEPTH = 12;
-
-const done = () => process.exit(0);
 
 /** A name pattern: `*.csproj` matches by suffix, anything else exactly. Case-insensitive, as on Windows. */
 function matcher(pattern) {
@@ -99,78 +102,108 @@ function onPath(name) {
   return null;
 }
 
-/** Run it, or print it under --dry-run. Output is swallowed: silent on success is the contract. */
-function invoke(exe, args, cwd) {
+/** A formatter that takes longer than this is skipped: it runs after every edit, so it must not stall the turn. */
+const FORMATTER_TIMEOUT_MS = 8000;
+
+/** Run it, or print `shown` (default: the executable and its arguments) under --dry-run. Output is swallowed: silent on success is the contract. */
+function invoke(exe, args, cwd, shown) {
   if (DRY_RUN) {
-    process.stdout.write(`${path.basename(exe).replace(/\.(?:exe|cmd|bat)$/i, '')} ${args.join(' ')}\n`);
+    const plan = shown ?? `${path.basename(exe).replace(/\.(?:exe|cmd|bat)$/i, '')} ${args.join(' ')}`;
+    process.stdout.write(`${plan}\n`);
     return;
   }
-  // A `.cmd` shim (npx on Windows) cannot be spawned without a shell; quote every argument.
+  // A `.cmd` shim cannot be spawned without a shell; quote every argument.
   const viaShell = IS_WINDOWS && /\.(?:cmd|bat)$/i.test(exe);
   const argv = viaShell ? args.map((a) => `"${a}"`) : args;
   spawnSync(viaShell ? `"${exe}"` : exe, argv, {
-    cwd, stdio: 'ignore', shell: viaShell, windowsHide: true, timeout: 25000,
+    cwd, stdio: 'ignore', shell: viaShell, windowsHide: true, timeout: FORMATTER_TIMEOUT_MS,
   });
 }
 
-try {
-  const raw = fs.readFileSync(0, 'utf8');
-  if (!raw.trim()) done();
+/**
+ * The project's own prettier, run without a package runner: its bin script under this node (no shell,
+ * no `npx` start-up), else the `.bin` shim. Null when it is not installed.
+ */
+function localPrettier(dir) {
+  const modules = path.join(dir, 'node_modules');
+  try {
+    const manifest = JSON.parse(fs.readFileSync(path.join(modules, 'prettier', 'package.json'), 'utf8'));
+    const rel = typeof manifest.bin === 'string' ? manifest.bin : manifest.bin?.prettier;
+    const script = rel && path.join(modules, 'prettier', rel);
+    if (script && fs.existsSync(script)) return { exe: process.execPath, args: [script] };
+  } catch { /* no manifest: try the shim */ }
+  const shim = path.join(modules, '.bin', IS_WINDOWS ? 'prettier.cmd' : 'prettier');
+  return fs.existsSync(shim) ? { exe: shim, args: [] } : null;
+}
 
-  const target = JSON.parse(raw)?.tool_input?.file_path;
-  if (typeof target !== 'string' || !target.trim()) done();
+/** Formats the file a Write / Edit / MultiEdit payload names, when the project configures a formatter for it. Never throws, returns nothing. */
+function run(payload) {
+  try {
+    const target = payload?.tool_input?.file_path;
+    if (typeof target !== 'string' || !target.trim()) return;
 
-  // The fast path, before any file system access: most edits touch a file no formatter owns.
-  const ext = path.extname(target).toLowerCase();
-  const isDotnet = DOTNET_EXT.has(ext);
-  if (!isDotnet && !WEB_EXT.has(ext)) done();
+    // The fast path, before any file system access: most edits touch a file no formatter owns.
+    const ext = path.extname(target).toLowerCase();
+    const isDotnet = DOTNET_EXT.has(ext);
+    if (!isDotnet && !WEB_EXT.has(ext)) return;
 
-  const file = path.resolve(target);
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) done();
-  if (EXCLUDED_PATH.test(file)) done();
+    const file = path.resolve(target);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return;
+    if (EXCLUDED_PATH.test(file)) return;
 
-  if (isDotnet) {
-    // Outside a project there is nothing to derive the style from.
-    const project = findAncestor(file, ['*.csproj', '*.vbproj', '*.fsproj']);
-    if (!project) done();
-    // No .editorconfig means the project never chose a style: formatting would invent one.
-    if (!findAncestor(file, ['.editorconfig'])) done();
-    const dotnet = onPath('dotnet');
-    if (!dotnet) done();
+    if (isDotnet) {
+      // Outside a project there is nothing to derive the style from.
+      const project = findAncestor(file, ['*.csproj', '*.vbproj', '*.fsproj']);
+      if (!project) return;
+      // No .editorconfig means the project never chose a style: formatting would invent one.
+      if (!findAncestor(file, ['.editorconfig'])) return;
+      const dotnet = onPath('dotnet');
+      if (!dotnet) return;
 
-    // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
-    // formats the project's directory as plain files instead of loading the project through MSBuild
-    // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
-    invoke(dotnet, [
-      'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
-    ], project.directory);
-    done();
-  }
-
-  const manifest = findAncestor(file, ['package.json']);
-  if (!manifest) done();
-
-  // The project must actually configure a formatter — a config file, or a key in the manifest.
-  let configured = Boolean(findAncestor(file, WEB_FORMATTER_CONFIG));
-  if (!configured) {
-    try {
-      configured = Object.prototype.hasOwnProperty.call(JSON.parse(fs.readFileSync(manifest.file, 'utf8')), 'prettier');
-    } catch {
-      configured = false;
+      // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
+      // formats the project's directory as plain files instead of loading the project through MSBuild
+      // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
+      invoke(dotnet, [
+        'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
+      ], project.directory);
+      return;
     }
+
+    const manifest = findAncestor(file, ['package.json']);
+    if (!manifest) return;
+
+    // The project must actually configure a formatter — a config file, or a key in the manifest.
+    let configured = Boolean(findAncestor(file, WEB_FORMATTER_CONFIG));
+    if (!configured) {
+      try {
+        configured = Object.prototype.hasOwnProperty.call(JSON.parse(fs.readFileSync(manifest.file, 'utf8')), 'prettier');
+      } catch {
+        configured = false;
+      }
+    }
+    if (!configured) return;
+
+    // The installed binary only: dependencies must already be there, so a hook can never trigger a
+    // download in the middle of a session.
+    const prettier = localPrettier(manifest.directory);
+    if (!prettier) return;
+
+    invoke(prettier.exe, [...prettier.args, '--write', file], manifest.directory, `prettier --write ${file}`);
+  } catch {
+    // A hook that breaks must not break the edit that triggered it.
   }
-  if (!configured) done();
+}
 
-  // The local package runner only: dependencies must already be installed, so a hook can never
-  // trigger a download in the middle of a session.
-  const modules = path.join(manifest.directory, 'node_modules');
-  if (!fs.existsSync(modules) || !fs.statSync(modules).isDirectory()) done();
-  const npx = onPath('npx');
-  if (!npx) done();
+module.exports = { run };
 
-  invoke(npx, ['--no-install', 'prettier', '--write', file], manifest.directory);
-  done();
-} catch {
-  // A hook that breaks must not break the edit that triggered it.
-  done();
+// Run as a script, or required by `node -e` as an older settings.json wires it; `hooks/nudges.js` sets the
+// flag and calls `run` itself.
+if (require.main === module || !global.__nudgesDispatch) {
+  try {
+    const raw = fs.readFileSync(0, 'utf8');
+    if (raw.trim()) run(JSON.parse(raw));
+  } catch {
+    /* silence */
+  }
+  process.exit(0);
 }

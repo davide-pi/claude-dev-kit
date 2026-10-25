@@ -74,9 +74,9 @@ function edit(root, file, extra = {}, hook = GUARD) {
 
 test('a file outside the active perimeter → one line naming the file and the branch', () => {
   const out = edit(repo(), 'src/Orders/OrdersController.cs');
-  assert.match(out, /^Fuori perimetro: `src\/Orders\/OrdersController\.cs`/);
+  assert.match(out, /^Out of perimeter: `src\/Orders\/OrdersController\.cs`/);
   assert.match(out, /feat\/orders-filter/);
-  assert.match(out, /chiedi all'utente/);
+  assert.match(out, /ask the user/);
 });
 
 test('files inside: a listed file, a directory, a glob → silent; matching is anchored and case-insensitive', () => {
@@ -85,7 +85,7 @@ test('files inside: a listed file, a directory, a glob → silent; matching is a
   assert.equal(edit(root, 'src/Orders/Dto/Deep/Line.cs'), '');
   assert.equal(edit(root, 'tests/unit/OrdersQueryTests.cs'), '');
   assert.equal(edit(root, 'SRC/orders/ordersquery.cs'), '');
-  assert.match(edit(root, 'other/src/Orders/OrdersQuery.cs'), /^Fuori perimetro/);
+  assert.match(edit(root, 'other/src/Orders/OrdersQuery.cs'), /^Out of perimeter/);
 });
 
 test('no perimeter file, no active status, or a closed perimeter → no-op', () => {
@@ -107,7 +107,7 @@ test('a plan file under docs/plans is no longer where the perimeter lives', () =
 
 test('a linked worktree reads its own git directory (.git is a file)', () => {
   const root = repo(PERIMETER, { linked: true });
-  assert.match(edit(root, 'src/Other.cs'), /^Fuori perimetro/);
+  assert.match(edit(root, 'src/Other.cs'), /^Out of perimeter/);
   assert.equal(edit(root, 'src/Orders/OrdersQuery.cs'), '');
   assert.equal(edit(repo(PERIMETER.replace(BRANCH, 'x'), { linked: true }), 'src/Other.cs'), '');
 });
@@ -123,8 +123,8 @@ test('the plan files and the git directory themselves, and a path outside any re
 
 test('MultiEdit and Write count; Read and other events do not', () => {
   const root = repo();
-  assert.match(edit(root, 'src/Other.cs', { tool_name: 'MultiEdit' }), /^Fuori perimetro/);
-  assert.match(edit(root, 'src/Other.cs', { tool_name: 'Write' }), /^Fuori perimetro/);
+  assert.match(edit(root, 'src/Other.cs', { tool_name: 'MultiEdit' }), /^Out of perimeter/);
+  assert.match(edit(root, 'src/Other.cs', { tool_name: 'Write' }), /^Out of perimeter/);
   assert.equal(edit(root, 'src/Other.cs', { tool_name: 'Read' }), '');
   assert.equal(edit(root, 'src/Other.cs', { hook_event_name: 'UserPromptSubmit' }), '');
 });
@@ -134,7 +134,7 @@ test('inside a subagent the line says Noticed, since a subagent never asks', () 
 });
 
 test('through nudges.js the same line comes out as additionalContext', () => {
-  assert.match(edit(repo(), 'src/Other.cs', {}, NUDGES), /^Fuori perimetro/);
+  assert.match(edit(repo(), 'src/Other.cs', {}, NUDGES), /^Out of perimeter/);
 });
 
 test('garbage on stdin → silence, exit 0', () => {

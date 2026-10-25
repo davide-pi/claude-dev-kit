@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller appends result.findingsLog (references/loop.md).',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -77,17 +77,24 @@ const groupOf = (path, groups, root) => {
 
 const reviewersFor = (size, touches = []) => {
   const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
-  const list = size === 'S' ? [code('A', 'sonnet', 'medium')] : size === 'M' ? [code('A', 'opus', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
-  const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: 'high' }] : [])
+  const list = size === 'S' ? [code('A', 'sonnet', 'medium')] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
 
-// Only upward: a change that shrinks again is not reviewed lighter.
+// Size comes from the triage; the risk axes of the change only raise the floor (never down), the file count never does.
 const SIZES = ['S', 'M', 'L']
-const sizeFor = (given, changedCount) => {
-  const floor = changedCount >= 5 ? 'L' : changedCount >= 2 ? 'M' : 'S'
+const RISKS = ['logic', 'data', 'money', 'concurrency', 'contract', 'security', 'performance']
+const FLOOR_M = ['data', 'money', 'concurrency', 'contract', 'security']
+const riskAxes = (risk, touches) => [...new Set([...(Array.isArray(risk) ? risk : []), ...(Array.isArray(touches) ? touches : [])].filter(x => RISKS.includes(x)))]
+const sizeFor = (given, axes = []) => {
+  const floor = axes.length >= 3 ? 'L' : axes.some(x => FLOOR_M.includes(x)) ? 'M' : 'S'
   return SIZES[Math.max(SIZES.indexOf(given), SIZES.indexOf(floor))]
 }
+// More files than the triage size implies: a signal for the verdict, never a bump of the size.
+const sizeSignal = (size, count) => (size === 'S' && count > 1) || (size === 'M' && count > 6)
+  ? `the change touches ${count} files, more than a size ${size} triage implies: the triage may have been too small`
+  : ''
 
 const VERIFY_STATUSES = ['pass', 'fail', 'not-run']
 const readReport = r => {
@@ -102,6 +109,7 @@ const readReport = r => {
     questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
     defaults: list(r.defaults).filter(d => d && typeof d.choice === 'string' && d.choice.trim()),
     filesReviewed: list(r.filesReviewed),
+    remaining: list(r.remaining).filter(s => typeof s === 'string' && s.trim()),
   }
 }
 
@@ -233,11 +241,37 @@ const deltaReviewers = (everyone, finders = []) => {
   return sonnet ? list : [...list, WATCHER]
 }
 const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
-// The size can change the panel under a key (A is the Opus at M, the Sonnet at L): a key stands only while it names the same reviewer.
+// The size can change the panel under a key (A is a Sonnet high at M and L, the Opus is B at L): a key stands only while it names the same reviewer.
 const finderKey = (raised, everyone) => {
   const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
   if (!raised.model || everyone.some(r => r.key[0] === raised.key[0] && same(r))) return raised.key
   return [...everyone, WATCHER].find(same)?.key ?? raised.key
+}
+
+// The fix deltas each reader set saw: the final full read is owed only when a panel key missed one of them.
+const finalReadOwed = (readers, panelKeys) => (Array.isArray(readers) ? readers : []).some(set => panelKeys.some(k => !set.has(k)))
+
+// splice(-1, 1) would drop the last entry: an id that is not in the list removes nothing.
+const removeById = (list, id) => {
+  const at = list.findIndex(m => m.id === id)
+  if (at >= 0) list.splice(at, 1)
+  return at >= 0
+}
+
+// A file the snapshot reports as big becomes a P3 split proposal, once per path, never a finding to fix.
+const growthProposals = big => {
+  const seen = new Set()
+  const out = []
+  for (const b of Array.isArray(big) ? big : []) {
+    if (!b || typeof b.file !== 'string' || !b.file.trim() || !Number.isFinite(b.start) || !Number.isFinite(b.now) || seen.has(norm(b.file))) continue
+    seen.add(norm(b.file))
+    out.push({
+      source: 'growth', category: 'clean-code', priority: 'P3', proposal: true, path: b.file,
+      title: `${b.file} is now ${b.now} lines (${b.start} at the start): propose a split`,
+      why: b.now > 600 ? 'a file past 600 lines' : 'a file of 200 lines or more at the start that grew by 30% or more',
+    })
+  }
+  return out
 }
 
 const findingsLog = ({ known = {}, tracked = {}, cleaned = [] } = {}) => Object.values(known)
@@ -409,7 +443,7 @@ if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
 }
 const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : 'medium'
-const touches = Array.isArray(input.touches) ? input.touches : []
+const risk = riskAxes(input.risk, input.touches)
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
 const perimeterTextFor = (list, forWriter = true) => [
@@ -435,7 +469,6 @@ const answersText = at => {
   const list = resolutions.filter(r => Number(r?.round) < at).flatMap(readAnswers)
   return list.length ? `Owner answers so far (the owner's own words, binding; do not ask them again):\n${list.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}` : ''
 }
-const GROWTH_TEXT = `Growth check (pass G): for each file the change touched run \`git diff --numstat ${startHead || 'HEAD'}\` and count its lines now; note lines at start -> now (+%). A file past 600 lines, or one that had 200 lines or more at the start and grew by 30%, is a P3 \`clean-code\` finding with \`proposal: true\` (any other file is no proposal): a split proposal for the closing table, never fixed here.`
 const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|perfect|ottimo|looks good'
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
 
@@ -455,8 +488,9 @@ const writerTail = (budget, cleaning = false) => [
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
   RULES,
   budget ?? '',
+  'Environment: when the verify fails for an environment reason (a missing file, tool or config), change no code for it: return verify.status fail and explain it in notVerified.',
   'Time: when the work is long, return the structured output before the turn budget runs out, with the work done so far and what is left under `openQuestions`: a partial report beats none, and a run that ends without it is lost.',
-  'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions.',
+  'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions, remaining (the tasks or parts of the brief not done yet; empty when the work is complete).',
   snapshotText(lastTree),
 ]
 
@@ -470,7 +504,7 @@ const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 
   files: arr(str('absolute or repo-relative path of a file you changed')),
   evidence: str('the verify command and the output line that settles it, quoted; or why not run'),
   verify: obj(['status'], { status: { type: 'string', enum: VERIFY_STATUSES }, command: str('the verify command that ran'), line: str('the output line that settles it, quoted') }),
-  snapshot: obj(['tree', 'files'], { tree: str(), files: arr(str()), churn: { type: 'integer' } }),
+  snapshot: obj(['tree', 'files'], { tree: str(), files: arr(str()), churn: { type: 'integer' }, big: arr(obj(['file', 'start', 'now'], { file: str(), start: { type: 'integer' }, now: { type: 'integer' } }), 'as printed by the script') }),
   rejected: arr(obj(['id', 'reason'], {
     id: str(),
     reason: str(),
@@ -478,6 +512,7 @@ const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 
   }), 'review findings you judged wrong or could not reproduce, left unchanged'),
   noticed: arr(obj(['title', 'path', 'why'], { title: str(), path: str(), why: str() }), 'things outside the request you saw and deliberately did not do (inside or outside the perimeter)'),
   notVerified: str(),
+  remaining: arr(str(), 'tasks or parts of the brief not done yet, one line each; empty when the work is complete'),
   openQuestions: arr(str('a guess you had to make and its alternative, one line (out-of-perimeter proposals go under noticed)')),
   questions: arr(QUESTION, 'a behaviour choice the owner would see (never an internal one), left undecided: the run stops before review until it is answered'),
   defaults: arr(obj(['choice', 'alternative', 'path'], { choice: str(), alternative: str(), path: str() }), 'non-trivial choices the brief did not state, with the alternative: the owner reads them in the verdict (no stall)'),
@@ -493,7 +528,7 @@ const FINDING_IN = obj(['title', 'path', 'category', 'priority', 'failure'], {
   fix: str(),
   causedByChange: { type: 'boolean', description: 'true when the change itself causes this defect, even outside the perimeter' },
   confidence: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
-  proposal: { type: 'boolean', description: 'true for a split proposal (a file past 600 lines, or 200+ lines at the start that grew by 30%): a note for the closing table, never fixed' },
+  proposal: { type: 'boolean', description: 'true for a split proposal: a note for the closing table, never fixed' },
 })
 
 const REVIEW = obj(['previous', 'found', 'checked', 'filesReviewed'], {
@@ -517,6 +552,7 @@ let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = fal
 let fixChurns = [], openCounts = [], afterFix = false
 let nextRound = { only: null, coverage: false, final: false }
 let finalReading = false, finalReadDone = false, round1Tree = ''
+let fixReaders = [], lastFixIsReview = false, bigFiles = []   // fixReaders: per review fix, the panel keys that read its delta
 
 const ask = async (prompt, opts) => {
   try { return await agent(prompt, opts) } catch (e) {
@@ -551,6 +587,7 @@ const takeReport = r => {
   lastReportTree = r.snapshot?.tree ?? ''
   if (lastReportTree) lastTree = lastReportTree
   lastReport = r
+  if (Array.isArray(r.snapshot?.big)) bigFiles = growthProposals(r.snapshot.big)
   takeNoticed(r)
 }
 const gateReport = (r, toFixHadVerify) => {
@@ -588,7 +625,7 @@ const result = extra => withHistory({
   rounds: round,
   open: [...Object.keys(tracked).filter(id => tracked[id].status === 'open').map(id => known[id]), ...verifyOpen],
   accepted: Object.keys(tracked).filter(id => tracked[id].status === 'accepted').map(id => known[id]),
-  outOfScope: [...notes.filter(q => !noticed.some(n => sameText(q.text, n.title) || sameText(q.text, n.why))), ...noticed, ...outOfScope, ...proposals],
+  outOfScope: [...notes.filter(q => !noticed.some(n => sameText(q.text, n.title) || sameText(q.text, n.why))), ...noticed, ...outOfScope, ...proposals, ...bigFiles],
   minor,
   cleaned,
   gaps,
@@ -651,18 +688,40 @@ if (!inline) {
   const resolution0 = resolutions.find(r => Number(r?.round) === 0)
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
   if (asked0.stall) return asked0.stall
-  const impl = asked0.report
-  if (!impl) {
-    const left = await recoverChanges()
-    if (!left.length) return stallAgain(0, `the implementer returned nothing (stopped or failed${why('implement')})`)
-    left.forEach(f => changed.add(f))
-    gaps.push(`the implementer returned no report: the tree shows ${left.length} changed file(s) in the perimeter, reviewed as they are (the verify was not reported)`)
-    addNotes(['the implementer ran out of turns before its report: the work may be partial, check what is left against the brief'])
+  let impl = asked0.report
+  // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
+  let continuations = 0
+  while ((!impl || impl.remaining.length) && continuations < 2) {
+    if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
+    continuations += 1
+    const left = impl?.remaining ?? []
+    const label = `implement (continue ${continuations})`
+    const next = readReport(await ask(buildImpl([
+      'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
+      left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
+    ].filter(Boolean).join('\n')), { ...implOpts, label }))
+    if (next) addQuestionNotes(next.questions)
+    impl = next ?? impl
   }
-  const implStall = impl ? absorb(impl) : null
+  if (!impl || impl.remaining.length) {
+    // A report lists its own files; only a missing one needs the probe.
+    const done = impl ? strings(impl.files) : await recoverChanges()
+    const todo = impl?.remaining ?? []
+    return result({
+      status: 'STALL',
+      stall: {
+        round: 0,
+        why: 'incomplete',
+        findings: [],
+        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement (continue ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+      },
+      resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
+    })
+  }
+  const implStall = absorb(impl)
   if (implStall) return verifyStall(0, implStall)
 
-  if (impl && previewText && sizeFor(givenSize, changed.size) !== 'S') {
+  if (previewText && sizeFor(givenSize, risk) !== 'S') {
     const previewQuestion = {
       text: `Preview: show the owner ${previewText} (a screenshot or a sample of the output) and ask whether it is right; "ok" goes on to the review, any other answer is a direction for one more implementer pass`,
       default: 'ok',
@@ -719,8 +778,10 @@ const reviewersForRound = () => {
   for (const f of changed) { const k = rel(f, repoRoot); if (!seen.has(k)) seen.set(k, f) }
   const expected = [...seen.values()]
   const groups = groupFiles(expected)
-  const size = sizeFor(givenSize, seen.size)
-  const reviewers = reviewersFor(size, touches)
+  const size = sizeFor(givenSize, risk)
+  const signal = sizeSignal(size, seen.size)
+  if (signal && !gaps.includes(signal)) gaps.push(signal)
+  const reviewers = reviewersFor(size, risk)
   const [first, ...rest] = reviewers
   if (groups.length < 2) return { size, groups, list: reviewers, expected }
   return { size, groups, expected, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
@@ -773,7 +834,6 @@ while (true) {
     decisionsText,
     answersText(round),
     ownerQuestionsText,
-    round === 1 || final ? GROWTH_TEXT : '',
     verifyText(),
     reviewPerimeter,
     dirtyText,
@@ -787,6 +847,7 @@ while (true) {
   ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
   alive.forEach(takeDefaults)
+  if (lastFix && lastFixIsReview && !final && fixReaders.length) alive.forEach(a => fixReaders[fixReaders.length - 1].add(a.key))
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
   const owedNow = round === 1 ? expected : only ? [] : final ? [...fixFiles] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
@@ -817,7 +878,7 @@ while (true) {
   for (const id of cleanupSent) {
     if (isTouched(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
     if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
-    minor.splice(minor.findIndex(m => m.id === id), 1)
+    removeById(minor, id)
     cleaned.push(known[id])
   }
   cleanupSent = cleanupWait
@@ -868,7 +929,7 @@ while (true) {
       continue
     }
     // The 0 of a DONE is no bar for later fix cycles.
-    if (!finalReadDone && fixFiles.size && size !== 'S') {
+    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key))) {
       finalReadDone = true
       nextRound = { only: null, coverage: false, final: true }
       openCounts = []
@@ -949,6 +1010,8 @@ while (true) {
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
+  lastFixIsReview = !cleaning
+  if (!cleaning) fixReaders.push(new Set())
   if (!cleaning) (Array.isArray(fixed.files) ? fixed.files : []).forEach(f => fixFiles.add(f))
   addNotes(fixed.openQuestions)
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))

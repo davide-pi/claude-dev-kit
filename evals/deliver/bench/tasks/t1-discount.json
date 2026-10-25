@@ -1,0 +1,8 @@
+{
+  "id": "t1-discount",
+  "kind": "logic",
+  "prompt": "Il totale ordine sbaglia lo sconto: ai clienti premium dovremmo togliere il 10%, ma su un ordine da 200 euro lo sconto e' di pochi centesimi. Sistemalo.",
+  "seeds": [
+    { "file": "OrdersApi/Services/PricingService.cs", "find": "isPremium ? Math.Round(total * (1 - PremiumRate), 2) : total;", "replace": "isPremium ? total - PremiumRate : total;" }
+  ]
+}
