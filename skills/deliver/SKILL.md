@@ -51,12 +51,12 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 
 | | S | M | L |
 | --- | --- | --- | --- |
-| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, the doubts pass, the challenger `Plan` on Sonnet | `plan-work`, criteria + proof + questions, owner ok, the doubts pass, the challenger `Plan` on Opus |
+| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, doubts pass, challenger `Plan` (risk: data, money, contract, security) | `plan-work`, criteria + proof, questions, owner ok, doubts pass, challenger `Plan` (Opus) |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
 | implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, a run per phase, 3-4 tasks (P-run, `references/loop.md`) |
-| review | 1 `code-reviewer`, Sonnet medium | 1 Opus high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
+| review | 1 `code-reviewer`, Sonnet medium | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
-`implementer` runs at `medium` (`implementerEffort`: `high`). Before the loop: `references/scenarios.md`; the criteria, the doubts pass and the challenger (M, L) in `references/loop.md`.
+`implementer` runs at `medium` (`implementerEffort`: `high`). Before the loop: `references/scenarios.md`; criteria, doubts pass and challenger: `references/loop.md`.
 
 ### 3. Who asks the user
 

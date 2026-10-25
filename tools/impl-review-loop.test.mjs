@@ -212,13 +212,13 @@ test('script: reviewers by size, effort and model', async () => {
     sizes[size] = calls.filter((c) => c.opts.label?.startsWith('R1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
   assert.deepEqual(sizes.S, ['code-reviewer:sonnet:medium']);
-  assert.deepEqual(sizes.M, ['code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:high']);
-  assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:high']);
+  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
+  assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
 });
 
-test('script: M without touches is one Opus reviewer at high', async () => {
+test('script: M without touches is one Sonnet reviewer at high', async () => {
   const { calls } = await run(ARGS, [review([])]);
-  assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('R1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:opus:high']);
+  assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('R1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high']);
 });
 
 test('script: an S change that grows to 5 files stays S: the file count is a gaps signal, never a size', async () => {
@@ -241,7 +241,7 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
   assert.deepEqual(await panel('S', {}), ['R1 A']);
   assert.deepEqual(await panel('S', { risk: ['logic'] }), ['R1 A']);
   const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([])]);
-  assert.equal(lifted.calls.find((c) => c.opts.label === 'R1 A').opts.model, 'opus');        // M: one Opus at high
+  assert.equal(lifted.calls.find((c) => c.opts.label === 'R1 A').opts.model, 'sonnet');      // M: one Sonnet at high
   assert.deepEqual(lifted.out.roundLog.map((r) => r.size), ['M']);
   assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['R1 A', 'R1 B', 'R1 performance']);   // three axes: L, plus the specialist
   assert.deepEqual(await panel('M', { risk: ['security'] }), ['R1 A', 'R1 security']);
@@ -632,15 +632,15 @@ test('groupOf: a path goes to the group listing it (root, case and slashes ignor
   assert.equal(groupOf('src/stray.cs', groups, ROOT), 1);
 });
 
-test('reviewersFor: S one Sonnet at medium, M one Opus at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
+test('reviewersFor: S one Sonnet at medium, M one Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
   const spec = (size, touches) => reviewersFor(size, touches).map((r) => `${r.key}:${r.agentType}:${r.model}:${r.effort}${r.whole ? ':whole' : ''}`);
   assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:medium:whole']);
-  assert.deepEqual(spec('M', []), ['A:code-reviewer:opus:high:whole']);
+  assert.deepEqual(spec('M', []), ['A:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(spec('L', []), ['A:code-reviewer:sonnet:high:whole', 'B:code-reviewer:opus:high:whole']);
   assert.deepEqual(spec('S', ['security', 'performance']), ['A:code-reviewer:sonnet:medium:whole']);
-  assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:opus:high:whole', 'security:review-security:sonnet:high']);
-  assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:high']);
-  assert.deepEqual(spec('M', undefined), ['A:code-reviewer:opus:high:whole']);
+  assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
+  assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
+  assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
 });
 
 test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes lift to L, never downward', () => {
@@ -2210,7 +2210,7 @@ test('script (W6): M delta round = the reviewer that raised the finding + one So
   const watcher = calls.find(c => c.opts.label === 'R2 S').opts;
   assert.deepEqual([watcher.model, watcher.effort, watcher.agentType], ['sonnet', 'medium', 'code-reviewer']);
   const final = calls.find(c => c.opts.label === 'R3 A (final)');
-  assert.deepEqual([final.opts.model, final.opts.effort], ['opus', 'high']);                  // on M the full panel is the one Opus
+  assert.deepEqual([final.opts.model, final.opts.effort], ['sonnet', 'high']);                // on M the full panel is the one Sonnet
   assert.match(final.prompt, /FINAL FULL READ/);
   assert.match(final.prompt, /git diff t1 t2/);
   assert.match(final.prompt, /- F1 \[closed\]/);

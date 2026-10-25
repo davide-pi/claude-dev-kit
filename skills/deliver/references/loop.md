@@ -10,8 +10,8 @@ batched in one message, each with a recommendation; the brief states the rest as
 a concurrent run, a dependency down. UI or legacy code with no tests: the proof is a browser run (screenshot) or an
 HTTP call, never "it compiles". `preview` is the default at M whenever the change has an owner-visible output.
 
-**The challenger** (M, L), after the owner's ok and before the loop: one `Plan` agent, `model: sonnet` at M,
-`model: opus` at L (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
+**The challenger**, after the owner's ok and before the loop: one `Plan` agent. At M only when `risk` includes data,
+money, contract or security (`model: sonnet`); at L always, `model: opus` (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
 criteria, the perimeter. Output, at most 10 lines: a verdict `tenere` | `cambiare` | `scartare`, why, and the
 alternative if any. Read-only, it never asks the user. Show it to the owner only when the verdict is `cambiare` or
 `scartare`; `tenere` goes on silently.

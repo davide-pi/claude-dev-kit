@@ -77,8 +77,8 @@ const groupOf = (path, groups, root) => {
 
 const reviewersFor = (size, touches = []) => {
   const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
-  const list = size === 'S' ? [code('A', 'sonnet', 'medium')] : size === 'M' ? [code('A', 'opus', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
-  const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: 'high' }] : [])
+  const list = size === 'S' ? [code('A', 'sonnet', 'medium')] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
 
@@ -241,7 +241,7 @@ const deltaReviewers = (everyone, finders = []) => {
   return sonnet ? list : [...list, WATCHER]
 }
 const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
-// The size can change the panel under a key (A is the Opus at M, the Sonnet at L): a key stands only while it names the same reviewer.
+// The size can change the panel under a key (A is a Sonnet high at M and L, the Opus is B at L): a key stands only while it names the same reviewer.
 const finderKey = (raised, everyone) => {
   const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
   if (!raised.model || everyone.some(r => r.key[0] === raised.key[0] && same(r))) return raised.key
