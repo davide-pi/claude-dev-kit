@@ -52,6 +52,7 @@ const allows = (content, file) => assert.equal(write(content, file).decision, 'a
 
 // ── Assembled fixtures: realistic shapes, no literal secret in the repo ───────────────────────
 
+const PW = 'Str0ng' + 'Local' + 'Pass1';
 const A = 'A1b2C3d4E5f6G7h8';                   // 16 chars
 const LONG = `${A}${A}${A.toLowerCase()}`;      // 48 chars
 const providerToken = `ghp${'_'}${LONG}`;
@@ -132,14 +133,38 @@ test('a MultiEdit is scanned on every edits[].new_string, never on old_string', 
   assert.equal(multi([{ old_string: `var token = "${providerToken}";`, new_string: 'var token = Read();' }]).decision, 'approve');
 });
 
-test('settings.json runs it on Write|Edit|MultiEdit and blocks when the script cannot run', () => {
+test('settings.json runs it on Write|Edit|MultiEdit|NotebookEdit and blocks when the script cannot run', () => {
   const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
   const hook = settings.hooks.PreToolUse
     .flatMap((g) => (g.hooks ?? []).map((h) => ({ matcher: g.matcher, ...h })))
     .find((h) => (h.args ?? []).join(' ').includes('secret-scan.js'));
-  assert.equal(hook?.matcher, 'Write|Edit|MultiEdit');
+  assert.equal(hook?.matcher, 'Write|Edit|MultiEdit|NotebookEdit');
   assert.equal(hook.onFailure, 'block');
   assert.ok(!(hook.args ?? []).join(' ').includes('catch'), 'no fail-open wrapper around the require');
+});
+
+test('a password in a URL', () => {
+  blocks(`DATABASE_URL=postgres://app:${PW}@db.internal:5432/sales`, /password in a URL/);
+  blocks(`"repo": "https://deploy:${PW}@dev.azure.com/org/_git/repo"`, /password in a URL/);
+});
+
+test('a quoted secret in YAML or JSON', () => {
+  blocks(`"password": "${PW}"`, /quoted secret value/);
+  blocks(`  api_key: "${PW}"`, /quoted secret value/);
+  blocks(`client_secret: '${PW}'`, /quoted secret value/);
+  blocks(`{ "token": "${PW}" }`, /quoted secret value/);
+});
+
+test('a NotebookEdit is scanned on new_source', () => {
+  const notebook = (new_source) => runRaw(JSON.stringify({
+    tool_name: 'NotebookEdit',
+    tool_input: { notebook_path: 'analysis.ipynb', new_source },
+  }));
+  const { decision, reason } = notebook(`client = Client("${providerToken}")`);
+  assert.equal(decision, 'deny');
+  assert.match(reason, /provider token/);
+  assert.match(reason, /analysis\.ipynb/);
+  assert.equal(notebook('import pandas as pd').decision, 'approve');
 });
 
 test('the message names the pattern and the line, and never echoes the whole secret', () => {
@@ -191,6 +216,23 @@ test('a detection pattern is not the thing it detects', () => {
   allows('Select-String -Path .\\src\\*.json -Pattern "AccountKey="');
   allows('rg -n "AKIA[0-9A-Z]{16}" .');
   allows(`const fixture = "AKIA" + "${'ABCDEFGHIJKLMNOP'}";`);
+});
+
+test('a URL or a key with a reference, a mask or a short or empty value is not a credential', () => {
+  allows('DATABASE_URL=postgres://app:${DB_PASSWORD}@db.internal:5432/sales');
+  allows('DATABASE_URL=postgres://app:$DB_PASSWORD@db.internal/sales');
+  allows('DATABASE_URL=postgres://app:<password>@db.internal/sales');
+  allows('url: https://user:***@host/path');
+  allows('https://example.com:8080/path');
+  allows('git@github.com:org/repo.git');
+  allows('"password": ""');
+  allows('"password": "${DB_PASSWORD}"');
+  allows('"password": "changeme"');
+  allows('"password": "string"');
+  allows('"password": "abc"');
+  allows('"token": "Enter your token here"');
+  allows('"token_type": "Bearer-token-value"');
+  allows('password: secretValue123');
 });
 
 test('a scanner file is skipped whole, or the hook would lock itself', () => {

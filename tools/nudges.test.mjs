@@ -15,7 +15,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -80,6 +80,31 @@ test('PostToolUse: the third edit nudges towards the implementer, never the cont
   assert.equal(third.hookEventName, 'PostToolUse');
   assert.match(third.additionalContext, /\bimplementer\b/);
   assert.doesNotMatch(third.additionalContext, /Contesto/);
+});
+
+test('PostToolUse: the formatter runs in the same process as the nudges', () => {
+  const config = sandbox();
+  const project = mkdtempSync(join(tmpdir(), 'nudges-fmt-'));
+  created.push(project);
+  mkdirSync(join(project, 'node_modules'));
+  writeFileSync(join(project, 'package.json'), '{ "name": "web" }');
+  writeFileSync(join(project, '.prettierrc'), '{}');
+  writeFileSync(join(project, 'main.ts'), 'export {};');
+  const payload = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: join(project, 'main.ts') } };
+  const r = spawnSync(process.execPath, [HOOK, '--dry-run'], {
+    input: JSON.stringify(payload), encoding: 'utf8', cwd: config, env: { ...process.env, CLAUDE_CONFIG_DIR: config },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /^npx --no-install prettier --write .*main\.ts$/m, 'format-on-edit ran inside nudges.js');
+});
+
+test('settings.json: one PostToolUse node for the edits, with the formatter timeout', () => {
+  const { hooks } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  const group = hooks.PostToolUse.find((g) => g.matcher === 'Write|Edit|MultiEdit');
+  assert.equal(group.hooks.length, 1);
+  assert.ok(group.hooks[0].args.join(' ').includes('nudges.js'));
+  assert.equal(group.hooks[0].timeout, 30);
+  assert.ok(!JSON.stringify(hooks).includes('format-on-edit.js'), 'no separate formatter entry');
 });
 
 test('an unknown event, a bad payload or an empty one → silent, exit 0', () => {

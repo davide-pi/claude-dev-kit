@@ -532,6 +532,69 @@ test('git switch that discards local changes asks', () => {
   for (const command of ['git switch main', 'git switch -c feature/x', 'git switch --create fix-feature', 'git switch -']) approves(command);
 });
 
+test('find that deletes asks, a plain find does not', () => {
+  for (const command of [
+    'find . -name "*.log" -delete', 'find ./bin -type f -delete', 'find . -name x -exec rm {} ;', 'find . -name x -exec rm -f {} +',
+    'find . -name x -execdir rm {} +', 'find . -exec /bin/rm {} +', 'find / -exec /bin/rm -f {} ;',
+  ]) asks(command, /find deletes/);
+  for (const command of ['find . -name x', 'find . -name "*.log" -print', 'find . -name x -exec grep -l foo {} +', 'find . -name "delete-me*"']) approves(command);
+});
+
+test('git checkout and git restore that discard working-tree changes ask, in either shell', () => {
+  for (const command of [
+    'git checkout -- src/a.cs', 'git checkout -- .', 'git checkout .', 'git checkout HEAD~1 -- a.cs', 'git checkout -f main', 'git checkout -fb x',
+    'git restore a.cs', 'git restore .', 'git restore --worktree a.cs', 'git restore --staged --worktree a.cs', 'git restore -SW a.cs',
+    'git restore --source=HEAD~1 a.cs', 'git -C repo restore a.cs',
+  ]) asks(command, /overwrites files in the working tree/);
+  for (const command of [
+    'git checkout -b feature/x', 'git checkout main', 'git checkout feature/x', 'git checkout -B fix/y origin/main', 'git checkout -b x',
+    'git restore --staged a.cs', 'git restore -S a.cs', 'git restore --staged .', 'git restore --help',
+    'git commit -m "restore the old layout"', 'git log --oneline -- a.cs',
+  ]) approves(command);
+});
+
+test('git clean asks when it forces, not on a dry run', () => {
+  for (const command of ['git clean -fd', 'git clean -dfx', 'git clean --force -d']) asks(command, /untracked files/);
+  for (const command of ['git clean -n', 'git clean -fdn', 'git clean --dry-run -d', 'git clean -d']) approves(command);
+});
+
+test('a pipeline ending in a deleter asks, even without -Recurse', () => {
+  for (const command of [
+    'Get-ChildItem *.log | Remove-Item', 'Get-ChildItem *.log | rm', 'gci *.log | del', 'Get-ChildItem *.log | ri', 'git ls-files -o | xargs rm',
+    'ls | foreach { Remove-Item $_.FullName }', 'gci | ForEach-Object { ri $_ }', 'ls | % { rm $_ }',
+  ]) asks(command, /previous command of the pipeline/);
+  for (const command of [
+    'Get-ChildItem *.log | Remove-Item -WhatIf', 'Get-ChildItem *.log | Select-Object Name', 'ls | % { $_.Name }', 'Remove-Item a.log', 'a || rm a.log',
+  ]) approves(command);
+});
+
+test('settings.json: the broad find allow rule is gone, yarn and pnpm are narrowed, tag and remote are read-only', () => {
+  const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
+  assert.deepEqual(allow.filter((r) => /^(?:Bash|PowerShell)\(find /.test(r)), []);
+  for (const shell of ['Bash', 'PowerShell']) {
+    for (const rule of ['yarn *', 'pnpm *', 'git tag *', 'git remote *']) assert.ok(!allow.includes(`${shell}(${rule})`), `${shell}(${rule})`);
+    for (const tool of ['yarn', 'pnpm']) {
+      for (const sub of ['test', 'run', 'build', 'lint', 'typecheck', 'list', 'ls', 'why', 'outdated']) {
+        assert.ok(allow.includes(`${shell}(${tool} ${sub}*)`), `${shell}(${tool} ${sub}*)`);
+      }
+      for (const rule of ['i', 'i *', 'install', 'install *']) assert.ok(allow.includes(`${shell}(${tool} ${rule})`), `${shell}(${tool} ${rule})`);
+      for (const rule of ['exec*', 'i*', 'install*', 'dlx*']) assert.ok(!allow.includes(`${shell}(${tool} ${rule})`), `${shell}(${tool} ${rule})`);
+    }
+    assert.deepEqual(allow.filter((r) => r.startsWith(`${shell}(git tag`)), [
+      `${shell}(git tag)`, `${shell}(git tag -l*)`, `${shell}(git tag --list*)`, `${shell}(git tag --points-at*)`, `${shell}(git tag --contains*)`,
+    ]);
+    assert.deepEqual(allow.filter((r) => r.startsWith(`${shell}(git remote`)), [
+      `${shell}(git remote)`, `${shell}(git remote -v)`, `${shell}(git remote get-url *)`, `${shell}(git remote show *)`,
+    ]);
+  }
+});
+
+test('settings.json: no allow rule for dlx, the status line refreshes every 5 seconds', () => {
+  const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  assert.deepEqual(settings.permissions.allow.filter((r) => /dlx/.test(r)), []);
+  assert.equal(settings.statusLine.refreshInterval, 5);
+});
+
 test('settings.json: no script-block cmdlet in the allow list, db-ro matched by its scripts path', () => {
   const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
   assert.deepEqual(allow.filter((r) => /Select-Object|Sort-Object|ForEach-Object|Where-Object/.test(r)), []);

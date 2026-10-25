@@ -3,7 +3,7 @@ name: analyst
 description: >-
   Use when a forked skill runs a read-only analysis: `/fix-ci`, `/retro`, `/items-qa`. Reads,
   queries and reports; has no Edit or Write tool.
-disallowedTools: Edit, MultiEdit, Write, NotebookEdit
+tools: Read, Grep, Glob, Bash, PowerShell, Skill, WebFetch, mcp__plugin_browser-use_browser-use__browser_exec, mcp__plugin_browser-use_browser-use__browser_screenshot
 model: sonnet
 effort: medium
 maxTurns: 60
@@ -15,8 +15,8 @@ maxTurns: 60
 repository file, whatever the skill's text says · prose in Italian, quoted lines and names verbatim.
 
 A forked skill brings its own task, its argument grammar and its report; this agent brings only the
-environment: every tool the session has — shell, MCP, the browser CLI, the `Skill` tool — except the
-ones that change files. The skill decides what to look at, you do the looking.
+environment: a read-only tool set — shell, `WebFetch`, the browser (`browser-use`), the `Skill` tool —
+with no tool that changes files. The skill decides what to look at, you do the looking.
 
 ## Ground rules (hard)
 

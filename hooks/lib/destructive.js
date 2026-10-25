@@ -42,7 +42,7 @@ const { splitSegments } = require('./segments');
  * `purge_queue` / `delete_queue` are listed in full because `_` is a word character, so `\bpurge\b`
  * does not match inside them — the broker CLIs would have slipped straight through the gate.
  */
-const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|ri|rd|rmdir|del|erase|down|nuke|clear|expire|push|switch)\b/i;
+const DANGER_WORDS = /\b(?:drop|dropdb|dropuser|dropdatabase|truncate|flushall|flushdb|flush_all|prune|purge|purge_queue|delete|delete_queue|destroy|uninstall|remove|rm|ri|rd|rmdir|del|erase|down|nuke|clear|expire|push|switch|checkout|restore|clean)\b/i;
 /** A flag cluster carrying `-D`: force-delete. Case-sensitive, because `-d` is the safe form. */
 const DANGER_FLAG = /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/;
 
@@ -194,6 +194,9 @@ function effectiveCommand(segment) {
   return leadingCommand(tokens.slice(i).join(' '));
 }
 
+/** A pipeline stage that runs a script block per item: `ls | % { rm $_ }`. */
+const PIPE_LOOPS = new Set(['%', 'foreach', 'foreach-object']);
+const DELETER_WORD = /(?<![-\w])(?:remove-item|rm|ri|del|erase|rd|rmdir)(?![-\w])/i;
 const DELETERS = new Set(['rm', 'ri', 'del', 'rd', 'rmdir', 'erase', 'remove-item']);
 /** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. */
 function deletesRecursively(scan, keep, segment) {
@@ -201,6 +204,45 @@ function deletesRecursively(scan, keep, segment) {
   if (!DELETERS.has(command)) return false;
   if (command === 'rm') return /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep);
   return /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
+}
+
+/** `git [-c k=v] <checkout|restore|clean> …`: the verb is the first word after git and its options, never a word inside a message. */
+const GIT_VERB = /\bgit\s+(?:(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(checkout|restore|clean)\b/i;
+function gitCall(text) {
+  const m = GIT_VERB.exec(text);
+  return m ? { verb: m[1].toLowerCase(), rest: text.slice(m.index + m[0].length) } : null;
+}
+const flagCluster = (letter) => new RegExp(`(?<![-\\w])-[a-zA-Z]*${letter}[a-zA-Z]*(?![\\w-])`);
+
+/** `git checkout -- <path>`, `git checkout .`, `git checkout -f`: the working tree is overwritten from the index or a commit. */
+function checkoutDiscards(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'checkout') return false;
+  return /(?<!\S)--(?!\S)\s*\S/.test(call.rest) || /(?<!\S)\.(?!\S)/.test(call.rest)
+    || flagCluster('f').test(call.rest) || /(?<![-\w])--force(?![\w-])/.test(call.rest);
+}
+
+/** `git restore` writes the working tree unless it is only `--staged` (an unstage). */
+function restoreDiscards(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'restore') return false;
+  const staged = /(?<![-\w])--staged(?![\w-])/.test(call.rest) || flagCluster('S').test(call.rest);
+  const worktree = /(?<![-\w])--worktree(?![\w-])/.test(call.rest) || flagCluster('W').test(call.rest);
+  return !staged || worktree;
+}
+
+/** `git clean` that really deletes: forced and not a dry run (`-n` anywhere in a cluster). */
+function cleanDeletes(scan, keep) {
+  const call = gitCall(keep);
+  if (call?.verb !== 'clean') return false;
+  return (flagCluster('f').test(call.rest) || /(?<![-\w])--force(?![\w-])/.test(call.rest)) && !flagCluster('n').test(call.rest);
+}
+
+/** `find … -delete`, `find … -exec rm …`: the walk itself deletes what it matches. */
+function findDeletes(scan, keep, segment) {
+  if (effectiveCommand(segment) !== 'find') return false;
+  return /(?<![\w-])-delete(?![\w-])/.test(keep)
+    || /(?<![\w-])-exec(?:dir)?\s+(?:\S*[\\/])?(?:rm|rmdir|del|unlink|shred)(?![\w-])/i.test(keep);
 }
 
 const RULES = [
@@ -325,6 +367,29 @@ const RULES = [
     reason: 'This deletes files recursively or by force, and there is no recycle bin for it. Confirm?',
   },
   {
+    // The segment split loses the pipe, so `piped` says the deleter takes its paths from the line before it.
+    test: (scan, keep, segment, piped) => piped && (DELETERS.has(effectiveCommand(segment))
+      || (PIPE_LOOPS.has(effectiveCommand(segment)) && DELETER_WORD.test(keep))),
+    reason: 'This deletes whatever the previous command of the pipeline lists (`… | Remove-Item`), '
+      + 'without a recycle bin. Confirm?',
+  },
+  {
+    test: findDeletes,
+    reason: 'This find deletes every file it matches (`-delete`, `-exec rm`), and there is no recycle bin for it. Confirm?',
+  },
+  {
+    test: checkoutDiscards,
+    reason: 'This checkout overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
+  },
+  {
+    test: restoreDiscards,
+    reason: 'This restore overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
+  },
+  {
+    test: cleanDeletes,
+    reason: 'This git clean deletes untracked files for good, and they are in no commit. Confirm?',
+  },
+  {
     // `-f` / `--discard-changes` throw away the uncommitted work in the files the switch touches.
     test: all(has(/\bgit\b/i), has(/\bswitch\b/), has(/(?<![-\w])(?:--force|--discard-changes|-[a-zA-Z]*f[a-zA-Z]*)(?![\w-])/)),
     reason: 'This switches branch and discards local changes: whatever was uncommitted is lost. Confirm?',
@@ -340,16 +405,21 @@ function checkDestructive(command) {
   // Fast path: nothing here can be one of the rules.
   if (!isDangerous(command)) return null;
 
+  let at = 0;
   for (const segment of splitSegments(command)) {
+    at = command.indexOf(segment, at);
+    const before = command.slice(0, at).trimEnd();
+    const piped = before.endsWith('|') && !before.endsWith('||');
+    at += segment.length;
     if (isSearcher(segment)) continue;
     if (NOOP_FLAGS.test(segment)) continue;
 
     const scan = prepare(segment);
     const keep = prepare(segment, false);
     // The preparation may have blanked the only occurrence (a comment, a path, a read-only query).
-    if (!isDangerous(scan)) continue;
+    if (!isDangerous(scan) && !isDangerous(keep)) continue;
 
-    const rule = RULES.find((r) => r.test(scan, keep, segment));
+    const rule = RULES.find((r) => r.test(scan, keep, segment, piped));
     if (rule) return rule.reason;
   }
   return null;

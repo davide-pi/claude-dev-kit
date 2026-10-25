@@ -1,5 +1,5 @@
 /**
- * PreToolUse hook for Write / Edit / MultiEdit.
+ * PreToolUse hook for Write / Edit / MultiEdit / NotebookEdit.
  *
  * A credential that reaches a file is already halfway to the remote: the next `git add -A` takes
  * it, and once it is in the history it stays there. This hook is the last cheap moment to stop it,
@@ -8,9 +8,10 @@
  *
  * The catalogue is the one tools/validate.mjs already enforces on the kit's own files — provider
  * tokens, a cloud access key id, an API-key-shaped string, a password inside a connection string —
- * plus the two shapes a source file can carry that a config repo cannot: a private key block and a
- * signed token. Keeping the two lists in step matters: what the validator rejects in the repo is
- * exactly what must never be written into a project either.
+ * plus the shapes a source file can carry that a config repo cannot: a private key block, a signed
+ * token, a password in a URL (`scheme://user:secret@host`) and a quoted `"password": "literal"` pair.
+ * Keeping the two lists in step matters: what the validator rejects in the repo is exactly what must
+ * never be written into a project either.
  *
  * Node, not PowerShell: this runs before every Write and Edit, so ~150ms against ~370ms just to
  * start `pwsh`. No subprocess, no file system access beyond stdin — it only reads the text the tool
@@ -82,6 +83,17 @@ const PATTERNS = [
     re: /\b(?:accountkey|sharedaccesskey|shared_access_key|aws_secret_access_key|client_secret|clientsecret)\s*=\s*(?!<)([^;'"\s|,)}\]]{8,})/gi,
     value: 1,
   },
+  {
+    label: 'a password in a URL',
+    re: /\b[a-z][a-z0-9+.-]*:\/\/[^\s:/@'"]+:([^\s@/'"]{3,})@[^\s'"]+/gi,
+    value: 1,
+  },
+  {
+    // Only a quoted literal: an unquoted value is as likely a reference or a type name as a secret.
+    label: 'a quoted secret value',
+    re: /["']?\b(?:password|passwd|pwd|secret|api_?key|token|client_?secret)["']?\s*:\s*["']([^"'\s]{6,})["']/gi,
+    value: 1,
+  },
 ];
 
 /**
@@ -146,6 +158,7 @@ const SCANNER_FILE = /(?:^|[\\/])(?:hooks|tools)[\\/][\w.-]*(?:secret|leak|scan|
 function newText(input) {
   if (typeof input?.content === 'string') return input.content;
   if (typeof input?.new_string === 'string') return input.new_string;
+  if (typeof input?.new_source === 'string') return input.new_source;
   if (Array.isArray(input?.edits)) {
     return input.edits.map((e) => (typeof e?.new_string === 'string' ? e.new_string : '')).join('\n');
   }
@@ -160,7 +173,7 @@ function redact(value) {
 
 try {
   const payload = readPayload();
-  const filePath = payload?.tool_input?.file_path ?? '';
+  const filePath = payload?.tool_input?.file_path ?? payload?.tool_input?.notebook_path ?? '';
   const text = newText(payload?.tool_input);
   if (typeof text !== 'string' || !text.trim()) approve();
   if (SCANNER_FILE.test(filePath)) approve();

@@ -46,4 +46,7 @@ CLAUDE.md; `P1|P2|P3` and `S|M|L` stay verbatim too.
 10. **A turn that modified files closes with CLAUDE.md's verdict table**, also outside `deliver` (Stato:
    `fatto`, `non verificato: <motivo>`, `failed`). Command evidence lives in that table, never in a fenced
    block of command → output lines.
+11. **A wrong or weaker premise is named first.** When the owner's premise, proposal or reasoning is wrong
+   or weaker than an alternative, say so plainly in the first lines, with the evidence, before doing anything
+   else: no deference, no softening.
 Where these rules conflict with general formatting guidance elsewhere, these rules win — except rule 9.

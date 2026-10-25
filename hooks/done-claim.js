@@ -310,8 +310,9 @@ try {
   log(payload, 'claim-without-evidence', word, message);
   process.stdout.write(JSON.stringify({
     decision: 'block',
-    reason: `Dichiari un esito ("${word}") senza prova. Cita il comando eseguito e la riga di output che lo `
-      + 'conferma in un blocco ```, oppure scrivi "non verificato" e perché. Non rieseguire nulla se l\'output è già sopra: citalo.',
+    reason: `Dichiari un esito ("${word}") senza prova. Metti il comando eseguito e la riga di output che lo `
+      + 'conferma nella tabella "Livello | Comando | Riga che decide | Stato" (tabella markdown semplice, mai in un blocco di codice), '
+      + 'oppure scrivi "non verificato" e perché. Non rieseguire nulla se l\'output è già sopra: citalo nella tabella.',
   }));
   process.exit(0);
 } catch {

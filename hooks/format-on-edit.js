@@ -23,6 +23,9 @@
  * Detection is version-agnostic: the formatter is whatever the project configures, discovered from
  * the files on disk, and it is invoked through the local package runner so nothing is downloaded.
  *
+ * Wired through `nudges.js` (one node process for every PostToolUse hook, this one included); run alone
+ * (`node hooks/format-on-edit.js`) it reads stdin and runs for itself.
+ *
  * `--dry-run` prints the formatter invocation that would run instead of running it. That is how
  * tools/format-on-edit.test.mjs asserts the routing without the SDK or a node_modules tree.
  *
@@ -60,8 +63,6 @@ const WEB_FORMATTER_CONFIG = [
  * sense worth formatting, and an unbounded walk would hit the filesystem root on every edit.
  */
 const MAX_DEPTH = 12;
-
-const done = () => process.exit(0);
 
 /** A name pattern: `*.csproj` matches by suffix, anything else exactly. Case-insensitive, as on Windows. */
 function matcher(pattern) {
@@ -113,64 +114,76 @@ function invoke(exe, args, cwd) {
   });
 }
 
-try {
-  const raw = fs.readFileSync(0, 'utf8');
-  if (!raw.trim()) done();
+/** Formats the file a Write / Edit / MultiEdit payload names, when the project configures a formatter for it. Never throws, returns nothing. */
+function run(payload) {
+  try {
+    const target = payload?.tool_input?.file_path;
+    if (typeof target !== 'string' || !target.trim()) return;
 
-  const target = JSON.parse(raw)?.tool_input?.file_path;
-  if (typeof target !== 'string' || !target.trim()) done();
+    // The fast path, before any file system access: most edits touch a file no formatter owns.
+    const ext = path.extname(target).toLowerCase();
+    const isDotnet = DOTNET_EXT.has(ext);
+    if (!isDotnet && !WEB_EXT.has(ext)) return;
 
-  // The fast path, before any file system access: most edits touch a file no formatter owns.
-  const ext = path.extname(target).toLowerCase();
-  const isDotnet = DOTNET_EXT.has(ext);
-  if (!isDotnet && !WEB_EXT.has(ext)) done();
+    const file = path.resolve(target);
+    if (!fs.existsSync(file) || !fs.statSync(file).isFile()) return;
+    if (EXCLUDED_PATH.test(file)) return;
 
-  const file = path.resolve(target);
-  if (!fs.existsSync(file) || !fs.statSync(file).isFile()) done();
-  if (EXCLUDED_PATH.test(file)) done();
+    if (isDotnet) {
+      // Outside a project there is nothing to derive the style from.
+      const project = findAncestor(file, ['*.csproj', '*.vbproj', '*.fsproj']);
+      if (!project) return;
+      // No .editorconfig means the project never chose a style: formatting would invent one.
+      if (!findAncestor(file, ['.editorconfig'])) return;
+      const dotnet = onPath('dotnet');
+      if (!dotnet) return;
 
-  if (isDotnet) {
-    // Outside a project there is nothing to derive the style from.
-    const project = findAncestor(file, ['*.csproj', '*.vbproj', '*.fsproj']);
-    if (!project) done();
-    // No .editorconfig means the project never chose a style: formatting would invent one.
-    if (!findAncestor(file, ['.editorconfig'])) done();
-    const dotnet = onPath('dotnet');
-    if (!dotnet) done();
-
-    // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
-    // formats the project's directory as plain files instead of loading the project through MSBuild
-    // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
-    invoke(dotnet, [
-      'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
-    ], project.directory);
-    done();
-  }
-
-  const manifest = findAncestor(file, ['package.json']);
-  if (!manifest) done();
-
-  // The project must actually configure a formatter — a config file, or a key in the manifest.
-  let configured = Boolean(findAncestor(file, WEB_FORMATTER_CONFIG));
-  if (!configured) {
-    try {
-      configured = Object.prototype.hasOwnProperty.call(JSON.parse(fs.readFileSync(manifest.file, 'utf8')), 'prettier');
-    } catch {
-      configured = false;
+      // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
+      // formats the project's directory as plain files instead of loading the project through MSBuild
+      // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
+      invoke(dotnet, [
+        'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
+      ], project.directory);
+      return;
     }
+
+    const manifest = findAncestor(file, ['package.json']);
+    if (!manifest) return;
+
+    // The project must actually configure a formatter — a config file, or a key in the manifest.
+    let configured = Boolean(findAncestor(file, WEB_FORMATTER_CONFIG));
+    if (!configured) {
+      try {
+        configured = Object.prototype.hasOwnProperty.call(JSON.parse(fs.readFileSync(manifest.file, 'utf8')), 'prettier');
+      } catch {
+        configured = false;
+      }
+    }
+    if (!configured) return;
+
+    // The local package runner only: dependencies must already be installed, so a hook can never
+    // trigger a download in the middle of a session.
+    const modules = path.join(manifest.directory, 'node_modules');
+    if (!fs.existsSync(modules) || !fs.statSync(modules).isDirectory()) return;
+    const npx = onPath('npx');
+    if (!npx) return;
+
+    invoke(npx, ['--no-install', 'prettier', '--write', file], manifest.directory);
+  } catch {
+    // A hook that breaks must not break the edit that triggered it.
   }
-  if (!configured) done();
+}
 
-  // The local package runner only: dependencies must already be installed, so a hook can never
-  // trigger a download in the middle of a session.
-  const modules = path.join(manifest.directory, 'node_modules');
-  if (!fs.existsSync(modules) || !fs.statSync(modules).isDirectory()) done();
-  const npx = onPath('npx');
-  if (!npx) done();
+module.exports = { run };
 
-  invoke(npx, ['--no-install', 'prettier', '--write', file], manifest.directory);
-  done();
-} catch {
-  // A hook that breaks must not break the edit that triggered it.
-  done();
+// Run as a script, or required by `node -e` as an older settings.json wires it; `hooks/nudges.js` sets the
+// flag and calls `run` itself.
+if (require.main === module || !global.__nudgesDispatch) {
+  try {
+    const raw = fs.readFileSync(0, 'utf8');
+    if (raw.trim()) run(JSON.parse(raw));
+  } catch {
+    /* silence */
+  }
+  process.exit(0);
 }

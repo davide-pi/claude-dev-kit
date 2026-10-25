@@ -56,6 +56,9 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   const { reason, dir } = stop(edited('Fatto: il totale ora somma le righe.'));
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
+  assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
+  assert.match(reason, /mai in un blocco/);
+  assert.doesNotMatch(reason, /in un blocco ```/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(log.length, 1);
   assert.equal(JSON.parse(log[0]).word, 'Fatto');
@@ -362,6 +365,11 @@ test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table 
   assert.equal(inTail.reason, '');
   // "non verificato" rows need no proof
   assert.equal(stop([prompt('x'), tool('Edit'), result('ok'), ...filler, say(verdict(row('-', 'non verificato: serve staging')))]).reason, '');
+});
+
+test('a verdict table whose deciding line the turn printed is the accepted evidence', () => {
+  const table = ['Fatto.', '', '| Livello | Comando | Riga che decide | Stato |', '| --- | --- | --- | --- |', '| test | `node --test` | 42 passed | fatto |'].join('\n');
+  assert.equal(stop(edited(table, '42 passed')).reason, '');
 });
 
 test('a later human prompt ends the turn a delegate armed', () => {
