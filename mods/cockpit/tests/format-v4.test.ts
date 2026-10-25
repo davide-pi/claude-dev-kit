@@ -1,11 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
-import { costSummary, creditProjection, modelRows, perHour, roundCosts, topRounds } from '../hooks/costs'
+import { creditProjection, modelRows, perHour, roundCosts, topRounds } from '../hooks/costs'
 import { workItemIds, workItemUrl } from '../hooks/links'
 import { cacheHit, usdOf } from '../hooks/pricing'
-import { emptyInsights } from '../hooks/insights'
-import { INITIAL } from '../hooks/state'
-import { setLang } from '../hooks/strings'
 import { EVENTS_KEEP, recordAgentEvent, recordEvent } from '../hooks/timeline'
 import { NOW } from './format-fixtures'
 
@@ -90,33 +87,6 @@ test('modelRows: the counters per model priced and ranked, dearest first', () =>
   expect(rows.map(r => r.model)).toEqual(['claude-opus-5-5', 'claude-haiku-5'])
   expect(rows[0]?.hit).toBe(50)
   expect(modelRows(undefined)).toEqual([])
-})
-
-test('costSummary: text in the language in force from what the snapshot holds, with the cost, the models, the credits and the notifications count', () => {
-  const summary = () => costSummary({
-    ...INITIAL,
-    now: NOW + 3_600_000,
-    startedAt: NOW,
-    cost: { usd: 4.5 },
-    insights: { ...emptyInsights(), rounds: 12 },
-    modelUse: { 'claude-sonnet-5-5': { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 } },
-    rateLimits: [{ kind: 'five_hour', percentUsed: 62 }],
-  })
-  const lines = summary().split(String.fromCharCode(10))
-  expect(lines[0]).toBe('Session summary')
-  expect(lines[1]).toMatch(/\$4\.50/)
-  expect(lines[1]).toMatch(/12 rounds/)
-  expect(lines.some(l => /claude-sonnet-5-5 \$2\.00/.test(l))).toBe(true)
-  expect(lines.some(l => /5h credits used: 62%/.test(l))).toBe(true)
-  try {
-    setLang('it')
-    const it = summary().split(String.fromCharCode(10))
-    expect(it[0]).toBe('Riepilogo sessione')
-    expect(it[1]).toMatch(/12 giri/)
-    expect(it.some(l => /crediti 5h usati: 62%/.test(l))).toBe(true)
-  } finally {
-    setLang('en')
-  }
 })
 
 test('workItemIds and workItemUrl: AB# ids of the branch and the PR titles, once each; a URL needs the org and the project', () => {

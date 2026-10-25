@@ -1,8 +1,5 @@
-import type { CockpitEvent, CockpitRateLimit, CockpitSnapshot, CockpitUsage } from '../types'
+import type { CockpitEvent, CockpitRateLimit, CockpitUsage } from '../types'
 import { cacheHit, usdOf } from './pricing'
-import { signalsOf } from './signals'
-import { fmtCost } from './shared'
-import { t } from './strings'
 import { parseReset } from './session'
 
 const HOUR_MS = 3_600_000
@@ -43,18 +40,3 @@ export const modelRows = (use: Readonly<Record<string, CockpitUsage>> | undefine
     .map(([model, usage]) => ({ model, usd: usdOf(model, usage), hit: cacheHit(usage) }))
     .sort((a, b) => b.usd - a.usd)
 
-/** The session's cost as text for the prompt box: no model call, only what the pane already holds. */
-export function costSummary(s: CockpitSnapshot): string {
-  const S = t().summary
-  const rounds = roundCosts(s.events)
-  const rate = perHour(s.cost.usd, s.startedAt, s.now)
-  const models = modelRows(s.modelUse).map(m => `${m.model} ${fmtCost(m.usd)}${m.hit === undefined ? '' : ` (cache ${m.hit}%)`}`)
-  const five = (s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? [])).find(r => r.kind === 'five_hour')
-  return [
-    t().summaryTitle,
-    S.cost(fmtCost(s.cost.usd), s.insights?.rounds ?? rounds.length, rate === undefined ? undefined : fmtCost(rate)),
-    ...(models.length > 0 ? [S.models(models.join(', '))] : []),
-    ...(five ? [S.credits(Math.round(five.percentUsed))] : []),
-    S.signals(signalsOf(s).length),
-  ].join('\n')
-}

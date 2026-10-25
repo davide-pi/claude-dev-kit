@@ -168,7 +168,7 @@ test('the list is empty again at session start (a /clear included)', async ($, o
   expect((JSON.parse(second?.[1] ?? 'null') as { tasks: unknown }).tasks).toBeNull()
 })
 
-test('Work: no ALM line; the log hours button is the first row of the tab', async ($, on) => {
+test('Work: no ALM line, and the log hours button is in the footer, not at the top of the tab', async ($, on) => {
   world(on, { sessionId: () => 'chat-7', workspaces: { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } })
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -179,9 +179,9 @@ test('Work: no ALM line; the log hours button is the first row of the tab', asyn
   const rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^ALM/.test(r))).toBe(false)
   expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
-  // the button's row (empty text) comes right after the tab bar's rule, before the MAIN block
+  // the tab starts with the empty row after the tab bar's rule, then the MAIN block
   const main = rows.findIndex(r => /^MAIN/.test(r))
-  expect(rows[main - 3]).toBe('')
+  expect(rows[main - 1]?.trim()).toBe('')
   expect(rows[main - 2]).toMatch(/^─/)
   await ui.unmount()
 })

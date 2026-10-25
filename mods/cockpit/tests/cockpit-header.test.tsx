@@ -62,17 +62,16 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/^ 62% 5h/)).toBe(' 62% 5h \u21bb  2h14m')
     expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb  3d\d\dh$/)
     expect(await text(/vs expected/)).toBe('vs expected 7d  \u22125%')
-    // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row
+    // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
     const row = (await ui.find({ key: 'agent:a1' }))?.text
-    expect(row).toContain('\u2713 code-reviewer')
-    expect(await text(/son 5\.5/)).toContain('son 5.5')
-    // the four counters are one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
-    const toggle = (await ui.find({ key: 'usage:a1' }))?.text ?? ''
-    expect(toggle).toMatch(/^ +[▸▾] tokens$/)
-    if (toggle.includes('▸')) {
+    expect(row).toContain('✓ code-reviewer')
+    expect(row).toContain('sonnet')
+    // the rest (facts, the four counters) is one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
+    if ((await ui.find({ key: 'open:a1' })) === undefined) {
       expect(await text(/^ *in 30k/)).toBeUndefined()
-      await ui.press({ key: 'usage:a1' })
+      await ui.press({ key: 'agent:a1' })
     }
+    expect(await text(/son 5\.5/)).toContain('son 5.5')
     expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')
     expect(await text(/asked/)).toContain('asked fable \u2192 sonnet')
     expect(await text(/SUBAGENTS/)).toBe('SUBAGENTS \u00b7 0 running')
@@ -85,7 +84,7 @@ test('the pane has no close button of its own: the tab bar and the buttons row a
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:signals', 'tab:work', 'tab:notes', 'bar:compact', 'bar:suite', 'bar:summary'])
+  expect(keys).toEqual(['tab:agents', 'tab:context', 'tab:signals', 'tab:work', 'tab:notes', 'bar:compact', 'bar:suite', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -571,8 +570,8 @@ const LANGUAGES = [
   {
     name: 'English',
     files: {},
-    tabs: barLabels({ work: ' ●' }),
-    bareTabs: () => barLabels(),
+    tabs: barLabels({ work: ' ●' }, 'en', 'agents', 2),
+    bareTabs: () => barLabels({}, 'en', 'notes'),
     buttons: { compact: 'compact', save: 'save', edit: 'edit', send: 'send', delete: 'delete' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
     byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
@@ -581,7 +580,7 @@ const LANGUAGES = [
     name: 'Italian',
     files: IT_FILE,
     tabs: barLabels({ work: ' ●' }, 'it'),
-    bareTabs: () => barLabels({}, 'it'),
+    bareTabs: () => barLabels({}, 'it', 'notes'),
     buttons: { compact: 'compatta', save: 'salva', edit: 'modifica', send: 'invia', delete: 'elimina' },
     header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
     byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },

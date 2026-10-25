@@ -19,6 +19,7 @@ import {
   pctCell,
   signedPctCell,
   spanWidth,
+  textCells,
   truncMiddle,
   truncateSpans,
   ICONS,
@@ -49,6 +50,31 @@ export const PANE_MAX_COLUMNS = 60
 /** Columns of margin on each side of the content. */
 const PANE_PADDING_X = 1
 
+/** Cells a tab button takes: its label, a border and a space each side, and the dot after it. */
+const tabCells = (label: string, hasDot: boolean): number => textCells(label) + 4 + (hasDot ? 2 : 0)
+
+/**
+ * The tab bar's labels, always for one row of `width` cells; each step is tried when the one before does not fit: full names with counters,
+ * Context short, every short name, the first 3 cells of each short name. The selected tab always keeps its full name. A counter past 9 reads `9+`.
+ */
+export function tabBarLabels(active: CockpitTab, counts: Partial<Record<CockpitTab, number>>, dots: Partial<Record<CockpitTab, boolean>>, width: number): Record<CockpitTab, string> {
+  const S = t()
+  const badge = (id: CockpitTab) => {
+    const n = counts[id] ?? 0
+    return n > 0 ? ` ${n > 9 ? '9+' : n}` : ''
+  }
+  const steps: ((id: CockpitTab) => string)[] = [
+    id => S.tabs[id],
+    id => (id === 'context' && id !== active ? S.tabsShort[id] : S.tabs[id]),
+    id => (id === active ? S.tabs[id] : S.tabsShort[id]),
+    id => (id === active ? S.tabs[id] : S.tabsShort[id].slice(0, 3)),
+  ]
+  const build = (name: (id: CockpitTab) => string) => Object.fromEntries(TABS.map(id => [id, name(id) + badge(id)])) as Record<CockpitTab, string>
+  const total = (labels: Record<CockpitTab, string>) => TABS.reduce((n, id) => n + tabCells(labels[id], dots[id] === true), 0) + TABS.length - 1
+  const fitting = steps.map(build).find(labels => total(labels) <= width)
+  return fitting ?? build(steps[steps.length - 1] as (id: CockpitTab) => string)
+}
+
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Text, Button } = ui
   const S = t()
@@ -68,8 +94,10 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const newSignals = tab === 'signals' ? 0 : signalsOf(s).filter(sig => !seen.has(signalId(sig))).length
 
   // ── Tab bar: every tab shows its name; the selected one is the primary button ──
-  const tabButton = (id: CockpitTab, hasDot = false, count = 0) => {
-    const label = `${S.tabs[id]}${count > 0 ? ` ${count}` : ''}`
+  const counts = { agents: running.length, signals: newSignals }
+  const labels = tabBarLabels(tab, counts, { work: hasWorklog }, width)
+  const tabButton = (id: CockpitTab, hasDot = false) => {
+    const label = labels[id]
     const variant = tab === id ? 'primary' : 'secondary'
     return hasDot ? (
       <Button key={`tab:${id}`} variant={variant} onPress={() => actions.selectTab(id)}>
@@ -81,8 +109,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     )
   }
   const tabBar = (
-    <Box columnGap={1} flexWrap="wrap">
-      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog, id === 'agents' ? running.length : id === 'signals' ? newSignals : 0))}
+    <Box columnGap={1}>
+      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog))}
     </Box>
   )
 
@@ -158,13 +186,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     return split(line(ui, barCells(barW, parts)), barW, text)
   }
 
-  // The footer, the last row of every tab: compact, analizza suite (behind a confirm: it sends /retro to the model), copia riepilogo (no model call).
+  // The footer, the last row of every tab: compact, analizza suite (behind a confirm: it sends /retro to the model), segna ore (behind a confirm; the hours of this chat, so only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
-  const barLabels = [S.buttons.compact, S.buttons.analyzeSuite, S.buttons.copySummary]
+  const hasLog = s.sessionId !== undefined
+  const barLabels = [S.buttons.compact, S.buttons.analyzeSuite, ...(hasLog ? [S.buttons.logHours] : [])]
   const buttonsRow =
-    s.confirm === 'suite' ? (
+    s.confirm === 'suite' || (s.confirm === 'worklog' && hasLog) ? (
       <Box flexDirection="column">
-        {line(ui, truncateSpans([sp(S.confirmSuite, COLORS.yellow)], width))}
+        {line(ui, truncateSpans([sp(s.confirm === 'suite' ? S.confirmSuite : S.confirmLog, COLORS.yellow)], width))}
         <Box columnGap={BUTTON_GAP}>
           <Button key="confirm:yes" onPress={() => actions.answer(true)}>
             {S.buttons.yes}
@@ -182,9 +211,11 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         <Button key="bar:suite" onPress={() => actions.ask('suite')}>
           {S.buttons.analyzeSuite}
         </Button>
-        <Button key="bar:summary" onPress={() => actions.copySummary()}>
-          {S.buttons.copySummary}
-        </Button>
+        {hasLog && (
+          <Button key="bar:worklog" onPress={() => actions.ask('worklog')}>
+            {S.buttons.logHours}
+          </Button>
+        )}
       </Box>
     )
 

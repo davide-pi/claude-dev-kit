@@ -4,7 +4,6 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
 import { addHistory, addModelUse, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
 import { compactInstructions, recordCtxSample, recordRound } from './context'
-import { costSummary } from './costs'
 import {
   addStepUsage,
   applyTodos,
@@ -132,18 +131,10 @@ const paneActions = ($: EngineInterface): PaneActions => ({
         }
       })
       .catch(() => undefined),
-  copySummary: () =>
-    void read($, snapshot)
-      .then(async s => {
-        const box = await $.prompt.read().catch(() => undefined)
-        await $.prompt.fill({ text: `${box?.text === '' ? '' : '\n'}${costSummary(s)}`, mode: 'append' })
-        $.ui.toast(t().summaryCopied)
-      })
-      .catch(() => undefined),
   openDiff: change => void showDiff($, change),
   openAgent: agentId => void $.ui.view({ agentId }).catch(() => undefined),
   toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
-  toggleUsage: id => void patch($, s => ({ ...s, usageOpen: toggled(s.usageOpen, id) })).catch(() => undefined),
+  toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
   toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
   refresh: () => void pressRefresh($).catch(() => undefined),
   toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),

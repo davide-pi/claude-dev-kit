@@ -56,8 +56,8 @@ test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, c
   expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▾')
   const keys = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('history:'))
   expect(await keys()).toEqual(['history:a2', 'history:a1'])
-  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✗ two +son 5\.5 +5s +0$/)
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ one +son 5\.5 +0s +0$/)
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✗ two +sonnet +0 +5s$/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ one +sonnet +0 +0s$/)
   await ui.press({ key: 'history' })
   expect(await keys()).toEqual([])
   await ui.unmount()
@@ -115,7 +115,7 @@ test('HISTORY survives a reload: the session id reads its history from its state
   let ui = await mountPane($)
   expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')
   await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +son 5\.5 +1m00s +5\.4k$/)
+  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +sonnet +5\.4k +1m00s$/)
   expect((await ui.find({ key: 'history:a8' }))?.text).toMatch(/^✗ reviewer/)
   await ui.unmount()
 
@@ -189,7 +189,7 @@ test('HISTORY: entries a state file holds wrongly are left out, a file with no h
   await ui.unmount()
 })
 
-test('pressing an agent row, live or in HISTORY, puts that agent in the main view', async ($, on) => {
+test('an agent row, live or in HISTORY, expands on a press and collapses on the next; its open button puts that agent in the main view', async ($, on) => {
   const viewed: (string | undefined)[] = []
   const clock = world(on, { viewed, listed: [{ id: 'a2', status: 'running' }, { id: 'a3', status: 'running' }] })
   spawns(on)
@@ -202,15 +202,22 @@ test('pressing an agent row, live or in HISTORY, puts that agent in the main vie
   await finishAgent($, 'a2')
 
   const ui = await mountPane($)
-  // Subagents is the tab the pane opens on
-  await ui.press({ key: 'agent:a3' })
-  expect(viewed).toEqual(['a3'])
   await ui.press({ key: 'tab:agents' })
+  // collapsed: one row each, nothing to open
+  expect(await ui.find({ key: 'open:a3' })).toBeUndefined()
   await ui.press({ key: 'agent:a3' }) // live
+  expect(viewed).toEqual([])
+  expect(await ui.find({ key: 'open:a3' })).toBeDefined()
+  await ui.press({ key: 'open:a3' })
+  await ui.press({ key: 'agent:a3' })
+  expect(await ui.find({ key: 'open:a3' })).toBeUndefined()
   await ui.press({ key: 'agent:a2' }) // finished, still listed
+  await ui.press({ key: 'open:a2' })
   await ui.press({ key: 'history' })
+  expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   await ui.press({ key: 'history:a1' }) // in the history
-  expect(viewed).toEqual(['a3', 'a3', 'a2', 'a1'])
+  await ui.press({ key: 'open:a1' })
+  expect(viewed).toEqual(['a3', 'a2', 'a1'])
   await ui.unmount()
 })
 
@@ -302,12 +309,16 @@ test('subagent rows: a tool call seen before its agent spawned does not make a s
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
   await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
-  const rows = (await paneRows($, 50, 'agents')).rows
-  expect(rows.find(r => /code-reviewer/.test(r))).toMatch(/Review the orders filter/)
-  expect(rows.some(r => /last tool/.test(r))).toBe(false)
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'agent:a1' })
+  const rows = async () => rowTexts(await ui.drawn())
+  expect((await rows()).find(r => /^ +Review the orders filter/.test(r))).toBeDefined()
+  expect((await rows()).some(r => /last tool/.test(r))).toBe(false)
   // a call after the spawn is seen as before
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
-  expect((await paneRows($, 50, 'agents')).rows.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
+  expect((await rows()).some(r => /^ +last tool Grep$/.test(r))).toBe(true)
+  await ui.unmount()
 })
 
 // ── Subagenti ──
@@ -345,14 +356,18 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
 
   await step('a1')
   let now = await rows()
-  expect(now.find(r => /code-reviewer/.test(r))).toBe('◐ code-reviewer  go')
-  // the four counters are one press away
-  expect(now.some(r => counters.test(r))).toBe(false)
-  expect(now.find(r => /tokens$/.test(r))).toBe('  ▸ tokens')
-  await ui.press({ key: 'usage:a1' })
+  // collapsed: one row, the model a word, the effort an icon, the tokens and the time; nothing else of the agent
+  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^◐ code-reviewer +sonnet \u{F12A3} +1\.7k +0s$/u)
+  expect(now.some(r => counters.test(r) || /^ +go$/.test(r) || /% token/.test(r))).toBe(false)
+  // a press expands it: what it was asked, the facts and the four counters; the next press collapses it
+  await ui.press({ key: 'agent:a1' })
   now = await rows()
   expect(now.some(r => counters.test(r))).toBe(true)
-  expect(now.find(r => /tokens$/.test(r))).toBe('  ▾ tokens')
+  expect(now.some(r => /^ +go$/.test(r))).toBe(true)
+  await ui.press({ key: 'agent:a1' })
+  expect((await rows()).some(r => counters.test(r))).toBe(false)
+  await ui.press({ key: 'agent:a1' })
+  now = await rows()
   expect(now.find(r => /son 5\.5/.test(r))).toMatch(/^ +son 5\.5 .* HIGH/)
   expect(await facts()).toBe('100% token  0s')
 
@@ -400,8 +415,8 @@ test('Subagenti: the turn\'s own total replaces what its steps added, a turn tha
   // 1800 and 1700 new tokens of 3500
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  await ui.press({ key: 'usage:a1' })
-  await ui.press({ key: 'usage:a2' })
+  await ui.press({ key: 'agent:a1' })
+  await ui.press({ key: 'agent:a2' })
   const rows = rowTexts(await ui.drawn())
   expect(rows.filter(r => /^ +in 1k {2}out 300 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
   expect(rows.filter(r => /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/.test(r))).toHaveLength(1)
@@ -423,6 +438,7 @@ test('Subagenti: after a reload the share keeps the main loop\'s tokens and the 
   // 1700 of 10000 + 5400 + 1700 new tokens
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'agent:a1' })
   expect(shares(rowTexts(await ui.drawn()))).toEqual(['10% token'])
   await ui.unmount()
   // a main step is written, for the next reload
@@ -442,7 +458,7 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
   await spawnAgent($, 'code-reviewer')
   const ui = await mountPane($)
-  const elapsed = async () => (await ui.findAll({ type: 'Text', text: /^\d+s$/ }))[0]?.text
+  const elapsed = async () => /(\d+s)$/.exec((await ui.find({ key: 'agent:a1' }))?.text ?? '')?.[1]
   await ui.press({ key: 'tab:agents' })
   await clock.advance(4000)
   await settleAll()
@@ -485,6 +501,7 @@ test('Subagenti: an agent that leaves the list joins a cumulative counter that t
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   // 1700 of 100000 + 1700 + 1700 (the agent has run for minutes by now)
+  await ui.press({ key: 'agent:a2' })
   expect(shares(rowTexts(await ui.drawn()))).toEqual(['2% token'])
   await ui.unmount()
 })
@@ -504,56 +521,88 @@ test('Subagenti: the tool line (the one running, or the last) is cut to the widt
 
 // ── Phase 9: Subagents rows are one cut line each ──
 
-test('Subagents: every row is one line cut to the width, at 40, 58 and 80 columns: the type and description, the facts, the warning, the tool', async ($, on) => {
+test('Subagents: every row is one line cut to the width, at 40, 58 and 80 columns: the agent row with its fixed columns, then (expanded) the description, the facts, the warning and the tool', async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'a-code-reviewer-with-a-long-name', description: 'Review the orders filter and every test around it, then report back', model: 'fable' })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'a-code-reviewer-with-a-very-long-name-that-cannot-fit-a-row', description: 'Review the orders filter and every test around it, then report back', model: 'fable' })
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
   await clock.advance(2 * MIN)
   for (const columns of [40, 58, 80]) {
     const width = Math.min(columns, 60) - 2
-    const { root, rows } = await paneRows($, columns, 'agents')
-    const i = rows.findIndex(r => r.startsWith('SUBAGENTS'))
-    expect(i).toBeGreaterThan(0)
-    const body = rows.slice(i).filter(r => !/^─+$/.test(r))
-    expect(body.length).toBeGreaterThan(3)
-    for (const row of body) expect(textCells(row)).toBeLessThanOrEqual(width)
-    expect(rows.find(r => /^◐ a-code/.test(r))).toMatch(/…$/)
+    const ui = await mountPane($, columns)
+    await ui.press({ key: 'tab:agents' })
+    const body = async () => {
+      const rows = rowTexts(await ui.drawn())
+      return rows.slice(rows.findIndex(r => r.startsWith('SUBAGENTS'))).filter(r => !/^─+$/.test(r))
+    }
+    // collapsed: the agent is exactly one row, as wide as the pane: the name cut with …, the model, effort, tokens and time in fixed columns
+    const collapsed = await body()
+    const row = collapsed.filter(r => /^◐ a-code/.test(r))
+    expect(row).toHaveLength(1)
+    expect(textCells(row[0] ?? '')).toBe(width)
+    expect(row[0]).toMatch(/^◐ a-code[^ ]*… +sonnet +\S* *\S+ +2m00s$/)
+    expect(collapsed.some(r => /Review the orders|last tool|⚠/.test(r))).toBe(false)
+
+    // expanded: every row of the block is one line, none wider than the pane
+    await ui.press({ key: 'agent:a1' })
+    const expanded = await body()
+    expect(expanded.length).toBeGreaterThan(collapsed.length + 2)
+    for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
+    expect(expanded.find(r => /^ +Review the orders/.test(r))).toMatch(/…$/)
     // the facts row is exactly the width: the model on the left, the time on the right
-    expect(textCells(rows.find(r => /son 5\.5/.test(r)) ?? '')).toBe(width)
+    expect(textCells(expanded.find(r => /son 5\.5/.test(r)) ?? '')).toBe(width)
+    expect(expanded.some(r => /^ +⚠ asked fable/.test(r))).toBe(true)
+    expect(expanded.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
+
     // every pressable row of the tab is one truncating Text
     const rowsOfAgent = (n: unknown): unknown[] => {
       const o = n as { type?: string; props?: { key?: string; wrap?: string }; children?: unknown[] } | null
       return o?.type === 'Button' && o.props?.key === 'agent:a1' ? (o.children ?? []) : (o?.children ?? []).flatMap(rowsOfAgent)
     }
-    const inner = rowsOfAgent(root)[0] as { type?: string; props?: { wrap?: string } } | undefined
+    const inner = rowsOfAgent(await ui.drawn())[0] as { type?: string; props?: { wrap?: string } } | undefined
     expect(inner?.type).toBe('Text')
     expect(inner?.props?.wrap).toBe('truncate')
+    await ui.press({ key: 'agent:a1' })
+    await ui.unmount()
   }
 })
 
-test('Subagents: a description with line breaks stays on its one row', async ($, on) => {
+test('Subagents: a description with line breaks stays on its one row, under the expanded agent', async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review the filter\r\n\n  then report', model: 'fable' })
   await clock.advance(MIN)
-  const { rows } = await paneRows($, 58, 'agents')
-  expect(rows.filter(r => /^◐ reviewer/.test(r))).toEqual(['◐ reviewer  Review the filter then report'])
+  const ui = await mountPane($, 58)
+  await ui.press({ key: 'tab:agents' })
+  await ui.press({ key: 'agent:a1' })
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.filter(r => /Review the filter/.test(r))).toEqual(['  Review the filter then report'])
   expect(rows.some(r => /^then report/.test(r.trim()))).toBe(false)
+  await ui.unmount()
 })
 
-test('Subagents: the history rows are one truncating Text each', async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ history: [{ id: 'h1', type: 'a-reviewer-with-an-extremely-long-name-indeed', startedAt: NOW - 60_000, endedAt: NOW - 30_000, tokens: 1234, isFailed: false }], prs: [] }) })
+test('Subagents: the history rows are one row each, the name cut by display width (wide characters count two cells), and expand like a live one', async ($, on) => {
+  const at = { startedAt: NOW - 60_000, endedAt: NOW - 30_000, tokens: 1234, isFailed: false }
+  world(on, { dataFile: JSON.stringify({ history: [{ id: 'h1', type: 'a-reviewer-with-an-extremely-long-name-indeed', ...at }, { id: 'h2', type: '日本語のとても長いレビューアの名前です', ...at }], prs: [] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 40)
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'history' })
   const rows = rowTexts(await ui.drawn())
-  const row = rows.find(r => /^✓ a-reviewer/.test(r)) ?? ''
-  expect(textCells(row)).toBeLessThanOrEqual(38)
+  for (const re of [/^✓ a-reviewer/, /^✓ 日本語/]) {
+    const row = rows.find(r => re.test(r)) ?? ''
+    expect(textCells(row)).toBe(38)
+    expect(row).toMatch(/…/)
+    expect(row).toMatch(/ +1\.2k +30s$/)
+  }
+  expect(await ui.find({ key: 'open:h1' })).toBeUndefined()
+  await ui.press({ key: 'history:h1' })
+  expect(await ui.find({ key: 'open:h1' })).toBeDefined()
+  await ui.press({ key: 'history:h1' })
+  expect(await ui.find({ key: 'open:h1' })).toBeUndefined()
   await ui.unmount()
 })
 

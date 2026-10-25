@@ -11,7 +11,7 @@ test('English is the default: the tab labels, the footer and the titles', async 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:suite'), await label('bar:summary')]).toEqual(['Agents', 'Context', 'Notifications', 'Work', 'Notes', 'compact', 'analyze suite', 'copy summary'])
+  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:suite'), await label('bar:worklog')]).toEqual(['Agents', 'Ctx', 'Notifications', 'Work', 'Notes', 'compact', 'analyze suite', 'log hours'])
   expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
   await ui.unmount()
 })
@@ -36,8 +36,8 @@ test('both languages draw every tab, with every label of the bundles in both and
       const ui = await mountPane($, 58)
       const ids = ['agents', 'context', 'signals', 'work', 'notes']
       for (const [i, id] of ids.entries()) {
-        expect((await ui.find({ key: 'tab:' + id }))?.text).toBe(tabs[i])
         await ui.press({ key: 'tab:' + id })
+        expect((await ui.find({ key: 'tab:' + id }))?.text).toBe(tabs[i]) // the selected tab keeps its full name
         const drawn = rowTexts(await ui.drawn()).join('\n')
         // an undefined or raw key would show as "undefined" or a dotted path
         expect(drawn, lang + ' ' + id).not.toMatch(/undefined|\[object|\bbuttons\.|\bsignalText\./)

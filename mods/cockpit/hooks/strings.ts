@@ -31,11 +31,11 @@ const EN = {
   ...SHARED,
   /** Every tab's label, in the bar: text, never an icon alone. */
   tabs: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
-  buttons: { compact: 'compact', analyzeSuite: 'analyze suite', copySummary: 'copy summary', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
+  tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
+  buttons: { compact: 'compact', analyzeSuite: 'analyze suite', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
   confirmLog: 'log the hours of this chat?',
   confirmSuite: 'analyze the suite? sends /retro to the model',
   confirmNoteDelete: 'delete this note?',
-  summaryCopied: 'summary in the prompt',
 
   // Header
   contextTitle: 'CONTEXT',
@@ -51,7 +51,7 @@ const EN = {
   // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   lastTool: 'last tool ',
-  tokensToggle: 'tokens',
+  openAgentView: 'open transcript',
   historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
@@ -95,13 +95,6 @@ const EN = {
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
     `${from} → ${to}${growth ? ` (+${growth}/round)` : ''}${rounds === undefined ? '' : `, compact in ~${rounds} ${plural(rounds, 'round', 'rounds')}`}`,
   refreshIn: (seconds: number) => `refresh ${seconds}s`,
-  summaryTitle: 'Session summary',
-  summary: {
-    cost: (usd: string, rounds: number, perHour?: string) => `cost ${usd} in ${rounds} ${plural(rounds, 'round', 'rounds')}${perHour === undefined ? '' : `, ${perHour}/h`}`,
-    models: (list: string) => `models: ${list}`,
-    credits: (pct: number) => `5h credits used: ${pct}%`,
-    signals: (n: number) => `signals: ${n}`,
-  },
 
   // Work
   mainTitle: 'MAIN',
@@ -151,11 +144,11 @@ export type Strings = typeof EN
 const IT: Strings = {
   ...SHARED,
   tabs: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
-  buttons: { compact: 'compatta', analyzeSuite: 'analizza suite', copySummary: 'copia riepilogo', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
+  tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
+  buttons: { compact: 'compatta', analyzeSuite: 'analizza suite', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
   confirmLog: 'registrare le ore di questa chat?',
   confirmSuite: 'analizzare la suite? invia /retro al modello',
   confirmNoteDelete: 'eliminare questa nota?',
-  summaryCopied: 'riepilogo nel prompt',
 
   contextTitle: 'CONTESTO',
   contextDetailsTitle: 'DETTAGLI CONTESTO',
@@ -168,7 +161,7 @@ const IT: Strings = {
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
-  tokensToggle: 'token',
+  openAgentView: 'apri trascrizione',
   historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
@@ -217,13 +210,6 @@ const IT: Strings = {
   trendLine: (from: string, to: string, growth?: string, rounds?: number) =>
     `${from} → ${to}${growth ? ` (+${growth}/giro)` : ''}${rounds === undefined ? '' : `, compattazione tra ~${rounds} ${plural(rounds, 'giro', 'giri')}`}`,
   refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
-  summaryTitle: 'Riepilogo sessione',
-  summary: {
-    cost: (usd: string, rounds: number, perHour?: string) => `costo ${usd} in ${rounds} ${plural(rounds, 'giro', 'giri')}${perHour === undefined ? '' : `, ${perHour}/h`}`,
-    models: (list: string) => `modelli: ${list}`,
-    credits: (pct: number) => `crediti 5h usati: ${pct}%`,
-    signals: (n: number) => `segnali: ${n}`,
-  },
 
   mainTitle: 'PRINCIPALE',
   tasksDone: (n: number) => ` ${n} ${plural(n, 'fatto', 'fatti')}`,

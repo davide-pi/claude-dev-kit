@@ -180,7 +180,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   noteDraft: undefined,
   noteEditing: undefined,
   insights: undefined,
-  usageOpen: undefined,
+  agentsOpen: undefined,
   signalOpen: undefined,
   seenSignals: undefined,
   notesOpen: undefined,

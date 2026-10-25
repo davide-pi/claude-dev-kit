@@ -73,24 +73,38 @@ export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgen
 export const agentIcon = (a: CockpitAgent): Span =>
   a.status === 'running' ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green)
 
+const MODEL_W = 6
+const TOKENS_W = 5
+const TIME_W = 6
+// icon, gap, name, then gap + model, gap + effort, gap + tokens, gap + time
+const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + TOKENS_W + 1 + TIME_W
+
+/** The model as a word (`opus`, `sonnet`, `haiku`); a name this build does not know is cut to the column. */
+const rowModel = (model: string | undefined): string => modelFamily(model) ?? (model ? truncEnd(model, MODEL_W) : '—')
+
+/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, tokens, time. */
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number): Span[] {
-  const nameW = Math.max(6, width - 27)
+  const nameW = Math.max(1, width - ROW_FIXED_W)
   const prefix = depth > 0 ? `${'  '.repeat(depth - 1)}└ ` : ''
   const isRunning = a.status === 'running'
-  const end = a.endedAt ?? now
-  return [
-    agentIcon(a),
-    sp(' '),
-    depth > 0 ? sp(padCells(truncEnd(prefix + a.type, nameW), nameW), COLORS.dim) : sp(padCells(truncEnd(a.type, nameW), nameW)),
-    sp(' '),
-    sp(padCells(truncEnd(shortModel(a.model), 9), 9), undefined, isRunning),
-    sp(' '),
-    ...(effortSpans(a.effort).length ? effortSpans(a.effort) : [sp(' ')]),
-    sp(' '),
-    sp(padStart(duration(end - a.startedAt), 6)),
-    sp(' '),
-    sp(padStart(isRunning ? '' : abbrevTokens(a.tokens), 5)),
-  ]
+  const name = padCells(truncEnd(prefix + a.type, nameW), nameW)
+  const effort = effortSpans(a.effort)
+  return truncateSpans(
+    [
+      agentIcon(a),
+      sp(' '),
+      depth > 0 ? sp(name, COLORS.dim) : sp(name, undefined, isRunning),
+      sp(' '),
+      sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning),
+      sp(' '),
+      ...(effort.length ? effort : [sp(' ')]),
+      sp(' '),
+      sp(padStart(abbrevTokens(a.tokens), TOKENS_W)),
+      sp(' '),
+      sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
+    ],
+    width,
+  )
 }
 
 /** `left` and `right` on one row of `width` cells: a gap between them, the left cut to leave the right whole; a row too short for both is cut. */
@@ -116,13 +130,13 @@ export function subagentFacts(a: CockpitAgent, now: number, total: number, inden
 }
 
 /**
- * The rows under an agent's facts on the Subagents tab: the four counters when the agent's are open (`isUsageOpen`), then the tool running
+ * The rows under an agent's facts on the Subagents tab once it is expanded: what it was asked, the four counters, then the tool running
  * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
  */
-export function subagentDetails(a: CockpitAgent, indent: string, width: number, isUsageOpen = false): Span[][] {
+export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
   const running = a.status === 'running' ? a.activeTools?.at(-1) : undefined
   const counters =
-    a.usage && isUsageOpen
+    a.usage
       ? truncateSpans(
           [
             sp(indent),
@@ -140,7 +154,8 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number, 
       : undefined
   const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
   const tool = toolSpans && truncateSpans(toolSpans, width)
-  return [counters, tool].filter((r): r is Span[] => r !== undefined)
+  const task = a.description ? truncateSpans([sp(indent), dim(a.description.replace(/\s+/g, ' '))], width) : undefined
+  return [task, counters, tool].filter((r): r is Span[] => r !== undefined)
 }
 
 const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [

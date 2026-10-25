@@ -308,8 +308,8 @@ export type CockpitSnapshot = {
   confirm?: 'suite' | 'worklog' | `note:${number}`
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights
-  /** The agents whose four token counters are expanded on the Agents tab (the others show a line to open them). */
-  usageOpen?: string[]
+  /** The agents expanded on the Agents tab (the others show their one line): description, facts, warning, four token counters, tool. */
+  agentsOpen?: string[]
   /** The notes shown in full on the Notes tab (the others show their first lines). */
   notesOpen?: number[]
   /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */

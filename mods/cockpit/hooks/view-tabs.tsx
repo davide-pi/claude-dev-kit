@@ -11,7 +11,7 @@ import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { Signal } from './signals'
 import { t } from './strings'
-import { agentIcon, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
+import { agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, subagentFacts, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar, trendSpans } from './view-context'
@@ -30,13 +30,11 @@ export type PaneActions = {
   ask: (kind: 'suite' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
-  /** Puts the session's cost summary in the prompt box (no model call). */
-  copySummary: () => void
   /** Puts the agent's transcript in the main view. */
   openAgent: (agentId: string) => void
   toggleHistory: () => void
-  /** Opens or closes the four token counters of an agent. */
-  toggleUsage: (agentId: string) => void
+  /** Expands or collapses an agent row (live or in the history). */
+  toggleAgent: (agentId: string) => void
   /** Opens or closes the why and what-to-do of a notification (`kind:key`). */
   toggleSignal: (id: string) => void
   /** Asks for the exact count of the context breakdown (`full`: it spends token-count requests): the Context tab's `refresh`, once a minute. */
@@ -127,48 +125,29 @@ export function agentsBlocks(k: Kit): Block[] {
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
 
-  const agentButton = (key: string, a: CockpitAgent, depth: number) => (
-    <Button key={key} plain onPress={() => actions.openAgent(a.id)}>
-      <Text wrap="truncate">{spanNodes(ui, agentRow(a, depth, s.now, width))}</Text>
-    </Button>
-  )
-
-  // Every agent listed (finished ones for two minutes), a block each
-  const rows = orderAgents(agents)
+  // Every agent is one row (state, name, model, effort, tokens, time); pressing it expands what else there is to know. Live and history alike.
   const sessionTotal = sessionTokens(s)
-  const agentRows = rows.flatMap(({ agent, depth }, i) => {
+  const agentBlock = (key: string, agent: CockpitAgent, depth: number): Block => {
     const indent = '  '.repeat(depth + 1)
+    const isOpen = s.agentsOpen?.includes(agent.id) === true
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    const isUsageOpen = s.usageOpen?.includes(agent.id) === true
     return [
-      i > 0 && gap(),
-      // The first row is the pressable one: state, type and what the agent was asked. Every row is one cut line, never wrapped.
-      <Button key={`agent:${agent.id}`} plain onPress={() => actions.openAgent(agent.id)}>
-        <Text wrap="truncate">
-          {spanNodes(
-            ui,
-            truncateSpans(
-              [
-                agentIcon(agent),
-                sp(' '),
-                sp(depth > 0 ? `${'  '.repeat(depth - 1)}└ ${agent.type}` : agent.type, undefined, agent.status === 'running'),
-                ...(agent.description ? [dim(`  ${agent.description.replace(/\s+/g, ' ')}`)] : []),
-              ],
-              width,
-            ),
-          )}
-        </Text>
+      <Button key={key} plain onPress={() => actions.toggleAgent(agent.id)}>
+        <Text wrap="truncate">{spanNodes(ui, agentRow(agent, depth, s.now, width))}</Text>
       </Button>,
-      line(ui, subagentFacts(agent, s.now, sessionTotal, indent, width)),
-      warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
-      agent.usage && (
-        <Button key={`usage:${agent.id}`} plain onPress={() => actions.toggleUsage(agent.id)}>
-          <Text wrap="truncate" color={COLORS.title}>{`${indent}${isUsageOpen ? '▾' : '▸'} ${S.tokensToggle}`}</Text>
-        </Button>
-      ),
-      ...subagentDetails(agent, indent, width, isUsageOpen).map(spans => line(ui, spans)),
+      isOpen && [
+        line(ui, subagentFacts(agent, s.now, sessionTotal, indent, width)),
+        warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
+        ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
+        <Button key={`open:${agent.id}`} plain onPress={() => actions.openAgent(agent.id)}>
+          <Text wrap="truncate" color={COLORS.title}>{`${indent}↗ ${S.openAgentView}`}</Text>
+        </Button>,
+        gap(),
+      ],
     ]
-  })
+  }
+  const rows = orderAgents(agents)
+  const agentRows = rows.map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth))
   // HISTORY: the agents that left the list, newest first, behind a toggle (collapsed by default)
   const history = s.history ?? []
   const isHistoryOpen = s.isHistoryOpen === true
@@ -182,7 +161,7 @@ export function agentsBlocks(k: Kit): Block[] {
               <Text color={COLORS.title}>{`${S.historyTitle} · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
             </Button>,
             isHistoryOpen && gap(),
-            isHistoryOpen && history.map(h => agentButton(`history:${h.id}`, { ...h, status: 'done' }, 0)),
+            isHistoryOpen && history.map(h => agentBlock(`history:${h.id}`, { ...h, status: 'done' }, 0)),
           ],
         ]
   return [
@@ -436,22 +415,7 @@ export function workBlocks(k: Kit): Block[] {
   ]
   const linksPart: Block = prs.length + items.length > 0 ? [gap(), title(S.linksTitle(prs.length + items.length)), gap(), linkRows] : []
 
-  // `log hours` logs the hours of this chat: the first row of the tab, behind a confirmation
-  const logPart: Block =
-    s.sessionId === undefined
-      ? []
-      : [
-          gap(),
-          ...(s.confirm === 'worklog'
-            ? confirmRow(k, S.confirmLog)
-            : [
-                <Button key="bar:worklog" onPress={() => actions.ask('worklog')}>
-                  {S.buttons.logHours}
-                </Button>,
-              ]),
-        ]
-
-  return [logPart, ...principalBlock, changesPart, linksPart].filter(b => b.length > 0)
+  return [...principalBlock, changesPart, linksPart].filter(b => b.length > 0)
 }
 
 // ── Note ──

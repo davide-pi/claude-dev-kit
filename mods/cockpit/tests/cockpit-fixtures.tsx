@@ -139,8 +139,20 @@ export const NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
   it: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
 }
 
-/** The tab bar's labels: every tab's name; `extras` adds a badge (` 1`, ` ●`) after a label. */
-export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}, lang: 'en' | 'it' = 'en') => TABS.map(tab => `${NAMES[lang][tab]}${extras[tab] ?? ''}`)
+const SHORT_NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
+  en: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
+  it: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
+}
+
+/**
+ * The tab bar's labels at 58 columns: `level` 1 is every full name but Context (a bare bar), 2 the selected tab's name and the others short (a badge
+ * or the worklog dot is on); `extras` adds a badge (` 1`, ` ●`) after a label.
+ */
+export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}, lang: 'en' | 'it' = 'en', active: CockpitTab = 'agents', level: 1 | 2 = 1) =>
+  TABS.map(tab => {
+    const isShort = level === 2 ? tab !== active : tab === 'context' && tab !== active
+    return `${(isShort ? SHORT_NAMES : NAMES)[lang][tab]}${extras[tab] ?? ''}`
+  })
 
 // ── Phase 4: Work, per agent ──
 

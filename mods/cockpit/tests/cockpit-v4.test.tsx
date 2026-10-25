@@ -33,7 +33,7 @@ test('Notifications: a command that failed twice is one row (what), its why and 
   await clock.advance(5000) // past the state file's write window
   await settleAll()
 
-  expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notifications 1')
+  expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notif 1')
   expect(headerOf(rowTexts(await ui.drawn())).some(r => /⚠/.test(r))).toBe(false)
   expect(flagOf(writes)).not.toHaveProperty('signals')
 
