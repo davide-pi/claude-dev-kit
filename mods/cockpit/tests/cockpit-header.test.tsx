@@ -371,18 +371,18 @@ test('header: the folder icon of a folder that is not a repository is U+F024B', 
   expect(row).toContain('\u{F024B} example-repo')
 })
 
-test('header: the folder icon of a repository is U+F0CCF', async ($, on) => {
+test('header: the folder icon of a repository is U+F024B too', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const row = headerOf((await paneRows($)).rows).find(r => /example-repo/.test(r))
-  expect(row).toContain('\u{F0CCF} example-repo')
+  expect(row).toContain('\u{F024B} example-repo')
 })
 
-test('header: the folder icon of a linked worktree is U+F0CD0', async ($, on) => {
+test('header: the folder icon of a linked worktree is U+F024B too', async ($, on) => {
   world(on, { isLinkedWorktree: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const row = headerOf((await paneRows($)).rows).find(r => /example-repo/.test(r))
-  expect(row).toContain('\u{F0CD0} example-repo')
+  expect(row).toContain('\u{F024B} example-repo')
 })
 
 test('header: the folder is a Link to the worktree root as a file:// address, keeping its name', async ($, on) => {

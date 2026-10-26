@@ -1,8 +1,6 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
 // Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
-import type { CockpitGit } from '../types'
-
 export const COLORS = {
   text: '#d6d8dc',
   dim: '#9aa0aa',
@@ -24,16 +22,10 @@ export const COLORS = {
 } as const
 
 export const ICONS = {
-  folder: '\u{F024B}', // nf-md-folder: a folder that is not a repository
-  repo: '\u{F0CCF}', // nf-md-source_repository: a repository's own checkout
-  tree: '\u{F0CD0}', // nf-md-source_repository_multiple: a linked worktree, another checkout of the same repo
+  folder: '\u{F024B}', // nf-md-folder: the folder, whether a plain one, a repository or a linked worktree
   branch: '\u{F062C}', // nf-md-source_branch
   disk: '\u{F02CA}', // nf-md-harddisk
 } as const
-
-/** The folder glyph by what the folder is: a linked worktree, a repository's checkout, or a plain folder (no git). */
-export const folderIcon = (git: Pick<CockpitGit, 'root' | 'worktreeRoot'> | undefined): string =>
-  git?.worktreeRoot ? ICONS.tree : git ? ICONS.repo : ICONS.folder
 
 // Nerd Font Material Design glyphs (supplementary private use area, hence \u{...}).
 const EFFORT: Record<string, { icon: string; color: string }> = {

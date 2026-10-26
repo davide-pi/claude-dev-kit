@@ -14,7 +14,6 @@ import {
   duration,
   fmtCost,
   fmtCostDelta,
-  folderIcon,
   gridWidths,
   pathToFileUri,
   pctCell,
@@ -127,7 +126,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const folderPath = g?.worktreeRoot || s.cwd
   const folderName = baseName(folderPath)
   const folderHref = pathToFileUri(folderPath)
-  const folderText = truncMiddle(`${folderIcon(g)} ${folderName}`, w.folder)
+  const folderText = truncMiddle(`${ICONS.folder} ${folderName}`, w.folder)
   const arrows = g ? aheadBehindSpans(g) : []
   const grid = (
     <Box columnGap={1}>

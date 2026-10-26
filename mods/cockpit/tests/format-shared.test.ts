@@ -12,7 +12,6 @@ import {
   effortGlyph,
   fmtCost,
   fmtCostDelta,
-  folderIcon,
   gridWidths,
   pathToFileUri,
   pctCell,
@@ -175,13 +174,8 @@ test('signedPctCell pads the pace delta to the width of the other percentages', 
 
 // ── Cockpit v3, phase 1: the always-visible header ──
 
-test('folderIcon: a plain folder, a repository and a linked worktree each have their own glyph', () => {
+test('ICONS.folder: one glyph for a plain folder, a repository and a linked worktree', () => {
   expect(ICONS.folder).toBe('\u{F024B}')
-  expect(ICONS.repo).toBe('\u{F0CCF}')
-  expect(ICONS.tree).toBe('\u{F0CD0}')
-  expect(folderIcon(undefined)).toBe('\u{F024B}')
-  expect(folderIcon({ root: '/w/orders' })).toBe('\u{F0CCF}')
-  expect(folderIcon({ root: '/w/orders-wt', worktreeRoot: '/w/orders-wt' })).toBe('\u{F0CD0}')
 })
 
 test('cacheColor: green from 80 %, amber from 50 to 79, red below 50', () => {

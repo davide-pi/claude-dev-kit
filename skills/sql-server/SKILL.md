@@ -18,6 +18,8 @@ and object names verbatim.
 - Something is slow, times out, deadlocks, or got slower after a deploy; an index is proposed.
 - Inspecting an unfamiliar database; porting between SQL Server and Postgres; the read cache.
 
+A script that writes always carries `@DryRun bit = 1` (rollback by default, commit only at 0): `rules/sql.md`.
+
 Not for: EF modelling, LINQ translation, migrations (`ef-core`); starting a database container
 (`docker-dev-env`); client-side latency (`dotnet-diagnostics`).
 
