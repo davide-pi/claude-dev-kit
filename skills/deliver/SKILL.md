@@ -28,7 +28,7 @@ yet (`debug-systematic` runs inside the bug scenario).
 | Field | Values |
 | --- | --- |
 | scenario | `bug` · `perf` · `refactor` · `migration` · `feature` · `spike` |
-| size | by risk, never by file count: **S** logic only, a few lines, or a mechanical batch (rename, move, config, generated) with tests · **M** one feature, or data, money, concurrency, contract, security · **L** a subsystem, a new interface, 3+ risk axes |
+| size | by risk, never by file count: **S** logic only, a few lines, or a mechanical batch (rename, move, config, generated) with tests · **M** one feature, or data, money, concurrency, contract, security · **L** a subsystem, a new interface, 3+ non-`logic` risk axes |
 | risk | the axes touched: `logic` `data` `money` `concurrency` `contract` `security` `performance`; they raise the size floor (`references/loop.md`) |
 | PERIMETER | files (paths, `dir/`, globs), behaviour in scope, exclusions |
 | test matrix | which levels apply (unit · integration · e2e · perf) and the command for each |
@@ -39,7 +39,7 @@ it at every triage (it overwrites, records the branch), close it before the verd
 pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files 'src/Orders/OrdersQuery.cs,src/Orders/Dto/,tests/**/Orders*.cs'
 pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close -FindingsLog '<result.findingsLog>' [-Run <id>] [-Tokens <n>]
 ```
-Write the path exactly so, literal `~` (the allow rules match the text); entries in single quotes. `-Close` logs the
+Write the path exactly so, literal `~` (allow rules match it); entries in single quotes. `-Close` logs the
 findings line; `-LogRun` logs without closing, `-NoFindings` closes with none (`references/loop.md`).
 
 `scope-guard.js` reads that file only, ignoring it on another branch. Tests of the change belong to the perimeter;

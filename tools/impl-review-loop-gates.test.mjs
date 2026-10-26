@@ -41,14 +41,15 @@ test('reviewersFor: S one Sonnet at medium, M one Sonnet at high, L Sonnet and O
   assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
 });
 
-test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes lift to L, never downward', () => {
+test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes besides logic lift to L, never downward', () => {
   assert.equal(sizeFor('S', []), 'S');
   assert.equal(sizeFor('S'), 'S');
   assert.equal(sizeFor('S', ['logic']), 'S');
   assert.equal(sizeFor('S', ['logic', 'performance']), 'S');                 // two axes of the low kind
   for (const axis of ['data', 'money', 'concurrency', 'contract', 'security']) assert.equal(sizeFor('S', [axis]), 'M', axis);
-  assert.equal(sizeFor('S', ['logic', 'performance', 'security']), 'L');
-  assert.equal(sizeFor('M', ['logic', 'performance', 'data']), 'L');
+  assert.equal(sizeFor('S', ['logic', 'performance', 'security']), 'M');    // logic is in almost every change: it never counts toward L
+  assert.equal(sizeFor('M', ['logic', 'performance', 'data']), 'M');
+  assert.equal(sizeFor('S', ['performance', 'data', 'security']), 'L');
   assert.equal(sizeFor('M', ['data']), 'M');
   assert.equal(sizeFor('L', []), 'L');
   assert.equal(sizeFor('L', ['logic']), 'L');
