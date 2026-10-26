@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
 
 test('inPerimeter: file, directory, glob, absolute path under the root, case, anchored at the root', () => {
   assert.ok(inPerimeter('src/Orders/OrdersQuery.cs', FILES));
@@ -148,7 +148,7 @@ test('script: reviewers by size, effort and model', async () => {
   const sizes = {};
   for (const size of ['S', 'M', 'L']) {
     const { calls } = await run({ ...ARGS, size, ...(size === 'S' ? {} : { touches: ['security', 'performance'] }) }, size === 'S' ? [review([])] : size === 'M' ? [review([]), review([]), review([])] : [review([]), review([]), review([]), review([])]);
-    sizes[size] = calls.filter((c) => c.opts.label?.startsWith('review round 1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
+    sizes[size] = calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
   assert.deepEqual(sizes.S, ['code-reviewer:sonnet:medium']);
   assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
@@ -157,7 +157,7 @@ test('script: reviewers by size, effort and model', async () => {
 
 test('script: M without touches is one Sonnet reviewer at high', async () => {
   const { calls } = await run(ARGS, [review([])]);
-  assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('review round 1')).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high']);
+  assert.deepEqual(calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high']);
 });
 
 test('script: an S change that grows to 5 files stays S: the file count is a gaps signal, never a size', async () => {
@@ -167,29 +167,29 @@ test('script: an S change that grows to 5 files stays S: the file count is a gap
     { scope: 'fixed', files: grown, evidence: 'ok' },
   ]);
   assert.equal(out.status, 'OK');
-  const models = (round) => calls.filter((c) => c.opts.label?.startsWith(`review round ${round}: `)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
-  assert.deepEqual(models(1), ['review round 1: code:sonnet:medium']);
-  assert.deepEqual(models(2), ['review round 2: code:sonnet:medium']);                                        // the delta round: at S the Sonnet that raised F1 is the panel
+  const models = (round) => calls.filter((c) => isReview(c.opts.label, round)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
+  assert.deepEqual(models(1), ['reviewer A · round 1 · code:sonnet:medium']);
+  assert.deepEqual(models(2), ['reviewer A · round 2 · code:sonnet:medium']);                                        // the delta round: at S the Sonnet that raised F1 is the panel
   assert.deepEqual(models(3), []);                                                            // S has no final full read
   assert.deepEqual(out.roundLog.map((r) => r.size), ['S', 'S']);
   assert.equal(out.gaps.filter((g) => /5 files.*size S/.test(g)).length, 1);                 // pushed once, not per round
 });
 
 test('script: risk raises the floor of the triage size, never lowers it: data lifts S to M, three axes besides logic lift to L; touches is the old alias', async () => {
-  const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([])])).calls.filter((c) => c.opts.label?.startsWith('review round 1')).map((c) => c.opts.label);
-  assert.deepEqual(await panel('S', {}), ['review round 1: code']);
-  assert.deepEqual(await panel('S', { risk: ['logic'] }), ['review round 1: code']);
+  const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
+  assert.deepEqual(await panel('S', {}), ['reviewer A · round 1 · code']);
+  assert.deepEqual(await panel('S', { risk: ['logic'] }), ['reviewer A · round 1 · code']);
   const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([])]);
-  assert.equal(lifted.calls.find((c) => c.opts.label === 'review round 1: code').opts.model, 'sonnet');      // M: one Sonnet at high
+  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.model, 'sonnet');      // M: one Sonnet at high
   assert.deepEqual(lifted.out.roundLog.map((r) => r.size), ['M']);
-  assert.deepEqual(await panel('M', { risk: ['data', 'performance', 'money'] }), ['review round 1: code', 'review round 1: second opinion', 'review round 1: performance']);   // three axes: L, plus the specialist
-  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['review round 1: code', 'review round 1: performance']);   // logic never counts toward L
-  assert.deepEqual(await panel('M', { risk: ['security'] }), ['review round 1: code', 'review round 1: security']);
-  assert.deepEqual(await panel('M', { touches: ['security'] }), ['review round 1: code', 'review round 1: security']);
-  assert.deepEqual(await panel('L', { risk: ['logic'] }), ['review round 1: code', 'review round 1: second opinion']);
+  assert.deepEqual(await panel('M', { risk: ['data', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer performance · round 1']);   // three axes: L, plus the specialist
+  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer performance · round 1']);   // logic never counts toward L
+  assert.deepEqual(await panel('M', { risk: ['security'] }), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
+  assert.deepEqual(await panel('M', { touches: ['security'] }), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
+  assert.deepEqual(await panel('L', { risk: ['logic'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok' }]);
   assert.equal(many.out.roundLog[0].size, 'M');                                               // 9+ files split the reviewers, the size stays
-  assert.deepEqual(many.calls.filter((c) => c.opts.label?.startsWith('review round 1')).map((c) => c.opts.label), ['review round 1: code (files 1/2)', 'review round 1: code (files 2/2)']);
+  assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2']);
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
 });
 
@@ -197,7 +197,7 @@ test('script: the carried fields are in the schemas, a report without them is st
   const { out, calls } = await run(ARGS, [review([])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(['verify', 'snapshot', 'rejected', 'noticed', 'evidence'].filter((k) => !calls[0].opts.schema.required.includes(k)), []);
-  const reviewer = calls.find((c) => c.opts.label === 'review round 1: code').opts.schema;
+  const reviewer = calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.schema;
   assert.ok(reviewer.required.includes('filesReviewed'));
   assert.deepEqual(Object.keys(reviewer.properties.found.items.properties).filter((k) => ['causedByChange', 'confidence'].includes(k)), ['causedByChange', 'confidence']);
 });
@@ -363,8 +363,8 @@ test('script: round 1 reviews the files the implementer changed; from round 2 th
     { scope: 'first', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' },
     { scope: 'fixed the null guard', files: ['src/Orders/Dto/A.cs'], evidence: 'ok' },
   ]);
-  const r1 = calls.find((c) => c.opts.label === 'review round 1: code').prompt;
-  const r2 = calls.find((c) => c.opts.label === 'review round 2: code').prompt;
+  const r1 = calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt;
+  const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
   assert.match(r1, /git diff HEAD --name-only.*git ls-files -o --exclude-standard/);
   assert.match(r1, /list the implementer declared \(src\/Orders\/OrdersQuery\.cs\) is a hint/);
   assert.match(r2, /DELTA of the last fix/);
@@ -405,7 +405,7 @@ test('script: a missing verdict is asked again next round, with no fix and no st
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 3);
   assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix round 1 findings']);
-  assert.match(calls.find((c) => c.opts.label === 'review round 3: code').prompt, /- F1 \[open\]/);
+  assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 3 · code').prompt, /- F1 \[open\]/);
   assert.match(out.gaps.join('\n'), /round 2: no verdict for F1/);
 });
 
@@ -430,11 +430,11 @@ test('script: a RECHECK round asks only the skipped ids; no verdict again → ST
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.round, 3);
   assert.deepEqual(out.stall.findings.map((s) => [s.id, s.why]), [['F2', 'no-verdict']]);
-  const r3 = calls.find((c) => c.opts.label === 'review round 3: code').prompt;
+  const r3 = calls.find((c) => c.opts.label === 'reviewer A · round 3 · code').prompt;
   assert.match(r3, /you skipped last round.*ids only/s);
   assert.match(r3, /- F2 \[open\]/);
   assert.doesNotMatch(r3, /- F1 /);
-  assert.equal(calls.filter((c) => c.opts.label?.startsWith('review round') && !c.opts.label.endsWith('check the fixes')).length, 3);   // the Sonnet watcher S is answered by the harness, not counted
+  assert.equal(calls.filter((c) => isReview(c.opts.label) && !c.opts.label.endsWith('check the fixes')).length, 3);   // the Sonnet watcher S is answered by the harness, not counted
 });
 
 test('script: out-of-scope and minor findings seen again in a later round are listed once', async () => {
@@ -483,7 +483,7 @@ test('script: an implementer with no report is continued, never reviewed partial
   assert.deepEqual(impls.map((c) => c.opts.label), ['implement the change', 'implement the change (continued, 1)']);
   assert.match(impls[1].prompt, /Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over/);
   assert.match(impls[1].prompt, /fix it/);
-  assert.equal(calls.filter((c) => c.opts.label === 'review round 1: code').length, 1);
+  assert.equal(calls.filter((c) => c.opts.label === 'reviewer A · round 1 · code').length, 1);
   assert.equal(out.gaps.join(' ').includes('returned no report'), false);
 });
 
@@ -510,7 +510,7 @@ test('script: four failed continuations (null, or still remaining) → STALL inc
   assert.doesNotMatch(still.out.stall.reason, /Other\.cs/);
   assert.match(still.out.resume, /WITHOUT resumeFromRunId/);
   assert.equal(still.calls.filter((c) => c.opts.agentType === 'implementer').length, 5);
-  assert.equal(still.calls.some((c) => c.opts.label === 'review round 1: code'), false);
+  assert.equal(still.calls.some((c) => c.opts.label === 'reviewer A · round 1 · code'), false);
   const none = await run(ARGS, [], [null, null, null, null, null], { probe: { files: [] } });
   assert.equal(none.out.stall.why, 'incomplete');
 });
@@ -524,7 +524,7 @@ test('script: a reviewer carries defaults (no question, no stall) and both promp
   const { out, calls } = await run(ARGS, [{ ...review([]), defaults: [{ choice: 'kept the name', alternative: 'rename', path: 'src/Orders/OrdersQuery.cs' }] }]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(out.defaults.map((d) => d.choice), ['kept the name']);
-  assert.match(calls.find((c) => c.opts.label === 'review round 1: code').prompt, /only when the answer changes behaviour, a public contract, data or security/);
+  assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /only when the answer changes behaviour, a public contract, data or security/);
   assert.match(calls[0].prompt, /before the turn budget runs out/);
 });
 

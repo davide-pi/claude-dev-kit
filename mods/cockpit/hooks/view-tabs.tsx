@@ -13,7 +13,7 @@ import { t } from './strings'
 import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, pairRow, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
-import { categoryRows, consumerSpans, contextBar } from './view-context'
+import { categoryRows, contextBar } from './view-context'
 import { bigResultSpans } from './view-insights'
 import { changeSpans, prSpans } from './view-work'
 import { repoRelative } from './work'
@@ -45,6 +45,8 @@ export type PaneActions = {
   refresh: () => void
   /** Opens or closes a note beyond its first lines. */
   toggleNote: (id: number) => void
+  /** Shows a cut list in full or folds it again (`changes`, `outside`), or expands a row (`grew:…`). */
+  toggleOpen: (key: string) => void
   /** Draws the diff of a changed file in the second pane. */
   openDiff: (change: CockpitChange) => void
   /** Keeps what the Note tab's field holds as the person types it. */
@@ -59,7 +61,7 @@ export type PaneActions = {
 }
 
 export type Node = RenderElement | false | undefined
-export type Block = (Node | readonly Node[])[]
+export type Block = (Node | readonly Node[] | Block)[]
 
 export type Kit = {
   ui: Ui
@@ -301,14 +303,21 @@ export function contextBlocks(k: Kit): Block[] {
     gap(),
     refreshRow,
   ]
-  const consumersBlock: Block =
-    context && context.consumers.length > 0
-      ? [gap(), title(S.consumersTitle(context.consumers.length)), gap(), context.consumers.map(c => line(ui, consumerSpans(c, width)))]
-      : []
+  // Each output that grew the context is a button: pressed, its whole argument (a file by its full path) wraps under it instead of being cut
   const biggest = s.insights?.biggest ?? []
-  const grewBlock: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), biggest.map(r => line(ui, bigResultSpans(r, width)))] : []
-  // The context first (categories, consumers, the compact hint), then what the agents cost, then the outputs that grew the context
-  return [breakdownBlock, consumersBlock, agentsBlock, grewBlock].filter(b => b.length > 0)
+  const grewRows = biggest.map((r): Block => {
+    const id = `grew:${r.tool}:${r.arg ?? ''}:${r.tokens}`
+    const isOpen = s.openKeys?.includes(id) === true
+    return [
+      <Button key={id} plain onPress={() => actions.toggleOpen(id)}>
+        <Text wrap="truncate">{spanNodes(ui, bigResultSpans(r, width))}</Text>
+      </Button>,
+      isOpen && (r.fullArg ?? r.arg) !== undefined && wrapCells(r.fullArg ?? r.arg ?? '', Math.max(4, width - 2)).map(l => line(ui, [dim(`  ${l}`)])),
+    ]
+  })
+  const grewBlock: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), grewRows] : []
+  // The context first (categories, the compact hint), then what the agents cost, then the outputs that grew the context
+  return [breakdownBlock, agentsBlock, grewBlock].filter(b => b.length > 0)
 }
 
 // ── Lavoro ──
@@ -364,14 +373,21 @@ export function workBlocks(k: Kit): Block[] {
           gap(),
           line(ui, [dim(S.perimeter(s.perimeter.length)), ...(check ? [dim(S.filesTouched(check.files))] : [])]),
           check && (outside.length === 0 ? line(ui, [sp('✓ ', COLORS.green), dim(S.noFileOutside)]) : line(ui, [sp(S.filesOutside(outside.length), COLORS.red)])),
-          outside.slice(0, MAX_OUTSIDE_ROWS).map(file => line(ui, [sp(`  ${truncMiddle(file, Math.max(4, width - 2))}`, COLORS.yellow)])),
-          outside.length > MAX_OUTSIDE_ROWS && line(ui, [dim(`  … +${outside.length - MAX_OUTSIDE_ROWS}`)]),
+          collapsible(
+            k,
+            'outside',
+            outside.map(file => [line(ui, [sp(`  ${truncMiddle(file, Math.max(4, width - 2))}`, COLORS.yellow)])]),
+            MAX_OUTSIDE_ROWS,
+            s.openKeys?.includes('outside') === true,
+            () => actions.toggleOpen('outside'),
+          ),
         ]
   const principalBlock: Block[] = perimeterPart.length + taskPart.length + worklogPart.length > 0 ? [[gap(), title(S.mainTitle), ...perimeterPart, ...taskPart, ...worklogPart]] : []
 
   // The files changed on the branch and not committed yet. A changed file is a Button: a press draws its diff in the second pane.
   const repo = s.repo
   const edited = new Set((s.edited ?? []).flatMap(p => repoRelative(s.git?.root, p) ?? []))
+  const isChangesOpen = s.openKeys?.includes('changes') === true
   const changesPart: Block = repo
     ? [
         gap(),
@@ -379,12 +395,20 @@ export function workBlocks(k: Kit): Block[] {
         gap(),
         repo.files.length === 0
           ? line(ui, [dim(S.noChanges)])
-          : repo.files.slice(0, MAX_FILE_ROWS).map(c => (
-              <Button key={`file:${c.path}`} plain onPress={() => actions.openDiff(c)}>
-                {spanNodes(ui, changeSpans(c, width, edited.has(c.path)))}
-              </Button>
-            )),
-        repo.total > MAX_FILE_ROWS && line(ui, [dim(`… +${repo.total - MAX_FILE_ROWS}`)]),
+          : collapsible(
+              k,
+              'changes',
+              repo.files.map(c => [
+                <Button key={`file:${c.path}`} plain onPress={() => actions.openDiff(c)}>
+                  {spanNodes(ui, changeSpans(c, width, edited.has(c.path)))}
+                </Button>,
+              ]),
+              MAX_FILE_ROWS,
+              isChangesOpen,
+              () => actions.toggleOpen('changes'),
+            ),
+        // the read keeps the first files only: the ones past them are counted, never listed
+        (isChangesOpen || repo.files.length <= MAX_FILE_ROWS) && repo.total > repo.files.length && line(ui, [dim(`… +${repo.total - repo.files.length}`)]),
       ]
     : []
 

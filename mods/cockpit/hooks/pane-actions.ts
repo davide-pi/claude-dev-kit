@@ -68,6 +68,7 @@ export function paneActions($: EngineInterface): PaneActions {
     toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
     refresh: () => void pressRefresh($).catch(() => undefined),
     toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
+    toggleOpen: key => void patch($, s => ({ ...s, openKeys: toggled(s.openKeys, key) })).catch(() => undefined),
     setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
     saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
     editNote: id =>

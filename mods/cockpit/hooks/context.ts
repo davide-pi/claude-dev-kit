@@ -1,7 +1,7 @@
 import type { SessionContextBreakdown } from 'claude-code'
 
-import type { CockpitConsumer, CockpitContext, CockpitContextRow, CockpitSnapshot, CockpitStatic, CockpitTask } from '../types'
-import { baseName, isCount, isRecord, truncEnd } from './shared'
+import type { CockpitContext, CockpitContextRow, CockpitSnapshot, CockpitStatic, CockpitTask } from '../types'
+import { isCount, isRecord, truncEnd } from './shared'
 
 // ── Context growth and the autocompact forecast ──
 
@@ -43,7 +43,6 @@ const COMPACT_GROWTH = 1.05
 const COMPACT_ROUNDS = 3
 /** The hint shows with this many requests (or fewer) left before auto-compaction, whatever the fill. */
 const COMPACT_FORECAST_MAX = 3
-const CONSUMERS_SHOWN = 5
 
 /** `rounds` with this main turn's context size added, the last twenty kept. A shrinking context stays: a compaction is a drop to see. */
 export const recordRound = (rounds: readonly number[] | undefined, tokens: number): number[] => [...(rounds ?? []), tokens].slice(-ROUNDS_KEEP)
@@ -68,15 +67,14 @@ export const sortRows = (rows: readonly CockpitContextRow[]): CockpitContextRow[
 /** Messages are what the conversation holds and change with every response; every other row of the window is fixed for a session. */
 const isStaticRow = (r: CockpitContextRow): boolean => (r.kind === 'used' || r.kind === 'deferred') && !/^messages$/i.test(r.name)
 
-/** What an exact reading fixes for the session: its static rows, consumers and skills listing. */
+/** What an exact reading fixes for the session: its static rows and skills listing. */
 export const staticOf = (c: CockpitContext): CockpitStatic => ({
   rows: c.rows.filter(isStaticRow).map(r => ({ name: r.name, tokens: r.tokens })),
-  consumers: c.consumers,
   ...(c.skills && { skills: c.skills }),
 })
 
 /**
- * A summary reading with the static part of an exact count laid over it: those rows (marked exact), the consumers and the skills
+ * A summary reading with the static part of an exact count laid over it: those rows (marked exact) and the skills
  * listing come from the count, Messages stay the summary's. The free space gives back what the used rows took, the total follows.
  */
 export function withStatic(c: CockpitContext, fixed: CockpitStatic): CockpitContext {
@@ -91,7 +89,6 @@ export function withStatic(c: CockpitContext, fixed: CockpitStatic): CockpitCont
     ...c,
     rows: sortRows(rows.map(r => (r.kind === 'free' ? { ...r, tokens: Math.max(0, r.tokens - diff) } : r))),
     total: c.total + diff,
-    consumers: fixed.consumers,
     ...(fixed.skills && { skills: fixed.skills }),
     isExact: false,
   }
@@ -111,24 +108,16 @@ export function withDeltas(next: CockpitContext, previous: CockpitContext | unde
 }
 
 /**
- * What the Context tab keeps of a breakdown: every row as the engine lists it, the window, and the five biggest static
- * consumers (memory files, MCP tools inside the window, agents, and the skills listing as one).
+ * What the Context tab keeps of a breakdown: every row as the engine lists it, the window, and how many skills the listing holds.
  */
 export function contextOf(
-  b: Pick<SessionContextBreakdown, 'categories' | 'totalTokens' | 'rawMaxTokens' | 'memoryFiles' | 'mcpTools' | 'agents' | 'skills'>,
+  b: Pick<SessionContextBreakdown, 'categories' | 'totalTokens' | 'rawMaxTokens' | 'skills'>,
   isExact: boolean,
 ): CockpitContext {
-  const consumers: CockpitConsumer[] = [
-    ...b.memoryFiles.map((f): CockpitConsumer => ({ name: `${f.type} ${baseName(f.path)}`, kind: 'memory', tokens: f.tokens })),
-    ...b.mcpTools.filter(t => t.isLoaded).map((t): CockpitConsumer => ({ name: t.name, kind: 'mcp', tokens: t.tokens })),
-    ...b.agents.map((a): CockpitConsumer => ({ name: a.agentType, kind: 'agent', tokens: a.tokens })),
-    ...(b.skills ? [{ name: `skills ${b.skills.includedSkills}/${b.skills.totalSkills}`, kind: 'skill' as const, tokens: b.skills.tokens }] : []),
-  ]
   return {
     rows: sortRows(b.categories.map((c): CockpitContextRow => ({ name: c.name, tokens: c.tokens, kind: c.kind, ...(isExact && { isExact: true as const }) }))),
     total: b.totalTokens,
     max: b.rawMaxTokens,
-    consumers: consumers.filter(c => c.tokens > 0).sort((a, c) => c.tokens - a.tokens).slice(0, CONSUMERS_SHOWN),
     ...(b.skills && { skills: { listed: b.skills.includedSkills, total: b.skills.totalSkills } }),
     isExact,
   }

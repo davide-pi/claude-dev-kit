@@ -34,7 +34,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   expect(rows[i]).toMatch(/^TASK · 2\/4◐ 1 {2}○ 1 {2}✓ 2$/)
   expect(rows[i - 1]).toBe(' ')
   // the tasks belong to the main agent's block
-  expect(rows[i - 2]).toBe('MAIN')
+  expect(rows[i - 2]).toBe('IN PROGRESS')
   expect(rows[i - 3]).toBe(' ')
   expect(rows[i - 4]).toMatch(/^─+$/)
   expect(rows[i + 1]).toBe(' ')
@@ -179,8 +179,8 @@ test('Work: no ALM line, and the log hours button is in the footer, not at the t
   const rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^ALM/.test(r))).toBe(false)
   expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
-  // the tab starts with the empty row after the tab bar's rule, then the MAIN block
-  const main = rows.findIndex(r => /^MAIN/.test(r))
+  // the tab starts with the empty row after the tab bar's rule, then the IN PROGRESS block
+  const main = rows.findIndex(r => /^IN PROGRESS/.test(r))
   expect(rows[main - 1]?.trim()).toBe('')
   expect(rows[main - 2]).toMatch(/^─/)
   await ui.unmount()
@@ -215,18 +215,18 @@ test('Work with no tasks, no worklog warnings and no git draws no section, and n
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 50, 'work')
   expect(rows.some(r => /^(PROCESSI|PROCESSES)/.test(r))).toBe(false)
-  expect(rows.some(r => /^(MAIN|CHANGES|LINK)/.test(r))).toBe(false)
+  expect(rows.some(r => /^(IN PROGRESS|CHANGES|LINK)/.test(r))).toBe(false)
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })
 
-test('MAIN: the perimeter, the session tasks and the worklog warnings are one block, in that order', async ($, on) => {
+test('IN PROGRESS: the perimeter, the session tasks and the worklog warnings are one block, in that order', async ($, on) => {
   world(on, { hasWorklog: true, branch: 'feat/x', perimeter: PERIMETER, changed: ['lib/z.ts'] })
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
   const rows = await workRows($)
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
-  const [main, perimeter, tasks, worklog] = [at(/^MAIN$/), at(/^deliver perimeter/), at(/^TASK ·/), at(/worklog: 1d to log/)]
+  const [main, perimeter, tasks, worklog] = [at(/^IN PROGRESS$/), at(/^deliver perimeter/), at(/^TASK ·/), at(/worklog: 1d to log/)]
   expect(main).toBeLessThan(perimeter)
   expect(perimeter).toBeLessThan(tasks)
   expect(tasks).toBeLessThan(worklog)

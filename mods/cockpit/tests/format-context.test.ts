@@ -91,25 +91,13 @@ test('autocompactForecast: requests left from the average growth; absent without
   expect(autocompactForecast([100_000, 110_000], 150_000)).toBe(4)
 })
 
-test('contextOf: the rows and the window, and the top five static consumers over memory files, loaded MCP tools, agents and the skills listing', () => {
+test('contextOf: the rows, the window and the skills listing count', () => {
   const row = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred') => ({ name, tokens, color: 'promptBorder', isDeferred: kind === 'deferred', kind })
   const context = contextOf(
     {
       categories: [row('System prompt', 8000, 'used'), row('Messages', 90_000, 'used'), row('Free space', 700_000, 'free')],
       totalTokens: 248_000,
       rawMaxTokens: 1_000_000,
-      memoryFiles: [
-        { path: '/home/u/.claude/CLAUDE.md', type: 'User', tokens: 3000 },
-        { path: '/w/proj/CLAUDE.md', type: 'Project', tokens: 900 },
-      ],
-      mcpTools: [
-        { name: 'mcp__a__big', serverName: 'a', tokens: 5000, isLoaded: true },
-        { name: 'mcp__a__off', serverName: 'a', tokens: 9000, isLoaded: false },
-      ],
-      agents: [
-        { agentType: 'code-reviewer', source: 'plugin', tokens: 400 },
-        { agentType: 'tiny', source: 'plugin', tokens: 100 },
-      ],
       skills: { totalSkills: 60, includedSkills: 41, tokens: 4200, skillFrontmatter: [] },
     },
     false,
@@ -121,21 +109,12 @@ test('contextOf: the rows and the window, and the top five static consumers over
     { name: 'Free space', tokens: 700_000, kind: 'free' },
   ])
   expect([context.total, context.max, context.isExact]).toEqual([248_000, 1_000_000, false])
-  // an unloaded MCP schema is outside the window; the sixth and smallest consumer is cut
-  expect(context.consumers).toEqual([
-    { name: 'mcp__a__big', kind: 'mcp', tokens: 5000 },
-    { name: 'skills 41/60', kind: 'skill', tokens: 4200 },
-    { name: 'User CLAUDE.md', kind: 'memory', tokens: 3000 },
-    { name: 'Project CLAUDE.md', kind: 'memory', tokens: 900 },
-    { name: 'code-reviewer', kind: 'agent', tokens: 400 },
-  ])
   expect(context.skills).toEqual({ listed: 41, total: 60 })
   // no skill listing: none claimed
-  expect(contextOf({ categories: [], totalTokens: 0, rawMaxTokens: 0, memoryFiles: [], mcpTools: [], agents: [] }, true)).toEqual({
+  expect(contextOf({ categories: [], totalTokens: 0, rawMaxTokens: 0 }, true)).toEqual({
     rows: [],
     total: 0,
     max: 0,
-    consumers: [],
     isExact: true,
   })
 })
@@ -196,7 +175,6 @@ test('staticOf and withStatic: the static rows of an exact reading replace the e
     rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500), ctxRow('MCP tools', 4000, 'deferred'), ctxRow('Free space', 690_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
     total: 100_500,
     max: 1_000_000,
-    consumers: [{ name: 'User CLAUDE.md', kind: 'memory' as const, tokens: 3000 }],
     skills: { listed: 4, total: 5 },
     isExact: true,
   }
@@ -205,14 +183,12 @@ test('staticOf and withStatic: the static rows of an exact reading replace the e
       { name: 'System prompt', tokens: 9500 },
       { name: 'MCP tools', tokens: 4000 },
     ],
-    consumers: exact.consumers,
     skills: { listed: 4, total: 5 },
   })
   const summary = {
     rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 8000), ctxRow('MCP tools', 3000, 'deferred'), ctxRow('Free space', 700_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
     total: 103_000,
     max: 1_000_000,
-    consumers: [],
     isExact: false,
   }
   const merged = withStatic(summary, staticOf(exact))
@@ -223,11 +199,11 @@ test('staticOf and withStatic: the static rows of an exact reading replace the e
     { name: 'Free space', tokens: 698_500, kind: 'free' },
     { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
   ])
-  expect([merged.total, merged.isExact, merged.consumers, merged.skills]).toEqual([104_500, false, exact.consumers, { listed: 4, total: 5 }])
+  expect([merged.total, merged.isExact, merged.skills]).toEqual([104_500, false, { listed: 4, total: 5 }])
 })
 
 test('withDeltas: a round read stamps each row with its change from the reading before; any other read keeps the deltas it had', () => {
-  const before = { rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500)], total: 100_500, max: 1_000_000, consumers: [], isExact: false }
+  const before = { rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500)], total: 100_500, max: 1_000_000, isExact: false }
   const next = { ...before, rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 9500), ctxRow('Skills', 2000)] }
   const round = withDeltas(next, before, true)
   expect(round.rows.map(r => r.delta)).toEqual([4000, 0, undefined])

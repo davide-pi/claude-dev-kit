@@ -34,7 +34,6 @@ test('what reads the same in both languages is one value, shared by both bundles
     setLang('it')
     const it = t()
     expect(it.tokenLabels).toBe(en.tokenLabels)
-    expect(it.consumerKinds).toBe(en.consumerKinds)
     expect(it.diffTitle).toBe(en.diffTitle)
     for (const key of ['cache', 'taskTitle', 'costCacheHit'] as const) expect(it[key]).toBe(en[key])
     // the texts of the v4 views are not shared: each language has its own

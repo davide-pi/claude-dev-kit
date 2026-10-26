@@ -6,7 +6,7 @@ test('roundOf reads the number after R, and none for a label without one', () =>
   expect(roundOf('fix R2')).toBe(2)
   expect(roundOf('review R12 of x')).toBe(12)
   expect(roundOf('fix round 2 findings')).toBe(2)
-  expect(roundOf('review round 3: code (files 1/2)')).toBe(3)
+  expect(roundOf('reviewer A1 · round 3 · code, files 1/2')).toBe(3)
   expect(roundOf('R')).toBeUndefined()
   expect(roundOf('fix')).toBeUndefined()
 })

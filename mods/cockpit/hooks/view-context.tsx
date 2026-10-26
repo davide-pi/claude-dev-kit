@@ -1,4 +1,4 @@
-import type { CockpitConsumer, CockpitContext, CockpitContextRow } from '../types'
+import type { CockpitContext, CockpitContextRow } from '../types'
 import {
   COLORS,
   abbrevTokens,
@@ -6,19 +6,17 @@ import {
   padCells,
   shade,
   truncEnd,
-  truncMiddle,
   withBackground,
 } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
-import { dim, pad, padStart, sp } from './view-base'
+import { dim, padStart, sp } from './view-base'
 
-/** Cells of the Context rows: a category's tokens and share of the window, what follows them (the exact mark and the change of the last round) and a consumer's kind label. */
+/** Cells of the Context rows: a category's tokens and share of the window, and what follows them (the exact mark and the change of the last round). */
 const CTX_TOKENS_W = 6
 const CTX_SHARE_W = 5
 const CTX_MARK_W = 2
 const CTX_DELTA_W = 6
-const CONSUMER_KIND_W = 5
 /** The colors of the used categories, in turn; the compaction buffer is dim and the free space empty. */
 const CATEGORY_COLORS = [COLORS.blue, COLORS.lavender, COLORS.amber, COLORS.green, COLORS.yellow, COLORS.orange, COLORS.violet, COLORS.gray]
 
@@ -63,10 +61,4 @@ export function categoryRows(c: CockpitContext, width: number): Span[][] {
     // the free space is drawn from a dim gray, whose own square is nearly invisible
     return [categorySpans(r, color, shade(r.kind === 'free' ? COLORS.gray : color, r.kind === 'free' ? 0.2 : 0.32), c.max, width)]
   })
-}
-
-/** A static consumer row: its kind, its name cut to fit, its tokens. */
-export function consumerSpans(c: CockpitConsumer, width: number): Span[] {
-  const nameW = Math.max(4, width - CONSUMER_KIND_W - 1 - CTX_TOKENS_W)
-  return [dim(pad(t().consumerKinds[c.kind], CONSUMER_KIND_W)), sp(' '), sp(padCells(truncMiddle(c.name, nameW), nameW)), sp(padStart(abbrevTokens(c.tokens), CTX_TOKENS_W))]
 }

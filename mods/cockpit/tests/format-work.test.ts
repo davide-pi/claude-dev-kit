@@ -243,6 +243,17 @@ test('parseCreatedPr: the pull request a gh or az create printed, with the title
   expect(parseCreatedPr('az repos pr create --title Faster --source-branch x', az)).toEqual({ number: 9, title: 'Faster', url: 'https://dev.azure.com/o/p/_git/r/pullrequest/9' })
   expect(parseCreatedPr('az repos pr create', JSON.stringify({ pullRequestId: 9, title: 'No web url' }))).toEqual({ number: 9, title: 'No web url' })
   expect(parseCreatedPr('az repos pr create', 'ERROR: failed')).toBeUndefined()
+  // a --query that drops the repository: the address comes from the command's organization, project and repository
+  const bare = JSON.stringify({ pullRequestId: 2830, title: 'Build' })
+  const url = 'https://dev.azure.com/contoso/Shop/_git/Shop/pullrequest/2830'
+  expect(parseCreatedPr("az repos pr create --org https://dev.azure.com/contoso/ -p Shop --repository Shop --title 'Build' --query '{id: pullRequestId}'", bare)).toEqual({ number: 2830, title: 'Build', url })
+  expect(parseCreatedPr('az repos pr create --organization contoso --project=Shop -r Shop', bare)?.url).toBe(url)
+  expect(parseCreatedPr('az repos pr create --org https://dev.azure.com/o --project "My Project" --repository r', bare)?.url).toBe('https://dev.azure.com/o/My%20Project/_git/r/pullrequest/2830')
+  // a shell variable or a missing flag names no address
+  expect(parseCreatedPr('az repos pr create --org $org -p Shop --repository Shop', bare)).toEqual({ number: 2830, title: 'Build' })
+  expect(parseCreatedPr('az repos pr create --org o -p Shop', bare)).toEqual({ number: 2830, title: 'Build' })
+  // the record's own web address wins over the flags
+  expect(parseCreatedPr('az repos pr create --org x -p y --repository z', az)?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/9')
   expect(parseCreatedPr('git status', az)).toBeUndefined()
 })
 

@@ -512,7 +512,7 @@ const LANGUAGES = [
     bareTabs: () => barLabels({}, 'en', 'notes'),
     buttons: { compact: 'compact', save: 'save', edit: 'edit', send: 'send', delete: 'delete' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^MAIN$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^IN PROGRESS$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
@@ -521,7 +521,7 @@ const LANGUAGES = [
     bareTabs: () => barLabels({}, 'it', 'notes'),
     buttons: { compact: 'compatta', save: 'salva', edit: 'modifica', send: 'invia', delete: 'elimina' },
     header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^PRINCIPALE$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^IN CORSO$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 

@@ -185,6 +185,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   seenSignals: undefined,
   signalsAt: undefined,
   notesOpen: undefined,
+  openKeys: undefined,
   refreshedAt: undefined,
   tasks: [],
   cacheShare: undefined,

@@ -28,6 +28,7 @@ import {
   resultTokens,
   roundCost,
   toolArg,
+  toolArgFull,
 } from './insights'
 import {
   fastTick,
@@ -406,7 +407,7 @@ export const register: Register = on => {
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
       await patch($, s => ({
         ...s,
-        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), tokens: outcome?.tokens, error: outcome?.error }),
+        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), fullArg: toolArgFull(e), tokens: outcome?.tokens, error: outcome?.error }),
       })).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')

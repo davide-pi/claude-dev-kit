@@ -33,7 +33,7 @@ import type { Ui } from './view-base'
 import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit, tabBlocks } from './view-tabs'
-import type { Node, PaneActions } from './view-tabs'
+import type { Block, Node, PaneActions } from './view-tabs'
 import { aheadBehindSpans } from './work'
 
 export type { PaneActions } from './view-tabs'
@@ -274,7 +274,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // Only the selected tab is built. Blocks are told apart by a rule; an empty tab says so.
   const blocks = tabBlocks(tab, kit)
-  const body: Node[] = blocks.length > 0 ? blocks.flatMap((b, i) => [...(i > 0 ? [rule] : []), ...b.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
+  const body: Block = blocks.length > 0 ? blocks.flatMap((b, i) => [...(i > 0 ? [rule] : []), ...b.flat()]) : [gap(), line(ui, [dim(S.nothingToShow)])]
 
   return (
     <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>

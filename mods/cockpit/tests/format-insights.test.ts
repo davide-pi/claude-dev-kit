@@ -12,6 +12,7 @@ import {
   withContextReading,
   roundCost,
   toolArg,
+  toolArgFull,
 } from '../hooks/insights'
 
 test('toolArg: the short argument of a tool call, one line, a file by its name; none when the call carries nothing to show', () => {
@@ -86,6 +87,13 @@ test('recordToolCall: keeps the five largest results (tool, argument, tokens), b
   for (const tokens of [50, 30, 40, 20, 60]) ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0, tokens })
   expect(ins.biggest?.map(b => b.tokens)).toEqual([60, 50, 40, 30, 20])
   expect(ins.biggest?.[0]).toEqual({ tool: 'Grep', tokens: 60 })
+  // the whole argument is kept beside the short one only when it differs
+  const path = '/work/repo/src/orders/query.ts'
+  const read = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, arg: toolArg({ file_path: path }), fullArg: toolArgFull({ file_path: path }), tokens: 10 })
+  expect(read.biggest?.[0]).toEqual({ tool: 'Read', arg: 'query.ts', fullArg: path, tokens: 10 })
+  const ls = recordToolCall(undefined, { tool: 'Bash', isOk: true, ms: 0, arg: toolArg({ command: 'ls' }), fullArg: toolArgFull({ command: 'ls' }), tokens: 10 })
+  expect(ls.biggest?.[0]).toEqual({ tool: 'Bash', arg: 'ls', tokens: 10 })
+  expect(toolArgFull({ command: `a  ${'x'.repeat(2000)}` })).toHaveLength(1000)
   expect(recordToolCall(undefined, { tool: 'Bash', isOk: true, ms: 0, tokens: 0 }).biggest).toBeUndefined()
   expect(ins.lastError).toBeUndefined()
   ins = recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 0, error: 'exit 1\n  boom   here ' })
