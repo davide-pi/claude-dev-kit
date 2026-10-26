@@ -5,6 +5,8 @@
 # Anchored: the runtime output lives at the config root (`~/.claude/worklog/`), and unanchored it
 # would also swallow anything new under the tracked `skills/worklog/`.
 /worklog/
+# plan-work's plan files: working notes between sessions, never committed (docs/delivery.md).
+/docs/plans/
 # `claude plugin eval` writes run results here unless --output-dir says otherwise.
 /evals/results/
 
