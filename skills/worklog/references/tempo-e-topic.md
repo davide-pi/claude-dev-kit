@@ -25,38 +25,38 @@ pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM
 ```
 
 Reads every transcript under `~/.claude/projects` touched in the period — main sessions **and**
-subagents — and never touches Azure DevOps. A gap between two consecutive main-session events **of the same session** is:
+subagents — and never touches Azure DevOps. Two kinds of minutes:
 
-| Gap | Active when | Counted as |
+| Kind | What it is | Rule |
 | --- | --- | --- |
-| ≤ 15 min (`-IdleMinutes`) | always | base |
-| ≤ 45 min (`-HardPauseMinutes`) | anything in flight spans it: a tool call, a subagent, a background job, a turn | wait |
-| ≤ 45 min | the next event is on the **same topic** (project + branch) | continuity |
-| ≤ 20 min (`-SwitchMinutes`) | the topic changes | continuity |
-| 45-120 min (`-MaxSpanMinutes`) | a **foreground** tool call or a **working subagent** spans it — not a background job (dev servers live there), not a bare turn | wait |
-| longer | never | pause |
+| `CLAUDE` | Claude at work | per session, the union of its turns (`turn_duration`) and its subagents' activity (events ≤ 15 min apart, `-IdleMinutes`, or a longer gap spanned by one tool call of that subagent, up to `-MaxSpanMinutes`); a turn with no `turn_duration` (interrupted) runs from its prompt to the last reply before the next prompt; **summed** across sessions; background jobs (dev servers) never count |
+| `TU` | the user writing and reading | after each busy interval of a session, up to 15 min (`-MarginMinutes`) or until that session's next busy start or prompt; **counted once**: the union over all sessions, minus every session's busy time, each minute to the topic of the session whose busy interval ended last |
 
-Each session has its own timeline and its own spans (another session's tool call never covers a gap);
-the sessions' minutes are **summed**: two parallel 1h chats = 2h, so `ATTIVO` can exceed wall-clock time.
-A resumed transcript copies earlier messages: those count once, and a resume joins the original's
-timeline (a fork running in parallel stays a separate one). Each interval goes to the topic and the
-**day** of the event that opens it.
+Minutes inside 08:00-20:00 (`-DayStart`, `-DayEnd`) are the normal ones: `TOTALE` = `CLAUDE` + `TU`.
+Minutes outside go to `FUORI`, never dropped. A resumed transcript copies earlier messages: those
+count once, and a resume joins the original session (a fork running in parallel stays a separate
+one). A minute goes to the topic (project + branch) the session's events say at that moment and to
+its local **day**.
+
+Example: chat 1 works 10:00-11:00, chat 2 works 10:30-11:30, the user reads 15 min after each →
+`CLAUDE` 2h (summed), `TU` 15m (only 11:30-11:45: 11:00-11:15 is covered by chat 2 working),
+`TOTALE` 2h15m.
 
 Stdout, the authoritative numbers:
 
-- header: total active time and how much of it the waits and the continuity **recovered** over the
-  old fixed 15-minute threshold;
-- project → branch: active minutes, time window, prompt count;
-- **GIORNO** table, one row per day: `ATTIVO`, `RECUPERATI`, `TARGET`, `LOGGATO` (already in the
-  audit; a multi-day entry split evenly over its weekdays), `MANCANO` (target − logged);
-- **Attese lunghe**: every wait above 45 minutes counted active. A permission prompt left pending
-  over lunch looks exactly like a long build: show them in Table 1 and let the user drop them;
+- header: `CLAUDE`, `TU`, `TOTALE` and `FUORI` for the period;
+- project → branch: the same four columns, time window, prompt count;
+- **GIORNO** table, one row per day: `CLAUDE`, `TU`, `TOTALE`, `FUORI`, `TARGET`, `LOGGATO` (already in
+  the audit; a multi-day entry split evenly over its weekdays), `MANCANO` (target − logged);
+- **Attese lunghe**: every turn above 120 minutes (`-MaxSpanMinutes`), counted in `CLAUDE` (a subagent tool call that long counts up to the limit). A
+  permission prompt left pending over lunch looks exactly like a long build: show them in Table 1 and
+  let the user drop them;
 - the paths of the raw digest, the audit and `targets.json`.
 
-**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): a selection; the total, the
-active time and the topic minutes of the run do not change. A **Sessione** section lists each (day,
+**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): a selection; the totals and the
+topic minutes of the run do not change. A **Sessione** section lists each (day,
 project / branch) with at least one main-session event of that session and the session's **own**
-minutes there; the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
+`CLAUDE` + `TU` minutes there (`FUORI` apart); the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
 only those topics in Phases 3-7. A topic flagged `[anche altre sessioni]` (typically the default branch)
 holds other chats' work too: the minutes listed are the chat's share, but the topic's whole-day
 minutes are not, so never log the topic whole unasked — ask in Table 2 which item(s) it belongs to,
@@ -99,7 +99,7 @@ pwsh -NoProfile -File "$HOME\.claude\skills\worklog\round.ps1" -TargetHours 8 `
   "80|import nuovi mercati|main" "4|fix seed|donor" "7|fix proc|keep" "40|tooling worklog|internal"
 ```
 
-- Entry `minutes|label|role`, role default `main`; the Italian label seeds the Task title.
+- Entry `minutes|label|role`, role default `main`: `minutes` = the row's `Totale` as adjusted in Table 1; the Italian label seeds the Task title.
 - **Nearest 0.5h per topic**, no cap: 45 min → 1.0h (ties away from zero), under ~15 min → 0h.
 - **All of one day's topics in one call**: the donor spread depends on how many `main` rows there are.
 - `-TargetHours` = the day's `TARGET` from the GIORNO table. The helper prints:

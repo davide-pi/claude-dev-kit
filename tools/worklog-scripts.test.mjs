@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Tests for the /worklog PowerShell scripts: the engine's pause rules (worklog.ps1) and the only
+ * Tests for the /worklog PowerShell scripts: the engine's time model (worklog.ps1) and the only
  * writer of hours (worklog-push.ps1). Zero dependencies — `node:test` on Node 18+, plus pwsh 7.
  *
  *   node --test "tools/*.test.mjs"
@@ -49,7 +49,7 @@ function pwsh(script, args, env = process.env) {
   });
 }
 
-// ── engine: which gaps are work ─────────────────────────────────────────────────────────────────
+// ── engine: Claude at work, the user's time, working hours ───────────────────────────────────
 
 const pad = (n) => String(n).padStart(2, '0');
 const now = new Date();
@@ -63,142 +63,207 @@ const ev = (min, type, content, { session = 's1', branch = 'feature/a' } = {}) =
 });
 const prompt = (min, opts) => ev(min, 'user', 'fai la cosa', opts);
 const reply = (min, opts) => ev(min, 'assistant', [{ type: 'text', text: 'fatto' }], opts);
-const toolUse = (min, id, input = {}) => ev(min, 'assistant', [{ type: 'tool_use', id, name: 'Bash', input }]);
+const toolUse = (min, id, input = {}, name = 'Bash') => ev(min, 'assistant', [{ type: 'tool_use', id, name, input }]);
 const toolResult = (min, id) => ev(min, 'user', [{ type: 'tool_result', tool_use_id: id, content: 'ok' }]);
 
-/** Runs the engine on `main` (and optional subagent events) and returns today's active minutes. */
-async function activeMinutes(main, sub = []) {
+let turnSeq = 0;
+/** The system line that closes a turn of `len` minutes at `end` (the engine reads [end - len, end] as Claude at work). */
+const turn = (end, len, { session = 's1' } = {}) => ({
+  type: 'system', subtype: 'turn_duration', timestamp: at(end), sessionId: session, uuid: `turn-${++turnSeq}`, durationMs: len * 60000,
+});
+/** A whole turn: prompt at `end - len`, reply at `end`, turn_duration. */
+const worked = (end, len, opts) => [prompt(end - len, opts), reply(end, opts), turn(end, len, opts)];
+
+/** Runs the engine over `main` (and optional subagent events of s1) with extra flags; returns the whole output. */
+async function runEngine(main, sub, flags) {
   const root = tmp();
   const proj = join(root, 'C--work-api');
   mkdirSync(join(proj, 's1', 'subagents'), { recursive: true });
   writeFileSync(join(proj, 's1.jsonl'), main.map((e) => JSON.stringify(e)).join('\n'));
   if (sub.length) writeFileSync(join(proj, 's1', 'subagents', 'agent-x.jsonl'), sub.map((e) => JSON.stringify({ ...e, isSidechain: true })).join('\n'));
-  const r = await pwsh('worklog.ps1', ['-From', TODAY, '-ProjectsRoot', root, '-OutDir', join(root, 'out')]);
+  const r = await pwsh('worklog.ps1', ['-From', TODAY, '-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);
   assert.equal(r.code, 0, r.out);
-  const m = r.out.match(/Tempo attivo totale: (?:(\d+)h )?(\d+)m/);
-  assert.ok(m, r.out);
-  return Number(m[1] || 0) * 60 + Number(m[2]);
+  return r.out;
+}
+const mins = (s) => { const m = s.match(/(?:(\d+)h )?(\d+)m/); return Number(m[1] || 0) * 60 + Number(m[2]); };
+/** The header's figures, in minutes. */
+function figures(out) {
+  const m = out.match(/Progetti: \d+ \| CLAUDE: ([^|]+)\| TU: ([^|]+)\| TOTALE: ([^|]+)\| FUORI: (.+)/);
+  assert.ok(m, out);
+  const [claude, tu, totale, fuori] = m.slice(1).map((x) => mins(x.trim()));
+  return { claude, tu, totale, fuori };
 }
 
-test('a 30-min gap on the same topic is continuity, not a pause', { skip }, async () => {
-  assert.equal(await activeMinutes([prompt(0), reply(1), prompt(31), reply(32)]), 32);
+test('a 60-min turn and the reply 5 min later: CLAUDE 60, TU 5', { skip }, async () => {
+  const f = figures(await runEngine([...worked(60, 60), prompt(65)], [], []));
+  assert.deepEqual(f, { claude: 60, tu: 5, totale: 65, fuori: 0 });
 });
 
-test('a 50-min gap with nothing in flight is a pause', { skip }, async () => {
-  assert.equal(await activeMinutes([prompt(0), reply(1), prompt(51), reply(52)]), 2);
+test('a reply that never comes: the user time stops at the margin', { skip }, async () => {
+  assert.deepEqual(figures(await runEngine(worked(60, 60), [], [])), { claude: 60, tu: 15, totale: 75, fuori: 0 });
+  assert.equal(figures(await runEngine(worked(60, 60), [], ['-MarginMinutes', '10'])).tu, 10);
 });
 
-test('a 30-min topic switch with nothing in flight is a pause', { skip }, async () => {
-  const b = { session: 's2', branch: 'feature/b' };
-  assert.equal(await activeMinutes([prompt(0), reply(1), prompt(31, b), reply(32, b)]), 2);
+test('two overlapping 60-min turns in two chats: CLAUDE adds up, TU only after the last one ends', { skip }, async () => {
+  const main = [...worked(60, 60), ...worked(90, 60, { session: 's2' })];   // s1 10:00-11:00, s2 10:30-11:30
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 120, tu: 15, totale: 135, fuori: 0 });
 });
 
-test('a 60-min foreground tool call (a build, a test run) counts', { skip }, async () => {
-  assert.equal(await activeMinutes([prompt(0), toolUse(1, 't1'), toolResult(61, 't1'), reply(62)]), 62);
+test('the user time is never counted while another chat is busy, and once where it overlaps', { skip }, async () => {
+  const busy = [...worked(10, 10), ...worked(40, 35, { session: 's2' })];   // s1 0-10, s2 5-40
+  assert.deepEqual(figures(await runEngine(busy, [], [])), { claude: 45, tu: 15, totale: 60, fuori: 0 });
+  const gap = [...worked(10, 10), ...worked(30, 10, { session: 's2' })];   // s1 0-10, s2 20-30: 10-20 is free, 20-25 is covered
+  assert.deepEqual(figures(await runEngine(gap, [], [])), { claude: 20, tu: 25, totale: 45, fuori: 0 });
 });
 
-test('a subagent working through a 60-min gap counts', { skip }, async () => {
-  const sub = Array.from({ length: 13 }, (_, i) => reply(2 + i * 5));   // 10:02 … 11:02
-  assert.equal(await activeMinutes([prompt(0), reply(1), prompt(62), reply(63)], sub), 63);
+test('an idle open chat adds nothing', { skip }, async () => {
+  const main = [...worked(60, 60), ...worked(5, 5, { session: 's2' })];   // s2 answered at 10:05 and was left open for the hour
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 65, tu: 15, totale: 80, fuori: 0 });
 });
 
-test('a background dev server does not stretch a 60-min gap', { skip }, async () => {
+test('a turn with no turn_duration runs from its prompt to the last reply before the next prompt', { skip }, async () => {
+  assert.deepEqual(figures(await runEngine([prompt(0), reply(20), prompt(30), reply(35)], [], [])), { claude: 25, tu: 25, totale: 50, fuori: 0 });
+  const build = [prompt(0), toolUse(1, 't1'), toolResult(61, 't1'), reply(62)];   // interrupted turn with a long tool call
+  assert.equal(figures(await runEngine(build, [], [])).claude, 62);
+});
+
+test('subagent activity after the turn (a background agent) counts as CLAUDE', { skip }, async () => {
+  const sub = Array.from({ length: 7 }, (_, i) => reply(1 + i * 10));   // 10:01 … 11:01
+  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 61, tu: 15, totale: 76, fuori: 0 });
+});
+
+test('a subagent tool call that spans a long gap counts; the same gap with no call does not', { skip }, async () => {
+  const call = [reply(1), toolUse(2, 'sub1'), toolResult(42, 'sub1'), reply(43)];   // a 40-min tool call after the turn
+  assert.deepEqual(figures(await runEngine(worked(1, 1), call, [])), { claude: 43, tu: 15, totale: 58, fuori: 0 });
+  assert.equal(figures(await runEngine(worked(1, 1), [reply(1), reply(43)], [])).claude, 1);   // idle, then resumed: the gap is not work
+  const long = await runEngine(worked(1, 1), [toolUse(2, 'sub1'), toolResult(142, 'sub1')], []);   // 140 min: counted up to MaxSpanMinutes, listed in full
+  assert.equal(figures(long).claude, 121);
+  assert.match(long, /Attese lunghe[\s\S]*2h 20m/);
+  // a user prompt left open (AskUserQuestion) is not work; a call under the idle margin is just a run of events
+  const ask = [toolUse(2, 'q1', {}, 'AskUserQuestion'), toolResult(42, 'q1')];
+  assert.equal(figures(await runEngine(worked(1, 1), ask, [])).claude, 1);
+  assert.equal(figures(await runEngine(worked(1, 1), [toolUse(2, 'q2'), toolResult(12, 'q2')], [])).claude, 11);
+});
+
+test('a subagent tool call straddling midnight keeps its part inside the period', { skip }, async () => {
+  const sub = [toolUse(-610, 'x1'), toolResult(-570, 'x1')];   // 23:50 yesterday - 00:30 today
+  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 1, tu: 15, totale: 16, fuori: 45 });   // 30m of the call + 15m of TU, both before 08:00
+});
+
+test('a turn across midnight keeps its part before the end of the period in a per-day run', { skip }, async () => {
+  const main = [prompt(-630), reply(-570), turn(-570, 60)];   // 23:30 yesterday - 00:30 today
+  const out = await engineAt({ 'C--work-api/s1.jsonl': main }, '-From', dayStr(1), '-To', dayStr(1));
+  assert.deepEqual(figures(out), { claude: 0, tu: 0, totale: 0, fuori: 30 });
+});
+
+test('a background dev server never counts', { skip }, async () => {
   const main = [
-    prompt(0), toolUse(1, 'bg1', { run_in_background: true }), toolResult(1, 'bg1'),
-    prompt(61), reply(62),
+    ...worked(2, 2), toolUse(1, 'bg1', { run_in_background: true }), toolResult(1, 'bg1'),
     { type: 'queue-operation', operation: 'enqueue', timestamp: at(90), sessionId: 's1',
       content: '<task-notification><tool-use-id>bg1</tool-use-id></task-notification>' },
   ];
-  assert.equal(await activeMinutes(main), 2);
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 2, tu: 15, totale: 17, fuori: 0 });
+});
+
+test('minutes outside 08:00-20:00 go to FUORI, never dropped', { skip }, async () => {
+  assert.deepEqual(figures(await runEngine(worked(-90, 90), [], [])), { claude: 30, tu: 15, totale: 45, fuori: 60 });   // 07:00-08:30
+  assert.deepEqual(figures(await runEngine(worked(590, 10), [], [])), { claude: 10, tu: 10, totale: 20, fuori: 5 });   // 19:50-20:00, then 15 min of TU
+  assert.equal(figures(await runEngine(worked(-90, 90), [], ['-DayStart', '7'])).fuori, 0);
+});
+
+test('a 150-min turn counts and is listed under "Attese lunghe"', { skip }, async () => {
+  const out = await runEngine(worked(150, 150), [], []);
+  assert.equal(figures(out).claude, 150);
+  assert.match(out, /Attese lunghe[\s\S]*2h 30m/);
+  assert.doesNotMatch(await runEngine(worked(100, 100), [], []), /Attese lunghe/);
+});
+
+test('the GIORNO table reads CLAUDE, TU, TOTALE, FUORI, TARGET, LOGGATO, MANCANO', { skip }, async () => {
+  const out = await runEngine(worked(60, 60), [], []);
+  assert.match(out, /^GIORNO +CLAUDE +TU +TOTALE +FUORI +TARGET +LOGGATO +MANCANO\s*$/m);
+  assert.match(out, new RegExp(`^${TODAY} +1h 0m +15m +1h 15m +0m `, 'm'));
+  assert.doesNotMatch(out, /RECUPERATI/);
 });
 
 // ── engine: -SessionId selects the topics and shows the session's own minutes ───────────────────
 
 /** Runs the engine over `main` with extra flags; returns the whole output. */
-async function engine(main, ...flags) {
-  const root = tmp();
-  const proj = join(root, 'C--work-api');
-  mkdirSync(proj, { recursive: true });
-  writeFileSync(join(proj, 's1.jsonl'), main.map((e) => JSON.stringify(e)).join('\n'));
-  const r = await pwsh('worklog.ps1', ['-From', TODAY, '-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);
-  assert.equal(r.code, 0, r.out);
-  return r.out;
-}
-const total = (out) => out.match(/Tempo attivo totale: ([^|]+)\|/)[1].trim();
+const engine = (main, ...flags) => runEngine(main, [], flags);
+const total = (out) => out.match(/TOTALE: ([^|]+)\|/)[1].trim();
 const sessionSection = (out) => (out.match(/^Sessione .*(?:\r?\n(?!\r?\n).*)*/m) || [''])[0];
 
-// s1 works on feature/a, s2 on feature/b at the same time: parallel sessions, one timeline each, summed (6m + 6m).
+// s1 works on feature/a, s2 on feature/b at the same time: four 1-min turns (no turn_duration), 4m of CLAUDE and 19m of TU
+// (10:01-10:02 and 10:06-10:07 are s1's, 10:03-10:05 and 10:08-10:23 s2's: the later busy interval owns the minute).
 const twoSessions = () => [
   prompt(0), reply(1), prompt(2, { session: 's2', branch: 'feature/b' }), reply(3, { session: 's2', branch: 'feature/b' }),
   prompt(5), reply(6), prompt(7, { session: 's2', branch: 'feature/b' }), reply(8, { session: 's2', branch: 'feature/b' }),
 ];
 
-test('-SessionId marks only the topics of that session and leaves the active minutes alone', { skip }, async () => {
+test('-SessionId marks only the topics of that session and leaves the minutes alone', { skip }, async () => {
   const plain = await engine(twoSessions());
   const scoped = await engine(twoSessions(), '-SessionId', 's2');
   assert.doesNotMatch(plain, /^Sessione /m);
-  assert.equal(total(scoped), total(plain));
+  assert.deepEqual(figures(scoped), figures(plain));
   const sec = sessionSection(scoped);
   assert.match(sec, /feature\/b/);
   assert.doesNotMatch(sec, /feature\/a/);
-  assert.match(sec, new RegExp(`${TODAY}.*feature/b +6m`));   // the session's own minutes
-  assert.equal(total(plain), '12m');
+  assert.match(sec, new RegExp(`${TODAY}.*feature/b +19m`));   // the session's own CLAUDE + TU
+  assert.deepEqual(figures(plain), { claude: 4, tu: 19, totale: 23, fuori: 0 });
 });
 
-// ── engine: sessions summed, resume dedup, per-session spans ────────────────────────────────────
+/** The columns of the "|- <branch>" row of Table 1, in minutes. */
+function branchRow(out, branch) {
+  const num = '((?:\\d+h )?\\d+m)';
+  const m = out.match(new RegExp(`^\\s*\\|- ${branch} +${num} +${num} +${num} +${num}`, 'm'));
+  assert.ok(m, out);
+  const [claude, tu, totale, fuori] = m.slice(1).map(mins);
+  return { claude, tu, totale, fuori };
+}
+
+test('the user time goes to the topic of the chat whose busy interval ended most recently', { skip }, async () => {
+  const b = { session: 's2', branch: 'feature/b' };
+  // s1 (feature/a) busy 0-10, s2 (feature/b) busy 5-15 then a new prompt at 18: 15-18 is s2's, the rest of s1's margin (18-25) is s1's
+  const out = await engine([...worked(10, 10), ...worked(15, 10, b), prompt(18, b)]);
+  assert.deepEqual(branchRow(out, 'feature/a'), { claude: 10, tu: 7, totale: 17, fuori: 0 });
+  assert.deepEqual(branchRow(out, 'feature/b'), { claude: 10, tu: 3, totale: 13, fuori: 0 });
+});
+
+// ── engine: resume dedup, forks ─────────────────────────────────────────────────────────────────
 
 const withSession = (e, session, uuid) => ({ ...e, sessionId: session, ...(uuid ? { uuid } : {}) });
-const tool = (min, id, session) => withSession(toolUse(min, id), session);
-const result = (min, id, session) => withSession(toolResult(min, id), session);
 
-test('two overlapping 60-min sessions are summed, not counted once', { skip }, async () => {
-  const main = [
-    prompt(0), tool(1, 'a1', 's1'), result(61, 'a1', 's1'), reply(62),
-    prompt(0, { session: 's2' }), tool(1, 'b1', 's2'), result(61, 'b1', 's2'), reply(62, { session: 's2' }),
-  ];
-  assert.equal(total(await engine(main)), '2h 4m');
-});
-
-// s1 = u1..u4 (10:00-10:03); a resumed s9 copies them (same uuid, same timestamp) then goes on.
-const s1Head = () => [prompt(0), reply(1), prompt(2), reply(3)].map((e, i) => withSession(e, 's1', `u${i + 1}`));
+// s1 = u1..u3 (10:00-10:03: one turn); a resumed s9 copies them (same uuid, same timestamp) then goes on.
+const s1Head = () => [prompt(0), reply(3), turn(3, 3)].map((e, i) => withSession(e, 's1', `u${i + 1}`));
 const copiesAsS9 = () => s1Head().map((e) => withSession(e, 's9', e.uuid));
+const own = (session, uuidFrom, ...evs) => evs.map((e, i) => withSession(e, session, `u${uuidFrom + i}`));
 
-test('a resumed transcript counts once: one timeline, and -SessionId of the resume still finds the topic', { skip }, async () => {
-  const tail = [withSession(prompt(5), 's9', 'u5'), withSession(reply(6), 's9', 'u6')];
+test('a resumed transcript counts once: one session, and -SessionId of the resume still finds the topic', { skip }, async () => {
   const out = await engineAt({
     'C--work-api/s1.jsonl': s1Head(),
-    'C--work-api/s9.jsonl': [...copiesAsS9(), ...tail],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))],
   }, '-From', TODAY, '-SessionId', 's9');
-  const single = await engineAt({ 'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(5), 's1', 'u5'), withSession(reply(6), 's1', 'u6')] }, '-From', TODAY);
-  assert.equal(total(out), total(single));
-  assert.equal(total(out), '6m');
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +6m`));
+  const single = await engineAt({ 'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(5), reply(6), turn(6, 1))] }, '-From', TODAY);
+  assert.deepEqual(figures(out), figures(single));
+  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });   // 0-3 and 5-6, then 3-5 and 6-21
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
 });
 
-test('a fork (the original keeps working in parallel) keeps two timelines and drops only the duplicates', { skip }, async () => {
+test('a fork (the original keeps working in parallel) keeps two sessions and drops only the duplicates', { skip }, async () => {
   const out = await engineAt({
-    'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(8), 's1', 'u7'), withSession(reply(10), 's1', 'u8')],
-    'C--work-api/s9.jsonl': [...copiesAsS9(), withSession(prompt(6), 's9', 'u5'), withSession(reply(12), 's9', 'u6')],
+    'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(8), reply(10), turn(10, 2))],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 7, prompt(6), reply(12), turn(12, 6))],
   }, '-From', TODAY);
-  assert.equal(total(out), '16m');   // s1 0-3, 8, 10 = 10m; s9 6, 12 = 6m; one joined timeline would be 12m
+  assert.deepEqual(figures(out), { claude: 11, tu: 18, totale: 29, fuori: 0 });   // s1 0-3, 8-10 = 5m; s9 6-12 = 6m; one joined session would be 9m
 });
 
 test('a fork abandoned early keeps the original its own head (the copy ends first)', { skip }, async () => {
   const files = {
-    'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(8), 's1', 'u7'), withSession(reply(12), 's1', 'u8')],
-    'C--work-api/s9.jsonl': [...copiesAsS9(), withSession(prompt(5), 's9', 'u5'), withSession(reply(10), 's9', 'u6')],
+    'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(8), reply(12), turn(12, 4))],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 7, prompt(5), reply(10), turn(10, 5))],
   };
   const out = await engineAt(files, '-From', TODAY, '-SessionId', 's1');
-  assert.equal(total(out), '17m');   // s1 0-3, 8, 12 = 12m; s9 5, 10 = 5m; with the head on s9 s1 would lose the 3->8 gap
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +12m`));
-});
-
-test('a session idle for 50 min is a pause even while another session works through the gap', { skip }, async () => {
-  const main = [
-    prompt(0), reply(1), prompt(51), reply(52),
-    prompt(0, { session: 's2' }), tool(1, 'b1', 's2'), result(61, 'b1', 's2'), reply(62, { session: 's2' }),
-  ];
-  assert.equal(total(await engine(main)), '1h 4m');   // s1 2m (its gap is a pause) + s2 62m
+  assert.deepEqual(figures(out), { claude: 12, tu: 17, totale: 29, fuori: 0 });   // s1 0-3, 8-12 = 7m; s9 5-10 = 5m
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +24m`));   // s1: 7m + TU 3-5 and 12-27; with the head on s9 it would lose the 3m
 });
 
 test('-SessionId on a branch shared with another chat flags it and marks the digest lines of the session', { skip }, async () => {

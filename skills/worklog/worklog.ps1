@@ -1,47 +1,49 @@
 #requires -Version 7.0
 <#
 .SYNOPSIS
-  /worklog engine: what was done in a period, how much active time it took per (project, branch),
-  and how each day compares with its target.
+  /worklog engine: what was done in a period, how much time it took per (project, branch) —
+  Claude at work plus the user's own time — and how each day compares with its target.
 
 .DESCRIPTION
-  Points — the timelines — are the main-session user and assistant events: they carry the text of the
-  digest and the topic (project + git branch) of every interval. Each logical session (the sessionId of
-  the line; the file name when empty) has its own timeline; the active minutes of all sessions are SUMMED
-  (two overlapping 1h sessions = 2h, so a day can exceed the wall clock).
+  Two kinds of minutes, both from the transcripts, summed over the period:
+    CLAUDE  Claude at work. Per session (the sessionId of the line; the file name when empty) the busy
+            intervals are the union of its turns (system turn_duration: [ts - durationMs, ts]) and of its
+            subagents' activity (events under <sessionId>/subagents/, no more than IdleMinutes apart, or a gap
+            spanned by one tool call of that subagent: tool_use to its tool_result, up to MaxSpanMinutes,
+            interactive tools excluded; a background agent keeps working after the turn). A turn with no turn_duration (interrupted)
+            runs from its user prompt to the last assistant event before the next prompt. The busy
+            minutes of all sessions are SUMMED (two parallel 1h chats = 2h, so a day can exceed the clock).
+            Background bash jobs (dev servers) never count. A turn longer than MaxSpanMinutes still
+            counts, but is listed under "Attese lunghe": a permission prompt left pending looks the same
+            (so does a subagent tool call over MaxSpanMinutes, counted up to the limit and listed in full).
+    TU      the user writing prompts and reading results: after each busy interval of a session, up to
+            MarginMinutes or until that session's next busy start or prompt. Counted ONCE: the union of
+            these intervals over all sessions, minus the union of all sessions' busy intervals (while
+            Claude works anywhere the user's time is already covered). Each TU minute goes to the topic of
+            the session whose busy interval ended most recently.
+  Topic = project (cwd) + git branch: the one of the session's last event at the start of the interval,
+  changing where the session's events change it. Day = the local day of the minute.
+  Working hours: minutes inside DayStart-DayEnd are CLAUDE and TU (TOTALE = CLAUDE + TU); minutes
+  outside go to FUORI, never dropped. A turn or subagent call across the edge of the period (midnight
+  in a per-day run) counts for the part inside it.
   Resume dedup: a resumed transcript copies earlier messages (same uuid, same timestamp) under a new
   sessionId. A uuid is counted once, in the file that starts earliest (then created first, ends earliest, path).
   If session B carries copies of A's messages and A's last event is before B's first own event (a
-  resume), B joins A's timeline (no double count, the gap at the resume point is kept). If A keeps
-  working after B's first own event (a fork), only the duplicates are dropped: two timelines.
+  resume), B joins A's session (no double count). If A keeps working after B's first own event (a
+  fork), only the duplicates are dropped: two sessions.
   Limit: when the first timestamps tie, the creation time of the file breaks the tie; it is unreliable
   after copies, sync or restores (then the head of a fork may land on the wrong file).
-  Spans — work in flight that keeps a gap active even with no point inside it; per session (a span
-  covers only gaps of the session that owns it: the tool_use line's, the turn's, or the <sessionId>
-  directory above subagents/):
-    strong  subagent activity (subagent events no more than IdleMinutes apart) and a foreground
-            tool_use -> its tool_result (build, test, agent; interactive tools excluded);
-    weak    run_in_background launch -> its <task-notification> (dev servers live here too) and a
-            turn (system turn_duration, which also runs while background agents or the user are awaited).
-  A gap between two consecutive points of the same session is active when
-    gap <= IdleMinutes                                             base
-    gap <= HardPauseMinutes and any span covers it                 wait
-    gap <= HardPauseMinutes and the same topic (project + branch)  continuity
-    gap <= SwitchMinutes (topic switch)                            continuity
-    gap <= MaxSpanMinutes and a strong span covers it              wait
-  otherwise it is a pause. Spans longer than MaxSpanMinutes are ignored. Counted waits longer than
-  HardPauseMinutes are listed: a permission prompt left pending looks like a long tool call.
-  Each interval goes to the bucket and the day of the point that opens it.
+  A session with no main-session event in the period has no topic: its busy time is not counted.
 
   Targets: <OutDir>/targets.json  { "targetHours": 8, "days": { "yyyy-MM-dd": 6 | { "hours": 6, "note": "..." } } }
   — written by worklog-push.ps1; missing means targetHours Monday-Friday and 0 at weekends.
   Logged: <OutDir>/pushed.json (the audit); a multi-day entry is split evenly over its weekdays.
 
-  -SessionId <id> (case-insensitive; the raw id or the id its timeline resolves to) does not change the
-  total, the active time or the topic minutes; a "Sessione" section lists the (day, topic) pairs with at
-  least one main-session event of that session, each with the session's OWN minutes in that topic and
-  day; a topic that also has events of another session is flagged "[anche altre sessioni]", and the
-  digest lines of the session carry " [S]".
+  -SessionId <id> (case-insensitive; the raw id or the id its session resolves to) does not change the
+  totals or the topic minutes; a "Sessione" section lists the (day, topic) pairs with at least one
+  main-session event of that session, each with the session's OWN CLAUDE + TU minutes in that topic and
+  day (FUORI apart); a topic that also has events of another session is flagged "[anche altre sessioni]",
+  and the digest lines of the session carry " [S]".
   Without it nothing changes. With -SessionId and no -From the period starts at the first day of the
   session (first timestamp of <ProjectsRoot>/*/<id>.jsonl) and ends today (or at -To); the script
   prints "Sessione <id>: dal <yyyy-MM-dd>". The session's own [S] lines and its branches' headers
@@ -59,10 +61,11 @@ param(
   # "Nessuna attivita'", indistinguishable from a day without work.
   [string]$ProjectsRoot   = (Join-Path $HOME '.claude/projects'),
   [string]$OutDir         = (Join-Path $HOME '.claude/worklog'),
-  [int]$IdleMinutes       = 15,
-  [int]$SwitchMinutes     = 20,
-  [int]$HardPauseMinutes  = 45,
-  [int]$MaxSpanMinutes    = 120,
+  [int]$IdleMinutes       = 15,   # subagent events this close are one run of work; a subagent tool call longer than this fills the gap it spans
+  [int]$MarginMinutes     = 15,   # the user's time after a busy interval
+  [int]$MaxSpanMinutes    = 120,  # a longer turn is listed under "Attese lunghe"; a subagent tool call counts up to this and is listed
+  [int]$DayStart          = 8,    # working hours; the rest of the day is FUORI
+  [int]$DayEnd            = 20,
   [int]$RetentionDays     = 7,
   [int]$MaxPromptChars    = 400,
   [int]$MaxAsstChars      = 300,
@@ -152,15 +155,18 @@ function ReadJson([string]$p) {
 
 # ---- scan: one regex on the timestamp before any JSON parse (the transcripts weigh hundreds of MB) ----
 $tsRx  = [regex]::new('"timestamp":"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"', 'Compiled')
-$tuRx  = [regex]::new('<tool-use-id>(toolu_\w+)</tool-use-id>', 'Compiled')
+$toolUseRx = [regex]::new('"type":"tool_use","id":"([^"]+)","name":"([^"]+)"', 'Compiled')
+$toolResRx = [regex]::new('"tool_use_id":"([^"]+)"', 'Compiled')
 $loIso = $fromD.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
 $hiIso = $toD.AddDays(1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
-$interactive = @('AskUserQuestion', 'ExitPlanMode', 'EnterPlanMode')   # waiting on the user is not work in flight
+$turnHiIso = $toD.AddDays(2).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
+$subLoIso  = $fromD.AddDays(-1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
+$subHiIso  = $turnHiIso
 
-$events    = [System.Collections.Generic.List[object]]::new()
-$spans     = [System.Collections.Generic.List[object]]::new()   # { Session, Start, End, Strong } local datetimes
-$toolStart = @{}; $toolEnd = @{}; $bgEnd = @{}
-# Pass 1 keeps every line's contribution; the resume dedup (below) decides which ones count before any event or span is built.
+$events  = [System.Collections.Generic.List[object]]::new()
+$busyRaw = [System.Collections.Generic.List[object]]::new()   # { Session, S, E, Turn } local datetimes
+$subLong = [System.Collections.Generic.List[object]]::new()    # subagent tool calls longer than MaxSpanMinutes: { Session, S, E, Min }
+# Pass 1 keeps every line's contribution; the resume dedup (below) decides which ones count before any event or turn is built.
 $recs = [System.Collections.Generic.List[object]]::new()
 $fileFirst = @{}; $fileLast = @{}; $fileBorn = @{}
 
@@ -173,26 +179,52 @@ foreach ($file in $files) {
   $fileKey = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
   $subSession = if ($isSub -and $file.FullName -match '[\\/]([^\\/]+)[\\/]subagents[\\/]') { $matches[1] } else { $fileKey }
   $subTimes = [System.Collections.Generic.List[datetime]]::new()
+  $subCalls = @{}   # tool_use id -> { T, Name }: a tool call that spans a gap keeps the subagent at work
   foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
     $m = $tsRx.Match($line)
     if (-not $m.Success) { continue }
     $iso = $m.Groups[1].Value
-    if ([string]::CompareOrdinal($iso, $loIso) -lt 0 -or [string]::CompareOrdinal($iso, $hiIso) -ge 0) { continue }
-    if ($isSub) { $subTimes.Add((ToLocal $iso)); continue }
+    if ($isSub) {
+      # one day of margin on both sides, and every tool_use at any time: a run or a tool call straddling the
+      # period edge keeps its part inside (Book cuts the days); a call open for over a day past the edge is lost
+      $isUse = $line.Contains('"type":"tool_use"')
+      $near = [string]::CompareOrdinal($iso, $subLoIso) -ge 0 -and [string]::CompareOrdinal($iso, $subHiIso) -lt 0
+      if (-not ($near -or $isUse)) { continue }
+      $lt = ToLocal $iso
+      if ($near) { $subTimes.Add($lt) }
+      if ($isUse) {
+        foreach ($um in $toolUseRx.Matches($line)) { $subCalls[$um.Groups[1].Value] = [pscustomobject]@{ T = $lt; Name = $um.Groups[2].Value } }
+      }
+      if ($near -and $line.Contains('"type":"tool_result"')) {
+        foreach ($rm in $toolResRx.Matches($line)) {
+          $call = $subCalls[$rm.Groups[1].Value]
+          if ($call -and $call.Name -notin 'AskUserQuestion', 'ExitPlanMode' -and ($lt - $call.T).TotalMinutes -gt $IdleMinutes) {
+            $spanMin = ($lt - $call.T).TotalMinutes
+            $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $call.T; E = $(if ($spanMin -gt $MaxSpanMinutes) { $call.T.AddMinutes($MaxSpanMinutes) } else { $lt }); Turn = $false })
+            if ($spanMin -gt $MaxSpanMinutes) { $subLong.Add([pscustomobject]@{ Session = $subSession; S = $call.T; E = $lt; Min = $spanMin }) }
+          }
+        }
+      }
+      continue
+    }
+    # a turn_duration of the day after the period still counts: a turn across midnight keeps its part inside (Book cuts the days)
+    $late = [string]::CompareOrdinal($iso, $hiIso) -ge 0
+    if ([string]::CompareOrdinal($iso, $loIso) -lt 0 -or [string]::CompareOrdinal($iso, $turnHiIso) -ge 0) { continue }
+    if ($late -and -not $line.Contains('"subtype":"turn_duration"')) { continue }
     if (-not ($line.Contains('"type":"user"') -or $line.Contains('"type":"assistant"') -or
-              $line.Contains('"subtype":"turn_duration"') -or $line.Contains('"type":"queue-operation"'))) { continue }
+              $line.Contains('"subtype":"turn_duration"'))) { continue }
     try { $o = $line | ConvertFrom-Json } catch { continue }
-    if (-not $o.timestamp -or $o.isSidechain) { continue }
+    if (-not $o.timestamp -or $o.isSidechain -or ($late -and $o.type -ne 'system')) { continue }
     $ts = $o.timestamp   # ConvertFrom-Json may already have turned it into a DateTime, of any Kind
     $local = if ($ts -isnot [datetime]) { ToLocal ([string]$ts) }
              elseif ($ts.Kind -eq 'Local') { $ts }
              else { [datetime]::SpecifyKind($ts, 'Utc').ToLocalTime() }
-    if ($local.Date -lt $fromD -or $local.Date -gt $toD) { continue }
+    if ($local.Date -lt $fromD -or $local.Date -gt $toD.AddDays(1)) { continue }
 
     # the session key is the line's sessionId (a file may hold several); no id -> the file's own name
     $sess = if ($o.sessionId) { [string]$o.sessionId } else { $fileKey }
     $rec = [pscustomobject]@{ File = $file.FullName; Uuid = [string]$o.uuid; Session = $sess; Time = $local
-                              Ev = $null; TurnMs = 0.0; Starts = @(); Ends = @(); Bgs = @() }
+                              Ev = $null; TurnMs = 0.0 }
     if (-not $fileFirst.ContainsKey($rec.File) -or $local -lt $fileFirst[$rec.File]) { $fileFirst[$rec.File] = $local }
     if (-not $fileLast.ContainsKey($rec.File)  -or $local -gt $fileLast[$rec.File])  { $fileLast[$rec.File]  = $local }
 
@@ -200,48 +232,36 @@ foreach ($file in $files) {
       if ($o.subtype -eq 'turn_duration' -and $o.durationMs -gt 0) { $rec.TurnMs = [double]$o.durationMs; $recs.Add($rec) }
       continue
     }
-    if ($o.type -eq 'queue-operation') {
-      if ($o.content -is [string] -and $o.content.Contains('<task-notification>')) {
-        $rec.Bgs = @(foreach ($tm in $tuRx.Matches($o.content)) { $tm.Groups[1].Value }); $recs.Add($rec)
-      }
-      continue
-    }
     if ($o.type -ne 'user' -and $o.type -ne 'assistant') { continue }
 
     $content = $o.message.content
-    if ($content -isnot [string]) {
-      foreach ($b in @($content)) {
-        if ($b.type -eq 'tool_use' -and $b.id -and $b.name -notin $interactive) {
-          $rec.Starts += [pscustomobject]@{ Id = $b.id; Bg = [bool]$b.input.run_in_background }
-        } elseif ($b.type -eq 'tool_result' -and $b.tool_use_id) {
-          $rec.Ends += $b.tool_use_id
-        }
-      }
-    }
+    $isResult = $false
+    if ($content -isnot [string]) { foreach ($b in @($content)) { if ($b.type -eq 'tool_result') { $isResult = $true } } }
     $cwd    = if ($o.cwd) { [string]$o.cwd } else { 'sconosciuto' }
     $branch = if ($o.gitBranch) { [string]$o.gitBranch } else { '(nessun-branch)' }
+    $isPrompt = $false
     if ($o.type -eq 'user') {
       $raw = TextOf $content   # block prompts (pasted images) carry text too
-      if ($raw.Contains('<task-notification>')) { $rec.Bgs = @(foreach ($tm in $tuRx.Matches($raw)) { $tm.Groups[1].Value }) }
-      $text = if ($raw -match '^\s*<(task-notification|local-command|command-name|command-message)' -or
-                  $raw -match '^\s*\[Request interrupted') { '' } else { Clean $raw }
+      $system = $raw -match '^\s*<(task-notification|local-command|command-name|command-message)' -or $raw -match '^\s*\[Request interrupted'
+      $text = if ($system) { '' } else { Clean $raw }
+      $isPrompt = -not ($system -or $isResult -or $o.isMeta)   # a turn starts here
     } else {
       $text = Clean (TextOf $content)
     }
     $rec.Ev = [pscustomobject]@{
-      Time = $local; Project = $cwd; Branch = $branch; Type = $o.type; Text = $text; Session = $sess; Raw = $sess
+      Time = $local; Project = $cwd; Branch = $branch; Type = $o.type; Text = $text; Session = $sess; Raw = $sess; Prompt = $isPrompt
     }
     $recs.Add($rec)
   }
-  # subagent activity -> spans: runs of events no more than IdleMinutes apart, tagged with the session directory
+  # subagent activity -> busy intervals: runs of events no more than IdleMinutes apart, tagged with the session directory
   if ($subTimes.Count -gt 0) {
     $st = @($subTimes | Sort-Object)
     $segStart = $st[0]; $prev = $st[0]
     foreach ($t in $st) {
-      if (($t - $prev).TotalMinutes -gt $IdleMinutes) { $spans.Add([pscustomobject]@{ Session = $subSession; Start = $segStart; End = $prev; Strong = $true }); $segStart = $t }
+      if (($t - $prev).TotalMinutes -gt $IdleMinutes) { $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $segStart; E = $prev; Turn = $false }); $segStart = $t }
       $prev = $t
     }
-    $spans.Add([pscustomobject]@{ Session = $subSession; Start = $segStart; End = $prev; Strong = $true })
+    $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $segStart; E = $prev; Turn = $false })
   }
 }
 
@@ -263,22 +283,12 @@ foreach ($r in $recs) {
     }
     continue
   }
-  foreach ($s in $r.Starts) { $toolStart[$s.Id] = [pscustomobject]@{ Time = $r.Time; Bg = $s.Bg; Session = $r.Session } }
-  foreach ($id in $r.Ends) { $toolEnd[$id] = $r.Time }
-  foreach ($id in $r.Bgs) { if (-not $bgEnd.ContainsKey($id)) { $bgEnd[$id] = $r.Time } }
-  if ($r.TurnMs -gt 0) { $spans.Add([pscustomobject]@{ Session = $r.Session; Start = $r.Time.AddMilliseconds(-$r.TurnMs); End = $r.Time; Strong = $false }) }
+  if ($r.TurnMs -gt 0) { $busyRaw.Add([pscustomobject]@{ Session = $r.Session; S = $r.Time.AddMilliseconds(-$r.TurnMs); E = $r.Time; Turn = $true }) }
   if ($r.Ev) { $events.Add($r.Ev) }
 }
 
-# tool and background spans, tagged with the session of the tool_use line
-foreach ($id in $toolStart.Keys) {
-  $s = $toolStart[$id]
-  $end = if ($s.Bg -and $bgEnd.ContainsKey($id)) { $bgEnd[$id] } elseif ($toolEnd.ContainsKey($id)) { $toolEnd[$id] } else { $null }
-  if ($end -and $end -gt $s.Time) { $spans.Add([pscustomobject]@{ Session = $s.Session; Start = $s.Time; End = $end; Strong = -not $s.Bg }) }
-}
-
-# alias: B copies A's messages and A ended before B's first own event (a resume) -> one timeline, under A's id.
-# A still working after B's first own event is a fork: only the duplicates are dropped, two timelines.
+# alias: B copies A's messages and A ended before B's first own event (a resume) -> one session, under A's id.
+# A still working after B's first own event is a fork: only the duplicates are dropped, two sessions.
 $first = @{}; $last = @{}
 foreach ($e in $events) {
   if (-not $first.ContainsKey($e.Raw) -or $e.Time -lt $first[$e.Raw]) { $first[$e.Raw] = $e.Time }
@@ -300,7 +310,8 @@ foreach ($bs in @($copies.Keys | Where-Object { $first.ContainsKey($_) } | Sort-
   }
 }
 foreach ($e in $events) { $e.Session = Rep $e.Raw }
-foreach ($sp in $spans) { $sp.Session = Rep $sp.Session }
+foreach ($b in $busyRaw) { $b.Session = Rep $b.Session }
+foreach ($b in $subLong) { $b.Session = Rep $b.Session }
 
 $rangeLabel = if ($isRange) { "$fromStr -> $toStr" } else { $fromStr }
 if ($events.Count -eq 0) {
@@ -314,108 +325,199 @@ if ($events.Count -eq 0) {
   return
 }
 
-# ---- unions of spans (all, strong only): drop the implausible, merge what overlaps or nearly touches ----
-function Union($list) {
-  $merged = [System.Collections.Generic.List[object]]::new()
-  foreach ($sp in ($list | Where-Object { ($_.End - $_.Start).TotalMinutes -le $MaxSpanMinutes } | Sort-Object Start)) {
-    if ($merged.Count -gt 0 -and ($sp.Start - $merged[-1].End).TotalMinutes -le 1) {
-      if ($sp.End -gt $merged[-1].End) { $merged[-1].End = $sp.End }
-    } else {
-      $merged.Add([pscustomobject]@{ Start = $sp.Start; End = $sp.End })
-    }
+# ---- per session: topic changes, and the turns that left no turn_duration ----
+$bySession = @{}
+foreach ($sg in ($events | Group-Object Session)) { $bySession[$sg.Name] = @($sg.Group | Sort-Object Time) }
+$chgT = @{}; $chgK = @{}   # session -> the times at which its topic (project + branch) changes, and the topic keys
+foreach ($s in $bySession.Keys) {
+  $ts = [System.Collections.Generic.List[datetime]]::new(); $ks = [System.Collections.Generic.List[string]]::new()
+  foreach ($e in $bySession[$s]) {
+    $k = "$($e.Project)`n$($e.Branch)"
+    if ($ks.Count -eq 0 -or $ks[$ks.Count - 1] -ne $k) { $ts.Add($e.Time); $ks.Add($k) }
   }
-  return [pscustomobject]@{ Starts = [datetime[]]@($merged | ForEach-Object Start); Spans = $merged }
+  $chgT[$s] = $ts; $chgK[$s] = $ks
 }
-# per session: a span of one session never covers a gap of another
-$anySpan = @{}; $strongSpan = @{}
-foreach ($sg in ($spans | Group-Object Session)) {
-  $anySpan[$sg.Name]    = Union $sg.Group
-  $strongSpan[$sg.Name] = Union @($sg.Group | Where-Object Strong)
-}
-$noSpan = Union @()
-function Covered($u, [datetime]$a, [datetime]$b) {
-  # the last merged span starting at or before a (1 min tolerance): does it reach b?
-  $lo = 0; $hi = $u.Starts.Count - 1; $idx = -1; $limit = $a.AddMinutes(1)
+function TopicIdx([string]$s, [datetime]$t) {   # the last change at or before t, else the first
+  $cs = $chgT[$s]; $lo = 0; $hi = $cs.Count - 1; $idx = 0
   while ($lo -le $hi) {
     $mid = [int][math]::Floor(($lo + $hi) / 2)
-    if ($u.Starts[$mid] -le $limit) { $idx = $mid; $lo = $mid + 1 } else { $hi = $mid - 1 }
+    if ($cs[$mid] -le $t) { $idx = $mid; $lo = $mid + 1 } else { $hi = $mid - 1 }
   }
-  return ($idx -ge 0 -and $u.Spans[$idx].End -ge $b.AddMinutes(-1))
+  return $idx
+}
+function LowerBound($sorted, [datetime]$t) {   # index of the first element >= t (Count when none)
+  $lo = 0; $hi = $sorted.Count - 1; $k = $sorted.Count
+  while ($lo -le $hi) { $mid = [int][math]::Floor(($lo + $hi) / 2); if ($sorted[$mid] -ge $t) { $k = $mid; $hi = $mid - 1 } else { $lo = $mid + 1 } }
+  return $k
+}
+$turnTimes = @{}   # session -> the end times of its turn_duration turns, sorted
+foreach ($b in $busyRaw) { if ($b.Turn) { if (-not $turnTimes.ContainsKey($b.Session)) { $turnTimes[$b.Session] = [System.Collections.Generic.List[datetime]]::new() }; $turnTimes[$b.Session].Add($b.E) } }
+foreach ($s in @($turnTimes.Keys)) { $turnTimes[$s] = [datetime[]]@($turnTimes[$s] | Sort-Object) }
+$promptTimes = @{}   # session -> its prompts (a turn starts there; the user's time ends there)
+foreach ($s in $bySession.Keys) {
+  $ev = $bySession[$s]   # sorted by time: one pass finds the last reply before each next prompt
+  $pt = [datetime[]]@($ev | Where-Object Prompt | ForEach-Object Time)
+  $promptTimes[$s] = $pt
+  $lastReply = [datetime[]]::new($pt.Count); $k = -1
+  foreach ($e in $ev) {
+    if ($e.Type -ne 'assistant') { continue }
+    while ($k + 1 -lt $pt.Count -and $pt[$k + 1] -le $e.Time) { $k++ }
+    if ($k -ge 0) { $lastReply[$k] = $e.Time }
+  }
+  $tt = if ($turnTimes.ContainsKey($s)) { $turnTimes[$s] } else { [datetime[]]@() }
+  for ($i = 0; $i -lt $pt.Count; $i++) {
+    $a = $pt[$i]; $z = if ($i + 1 -lt $pt.Count) { $pt[$i + 1] } else { [datetime]::MaxValue }
+    $ti = LowerBound $tt $a
+    if ($ti -lt $tt.Count -and $tt[$ti] -lt $z) { continue }
+    if ($lastReply[$i] -gt $a) { $busyRaw.Add([pscustomobject]@{ Session = $s; S = $a; E = $lastReply[$i]; Turn = $true }) }
+  }
 }
 
-# ---- active time: one timeline per session, summed (two overlapping 1h sessions = 2h) ----
-$activeByPB = @{}; $activeByPBDay = @{}; $activeByDay = @{}; $recoveredByDay = @{}
-$activeBySPBDay = @{}   # session`nday`nproject`nbranch: the session's own minutes
-$recovered = @{ wait = 0.0; cont = 0.0 }
-$longWaits = [System.Collections.Generic.List[object]]::new()
-foreach ($sg in ($events | Group-Object Session)) {
-  $sorted = @($sg.Group | Sort-Object Time)
-  $anyU    = if ($anySpan.ContainsKey($sg.Name)) { $anySpan[$sg.Name] } else { $noSpan }
-  $strongU = if ($strongSpan.ContainsKey($sg.Name)) { $strongSpan[$sg.Name] } else { $noSpan }
-  for ($i = 0; $i -lt $sorted.Count - 1; $i++) {
-    $a = $sorted[$i]; $b = $sorted[$i + 1]
-    $g = ($b.Time - $a.Time).TotalMinutes
-    if ($g -lt 0) { continue }
-    $sameTopic = $a.Project -eq $b.Project -and $a.Branch -eq $b.Branch
-    $reason = if ($g -le $IdleMinutes) { 'base' }
-              elseif ($sameTopic -and $g -le $HardPauseMinutes) { 'cont' }
-              elseif ($g -le $HardPauseMinutes -and (Covered $anyU $a.Time $b.Time)) { 'wait' }
-              elseif ($g -le $SwitchMinutes) { 'cont' }
-              elseif ($g -gt $HardPauseMinutes -and $g -le $MaxSpanMinutes -and (Covered $strongU $a.Time $b.Time)) { 'wait' }
-              else { $null }
-    if (-not $reason) { continue }
-    $key = "$($a.Project)`n$($a.Branch)"
-    $day = $a.Time.ToString('yyyy-MM-dd')
-    $activeByPB[$key] = [double]$activeByPB[$key] + $g
-    $activeByPBDay["$day`n$key"] = [double]$activeByPBDay["$day`n$key"] + $g
-    $activeBySPBDay["$($sg.Name)`n$day`n$key"] = [double]$activeBySPBDay["$($sg.Name)`n$day`n$key"] + $g
-    $activeByDay[$day] = [double]$activeByDay[$day] + $g
-    if ($reason -ne 'base') {
-      $recovered[$reason] += $g
-      $recoveredByDay[$day] = [double]$recoveredByDay[$day] + $g
-      if ($reason -eq 'wait' -and $g -gt $HardPauseMinutes) {
-        $longWaits.Add([pscustomobject]@{ From = $a.Time; To = $b.Time; Min = $g; Where = "$(Split-Path $a.Project -Leaf) / $($a.Branch)" })
-      }
+# ---- intervals ----
+function MergeIv($list) {   # sorted, overlapping or touching ones merged, empty ones dropped
+  $out = [System.Collections.Generic.List[object]]::new()
+  foreach ($x in ($list | Where-Object { $_.E -gt $_.S } | Sort-Object S)) {
+    if ($out.Count -gt 0 -and $x.S -le $out[$out.Count - 1].E) { if ($x.E -gt $out[$out.Count - 1].E) { $out[$out.Count - 1].E = $x.E } }
+    else { $out.Add([pscustomobject]@{ S = $x.S; E = $x.E }) }
+  }
+  return ,$out
+}
+
+# ---- minutes: per topic, day, session; split at midnight and at the working hours ----
+$acc = @{}
+function AddAcc([string]$k, [double]$m) { $script:acc[$k] = [double]$script:acc[$k] + $m }
+function Book([datetime]$s, [datetime]$e, [string]$sess, [string]$key, [string]$kind) {
+  $t = $s
+  while ($t -lt $e) {
+    $d = $t.Date; $w0 = $d.AddHours($DayStart); $w1 = $d.AddHours($DayEnd)
+    $next = $e
+    foreach ($b in @($w0, $w1, $d.AddDays(1))) { if ($b -gt $t -and $b -lt $next) { $next = $b } }
+    if ($d -ge $fromD -and $d -le $toD) {
+      $m = ($next - $t).TotalMinutes
+      $kk = if ($t -ge $w0 -and $t -lt $w1) { $kind } else { 'out' }
+      $day = $d.ToString('yyyy-MM-dd')
+      AddAcc "P`n$key`n$kk" $m; AddAcc "D`n$day`n$kk" $m; AddAcc "S`n$sess`n$day`n$key`n$kk" $m
+    }
+    $t = $next
+  }
+}
+
+# ---- CLAUDE: the busy intervals of each session, summed ----
+$busyBy = @{}
+$allBusy = [System.Collections.Generic.List[object]]::new()
+foreach ($g in ($busyRaw | Where-Object { $bySession.ContainsKey($_.Session) } | Group-Object Session)) {
+  $busyBy[$g.Name] = MergeIv $g.Group
+  foreach ($iv in $busyBy[$g.Name]) { $allBusy.Add($iv) }
+}
+foreach ($s in $busyBy.Keys) {
+  foreach ($iv in $busyBy[$s]) {
+    $idx = TopicIdx $s $iv.S; $cs = $chgT[$s]; $t = $iv.S
+    while ($true) {
+      $end = if ($idx + 1 -lt $cs.Count -and $cs[$idx + 1] -lt $iv.E) { $cs[$idx + 1] } else { $iv.E }
+      Book $t $end $s $chgK[$s][$idx] 'claude'
+      if ($end -ge $iv.E) { break }
+      $t = $end; $idx++
     }
   }
 }
+# turns longer than MaxSpanMinutes count, and are listed: a permission prompt left pending looks the same;
+# a subagent tool call that long counts up to MaxSpanMinutes and is listed in full
+$longWaits = [System.Collections.Generic.List[object]]::new()
+foreach ($b in @($busyRaw | Where-Object Turn) + @($subLong)) {
+  if (-not $bySession.ContainsKey($b.Session)) { continue }
+  $mins = ($b.E - $b.S).TotalMinutes
+  if ($mins -le $MaxSpanMinutes -or $b.E -le $fromD -or $b.S -ge $toD.AddDays(1)) { continue }
+  $k =$chgK[$b.Session][(TopicIdx $b.Session $b.S)].Split("`n")
+  $longWaits.Add([pscustomobject]@{ From = $b.S; To = $b.E; Min = $mins; Where = "$(Split-Path $k[0] -Leaf) / $($k[1])" })
+}
+
+# ---- TU: after each busy interval, up to the margin, once, never while any session is busy ----
+$gb = MergeIv $allBusy
+$gbEnds = [datetime[]]@($gb | ForEach-Object E)
+$pieces = [System.Collections.Generic.List[object]]::new()
+foreach ($s in $busyBy.Keys) {
+  $stops = [datetime[]]@(@($busyBy[$s] | ForEach-Object S) + @($promptTimes[$s]) | Sort-Object)
+  foreach ($iv in $busyBy[$s]) {
+    $cap = $iv.E.AddMinutes($MarginMinutes)
+    $ni = LowerBound $stops $iv.E
+    if ($ni -lt $stops.Count -and $stops[$ni] -lt $cap) { $cap = $stops[$ni] }
+    if ($cap -le $iv.E) { continue }
+    $key = $chgK[$s][(TopicIdx $s $iv.E)]
+    # the part of [E, cap] outside every session's busy time
+    $lo = 0; $hi = $gbEnds.Count - 1; $k = $gbEnds.Count
+    while ($lo -le $hi) { $mid = [int][math]::Floor(($lo + $hi) / 2); if ($gbEnds[$mid] -gt $iv.E) { $k = $mid; $hi = $mid - 1 } else { $lo = $mid + 1 } }
+    $t = $iv.E
+    while ($t -lt $cap) {
+      if ($k -lt $gb.Count -and $gb[$k].S -lt $cap) {
+        if ($gb[$k].S -gt $t) { $pieces.Add([pscustomobject]@{ S = $t; E = $gb[$k].S; Owner = $iv.E; Session = $s; Key = $key }) }
+        if ($gb[$k].E -gt $t) { $t = $gb[$k].E }
+        $k++
+      } else { $pieces.Add([pscustomobject]@{ S = $t; E = $cap; Owner = $iv.E; Session = $s; Key = $key }); $t = $cap }
+    }
+  }
+}
+# overlapping pieces count once, for the session whose busy interval ended most recently
+$pieces = @($pieces | Sort-Object S)
+$bounds = [datetime[]]@(@($pieces | ForEach-Object S) + @($pieces | ForEach-Object E) | Sort-Object -Unique)
+$active = [System.Collections.Generic.List[object]]::new(); $pi = 0
+for ($bi = 0; $bi -lt $bounds.Count - 1; $bi++) {
+  $t0 = $bounds[$bi]; $t1 = $bounds[$bi + 1]
+  while ($pi -lt $pieces.Count -and $pieces[$pi].S -le $t0) { $active.Add($pieces[$pi]); $pi++ }
+  for ($j = $active.Count - 1; $j -ge 0; $j--) { if ($active[$j].E -le $t0) { $active.RemoveAt($j) } }
+  if ($active.Count -eq 0) { continue }
+  $best = $active[0]
+  foreach ($p in $active) { if ($p.Owner -gt $best.Owner) { $best = $p } }
+  Book $t0 $t1 $best.Session $best.Key 'tu'
+}
+function Acc([string]$k) { [double]$script:acc[$k] }
 
 # ---- report per project -> branch ----
 $projReport = foreach ($pg in ($events | Group-Object Project)) {
   $pe = @($pg.Group | Sort-Object Time)
   $branches = foreach ($bg in ($pe | Group-Object Branch)) {
     $be = @($bg.Group | Sort-Object Time)
+    $pk = "P`n$($pg.Name)`n$($bg.Name)"
+    $cl = Acc "$pk`nclaude"; $tu = Acc "$pk`ntu"
     [pscustomobject]@{
-      Branch    = $bg.Name
-      ActiveMin = [double]$activeByPB["$($pg.Name)`n$($bg.Name)"]
-      Prompts   = @($be | Where-Object { $_.Type -eq 'user' -and $_.Text -ne '' }).Count
-      First     = $be[0].Time
-      Last      = $be[-1].Time
-      Events    = $be
+      Branch  = $bg.Name
+      Claude  = $cl
+      Tu      = $tu
+      Total   = $cl + $tu
+      Out     = Acc "$pk`nout"
+      Prompts = @($be | Where-Object { $_.Type -eq 'user' -and $_.Text -ne '' }).Count
+      First   = $be[0].Time
+      Last    = $be[-1].Time
+      Events  = $be
     }
   }
-  $branches = @($branches | Sort-Object ActiveMin -Descending)
+  $branches = @($branches | Sort-Object Total -Descending)
   [pscustomobject]@{
-    Project   = $pg.Name
-    Leaf      = Split-Path $pg.Name -Leaf
-    ActiveMin = ($branches | Measure-Object ActiveMin -Sum).Sum
-    Prompts   = ($branches | Measure-Object Prompts -Sum).Sum
-    First     = $pe[0].Time
-    Last      = $pe[-1].Time
-    Sessions  = @($pe | Select-Object -ExpandProperty Session -Unique).Count
-    Branches  = $branches
+    Project  = $pg.Name
+    Leaf     = Split-Path $pg.Name -Leaf
+    Claude   = ($branches | Measure-Object Claude -Sum).Sum
+    Tu       = ($branches | Measure-Object Tu -Sum).Sum
+    Total    = ($branches | Measure-Object Total -Sum).Sum
+    Out      = ($branches | Measure-Object Out -Sum).Sum
+    Prompts  = ($branches | Measure-Object Prompts -Sum).Sum
+    First    = $pe[0].Time
+    Last     = $pe[-1].Time
+    Sessions = @($pe | Select-Object -ExpandProperty Session -Unique).Count
+    Branches = $branches
   }
 }
-$projReport = @($projReport | Where-Object { $_.Prompts -gt 0 -or $_.ActiveMin -ge 1 } | Sort-Object ActiveMin -Descending)
-$totalMin = ($projReport | Measure-Object ActiveMin -Sum).Sum
+$projReport = @($projReport | Where-Object { $_.Prompts -gt 0 -or ($_.Total + $_.Out) -ge 1 } | Sort-Object Total -Descending)
+$sumClaude = ($projReport | Measure-Object Claude -Sum).Sum
+$sumTu     = ($projReport | Measure-Object Tu -Sum).Sum
+$sumOut    = ($projReport | Measure-Object Out -Sum).Sum
+$totalMin  = $sumClaude + $sumTu
 
 # ---- the session's topics: (day, project, branch) with a main-session event of -SessionId ----
 $sessionTopics = @(); $sharedTopics = @{}; $sidReps = @{}
-# -SessionId matches the raw id or its representative (a resumed session shares its original's timeline)
+# -SessionId matches the raw id or its representative (a resumed session shares its original's session)
 function IsMine($e) { return ($sid -and ($e.Raw -ieq $sid -or $e.Session -ieq $sid)) }
 if ($sid) {
   foreach ($e in $events) { if (IsMine $e) { $sidReps[$e.Session] = $true } }
-  # a (day, topic) that also has events of another timeline: not the chat's alone
+  # a (day, topic) that also has events of another session: not the chat's alone
   foreach ($e in $events) { if (-not $sidReps.ContainsKey($e.Session)) { $sharedTopics["$($e.Time.ToString('yyyy-MM-dd'))`n$($e.Project)`n$($e.Branch)"] = $true } }
   $sessionTopics = @($events | Where-Object { IsMine $_ } | ForEach-Object {
     [pscustomobject]@{ Day = $_.Time.ToString('yyyy-MM-dd'); Project = $_.Project; Branch = $_.Branch }
@@ -448,16 +550,16 @@ foreach ($e in @(ReadJson $auditPath)) {
 
 # ---- stdout: the authoritative numbers ----
 Write-Output "=== WORKLOG $rangeLabel ==="
-Write-Output ("Progetti: {0} | Tempo attivo totale: {1} | di cui recuperati: attese tool/agent {2}, continuita' {3}" -f `
-  $projReport.Count, (FmtMin $totalMin), (FmtMin $recovered.wait), (FmtMin $recovered.cont))
-Write-Output ("Pausa: gap > {0} min stesso topic, > {1} min cambio topic senza attese in corso; oltre {0} min attivo solo con agent/tool in primo piano al lavoro (max {2} min)" -f `
-  $HardPauseMinutes, $SwitchMinutes, $MaxSpanMinutes)
+Write-Output ("Progetti: {0} | CLAUDE: {1} | TU: {2} | TOTALE: {3} | FUORI: {4}" -f `
+  $projReport.Count, (FmtMin $sumClaude), (FmtMin $sumTu), (FmtMin $totalMin), (FmtMin $sumOut))
+Write-Output ("Modello: CLAUDE = turni e subagent di ogni chat, sommati; TU = fino a {0} min dopo ogni risposta, una volta sola e mai mentre una chat lavora; orario {1}-{2}, il resto in FUORI; turni oltre {3} min elencati" -f `
+  $MarginMinutes, $DayStart, $DayEnd, $MaxSpanMinutes)
 Write-Output ""
-Write-Output ("{0,-34} {1,10} {2,-17} {3,6}" -f 'PROGETTO / topic (branch)', 'ATTIVO', 'FASCIA', 'PROMPT')
+Write-Output ("{0,-34} {1,9} {2,9} {3,9} {4,9} {5,-17} {6,6}" -f 'PROGETTO / topic (branch)', 'CLAUDE', 'TU', 'TOTALE', 'FUORI', 'FASCIA', 'PROMPT')
 foreach ($p in $projReport) {
-  Write-Output ("{0,-34} {1,10} {2,-17} {3,6}" -f (Trunc $p.Leaf 34), (FmtMin $p.ActiveMin), ("{0}-{1}" -f (FmtStamp $p.First), (FmtStamp $p.Last)), $p.Prompts)
+  Write-Output ("{0,-34} {1,9} {2,9} {3,9} {4,9} {5,-17} {6,6}" -f (Trunc $p.Leaf 34), (FmtMin $p.Claude), (FmtMin $p.Tu), (FmtMin $p.Total), (FmtMin $p.Out), ("{0}-{1}" -f (FmtStamp $p.First), (FmtStamp $p.Last)), $p.Prompts)
   foreach ($b in $p.Branches) {
-    Write-Output ("  |- {0,-29} {1,10} {2,-17} {3,6}" -f (Trunc $b.Branch 29), (FmtMin $b.ActiveMin), ("{0}-{1}" -f (FmtStamp $b.First), (FmtStamp $b.Last)), $b.Prompts)
+    Write-Output ("  |- {0,-29} {1,9} {2,9} {3,9} {4,9} {5,-17} {6,6}" -f (Trunc $b.Branch 29), (FmtMin $b.Claude), (FmtMin $b.Tu), (FmtMin $b.Total), (FmtMin $b.Out), ("{0}-{1}" -f (FmtStamp $b.First), (FmtStamp $b.Last)), $b.Prompts)
   }
 }
 if ($sid) {
@@ -466,25 +568,30 @@ if ($sid) {
   if ($sessionTopics.Count -eq 0) {
     Write-Output "Sessione ${sid}: nessun evento in questo periodo."
   } else {
-    Write-Output "Sessione ${sid}: topic con almeno un evento della sessione (minuti = tempo attivo della sola sessione nel topic e giorno)"
+    Write-Output "Sessione ${sid}: topic con almeno un evento della sessione (minuti = CLAUDE + TU della sola sessione nel topic e giorno; fuori orario a parte)"
     foreach ($t in $sessionTopics) {
       $shared = if ($sharedTopics["$($t.Day)`n$($t.Project)`n$($t.Branch)"]) { '  [anche altre sessioni]' } else { '' }
-      $own = 0.0
-      foreach ($rep in $sidReps.Keys) { $own += [double]$activeBySPBDay["$rep`n$($t.Day)`n$($t.Project)`n$($t.Branch)"] }
-      Write-Output ("  {0}  {1} / {2}  {3}{4}" -f $t.Day, (Split-Path $t.Project -Leaf), $t.Branch, (FmtMin $own), $shared)
+      $own = 0.0; $ownOut = 0.0
+      foreach ($rep in $sidReps.Keys) {
+        $sk = "S`n$rep`n$($t.Day)`n$($t.Project)`n$($t.Branch)"
+        $own += (Acc "$sk`nclaude") + (Acc "$sk`ntu"); $ownOut += Acc "$sk`nout"
+      }
+      $fuori = if ($ownOut -ge 1) { "  (+ fuori orario $(FmtMin $ownOut))" } else { '' }
+      Write-Output ("  {0}  {1} / {2}  {3}{4}{5}" -f $t.Day, (Split-Path $t.Project -Leaf), $t.Branch, (FmtMin $own), $fuori, $shared)
     }
   }
 }
 Write-Output ""
-Write-Output ("{0,-11} {1,9} {2,11} {3,7} {4,8} {5,8}" -f 'GIORNO', 'ATTIVO', 'RECUPERATI', 'TARGET', 'LOGGATO', 'MANCANO')
+Write-Output ("{0,-11} {1,9} {2,9} {3,9} {4,9} {5,7} {6,8} {7,8}" -f 'GIORNO', 'CLAUDE', 'TU', 'TOTALE', 'FUORI', 'TARGET', 'LOGGATO', 'MANCANO')
 for ($d = $fromD; $d -le $toD; $d = $d.AddDays(1)) {
-  $k = $d.ToString('yyyy-MM-dd'); $t = TargetOf $d; $l = [double]$loggedByDay[$k]; $am = [double]$activeByDay[$k]
-  if ($t -eq 0 -and $am -eq 0 -and $l -eq 0) { continue }
-  Write-Output ("{0,-11} {1,9} {2,11} {3,7} {4,8} {5,8}" -f $k, (FmtMin $am), (FmtMin $recoveredByDay[$k]), (FmtH $t), (FmtH $l), (FmtH ([math]::Max(0, $t - $l))))
+  $k = $d.ToString('yyyy-MM-dd'); $t = TargetOf $d; $l = [double]$loggedByDay[$k]
+  $dc = Acc "D`n$k`nclaude"; $du = Acc "D`n$k`ntu"; $dOut = Acc "D`n$k`nout"
+  if ($t -eq 0 -and ($dc + $du + $dOut) -eq 0 -and $l -eq 0) { continue }
+  Write-Output ("{0,-11} {1,9} {2,9} {3,9} {4,9} {5,7} {6,8} {7,8}" -f $k, (FmtMin $dc), (FmtMin $du), (FmtMin ($dc + $du)), (FmtMin $dOut), (FmtH $t), (FmtH $l), (FmtH ([math]::Max(0, $t - $l))))
 }
 if ($longWaits.Count) {
   Write-Output ""
-  Write-Output "Attese lunghe contate come attive (verificale in Tabella 1):"
+  Write-Output "Attese lunghe contate come CLAUDE (verificale in Tabella 1):"
   foreach ($w in ($longWaits | Sort-Object From)) { Write-Output ("  {0}-{1}  {2,7}  {3}" -f $w.From.ToString('MM-dd HH:mm'), $w.To.ToString('HH:mm'), (FmtMin $w.Min), $w.Where) }
 }
 
@@ -492,20 +599,20 @@ if ($longWaits.Count) {
 $sb = [System.Text.StringBuilder]::new()
 [void]$sb.AppendLine("# Digest grezzo - $rangeLabel")
 [void]$sb.AppendLine("")
-[void]$sb.AppendLine("Tempo attivo totale: **$(FmtMin $totalMin)** su $($projReport.Count) progetti (recuperati: attese $(FmtMin $recovered.wait), continuita' $(FmtMin $recovered.cont)).")
+[void]$sb.AppendLine("CLAUDE **$(FmtMin $sumClaude)** + TU **$(FmtMin $sumTu)** = TOTALE **$(FmtMin $totalMin)** su $($projReport.Count) progetti (fuori orario $(FmtMin $sumOut)).")
 [void]$sb.AppendLine("Il branch git e' usato come topic. Il lavoro su 'master'/'HEAD' va spezzato in topic leggendo i contenuti.")
 [void]$sb.AppendLine("")
 foreach ($p in $projReport) {
   [void]$sb.AppendLine("## $($p.Leaf)")
   [void]$sb.AppendLine("``Path``: $($p.Project)")
-  [void]$sb.AppendLine("Attivo ~$(FmtMin $p.ActiveMin) | $(FmtStamp $p.First)-$(FmtStamp $p.Last) | $($p.Prompts) prompt | $($p.Sessions) sessioni")
+  [void]$sb.AppendLine("CLAUDE ~$(FmtMin $p.Claude) + TU ~$(FmtMin $p.Tu) | fuori ~$(FmtMin $p.Out) | $(FmtStamp $p.First)-$(FmtStamp $p.Last) | $($p.Prompts) prompt | $($p.Sessions) sessioni")
   [void]$sb.AppendLine("")
   $projLines = 0; $projTrunc = $false
   foreach ($b in $p.Branches) {
     $mineBranch = [bool]$sessionBranches["$($p.Project)`n$($b.Branch)"]
     # the session's own lines and branch headers are never cut and do not count toward the limit
     if (-not $mineBranch -and $projLines -ge $MaxLinesPerProj) { $projTrunc = $true; continue }
-    [void]$sb.AppendLine("### topic (branch): $($b.Branch)  -  ~$(FmtMin $b.ActiveMin) | $($b.Prompts) prompt | $(FmtStamp $b.First)-$(FmtStamp $b.Last)$(if ($sessionBranches["$($p.Project)`n$($b.Branch)"]) { ' | sessione: si' })")
+    [void]$sb.AppendLine("### topic (branch): $($b.Branch)  -  CLAUDE ~$(FmtMin $b.Claude) + TU ~$(FmtMin $b.Tu) | $($b.Prompts) prompt | $(FmtStamp $b.First)-$(FmtStamp $b.Last)$(if ($sessionBranches["$($p.Project)`n$($b.Branch)"]) { ' | sessione: si' })")
     foreach ($e in @($b.Events | Where-Object { $_.Text -ne '' })) {
       $isMine = IsMine $e
       if (-not $isMine -and $projLines -ge $MaxLinesPerProj) { $projTrunc = $true; continue }
