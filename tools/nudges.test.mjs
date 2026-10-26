@@ -22,8 +22,12 @@ import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'nudges.js');
 const created = [];
-// An edit is scratch when its file sits under the temp dir, where the sandboxes live: resolve the relative file against the repo instead.
-const REPO = join(dirname(HOOK), '..');
+// An edit is scratch when its file sits under the temp dir, where the sandboxes live: the child gets its own temp dir
+// inside the sandbox, so `a.cs` at the sandbox root counts, and no repo (nor its deliver perimeter) is in the way.
+const childEnv = (config) => {
+  const tmp = join(config, 'tmp');
+  return { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '120000,200000,320000', TEMP: tmp, TMP: tmp, TMPDIR: tmp };
+};
 process.on('exit', () => {
   for (const dir of created) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
 });
@@ -46,14 +50,14 @@ function fire(config, payload) {
     input: typeof payload === 'string' ? payload : JSON.stringify(payload),
     encoding: 'utf8',
     cwd: config,                                // outside any repo: scope-guard must not read the real deliver perimeter
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '120000,200000,320000' },
+    env: childEnv(config),
   });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
 }
 
 const prompt = (config, id = 'sess-1') => fire(config, { session_id: id, hook_event_name: 'UserPromptSubmit', prompt: 'x' });
-const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO });
+const edit = (config) => fire(config, { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: config });
 
 test('UserPromptSubmit: the context nudge speaks once per band', () => {
   const config = sandbox();
@@ -125,7 +129,7 @@ function viaRequire(config, hook, payload) {
     input: JSON.stringify(payload),
     encoding: 'utf8',
     cwd: config,
-    env: { ...process.env, CLAUDE_CONFIG_DIR: config, CLAUDE_NUDGE_STEPS: '120000,200000,320000' },
+    env: childEnv(config),
   });
   assert.equal(r.status, 0, r.stderr);
   return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
@@ -133,7 +137,7 @@ function viaRequire(config, hook, payload) {
 
 test('an older settings.json that requires a nudge directly still gets its output', () => {
   const config = sandbox();
-  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: REPO };
+  const edit = { session_id: 'sess-1', hook_event_name: 'PostToolUse', tool_name: 'Edit', tool_input: { file_path: 'a.cs' }, cwd: config };
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.equal(viaRequire(config, 'edit-nudge.js', edit), null);
   assert.match(viaRequire(config, 'edit-nudge.js', edit).additionalContext, /\bimplementer\b/);
