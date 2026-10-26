@@ -8,7 +8,7 @@ reviews leave traces elsewhere. This file is opened **only** when the gap prompt
 
 | Rule | Detail |
 | --- | --- |
-| Proposals, never hours | every event becomes a **candidate row** in Table 1 with its `Fonte`; the user confirms, edits or drops each one |
+| Proposals, never hours | every event becomes a **candidate row** in Table 1, its source on the `Fonte` line below the table; the user confirms, edits or drops each one |
 | Never auto-logged | a source row without an explicit yes is dropped, not kept "to be safe" |
 | No double count | an event overlapping a transcript window already in Table 1 is shown once, merged into that row |
 | Read-only | search and read; never send, react, draft, schedule or change anything in a source |

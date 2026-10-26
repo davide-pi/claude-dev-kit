@@ -15,7 +15,7 @@ Fires on every day whose COPERTURA is more than 1h short of the target, right af
 | --- | --- |
 | `Riunioni e chiamate (Recommended)` — first, the management item | follow-up: hours (default: the whole gap) and a one-line subject per session → management rows, one Task per session (below) |
 | `Test manuali e verifiche` | follow-up: hours and the product item they belong to (default: the day's main topic) → a development row on that item's Task |
-| `Cercale nelle fonti (Slack, calendario)` | `fonti-esterne.md`: candidate rows with `Fonte`, each confirmed or dropped by the user |
+| `Cercale nelle fonti (Slack, calendario)` | `fonti-esterne.md`: candidate rows named on the `Fonte` line, each confirmed or dropped by the user |
 | `Giornata ridotta (ferie, permesso, evento, corso)` | follow-up: the real target for the day and a note → a `target` row for `worklog-push.ps1`; nothing logged for the difference |
 | *Other* (free text, automatic) | `altro`: whatever the user says, mapped to one of the cases above; unclear → ask |
 
