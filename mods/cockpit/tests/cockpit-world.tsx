@@ -118,6 +118,8 @@ export type World = {
   fileDiffs?: Record<string, string>
   /** The text of the working-tree files `fs.read` answers, by path tail (the untracked files the diff pane reads). */
   files?: Record<string, string>
+  /** True: with no `cockpit.json` among `files` the pane opens at session start; absent, the world's own file says `autoOpen: false`. */
+  isAutoOpen?: boolean
   /** Extra fields of the `gh pr view` answer (title, url ...). */
   prExtra?: Record<string, unknown>
   /** The list `az repos pr list` answers; absent, az answers an empty list. */
@@ -281,6 +283,8 @@ export function world(on: On, options: World = {}) {
     if (options.unreadable?.some(k => e.path.endsWith(k))) throw new Error('EACCES: permission denied')
     const file = Object.keys(options.files ?? {}).find(k => e.path.endsWith(k))
     if (file !== undefined) return { value: options.files?.[file] ?? '' }
+    // Most tests open the pane themselves: unless one asks for the default (`isAutoOpen`), the world's cockpit.json keeps it closed at start.
+    if (e.path.endsWith('cockpit.json') && !options.isAutoOpen) return { value: '{"autoOpen":false}' }
     return {
       value: options.hasWorklog ? JSON.stringify({ day: '2026-10-22', auditMtime: 5, pending: [{ date: '2026-10-20' }], underTarget: [] }) : '{}',
     }

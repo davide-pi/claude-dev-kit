@@ -25,12 +25,15 @@ import { DATA, NOW, PANE, dataOf, flagOf, iso, rowTexts, settle, world } from '.
 /** The context the world measures at start, as the data file keeps it. */
 const LIVE_CTX = { tokens: 248_000, window: 1_000_000, percent: 25 }
 
-test('the pane is not opened at session start', async ($, on) => {
-  const opened: string[] = []
-  world(on, { opened })
+test('a data file from before the model usage was dropped still loads: its history comes back, the old modelUse is ignored', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
+  await ui.unmount()
   await settle()
-  expect(opened).toEqual([])
+  expect(dataOf(writes)).not.toHaveProperty('modelUse')
 })
 
 test('the state file is written at session start with open:false and the session data', async ($, on) => {

@@ -16,6 +16,7 @@ import {
   fmtCostDelta,
   folderIcon,
   gridWidths,
+  pathToFileUri,
   pctCell,
   signedPctCell,
   spanWidth,
@@ -76,7 +77,7 @@ export function tabBarLabels(active: CockpitTab, counts: Partial<Record<CockpitT
 }
 
 export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
-  const { Box, Text, Button } = ui
+  const { Box, Text, Button, Link } = ui
   const S = t()
   // The block is at most PANE_MAX_COLUMNS wide; its content leaves one column of margin each side.
   const block = Math.min(bodyColumns, PANE_MAX_COLUMNS)
@@ -123,11 +124,24 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const diffText = diffs.flatMap((d, i) => (i ? [sp(' '), d] : [d]))
   const w = gridWidths(width, spanWidth(diffText))
   const dirty = g !== undefined && (g.staged > 0 || g.modified > 0)
-  const folderName = g?.worktreeRoot ? baseName(g.worktreeRoot) : baseName(s.cwd)
+  const folderPath = g?.worktreeRoot || s.cwd
+  const folderName = baseName(folderPath)
+  const folderHref = pathToFileUri(folderPath)
+  const folderText = truncMiddle(`${folderIcon(g)} ${folderName}`, w.folder)
   const arrows = g ? aheadBehindSpans(g) : []
   const grid = (
     <Box columnGap={1}>
-      <Box width={w.folder}>{line(ui, [sp(truncMiddle(`${folderIcon(g)} ${folderName}`, w.folder), COLORS.folder)])}</Box>
+      <Box width={w.folder}>
+        {folderHref ? (
+          <Text wrap="truncate">
+            <Link href={folderHref}>
+              <Text color={COLORS.folder}>{folderText}</Text>
+            </Link>
+          </Text>
+        ) : (
+          line(ui, [sp(folderText, COLORS.folder)])
+        )}
+      </Box>
       <Box width={w.branch}>
         {g
           ? line(ui, [sp(truncMiddle(`${ICONS.branch} ${g.branch}`, Math.max(0, w.branch - spanWidth(arrows))), dirty ? COLORS.yellow : COLORS.lavender), ...arrows])

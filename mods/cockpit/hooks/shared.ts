@@ -321,3 +321,12 @@ export function sameSnapshot(a: object, b: object): boolean {
   }
   return true
 }
+
+/** The `file://` URI of a local path (Windows drive letters kept: `file:///C:/work`), as the status line builds it; undefined for an empty path. */
+export function pathToFileUri(p: string): string | undefined {
+  if (!p) return undefined
+  let u = p.replace(/\\/g, '/').split('/').map(encodeURIComponent).join('/')
+  u = u.replace(/^([A-Za-z])%3A/i, '$1:')
+  if (!u.startsWith('/')) u = '/' + u
+  return `file://${u}`
+}

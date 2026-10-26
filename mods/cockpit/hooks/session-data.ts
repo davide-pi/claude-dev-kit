@@ -204,7 +204,6 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   skillsUsed: undefined,
   workflowRun: undefined,
   events: undefined,
-  modelUse: undefined,
   startedAt: undefined,
   confirm: undefined,
 })

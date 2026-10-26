@@ -137,7 +137,7 @@ export function agentsBlocks(k: Kit): Block[] {
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
 
-  // Every agent is one row (state, name, model when it fits, effort, tokens, share, time); pressing it expands what else there is to know. Live and history alike.
+  // Every agent is one row (state, name, model when it fits, effort, share, time); pressing it expands what else there is to know. Live and history alike.
   const sessionTotal = sessionTokens(s)
   const agentBlock = (key: string, agent: CockpitAgent, depth: number): Block => {
     const indent = '  '.repeat(depth + 1)

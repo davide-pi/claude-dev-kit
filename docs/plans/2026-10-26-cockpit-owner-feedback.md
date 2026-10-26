@@ -59,3 +59,28 @@ fixes the one asymmetry the code shows; a paste of the rows decides whether more
   - depends on: 6
 
 Finished → the gate, `install.ps1 -Force` then `-Check`, commit on the branch, no push.
+
+## Round 3 (owner, same day)
+
+- [x] 9. **Pane opens at session start by default**
+  - files: `mods/cockpit/hooks/register.tsx`, `mods/cockpit/hooks/strings.ts` (cockpit.json parsing), tests, README
+  - change: `session.start` opens the pane unless `cockpit.json` says `"autoOpen": false`; missing file or key = open.
+    The engine places an unasked pane only from 144 columns, below that it waits undrawn: say so in the README.
+  - verify: a session start with no cockpit.json opens the pane; with `autoOpen: false` it doesn't.
+- [x] 10. **Folder link in the header**
+  - files: `mods/cockpit/hooks/view.tsx` (+ a `file://` URI helper as `statusline.js` `pathToFileUri`), tests
+  - change: the folder name in the header grid is a `Link` to the folder (worktree root, else cwd).
+  - verify: the header's folder node is a Link with `file:///C:/...` href for a Windows path.
+- [x] 11. **Agent rows: share only, tokens in the details**
+  - files: `mods/cockpit/hooks/view-agents.tsx`, tests
+  - change: the tokens column leaves the row (the share stays); the expanded rows start with the total tokens, live and history.
+  - verify: a row reads `✓ name  son 5.5 <icon>  32%  1m00s`; expanded, a `tokens 5.4k` line.
+- [x] 12. **Drop `modelUse`**
+  - files: `mods/cockpit/hooks/register.tsx`, `session-data.ts`, `types/index.d.ts`, tests
+  - change: nothing collects or persists per-model usage any more; an old data file holding it still loads.
+  - verify: the gate; a data file with `modelUse` parses.
+- [x] 13. **Split the big files** (pure moves, no behaviour change)
+  - files: `mods/cockpit/hooks/register.tsx` (642), `tests/cockpit-subagents.test.tsx` (773), `tests/cockpit-header.test.tsx` (616)
+  - change: each under 600 lines along a seam that's already there. `workflows/impl-review-loop.js` stays one file:
+    a Workflow script must be self-contained (no imports).
+  - verify: the gate, same test count.

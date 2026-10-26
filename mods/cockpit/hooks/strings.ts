@@ -254,6 +254,15 @@ export function langOf(text: string): Lang {
   }
 }
 
+/** Whether `cockpit.json` lets the pane open at session start: true unless it says `"autoOpen": false`. */
+export function autoOpenOf(text: string): boolean {
+  try {
+    return (JSON.parse(text) as { autoOpen?: unknown } | null)?.autoOpen !== false
+  } catch {
+    return true
+  }
+}
+
 export const setLang = (lang: Lang): void => {
   current = BUNDLES[lang]
 }

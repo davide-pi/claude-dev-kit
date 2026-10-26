@@ -76,18 +76,17 @@ export const agentIcon = (a: CockpitAgent): Span =>
   a.status === 'running' ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green)
 
 const MODEL_W = 9
-const TOKENS_W = 5
 /** A name is worth this many cells before a row gives up other columns (the model, on the Subagents tab; the cache hit then the model, in TOP AGENTS). */
 const MIN_NAME_W = 6
 const SHARE_W = 4
 const TIME_W = 6
-// icon, gap, name, then gap + model, gap + effort, gap + tokens, gap + share of the session's tokens, gap + time
-const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + TOKENS_W + 1 + SHARE_W + 1 + TIME_W
+// icon, gap, name, then gap + model, gap + effort, gap + share of the session's tokens, gap + time
+const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + TIME_W
 
 /** The model with its version (`son 5.5`, `opus 5.5`); a name this build does not know is cut to the column. */
 const rowModel = (model: string | undefined): string => (model ? truncEnd(shortModel(model), MODEL_W) : '—')
 
-/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, tokens, their share of the session's `total` (blank when unknown), time. */
+/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, their share of the session's `total` (blank when unknown), time. */
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number): Span[] {
   // a pane too narrow for the name drops the model column: the share and the time matter more
   const hasModel = width - ROW_FIXED_W >= MIN_NAME_W
@@ -104,8 +103,6 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
       sp(' '),
       ...(hasModel ? [sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning), sp(' ')] : []),
       ...(effort.length ? effort : [sp(' ')]),
-      sp(' '),
-      sp(padStart(abbrevTokens(a.tokens), TOKENS_W)),
       sp(' '),
       sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
       sp(' '),
@@ -161,7 +158,7 @@ export const fitPair = (left: readonly Span[], right: readonly Span[], width: nu
   spanWidth(left) + 1 + spanWidth(right) <= width ? pairRow(left, right, width) : truncateSpans(left, width)
 
 /**
- * The rows under an agent's row on the Subagents tab once it is expanded: what it was asked, the four counters, then the tool running
+ * The rows under an agent's row on the Subagents tab once it is expanded: the total tokens, what it was asked, the four counters, then the tool running
  * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
  */
 export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
@@ -186,7 +183,8 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
   const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
   const tool = toolSpans && truncateSpans(toolSpans, width)
   const task = a.description ? truncateSpans([sp(indent), dim(a.description.replace(/\s+/g, ' '))], width) : undefined
-  return [task, counters, tool].filter((r): r is Span[] => r !== undefined)
+  const total = dim(`${indent}${t().costDetail.tokens(abbrevTokens(a.tokens))}`)
+  return [truncateSpans([total], width), task, counters, tool].filter((r): r is Span[] => r !== undefined)
 }
 
 const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [

@@ -305,8 +305,6 @@ export type CockpitSnapshot = {
   repo?: CockpitRepo
   /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
-  /** The usage counters of every finished turn by model id: the Costi tab prices them. */
-  modelUse?: Record<string, CockpitUsage>
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `analizza suite` or Lavoro's `log hours`. */

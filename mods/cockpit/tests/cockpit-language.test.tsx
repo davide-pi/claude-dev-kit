@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { textCells } from '../hooks/shared'
 import { setLang, t } from '../hooks/strings'
 import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
-import { iso, rowTexts, world } from './cockpit-world'
+import { flagOf, iso, rowTexts, settle, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
 test('English is the default: the tab labels, the footer and the titles', async ($, on) => {
@@ -146,4 +146,31 @@ test('Italian: the pace title is translated, and the title rows fit 40 and 58 co
   } finally {
     setLang('en')
   }
+})
+
+test('the pane opens at session start when cockpit.json is missing or holds no autoOpen, and the state file says open', async ($, on) => {
+  const opened: string[] = []
+  const writes = new Map<string, string>()
+  const options: World = { opened, writes, isAutoOpen: true }
+  world(on, options)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(opened).toEqual(['cockpit'])
+  expect(flagOf(writes)).toMatchObject({ open: true })
+
+  opened.length = 0
+  options.files = { 'cockpit.json': '{"lang":"it"}' }
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(opened).toEqual(['cockpit'])
+})
+
+test('the pane is not opened at session start when cockpit.json says autoOpen:false; /cockpit still opens it', async ($, on) => {
+  const opened: string[] = []
+  world(on, { opened, files: { 'cockpit.json': '{"autoOpen":false}' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settle()
+  expect(opened).toEqual([])
+  await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
+  expect(opened).toEqual(['cockpit'])
 })

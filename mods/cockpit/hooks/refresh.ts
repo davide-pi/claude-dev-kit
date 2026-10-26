@@ -10,21 +10,24 @@ import type { WorklogSnapshot } from './session'
 import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
 import { configDir, patch } from './store'
-import { langOf, setLang } from './strings'
+import { autoOpenOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
 import { endRun, expireRun, finishWorkflowAgent } from './workflow'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
-/** The language of the pane's texts: the `lang` of `<config dir>/cockpit.json`; a missing or unreadable file is English. */
-export async function refreshLang($: EngineInterface): Promise<void> {
+/** Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English) and tells whether the pane opens at session start (`autoOpen`, true unless `false`). */
+export async function refreshConfig($: EngineInterface): Promise<boolean> {
   try {
     const dir = await configDir($)
     const text = dir ? await $.fs.read(`${dir}/cockpit.json`) : undefined
-    setLang(langOf(typeof text === 'string' ? text : ''))
+    const raw = typeof text === 'string' ? text : ''
+    setLang(langOf(raw))
+    return autoOpenOf(raw)
   } catch {
     setLang('en')
+    return true
   }
 }
 

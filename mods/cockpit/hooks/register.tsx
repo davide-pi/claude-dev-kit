@@ -2,8 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
-import { addHistory, addModelUse, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
-import { compactInstructions, recordCtxSample, recordRound } from './context'
+import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import { recordCtxSample, recordRound } from './context'
 import {
   addStepUsage,
   applyTodos,
@@ -15,10 +15,7 @@ import {
   noteEdit,
   readClaudeState,
   removeOne,
-  saveNote,
-  sendNote,
   setClaudeState,
-  toggled,
   upsertAgent,
 } from './events'
 import {
@@ -37,29 +34,26 @@ import {
   mediumTick,
   refreshAlm,
   refreshAutoCompact,
+  refreshConfig,
   refreshDoneClaims,
-  refreshLang,
   refreshLastRates,
   refreshOnOpen,
   refreshUsage,
   refreshWorklog,
   slowTick,
 } from './refresh'
+import { diffActions, paneActions } from './pane-actions'
 import { cacheHit, usdOf } from './pricing'
-import { openContext, pressRefresh, scheduleContextRead } from './refresh-context'
-import { refreshGit, refreshRepo, showDiff } from './refresh-git'
-import { NOTE_MAX, normalizeNewlines } from './session'
+import { scheduleContextRead } from './refresh-context'
+import { refreshGit } from './refresh-git'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
-import { signalId, signalsOf } from './signals'
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { recordAgentEvent } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
-import type { PaneActions } from './view'
 import { diffView } from './view-work'
-import type { DiffActions } from './view-work'
-import { activeRun, addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
+import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
 import { parseCreatedPr, upsertPr } from './work'
 
 // The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
@@ -95,71 +89,6 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
   }
 }
 
-/** What the pane's buttons do. Each runs apart from the press and fails alone: a refused call leaves the pane as it was. */
-const paneActions = ($: EngineInterface): PaneActions => ({
-  // The Lavoro tab's git read and the Costi tab's breakdown run while the tab is selected: the press starts them.
-  selectTab: tab =>
-    void patch($, s => ({ ...s, tab, confirm: undefined, signalOpen: undefined, seenSignals: s.tab === 'signals' || tab === 'signals' ? signalsOf(s).map(signalId) : s.seenSignals }))
-      .then(async () => {
-        if (tab === 'work') await refreshRepo($)
-        else if (tab === 'context') await openContext($)
-      })
-      .catch(() => undefined),
-  // The instructions are built from the snapshot as it is at the press.
-  compact: () =>
-    void read($, snapshot)
-      .then(s => $.session.compact({ instructions: compactInstructions({ ...s, workflow: activeRun(s.workflowRun)?.name }) }))
-      .catch(() => undefined),
-  // A button that sends something waits for its confirmation; the answer runs it or drops it.
-  ask: kind => void patch($, s => ({ ...s, confirm: kind })).catch(() => undefined),
-  // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
-  // `command.run` entry of the engine types). The worklog is the skill's `sessione <id>` scope: the hours of this chat.
-  answer: isYes =>
-    void read($, snapshot)
-      .then(async s => {
-        const asked = s.confirm
-        await patch($, x => ({ ...x, confirm: undefined }))
-        if (!isYes) return
-        if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
-        if (asked === 'suite') await $.command.run({ command: 'retro' })
-        if (typeof asked === 'string' && asked.startsWith('note:')) {
-          const id = Number(asked.slice(5))
-          await patch($, x => {
-            const notes = (x.notes ?? []).filter(n => n.id !== id)
-            return { ...x, notes: notes.length > 0 ? notes : undefined, noteEditing: x.noteEditing === id ? undefined : x.noteEditing }
-          })
-        }
-      })
-      .catch(() => undefined),
-  openDiff: change => void showDiff($, change),
-  toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
-  toggleCostAgents: () => void patch($, s => ({ ...s, isCostAgentsOpen: !s.isCostAgentsOpen })).catch(() => undefined),
-  toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
-  toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
-  refresh: () => void pressRefresh($).catch(() => undefined),
-  toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
-  setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
-  saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
-  editNote: id =>
-    void patch($, s => {
-      const note = s.notes?.find(n => n.id === id)
-      return note ? { ...s, noteDraft: note.text, noteEditing: id } : s
-    }).catch(() => undefined),
-  sendNote: id => void sendNote($, id).catch(() => undefined),
-  deleteNote: id => void patch($, s => ({ ...s, confirm: `note:${id}` })).catch(() => undefined),
-})
-
-/**
- * What the diff pane's button does: forgets the diff, then closes the pane. A plugin's own `$.ui.close` does not reach its
- * own `ui.close` hook, which is what forgets the diff when the person closes the pane instead.
- */
-const diffActions = ($: EngineInterface): DiffActions => ({
-  close: () =>
-    void patch($, s => ({ ...s, diff: undefined }))
-      .then(() => $.ui.close({ id: DIFF_PANE }))
-      .catch(() => undefined),
-})
-
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */
@@ -173,7 +102,7 @@ async function open($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // First: the command registered below is described in the language read here.
-    await refreshLang($)
+    const autoOpen = await refreshConfig($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
@@ -203,7 +132,8 @@ export const register: Register = on => {
     $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
     $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
     $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
-    // The pane starts closed: `/cockpit` opens it.
+    // The pane opens with the session unless cockpit.json says `"autoOpen": false`; `/cockpit` opens it any time.
+    if (autoOpen) await open($).catch(() => undefined)
     return next(e)
   })
 
@@ -266,7 +196,7 @@ export const register: Register = on => {
     return closed
   })
 
-  // Any close, whoever asked for it: the pane stays closed until `/cockpit`.
+  // Any close, whoever asked for it: the pane stays closed until `/cockpit` or the next session start (autoOpen).
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
     await setOpen($, false)
@@ -585,7 +515,6 @@ export const register: Register = on => {
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
-          modelUse: usage && s.model ? addModelUse(s.modelUse, s.model, usageOf(usage)) : s.modelUse,
         }
       })
       await setClaudeState($, { kind: 'idle' })
@@ -613,7 +542,6 @@ export const register: Register = on => {
           ...s,
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
-          modelUse: usage && ended?.model ? addModelUse(s.modelUse, ended.model, usageOf(usage)) : s.modelUse,
           events: ended
             ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
             : s.events,
@@ -634,7 +562,7 @@ export const register: Register = on => {
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {
-      await refreshLang($)
+      await refreshConfig($)
       $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
