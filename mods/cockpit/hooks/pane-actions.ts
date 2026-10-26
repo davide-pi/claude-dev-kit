@@ -34,15 +34,12 @@ export function paneActions($: EngineInterface): PaneActions {
         .catch(() => undefined),
     // A button that sends something waits for its confirmation; the answer runs it or drops it.
     ask: kind => void patch($, s => ({ ...s, confirm: kind })).catch(() => undefined),
-    // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
-    // `command.run` entry of the engine types). The worklog is the skill's `sessione <id>` scope: the hours of this chat.
     answer: isYes =>
       void read($, snapshot)
         .then(async s => {
           const asked = s.confirm
           await patch($, x => ({ ...x, confirm: undefined }))
           if (!isYes) return
-          if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
           if (typeof asked === 'string' && asked.startsWith('note:')) {
             const id = Number(asked.slice(5))
             await patch($, x => {
@@ -56,6 +53,13 @@ export function paneActions($: EngineInterface): PaneActions {
     retro: scope =>
       void patch($, s => ({ ...s, confirm: undefined }))
         .then(() => $.command.run(scope === 'days' ? { command: 'retro', args: 'days 10' } : { command: 'retro' }))
+        .catch(() => undefined),
+    // `$.command.run` is the engine's documented way to run a slash command: "as if the person typed `/command args`" (the
+    // `command.run` entry of the engine types). The worklog's choice is its confirmation: the skill's `sessione <id>` scope, the
+    // hours of this chat, or the whole day.
+    worklog: scope =>
+      void patch($, s => ({ ...s, confirm: undefined }))
+        .then(async () => $.command.run({ command: 'worklog', args: scope === 'session' ? `oggi sessione ${await $.session.id()}` : 'oggi' }))
         .catch(() => undefined),
     openDiff: change => void showDiff($, change),
     toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),

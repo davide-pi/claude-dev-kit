@@ -157,7 +157,7 @@ for (const [name, options] of [
   ['the default branch', { branch: 'main' }],
   ['no git', { notRepo: true }],
 ] as const) {
-  test(`footer: log hours on ${name} asks first, then runs /worklog oggi sessione with the id of this chat`, async ($, on) => {
+  test(`footer: log hours on ${name} asks which hours, then runs /worklog oggi sessione with the id of this chat, or /worklog oggi`, async ($, on) => {
     const commands: string[] = []
     const w: World = { commands, sessionId: () => 'chat-7', ...options }
     world(on, w)
@@ -167,14 +167,20 @@ for (const [name, options] of [
     expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
     await ui.press({ key: 'bar:worklog' })
     expect(commands).toEqual([])
-    expect(rowTexts(await ui.drawn()).some(r => /log the hours/.test(r))).toBe(true)
+    expect(rowTexts(await ui.drawn()).some(r => /which hours\? sends \/worklog/.test(r))).toBe(true)
+    expect([(await ui.find({ key: 'confirm:chat' }))?.text, (await ui.find({ key: 'confirm:day' }))?.text]).toEqual(['this chat', 'today'])
     await ui.press({ key: 'confirm:no' })
     expect(commands).toEqual([])
+    expect(await ui.find({ key: 'confirm:chat' })).toBeUndefined()
     await ui.press({ key: 'bar:worklog' })
-    await ui.press({ key: 'confirm:yes' })
+    await ui.press({ key: 'confirm:chat' })
     await until(() => commands.length > 0)
-    await ui.unmount()
     expect(commands).toEqual(['/worklog oggi sessione chat-7'])
+    await ui.press({ key: 'bar:worklog' })
+    await ui.press({ key: 'confirm:day' })
+    await until(() => commands.length > 1)
+    await ui.unmount()
+    expect(commands).toEqual(['/worklog oggi sessione chat-7', '/worklog oggi'])
   })
 }
 
