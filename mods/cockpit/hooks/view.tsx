@@ -199,11 +199,12 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     return split(line(ui, barCells(barW, parts)), barW, text)
   }
 
-  // The footer, the last row of every tab: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a confirm; the hours of this chat, so only with a session).
+  // The footer, the last row of every tab: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
   const hasLog = s.sessionId !== undefined
   const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]
   const retroLabels = [S.buttons.retroDays, S.buttons.retroSession, S.buttons.no]
+  const logLabels = [S.buttons.logSession, S.buttons.logDay, S.buttons.no]
   const buttonsRow =
     s.confirm === 'retro' ? (
       <Box flexDirection="column">
@@ -223,9 +224,12 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     ) : s.confirm === 'worklog' && hasLog ? (
       <Box flexDirection="column">
         {line(ui, truncateSpans([sp(S.confirmLog, COLORS.yellow)], width))}
-        <Box columnGap={BUTTON_GAP}>
-          <Button key="confirm:yes" onPress={() => actions.answer(true)}>
-            {S.buttons.yes}
+        <Box flexDirection={buttonRowWidth(logLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+          <Button key="confirm:chat" onPress={() => actions.worklog('session')}>
+            {S.buttons.logSession}
+          </Button>
+          <Button key="confirm:day" onPress={() => actions.worklog('day')}>
+            {S.buttons.logDay}
           </Button>
           <Button key="confirm:no" onPress={() => actions.answer(false)}>
             {S.buttons.no}

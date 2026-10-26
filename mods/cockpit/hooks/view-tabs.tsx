@@ -25,12 +25,14 @@ import { activeRun } from './workflow'
 export type PaneActions = {
   selectTab: (tab: CockpitTab) => void
   compact: () => void
-  /** Asks to confirm a button that sends something (`retro`: which `/retro`) or logs hours (`worklog`). */
+  /** Asks to confirm a button that sends something (`retro`: which `/retro`) or logs hours (`worklog`: which `/worklog`). */
   ask: (kind: 'retro' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
   /** Answers the retrospective's choice: `/retro days 10` over the last ten days, `/retro` on this session. */
   retro: (scope: 'days' | 'session') => void
+  /** Answers the worklog's choice: `/worklog oggi sessione <id>` for the hours of this chat, `/worklog oggi` for the whole day. */
+  worklog: (scope: 'session' | 'day') => void
   /** Shows every history entry, or only the newest few. */
   toggleHistory: () => void
   /** Shows every TOP AGENTS entry, or only the dearest few. */
