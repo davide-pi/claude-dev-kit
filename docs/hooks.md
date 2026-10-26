@@ -54,6 +54,7 @@ Hooks cooperate through files, never through each other's code:
 
 ## Tests
 
-Every hook entry point and library has a dependency-free `tools/<name>.test.mjs`. The false positives
+Every Node hook entry point has a dependency-free test in `tools/`; the libraries are tested on their own or
+through the hooks that use them. The false positives
 matter as much as the true ones: a guard that fires on a comment, a path or a dry run gets switched off.
 A new check is seen failing once before it counts.

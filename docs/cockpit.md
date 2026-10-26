@@ -13,8 +13,9 @@ change to `mods/cockpit/` keeps, and the options already tried and dropped.
 3. **Nothing submitted on the person's behalf.** A note is sent with `prompt.fill`, never `prompt.submit`:
    the person decides when a turn starts.
 4. **Cheap while open, nearly idle while closed.** The fast tier runs only while a tab that draws elapsed times
-   is selected, the medium tier (git) only while the pane is open. While the pane is closed the slow tier keeps
-   only the state file's heartbeat for the status line, and the agents' list while one runs (`hooks/refresh.ts`).
+   is selected, the medium tier (git) only while the pane is open. While the pane is closed the slow tier only
+   updates the agents' list while one runs or a permission waits; the heartbeat, the ALM line, git and the worklog
+   wait for the pane to open (`hooks/refresh.ts`).
 5. **Fixed width.** Content is at most 60 columns plus a margin of one on each side. Rows truncate (only a name
    or description is cut, with `…`), and every view is tested at narrow and wide widths.
 6. **Two languages, one file.** Every text is in `hooks/strings.ts` in English and Italian. The language is read
