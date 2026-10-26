@@ -149,6 +149,22 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
     }
   }
 
+  // ── 4c. Table templates the model copies fit a terminal ─────────────────────
+  // A ```markdown fence in a skill is a table the model prints as is: past 8 columns it wraps and falls apart
+  // in the terminal, and `~` pairs in a row render as strikethrough (the worklog's Table 1, 2026-10-26).
+  for (const rel of textFiles.filter((f) => f.startsWith('skills/') && f.endsWith('.md'))) {
+    let inTemplate = false;
+    read(rel).split(/\r?\n/).forEach((text, i) => {
+      if (/^```markdown\b/.test(text)) inTemplate = true;
+      else if (/^```/.test(text)) inTemplate = false;
+      else if (inTemplate && text.startsWith('|')) {
+        const columns = text.split('|').length - 2;
+        if (columns > 8) fail(`${rel}:${i + 1}`, `table template has ${columns} columns: at most 8 fit a terminal`);
+        if (text.includes('~')) fail(`${rel}:${i + 1}`, 'table template has `~`: two in a row render as strikethrough');
+      }
+    });
+  }
+
   // ── 5. Environment variables the kit needs are documented ────────────────────
   const SYSTEM_VARS = new Set(['USERPROFILE', 'LOCALAPPDATA', 'HOME', 'TEMP', 'TMP', 'PATH', 'APPDATA', 'COMPUTERNAME', 'CLAUDE_PROJECT_DIR']);
   const readme = read('README.md');

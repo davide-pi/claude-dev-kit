@@ -103,6 +103,18 @@ test('byte caps: output style and SKILL.md fail over the cap, CLAUDE.md only war
   assert.match(claude.out, /CLAUDE\.md: \d+ bytes against the 2750-byte cap/);
 });
 
+test('a skill table template fails past 8 columns or with ~; outside a markdown fence it does not', () => {
+  const template = (row) => `\n\`\`\`markdown\n${row}\n\`\`\`\n`;
+  const wide = run((write, read) => write(SKILL, read(SKILL) + template(`|${' a |'.repeat(9)}`)));
+  assert.equal(wide.code, 1);
+  assert.match(wide.out, /skills\/demo\/SKILL\.md:\d+: table template has 9 columns/);
+  const tilde = run((write, read) => write(SKILL, read(SKILL) + template('| 1 | ~2h | ~3m |')));
+  assert.equal(tilde.code, 1);
+  assert.match(tilde.out, /table template has `~`/);
+  const prose = run((write, read) => write(SKILL, `${read(SKILL)}\n|${' a |'.repeat(9)}\n| ~2h |\n`));
+  assert.equal(prose.code, 0, prose.out);
+});
+
 test('the listed description budget fails over 8000 chars; hidden skills do not count', () => {
   const longAgent = (read) => read(AGENT).replace(/description: >-\n.*\n/, `description: ${'Use when words. '.repeat(540)}\n`);
   const over = run((write, read) => write(AGENT, longAgent(read)));

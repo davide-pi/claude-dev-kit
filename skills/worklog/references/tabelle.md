@@ -11,13 +11,15 @@ One block per day (a range prints one per day). Only this in chat; the timeline 
 ```markdown
 **Lunedì 12/10** — target 8h · già sul board 0h
 
-| # | Progetto | Topic | Descrizione breve | Claude | Tu | Totale | Fuori orario | Da | A | Arrotondato | Fonte |
-|---|----------|-------|-------------------|--------|----|--------|--------------|----|---|-------------|-------|
-| 1 | <Project> | import nuovi mercati | Import e mappatura dei nuovi mercati | 55m | 25m | 1h20m | 0m | 09:08 | 10:16 | 1.5h | transcript |
-| 2 | <Project> | cache traduzioni | Fix invalidazione cache traduzioni | 15m | 10m | 25m | 0m | 11:40 | 12:05 | 0.5h | transcript |
-| 3 | interno | tooling worklog | Fix engine worklog | 30m | 10m | 40m | 0m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
-| | | **Totale** | | **1h40m** | **45m** | **2h25m** | **0m** | | | **2h loggabili** | |
+| # | Progetto | Topic | Claude + Tu | Totale | Arrotondato |
+|---|----------|-------|-------------|--------|-------------|
+| 1 | <Project> | import nuovi mercati — mappatura nuovi mercati | 55m + 25m | 1h20m | 1.5h |
+| 2 | <Project> | cache traduzioni — fix invalidazione cache | 15m + 10m | 25m* | 0.5h |
+| 3 | interno | tooling worklog — fix engine worklog | 30m + 10m | 40m | 0.5h (interno, non loggato) |
+| | | **Totale** | **1h40m + 45m** | **2h25m** | **2h loggabili** |
 
+\* stima: ripartizione del branch di default
+Fuori orario: #1 +10m
 Non fatturato: 40m (interni 40m, arrotondamento 0m)
 Attese lunghe contate: 10:45-13:10 (2h25m, <repo>) — tienile o toglile
 **Copertura: 2h / 8h — mancano 6h**
@@ -26,10 +28,11 @@ Attese lunghe contate: 10:45-13:10 (2h25m, <repo>) — tienile o toglile
 | Column / line | Source |
 | --- | --- |
 | `Progetto` | **every row, gap rows included**: the board project from `workspaces.json` (the topic's path), `interno` for internal rows; unmapped or unsure → `?` and ask in the same message |
-| `Claude` / `Tu` / `Totale` / `Fuori orario` | the engine's `CLAUDE`, `TU`, `TOTALE` and `FUORI` for the topic (after a split of the default branch, say it is an estimate): measured hours, extra, their sum, and what fell outside 08:00-20:00; the user adjusts by judgement |
-| `Da` / `A` | the topic's window |
+| `Topic` | `<topic> — <descrizione breve>` in one cell, **at most ~50 characters**: cut the description, never wrap it |
+| `Claude + Tu` / `Totale` | the engine's `CLAUDE`, `TU` and `TOTALE` for the topic: measured hours, extra, their sum; the user adjusts by judgement. An estimate (a split of the default branch) gets `*` after `Totale` and the line `\* stima: <why>` below the table — **never `~`** in a cell: two of them in a row render as strikethrough |
 | `Arrotondato` | `round.ps1` on `Totale`, never by hand; mark `0h (non loggato)` and `interno` rows |
-| `Fonte` | `transcript`, or for gap rows `dichiarato`, `Slack`, `calendario`, `board`, `git` |
+| `Fuori orario` line | the engine's `FUORI`, what fell outside 08:00-20:00: `#<n> +<min>` per row that has any; omit the line when all are 0 |
+| `Fonte` line | only rows not from the transcripts (gap rows): `#<n> da <dichiarato, Slack, calendario, board, git>`; omit it otherwise |
 | header `già sul board` | the GIORNO table's `LOGGATO` for the day |
 | `Non fatturato` | the helper's NON FATTURATO line, verbatim numbers |
 | `Attese lunghe contate` | the engine's long turns on that day; omit the line when there are none |
@@ -91,3 +94,6 @@ and what did **not** happen (a 0h row, a failed row, a failed link).
 4. "Ok procedi" on Table 1 taken for Table 2 → one gate passed → each table has its own confirmation.
 5. Coverage computed once and left stale → rows added by the gap prompt → recompute after every change.
 6. The recap repeats Table 2 → the plan was trusted → the recap is the push output, read back.
+7. Table 1 falls apart in the terminal → 12 columns and long descriptions wrap, `~` pairs strike text through →
+   the six columns above, `Topic` at ~50 characters, `*` for an estimate (`tools/validate-content.mjs` checks the
+   templates: at most 8 columns, no `~`).
