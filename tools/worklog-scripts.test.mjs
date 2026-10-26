@@ -266,6 +266,59 @@ test('a fork abandoned early keeps the original its own head (the copy ends firs
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +24m`));   // s1: 7m + TU 3-5 and 12-27; with the head on s9 it would lose the 3m
 });
 
+test('a tie on the first timestamp goes to the file a continued-in line points away from, not to the older file', { skip }, async () => {
+  const continuedIn = { type: 'continued-in', timestamp: at(7), sessionId: 's1', continuedInSessionId: 's9' };
+  const files = (withLine) => ({   // s9 is written first: by creation time alone it would own the copied head
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))],
+    'C--work-api/s1.jsonl': [...s1Head(), ...(withLine ? [continuedIn] : [])],
+  });
+  const out = await engineAt(files(true), '-From', TODAY, '-SessionId', 's1');
+  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));   // s1 owns the head, s9 joins it
+  assert.match(sessionSection(await engineAt(files(false), '-From', TODAY, '-SessionId', 's1')), /nessun evento/);   // the fallback: creation time
+});
+
+test('a simple --resume of a resume (no continued-in line of its own) does not take the head of the chain', { skip }, async () => {
+  const continuedIn = { type: 'continued-in', timestamp: at(7), sessionId: 's1', continuedInSessionId: 's9' };
+  const all = [...s1Head(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))];
+  const out = await engineAt({   // s8 is written last and copies everything s9 has: the chain s1 -> s9 owns the lines
+    'C--work-api/s1.jsonl': [...s1Head(), continuedIn],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...all.slice(3).map((e) => withSession(e, 's9', e.uuid))],
+    'C--work-api/s8.jsonl': all.map((e) => withSession(e, 's8', e.uuid)),
+  }, '-From', TODAY, '-SessionId', 's9');
+  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
+});
+
+test('a plain --resume original keeps its head when its resume is itself continued by a continued-in line', { skip }, async () => {
+  const continuedIn = { type: 'continued-in', timestamp: at(9), sessionId: 'sA', continuedInSessionId: 'sB' };
+  const copy = (session, evs) => evs.map((e) => withSession(e, session, e.uuid));
+  const headX = s1Head().map((e) => withSession(e, 'sX', e.uuid));
+  const aOwn = own('sA', 4, prompt(5), reply(6), turn(6, 1));
+  const out = await engineAt({   // written in the order sX, sA, sB: sX is in no chain but is the oldest file
+    'C--work-api/sX.jsonl': headX,
+    'C--work-api/sA.jsonl': [...copy('sA', headX), ...aOwn, continuedIn],
+    'C--work-api/sB.jsonl': [...copy('sB', headX), ...copy('sB', aOwn), ...own('sB', 7, prompt(10), reply(11), turn(11, 1))],
+  }, '-From', TODAY, '-SessionId', 'sX');
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a`));
+});
+
+/** A tool_result-only user line in the shape Claude Code writes: tool_use_id first in the block, top-level keys before message, timestamp last. */
+const rawToolResult = (min, id, uuid, cwdJson = 'C:\\\\work\\\\api') =>
+  `{"parentUuid":null,"isSidechain":false,"cwd":"${cwdJson}","sessionId":"s1","gitBranch":"feature/a","type":"user","message":{"role":"user","content":[{"tool_use_id":"${id}","type":"tool_result","content":"ok"}]},"uuid":"${uuid}","timestamp":"${at(min)}"}`;
+
+test('tool_result lines in the real shape (string-search path) give the same figures as the parsed ones, with escaped cwds too', { skip }, async () => {
+  const rest = [prompt(0), toolUse(1, 'c1'), reply(9)];
+  const withResults = (rawCwd) => ({ 'C--work-api/s1.jsonl': [...rest, rawToolResult(20, 'c1', 'r1', rawCwd), prompt(30)] });
+  const parsed = await engineAt({ 'C--work-api/s1.jsonl': [...rest, toolResult(20, 'c1'), prompt(30)] }, '-From', TODAY);
+  for (const cwd of ['C:\\\\work\\\\api', 'C:\\u005cwork\\u005capi']) {   // \\ in the JSON, then a \u escape (the fallback parse)
+    const out = await engineAt(withResults(cwd), '-From', TODAY);
+    assert.deepEqual(figures(out), figures(parsed));
+    assert.deepEqual(branchRow(out, 'feature/a'), branchRow(parsed, 'feature/a'));
+    assert.match(out, /api/);
+  }
+});
+
 test('-SessionId on a branch shared with another chat flags it and marks the digest lines of the session', { skip }, async () => {
   const shared = { branch: 'main' };
   const main = [
@@ -305,7 +358,7 @@ async function engineAt(files, ...flags) {
   const root = tmp();
   for (const [rel, events] of Object.entries(files)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
-    writeFileSync(join(root, rel), events.map((e) => JSON.stringify(e)).join('\n'));
+    writeFileSync(join(root, rel), events.map((e) => (typeof e === 'string' ? e : JSON.stringify(e))).join('\n'));
     await new Promise((r) => setTimeout(r, 50));   // distinct, increasing CreationTime: the engine orders fork owners by it
   }
   const r = await pwsh('worklog.ps1', ['-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);

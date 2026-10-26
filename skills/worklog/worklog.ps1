@@ -31,8 +31,11 @@
   If session B carries copies of A's messages and A's last event is before B's first own event (a
   resume), B joins A's session (no double count). If A keeps working after B's first own event (a
   fork), only the duplicates are dropped: two sessions.
-  Limit: when the first timestamps tie, the creation time of the file breaks the tie; it is unreliable
-  after copies, sync or restores (then the head of a fork may land on the wrong file).
+  When the first timestamps tie: first the creation time of the chain's first file (a chain follows the
+  {"type":"continued-in","continuedInSessionId":<resume>} line the original ends with; a file in no chain is
+  its own chain), then the place in the chain (the original before its resume), then the file's creation time.
+  Limit: only some resumes leave that line (none seen for a plain --resume or a fork); the creation time is
+  unreliable after copies, sync or restores (the head of a fork may land on the wrong file).
   A session with no main-session event in the period has no topic: its busy time is not counted.
 
   Targets: <OutDir>/targets.json  { "targetHours": 8, "days": { "yyyy-MM-dd": 6 | { "hours": 6, "note": "..." } } }
@@ -125,43 +128,11 @@ Get-ChildItem $rawDir -Filter '*.md' -File -ErrorAction SilentlyContinue | ForEa
 $auditPath   = Join-Path $OutDir 'pushed.json'
 $targetsPath = Join-Path $OutDir 'targets.json'
 
-# ---- helpers ----
-function Clean([string]$s) {
-  if (-not $s) { return '' }
-  $s = [regex]::Replace($s, '(?s)<system-reminder>.*?</system-reminder>', '')
-  $s = [regex]::Replace($s, '(?s)<command-[^>]*>.*?</command-[^>]*>', '')
-  $s = [regex]::Replace($s, '(?s)<local-command-[^>]*>.*?</local-command-[^>]*>', '')
-  return ($s -replace '\s+', ' ').Trim()
-}
-function Trunc([string]$s, [int]$n) { if ($s.Length -le $n) { $s } else { $s.Substring(0, $n).TrimEnd() + '...' } }
-function TextOf($content) {
-  if ($null -eq $content) { return '' }
-  if ($content -is [string]) { return $content }
-  $parts = foreach ($b in $content) { if ($b.type -eq 'text' -and $b.text) { [string]$b.text } }
-  return (@($parts) -join "`n")
-}
-function FmtMin([double]$m) {
-  $m = [math]::Round($m); if ($m -lt 1 -and $m -gt 0) { $m = 1 }
-  $h = [math]::Floor($m / 60); $r = $m % 60
-  if ($h -gt 0) { "${h}h ${r}m" } else { "${r}m" }
-}
-function FmtStamp([datetime]$t) { if ($isRange) { $t.ToString('MM-dd HH:mm') } else { $t.ToString('HH:mm') } }
-function FmtH([double]$h) { ('{0:0.##}h' -f $h) }
-function ToLocal([string]$iso) { [datetime]::Parse($iso, [cultureinfo]::InvariantCulture, 'RoundtripKind').ToLocalTime() }
-function ReadJson([string]$p) {
-  if (-not (Test-Path $p)) { return $null }
-  try { return (Get-Content $p -Raw | ConvertFrom-Json) } catch { return $null }
-}
+# ---- helpers: text, formatting, string search, topic and interval lookups, booking (worklog-lib.ps1) ----
+. (Join-Path $PSScriptRoot 'worklog-lib.ps1')
 
-# ---- scan: one regex on the timestamp before any JSON parse (the transcripts weigh hundreds of MB) ----
-$tsRx  = [regex]::new('"timestamp":"(\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?Z)"', 'Compiled')
-$toolUseRx = [regex]::new('"type":"tool_use","id":"([^"]+)","name":"([^"]+)"', 'Compiled')
-$toolResRx = [regex]::new('"tool_use_id":"([^"]+)"', 'Compiled')
-$loIso = $fromD.ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
-$hiIso = $toD.AddDays(1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
-$turnHiIso = $toD.AddDays(2).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
-$subLoIso  = $fromD.AddDays(-1).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ss')
-$subHiIso  = $turnHiIso
+# ---- scan: the timestamp is read by string search before any JSON parse (the transcripts weigh hundreds of MB) ----
+$contRx = [regex]::new('"sessionId":"([^"]+)".*"continuedInSessionId":"([^"]+)"')
 
 $events  = [System.Collections.Generic.List[object]]::new()
 $busyRaw = [System.Collections.Generic.List[object]]::new()   # { Session, S, E, Turn } local datetimes
@@ -169,106 +140,36 @@ $subLong = [System.Collections.Generic.List[object]]::new()    # subagent tool c
 # Pass 1 keeps every line's contribution; the resume dedup (below) decides which ones count before any event or turn is built.
 $recs = [System.Collections.Generic.List[object]]::new()
 $fileFirst = @{}; $fileLast = @{}; $fileBorn = @{}
+$continuedBy = @{}   # session id of a resume -> session id of the original that has a "continued-in" line pointing at it
 
 $files = Get-ChildItem $ProjectsRoot -Recurse -Filter *.jsonl -File -ErrorAction SilentlyContinue |
          Where-Object { $_.LastWriteTime -ge $fromD }
 
+$cfg = @{ FromD = $fromD; ToD = $toD
+          IdleMinutes = $IdleMinutes; MaxSpanMinutes = $MaxSpanMinutes; ContRx = $contRx }
 foreach ($file in $files) {
-  $fileBorn[$file.FullName] = $file.CreationTimeUtc
-  $isSub = $file.FullName -match '[\\/]subagents[\\/]'
-  $fileKey = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
-  $subSession = if ($isSub -and $file.FullName -match '[\\/]([^\\/]+)[\\/]subagents[\\/]') { $matches[1] } else { $fileKey }
-  $subTimes = [System.Collections.Generic.List[datetime]]::new()
-  $subCalls = @{}   # tool_use id -> { T, Name }: a tool call that spans a gap keeps the subagent at work
-  foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
-    $m = $tsRx.Match($line)
-    if (-not $m.Success) { continue }
-    $iso = $m.Groups[1].Value
-    if ($isSub) {
-      # one day of margin on both sides, and every tool_use at any time: a run or a tool call straddling the
-      # period edge keeps its part inside (Book cuts the days); a call open for over a day past the edge is lost
-      $isUse = $line.Contains('"type":"tool_use"')
-      $near = [string]::CompareOrdinal($iso, $subLoIso) -ge 0 -and [string]::CompareOrdinal($iso, $subHiIso) -lt 0
-      if (-not ($near -or $isUse)) { continue }
-      $lt = ToLocal $iso
-      if ($near) { $subTimes.Add($lt) }
-      if ($isUse) {
-        foreach ($um in $toolUseRx.Matches($line)) { $subCalls[$um.Groups[1].Value] = [pscustomobject]@{ T = $lt; Name = $um.Groups[2].Value } }
-      }
-      if ($near -and $line.Contains('"type":"tool_result"')) {
-        foreach ($rm in $toolResRx.Matches($line)) {
-          $call = $subCalls[$rm.Groups[1].Value]
-          if ($call -and $call.Name -notin 'AskUserQuestion', 'ExitPlanMode' -and ($lt - $call.T).TotalMinutes -gt $IdleMinutes) {
-            $spanMin = ($lt - $call.T).TotalMinutes
-            $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $call.T; E = $(if ($spanMin -gt $MaxSpanMinutes) { $call.T.AddMinutes($MaxSpanMinutes) } else { $lt }); Turn = $false })
-            if ($spanMin -gt $MaxSpanMinutes) { $subLong.Add([pscustomobject]@{ Session = $subSession; S = $call.T; E = $lt; Min = $spanMin }) }
-          }
-        }
-      }
-      continue
-    }
-    # a turn_duration of the day after the period still counts: a turn across midnight keeps its part inside (Book cuts the days)
-    $late = [string]::CompareOrdinal($iso, $hiIso) -ge 0
-    if ([string]::CompareOrdinal($iso, $loIso) -lt 0 -or [string]::CompareOrdinal($iso, $turnHiIso) -ge 0) { continue }
-    if ($late -and -not $line.Contains('"subtype":"turn_duration"')) { continue }
-    if (-not ($line.Contains('"type":"user"') -or $line.Contains('"type":"assistant"') -or
-              $line.Contains('"subtype":"turn_duration"'))) { continue }
-    try { $o = $line | ConvertFrom-Json } catch { continue }
-    if (-not $o.timestamp -or $o.isSidechain -or ($late -and $o.type -ne 'system')) { continue }
-    $ts = $o.timestamp   # ConvertFrom-Json may already have turned it into a DateTime, of any Kind
-    $local = if ($ts -isnot [datetime]) { ToLocal ([string]$ts) }
-             elseif ($ts.Kind -eq 'Local') { $ts }
-             else { [datetime]::SpecifyKind($ts, 'Utc').ToLocalTime() }
-    if ($local.Date -lt $fromD -or $local.Date -gt $toD.AddDays(1)) { continue }
-
-    # the session key is the line's sessionId (a file may hold several); no id -> the file's own name
-    $sess = if ($o.sessionId) { [string]$o.sessionId } else { $fileKey }
-    $rec = [pscustomobject]@{ File = $file.FullName; Uuid = [string]$o.uuid; Session = $sess; Time = $local
-                              Ev = $null; TurnMs = 0.0 }
-    if (-not $fileFirst.ContainsKey($rec.File) -or $local -lt $fileFirst[$rec.File]) { $fileFirst[$rec.File] = $local }
-    if (-not $fileLast.ContainsKey($rec.File)  -or $local -gt $fileLast[$rec.File])  { $fileLast[$rec.File]  = $local }
-
-    if ($o.type -eq 'system') {
-      if ($o.subtype -eq 'turn_duration' -and $o.durationMs -gt 0) { $rec.TurnMs = [double]$o.durationMs; $recs.Add($rec) }
-      continue
-    }
-    if ($o.type -ne 'user' -and $o.type -ne 'assistant') { continue }
-
-    $content = $o.message.content
-    $isResult = $false
-    if ($content -isnot [string]) { foreach ($b in @($content)) { if ($b.type -eq 'tool_result') { $isResult = $true } } }
-    $cwd    = if ($o.cwd) { [string]$o.cwd } else { 'sconosciuto' }
-    $branch = if ($o.gitBranch) { [string]$o.gitBranch } else { '(nessun-branch)' }
-    $isPrompt = $false
-    if ($o.type -eq 'user') {
-      $raw = TextOf $content   # block prompts (pasted images) carry text too
-      $system = $raw -match '^\s*<(task-notification|local-command|command-name|command-message)' -or $raw -match '^\s*\[Request interrupted'
-      $text = if ($system) { '' } else { Clean $raw }
-      $isPrompt = -not ($system -or $isResult -or $o.isMeta)   # a turn starts here
-    } else {
-      $text = Clean (TextOf $content)
-    }
-    $rec.Ev = [pscustomobject]@{
-      Time = $local; Project = $cwd; Branch = $branch; Type = $o.type; Text = $text; Session = $sess; Raw = $sess; Prompt = $isPrompt
-    }
-    $recs.Add($rec)
-  }
-  # subagent activity -> busy intervals: runs of events no more than IdleMinutes apart, tagged with the session directory
-  if ($subTimes.Count -gt 0) {
-    $st = @($subTimes | Sort-Object)
-    $segStart = $st[0]; $prev = $st[0]
-    foreach ($t in $st) {
-      if (($t - $prev).TotalMinutes -gt $IdleMinutes) { $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $segStart; E = $prev; Turn = $false }); $segStart = $t }
-      $prev = $t
-    }
-    $busyRaw.Add([pscustomobject]@{ Session = $subSession; S = $segStart; E = $prev; Turn = $false })
-  }
+  $r = ScanFile $file $cfg
+  $fileBorn[$r.File] = $r.Born
+  foreach ($cp in $r.Cont) { $continuedBy[$cp[0]] = $cp[1] }
+  $busyRaw.AddRange($r.Busy); $subLong.AddRange($r.SubLong); $recs.AddRange($r.Recs)
+  if ($null -ne $r.First) { $fileFirst[$r.File] = $r.First; $fileLast[$r.File] = $r.Last }
 }
 
 # ---- resume dedup: a resumed transcript copies earlier messages (same uuid and timestamp) under a new sessionId ----
-# The copy belongs to the file that starts earliest (then was created first: a fork starts with the same timestamps as its original, then ends earliest, then path): its lines are dropped everywhere.
+# The copy belongs to the file that starts earliest; on a tie (a fork starts with the same timestamps as its original): the chain
+# created first, then the earlier place in the "continued-in" chain, then created first, ends earliest, path. Its lines are dropped everywhere.
 $fileRank = @{}; $rankN = 0
-foreach ($k in ($fileFirst.Keys | Sort-Object { $fileFirst[$_] }, { $fileBorn[$_] }, { $fileLast[$_] }, { $_ })) { $fileRank[$k] = $rankN++ }
+$fileDepth = @{}   # how many "continued-in" hops lead from the chain's root to this file's session: the original is 0, its resume 1
+$fileRootBorn = @{}   # creation time of the chain's root file (the file itself when it is in no chain): the depth only orders files of one chain
+$bornById = @{}
+foreach ($k in $fileBorn.Keys) { $bornById[[System.IO.Path]::GetFileNameWithoutExtension($k)] = $fileBorn[$k] }
+foreach ($k in $fileFirst.Keys) {
+  $id = [System.IO.Path]::GetFileNameWithoutExtension($k); $n = 0
+  while ($continuedBy.ContainsKey($id) -and $n -lt $continuedBy.Count) { $id = $continuedBy[$id]; $n++ }
+  $fileDepth[$k] = $n
+  $fileRootBorn[$k] = if ($bornById.ContainsKey($id)) { $bornById[$id] } else { $fileBorn[$k] }
+}
+foreach ($k in ($fileFirst.Keys | Sort-Object { $fileFirst[$_] }, { $fileRootBorn[$_] }, { $fileDepth[$_] }, { $fileBorn[$_] }, { $fileLast[$_] }, { $_ })) { $fileRank[$k] = $rankN++ }
 $owner = @{}
 foreach ($r in $recs) {
   if (-not $r.Uuid) { continue }
@@ -337,19 +238,6 @@ foreach ($s in $bySession.Keys) {
   }
   $chgT[$s] = $ts; $chgK[$s] = $ks
 }
-function TopicIdx([string]$s, [datetime]$t) {   # the last change at or before t, else the first
-  $cs = $chgT[$s]; $lo = 0; $hi = $cs.Count - 1; $idx = 0
-  while ($lo -le $hi) {
-    $mid = [int][math]::Floor(($lo + $hi) / 2)
-    if ($cs[$mid] -le $t) { $idx = $mid; $lo = $mid + 1 } else { $hi = $mid - 1 }
-  }
-  return $idx
-}
-function LowerBound($sorted, [datetime]$t) {   # index of the first element >= t (Count when none)
-  $lo = 0; $hi = $sorted.Count - 1; $k = $sorted.Count
-  while ($lo -le $hi) { $mid = [int][math]::Floor(($lo + $hi) / 2); if ($sorted[$mid] -ge $t) { $k = $mid; $hi = $mid - 1 } else { $lo = $mid + 1 } }
-  return $k
-}
 $turnTimes = @{}   # session -> the end times of its turn_duration turns, sorted
 foreach ($b in $busyRaw) { if ($b.Turn) { if (-not $turnTimes.ContainsKey($b.Session)) { $turnTimes[$b.Session] = [System.Collections.Generic.List[datetime]]::new() }; $turnTimes[$b.Session].Add($b.E) } }
 foreach ($s in @($turnTimes.Keys)) { $turnTimes[$s] = [datetime[]]@($turnTimes[$s] | Sort-Object) }
@@ -373,34 +261,7 @@ foreach ($s in $bySession.Keys) {
   }
 }
 
-# ---- intervals ----
-function MergeIv($list) {   # sorted, overlapping or touching ones merged, empty ones dropped
-  $out = [System.Collections.Generic.List[object]]::new()
-  foreach ($x in ($list | Where-Object { $_.E -gt $_.S } | Sort-Object S)) {
-    if ($out.Count -gt 0 -and $x.S -le $out[$out.Count - 1].E) { if ($x.E -gt $out[$out.Count - 1].E) { $out[$out.Count - 1].E = $x.E } }
-    else { $out.Add([pscustomobject]@{ S = $x.S; E = $x.E }) }
-  }
-  return ,$out
-}
-
-# ---- minutes: per topic, day, session; split at midnight and at the working hours ----
-$acc = @{}
-function AddAcc([string]$k, [double]$m) { $script:acc[$k] = [double]$script:acc[$k] + $m }
-function Book([datetime]$s, [datetime]$e, [string]$sess, [string]$key, [string]$kind) {
-  $t = $s
-  while ($t -lt $e) {
-    $d = $t.Date; $w0 = $d.AddHours($DayStart); $w1 = $d.AddHours($DayEnd)
-    $next = $e
-    foreach ($b in @($w0, $w1, $d.AddDays(1))) { if ($b -gt $t -and $b -lt $next) { $next = $b } }
-    if ($d -ge $fromD -and $d -le $toD) {
-      $m = ($next - $t).TotalMinutes
-      $kk = if ($t -ge $w0 -and $t -lt $w1) { $kind } else { 'out' }
-      $day = $d.ToString('yyyy-MM-dd')
-      AddAcc "P`n$key`n$kk" $m; AddAcc "D`n$day`n$kk" $m; AddAcc "S`n$sess`n$day`n$key`n$kk" $m
-    }
-    $t = $next
-  }
-}
+$acc = @{}   # minutes per topic, day, session (Book, in the lib)
 
 # ---- CLAUDE: the busy intervals of each session, summed ----
 $busyBy = @{}
@@ -427,7 +288,7 @@ foreach ($b in @($busyRaw | Where-Object Turn) + @($subLong)) {
   if (-not $bySession.ContainsKey($b.Session)) { continue }
   $mins = ($b.E - $b.S).TotalMinutes
   if ($mins -le $MaxSpanMinutes -or $b.E -le $fromD -or $b.S -ge $toD.AddDays(1)) { continue }
-  $k =$chgK[$b.Session][(TopicIdx $b.Session $b.S)].Split("`n")
+  $k = $chgK[$b.Session][(TopicIdx $b.Session $b.S)].Split("`n")
   $longWaits.Add([pscustomobject]@{ From = $b.S; To = $b.E; Min = $mins; Where = "$(Split-Path $k[0] -Leaf) / $($k[1])" })
 }
 
@@ -469,7 +330,6 @@ for ($bi = 0; $bi -lt $bounds.Count - 1; $bi++) {
   foreach ($p in $active) { if ($p.Owner -gt $best.Owner) { $best = $p } }
   Book $t0 $t1 $best.Session $best.Key 'tu'
 }
-function Acc([string]$k) { [double]$script:acc[$k] }
 
 # ---- report per project -> branch ----
 $projReport = foreach ($pg in ($events | Group-Object Project)) {

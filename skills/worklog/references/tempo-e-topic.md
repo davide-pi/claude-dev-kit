@@ -35,7 +35,11 @@ subagents — and never touches Azure DevOps. Two kinds of minutes:
 Minutes inside 08:00-20:00 (`-DayStart`, `-DayEnd`) are the normal ones: `TOTALE` = `CLAUDE` + `TU`.
 Minutes outside go to `FUORI`, never dropped. A resumed transcript copies earlier messages: those
 count once, and a resume joins the original session (a fork running in parallel stays a separate
-one). A minute goes to the topic (project + branch) the session's events say at that moment and to
+one). Who the original is: the file that starts first; on a tie, the chain created first (a chain follows
+the `continued-in` lines; a file in no chain is its own chain), then the original before its resume inside
+the chain, then the file created first. Limit: only some resumes leave a `continued-in` line (none for a
+plain `--resume` or a fork), and the creation time is unreliable after a copy, sync or restore, so the head
+of a fork can land on the wrong file. A minute goes to the topic (project + branch) the session's events say at that moment and to
 its local **day**.
 
 Example: chat 1 works 10:00-11:00, chat 2 works 10:30-11:30, the user reads 15 min after each →
