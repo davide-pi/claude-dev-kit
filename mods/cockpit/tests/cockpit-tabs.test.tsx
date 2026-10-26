@@ -69,7 +69,7 @@ test('footer: compact compacts with the instructions and sends nothing else', as
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'bar:compact' }))?.text).toBe('compact')
-  expect((await ui.find({ key: 'bar:suite' }))?.text).toBe('retrospective')
+  expect((await ui.find({ key: 'bar:retro' }))?.text).toBe('retrospective')
   expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
   expect(await ui.find({ key: 'bar:summary' })).toBeUndefined()
   await ui.press({ key: 'bar:compact' })
@@ -84,24 +84,24 @@ test('footer: retrospective asks which one; the last 10 days sends /retro days 1
   world(on, { commands })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  await ui.press({ key: 'bar:suite' })
+  await ui.press({ key: 'bar:retro' })
   expect(rowTexts(await ui.drawn()).some(r => /which retrospective/.test(r))).toBe(true)
   expect((await ui.find({ key: 'confirm:days' }))?.text).toBe('last 10 days')
   expect((await ui.find({ key: 'confirm:session' }))?.text).toBe('this session')
-  expect(await ui.find({ key: 'bar:suite' })).toBeUndefined()
+  expect(await ui.find({ key: 'bar:retro' })).toBeUndefined()
   expect(commands).toEqual([])
 
   await ui.press({ key: 'confirm:no' })
   expect(commands).toEqual([])
-  expect(await ui.find({ key: 'bar:suite' })).toBeDefined()
+  expect(await ui.find({ key: 'bar:retro' })).toBeDefined()
 
-  await ui.press({ key: 'bar:suite' })
+  await ui.press({ key: 'bar:retro' })
   await ui.press({ key: 'confirm:days' })
   await until(() => commands.length > 0)
   expect(commands).toEqual(['/retro days 10'])
-  expect(await ui.find({ key: 'bar:suite' })).toBeDefined()
+  expect(await ui.find({ key: 'bar:retro' })).toBeDefined()
 
-  await ui.press({ key: 'bar:suite' })
+  await ui.press({ key: 'bar:retro' })
   await ui.press({ key: 'confirm:session' })
   await until(() => commands.length > 1)
   expect(commands).toEqual(['/retro days 10', '/retro'])
@@ -123,7 +123,7 @@ test('footer: the very last row of every tab, set apart by a rule', async ($, on
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const tab of TABS) {
     const { root, rows } = await paneRows($, 50, tab)
-    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:suite', 'bar:worklog'])
+    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:retro', 'bar:worklog'])
     expect(rows.at(-2)).toMatch(/^─+$/)
   }
 })
@@ -146,7 +146,7 @@ test('footer: the buttons close the pane height, whatever the tab: a column box 
     const kids = root.children ?? []
     expect(kids.at(-3)?.type).toBe('Box')
     expect(kids.at(-3)?.props?.flexGrow).toBe(1)
-    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:suite', 'bar:worklog'])
+    expect(lastRowKeys(root)).toEqual(['bar:compact', 'bar:retro', 'bar:worklog'])
   }
 })
 

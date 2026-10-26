@@ -25,8 +25,8 @@ import { activeRun } from './workflow'
 export type PaneActions = {
   selectTab: (tab: CockpitTab) => void
   compact: () => void
-  /** Asks to confirm a button that sends something (`suite`: which `/retro`) or logs hours (`worklog`). */
-  ask: (kind: 'suite' | 'worklog') => void
+  /** Asks to confirm a button that sends something (`retro`: which `/retro`) or logs hours (`worklog`). */
+  ask: (kind: 'retro' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
   /** Answers the retrospective's choice: `/retro days 10` over the last ten days, `/retro` on this session. */

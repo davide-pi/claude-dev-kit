@@ -205,9 +205,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]
   const retroLabels = [S.buttons.retroDays, S.buttons.retroSession, S.buttons.no]
   const buttonsRow =
-    s.confirm === 'suite' ? (
+    s.confirm === 'retro' ? (
       <Box flexDirection="column">
-        {line(ui, truncateSpans([sp(S.confirmSuite, COLORS.yellow)], width))}
+        {line(ui, truncateSpans([sp(S.confirmRetro, COLORS.yellow)], width))}
         <Box flexDirection={buttonRowWidth(retroLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
           <Button key="confirm:days" onPress={() => actions.retro('days')}>
             {S.buttons.retroDays}
@@ -237,7 +237,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         <Button key="bar:compact" onPress={() => actions.compact()}>
           {S.buttons.compact}
         </Button>
-        <Button key="bar:suite" onPress={() => actions.ask('suite')}>
+        <Button key="bar:retro" onPress={() => actions.ask('retro')}>
           {S.buttons.retro}
         </Button>
         {hasLog && (

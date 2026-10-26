@@ -32,7 +32,7 @@ const EN = {
   tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
   buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
   confirmLog: 'log the hours of this chat?',
-  confirmSuite: 'which retrospective? sends /retro',
+  confirmRetro: 'which retrospective? sends /retro',
   confirmNoteDelete: 'delete this note?',
 
   // Header
@@ -140,7 +140,7 @@ const IT: Strings = {
   tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
   buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
   confirmLog: 'registrare le ore di questa chat?',
-  confirmSuite: 'quale retrospettiva? invia /retro',
+  confirmRetro: 'quale retrospettiva? invia /retro',
   confirmNoteDelete: 'eliminare questa nota?',
 
   contextTitle: 'CONTESTO',

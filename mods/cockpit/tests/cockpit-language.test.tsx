@@ -11,7 +11,7 @@ test('English is the default: the tab labels, the footer and the titles', async 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:suite'), await label('bar:worklog')]).toEqual(['Agents', 'Ctx', 'Notifications', 'Work', 'Notes', 'compact', 'retrospective', 'log hours'])
+  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['Agents', 'Ctx', 'Notifications', 'Work', 'Notes', 'compact', 'retrospective', 'log hours'])
   expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
   await ui.unmount()
 })
