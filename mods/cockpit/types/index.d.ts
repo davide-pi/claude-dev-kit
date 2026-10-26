@@ -47,6 +47,8 @@ export type CockpitHistoryEntry = {
   tokens: number
   isFailed: boolean
   effort?: string | number
+  /** The spawn's `description` of the task, kept so an expanded history row still says what the agent did; absent when it had none. */
+  description?: string
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
 }

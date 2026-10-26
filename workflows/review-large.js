@@ -102,7 +102,7 @@ let files = Array.isArray(input.files) ? input.files.filter(f => typeof f === 's
 if (!files) {
   const scope = await agent(
     `Run \`git diff --name-only ${range} -- ':/' ${EXCLUDE}\` in the current repository and return the repo-relative paths. Read-only: no other git command.`,
-    { label: 'scope', phase: 'Scope', agentType: 'Explore', schema: FILES },
+    { label: 'list the files to review', phase: 'Scope', agentType: 'Explore', schema: FILES },
   ).catch(() => null)
   if (!scope) return 'review-large: scope step failed: pass files or retry.'
   files = scope.files ?? []
@@ -135,9 +135,9 @@ const reviews = await pipeline(groups, group => {
   const label = group.length === 1 ? group[0] : `${group[0]} +${group.length - 1}`
   const run = (opts, who) => () => agent(prompt, { phase: 'Review', agentType: 'code-reviewer', schema: REVIEW, effort, ...opts })
     .then(r => settle(r, who), () => settle(null, who))
-  const a = run({ label: `A ${label}` }, { files: group, reviewer: 'A', model: 'sonnet' })
+  const a = run({ label: `review ${label}` }, { files: group, reviewer: 'A', model: 'sonnet' })
   if (!twoModels) return a()
-  const b = run({ label: `B ${label}`, model: modelB }, { files: group, reviewer: 'B', model: modelB })
+  const b = run({ label: `second opinion on ${label}`, model: modelB }, { files: group, reviewer: 'B', model: modelB })
   return parallel([a, b])
 })
 
@@ -210,6 +210,6 @@ ${SKELETON}`,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet${twoModels ? `, B ${modelB}` : ''}.`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',
   `Results (JSON):\n${JSON.stringify(mergerInput)}`,
-].join('\n\n'), { label: 'merge', phase: 'Merge', model: 'sonnet' }).catch(() => null)
+].join('\n\n'), { label: 'merge the reviews into one report', phase: 'Merge', model: 'sonnet' }).catch(() => null)
 
 return report ?? `review-large: the merger returned nothing (${results.length} worker results, ${gaps} gap(s)); raw findings, unmerged:\n\n${rawTable()}`

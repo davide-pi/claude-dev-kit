@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { spanText, spanWidth, textCells } from '../hooks/shared'
 import { agentCosts } from '../hooks/signals'
-import { agentCostDetails, agentCostRow, subagentDetails } from '../hooks/view-agents'
+import { agentCostDetails, agentCostRow, orderAgents, subagentDetails } from '../hooks/view-agents'
 import {
   MIN,
   SPAWN,
@@ -61,8 +61,8 @@ test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, c
   // the state file carries it, so a resume or a reload finds it
   await clock.advance(3000)
   expect(dataOf(writes)?.history).toEqual([
-    { id: 'a2', type: 'two', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW + 5000, tokens: 0, isFailed: true },
-    { id: 'a1', type: 'one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
+    { id: 'a2', type: 'two', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW + 5000, tokens: 0, isFailed: true, description: 'go' },
+    { id: 'a1', type: 'one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, description: 'go' },
   ])
 })
 
@@ -138,7 +138,7 @@ test('HISTORY: a /clear moves the finished agent still under 2 minutes into the 
   await finishAgent($, 'a1')
   id = 's-2'
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  expect(fileOfSession(writes, 's-1')?.history).toEqual([{ id: 'a1', type: 'old', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false }])
+  expect(fileOfSession(writes, 's-1')?.history).toEqual([{ id: 'a1', type: 'old', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, description: 'go' }])
   await clock.advance(135_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
@@ -212,6 +212,26 @@ test('an agent row, live or in HISTORY, expands on a press and collapses on the 
   expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   expect(viewed).toEqual([])
   await ui.unmount()
+})
+
+test('a HISTORY row expanded shows the description kept in the state file; one without a description shows nothing extra', async ($, on) => {
+  const withText = { ...entry('a1', 'reviewer', NOW - 1000), description: 'Review the orders filter' }
+  world(on, { stateFile: JSON.stringify({ tab: 'agents', history: [withText, entry('a2', 'plain', NOW - 2000)] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($)
+  const rows = async () => rowTexts(await ui.drawn())
+  await ui.press({ key: 'history:a1' })
+  expect((await rows()).some(r => /^ +Review the orders filter$/.test(r))).toBe(true)
+  await ui.press({ key: 'history:a1' })
+  await ui.press({ key: 'history:a2' })
+  expect((await rows()).some(r => /^ +Review/.test(r))).toBe(false)
+  await ui.unmount()
+})
+
+test('orderAgents lists each level newest first, children right under their parent', () => {
+  const a = (id: string, startedAt: number, parentId?: string) => ({ id, type: 't', status: 'running' as const, startedAt, tokens: 0, ...(parentId && { parentId }) })
+  const out = orderAgents([a('old', 1), a('old-kid1', 2, 'old'), a('new', 5), a('old-kid2', 3, 'old'), a('new-kid', 6, 'new')])
+  expect(out.map(r => `${r.depth}${r.agent.id}`)).toEqual(['0new', '1new-kid', '0old', '1old-kid2', '1old-kid1'])
 })
 
 test('Subagents: a row ends with the agent\'s share of the session tokens before its time, and stays within 30 and 58 columns', async ($, on) => {

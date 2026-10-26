@@ -53,12 +53,13 @@ export function taskRow(task: CockpitTask, now: number, width: number): Span[] {
   ]
 }
 
-/** Parents first, each followed by its children; an orphan counts as a root. */
+/** Parents first, each followed by its children; an orphan counts as a root. Every level is newest first (by start). */
 export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgent; depth: number }[] {
   const ids = new Set(list.map(a => a.id))
+  const newestFirst = [...list].sort((a, b) => b.startedAt - a.startedAt)
   const out: { agent: CockpitAgent; depth: number }[] = []
   const walk = (parent: string | undefined, depth: number) => {
-    for (const a of list) {
+    for (const a of newestFirst) {
       const isRoot = parent === undefined && (a.parentId === undefined || !ids.has(a.parentId))
       if (isRoot || (parent !== undefined && a.parentId === parent)) {
         out.push({ agent: a, depth })

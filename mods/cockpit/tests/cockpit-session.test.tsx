@@ -260,8 +260,8 @@ test('session.end while id() still answers the ending session: a tick in between
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
   const ended = fileOfSession(writes, 's-1')
   expect(ended?.history).toEqual([
-    { id: 'a1', type: 'running-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, isInterrupted: true },
-    { id: 'a2', type: 'finished-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false },
+    { id: 'a1', type: 'running-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, description: 'go', isInterrupted: true },
+    { id: 'a2', type: 'finished-one', model: 'claude-sonnet-5-5', startedAt: NOW, endedAt: NOW, tokens: 0, isFailed: false, description: 'go' },
   ])
   // a tick lands before the engine switches to the next id: it must not take s-1 back
   await clock.advance(30_000)

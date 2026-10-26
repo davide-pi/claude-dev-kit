@@ -677,13 +677,13 @@ const recoverChanges = async () => {
   const r = await ask([
     `List the files changed in the working tree since ${since}: \`git diff ${since} --name-only\` plus \`git ls-files -o --exclude-standard\`${skip}. Read only, change nothing; return them in \`files\`.`,
     RULES,
-  ].join('\n\n'), { label: 'probe', phase: 'Implement', agentType: 'Explore', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
+  ].join('\n\n'), { label: 'find the files to change', phase: 'Implement', agentType: 'Explore', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
   return strings(r?.files).filter(f => inPerimeter(f, files, repoRoot))
 }
 
 if (!inline) {
   phase('Implement')
-  const implOpts = { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const implOpts = { label: 'implement the change', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
   const buildImpl = extra => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, ...writerTail()].filter(Boolean).join('\n\n')
   const resolution0 = resolutions.find(r => Number(r?.round) === 0)
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
@@ -695,7 +695,7 @@ if (!inline) {
     if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
     continuations += 1
     const left = impl?.remaining ?? []
-    const label = `implement (continue ${continuations})`
+    const label = `implement the change (continued, ${continuations})`
     const next = readReport(await ask(buildImpl([
       'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
       left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
@@ -713,7 +713,7 @@ if (!inline) {
         round: 0,
         why: 'incomplete',
         findings: [],
-        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement (continue ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
       },
       resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
     })
@@ -734,8 +734,8 @@ if (!inline) {
           ' A bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the review; any other answer runs the implementer once more with it as its direction. The verdict carries a final screenshot of the same surface.'))
     }
     if (!PREVIEW_OK.test(said.answer)) {
-      const again = readReport(await ask(buildImpl(answersBlock([said])), { ...implOpts, label: 'implement (preview)' }))
-      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement (preview)')})`)
+      const again = readReport(await ask(buildImpl(answersBlock([said])), { ...implOpts, label: 'implement the change (preview feedback)' }))
+      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
       addQuestionNotes(again.questions)
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
@@ -822,7 +822,9 @@ while (true) {
     : round === 1 || final ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
-  const labelOf = r => `R${round} ${r.key}${final ? ' (final)' : ''}`
+  // What the owner reads in the agent list: the round and the reviewer's job, never the model or effort.
+  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
+  const labelOf = r => `review round ${round}: ${roleOf(r)}${r.group === undefined ? '' : ` (files ${r.group + 1}/${groups.length})`}${final ? ', final read' : ''}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
@@ -972,7 +974,8 @@ while (true) {
   const unproven = id => !cleaning && known[id].confidence === 'PLAUSIBLE'
   const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && sending.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
   const fix = sending.map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
-  const fixOpts = { label: `${cleaning ? 'cleanup' : 'fix'} R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  // `cleanup` stays the label's first word: askWithQuestions reads it.
+  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
   const asked1 = await askWithQuestions(extra => [
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with a one-line reason, no code change: never ask about it. No other edit.'
