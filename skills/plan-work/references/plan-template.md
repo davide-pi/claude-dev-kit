@@ -12,8 +12,8 @@ sizing question, the confirmation — is Italian (`plan-work`).
 ```markdown
 # <Change name>
 
-Branch: `feature/<slug>` · Work item: `<id>` (or `none`) · Source: `docs/specs/<file>.md` (or the
-request, quoted in one line)
+Branch: `feature/<slug>` · Work item: `<id>` (or `none`) · Source: the request, quoted in one line (or
+the doc it comes from)
 
 ## Goal
 
