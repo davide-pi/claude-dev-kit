@@ -56,11 +56,11 @@ test('duplicate repos are audited once', async () => {
 });
 
 test('a null Discover is an error, an empty one is "no git repository"', async () => {
-  const failed = await dryRun({ question: 'q' }, (o) => (o.label === 'discover' ? null : undefined));
+  const failed = await dryRun({ question: 'q' }, (o) => (o.label === 'find the repositories' ? null : undefined));
   assert.match(failed.out, /discovery step failed: pass repos explicitly or retry/);
-  const rejected = await dryRun({ question: 'q' }, (o) => { if (o.label === 'discover') throw new Error('boom'); });
+  const rejected = await dryRun({ question: 'q' }, (o) => { if (o.label === 'find the repositories') throw new Error('boom'); });
   assert.match(rejected.out, /discovery step failed/);
-  const empty = await dryRun({ question: 'q' }, (o) => (o.label === 'discover' ? { repos: [] } : undefined));
+  const empty = await dryRun({ question: 'q' }, (o) => (o.label === 'find the repositories' ? { repos: [] } : undefined));
   assert.match(empty.out, /no git repository found/);
 });
 

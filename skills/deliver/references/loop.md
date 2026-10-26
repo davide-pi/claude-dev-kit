@@ -67,8 +67,9 @@ A run has a large fixed cost whatever its size: launch once per coherent request
 findings log, with its `tokens`, will measure it. One implementer works through the plan tasks in order, testing after each; the
 reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
 for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
-An implementer that stops before finishing is continued twice (`stall.why: incomplete` after that: split the plan). The implementer has no
-tool-call budget; it runs only the tests the change touches while it works, and `verify` once at the end.
+The implementer aims at 30 turns and stops itself at 50 tool calls, reporting what's left; a fresh one continues from its edits with a
+clean context, up to four times (`stall.why: incomplete` after that: split the plan). It runs only the tests the change touches while it
+works, and `verify` once at the end.
 
 ## Weight, criteria, proof
 
