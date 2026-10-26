@@ -6,6 +6,7 @@ import { THRESHOLDS } from './signals'
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
 const ARG_MAX = 120
+const FULL_ARG_MAX = 1000
 // What a tool call shows of itself, first match: a command, a file (by its name), a pattern (a Grep or Glob shows what it looks for, before the folder it looks in), a folder, an address, a query, a description.
 const ARG_KEYS = ['command', 'file_path', 'notebook_path', 'pattern', 'path', 'url', 'query', 'description', 'skill'] as const
 
@@ -16,6 +17,17 @@ export function toolArg(input: { readonly [key: string]: unknown }): string | un
     if (typeof value !== 'string') continue
     const one = (key.endsWith('path') ? baseName(value) : value).replace(/\s+/g, ' ').trim()
     if (one !== '') return [...one].slice(0, ARG_MAX).join('')
+  }
+  return undefined
+}
+
+/** The argument `toolArg` shortens, as the call gave it: a file by its whole path, one line of at most 1000 characters. */
+export function toolArgFull(input: { readonly [key: string]: unknown }): string | undefined {
+  for (const key of ARG_KEYS) {
+    const value = input[key]
+    if (typeof value !== 'string') continue
+    const one = value.replace(/\s+/g, ' ').trim()
+    if (one !== '') return [...one].slice(0, FULL_ARG_MAX).join('')
   }
   return undefined
 }
@@ -66,7 +78,7 @@ export function resultTokens(ran: { text?: unknown; result?: unknown }): number 
 /** `ins` after a main-loop tool call ended: counted by tool (and as a failure when it did not run clean, its message kept), its running time added, a successful `Read` counted by file, its result among the largest. */
 export function recordToolCall(
   ins: CockpitInsights | undefined,
-  call: { tool: string; isOk: boolean; ms: number; readPath?: string; arg?: string; tokens?: number; error?: string },
+  call: { tool: string; isOk: boolean; ms: number; readPath?: string; arg?: string; fullArg?: string; tokens?: number; error?: string },
 ): CockpitInsights {
   const now = ins ?? emptyInsights()
   const known = now.tools[call.tool]
@@ -83,7 +95,7 @@ export function recordToolCall(
     ...(isCmdKept && failedKey !== undefined && { failedCmds: { ...now.failedCmds, [failedKey]: (now.failedCmds?.[failedKey] ?? 0) + 1 } }),
     reads: isReadKept ? { ...now.reads, [path]: (now.reads[path] ?? 0) + 1 } : now.reads,
     ...(call.tokens !== undefined && call.tokens > 0 && {
-      biggest: [...(now.biggest ?? []), { tool: call.tool, ...(call.arg !== undefined && { arg: call.arg }), tokens: call.tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, BIGGEST_KEEP),
+      biggest: [...(now.biggest ?? []), { tool: call.tool, ...(call.arg !== undefined && { arg: call.arg }), ...(call.fullArg !== undefined && call.fullArg !== call.arg && { fullArg: call.fullArg }), tokens: call.tokens }].sort((a, b) => b.tokens - a.tokens).slice(0, BIGGEST_KEEP),
     }),
     ...(!call.isOk && error !== undefined && error !== '' && { lastError: { tool: call.tool, text: error } }),
   }

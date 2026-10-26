@@ -826,9 +826,9 @@ while (true) {
     : round === 1 || final ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
-  // What the owner reads in the agent list: the round and the reviewer's job, never the model or effort.
+  // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
   const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
-  const labelOf = r => `review round ${round}: ${roleOf(r)}${r.group === undefined ? '' : ` (files ${r.group + 1}/${groups.length})`}${final ? ', final read' : ''}`
+  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${r.group === undefined ? '' : `, files ${r.group + 1}/${groups.length}`}${final ? ', final read' : ''}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)

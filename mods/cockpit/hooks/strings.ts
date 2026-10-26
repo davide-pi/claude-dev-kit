@@ -18,7 +18,6 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
 const SHARED = {
   costCacheHit: 'cache',
   cache: 'cache ',
-  consumerKinds: { memory: 'file', mcp: 'mcp', agent: 'agent', skill: 'skill' },
   taskTitle: 'TASK',
   diffTitle: (file: string) => `diff · ${file}`,
   /** The four counters of an agent's row. */
@@ -86,11 +85,10 @@ const EN = {
   noReading: 'no reading',
   /** The engine's category names in this language; one not listed shows as the engine names it. */
   contextCategories: {} as Record<string, string>,
-  consumersTitle: (n: number) => `CONSUMERS · top ${n}`,
   refreshIn: (seconds: number) => `refresh ${seconds}s`,
 
   // Work
-  mainTitle: 'MAIN',
+  mainTitle: 'IN PROGRESS',
   tasksDone: (n: number) => ` ${n} done`,
   perimeter: (entries: number) => `deliver perimeter · ${entries} ${plural(entries, 'entry', 'entries')}`,
   filesTouched: (n: number) => ` · ${n} ${plural(n, 'file', 'files')} touched`,
@@ -195,10 +193,9 @@ const IT: Strings = {
     'Free space': 'Spazio libero',
     'Autocompact buffer': 'Riserva di compattazione',
   },
-  consumersTitle: (n: number) => `CONSUMI · primi ${n}`,
   refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
 
-  mainTitle: 'PRINCIPALE',
+  mainTitle: 'IN CORSO',
   tasksDone: (n: number) => ` ${n} ${plural(n, 'fatto', 'fatti')}`,
   perimeter: (entries: number) => `perimetro deliver · ${entries} ${plural(entries, 'voce', 'voci')}`,
   filesTouched: (n: number) => ` · ${n} ${plural(n, 'file toccato', 'file toccati')}`,

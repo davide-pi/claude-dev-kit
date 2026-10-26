@@ -22,7 +22,7 @@ async function endedAgents($: Parameters<typeof mountPane>[0], on: Parameters<ty
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'Review doc XYZ' })
-  await $.agent.spawn({ ...SPAWN, subagentType: 'Explore' })
+  await $.agent.spawn({ ...SPAWN, subagentType: 'Explore', description: '' })
   await spawnAgent($, 'other')
   for await (const chunk of $.turn.step({ turnId: 't', index: 0, model: 'claude-sonnet-5-5', effort: 'high', messageCount: 1, agentId: 'a1' })) void chunk
   await clock.advance(65_000)

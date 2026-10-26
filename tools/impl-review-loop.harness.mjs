@@ -30,9 +30,9 @@ const ALL_READ = Symbol('every file the change touched');
 
 /**
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
- * Two reviewers are answered by the harness, not by the queue: the Sonnet watcher of the delta rounds (label "review round <n>: check the fixes":
+ * Two reviewers are answered by the harness, not by the queue: the Sonnet watcher of the delta rounds (label "reviewer S · round <n> · check the fixes":
  * `review([])` unless `extra.watcher` is given: an answer, null = it returned nothing, or an array of one answer per round) and the full panel of the final read (label
- * "review round <n>: <role>, final read": every previous id closed unless `extra.finals` queues its answers).
+ * "reviewer <key> · round <n> · <role>, final read": every previous id closed unless `extra.finals` queues its answers).
  */
 async function run(args, reviews, implementers = [], extra = {}) {
   const calls = [];
@@ -48,7 +48,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
     let answer = opts.label === 'find the files to change' ? (extra.probe ?? null)
       : opts.agentType === 'implementer'
       ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
-      : /^review round \d+: check the fixes$/.test(opts.label ?? '') ? (watchers ? (watchers.length ? watchers.shift() : review([])) : 'watcher' in extra ? extra.watcher : review([]))
+      : /^reviewer S · round \d+ · check the fixes$/.test(opts.label ?? '') ? (watchers ? (watchers.length ? watchers.shift() : review([])) : 'watcher' in extra ? extra.watcher : review([]))
       : isFinal && !finals.length ? review([...prompt.matchAll(/^- ([FV]\d+) \[/gm)].map((m) => ({ id: m[1], status: 'closed' })))
       : isFinal ? finals.shift()
       : queue.shift();
@@ -75,6 +75,9 @@ const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/']
 const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
 const read = (...filesReviewed) => ({ previous: [], found: [], filesReviewed });
 const labels = (calls, prefix) => calls.filter(c => c.opts.label?.startsWith(prefix)).map(c => c.opts.label);
+// A reviewer's label (`reviewer A · round 2 · code`), of round `round` when one is given.
+const isReview = (label, round) => new RegExp(`^reviewer \\S+ · round ${round ?? '\\d+'}(?!\\d)`).test(label ?? '');
+const reviewLabels = (calls, round) => calls.filter(c => isReview(c.opts.label, round)).map(c => c.opts.label);
 const impl = (extra = {}) => ({ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: { tree: 't1', files: ['src/Orders/OrdersQuery.cs'], churn: 3 }, rejected: [], noticed: [], openQuestions: [], ...extra });
 const FAIL = { status: 'fail', command: 'node --test', line: '# fail 2' };
 const HELPER = 'src/Other/Helper.cs';
@@ -85,4 +88,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal };
+export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal };

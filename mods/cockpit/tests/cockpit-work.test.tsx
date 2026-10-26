@@ -5,7 +5,7 @@ import { PERIMETER, SPAWN, lavoroRows, mountPane, paneRows, settleAll, spawnWork
 import { PANE, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-test('MAIN: the deliver perimeter with its entries and touched files, and the changed files outside it', async ($, on) => {
+test('IN PROGRESS: the deliver perimeter with its entries and touched files, and the changed files outside it', async ($, on) => {
   const gitCalls: string[] = []
   world(on, {
     gitCalls,
@@ -16,7 +16,7 @@ test('MAIN: the deliver perimeter with its entries and touched files, and the ch
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
-  const i = rows.findIndex(r => r === 'MAIN')
+  const i = rows.findIndex(r => r === 'IN PROGRESS')
   expect(i).toBeGreaterThan(0)
   expect(rows[i - 1]).toBe(' ')
   expect(rows[i - 2]).toMatch(/^─+$/)
@@ -29,7 +29,7 @@ test('MAIN: the deliver perimeter with its entries and touched files, and the ch
   expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks ls-files --others --exclude-standard -z')
 })
 
-test('MAIN: nothing outside the perimeter says so; one entry and one file are singular', async ($, on) => {
+test('IN PROGRESS: nothing outside the perimeter says so; one entry and one file are singular', async ($, on) => {
   world(on, { branch: 'feat/x', perimeter: 'branch: feat/x\nstatus: active\n- src/a.ts\n', changed: ['src/a.ts'] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
@@ -38,29 +38,42 @@ test('MAIN: nothing outside the perimeter says so; one entry and one file are si
   expect(rows.some(r => /outside the perimeter$/.test(r) && r.startsWith('⚠'))).toBe(false)
 })
 
-test('MAIN: at most 5 outside files are named, then … +n', async ($, on) => {
+test('IN PROGRESS: 5 outside files are named, `▸ +n` opens the rest and `▾ −n` folds them', async ($, on) => {
   const changed = Array.from({ length: 7 }, (_, n) => `lib/f${n}.ts`)
   world(on, { branch: 'feat/x', perimeter: PERIMETER, changed })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const rows = await workRows($)
+  await settleAll()
+  const ui = await mountPane($)
+  await ui.press({ key: 'tab:work' })
+  await settleAll()
+  let rows = rowTexts(await ui.drawn())
   const i = rows.findIndex(r => r.startsWith('⚠'))
   expect(rows[i]).toBe('⚠ 7 files outside the perimeter')
   expect(rows.slice(i + 1, i + 6)).toEqual(changed.slice(0, 5).map(f => `  ${f}`))
-  expect(rows[i + 6]).toBe('  … +2')
+  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('▸ +2')
+  await ui.press({ key: 'outside:more' })
+  await settleAll()
+  rows = rowTexts(await ui.drawn())
+  expect(rows.slice(i + 1, i + 8)).toEqual(changed.map(f => `  ${f}`))
+  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('▾ −2')
+  await ui.press({ key: 'outside:more' })
+  await settleAll()
+  expect(rowTexts(await ui.drawn()).some(r => r === '  lib/f6.ts')).toBe(false)
+  await ui.unmount()
 })
 
-test("MAIN: no perimeter for this branch (another branch's, closed): no perimeter rows and no git diff", async ($, on) => {
+test("IN PROGRESS: no perimeter for this branch (another branch's, closed): no perimeter rows and no git diff", async ($, on) => {
   const gitCalls: string[] = []
   world(on, { gitCalls, branch: 'feat/x', perimeter: PERIMETER.replace('feat/x', 'feat/other'), changed: ['lib/z.ts'] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
   expect(rows.some(r => /perimetro/.test(r))).toBe(false)
-  expect(rows).not.toContain('MAIN')
+  expect(rows).not.toContain('IN PROGRESS')
   // the changed files of the tab are listed from git, but no diff against the perimeter is made
   expect(gitCalls.filter(c => c.includes(' diff '))).toEqual([])
 })
 
-test('MAIN: a failed git diff leaves the entry count alone: no file counts, no claim about the outside', async ($, on) => {
+test('IN PROGRESS: a failed git diff leaves the entry count alone: no file counts, no claim about the outside', async ($, on) => {
   world(on, { branch: 'feat/x', perimeter: PERIMETER, failDiff: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
@@ -80,7 +93,7 @@ test('Work: neither the workflow block nor subagent blocks; the Subagents tab ho
 
 // ── Work: the changed files ──
 
-test('Work: the changed files with +/- (a binary file bin, an untracked one ?), at most 8 rows, then … +n', async ($, on) => {
+test('Work: the changed files with +/- (a binary file bin, an untracked one ?), 8 rows, then `▸ +n` opens the rest', async ($, on) => {
   const numstat: [string, string, string][] = [
     ['12', '3', 'src/a.ts'],
     ['0', '5', 'src/b.ts'],
@@ -107,7 +120,12 @@ test('Work: the changed files with +/- (a binary file bin, an untracked one ?), 
   const i = rows.findIndex(r => r === 'CHANGES · 10')
   expect(i).toBeGreaterThan(0)
   expect(rows[i + 1]).toBe(' ')
-  expect(rows[i + 10]).toBe('… +2')
+  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('▸ +2')
+  await ui.press({ key: 'changes:more' })
+  await settleAll()
+  const all = (await ui.findAll({ type: 'Button' })).filter(b => /^file:/.test(b.key ?? '')).map(b => b.key)
+  expect(all.slice(8)).toEqual(['file:x.ts', 'file:y.ts'])
+  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('▾ −2')
   await ui.unmount()
 })
 

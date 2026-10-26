@@ -153,24 +153,18 @@ export type CockpitContextRow = {
   isExact?: true
 }
 
-/** What an exact (`full`) reading fixes for the rest of the session: the static rows (every one but Messages), the consumers and the skills listing. */
+/** What an exact (`full`) reading fixes for the rest of the session: the static rows (every one but Messages) and the skills listing. */
 export type CockpitStatic = {
   rows: { name: string; tokens: number }[]
-  consumers: CockpitConsumer[]
   skills?: { listed: number; total: number }
 }
 
-/** A static consumer of the window: a memory file, a loaded MCP tool's schema, a custom agent's description, or the skills listing as a whole. */
-export type CockpitConsumer = { name: string; kind: 'memory' | 'mcp' | 'agent' | 'skill'; tokens: number }
-
-/** What the Context tab draws from `usage({ breakdown })`: the rows, the window they are measured against, the five biggest static consumers. */
+/** What the Context tab draws from `usage({ breakdown })`: the rows and the window they are measured against. */
 export type CockpitContext = {
   rows: CockpitContextRow[]
   /** Tokens in use and the window measured against (the compaction window), as the breakdown counts them. */
   total: number
   max: number
-  /** The five biggest static consumers, biggest first. */
-  consumers: CockpitConsumer[]
   /** How many skills the listing includes of those the session has; absent when the session lists none. */
   skills?: { listed: number; total: number }
   /** True when the whole breakdown was counted with the token-count API (`full`); false for the local estimate (its static rows may still be exact: `isExact` per row). */
@@ -208,8 +202,8 @@ export type CockpitInsights = {
   reads: Record<string, number>
   /** The cache hit of the last twenty main turns, oldest first. */
   cacheShares: number[]
-  /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument and the result's estimated tokens (characters / 4). */
-  biggest?: { tool: string; arg?: string; tokens: number }[]
+  /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument, the whole one when it differs (a file's full path, a long command) and the result's estimated tokens (characters / 4). */
+  biggest?: { tool: string; arg?: string; fullArg?: string; tokens: number }[]
   /** How many times each Bash command failed (its short argument). */
   failedCmds?: Record<string, number>
   /** When the last main round ended (`$.clock.now()`). */
@@ -317,6 +311,8 @@ export type CockpitSnapshot = {
   agentsOpen?: string[]
   /** The notes shown in full on the Notes tab (the others show their first lines). */
   notesOpen?: number[]
+  /** The lists shown in full and the rows expanded on the Context and Work tabs: `changes`, `outside`, `grew:<tool>:<arg>:<tokens>`. */
+  openKeys?: string[]
   /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */
   refreshedAt?: number
   /** The Notes tab's saved notes, kept with the session in its data file; `send` appends one to the prompt box and keeps it. Absent when none. */

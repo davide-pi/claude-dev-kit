@@ -163,7 +163,31 @@ test('Context: the fast tier runs while the tab is selected (the refresh countdo
   await ui.unmount()
 })
 
-test('Context: the top five static consumers by tokens, and the skills invoked this session with the listing count', async ($, on) => {
+test('WHAT GREW THE CONTEXT: each output is one cut row; a press wraps its whole argument under it, another folds it', async ($, on) => {
+  world(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {}, text: 'x'.repeat(40_000) }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const command = `npm run build -- --first-option alpha --second-option beta --third gamma`
+  await $.tool.call({ tool: 'Bash', command })
+  await settleAll()
+  const ui = await mountPane($, 40)
+  await ui.press({ key: 'tab:context' })
+  await settleAll()
+  const key = `grew:Bash:${command}:10000`
+  expect((await ui.find({ key }))?.text).toMatch(/^Bash +npm run build.*… +\+10k$/)
+  const before = rowTexts(await ui.drawn())
+  await ui.press({ key })
+  await settleAll()
+  const opened = rowTexts(await ui.drawn())
+  const under = opened.slice(opened.findIndex(r => r.startsWith('Bash')) + 1).filter(r => r.startsWith('  ')).map(r => r.trim())
+  expect(under.join(' ')).toBe(command)
+  await ui.press({ key })
+  await settleAll()
+  expect(rowTexts(await ui.drawn())).toEqual(before)
+  await ui.unmount()
+})
+
+test('Context: no list of static consumers, whatever the breakdown names', async ($, on) => {
   world(on, {
     breakdown: {
       categories: CONTEXT_ROWS,
@@ -194,13 +218,8 @@ test('Context: the top five static consumers by tokens, and the skills invoked t
   await ui.press({ key: 'tab:context' })
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  const consumers = rows.filter(r => /^(file|mcp|agent|skill) /.test(r))
-  expect(consumers).toHaveLength(5)
-  expect(consumers[0]).toMatch(/^mcp +mcp__a__big +5k$/)
-  expect(consumers[1]).toMatch(/^skill +skills 41\/60 +4\.2k$/)
-  expect(consumers[2]).toMatch(/^file +User CLAUDE\.md +3k$/)
-  expect(consumers[3]).toMatch(/^file +Project CLAUDE\.md +900$/)
-  expect(consumers[4]).toMatch(/^agent +code-reviewer +400$/)
+  expect(rows.some(r => /^CONSUMERS/.test(r))).toBe(false)
+  expect(rows.filter(r => /^(file|mcp|agent|skill) /.test(r))).toEqual([])
   expect(rows.some(r => /^SKILLS/.test(r))).toBe(false)
   await ui.unmount()
 })
