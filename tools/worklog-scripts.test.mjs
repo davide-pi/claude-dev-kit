@@ -17,7 +17,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, existsSync, rmSync } from 'node:fs';
 import { join, dirname } from 'node:path';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const SKILL = join(dirname(fileURLToPath(import.meta.url)), '..', 'skills', 'worklog');
@@ -420,16 +420,18 @@ test('the raw digest marks "sessione: si" on the branch of the session only', { 
 
 // ── push: cumulative, idempotent, audited ───────────────────────────────────────────────────────
 
-/** A sandbox: az shim on PATH, CompletedWork state, an empty worklog folder. */
-function sandbox(state = { 101: 2 }) {
+/** A sandbox: az shim on PATH, CompletedWork state, an empty worklog folder, an optional workspaces config. */
+function sandbox(state = { 101: 2 }, config = null) {
   const dir = tmp();
   const bin = join(dir, 'bin');
   mkdirSync(bin);
   writeFileSync(join(dir, 'state.json'), JSON.stringify(state));
+  if (config) writeFileSync(join(dir, 'none.json'), JSON.stringify(config));
   writeFileSync(join(bin, 'az-shim.cjs'), `
 const fs = require('fs'); const path = require('path');
 const dir = path.join(__dirname, '..'); const a = process.argv.slice(2);
 fs.appendFileSync(path.join(dir, 'calls.log'), a.join(' ') + '\\n');
+fs.appendFileSync(path.join(dir, 'cfg.log'), (process.env.AZURE_CONFIG_DIR || '') + '\\n');
 const st = JSON.parse(fs.readFileSync(path.join(dir, 'state.json'), 'utf8'));
 const id = a[a.indexOf('--id') + 1];
 if (!(id in st)) { process.stderr.write('ERROR: work item ' + id + ' not found'); process.exit(1); }
@@ -533,6 +535,28 @@ test('push: a failing item exits 1 and leaves its audit entry unwritten, the oth
   assert.match(r.out, /ERRORE/);
   const audit = sb.read('wl/pushed.json');
   assert.deepEqual(audit.map((e) => e.itemId), [101]);
+});
+
+test('push picks the az identity of the root whose project matches the row, not the first root of the org', { skip: skipWin }, async () => {
+  // Two roots on one org, each with its own identity: the per-org config dir must follow the row's project.
+  const tag = `wltest-${process.pid}-${Date.now()}`;
+  const ids = { a: `${tag}-a`, b: `${tag}-b` };
+  for (const id of Object.values(ids)) {
+    const d = join(homedir(), `.azure-${id}`);
+    mkdirSync(d);
+    created.push(d);
+  }
+  const roots = [
+    { path: 'C:\\ws\\org', org: 'contoso', projects: { x: 'X' }, identity: ids.a },
+    { path: 'C:\\ws\\org\\p', org: 'contoso', project: 'P', identity: ids.b },
+  ];
+  const sb = sandbox({ 101: 2, 102: 0 }, { roots });
+  const r = await sb.push([row(), row({ itemId: 102, project: 'X' })]);
+  assert.equal(r.code, 0, r.out);
+  const used = readFileSync(join(sb.dir, 'cfg.log'), 'utf8').trim().split('\n');
+  const byItem = (id) => used.filter((_, i) => sb.calls()[i].includes(`--id ${id}`));
+  assert.ok(byItem(101).length > 0 && byItem(101).every((d) => d.endsWith(`.azure-${ids.b}`)), used.join('\n'));
+  assert.ok(byItem(102).length > 0 && byItem(102).every((d) => d.endsWith(`.azure-${ids.a}`)), used.join('\n'));
 });
 
 describe('worklog scripts', { concurrency: 4 }, () => {
