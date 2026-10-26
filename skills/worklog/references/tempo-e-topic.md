@@ -25,7 +25,7 @@ pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM
 ```
 
 Reads every transcript under `~/.claude/projects` touched in the period — main sessions **and**
-subagents — and never touches Azure DevOps. A gap between two consecutive main-session events is:
+subagents — and never touches Azure DevOps. A gap between two consecutive main-session events **of the same session** is:
 
 | Gap | Active when | Counted as |
 | --- | --- | --- |
@@ -36,8 +36,11 @@ subagents — and never touches Azure DevOps. A gap between two consecutive main
 | 45-120 min (`-MaxSpanMinutes`) | a **foreground** tool call or a **working subagent** spans it — not a background job (dev servers live there), not a bare turn | wait |
 | longer | never | pause |
 
-Parallel sessions share one timeline, so wall-clock time counts once. Each interval goes to the topic
-and the **day** of the event that opens it.
+Each session has its own timeline and its own spans (another session's tool call never covers a gap);
+the sessions' minutes are **summed**: two parallel 1h chats = 2h, so `ATTIVO` can exceed wall-clock time.
+A resumed transcript copies earlier messages: those count once, and a resume joins the original's
+timeline (a fork running in parallel stays a separate one). Each interval goes to the topic and the
+**day** of the event that opens it.
 
 Stdout, the authoritative numbers:
 
@@ -50,14 +53,14 @@ Stdout, the authoritative numbers:
   over lunch looks exactly like a long build: show them in Table 1 and let the user drop them;
 - the paths of the raw digest, the audit and `targets.json`.
 
-**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): only a selection. Timeline,
-active time and topic minutes are the global ones, parallel sessions counted once — the session's own
-minutes are never computed, they would double-count parallel chats and re-runs. A **Sessione** section
-lists each (day, project / branch) with at least one main-session event of that session and the topic's
-whole-day minutes; the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
+**`-SessionId <id>`** (case-insensitive; the scoped run `sessione <id>`): a selection; the total, the
+active time and the topic minutes of the run do not change. A **Sessione** section lists each (day,
+project / branch) with at least one main-session event of that session and the session's **own**
+minutes there; the digest marks those topics `sessione: si` and the session's own lines `[S]`. Keep
 only those topics in Phases 3-7. A topic flagged `[anche altre sessioni]` (typically the default branch)
-holds other chats' work too: its minutes are not the chat's alone, so never log it whole unasked — ask in
-Table 2 which item(s) it belongs to, telling the chat's share from the `[S]` lines.
+holds other chats' work too: the minutes listed are the chat's share, but the topic's whole-day
+minutes are not, so never log the topic whole unasked — ask in Table 2 which item(s) it belongs to,
+telling the chat's share from the `[S]` lines.
 Without `-From` the engine finds the session's first day itself (first event of its transcript) and runs to today, printing `Sessione <id>: dal <data>`.
 `nessun evento` → the id is not in the period: say so, ask for the right period or id (do not go to the gap prompt).
 

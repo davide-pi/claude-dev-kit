@@ -112,7 +112,7 @@ test('a background dev server does not stretch a 60-min gap', { skip }, async ()
   assert.equal(await activeMinutes(main), 2);
 });
 
-// ── engine: -SessionId only selects the topics, the minutes stay the global ones ────────────────
+// ── engine: -SessionId selects the topics and shows the session's own minutes ───────────────────
 
 /** Runs the engine over `main` with extra flags; returns the whole output. */
 async function engine(main, ...flags) {
@@ -127,7 +127,7 @@ async function engine(main, ...flags) {
 const total = (out) => out.match(/Tempo attivo totale: ([^|]+)\|/)[1].trim();
 const sessionSection = (out) => (out.match(/^Sessione .*(?:\r?\n(?!\r?\n).*)*/m) || [''])[0];
 
-// s1 works on feature/a, s2 on feature/b at the same time: parallel sessions, one timeline.
+// s1 works on feature/a, s2 on feature/b at the same time: parallel sessions, one timeline each, summed (6m + 6m).
 const twoSessions = () => [
   prompt(0), reply(1), prompt(2, { session: 's2', branch: 'feature/b' }), reply(3, { session: 's2', branch: 'feature/b' }),
   prompt(5), reply(6), prompt(7, { session: 's2', branch: 'feature/b' }), reply(8, { session: 's2', branch: 'feature/b' }),
@@ -141,7 +141,64 @@ test('-SessionId marks only the topics of that session and leaves the active min
   const sec = sessionSection(scoped);
   assert.match(sec, /feature\/b/);
   assert.doesNotMatch(sec, /feature\/a/);
-  assert.match(sec, new RegExp(`${TODAY}.*feature/b +4m`));   // the topic's whole-day minutes
+  assert.match(sec, new RegExp(`${TODAY}.*feature/b +6m`));   // the session's own minutes
+  assert.equal(total(plain), '12m');
+});
+
+// ── engine: sessions summed, resume dedup, per-session spans ────────────────────────────────────
+
+const withSession = (e, session, uuid) => ({ ...e, sessionId: session, ...(uuid ? { uuid } : {}) });
+const tool = (min, id, session) => withSession(toolUse(min, id), session);
+const result = (min, id, session) => withSession(toolResult(min, id), session);
+
+test('two overlapping 60-min sessions are summed, not counted once', { skip }, async () => {
+  const main = [
+    prompt(0), tool(1, 'a1', 's1'), result(61, 'a1', 's1'), reply(62),
+    prompt(0, { session: 's2' }), tool(1, 'b1', 's2'), result(61, 'b1', 's2'), reply(62, { session: 's2' }),
+  ];
+  assert.equal(total(await engine(main)), '2h 4m');
+});
+
+// s1 = u1..u4 (10:00-10:03); a resumed s9 copies them (same uuid, same timestamp) then goes on.
+const s1Head = () => [prompt(0), reply(1), prompt(2), reply(3)].map((e, i) => withSession(e, 's1', `u${i + 1}`));
+const copiesAsS9 = () => s1Head().map((e) => withSession(e, 's9', e.uuid));
+
+test('a resumed transcript counts once: one timeline, and -SessionId of the resume still finds the topic', { skip }, async () => {
+  const tail = [withSession(prompt(5), 's9', 'u5'), withSession(reply(6), 's9', 'u6')];
+  const out = await engineAt({
+    'C--work-api/s1.jsonl': s1Head(),
+    'C--work-api/s9.jsonl': [...copiesAsS9(), ...tail],
+  }, '-From', TODAY, '-SessionId', 's9');
+  const single = await engineAt({ 'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(5), 's1', 'u5'), withSession(reply(6), 's1', 'u6')] }, '-From', TODAY);
+  assert.equal(total(out), total(single));
+  assert.equal(total(out), '6m');
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +6m`));
+});
+
+test('a fork (the original keeps working in parallel) keeps two timelines and drops only the duplicates', { skip }, async () => {
+  const out = await engineAt({
+    'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(8), 's1', 'u7'), withSession(reply(10), 's1', 'u8')],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), withSession(prompt(6), 's9', 'u5'), withSession(reply(12), 's9', 'u6')],
+  }, '-From', TODAY);
+  assert.equal(total(out), '16m');   // s1 0-3, 8, 10 = 10m; s9 6, 12 = 6m; one joined timeline would be 12m
+});
+
+test('a fork abandoned early keeps the original its own head (the copy ends first)', { skip }, async () => {
+  const files = {
+    'C--work-api/s1.jsonl': [...s1Head(), withSession(prompt(8), 's1', 'u7'), withSession(reply(12), 's1', 'u8')],
+    'C--work-api/s9.jsonl': [...copiesAsS9(), withSession(prompt(5), 's9', 'u5'), withSession(reply(10), 's9', 'u6')],
+  };
+  const out = await engineAt(files, '-From', TODAY, '-SessionId', 's1');
+  assert.equal(total(out), '17m');   // s1 0-3, 8, 12 = 12m; s9 5, 10 = 5m; with the head on s9 s1 would lose the 3->8 gap
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +12m`));
+});
+
+test('a session idle for 50 min is a pause even while another session works through the gap', { skip }, async () => {
+  const main = [
+    prompt(0), reply(1), prompt(51), reply(52),
+    prompt(0, { session: 's2' }), tool(1, 'b1', 's2'), result(61, 'b1', 's2'), reply(62, { session: 's2' }),
+  ];
+  assert.equal(total(await engine(main)), '1h 4m');   // s1 2m (its gap is a pause) + s2 62m
 });
 
 test('-SessionId on a branch shared with another chat flags it and marks the digest lines of the session', { skip }, async () => {
@@ -184,6 +241,7 @@ async function engineAt(files, ...flags) {
   for (const [rel, events] of Object.entries(files)) {
     mkdirSync(dirname(join(root, rel)), { recursive: true });
     writeFileSync(join(root, rel), events.map((e) => JSON.stringify(e)).join('\n'));
+    await new Promise((r) => setTimeout(r, 50));   // distinct, increasing CreationTime: the engine orders fork owners by it
   }
   const r = await pwsh('worklog.ps1', ['-ProjectsRoot', root, '-OutDir', join(root, 'out'), ...flags]);
   assert.equal(r.code, 0, r.out);
