@@ -5,6 +5,7 @@ import type { CockpitSnapshot } from '../types'
 import { activeAlerts } from './session'
 import { adoptSession, writeState } from './session-data'
 import { sameSnapshot } from './shared'
+import { withSignalTimes } from './signals'
 import { INITIAL } from './state'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -15,8 +16,14 @@ export async function patch($: EngineInterface, next: (s: CockpitSnapshot) => Co
   // After a session's end (a /clear, a resume) no session start follows: the first change under another id adopts it.
   await adoptSession($).catch(() => undefined)
   const current = await read($, snapshot)
-  if (sameSnapshot(current, next(current))) return
-  await update($, snapshot, next)
+  const changed = next(current)
+  if (sameSnapshot(current, changed)) return
+  // A notification's time is the change that first made it hold: the clock is asked only when the set of notifications changes.
+  const at = withSignalTimes(changed, 0) === changed ? undefined : await $.clock.now().catch(() => undefined)
+  await update($, snapshot, s => {
+    const n = next(s)
+    return withSignalTimes(n, at ?? n.now)
+  })
   await writeState($)
   await raiseAlerts($)
 }

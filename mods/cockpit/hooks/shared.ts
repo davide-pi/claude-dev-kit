@@ -75,6 +75,12 @@ export function countdown(resetsAtMs: number | undefined, now: number): string {
   return fixedSpan(resetsAtMs - now)
 }
 
+/** `ms` as the local time of day, `HH:MM`. */
+export function clockTime(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
 /** Elapsed time: `41s`, `2m14s`, `1h02m`. */
 export function duration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -205,6 +211,28 @@ function takeCells(s: string, max: number): string {
     if (used + w > max) break
     out += ch
     used += w
+  }
+  return out
+}
+
+/** `s` cut where its start fits `max` cells, at the last space of that start when it has one: the start, and the rest without its leading spaces. */
+export function splitCells(s: string, max: number): [string, string] {
+  if (textCells(s) <= max) return [s, '']
+  // At least one character, so a wide one under a narrow `max` still moves the cut on
+  const head = takeCells(s, Math.max(1, max)) || ([...s][0] ?? '')
+  const space = s[head.length] === ' ' ? head.length : head.lastIndexOf(' ')
+  const cut = space > 1 ? space : head.length
+  return [s.slice(0, cut), s.slice(cut).trimStart()]
+}
+
+/** `s` in lines of at most `max` cells, broken at spaces where it can be. */
+export function wrapCells(s: string, max: number): string[] {
+  const out: string[] = []
+  let rest = s
+  while (rest !== '') {
+    const [head, tail] = splitCells(rest, max)
+    out.push(head)
+    rest = tail
   }
   return out
 }

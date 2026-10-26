@@ -124,6 +124,14 @@ export function detectPermissionWait(state: CockpitClaudeState | undefined, now:
   return state?.kind === 'waiting' && state.since !== undefined && now - state.since > THRESHOLDS.permissionWaitMs ? [{ kind: 'permissionWait', key: String(state.since), n: now - state.since }] : []
 }
 
+/** `s` with `signalsAt` naming each signal in force, at `at` for one new and its time kept for one already there; `s` itself when the set did not change. */
+export function withSignalTimes(s: CockpitSnapshot, at: number): CockpitSnapshot {
+  const prev = s.signalsAt ?? {}
+  const ids = [...new Set(signalsOf(s).map(signalId))]
+  if (ids.length === Object.keys(prev).length && ids.every(id => id in prev)) return s
+  return { ...s, signalsAt: Object.fromEntries(ids.map(id => [id, prev[id] ?? at])) }
+}
+
 /** Every signal that holds now, from the snapshot alone (no clock, no model). */
 export function signalsOf(s: CockpitSnapshot): Signal[] {
   const costs = agentCosts(s.agents, s.events)

@@ -287,6 +287,8 @@ export type CockpitSnapshot = {
   signalOpen?: string
   /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
   seenSignals?: string[]
+  /** When each notification in force first held (`kind:key` → ms): the time on its row. One that stops holding is dropped. */
+  signalsAt?: Record<string, number>
   git?: CockpitGit
   worklog: CockpitWorklog
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
