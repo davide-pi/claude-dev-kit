@@ -195,7 +195,7 @@ a broken hook must never block work (`worktree-root.js` alone fails loudly: a si
 | `evals/skill-triggering.md` | The manual `MUST` / `MUST NOT` rows of the skills with no suite yet, and what a suite cannot express (the `paths:` hidden-until-read gate). The `MUST NOT` rows are the borders between neighbouring assets. |
 | `tools/run-evals.ps1` | Runs only the suites whose `skills/<name>/` or `evals/<name>/` changed against `-Base` (default: the remote default branch): `--ablation none` so the triggering graders score, `--no-publish`, `--max-cost-usd` per suite (`-MaxCostUsd`, default 2), reports under `%TEMP%\kit-evals\`. `-List` shows what would run, `-All` / `-Suite` override, `-Runs` / `-Model` tune; about $0.10 per run, so a suite is roughly $0.5 to $1. |
 | `mcp/servers.example.json` | The Azure DevOps MCP server the skills fall back to, as a mergeable JSON block, and the note on how the `ops-analyst` Grafana servers are wired. Not installed by copying — see below. |
-| `docs/specs/` | The design specs the kit was built from, including the asset contract every asset obeys. |
+| `docs/` | Living docs per area, each updated in the branch that changes the area: `asset-rules.md` (why the asset contract is what it is), `delivery.md` (how a change moves, how this repo ships), `hooks.md` (the safety net's design), `cockpit.md` (the mod's design rules). `docs/plans/` holds `plan-work`'s working files and is ignored by git. |
 
 ## What the kit deliberately does not cover
 

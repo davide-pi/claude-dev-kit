@@ -8,7 +8,7 @@ import { join, dirname } from 'node:path';
 
 export function checkContract({ ROOT, fail, warn, read, has, allFiles, textFiles, AGENT_MODELS, agentNames }) {
   // ── 6. The v2 asset contract ─────────────────────────────────────────────────
-  // The design spec under docs/specs/ sets three rules that nothing else can catch: hard line caps
+  // The contract (skill-forge § 2, reasons in docs/asset-rules.md) sets three rules nothing else can catch: hard line caps
   // (a skill needing more text needs a reference file, not a longer SKILL.md), a fixed body
   // skeleton, and no version numbers in an asset's prose. One skill is exempt: grill-me is fourteen
   // lines of interview instruction, and the skeleton would only pad it. Everything else conforms —

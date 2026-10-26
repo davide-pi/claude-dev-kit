@@ -58,8 +58,8 @@ listed at the top of the plan, never inside a task.
 
 ### 4. Where the file lives
 
-Repo with `docs/` → `docs/plans/<yyyy-MM-dd>-<slug>.md`, committed with the work. No `docs/`, or the
-work may be abandoned → the session scratchpad. One plan per branch, kept current.
+Repo with `docs/` → `docs/plans/<yyyy-MM-dd>-<slug>.md`, kept out of git through `.git/info/exclude` (Do).
+No `docs/`, or the work may be abandoned → the session scratchpad. One plan per branch, kept current.
 
 ### 5. Spike — answer one question, leave nothing behind
 
@@ -91,17 +91,17 @@ the final review and evidence check. Details: `references/delegation.md`.
 
 ```powershell
 $plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --show-toplevel) 'docs/plans')
+$exclude = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'info/exclude'; New-Item -ItemType Directory -Force (Split-Path $exclude) | Out-Null
+if (@(Get-Content $exclude -EA Ignore) -notcontains '/docs/plans/') { Add-Content $exclude "`n/docs/plans/" }   # never committed
 $file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
 ```
 
-Fill it from `references/plan-template.md` (a multi-session plan ends with its `/goal` line). While executing: dependency order; each task's verify
-before the next; tick `- [x]` in the file; a wrong task → edit the plan first, the code second.
-Finished → verify the whole change, not the last task (`references/evidence-by-stack.md`).
+Fill it from `references/plan-template.md` (a multi-session plan ends with its `/goal` line). While executing: dependency order;
+each task's verify before the next; tick `- [x]`; a wrong task → edit the plan first, the code second. Finished → verify the whole change, not the last task (`references/evidence-by-stack.md`).
 
 ## Traps
 
-1. Tasks that cannot fail ("refactor for clarity") → no verify command → restate as an observable
-   behaviour, or drop it.
+1. Tasks that cannot fail ("refactor for clarity") → no verify command → restate as an observable behaviour, or drop it.
 2. The plan rots → code diverged, file untouched → update it in the same edit as the divergence.
 3. `TBD: pick a library` inside a task → a decision was deferred → decide, or promote it to an open
    question that blocks the task.
