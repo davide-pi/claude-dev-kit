@@ -10,7 +10,7 @@ export const meta = {
 }
 
 // Contract: args in whenToUse; a STALL returns to the caller, which relaunches with resumeFromRunId and every resolution (stall.why names the kind).
-// Everything between the markers is pure and run by tools/impl-review-loop.test.mjs.
+// Everything between the markers is pure and run by tools/impl-review-loop.harness.mjs.
 
 // --- pure:begin
 const norm = p => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase().replace(/^\/([a-z])\//, '$1:/')

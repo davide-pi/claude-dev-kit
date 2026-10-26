@@ -296,7 +296,7 @@ const LEAK_EXEMPT = new Set(['hooks/secret-scan.js', 'tools/secret-scan.test.mjs
 // Test fixtures write fake drive paths (a drive letter and a made-up folder) to exercise path matching: for them, and only
 // for the absolute-path rule, a drive path is the subject under test, not a leak.
 const PATH_RULE = 'absolute Windows path';
-const isTestFile = (rel) => /^(?:tools\/[\w.-]+\.test\.mjs|mods\/[\w.-]+\/tests\/[\w.-]+\.test\.ts)$/.test(rel);
+const isTestFile = (rel) => /^(?:tools\/[\w.-]+\.(?:test|harness)\.mjs|mods\/[\w.-]+\/tests\/[\w.-]+\.test\.ts)$/.test(rel);
 for (const rel of textFiles) {
   if (LEAK_EXEMPT.has(rel)) continue;
   const text = read(rel);
