@@ -694,7 +694,7 @@ if (!inline) {
   let impl = asked0.report
   // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
   let continuations = 0
-  // The implementer stops itself at 50 tool calls: a fresh one continues with a clean context, cheaper than one long run.
+  // The implementer stops itself at 20 turns: a fresh one continues with a clean context, cheaper than one long run.
   while ((!impl || impl.remaining.length) && continuations < 4) {
     if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
     continuations += 1
