@@ -59,7 +59,7 @@ test('tab bar: the labels fit one row at 40, 58 and 80 columns', async ($, on) =
   expect(narrow.labels).toEqual(['Agents', 'Ctx', 'Not', 'Wor', 'Not'])
 })
 
-// ── Footer: compact, analyze suite, log hours: the last row of every tab ──
+// ── Footer: compact, retrospective, log hours: the last row of every tab ──
 
 test('footer: compact compacts with the instructions and sends nothing else', async ($, on) => {
   const calls: string[] = []
@@ -69,7 +69,7 @@ test('footer: compact compacts with the instructions and sends nothing else', as
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   expect((await ui.find({ key: 'bar:compact' }))?.text).toBe('compact')
-  expect((await ui.find({ key: 'bar:suite' }))?.text).toBe('analyze suite')
+  expect((await ui.find({ key: 'bar:suite' }))?.text).toBe('retrospective')
   expect((await ui.find({ key: 'bar:worklog' }))?.text).toBe('log hours')
   expect(await ui.find({ key: 'bar:summary' })).toBeUndefined()
   await ui.press({ key: 'bar:compact' })
@@ -79,13 +79,15 @@ test('footer: compact compacts with the instructions and sends nothing else', as
   await ui.unmount()
 })
 
-test('footer: analyze suite asks first; yes sends /retro, no sends nothing', async ($, on) => {
+test('footer: retrospective asks which one; the last 10 days sends /retro days 10, this session /retro, no sends nothing', async ($, on) => {
   const commands: string[] = []
   world(on, { commands })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   await ui.press({ key: 'bar:suite' })
-  expect(rowTexts(await ui.drawn()).some(r => /analyze the suite/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /which retrospective/.test(r))).toBe(true)
+  expect((await ui.find({ key: 'confirm:days' }))?.text).toBe('last 10 days')
+  expect((await ui.find({ key: 'confirm:session' }))?.text).toBe('this session')
   expect(await ui.find({ key: 'bar:suite' })).toBeUndefined()
   expect(commands).toEqual([])
 
@@ -94,10 +96,15 @@ test('footer: analyze suite asks first; yes sends /retro, no sends nothing', asy
   expect(await ui.find({ key: 'bar:suite' })).toBeDefined()
 
   await ui.press({ key: 'bar:suite' })
-  await ui.press({ key: 'confirm:yes' })
+  await ui.press({ key: 'confirm:days' })
   await until(() => commands.length > 0)
-  expect(commands).toEqual(['/retro'])
+  expect(commands).toEqual(['/retro days 10'])
   expect(await ui.find({ key: 'bar:suite' })).toBeDefined()
+
+  await ui.press({ key: 'bar:suite' })
+  await ui.press({ key: 'confirm:session' })
+  await until(() => commands.length > 1)
+  expect(commands).toEqual(['/retro days 10', '/retro'])
   await ui.unmount()
 })
 

@@ -309,7 +309,7 @@ export type CockpitSnapshot = {
   events?: CockpitEvent[]
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
-  /** A button waiting for its confirmation: the footer's `analizza suite` or Lavoro's `log hours`. */
+  /** A button waiting for its confirmation: the footer's `retrospettiva` (`suite`: the choice of which) or Lavoro's `log hours`. */
   confirm?: 'suite' | 'worklog' | `note:${number}`
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights

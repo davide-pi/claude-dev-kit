@@ -43,7 +43,6 @@ export function paneActions($: EngineInterface): PaneActions {
           await patch($, x => ({ ...x, confirm: undefined }))
           if (!isYes) return
           if (asked === 'worklog') await $.session.id().then(id => $.command.run({ command: 'worklog', args: `oggi sessione ${id}` }))
-          if (asked === 'suite') await $.command.run({ command: 'retro' })
           if (typeof asked === 'string' && asked.startsWith('note:')) {
             const id = Number(asked.slice(5))
             await patch($, x => {
@@ -52,6 +51,11 @@ export function paneActions($: EngineInterface): PaneActions {
             })
           }
         })
+        .catch(() => undefined),
+    // The retrospective's choice is its confirmation: the period's `days 10`, or the skill's default, this session.
+    retro: scope =>
+      void patch($, s => ({ ...s, confirm: undefined }))
+        .then(() => $.command.run(scope === 'days' ? { command: 'retro', args: 'days 10' } : { command: 'retro' }))
         .catch(() => undefined),
     openDiff: change => void showDiff($, change),
     toggleHistory: () => void patch($, s => ({ ...s, isHistoryOpen: !s.isHistoryOpen })).catch(() => undefined),
