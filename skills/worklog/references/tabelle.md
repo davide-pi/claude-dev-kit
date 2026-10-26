@@ -11,28 +11,28 @@ One block per day (a range prints one per day). Only this in chat; the timeline 
 ```markdown
 **Lunedì 12/10** — target 8h · già sul board 0h
 
-| # | Progetto | Topic | Descrizione breve | Attivo | Da | A | Arrotondato | Fonte |
-|---|----------|-------|-------------------|--------|----|---|-------------|-------|
-| 1 | <Project> | import nuovi mercati | Import e mappatura dei nuovi mercati | 1h20m | 09:08 | 10:16 | 1.5h | transcript |
-| 2 | <Project> | cache traduzioni | Fix invalidazione cache traduzioni | 25m | 11:40 | 12:05 | 0.5h | transcript |
-| 3 | interno | tooling worklog | Fix engine worklog | 40m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
-| | | **Totale** | | **2h25m** | | | **2h loggabili** | |
+| # | Progetto | Topic | Descrizione breve | Claude | Tu | Totale | Fuori orario | Da | A | Arrotondato | Fonte |
+|---|----------|-------|-------------------|--------|----|--------|--------------|----|---|-------------|-------|
+| 1 | <Project> | import nuovi mercati | Import e mappatura dei nuovi mercati | 55m | 25m | 1h20m | 0m | 09:08 | 10:16 | 1.5h | transcript |
+| 2 | <Project> | cache traduzioni | Fix invalidazione cache traduzioni | 15m | 10m | 25m | 0m | 11:40 | 12:05 | 0.5h | transcript |
+| 3 | interno | tooling worklog | Fix engine worklog | 30m | 10m | 40m | 0m | 15:02 | 15:42 | 0.5h *(interno, non loggato)* | transcript |
+| | | **Totale** | | **1h40m** | **45m** | **2h25m** | **0m** | | | **2h loggabili** | |
 
 Non fatturato: 40m (interni 40m, arrotondamento 0m)
-Attese lunghe contate: 10:45-12:04 (1h18m, <repo>) — tienile o toglile
+Attese lunghe contate: 10:45-13:10 (2h25m, <repo>) — tienile o toglile
 **Copertura: 2h / 8h — mancano 6h**
 ```
 
 | Column / line | Source |
 | --- | --- |
 | `Progetto` | **every row, gap rows included**: the board project from `workspaces.json` (the topic's path), `interno` for internal rows; unmapped or unsure → `?` and ask in the same message |
-| `Attivo` | the engine's minutes for the topic (after a split of the default branch, say it is an estimate) |
+| `Claude` / `Tu` / `Totale` / `Fuori orario` | the engine's `CLAUDE`, `TU`, `TOTALE` and `FUORI` for the topic (after a split of the default branch, say it is an estimate): measured hours, extra, their sum, and what fell outside 08:00-20:00; the user adjusts by judgement |
 | `Da` / `A` | the topic's window |
-| `Arrotondato` | `round.ps1`, never by hand; mark `0h (non loggato)` and `interno` rows |
+| `Arrotondato` | `round.ps1` on `Totale`, never by hand; mark `0h (non loggato)` and `interno` rows |
 | `Fonte` | `transcript`, or for gap rows `dichiarato`, `Slack`, `calendario`, `board`, `git` |
 | header `già sul board` | the GIORNO table's `LOGGATO` for the day |
 | `Non fatturato` | the helper's NON FATTURATO line, verbatim numbers |
-| `Attese lunghe contate` | the engine's long waits on that day; omit the line when there are none |
+| `Attese lunghe contate` | the engine's long turns on that day; omit the line when there are none |
 | `Copertura` | the helper's COPERTURA line, recomputed after every change |
 
 `donor` rows do not appear (they were spread): say so in one line if there were any.

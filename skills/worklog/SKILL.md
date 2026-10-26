@@ -44,7 +44,7 @@ Not for: creating backlog items (`workitem-create`), Azure DevOps verbs, auth an
 | Phase | What | Detail |
 | --- | --- | --- |
 | 1. Period | argument → `From`/`To`; ambiguous → ask; a range goes **day by day** from Phase 3 | `tempo-e-topic.md` |
-| 2. Engine | `worklog.ps1`: active time per project/branch, GIORNO table (attivo, target, loggato, mancano), long waits, digest | `tempo-e-topic.md` |
+| 2. Engine | `worklog.ps1`: Claude and user time per project/branch, GIORNO table (claude, tu, totale, fuori, target, loggato, mancano), long turns, digest | `tempo-e-topic.md` |
 | 3. Topics | topics from branch and digest, a role each, `round.ps1 -TargetHours <t>` per day | `tempo-e-topic.md` |
 | 4. Table 1 + coverage | the table, NON FATTURATO, COPERTURA; under target → **gap prompt** → management rows, source proposals, reduced day | `tabelle.md`, `ore-gestione.md`, `fonti-esterne.md` |
 | 5. Discovery | per loggable row: project, Task or parent, PRs/commits, hours on item, reconciliation | `scrittura.md` |
@@ -74,8 +74,8 @@ pwsh -NoProfile -File "$wl\worklog-push.ps1" -Rows "<rows.json>" -DryRun
 pwsh -NoProfile -File "$wl\worklog-push.ps1" -Rows "<rows.json>"
 ```
 
-The engine's header says how much the waits and the continuity recovered; the **Attese lunghe**
-list (> 45 min counted active) goes into Table 1 for the user to keep or drop. `Nessuna attivita'`
+The engine's header gives CLAUDE, TU, TOTALE (08:00-20:00) and FUORI; the **Attese lunghe**
+list (turns > 120 min counted as CLAUDE) goes into Table 1 for the user to keep or drop. `Nessuna attivita'`
 on a weekday → gap prompt or close at zero, after asking (scope `sessione`: `Sessione <id>: nessun evento` → ask period or id, no gap prompt). Read the digest for topics and decisions;
 open a transcript only for a missing detail.
 
@@ -100,7 +100,7 @@ open a transcript only for a missing detail.
 
 ## References
 
-- `tempo-e-topic.md` — period, the engine's pause rules and GIORNO table, `targets.json`, topics,
+- `tempo-e-topic.md` — period, the engine's time model (CLAUDE, TU, FUORI) and GIORNO table, `targets.json`, topics,
   roles, rounding per day, NON FATTURATO and COPERTURA.
 - `scoping.md` — a run scoped to an item, PR, topic or session (`sessione <id>`): which topics stay, the engine flag.
 - `tabelle.md` — Table 1 with coverage, Table 2, link format, confirm loops, the recap.
