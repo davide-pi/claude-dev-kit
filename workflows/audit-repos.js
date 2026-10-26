@@ -64,7 +64,7 @@ let repos = Array.isArray(input.repos) ? input.repos.filter(r => typeof r === 's
 if (!repos) {
   const found = await agent(
     `List every git repository under ${root}: a directory that contains a .git entry, at most two levels deep. Return absolute paths. Read-only.`,
-    { label: 'discover', phase: 'Discover', agentType: 'Explore', schema: REPOS },
+    { label: 'find the repositories', phase: 'Discover', agentType: 'Explore', schema: REPOS },
   ).catch(() => null)
   if (!found) return 'audit-repos: discovery step failed: pass repos explicitly or retry.'
   repos = found.repos ?? []

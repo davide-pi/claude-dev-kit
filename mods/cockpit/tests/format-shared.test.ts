@@ -14,6 +14,7 @@ import {
   fmtCostDelta,
   folderIcon,
   gridWidths,
+  pathToFileUri,
   pctCell,
   rateColor,
   sameSnapshot,
@@ -31,6 +32,12 @@ import {
 } from '../hooks/shared'
 import type { Span } from '../hooks/shared'
 import { NOW } from './format-fixtures'
+
+test('pathToFileUri: a file:// address with the drive letter kept, each segment percent-encoded; no path, no address', () => {
+  expect(pathToFileUri('C:\\work\\my repo')).toBe('file:///C:/work/my%20repo')
+  expect(pathToFileUri('/work/example-repo')).toBe('file:///work/example-repo')
+  expect(pathToFileUri('')).toBeUndefined()
+})
 
 test('abbrevTokens scales to k and M', () => {
   expect(abbrevTokens(248_000, true)).toBe('248K')

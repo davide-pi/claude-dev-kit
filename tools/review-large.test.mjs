@@ -28,7 +28,7 @@ async function dryRun(count, extra = {}, handler = null, noFiles = false) {
   const agent = async (_prompt, opts = {}) => {
     spawned.push({ ...opts, prompt: _prompt });
     if (handler) { const h = await handler(opts, _prompt); if (h !== undefined) return h; }
-    return opts.label === 'merge' ? 'REPORT' : { status: 'PASS', checked: 'read it', findings: [] };
+    return opts.label === 'merge the reviews into one report' ? 'REPORT' : { status: 'PASS', checked: 'read it', findings: [] };
   };
   const parallel = (thunks) => Promise.all(thunks.map((t) => t()));
   const pipeline = (items, stage) => Promise.all(items.map((item, i) => stage(item, item, i)));
@@ -70,7 +70,7 @@ test('raising filesPerReviewer brings a big diff under the cap', async () => {
 test('reviewers get the effort; the merger runs on sonnet', async () => {
   const { reviewers, spawned } = await dryRun(6, { effort: 'high' });
   assert.ok(reviewers.every((r) => r.effort === 'high'));
-  assert.equal(spawned.find((o) => o.label === 'merge').model, 'sonnet');
+  assert.equal(spawned.find((o) => o.label === 'merge the reviews into one report').model, 'sonnet');
 });
 
 test('modelB outside the allowed models is refused before any spawn', async () => {
@@ -80,30 +80,30 @@ test('modelB outside the allowed models is refused before any spawn', async () =
 });
 
 test('a null scope agent is an error message, not "no changed files"', async () => {
-  const { out } = await dryRun(0, {}, (o) => (o.label === 'scope' ? null : undefined), true);
+  const { out } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? null : undefined), true);
   assert.match(out, /scope step failed: pass files or retry/);
 });
 
 test('a rejecting scope agent is the same error', async () => {
-  const { out } = await dryRun(0, {}, (o) => { if (o.label === 'scope') throw new Error('boom'); }, true);
+  const { out } = await dryRun(0, {}, (o) => { if (o.label === 'list the files to review') throw new Error('boom'); }, true);
   assert.match(out, /scope step failed/);
 });
 
 test('an empty scope answer is still "no changed files"', async () => {
-  const { out } = await dryRun(0, {}, (o) => (o.label === 'scope' ? { files: [] } : undefined), true);
+  const { out } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? { files: [] } : undefined), true);
   assert.match(out, /no changed files/);
 });
 
 test('a rejecting reviewer is a gap, the merger still runs', async () => {
   const { out, spawned } = await dryRun(6, {}, (o) => { if (o.agentType === 'code-reviewer') throw new Error('boom'); });
   assert.equal(out, 'REPORT');
-  const merge = spawned.find((o) => o.label === 'merge');
+  const merge = spawned.find((o) => o.label === 'merge the reviews into one report');
   assert.match(merge.prompt, /BLOCKED/);
 });
 
 test('a null merger returns the raw findings table', async () => {
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
-  const { out } = await dryRun(6, {}, (o) => (o.label === 'merge' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
+  const { out } = await dryRun(6, {}, (o) => (o.label === 'merge the reviews into one report' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
   assert.match(out, /merger returned nothing/);
   assert.ok(out.includes('| 1 | P2 | PLAUSIBLE | correctness | src/a.cs:3 | Rotto | A |'), out);
 });
@@ -112,7 +112,7 @@ test('A and B findings on the same anchor reach the merger as one CONFIRMED, che
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
   const { spawned } = await dryRun(6, { effort: 'xhigh' }, (o) => (o.agentType === 'code-reviewer'
     ? { status: 'ISSUES', checked: 'c'.repeat(1000), findings: [finding] } : undefined));
-  const prompt = spawned.find((o) => o.label === 'merge').prompt;
+  const prompt = spawned.find((o) => o.label === 'merge the reviews into one report').prompt;
   const input = JSON.parse(prompt.slice(prompt.indexOf('Results (JSON):') + 16));
   assert.equal(input.findings.length, 1);
   assert.equal(input.findings[0].foundBy, 'A+B');

@@ -22,13 +22,12 @@ export const headerEffort = (effort: string | number | undefined): Span[] => {
 
 export type RateRow = { rem: number; color: string; resetMs: number | undefined; isStale: boolean; pace?: { target: number; delta: number } }
 
-/** The windows to draw: the engine's, or while it reports none the status line's last known ones (drawn with a `~`). */
-const isLastKnownRates = (s: CockpitSnapshot): boolean => s.rateLimits.length === 0 && (s.lastRates?.length ?? 0) > 0
-
+/** A window from the engine's reading, or while it reports none of that kind the status line's last known one (drawn with a `~`). */
 export function rateRow(s: CockpitSnapshot, kind: 'five_hour' | 'seven_day'): RateRow | undefined {
-  const isStale = isLastKnownRates(s)
-  const w = (isStale ? (s.lastRates ?? []) : s.rateLimits).find(r => r.kind === kind)
+  const live = s.rateLimits.find(r => r.kind === kind)
+  const w = live ?? s.lastRates?.find(r => r.kind === kind)
   if (!w) return undefined
+  const isStale = live === undefined
   const resetMs = parseReset(w.resetsAt)
   const windowSec = kind === 'five_hour' ? FIVE_HOURS : SEVEN_DAYS
   const rem = Math.max(0, Math.min(100, Math.round(100 - w.percentUsed)))

@@ -3,9 +3,9 @@ import { isRecord } from './shared'
 
 // ── The workflow run in flight, from the events that really reach the mod: the `Workflow` tool's result names it, the `agent.spawn` of its agents counts it ──
 
-/** The round a script's agent label names (`fix R2`, `cleanup R1`): the number after `R`; none for a label without one. */
+/** The round a script's agent label names (`fix round 2 findings`, `review round 1: code`): the number after `round` (or after `R`); none for a label without one. */
 export function roundOf(label: string): number | undefined {
-  const found = /\bR(\d+)\b/.exec(label)
+  const found = /\b(?:round |R)(\d+)\b/.exec(label)
   return found ? Number(found[1]) : undefined
 }
 

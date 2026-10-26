@@ -124,7 +124,7 @@ test('contextOf: the rows and the window, and the top five static consumers over
   // an unloaded MCP schema is outside the window; the sixth and smallest consumer is cut
   expect(context.consumers).toEqual([
     { name: 'mcp__a__big', kind: 'mcp', tokens: 5000 },
-    { name: 'skills', kind: 'skill', tokens: 4200 },
+    { name: 'skills 41/60', kind: 'skill', tokens: 4200 },
     { name: 'User CLAUDE.md', kind: 'memory', tokens: 3000 },
     { name: 'Project CLAUDE.md', kind: 'memory', tokens: 900 },
     { name: 'code-reviewer', kind: 'agent', tokens: 400 },
@@ -138,6 +138,20 @@ test('contextOf: the rows and the window, and the top five static consumers over
     consumers: [],
     isExact: true,
   })
+})
+
+test('contextOf: an exact reading marks isExact on every row, an estimate on none', () => {
+  const row = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer') => ({ name, tokens, color: 'promptBorder', isDeferred: false, kind })
+  const b = {
+    categories: [row('System prompt', 8000, 'used'), row('Messages', 90_000, 'used'), row('Free space', 700_000, 'free')],
+    totalTokens: 98_000,
+    rawMaxTokens: 1_000_000,
+    memoryFiles: [],
+    mcpTools: [],
+    agents: [],
+  }
+  expect(contextOf(b, true).rows.map(r => r.isExact)).toEqual([true, true, true])
+  expect(contextOf(b, false).rows.map(r => r.isExact)).toEqual([undefined, undefined, undefined])
 })
 
 test('recordRound keeps the last twenty main-turn contexts, and a shrinking context stays in the series', () => {

@@ -5,6 +5,10 @@ import { GH_SSH, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
 const GH_PR_ARGS = 'gh pr view --json number,title,url'
+/** The addresses of the pane's web links (the header's folder is a `file://` link too, left out). */
+const webLinks = async (ui: Awaited<ReturnType<typeof mountPane>>) =>
+  (await ui.findAll({ type: 'Link' })).map(l => l.props.href).filter(h => typeof h === 'string' && h.startsWith('http'))
+
 const AZ_REMOTE = 'https://dev.azure.com/<org>/proj/_git/orders'
 const AZ_WORKSPACES = { roots: [{ path: '/work', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] }
 
@@ -319,7 +323,7 @@ test('Work: a PR created in the session (gh pr create) is a Link, and is kept in
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('LINKS · 1')
   expect(rows.some(r => /^#42 Add filter$/.test(r))).toBe(true)
-  expect((await ui.find({ type: 'Link' }))?.props.href).toBe(GH_CREATED)
+  expect(await webLinks(ui)).toEqual([GH_CREATED])
   await ui.unmount()
   await clock.advance(3000)
   expect(dataOf(writes)?.prs).toEqual([{ number: 42, title: 'Add filter', url: GH_CREATED }])
@@ -336,7 +340,7 @@ test('Work: a PR created with az repos pr create takes its link from the reposit
   await ui.press({ key: 'tab:work' })
   await settleAll()
   expect(rowTexts(await ui.drawn()).some(r => /^#9 Faster orders$/.test(r))).toBe(true)
-  expect((await ui.find({ type: 'Link' }))?.props.href).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/9')
+  expect(await webLinks(ui)).toEqual(['https://dev.azure.com/o/p/_git/r/pullrequest/9'])
   await ui.unmount()
 })
 
@@ -367,7 +371,7 @@ test('Work: the PRs of a session come back with it (the state file), as links', 
   expect(rows.some(r => /^#8 Checks$/.test(r))).toBe(true)
   expect(rows.some(r => /review|checks 1/.test(r))).toBe(false)
   // a PR without a url is plain text, never a link to nowhere
-  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://github.com/example/orders/pull/7'])
+  expect(await webLinks(ui)).toEqual(['https://github.com/example/orders/pull/7'])
   await ui.unmount()
 })
 
@@ -396,7 +400,7 @@ test('follow-up: a PR link that is not an http(s) address (a saved state, a CLI 
   world(on, { stateFile: JSON.stringify({ open: false, tab: 'work', prs }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toEqual(['https://github.com/example/orders/pull/8'])
+  expect(await webLinks(ui)).toEqual(['https://github.com/example/orders/pull/8'])
   await ui.unmount()
 })
 

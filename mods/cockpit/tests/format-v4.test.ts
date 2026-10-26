@@ -1,6 +1,5 @@
 import { expect, test } from 'claude-code/testing'
 
-import { modelRows } from '../hooks/costs'
 import { workItemIds, workItemUrl } from '../hooks/links'
 import { cacheHit, usdOf } from '../hooks/pricing'
 import { EVENTS_KEEP, recordAgentEvent, recordEvent } from '../hooks/timeline'
@@ -46,16 +45,6 @@ test('recordAgentEvent: an agent that ended twice is one row', () => {
   list = recordAgentEvent(list, { at: 4, kind: 'agent', id: 'a1', usd: 2 })
   expect(list.map(e => e.kind)).toEqual(['agent', 'agent'])
   expect(list.map(e => e.usd)).toEqual([1, 2])
-})
-
-test('modelRows: the counters per model priced and ranked, dearest first', () => {
-  const rows = modelRows({
-    'claude-haiku-5': { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 },
-    'claude-opus-5-5': { input: 1_000_000, output: 0, cacheRead: 1_000_000, cacheWrite: 0 },
-  })
-  expect(rows.map(r => r.model)).toEqual(['claude-opus-5-5', 'claude-haiku-5'])
-  expect(rows[0]?.hit).toBe(50)
-  expect(modelRows(undefined)).toEqual([])
 })
 
 test('workItemIds and workItemUrl: AB# ids of the branch and the PR titles, once each; a URL needs the org and the project', () => {

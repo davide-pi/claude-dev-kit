@@ -53,14 +53,14 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 | --- | --- | --- | --- |
 | analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, doubts pass, challenger `Plan` (risk: data, money, contract, security) | `plan-work`, criteria + proof, questions, owner ok, doubts pass, challenger `Plan` (Opus) |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
-| implementation | this session, inline (a few lines; more → `implementer`) | `implementer` | `implementer`, a run per phase, 3-4 tasks (P-run, `references/loop.md`) |
+| implementation | this session, inline (up to ~3 files) | `implementer`, 3-4 tasks a run | as M, a run per phase (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
-`implementer` runs at `medium` (`implementerEffort`: `high`). Before the loop: `references/scenarios.md`; criteria, doubts pass and challenger: `references/loop.md`.
+`implementer`: `medium` (`implementerEffort`: `high`), `implementerModel: haiku` if mechanical; brief: `file:line` + the change. Before the loop: `references/scenarios.md`; criteria, doubts pass and challenger: `references/loop.md`.
 
 ### 3. Who asks the user
 
-Only this session. The workflow and every subagent return their state and stop; an undecidable choice comes back as an open question. Batch the questions, each with a recommendation, only the weighty ones (P-weight, `references/loop.md`).
+Only this session. The workflow and every subagent return their state and stop; an undecidable choice comes back as an open question. Batch the questions, each with a recommendation, weighty ones only (P-weight, `references/loop.md`).
 
 ### 4. Tests by level — run here, not delegated
 
@@ -85,14 +85,14 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 5. `perimeter.ps1 -Close -FindingsLog`, then the verdict (`done-claim` blocks one with the perimeter still active), then `/commit`, `pr-create` when asked.
 
 The verdict is a plain markdown table `done-claim` accepts as evidence, then the closing table of everything outside the
-perimeter (`references/loop.md`, "The verdict"): `fatto`, `non verificato: <motivo>` or `failed` per row; S two or three lines.
+perimeter (`references/loop.md`): `fatto`, `non verificato: <motivo>` or `failed` per row; S 2-3 lines.
 
 ## Traps
 
 1. The change keeps growing → the perimeter was a guess → stop, widen the file with the user's yes,
    never let an edit land first (`scope-guard.js` says "out of perimeter").
 2. A bug test written after the fix → it was never seen failing → revert the fix, run it red, restore.
-3. A spike drifts into the feature → answer, delete the probe; the feature is a new triage.
+3. A spike drifts into the feature → answer, delete the probe; the feature: a new triage.
 
 ## References
 
@@ -100,5 +100,5 @@ perimeter (`references/loop.md`, "The verdict"): `fatto`, `non verificato: <moti
   cleanup pass, the scope check after `OK`, the findings log, the verdict.
 - `references/stall.md` — only when a run returns `STALL`: each `why`, the resolutions, the resume, a red test after `OK`.
 - `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
-- `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": the baseline, the runs,
-  BenchmarkDotNet and HTTP timing, the result as ratio and spread.
+- `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": baseline, runs, BenchmarkDotNet,
+  HTTP timing, the result as ratio and spread.

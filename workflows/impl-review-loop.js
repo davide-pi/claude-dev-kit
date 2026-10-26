@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, implementerModel?, cleanup?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -10,7 +10,7 @@ export const meta = {
 }
 
 // Contract: args in whenToUse; a STALL returns to the caller, which relaunches with resumeFromRunId and every resolution (stall.why names the kind).
-// Everything between the markers is pure and run by tools/impl-review-loop.test.mjs.
+// Everything between the markers is pure and run by tools/impl-review-loop.harness.mjs.
 
 // --- pure:begin
 const norm = p => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase().replace(/^\/([a-z])\//, '$1:/')
@@ -64,6 +64,7 @@ const BLOCKING = new Set(['P1', 'P2'])
 
 // Past this many files reviewer A splits into one reviewer per group, in order, so a group keeps its files while fixes only append.
 const MAX_REVIEW_FILES = 8
+const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
 const groupFiles = (list, max = MAX_REVIEW_FILES) => {
   const groups = []
   for (let i = 0; i < list.length; i += max) groups.push(list.slice(i, i + max))
@@ -443,6 +444,7 @@ if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
 }
 const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : 'medium'
+const implModel = ['haiku', 'sonnet', 'opus'].includes(input.implementerModel) ? input.implementerModel : undefined
 const risk = riskAxes(input.risk, input.touches)
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
@@ -677,13 +679,13 @@ const recoverChanges = async () => {
   const r = await ask([
     `List the files changed in the working tree since ${since}: \`git diff ${since} --name-only\` plus \`git ls-files -o --exclude-standard\`${skip}. Read only, change nothing; return them in \`files\`.`,
     RULES,
-  ].join('\n\n'), { label: 'probe', phase: 'Implement', agentType: 'Explore', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
+  ].join('\n\n'), { label: 'find the files to change', phase: 'Implement', agentType: 'Explore', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
   return strings(r?.files).filter(f => inPerimeter(f, files, repoRoot))
 }
 
 if (!inline) {
   phase('Implement')
-  const implOpts = { label: 'implement', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const implOpts = { label: 'implement the change', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
   const buildImpl = extra => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, ...writerTail()].filter(Boolean).join('\n\n')
   const resolution0 = resolutions.find(r => Number(r?.round) === 0)
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
@@ -691,11 +693,12 @@ if (!inline) {
   let impl = asked0.report
   // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
   let continuations = 0
-  while ((!impl || impl.remaining.length) && continuations < 2) {
+  // The implementer stops itself at 50 tool calls: a fresh one continues with a clean context, cheaper than one long run.
+  while ((!impl || impl.remaining.length) && continuations < 4) {
     if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
     continuations += 1
     const left = impl?.remaining ?? []
-    const label = `implement (continue ${continuations})`
+    const label = `implement the change (continued, ${continuations})`
     const next = readReport(await ask(buildImpl([
       'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
       left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
@@ -713,7 +716,7 @@ if (!inline) {
         round: 0,
         why: 'incomplete',
         findings: [],
-        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement (continue ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
       },
       resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
     })
@@ -734,8 +737,8 @@ if (!inline) {
           ' A bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the review; any other answer runs the implementer once more with it as its direction. The verdict carries a final screenshot of the same surface.'))
     }
     if (!PREVIEW_OK.test(said.answer)) {
-      const again = readReport(await ask(buildImpl(answersBlock([said])), { ...implOpts, label: 'implement (preview)' }))
-      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement (preview)')})`)
+      const again = readReport(await ask(buildImpl(answersBlock([said])), { ...implOpts, label: 'implement the change (preview feedback)' }))
+      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
       addQuestionNotes(again.questions)
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
@@ -822,7 +825,9 @@ while (true) {
     : round === 1 || final ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
-  const labelOf = r => `R${round} ${r.key}${final ? ' (final)' : ''}`
+  // What the owner reads in the agent list: the round and the reviewer's job, never the model or effort.
+  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
+  const labelOf = r => `review round ${round}: ${roleOf(r)}${r.group === undefined ? '' : ` (files ${r.group + 1}/${groups.length})`}${final ? ', final read' : ''}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
@@ -929,13 +934,13 @@ while (true) {
       continue
     }
     // The 0 of a DONE is no bar for later fix cycles.
-    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key))) {
+    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key)) && (fixChurns.length < fixReaders.length || fixChurns.reduce((n, c) => n + c, 0) > FINAL_READ_MIN_CHURN)) {
       finalReadDone = true
       nextRound = { only: null, coverage: false, final: true }
       openCounts = []
       continue
     }
-    if (!cleanupDone && size !== 'S') cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
+    if (!cleanupDone && size !== 'S' && input.cleanup === true) cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
     if (!cleanupIds.length) return result({ status: 'OK' })
     cleanupDone = true
     openCounts = []
@@ -972,7 +977,8 @@ while (true) {
   const unproven = id => !cleaning && known[id].confidence === 'PLAUSIBLE'
   const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && sending.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
   const fix = sending.map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
-  const fixOpts = { label: `${cleaning ? 'cleanup' : 'fix'} R${round}`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  // `cleanup` stays the label's first word: askWithQuestions reads it.
+  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
   const asked1 = await askWithQuestions(extra => [
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with a one-line reason, no code change: never ask about it. No other edit.'

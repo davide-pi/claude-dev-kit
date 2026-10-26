@@ -3,16 +3,15 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitAgent, CockpitChange, CockpitNote, CockpitSnapshot, CockpitTab } from '../types'
 import { sessionTokens } from './agents'
 import { REFRESH_COOLDOWN_MS, autocompactForecast, openTasks, shouldCompact } from './context'
-import { modelRows } from './costs'
 import { workItemIds, workItemUrl } from './links'
 import { worklogLabel } from './session'
-import { COLORS, abbrevTokens, fmtCost, shortModel, spanWidth, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, fmtCost, spanWidth, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
 import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
 import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
-import { BUTTON_GAP, buttonRowWidth, dim, line, pad, sp, spanNodes } from './view-base'
+import { BUTTON_GAP, buttonRowWidth, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar } from './view-context'
 import { bigResultSpans } from './view-insights'
@@ -30,7 +29,10 @@ export type PaneActions = {
   ask: (kind: 'suite' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
+  /** Shows every history entry, or only the newest few. */
   toggleHistory: () => void
+  /** Shows every TOP AGENTS entry, or only the dearest few. */
+  toggleCostAgents: () => void
   /** Expands or collapses an agent row (live or in the history). */
   toggleAgent: (agentId: string) => void
   /** Opens or closes the why and what-to-do of a notification (`kind:key`). */
@@ -92,12 +94,12 @@ export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: Pane
 }
 
 const MAX_SIGNAL_ROWS = 8
-const MAX_MODEL_ROWS = 4
 const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
 const MAX_FILE_ROWS = 8
 const MAX_LINK_ROWS = 4
-const MAX_AGENT_COST_ROWS = 3
+const HISTORY_ROWS_SHOWN = 5
+const AGENT_COST_ROWS_SHOWN = 3
 const NOTE_LINES_SHOWN = 3
 /** The height of the note field: multi-line notes are common. */
 const NOTE_INPUT_ROWS = 6
@@ -115,6 +117,19 @@ function workflowBlock(k: Kit): Block {
   return [gap(), line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))]
 }
 
+/** The first `shown` rows, then a button that opens the rest (`▸ +K`) and folds them again (`▾ −K`); no button when every row fits. */
+function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {
+  const { Button, Text } = k.ui
+  const hidden = rows.length - shown
+  if (hidden <= 0) return rows
+  return [
+    isOpen ? rows : rows.slice(0, shown),
+    <Button key={`${key}:more`} plain onPress={onToggle}>
+      <Text color={COLORS.title}>{isOpen ? t().lessRows(hidden) : t().moreRows(hidden)}</Text>
+    </Button>,
+  ]
+}
+
 export function agentsBlocks(k: Kit): Block[] {
   const { ui, s, width, gap, actions } = k
   const { Button, Text } = ui
@@ -122,7 +137,7 @@ export function agentsBlocks(k: Kit): Block[] {
   const agents = visibleAgents(s)
   const running = agents.filter(a => a.status === 'running')
 
-  // Every agent is one row (state, name, model when it fits, effort, tokens, share, time); pressing it expands what else there is to know. Live and history alike.
+  // Every agent is one row (state, name, model when it fits, effort, share, time); pressing it expands what else there is to know. Live and history alike.
   const sessionTotal = sessionTokens(s)
   const agentBlock = (key: string, agent: CockpitAgent, depth: number): Block => {
     const indent = '  '.repeat(depth + 1)
@@ -141,20 +156,24 @@ export function agentsBlocks(k: Kit): Block[] {
   }
   const rows = orderAgents(agents)
   const agentRows = rows.map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth))
-  // HISTORY: the agents that left the list, newest first, behind a toggle (collapsed by default)
+  // HISTORY: the agents that left the list, newest first; the newest few, the rest behind a toggle
   const history = s.history ?? []
-  const isHistoryOpen = s.isHistoryOpen === true
   const historyBlock: Block[] =
     history.length === 0
       ? []
       : [
           [
             gap(),
-            <Button key="history" plain onPress={() => actions.toggleHistory()}>
-              <Text color={COLORS.title}>{`${S.historyTitle} · ${history.length} ${isHistoryOpen ? '▾' : '▸'}`}</Text>
-            </Button>,
-            isHistoryOpen && gap(),
-            isHistoryOpen && history.map(h => agentBlock(`history:${h.id}`, { ...h, status: 'done' }, 0)),
+            line(ui, [sp(`${S.historyTitle} · ${history.length}`, COLORS.title)]),
+            gap(),
+            collapsible(
+              k,
+              'history',
+              history.map(h => agentBlock(`history:${h.id}`, { ...h, status: 'done' }, 0)),
+              HISTORY_ROWS_SHOWN,
+              s.isHistoryOpen === true,
+              actions.toggleHistory,
+            ),
           ],
         ]
   return [
@@ -229,13 +248,8 @@ export function contextBlocks(k: Kit): Block[] {
   const { Button, Text } = ui
   const S = t()
 
-  // $ and cache hit per model and per agent, priced from the usage counters
-  const nameW = Math.max(6, width - 24)
-  const costRow = (name: string, usd: number, hit: number | undefined) =>
-    line(ui, [sp(pad(truncMiddle(name, nameW), nameW)), sp(` ${fmtCost(usd).padStart(7)}`, COLORS.yellow), dim(hit === undefined ? '' : `  ${S.costCacheHit} ${hit}%`)])
-  const models = modelRows(s.modelUse).slice(0, MAX_MODEL_ROWS)
-  const modelsBlock: Block = models.length > 0 ? [gap(), title(S.costModelsTitle), gap(), models.map(m => costRow(shortModel(m.model) || m.model, m.usd, m.hit))] : []
-  const agents = agentCosts(s.agents, s.events).sort((a, b) => b.usd - a.usd).slice(0, MAX_AGENT_COST_ROWS)
+  // Every priced agent, dearest first: the top few shown, the rest behind a toggle
+  const agents = agentCosts(s.agents, s.events).sort((a, b) => b.usd - a.usd)
   // Each agent is one row, a button: a press expands what it was asked and how it went (its own `cost:` entry of the open list, apart from the Agents tab's)
   const agentRows = (a: AgentCost): Block => {
     const id = `cost:${a.id}`
@@ -246,7 +260,10 @@ export function contextBlocks(k: Kit): Block[] {
       s.agentsOpen?.includes(id) === true && agentCostDetails(a, s.now, s.cost.usd, '  ', width).map(spans => line(ui, spans)),
     ]
   }
-  const agentsBlock: Block = agents.length > 0 ? [gap(), title(S.costAgentsTitle), gap(), agents.map(agentRows)] : []
+  const agentsBlock: Block =
+    agents.length > 0
+      ? [gap(), title(S.costAgentsTitle), gap(), collapsible(k, 'costAgents', agents.map(agentRows), AGENT_COST_ROWS_SHOWN, s.isCostAgentsOpen === true, actions.toggleCostAgents)]
+      : []
 
   const context = s.context
   const ctxRounds = s.ctxRounds ?? []
@@ -277,8 +294,8 @@ export function contextBlocks(k: Kit): Block[] {
       : []
   const biggest = s.insights?.biggest ?? []
   const grewBlock: Block = biggest.length > 0 ? [gap(), title(S.grewTitle), gap(), biggest.map(r => line(ui, bigResultSpans(r, width)))] : []
-  // The context first (categories, consumers, the compact hint), then what the models and agents cost, then the outputs that grew the context
-  return [breakdownBlock, consumersBlock, modelsBlock, agentsBlock, grewBlock].filter(b => b.length > 0)
+  // The context first (categories, consumers, the compact hint), then what the agents cost, then the outputs that grew the context
+  return [breakdownBlock, consumersBlock, agentsBlock, grewBlock].filter(b => b.length > 0)
 }
 
 // ── Lavoro ──

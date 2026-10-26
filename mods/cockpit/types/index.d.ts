@@ -46,6 +46,9 @@ export type CockpitHistoryEntry = {
   endedAt: number
   tokens: number
   isFailed: boolean
+  effort?: string | number
+  /** The spawn's `description` of the task, kept so an expanded history row still says what the agent did; absent when it had none. */
+  description?: string
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
 }
@@ -276,8 +279,10 @@ export type CockpitSnapshot = {
   agents: CockpitAgent[]
   /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
   history?: CockpitHistoryEntry[]
-  /** The HISTORY list is expanded; absent is collapsed. */
+  /** The HISTORY list shows every entry; absent shows the newest few. */
   isHistoryOpen?: boolean
+  /** The TOP AGENTS list shows every agent; absent shows the dearest few. */
+  isCostAgentsOpen?: boolean
   /** The notification whose why and what-to-do are shown (`kind:key`); absent shows none. */
   signalOpen?: string
   /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
@@ -300,8 +305,6 @@ export type CockpitSnapshot = {
   repo?: CockpitRepo
   /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
-  /** The usage counters of every finished turn by model id: the Costi tab prices them. */
-  modelUse?: Record<string, CockpitUsage>
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `analizza suite` or Lavoro's `log hours`. */
