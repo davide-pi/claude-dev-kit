@@ -34,7 +34,7 @@ on a yes, relaunch with `dirtyConfirmed: true`.
 ## Args
 
 `Workflow` with `name: impl-review-loop` and
-`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, risk, implementerEffort, verify, stackSkill, preview }`
+`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, risk, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview }`
 
 | Arg | Rule |
 | --- | --- |
@@ -45,13 +45,16 @@ on a yes, relaunch with `dirtyConfirmed: true`.
 | `size` | `S`, `M` or `L` from the triage (panel: `SKILL.md` step 2). The file count never changes it: past 8 changed files reviewer A splits into one per group of 8, and more files than the size implies (S: 2+, M: 7+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
 | `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes → L. `security` and `performance` also add their specialist at M and L. `touches` (the old name) is still read as the same axes |
 | `implementerEffort` | `high` only when the brief asks; default `medium` |
+| `implementerModel` | `haiku` for mechanical batches (moves, splits, renames, label updates) the tests fully cover; default: the agent's own model |
+| `cleanup` | `true` only when the owner asks for the P3 cleanup pass (M, L); default: the P3s go to the closing table |
 
 Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus one Sonnet at
 medium (at S that Sonnet is the panel). The first round that would end `OK` after a review fix ran (never at S) is a
 final full read: the whole panel, once, on the cumulative fix diff, unless every panel reviewer already read every fix
 delta (M with one fix round: the finder read it, so none runs; L where only A found it: B never read it, so it runs).
+It runs only when the review fixes changed more than 30 lines in all (a fix with no churn reported counts as over).
 
-**Size S**: edit inline (a few lines in one file; larger → `implementer`), then launch with
+**Size S**: edit inline (up to ~3 files; larger → `implementer`), then launch with
 `inline: true, changed: [the files you edited]`. No implementer runs first; a finding is fixed by `implementer` inside
 the loop. S has no final full read, no cleanup pass, no preview stop, no proof check.
 
@@ -89,7 +92,7 @@ cannot fail on the old code is `non verificato`. The verdict ends with "Test loc
 
 ## The cleanup pass before OK (M, L)
 
-A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the
+Runs only with `cleanup: true` (the owner asks for it); by default the P3s stay in `minor` for the closing table. A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the
 change does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (one
 Sonnet at medium); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
 review has read it; `minor` keeps the rest, and `outOfScope` the P3s outside the perimeter: all for the closing table.

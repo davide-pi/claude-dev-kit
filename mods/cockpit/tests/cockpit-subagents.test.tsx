@@ -25,7 +25,8 @@ const shares = (rows: string[]) =>
     return m ? [m[1] ?? ''] : []
   })
 
-test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, collapsed by default, newest first, with its outcome', async ($, on) => {
+// Three spawns, two finishes and a mounted pane run near the 5 s default on a loaded machine.
+test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, collapsed by default, newest first, with its outcome', { timeoutMs: 15_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes, listed: [{ id: 'a3', status: 'running' }] })
   spawns(on)

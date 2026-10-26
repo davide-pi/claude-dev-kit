@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, implementerModel?, cleanup?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -64,6 +64,7 @@ const BLOCKING = new Set(['P1', 'P2'])
 
 // Past this many files reviewer A splits into one reviewer per group, in order, so a group keeps its files while fixes only append.
 const MAX_REVIEW_FILES = 8
+const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
 const groupFiles = (list, max = MAX_REVIEW_FILES) => {
   const groups = []
   for (let i = 0; i < list.length; i += max) groups.push(list.slice(i, i + max))
@@ -443,6 +444,7 @@ if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
 }
 const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : 'medium'
+const implModel = ['haiku', 'sonnet', 'opus'].includes(input.implementerModel) ? input.implementerModel : undefined
 const risk = riskAxes(input.risk, input.touches)
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
@@ -683,7 +685,7 @@ const recoverChanges = async () => {
 
 if (!inline) {
   phase('Implement')
-  const implOpts = { label: 'implement the change', phase: 'Implement', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const implOpts = { label: 'implement the change', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
   const buildImpl = extra => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, ...writerTail()].filter(Boolean).join('\n\n')
   const resolution0 = resolutions.find(r => Number(r?.round) === 0)
   const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0)
@@ -932,13 +934,13 @@ while (true) {
       continue
     }
     // The 0 of a DONE is no bar for later fix cycles.
-    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key))) {
+    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key)) && (fixChurns.length < fixReaders.length || fixChurns.reduce((n, c) => n + c, 0) > FINAL_READ_MIN_CHURN)) {
       finalReadDone = true
       nextRound = { only: null, coverage: false, final: true }
       openCounts = []
       continue
     }
-    if (!cleanupDone && size !== 'S') cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
+    if (!cleanupDone && size !== 'S' && input.cleanup === true) cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
     if (!cleanupIds.length) return result({ status: 'OK' })
     cleanupDone = true
     openCounts = []
@@ -976,7 +978,7 @@ while (true) {
   const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && sending.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
   const fix = sending.map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
   // `cleanup` stays the label's first word: askWithQuestions reads it.
-  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: implEffort, schema: IMPLEMENTATION }
+  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
   const asked1 = await askWithQuestions(extra => [
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with a one-line reason, no code change: never ask about it. No other edit.'
