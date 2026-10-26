@@ -44,23 +44,18 @@ test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, c
   // inside the two minutes the finished agents are listed as before, and there is no history yet
   expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
   expect(await ui.find({ key: 'agent:a2' })).toBeDefined()
-  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
 
   await clock.advance(130_000)
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a3' })).toBeDefined()
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')
-  expect(await ui.find({ key: 'history:a1' })).toBeUndefined()
-
-  await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▾')
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
   const keys = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('history:'))
   expect(await keys()).toEqual(['history:a2', 'history:a1'])
-  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✗ two +sonnet +0 +5s$/)
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ one +sonnet +0 +0s$/)
-  await ui.press({ key: 'history' })
-  expect(await keys()).toEqual([])
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✗ two +son 5\.5 +0 +5s$/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ one +son 5\.5 +0 +0s$/)
+  expect(await ui.find({ key: 'history:more' })).toBeUndefined() // two rows: nothing to open
   await ui.unmount()
 
   // the state file carries it, so a resume or a reload finds it
@@ -91,7 +86,7 @@ test('Subagents: an agent the engine lists as killed or failed ends with ✗, on
   await ui.unmount()
 })
 
-test('HISTORY lists every entry, no cap and no … +n', async ($, on) => {
+test('HISTORY shows the newest 5 and a `▸ +K` button opens the rest, `▾ −K` folds them again', async ($, on) => {
   const clock = world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -102,10 +97,15 @@ test('HISTORY lists every entry, no cap and no … +n', async ($, on) => {
   await clock.advance(135_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 25 ▾')
-  expect((await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('history:')).length).toBe(25)
-  expect(rowTexts(await ui.drawn()).some(r => /^… \+\d+$/.test(r))).toBe(false)
+  const rows = async () => (await ui.findAll({ type: 'Button' })).filter(b => /^history:a/.test(b.key ?? '')).length
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 25')
+  expect(await rows()).toBe(5)
+  expect((await ui.find({ key: 'history:more' }))?.text).toBe('▸ +20')
+  await ui.press({ key: 'history:more' })
+  expect(await rows()).toBe(25)
+  expect((await ui.find({ key: 'history:more' }))?.text).toBe('▾ −20')
+  await ui.press({ key: 'history:more' })
+  expect(await rows()).toBe(5)
   await ui.unmount()
 })
 
@@ -114,16 +114,15 @@ test('HISTORY survives a reload: the session id reads its history from its state
   world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, tab: 'agents', history: [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   let ui = await mountPane($)
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')
-  await ui.press({ key: 'history' })
-  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +sonnet +5\.4k +\d+% +1m00s$/)
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
+  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^✓ implementer +son 5\.5 +5\.4k +\d+% +1m00s$/)
   expect((await ui.find({ key: 'history:a8' }))?.text).toMatch(/^✗ reviewer/)
   await ui.unmount()
 
   id = 's-2'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   ui = await mountPane($)
-  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
   await ui.unmount()
 })
 
@@ -143,7 +142,7 @@ test('HISTORY: a /clear moves the finished agent still under 2 minutes into the 
   await clock.advance(135_000)
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
-  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   await ui.unmount()
   expect(fileOfSession(writes, 's-2')?.history).toEqual([])
@@ -165,7 +164,7 @@ test('Subagents: a reload of the same session id keeps the live agents, the fini
   await clock.advance(135_000)
   expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
   expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 1 ▸')
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
   await ui.unmount()
 })
 
@@ -177,7 +176,6 @@ test('HISTORY draws an interrupted agent as a dim ■, and a resume of the ended
   await $.session.end({ reason: 'resume', sessionId: 's-1', resume: { id: 's-1' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  await ui.press({ key: 'history' })
   expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^■ running-one/)
   await ui.unmount()
 })
@@ -186,7 +184,7 @@ test('HISTORY: entries a state file holds wrongly are left out, a file with no h
   world(on, { stateFile: JSON.stringify({ tab: 'agents', history: [{ id: 'x' }, 'text', entry('a1', 'ok', NOW - 1000)] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 1 ▸')
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
   await ui.unmount()
 })
 
@@ -210,7 +208,6 @@ test('an agent row, live or in HISTORY, expands on a press and collapses on the 
   expect((await rows()).some(r => /^ +(sonnet|son 5\.5)/.test(r))).toBe(false) // no second row with the model, effort and time
   await ui.press({ key: 'agent:a3' })
   expect((await rows()).some(r => /^ +go$/.test(r))).toBe(false)
-  await ui.press({ key: 'history' })
   await ui.press({ key: 'history:a1' })
   expect(await ui.find({ key: 'open:a1' })).toBeUndefined()
   expect(viewed).toEqual([])
@@ -375,7 +372,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await step('a1')
   let now = await rows()
   // collapsed: one row, the model a word, the effort an icon, the tokens, their share of the session and the time; nothing else of the agent
-  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^◐ code-reviewer +sonnet \u{F12A3} +1\.7k +100% +0s$/u)
+  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^◐ code-reviewer +son 5\.5 +\u{F12A3} +1\.7k +100% +0s$/u)
   expect(now.some(r => counters.test(r) || /^ +go$/.test(r))).toBe(false)
   // a press expands it: what it was asked and the four counters; the next press collapses it
   await ui.press({ key: 'agent:a1' })
@@ -455,7 +452,7 @@ test('Subagenti: after a reload the share keeps the main loop\'s tokens and the 
   const ui = await mountPane($)
   await ui.press({ key: 'tab:agents' })
   await ui.press({ key: 'agent:a1' })
-  expect(shares(rowTexts(await ui.drawn()))).toEqual(['10%'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['10%', '32%']) // the live row, then the history row
   await ui.unmount()
   // a main step is written, for the next reload
   for await (const chunk of $.turn.step({ turnId: 't2', index: 0, model: 'claude-sonnet-5-5', messageCount: 1 })) void chunk
@@ -518,7 +515,7 @@ test('Subagenti: an agent that leaves the list joins a cumulative counter that t
   await ui.press({ key: 'tab:agents' })
   // 1700 of 100000 + 1700 + 1700 (the agent has run for minutes by now)
   await ui.press({ key: 'agent:a2' })
-  expect(shares(rowTexts(await ui.drawn()))).toEqual(['2%'])
+  expect(shares(rowTexts(await ui.drawn()))).toEqual(['2%', '2%']) // the live row, then the history row
   await ui.unmount()
 })
 
@@ -555,10 +552,10 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     }
     // collapsed: the agent is exactly one row, as wide as the pane: the name cut with …, the model, effort, tokens and time in fixed columns
     const collapsed = await body()
-    const row = collapsed.filter(r => /^◐ a-code/.test(r))
+    const row = collapsed.filter(r => /^◐ a-co/.test(r))
     expect(row).toHaveLength(1)
     expect(textCells(row[0] ?? '')).toBe(width)
-    expect(row[0]).toMatch(/^◐ a-code[^ ]*… +sonnet +\S* *\S+(?: +\d+%)? +2m00s$/)
+    expect(row[0]).toMatch(/^◐ a-co[^ ]*… +son 5\.5 +\S* *\S+(?: +\d+%)? +2m00s$/)
     expect(collapsed.some(r => /Review the orders|last tool|⚠/.test(r))).toBe(false)
 
     // expanded: every row of the block is one line, none wider than the pane
@@ -567,7 +564,7 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     expect(expanded.length).toBeGreaterThan(collapsed.length + 2)
     for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
     expect(expanded.find(r => /^ +Review the orders/.test(r))).toMatch(/…$/)
-    expect(expanded.some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
+    expect(expanded.filter(r => !/^◐ a-co/.test(r)).some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
     expect(expanded.some(r => /^ +⚠ asked fable/.test(r))).toBe(true)
     expect(expanded.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
 
@@ -605,9 +602,8 @@ test('Subagents: the history rows are one row each, the name cut by display widt
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 40)
   await ui.press({ key: 'tab:agents' })
-  await ui.press({ key: 'history' })
   const rows = rowTexts(await ui.drawn())
-  for (const re of [/^✓ a-review/, /^✓ 日本語/]) {
+  for (const re of [/^✓ a-re/, /^✓ 日本/]) {
     const row = rows.find(r => re.test(r)) ?? ''
     expect(textCells(row)).toBe(38)
     expect(row).toMatch(/…/)
@@ -620,10 +616,10 @@ test('Subagents: every agent of the session is listed, no cap and no … +n, at 
   world(on)
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (let n = 1; n <= 15; n++) await spawnAgent($, `agent-${n}`)
+  for (let n = 1; n <= 15; n++) await spawnAgent($, `ag${n}`)
   for (const columns of [40, 58, 80]) {
     const { rows } = await paneRows($, columns, 'agents')
-    for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`◐ agent-${n} `))]).toEqual([n, true])
+    for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`◐ ag${n} `))]).toEqual([n, true])
     expect(rows.some(r => /^… \+\d+$/.test(r))).toBe(false)
   }
 })
@@ -663,7 +659,7 @@ test('Context: a TOP AGENTS row is one line at 30 and 58 columns: name, model wo
     expect(row).toMatch(/\$\d/)
     expect(row.startsWith('review')).toBe(true) // the name keeps at least 5 visible characters, whatever the width
     if (width === 30) expect(row).not.toMatch(/cache/) // too narrow: the cache hit gives way to the name
-    if (width === 58) expect(row).toMatch(/^reviewer +sonnet \S \$\d+\.\d+ {2}cache 90%$/u)
+    if (width === 58) expect(row).toMatch(/^reviewer +son 5\.5 +\S \$\d+\.\d+ {2}cache 90% *$/u)
     await ui.unmount()
   }
 })
@@ -708,4 +704,50 @@ test('Context: a TOP AGENTS entry from an event without the newer fields renders
   if (!old) return
   expect(textCells(spanText(agentCostRow(old, 40)))).toBeLessThanOrEqual(40)
   expect(agentCostDetails(old, 0, undefined, '  ', 40).map(spanText)).toEqual(['  tokens 5'])
+})
+
+test('TOP AGENTS: the cost column sits at the same cell in every row, with or without a cache hit, short or long name', () => {
+  const base = { type: 'x', tokens: 10, usd: 1.5, model: 'claude-sonnet-5-5' }
+  for (const width of [30, 44, 58]) {
+    const rows = [
+      { ...base, id: 'a', type: 'ab', hit: 90 },
+      { ...base, id: 'b', type: 'a-very-long-agent-name-that-is-cut-to-fit-the-row', hit: 100 },
+      { ...base, id: 'c', type: 'no-hit' },
+    ].map(a => spanText(agentCostRow(a, width)))
+    for (const r of rows) expect(textCells(r)).toBeLessThanOrEqual(width)
+    expect(new Set(rows.map(r => textCells(r.slice(0, r.indexOf('$')))))).toHaveProperty('size', 1)
+  }
+})
+
+test('HISTORY: a row keeps the agent\'s versioned model and effort icon', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [{ ...entry('a1', 'two', NOW - 1000), effort: 'high' }, entry('a2', 'old', NOW - 2000)], prs: [] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  await ui.press({ key: 'tab:agents' })
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ two +son 5\.5 +\u{F12A3} /u)
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✓ old +son 5\.5 {2}/)
+  await ui.unmount()
+})
+
+test('TOP AGENTS: every agent, 3 shown, `▸ +2` opens the other two and `▾ −2` folds them', async ($, on) => {
+  world(on)
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (let n = 1; n <= 5; n++) await spawnAgent($, `ag${n}`)
+  // output tokens (hence cost) by agent: a2 > a4 > a5 > a1 > a3, none in spawn order
+  const output = [200_000, 500_000, 100_000, 400_000, 300_000]
+  for (const [i, tokens] of output.entries())
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: `a${i + 1}-t`, agentId: `a${i + 1}`, reason: 'answer', usage: { ...USAGE, output_tokens: tokens } })
+  const ui = await mountPane($, 58)
+  await ui.press({ key: 'tab:context' })
+  const rows = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^cost:a/.test(k))
+  expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5'])
+  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('▸ +2')
+  await ui.press({ key: 'costAgents:more' })
+  expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5', 'cost:a1', 'cost:a3'])
+  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('▾ −2')
+  await ui.press({ key: 'costAgents:more' })
+  expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5'])
+  await ui.unmount()
 })

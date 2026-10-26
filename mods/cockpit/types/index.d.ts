@@ -46,6 +46,7 @@ export type CockpitHistoryEntry = {
   endedAt: number
   tokens: number
   isFailed: boolean
+  effort?: string | number
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
 }
@@ -276,8 +277,10 @@ export type CockpitSnapshot = {
   agents: CockpitAgent[]
   /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
   history?: CockpitHistoryEntry[]
-  /** The HISTORY list is expanded; absent is collapsed. */
+  /** The HISTORY list shows every entry; absent shows the newest few. */
   isHistoryOpen?: boolean
+  /** The TOP AGENTS list shows every agent; absent shows the dearest few. */
+  isCostAgentsOpen?: boolean
   /** The notification whose why and what-to-do are shown (`kind:key`); absent shows none. */
   signalOpen?: string
   /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */

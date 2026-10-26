@@ -96,17 +96,17 @@ test('Context: opening the tab reads a summary breakdown and draws the bar and a
   const rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^CONTEXT/.test(r))).toBe(true)
   // every row is as wide as the pane's content (its background bar spans it)
-  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1% *$/)
+  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1% *$/) // the exact count is over: no ~
   expect(rows.find(r => /Messages/.test(r))).toMatch(/^■ Messages +90k +9% *$/)
   expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70% *$/)
   expect(textCells(rows.find(r => /Messages/.test(r)) ?? '')).toBe(48)
-  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('exact')
+  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text).toBe('exact')
   expect(usageCalls.filter(c => c === 'full')).toHaveLength(1) // the first opening, idle, counts once by itself
 
   await ui.press({ key: 'ctx:refresh' })
   await settleAll()
   expect(usageCalls.filter(c => c === 'full')).toHaveLength(2)
-  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('exact')
+  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text).toBe('exact')
   await ui.unmount()
 })
 
@@ -197,7 +197,7 @@ test('Context: the top five static consumers by tokens, and the skills invoked t
   const consumers = rows.filter(r => /^(file|mcp|agent|skill) /.test(r))
   expect(consumers).toHaveLength(5)
   expect(consumers[0]).toMatch(/^mcp +mcp__a__big +5k$/)
-  expect(consumers[1]).toMatch(/^skill +skills +4\.2k$/)
+  expect(consumers[1]).toMatch(/^skill +skills 41\/60 +4\.2k$/)
   expect(consumers[2]).toMatch(/^file +User CLAUDE\.md +3k$/)
   expect(consumers[3]).toMatch(/^file +Project CLAUDE\.md +900$/)
   expect(consumers[4]).toMatch(/^agent +code-reviewer +400$/)
@@ -279,7 +279,7 @@ test('Context: the first time the tab opens while idle one exact count runs; its
   await openCockpit($)
   const ui = await mountPane($, 50)
   const fulls = () => usageCalls.filter(c => c === 'full').length
-  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text
   await ui.press({ key: 'tab:context' })
   await settleAll()
   expect(fulls()).toBe(1)
@@ -294,10 +294,10 @@ test('Context: the first time the tab opens while idle one exact count runs; its
   await clock.advance(5000)
   await settleAll()
   expect(fulls()).toBe(1)
-  expect(await kind()).toBe('✓ = exact')
+  expect(await kind()).toBe('~ = estimate')
   const rows = rowTexts(await ui.drawn())
-  expect(rows.find(r => /^■ System prompt/.test(r))).toMatch(/^■ System prompt +9\.5k +1% ✓ *$/)
-  expect(rows.find(r => /^■ Messages/.test(r))).toMatch(/^■ Messages +95k +10% +\+5k$/) // from the summary read of the reopened tab, 90k
+  expect(rows.find(r => /^■ System prompt/.test(r))).toMatch(/^■ System prompt +9\.5k +1% *$/)
+  expect(rows.find(r => /^■ Messages/.test(r))).toMatch(/^■ Messages +95k +10% ~ +\+5k$/) // from the summary read of the reopened tab, 90k
   expect(rows.some(r => /^CONTEXT DETAILS · 104\.5K\/1M/.test(r))).toBe(true)
   expect((await ui.find({ key: 'ctx:refresh' }))?.text).toBe('refresh') // the button stays
   await ui.unmount()
@@ -347,7 +347,7 @@ test('Context: a turn that ends while the exact count runs is on the tab once th
   const releaseFull = h.hold('full')
   await ui.press({ key: 'tab:context' }) // a summary, then the first exact count, held
   await settleAll()
-  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9%')
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9% ~')
   // the conversation grows and a turn ends while the count is still running: no read is made for it
   options.breakdown = withMessages(120_000)
   await mainTurnEnd($)

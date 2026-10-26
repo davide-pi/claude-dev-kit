@@ -105,7 +105,7 @@ test('Agents: the workflow run is one row on top with its name, phase and agents
 
 // ── Context: the breakdown first, then what the session costs ──
 
-test('Context: the breakdown comes first, the costs below it (models), and the exact count is still behind refresh', async ($, on) => {
+test('Context: the breakdown comes first, no cost per model, and the exact count is still behind refresh', async ($, on) => {
   world(on)
   roundHooks(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -120,7 +120,7 @@ test('Context: the breakdown comes first, the costs below it (models), and the e
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
   expect(at(/^CONTEXT DETAILS/)).toBeGreaterThan(-1)
   expect(rows.some(r => /^COST PER ROUND|^TREND/.test(r))).toBe(false)
-  expect(at(/^BY MODEL/)).toBeGreaterThan(at(/^CONTEXT DETAILS/))
+  expect(rows.some(r => /^BY MODEL/.test(r))).toBe(false)
   expect(await ui.find({ key: 'ctx:refresh' })).toBeDefined()
   await ui.unmount()
 })

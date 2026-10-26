@@ -65,7 +65,7 @@ test('the pane shows header, context, credits and an agent that finished before 
     // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('✓ code-reviewer')
-    expect(row).toContain('sonnet')
+    expect(row).toContain('son 5.5')
     // the rest (the four counters) is one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
     if ((await text(/^ *in 30k/)) === undefined) await ui.press({ key: 'agent:a1' })
     expect(await text(/^ *in 30k/)).toContain('out 8k  cr 90k')

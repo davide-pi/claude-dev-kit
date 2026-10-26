@@ -33,6 +33,7 @@ test('toHistory keeps a finished agent with its outcome; an agent seen only thro
   expect(toHistory(finished('a1', 5000))).toEqual({ id: 'a1', type: 'code-reviewer', model: 'claude-sonnet-5-5', startedAt: -55_000, endedAt: 5000, tokens: 1200, isFailed: false })
   expect(toHistory(finished('a2', 5000, { isFailed: true }))?.isFailed).toBe(true)
   expect(toHistory(finished('a2', 5000, { isInterrupted: true }))?.isInterrupted).toBe(true)
+  expect(toHistory(finished('a2', 5000, { effort: 'high' }))?.effort).toBe('high')
   expect(toHistory(finished('a3', 5000, { type: '?' }))).toBeUndefined()
   expect(toHistory({ ...finished('a4', 5000), endedAt: undefined })).toBeUndefined()
 })
@@ -59,6 +60,7 @@ test('parseHistory takes the entries with their fields from a parsed state file 
     { id: 'a2', type: 'x', model: undefined, startedAt: 1, endedAt: 2, tokens: 0, isFailed: false },
   ])
   expect(parseHistory([{ ...ok, isInterrupted: true }])).toEqual([{ ...ok, isInterrupted: true }])
+  expect(parseHistory([{ ...ok, effort: 'high' }, { ...ok, effort: 3 }, { ...ok, effort: {} }]).map(h => h.effort)).toEqual(['high', 3, undefined])
   expect(parseHistory([{ id: 'a3', type: 'x', startedAt: 'now', endedAt: 2 }, null, 'text', { type: 'x' }])).toEqual([])
   expect(parseHistory('not a list')).toEqual([])
   expect(parseHistory(undefined)).toEqual([])

@@ -122,10 +122,10 @@ export function contextOf(
     ...b.memoryFiles.map((f): CockpitConsumer => ({ name: `${f.type} ${baseName(f.path)}`, kind: 'memory', tokens: f.tokens })),
     ...b.mcpTools.filter(t => t.isLoaded).map((t): CockpitConsumer => ({ name: t.name, kind: 'mcp', tokens: t.tokens })),
     ...b.agents.map((a): CockpitConsumer => ({ name: a.agentType, kind: 'agent', tokens: a.tokens })),
-    ...(b.skills ? [{ name: 'skills', kind: 'skill' as const, tokens: b.skills.tokens }] : []),
+    ...(b.skills ? [{ name: `skills ${b.skills.includedSkills}/${b.skills.totalSkills}`, kind: 'skill' as const, tokens: b.skills.tokens }] : []),
   ]
   return {
-    rows: sortRows(b.categories.map(c => ({ name: c.name, tokens: c.tokens, kind: c.kind }))),
+    rows: sortRows(b.categories.map((c): CockpitContextRow => ({ name: c.name, tokens: c.tokens, kind: c.kind, ...(isExact && { isExact: true as const }) }))),
     total: b.totalTokens,
     max: b.rawMaxTokens,
     consumers: consumers.filter(c => c.tokens > 0).sort((a, c) => c.tokens - a.tokens).slice(0, CONSUMERS_SHOWN),

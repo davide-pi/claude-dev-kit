@@ -272,7 +272,7 @@ test('session.end while id() still answers the ending session: a tick in between
   await ui.press({ key: 'tab:agents' })
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
-  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
   await ui.unmount()
   expect(fileOfSession(writes, 's-2')?.history).toEqual([])
   expect(fileOfSession(writes, 's-1')).toEqual(ended)
@@ -308,7 +308,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 2 ▸')
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
   await ui.unmount()
 })
 
@@ -422,7 +422,7 @@ test('session data: a resume brings back the history, the PRs, the notes and the
   world(on, { writes, dataFile })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect((await ui.find({ key: 'history' }))?.text).toBe('HISTORY · 1 ▸')
+  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
   await ui.press({ key: 'tab:notes' })
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:3', 'note:send:5'])
   await ui.press({ key: 'tab:work' })
@@ -474,7 +474,7 @@ test('session data: once the data file exists the old place is never read again,
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect(await ui.find({ key: 'history' })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
   expect(rowTexts(await ui.drawn()).some(r => /^PR ·/.test(r))).toBe(false)
   await ui.unmount()
 })
@@ -516,7 +516,21 @@ test('last known: before the first live reading the credits come from the status
   await settleAll()
   expect(await text(/^ 70% 5h/)).toBeDefined()
   expect(await text(/^~60% 5h/)).toBeUndefined()
-  expect(await text(/^~80% 7d/)).toBeUndefined() // the live reading carries no 7d window: none drawn
+  expect(await text(/^~80% 7d/)).toMatch(/^~80% 7d/) // the live reading carries no 7d window: the cache's one stays, with its ~
+  await ui.unmount()
+})
+
+test('last known: each window is drawn from the engine when it has that kind, else from the cache with a ~', async ($, on) => {
+  world(on, { rateLimits: [], files: { [RL_FILE]: rlCache(40, 20) } })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
+  await measureWith($, 25, [{ kind: 'seven_day', percentUsed: 10, resetsAt: iso(86_400_000) }])
+  await settleAll()
+  expect(await text(/^~60% 5h/)).toMatch(/^~60% 5h/) // only the 7d is live: the 5h row does not vanish
+  expect(await text(/^ 90% 7d/)).toBeDefined()
+  expect(await text(/^~80% 7d/)).toBeUndefined()
   await ui.unmount()
 })
 

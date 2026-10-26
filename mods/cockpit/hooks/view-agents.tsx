@@ -1,7 +1,7 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
 import type { AgentCost } from './signals'
-import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -74,7 +74,7 @@ export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgen
 export const agentIcon = (a: CockpitAgent): Span =>
   a.status === 'running' ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green)
 
-const MODEL_W = 6
+const MODEL_W = 9
 const TOKENS_W = 5
 /** A name is worth this many cells before a row gives up other columns (the model, on the Subagents tab; the cache hit then the model, in TOP AGENTS). */
 const MIN_NAME_W = 6
@@ -83,8 +83,8 @@ const TIME_W = 6
 // icon, gap, name, then gap + model, gap + effort, gap + tokens, gap + share of the session's tokens, gap + time
 const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + TOKENS_W + 1 + SHARE_W + 1 + TIME_W
 
-/** The model as a word (`opus`, `sonnet`, `haiku`); a name this build does not know is cut to the column. */
-const rowModel = (model: string | undefined): string => modelFamily(model) ?? (model ? truncEnd(model, MODEL_W) : '—')
+/** The model with its version (`son 5.5`, `opus 5.5`); a name this build does not know is cut to the column. */
+const rowModel = (model: string | undefined): string => (model ? truncEnd(shortModel(model), MODEL_W) : '—')
 
 /** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, tokens, their share of the session's `total` (blank when unknown), time. */
 export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number): Span[] {
@@ -120,12 +120,13 @@ const COST_W = 7
 export function agentCostRow(a: AgentCost, width: number): Span[] {
   const effort = effortSpans(a.effort)
   const cost = sp(` ${fmtCost(a.usd).padStart(COST_W)}`, COLORS.yellow)
-  const hit = (gap: string) => dim(a.hit === undefined ? '' : `${gap}${t().costCacheHit} ${a.hit}%`)
+  // the cache-hit cell has one width, blank when unknown, so the cost sits at the same offset in every row
+  const hitW = textCells(t().costCacheHit) + 1 + 4
+  const hit = (gap: string) => dim(padCells(a.hit === undefined ? '' : `${gap}${t().costCacheHit} ${a.hit}%`, gap.length + hitW))
   const model = [sp(' '), sp(padCells(rowModel(a.model), MODEL_W), undefined, a.isRunning)]
   const icon = [sp(' '), ...(effort.length ? effort : [sp(' ')])]
   const tails = [[...model, ...icon, cost, hit('  ')], [...model, ...icon, cost, hit(' ')], [...model, ...icon, cost], [...icon, cost]]
-  const minName = Math.min(MIN_NAME_W, textCells(a.type))
-  const tail = tails.find(x => width - spanWidth(x) >= minName) ?? tails[tails.length - 1] ?? []
+  const tail = tails.find(x => width - spanWidth(x) >= MIN_NAME_W) ?? tails[tails.length - 1] ?? []
   const nameW = Math.max(1, width - spanWidth(tail))
   return truncateSpans([sp(padCells(truncEnd(a.type, nameW), nameW), undefined, a.isRunning), ...tail], width)
 }

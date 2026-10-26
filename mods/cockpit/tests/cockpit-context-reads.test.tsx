@@ -9,7 +9,7 @@ test('follow-up: an older context read never replaces a newer one: the exact cou
   world(on, { holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text
   const releaseSummary = h.hold('summary')
   await ui.press({ key: 'tab:context' }) // summary read #1, held
   const releaseFull = h.hold('full')
@@ -29,7 +29,7 @@ test('follow-up: a summary read asked by a tab change while the exact count runs
   world(on, { usageCalls, holdUsage: h.holdUsage, breakdown: { categories: CONTEXT_ROWS, totalTokens: 98_000, rawMaxTokens: 1_000_000 } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text
   const summaries = () => usageCalls.filter(c => c === 'summary').length
   await ui.press({ key: 'tab:context' })
   await settleAll()
@@ -47,7 +47,7 @@ test('follow-up: a summary read asked by a tab change while the exact count runs
   await ui.press({ key: 'tab:context' }) // the count is over: a tab change reads a summary again
   await settleAll()
   expect(summaries()).toBe(before + 1)
-  expect(await kind()).toBe('✓ = exact')
+  expect(await kind()).toBe('~ = estimate')
   await ui.unmount()
 })
 
@@ -103,7 +103,7 @@ test('follow-up: an exact context count in flight is not overwritten by the sche
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await openCockpit($)
   const ui = await mountPane($, 50)
-  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text
+  const kind = async () => (await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text
   const summaries = () => usageCalls.filter(c => c === 'summary').length
   await ui.press({ key: 'tab:context' })
   await settleAll()
@@ -118,7 +118,7 @@ test('follow-up: an exact context count in flight is not overwritten by the sche
   await settleAll()
   // the turn that ended meanwhile is read once the count is over, laid over the count's static rows
   expect(summaries()).toBe(before + 1)
-  expect(await kind()).toBe('✓ = exact')
+  expect(await kind()).toBe('~ = estimate')
   await mainTurnEnd($) // the next turn's read runs again
   await clock.advance(5000)
   await settleAll()
@@ -147,7 +147,7 @@ test('follow-up: a turn that ended just before the exact count started does not 
   release()
   await settleAll()
   expect(summaries()).toBe(before + 1) // the read its timer could not make
-  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|✓ = exact)$/ }))?.text).toBe('✓ = exact')
+  expect((await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text).toBe('~ = estimate')
   await ui.unmount()
 })
 

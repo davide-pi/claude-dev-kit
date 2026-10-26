@@ -76,9 +76,11 @@ const EN = {
 
   // Costs
   costAgentsTitle: 'TOP AGENTS',
-  costModelsTitle: 'BY MODEL',
   exact: 'exact',
-  someExact: '✓ = exact',
+  someExact: '~ = estimate',
+  /** The toggle of a list cut to its first rows: `n` rows hidden, or shown (press to fold). */
+  moreRows: (n: number) => `▸ +${n}`,
+  lessRows: (n: number) => `▾ −${n}`,
   estimate: 'estimate',
   worthCompacting: '⚠ worth compacting',
   noReading: 'no reading',
@@ -175,9 +177,10 @@ const IT: Strings = {
   },
 
   costAgentsTitle: 'AGENTI PIÙ CARI',
-  costModelsTitle: 'PER MODELLO',
   exact: 'esatto',
-  someExact: '✓ = esatto',
+  someExact: '~ = stima',
+  moreRows: (n: number) => `▸ +${n}`,
+  lessRows: (n: number) => `▾ −${n}`,
   estimate: 'stima',
   worthCompacting: '⚠ conviene compattare',
   noReading: 'nessuna lettura',

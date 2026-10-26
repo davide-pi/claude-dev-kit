@@ -34,8 +34,8 @@ export function contextBar(c: CockpitContext, width: number): Span[] {
 }
 
 /**
- * One category row, exactly `width` cells: a square in the bar color, its name cut to fit, its tokens and its share of the window; a `✓`
- * when the tokens are an exact count kept from earlier and the change of the last round (`+12k`, blank when it did not move). The first
+ * One category row, exactly `width` cells: a square in the bar color, its name cut to fit, its tokens and its share of the window; a yellow `~`
+ * when the tokens of a used category are an estimate and the change of the last round (`+12k`, blank when it did not move). The first
  * cells, in proportion to the share of the window, sit on the `bg` background: the row carries its own bar.
  */
 export function categorySpans(r: CockpitContextRow, color: string, bg: string, max: number, width: number): Span[] {
@@ -48,7 +48,7 @@ export function categorySpans(r: CockpitContextRow, color: string, bg: string, m
     sp(padCells(truncEnd(t().contextCategories[r.name] ?? r.name, nameW), nameW)),
     sp(padStart(abbrevTokens(r.tokens), CTX_TOKENS_W)),
     dim(padStart(share, CTX_SHARE_W)),
-    r.isExact ? sp(' ✓', COLORS.green) : dim('  '),
+    r.kind === 'used' && !r.isExact ? sp(' ~', COLORS.yellow) : dim('  '),
     dim(delta),
   ]
   return withBackground(row, r.tokens > 0 && max > 0 ? Math.max(1, Math.round((width * r.tokens) / max)) : 0, bg)
