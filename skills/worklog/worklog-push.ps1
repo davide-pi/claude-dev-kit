@@ -24,7 +24,8 @@
   a write the audit does not know. A failed row leaves its audit entry untouched; the exit code is then 1.
   -DryRun prints the plan from the audit alone: no az call, no file written.
 
-  The az identity follows the row: "identity", else the workspaces.json root with the same org, else
+  The az identity follows the row: "identity", else the workspaces.json root with the same org whose
+  "project" (or a value of "projects") is the row's project, else the first root with that org, else
   AZ_IDENTITY — as ~/.azure-<identity>, the per-org Azure CLI config dir. Never `az account set`.
 #>
 [CmdletBinding()]
@@ -60,7 +61,14 @@ $roots = @((ReadJson $ConfigPath).roots)
 function OrgUrl([string]$org) { if ($org -match '^https?://') { $org.TrimEnd('/') } else { "https://dev.azure.com/$org" } }
 function IdentityDir($row) {
   $id = if (Has $row 'identity') { [string]$row.identity }
-        else { @($roots | Where-Object { $_.identity -and "$($_.org)" -ieq "$($row.org)" } | ForEach-Object identity)[0] }
+        else {
+          # Several roots can share an org with different identities: the root naming the row's project wins.
+          $sameOrg = @($roots | Where-Object { $_.identity -and "$($_.org)" -ieq "$($row.org)" })
+          $sameProject = @($sameOrg | Where-Object {
+            "$($_.project)" -ieq "$($row.project)" -or ($_.projects -and @($_.projects.PSObject.Properties.Value) -icontains "$($row.project)")
+          })
+          @($sameProject + $sameOrg | ForEach-Object identity)[0]
+        }
   if (-not $id) { $id = $env:AZ_IDENTITY }
   if (-not $id) { return $null }
   $dir = Join-Path $HOME ".azure-$id"
