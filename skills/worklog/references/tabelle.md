@@ -41,8 +41,8 @@ Attese lunghe contate: 10:45-13:10 (2h25m, <repo>) — tienile o toglile
 `donor` rows do not appear (they were spread): say so in one line if there were any.
 
 **Under target** (more than 1h short) → the **gap prompt** right after the table — one
-`AskUserQuestion`, shape and follow-ups in `ore-gestione.md`. The answers become new rows with their
-`Fonte`; reprint, recompute the coverage, then the usual question. Not under target → straight to:
+`AskUserQuestion`, shape and follow-ups in `ore-gestione.md`. The answers become new rows, each named on
+the `Fonte` line; reprint, recompute the coverage, then the usual question. Not under target → straight to:
 
 **"Vuoi modificare qualcosa (topic, descrizioni, tempi, accorpare o dividere righe, attese lunghe)?"**
 
