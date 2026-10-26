@@ -185,8 +185,7 @@ function cachedByCwd(name, cwd, fn) {
 // a raw glyph is invisible (or a tofu box) in any editor without the font and
 // survives copy/paste badly. Comments give each icon's Nerd Font class name.
 const ICONS = {
-  folder: "\u{F024B}", // nf-md-folder          - cwd, outside a linked worktree
-  tree:   "\u{F0CD0}", // nf-md-source_repository_multiple - worktree, replaces cwd inside one
+  folder: "\u{F024B}", // nf-md-folder          - cwd, or the worktree root inside a linked worktree
   branch: "\u{F062C}", // nf-md-source_branch  - git branch
   brain:  "\u{F09D1}", // nf-md-brain    - context window (Material Design set: fa-brain is missing from the font)
   gauge:  "\u{F029A}", // nf-md-gauge    - rate limits (fa-gauge is missing from the font)
@@ -251,10 +250,10 @@ const EFFORT = {
 function segFolder(cwd, worktree) {
   const base = (p) => p.replace(/[\\/]+$/, "").split(/[\\/]/).filter(Boolean).at(-1) || p;
   // Inside a linked worktree the worktree replaces the folder segment outright -
-  // tree icon, worktree name and link all point at its root - instead of hanging
-  // a "(wd: ...)" suffix off cwd. The main checkout keeps cwd and the folder icon.
-  const [icon, path] = worktree ? [ICONS.tree, worktree.root] : [ICONS.folder, cwd];
-  return `${C.violet}${BLD}${icon} ${link(pathToFileUri(path), base(path))}${R}`;
+  // worktree name and link both point at its root - instead of hanging a
+  // "(wd: ...)" suffix off cwd. The main checkout keeps cwd. One icon for both.
+  const path = worktree ? worktree.root : cwd;
+  return `${C.violet}${BLD}${ICONS.folder} ${link(pathToFileUri(path), base(path))}${R}`;
 }
 
 function segGit(git) {

@@ -66,7 +66,7 @@ test('pane open but stale (no heartbeat for over 45 s): the normal line', () => 
 
 // ── Folder icon ──────────────────────────────────────────────────────────────
 
-test('folder segment: a linked worktree shows nf-md-source_repository_multiple (U+F0CD0), a main checkout the folder icon', () => {
+test('folder segment: a linked worktree and a main checkout both show the folder icon (U+F024B)', () => {
   const base = mkdtempSync(join(tmpdir(), 'statusline-worktree-'));
   const git = (cwd, ...args) => execFileSync('git', ['-c', 'user.name=ci', '-c', 'user.email=ci', ...args], { cwd, stdio: 'ignore' });
   try {
@@ -77,11 +77,11 @@ test('folder segment: a linked worktree shows nf-md-source_repository_multiple (
     git(main, 'commit', '-q', '--allow-empty', '-m', 'init');
     git(main, 'worktree', 'add', '-q', linked, '-b', 'linked-branch');
     const inWorktree = render(undefined, { ...SAMPLE, cwd: linked });
-    assert.ok(inWorktree.includes('\u{F0CD0}'), 'worktree icon');
-    assert.ok(!inWorktree.includes('\u{F0253}'), 'the old worktree icon is gone');
+    assert.ok(inWorktree.includes('\u{F024B}'), 'folder icon in the worktree');
+    assert.ok(!inWorktree.includes('\u{F0CD0}'), 'no worktree icon');
+    assert.ok(inWorktree.includes('linked'), 'the worktree root still names the segment');
     const inMain = render(undefined, { ...SAMPLE, cwd: main });
     assert.ok(inMain.includes('\u{F024B}'), 'folder icon');
-    assert.ok(!inMain.includes('\u{F0CD0}'), 'no worktree icon in the main checkout');
   } finally { rmSync(base, { recursive: true, force: true }); }
 });
 

@@ -84,12 +84,13 @@ const reviewersFor = (size, touches = []) => {
 }
 
 // Size comes from the triage; the risk axes of the change only raise the floor (never down), the file count never does.
+// logic is in almost every change, so it never counts toward the three axes that lift to L.
 const SIZES = ['S', 'M', 'L']
 const RISKS = ['logic', 'data', 'money', 'concurrency', 'contract', 'security', 'performance']
 const FLOOR_M = ['data', 'money', 'concurrency', 'contract', 'security']
 const riskAxes = (risk, touches) => [...new Set([...(Array.isArray(risk) ? risk : []), ...(Array.isArray(touches) ? touches : [])].filter(x => RISKS.includes(x)))]
 const sizeFor = (given, axes = []) => {
-  const floor = axes.length >= 3 ? 'L' : axes.some(x => FLOOR_M.includes(x)) ? 'M' : 'S'
+  const floor = axes.filter(x => x !== 'logic').length >= 3 ? 'L' : axes.some(x => FLOOR_M.includes(x)) ? 'M' : 'S'
   return SIZES[Math.max(SIZES.indexOf(given), SIZES.indexOf(floor))]
 }
 // More files than the triage size implies: a signal for the verdict, never a bump of the size.

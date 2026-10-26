@@ -175,14 +175,15 @@ test('script: an S change that grows to 5 files stays S: the file count is a gap
   assert.equal(out.gaps.filter((g) => /5 files.*size S/.test(g)).length, 1);                 // pushed once, not per round
 });
 
-test('script: risk raises the floor of the triage size, never lowers it: data lifts S to M, three axes lift to L; touches is the old alias', async () => {
+test('script: risk raises the floor of the triage size, never lowers it: data lifts S to M, three axes besides logic lift to L; touches is the old alias', async () => {
   const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([])])).calls.filter((c) => c.opts.label?.startsWith('review round 1')).map((c) => c.opts.label);
   assert.deepEqual(await panel('S', {}), ['review round 1: code']);
   assert.deepEqual(await panel('S', { risk: ['logic'] }), ['review round 1: code']);
   const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([])]);
   assert.equal(lifted.calls.find((c) => c.opts.label === 'review round 1: code').opts.model, 'sonnet');      // M: one Sonnet at high
   assert.deepEqual(lifted.out.roundLog.map((r) => r.size), ['M']);
-  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['review round 1: code', 'review round 1: second opinion', 'review round 1: performance']);   // three axes: L, plus the specialist
+  assert.deepEqual(await panel('M', { risk: ['data', 'performance', 'money'] }), ['review round 1: code', 'review round 1: second opinion', 'review round 1: performance']);   // three axes: L, plus the specialist
+  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['review round 1: code', 'review round 1: performance']);   // logic never counts toward L
   assert.deepEqual(await panel('M', { risk: ['security'] }), ['review round 1: code', 'review round 1: security']);
   assert.deepEqual(await panel('M', { touches: ['security'] }), ['review round 1: code', 'review round 1: security']);
   assert.deepEqual(await panel('L', { risk: ['logic'] }), ['review round 1: code', 'review round 1: second opinion']);
