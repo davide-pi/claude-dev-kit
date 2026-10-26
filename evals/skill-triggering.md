@@ -174,7 +174,8 @@ must stay in the subagent.
 
 | Prompt | Expected |
 |--------|----------|
-| `/retro` | MUST invoke on the current session and return proposals only, one row per friction event |
+| `/retro` | MUST invoke on the current session: only automated-check proposals marked `da confermare nella retro a 10 giorni`, then `Consigli per te` |
+| `/retro days 10` | MUST invoke on the transcripts of the last 10 days: proposals only for friction recurring in 2+ sessions, then `Consigli per te` |
 | "facciamo una retrospettiva di questa sessione: cosa miglioriamo nel kit?" | MUST NOT invoke on its own (`disable-model-invocation`): suggest `/retro` |
 | "com'è andato lo sprint?" | MUST NOT (a team retrospective, not a session's environment) |
 

@@ -5,12 +5,12 @@ import { sessionTokens } from './agents'
 import { REFRESH_COOLDOWN_MS, autocompactForecast, openTasks, shouldCompact } from './context'
 import { workItemIds, workItemUrl } from './links'
 import { worklogLabel } from './session'
-import { COLORS, abbrevTokens, fmtCost, spanWidth, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, clockTime, fmtCost, spanWidth, splitCells, taskBarCells, textCells, truncMiddle, truncateSpans, wrapCells } from './shared'
 import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
-import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
+import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, pairRow, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, consumerSpans, contextBar } from './view-context'
@@ -25,10 +25,12 @@ import { activeRun } from './workflow'
 export type PaneActions = {
   selectTab: (tab: CockpitTab) => void
   compact: () => void
-  /** Asks to confirm a button that sends something (`suite`: `/retro`) or logs hours (`worklog`). */
-  ask: (kind: 'suite' | 'worklog') => void
+  /** Asks to confirm a button that sends something (`retro`: which `/retro`) or logs hours (`worklog`). */
+  ask: (kind: 'retro' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
+  /** Answers the retrospective's choice: `/retro days 10` over the last ten days, `/retro` on this session. */
+  retro: (scope: 'days' | 'session') => void
   /** Shows every history entry, or only the newest few. */
   toggleHistory: () => void
   /** Shows every TOP AGENTS entry, or only the dearest few. */
@@ -220,6 +222,9 @@ export function signalsBlocks(k: Kit): Block[] {
   const signals = signalsOf(s)
   if (signals.length === 0) return [[gap(), line(ui, [dim(S.noSignals)])]]
   const idOf = signalId
+  // An open notification's text wraps under its row, indented, instead of being cut
+  const wrapped = (text: string, style: (t: string) => Span) => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [style(`  ${l}`)]))
+  const yellow = (t: string) => sp(t, COLORS.yellow, true)
   return [
     [
       gap(),
@@ -227,13 +232,19 @@ export function signalsBlocks(k: Kit): Block[] {
       gap(),
       signals.slice(0, MAX_SIGNAL_ROWS).flatMap(sig => {
         const text = signalText(sig)
-        const isOpen = s.signalOpen === idOf(sig)
+        const id = idOf(sig)
+        const isOpen = s.signalOpen === id
+        // The time it arrived on the right; open, the row holds what fits of the title and the rest goes under it
+        const at = s.signalsAt?.[id]
+        const time = at === undefined ? [] : [dim(clockTime(at))]
+        const [head, rest] = isOpen ? splitCells(`▾ ${text.what}`, width - spanWidth(time) - 1) : [`▸ ${text.what}`, '']
         return [
-          <Button key={`signal:${idOf(sig)}`} plain onPress={() => actions.toggleSignal(idOf(sig))}>
-            <Text wrap="truncate">{spanNodes(ui, [sp(`${isOpen ? '▾' : '▸'} ${truncEnd(text.what, Math.max(4, width - 2))}`, COLORS.yellow, true)])}</Text>
+          <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
+            <Text wrap="truncate">{spanNodes(ui, pairRow([yellow(head)], time, width))}</Text>
           </Button>,
-          isOpen && line(ui, [dim(`  ${S.signalFields.why}${text.why}`)]),
-          isOpen && line(ui, [dim(`  ${S.signalFields.todo}${text.todo}`)]),
+          isOpen && wrapped(rest, yellow),
+          isOpen && wrapped(`${S.signalFields.why}${text.why}`, dim),
+          isOpen && wrapped(`${S.signalFields.todo}${text.todo}`, dim),
         ]
       }),
       signals.length > MAX_SIGNAL_ROWS && line(ui, [dim(`… +${signals.length - MAX_SIGNAL_ROWS}`)]),

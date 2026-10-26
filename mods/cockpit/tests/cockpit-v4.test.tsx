@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { clockTime, wrapCells } from '../hooks/shared'
 import {
   askPerson,
   callAs,
@@ -13,7 +14,7 @@ import {
   settleAll,
   workflowLaunches,
 } from './cockpit-fixtures'
-import { flagOf, rowTexts, world } from './cockpit-world'
+import { NOW, flagOf, rowTexts, world } from './cockpit-world'
 
 const failingBash = (on: Parameters<typeof world>[0]) => on('tool.call', { tool: 'Bash' }, () => ({ deny: 'exit 1: boom' }))
 
@@ -48,11 +49,51 @@ test('Notifications: a command that failed twice is one row (what), its why and 
   rows = rowTexts(await ui.drawn())
   expect(rows[at]).toMatch(/^▾ /)
   expect(rows[at + 1]).toMatch(/^ +why: /)
-  expect(rows[at + 2]).toMatch(/^ +what to do: /)
+  expect(rows.slice(at + 2, at + 4).some(r => /^ +what to do: /.test(r))).toBe(true) // the why may wrap onto a second row
+  expect(rows[at]?.trimEnd().endsWith(` ${clockTime(NOW)}`)).toBe(true) // the time it arrived, on the right
 
   await ui.press({ key: 'tab:notes' })
   expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notifications') // seen: leaving the tab does not count it again
   await ui.unmount()
+})
+
+test('Notifications: a title too long for the row is cut closed, and open it wraps under the row with why and what to do whole; the time stays on the right', async ($, on) => {
+  const clock = world(on)
+  failingBash(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 34)
+  const cmd = 'npm run test:integration --watch'
+  await $.tool.call({ tool: 'Bash', command: cmd })
+  await clock.advance(60_000)
+  await $.tool.call({ tool: 'Bash', command: cmd })
+  await settleAll()
+  const time = clockTime(NOW + 60_000) // the second failure is what makes it hold
+
+  await ui.press({ key: 'tab:signals' })
+  let rows = rowTexts(await ui.drawn())
+  const at = rows.findIndex(r => /^▸ command failed/.test(r))
+  expect(at).toBeGreaterThan(0)
+  expect(rows[at]).toMatch(new RegExp(`… +${time}$`))
+
+  await ui.press({ key: `signal:failedCommand:${cmd}` })
+  rows = rowTexts(await ui.drawn())
+  expect(rows[at]).toMatch(new RegExp(`^▾ command .* ${time}$`))
+  const end = rows.findIndex((r, i) => i > at && r.trim() === '')
+  const below = rows.slice(at + 1, end < 0 ? undefined : end).map(r => r.trim())
+  expect(rows.slice(at, at + below.length + 1).some(r => r.includes('…'))).toBe(false)
+  const text = [rows[at]?.replace(time, '').trim(), ...below].join(' ')
+  expect(text).toContain(`command failed 2 times: ${cmd}`)
+  expect(text).toContain('why: the same error repeats without a change of approach')
+  expect(text).toContain('what to do: read the error and fix the cause instead of rerunning')
+  expect(rows[at + 1]).toMatch(/^ {2}\S/) // wrapped lines sit indented under the row
+  await ui.unmount()
+})
+
+test('wrapCells: breaks at the space that fits, a word longer than the row is cut, a wide character under a narrow row still advances', () => {
+  expect(wrapCells('aaa bbb ccc', 7)).toEqual(['aaa bbb', 'ccc'])
+  expect(wrapCells('abcdefgh ij', 4)).toEqual(['abcd', 'efgh', 'ij'])
+  expect(wrapCells('漢字', 1)).toEqual(['漢', '字'])
+  expect(wrapCells('', 5)).toEqual([])
 })
 
 test('Notifications: with none, one line says so', async ($, on) => {

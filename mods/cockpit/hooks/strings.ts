@@ -30,9 +30,9 @@ const EN = {
   /** Every tab's label, in the bar: text, never an icon alone. */
   tabs: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
   tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
-  buttons: { compact: 'compact', analyzeSuite: 'analyze suite', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
+  buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', yes: 'yes', no: 'no', logHours: 'log hours', send: 'send', refresh: 'refresh', close: 'close', save: 'save', edit: 'edit', delete: 'delete' },
   confirmLog: 'log the hours of this chat?',
-  confirmSuite: 'analyze the suite? sends /retro to the model',
+  confirmRetro: 'which retrospective? sends /retro',
   confirmNoteDelete: 'delete this note?',
 
   // Header
@@ -138,9 +138,9 @@ const IT: Strings = {
   ...SHARED,
   tabs: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
   tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
-  buttons: { compact: 'compatta', analyzeSuite: 'analizza suite', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
+  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', yes: 'sì', no: 'no', logHours: 'segna ore', send: 'invia', refresh: 'aggiorna', close: 'chiudi', save: 'salva', edit: 'modifica', delete: 'elimina' },
   confirmLog: 'registrare le ore di questa chat?',
-  confirmSuite: 'analizzare la suite? invia /retro al modello',
+  confirmRetro: 'quale retrospettiva? invia /retro',
   confirmNoteDelete: 'eliminare questa nota?',
 
   contextTitle: 'CONTESTO',

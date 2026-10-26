@@ -1,9 +1,9 @@
 ---
 name: retro
 description: >-
-  Use when the user types /retro: mines a session's friction and proposes environment fixes,
-  enforceable checks first as backlog items. Proposes only.
-argument-hint: "[session-id | current] [focus | monthly | findings]"
+  Use when the user types /retro: mines a session's or the last days' friction, proposes
+  environment fixes and coaching advice, enforceable checks first. Proposes only.
+argument-hint: "[session-id | current | days <n>] [focus | monthly | findings]"
 disable-model-invocation: true
 context: fork
 agent: analyst
@@ -13,7 +13,7 @@ background: false
 
 # retro — friction in a session, turned into checks and pointers
 
-**Contract.** One proposal row per friction event, enforceable lessons as ready-to-file backlog
+**Contract.** One proposal row per event the mode admits, enforceable lessons as ready-to-file backlog
 items · never edits a skill, hook, rule, setting or `CLAUDE.md`, never files the items itself ·
 report in Italian; paths, tool names and quoted transcript lines verbatim, secrets as `<REDACTED>`.
 
@@ -33,14 +33,24 @@ single correction the user already gave (it is one event, not a retro).
 
 ### Which transcript
 
-| `session` argument | File |
+| First argument | File |
 | --- | --- |
+| `days <n>`, checked first: two tokens, `n` a whole number ≥ 1 (else 10, said in line 1); the focus follows | every main transcript modified in the last `n` days: `references/modes.md` |
 | empty or `current` | `~/.claude/projects/*/${CLAUDE_SESSION_ID}.jsonl` |
 | a session id | `~/.claude/projects/*/<id>.jsonl` |
 | no match | the newest `*.jsonl` in the project folder whose name is the cwd with every non-alphanumeric character turned into `-`; say which file was read |
 
 Subagent transcripts sit beside it under `<session-id>/subagents/`; read them only when an event
 points there. State the file read (path, size) in the report.
+
+### What each mode proposes
+
+| Mode | Suite proposals | `Consigli per te` |
+| --- | --- | --- |
+| one session | only the **Automated check** row below, its `Proposta` cell ending `(da confermare nella retro a 10 giorni)`: one session is noise for anything else | yes, ≤ 3 |
+| `days <n>` | every category, only for events recurring in 2+ sessions | yes, ≤ 5, patterns in 2+ sessions |
+| `monthly` | environment health, only when the owner asks or the focus is `monthly`, never on your own: `references/modes.md` | no |
+| `findings` | its section below | no |
 
 ### Friction events — what to collect
 
@@ -63,15 +73,6 @@ failed, retried call · a permission prompt · a fact asked for · a huge output
 Before proposing, grep what exists — `~/.claude/{skills,agents,hooks,rules}`, `~/.claude/CLAUDE.md`,
 the repo's checks: an asset that did not fire, or a check left unwired, *is* the finding.
 
-### Monthly — environment health
-
-Runs only when the owner asks, or when the focus argument is `monthly`; never on your own.
-
-| Step | Source | Fix |
-| --- | --- | --- |
-| Asset usage | the owner's `/skill-doctor` and `/doctor prompt-audit` output, pasted in the arguments (slash commands, a fork cannot run them) | never-invoked or over-budget descriptions → `skill-forge` |
-| Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
-
 ### Findings — implementer rules from the deliver log
 
 Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`): no transcript needed. Read
@@ -79,18 +80,19 @@ Runs only when the focus argument is `findings` (the SessionStart nudge names `/
 retro): the lines after the last marker, grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
 (`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count, files); a line a
 check could enforce is a backlog item, as above. The owner approves; after the yes the caller appends the marker `{"retro":"<date>"}`: the
-report carries the exact command (Report, row 5).
+report carries the exact command (Report, row 6).
 
-### Report — returned to the caller, ≤ 40 lines
+### Report — returned to the caller, ≤ 40 lines (`days`: ≤ 60)
 
-1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `findings` mode `Log: <path> · righe dopo l'ultimo retro: N`.
+1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `findings` mode `Log: <path> · righe dopo l'ultimo retro: N`; in `days` mode the line of `references/modes.md`.
 2. Proposals, most severe first, as a table `Proposta | Categoria | Evento (turno) | Dove | Rischio`;
    `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
 3. `Backlog` — one block per automated check: Italian title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
-4. When the Monthly section ran: `Salute: <outcome, one line per step>`.
-5. `findings` mode only: the line for the caller, the command that appends the marker after the owner's yes: `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.
-6. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
+4. `Consigli per te`, in the session and `days` modes: the table of `references/modes.md`.
+5. When `monthly` ran: `Salute: <outcome, one line per step>`.
+6. `findings` mode only: the line for the caller, the command that appends the marker after the owner's yes: `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.
+7. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
 
 ## Do
 
@@ -108,3 +110,8 @@ denials and user turns, then Read slices around each hit (`offset`/`limit`).
 2. A proposal with no event behind it → opinion → drop it.
 3. A retro that only adds lines → the next session pays for them every turn → prefer deleting.
 4. A quoted line carrying a token or connection string → `<REDACTED>`.
+
+## References
+
+- `references/modes.md` — the arguments read `days <n>` or `monthly`, or any mode that carries `Consigli per te`:
+  the period's transcripts, the coaching patterns and limits, the health steps.

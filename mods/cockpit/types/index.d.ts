@@ -287,6 +287,8 @@ export type CockpitSnapshot = {
   signalOpen?: string
   /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
   seenSignals?: string[]
+  /** When each notification in force first held (`kind:key` → ms): the time on its row. One that stops holding is dropped. */
+  signalsAt?: Record<string, number>
   git?: CockpitGit
   worklog: CockpitWorklog
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
@@ -307,8 +309,8 @@ export type CockpitSnapshot = {
   events?: CockpitEvent[]
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
-  /** A button waiting for its confirmation: the footer's `analizza suite` or Lavoro's `log hours`. */
-  confirm?: 'suite' | 'worklog' | `note:${number}`
+  /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or Lavoro's `log hours`. */
+  confirm?: 'retro' | 'worklog' | `note:${number}`
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights
   /** The agents expanded on the Agents tab (the others show their one line): description, facts, warning, four token counters, tool. */
