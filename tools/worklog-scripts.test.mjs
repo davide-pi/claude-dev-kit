@@ -426,7 +426,7 @@ function sandbox(state = { 101: 2 }, config = null) {
   const bin = join(dir, 'bin');
   mkdirSync(bin);
   writeFileSync(join(dir, 'state.json'), JSON.stringify(state));
-  if (config) writeFileSync(join(dir, 'none.json'), JSON.stringify(config));
+  if (config) writeFileSync(join(dir, 'workspaces.json'), JSON.stringify(config));   // absent → no roots
   writeFileSync(join(bin, 'az-shim.cjs'), `
 const fs = require('fs'); const path = require('path');
 const dir = path.join(__dirname, '..'); const a = process.argv.slice(2);
@@ -448,7 +448,7 @@ process.stdout.write(JSON.stringify({ id: Number(id), fields: { 'Microsoft.VSTS.
   const push = (rows, ...flags) => {
     const file = join(dir, 'rows.json');
     writeFileSync(file, JSON.stringify(rows));
-    return pwsh('worklog-push.ps1', ['-Rows', file, '-OutDir', join(dir, 'wl'), '-ConfigPath', join(dir, 'none.json'), ...flags], env);
+    return pwsh('worklog-push.ps1', ['-Rows', file, '-OutDir', join(dir, 'wl'), '-ConfigPath', join(dir, 'workspaces.json'), ...flags], env);
   };
   const read = (name) => JSON.parse(readFileSync(join(dir, name), 'utf8'));
   const calls = () => (existsSync(join(dir, 'calls.log')) ? readFileSync(join(dir, 'calls.log'), 'utf8').trim().split('\n') : []);
@@ -539,6 +539,8 @@ test('push: a failing item exits 1 and leaves its audit entry unwritten, the oth
 
 test('push picks the az identity of the root whose project matches the row, not the first root of the org', { skip: skipWin }, async () => {
   // Two roots on one org, each with its own identity: the per-org config dir must follow the row's project.
+  // The script resolves ~/.azure-<identity> under the real home, so the two dirs live there, uniquely named,
+  // and the exit handler removes them with the temp dirs (a killed run can leave them behind, empty).
   const tag = `wltest-${process.pid}-${Date.now()}`;
   const ids = { a: `${tag}-a`, b: `${tag}-b` };
   for (const id of Object.values(ids)) {

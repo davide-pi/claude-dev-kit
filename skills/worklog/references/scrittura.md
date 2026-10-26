@@ -69,7 +69,7 @@ In this order, the orchestrator alone (no parallel writers: the audit is one fil
    | `hours` | the **period's total** on that item — what the audit records, never the delta |
    | `delta` | omit it: the script adds `hours − already audited for (period, item)`; set it only for a reconciled row |
    | `state` | `Active` work ongoing (open PR, unpushed commit, awaiting validation), `Closed`/`Done` finished; never leave `New` |
-   | `org` | name or URL; the az identity follows the org through `workspaces.json` (or `"identity"`) |
+   | `org` | name or URL; the az identity is the row's `"identity"`, else the `workspaces.json` root of that org whose `project` (or a `projects` value) is the row's project, else the org's first root |
    | `overtime`, `note`, `sheet` | copied into the audit entry as given |
 
 4. **Preview**: `worklog-push.ps1 -Rows <file> -DryRun` — no az call, no write; it prints each row's
