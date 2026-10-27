@@ -131,20 +131,34 @@ function piecesPrinted(line, printed) {
   const loose = (s) => s.replace(/["']/g, '').replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
   const looseText = loose(printed);
   const elided = /…|\.{3}/.test(line);
-  const all = line.replace(/\([^)]*\)/g, ' ').split(/\s\/\s|,\s|;\s|\sand\s|\s·\s|\s*(?:…|\.{3})\s*/).map((p) => loose(p)).filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
+  // A gloss is a parenthesis after a space; `$(VAR)` or `f(x)` is part of the output.
+  const raw = line.replace(/(?<![\p{L}\p{N}$])\([^)]*\)/gu, ' ').split(/\s\/\s|,\s|;\s|\s(?:and|e)\s|\s·\s|\s*(?:…|\.{3})\s*/).map((p) => loose(p)).filter(Boolean);
+  // A lone word left once the gloss is gone (`IDENTICO` (17,8 s)) is the whole line: proven as a whole word.
+  if (raw.length === 1 && /^\p{L}{3,}$/u.test(raw[0])) return printedAsWords(looseText, raw[0]);
+  const all = raw.filter((p) => p.length >= 3 && !/^\p{L}+$/u.test(p));
   // The exit code is not printed on success: dropped when something else is left to prove.
   const pieces = all.some((p) => !EXIT_ZERO.test(p)) ? all.filter((p) => !EXIT_ZERO.test(p)) : all;
   // An elided fragment may start or end inside a word (a path with its backslashes stripped): substring, not whole words.
   return pieces.length > 0 && pieces.every((p) => (elided ? looseText.includes(p) : printedAsWords(looseText, p)));
 }
 
+/** A bare `exit 0` prints nothing: proven when a shell call after the last edit ran the row's command (a backticked span, else its first word). */
+function exitZeroRan(row, shellCommands) {
+  const spans = [...row.command.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  const keys = (spans.length ? spans : [row.command.trim().split(/\s+/)[0]]).map((k) => normalise(k)).filter((k) => k.length >= 3);
+  return keys.length > 0 && shellCommands.some((c) => keys.some((k) => normalise(c).includes(k)));
+}
+
 /** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
-function unprovenRows(rows, resultsText) {
+function unprovenRows(rows, resultsText, shellCommands = []) {
   const printed = normalise(resultsText);
   return rows.filter((r) => {
     if (!PROOF_STATE.test(r.state)) return false;
     const line = normalise(r.line);
+    // An empty JSON array or object is proof only as a line of its own.
+    if (/^(?:\[\]|\{\})$/.test(line)) return !new RegExp(`(?:^|\\s)${line.replace(/[[\]{}]/g, '\\$&')}(?:\\s|$)`).test(printed);
     if (!/[\p{L}\p{N}]/u.test(line)) return true;
+    if (EXIT_ZERO.test(line.replace(/=/g, ' ')) && exitZeroRan(r, shellCommands)) return false;
     return !printedAsWords(printed, line) && !piecesPrinted(line, printed);
   });
 }
@@ -266,6 +280,8 @@ function readTurn(entries, truncated = false) {
 
   let armed = false;
   let shellAfterEdit = false;
+  const shellCommands = [];                      // the shell calls after the last edit that did not fail
+  const failed = new Set();                      // tool_use ids whose result is an error or reports a non-zero exit code
   let pastFinalMessage = false;                  // walked back over a tool result
   const finalText = [];
   const results = [];
@@ -274,20 +290,28 @@ function readTurn(entries, truncated = false) {
     if (entry?.type === 'user') {
       pastFinalMessage = true;
       results.push(...printedBy(entry));
+      for (const b of blocks(entry)) {
+        if (b?.type !== 'tool_result') continue;
+        const text = typeof b.content === 'string' ? b.content : Array.isArray(b.content) ? b.content.map((p) => p?.text ?? '').join('\n') : '';
+        if (b.is_error === true || /^\s*Exit code [1-9]/i.test(text)) failed.add(b.tool_use_id);
+      }
     }
     if (entry?.type !== 'assistant') continue;
     // Walking backwards, so the first edit met is the last one made: a shell call seen before it is later.
     for (const b of [...blocks(entry)].reverse()) {
       if (b?.type !== 'tool_use' || armed) continue;
       if (EDIT_TOOLS.has(b.name) || (DELEGATE_TOOLS.has(b.name) && !(b.name !== 'Workflow' && READ_ONLY_AGENTS.has(b.input?.subagent_type)))) armed = true;
-      else if (SHELL_TOOLS.has(b.name)) shellAfterEdit = true;
+      else if (SHELL_TOOLS.has(b.name)) {
+        shellAfterEdit = true;
+        if (typeof b.input?.command === 'string' && !failed.has(b.id)) shellCommands.push(b.input.command);
+      }
     }
     if (!pastFinalMessage) {
       const text = entryText(entry);
       if (text) finalText.unshift(text);
     }
   }
-  return { armed, shellAfterEdit, text: finalText.join('\n'), results: results.join('\n'), complete };
+  return { armed, shellAfterEdit, shellCommands, text: finalText.join('\n'), results: results.join('\n'), complete };
 }
 
 /** The claim word when the message claims success without evidence, else null. */
@@ -331,7 +355,7 @@ try {
 
   if (claimsRows) {
     // A verdict table is judged row by row against what the turn printed; the rest of the message does not excuse a row.
-    const unproven = unprovenRows(rows, turn.results);
+    const unproven = unprovenRows(rows, turn.results, turn.shellCommands);
     if (!unproven.length) { blockOpenPerimeter(payload, rows, message); allow(); }
     if (!turn.complete) {
       // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
