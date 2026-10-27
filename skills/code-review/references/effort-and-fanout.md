@@ -2,8 +2,7 @@
 
 ## Effort sets depth, the ladder sets who
 
-Who is spawned and on which model: `report-format.md` § "Who reviews, on which model" (shared with
-`/code-review`). Effort then tells every agent how deep to go:
+Who is spawned and on which model: `report-format.md` § "Who reviews, on which model". Effort then tells every agent how deep to go:
 
 | Effort | Depth asked of each agent |
 | --- | --- |
@@ -52,6 +51,7 @@ Merge before triage:
 5. Re-sort across agents in the `report-format.md` order, keep the **higher** priority on a
    conflict, number the survivors `1..n` — the chat report and the tables use that numbering.
 6. Track which agent (and model) produced each survivor — it decides the tag.
+7. Already fixed in this session → `status: done`, `Risolto da: sessione`.
 
 ## Attribution
 

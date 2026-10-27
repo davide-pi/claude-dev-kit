@@ -1,7 +1,7 @@
 ---
 name: analyst
 description: >-
-  Use when a forked skill runs a read-only analysis: `/fix-ci`, `/retro`, `/items-qa`. Reads,
+  Use when a forked skill runs a read-only analysis: `/retro`. Reads,
   queries and reports; has no Edit or Write tool.
 tools: Read, Grep, Glob, Bash, PowerShell, Skill, WebFetch, mcp__plugin_browser-use_browser-use__browser_exec, mcp__plugin_browser-use_browser-use__browser_screenshot
 model: sonnet

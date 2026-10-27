@@ -1,10 +1,10 @@
 ---
-name: pr-review
-description: Use when the fixture needs /pr-review typed explicitly.
+name: code-review
+description: Use when the fixture needs /code-review typed explicitly.
 disable-model-invocation: true
 ---
 
-# pr-review
+# code-review
 
 **Contract.** A review · never posts · English.
 

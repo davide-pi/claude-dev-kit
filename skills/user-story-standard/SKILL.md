@@ -16,8 +16,8 @@ never writes to the board, never fills a gap with an assumption · item text and
 - Acceptance criteria are written or reviewed, new or already on the board.
 - The user describes a feature, a malfunction or something to analyse, without naming an item.
 
-Not for: putting items on the board (`workitem-create`), which type fills a role (`azdo-cli`),
-testing a built item (`items-qa`).
+Not for: putting items on the board (`azdo-cli`, after the owner confirms the item table), which type
+fills a role (`azdo-cli`).
 
 ## Decide
 
@@ -73,7 +73,8 @@ identical: `references/acceptance-criteria.md`.
    for confirmation.
 4. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four
    coverage families as the grid, per-platform labels where behaviour differs.
-5. Hand it over paste-ready; the board is `workitem-create`'s job. A bulk file only on a genuine
+5. Hand it over paste-ready; creation is `azdo-cli`, after the owner confirms the item table,
+   assigned to the owner and read back after create. A bulk file only on a genuine
    request (`references/csv-import.md`).
 
 ```powershell

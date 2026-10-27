@@ -18,7 +18,7 @@ unconfirmed · Italian chat, tables and board text; field names, WIQL and engine
 - The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
 - A day already logged is re-run: only the delta reaches the board.
 
-Not for: creating backlog items (`workitem-create`), Azure DevOps verbs, auth and identity
+Not for: creating backlog items (`user-story-standard`, `azdo-cli`), Azure DevOps verbs, auth and identity
 (`azdo-cli`), PR links (`pr-create`). Asked by the user only, never on Claude's own initiative.
 
 ## Decide

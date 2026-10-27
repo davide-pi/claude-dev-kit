@@ -20,7 +20,8 @@ question and it goes on the PR.
 | CONFIRMED completeness | "`Status.Archived` non è gestito in `Map()` — intenzionale?" |
 | Critical and cryptic | a short "perché?" where the code cannot be understood without the answer |
 
-A CONFIRMED security, regression or completeness finding does **not** stay in chat — but it is
+A CONFIRMED security, regression or completeness finding is a PR candidate, posted only under the
+`SKILL.md` posting gate (otherwise chat and the owner's ok) — and it is
 phrased as the question the author must answer, never as a lecture. The subagent's *for the author*
 field is the default signal (`yes` → PR candidate, `no` → chat); override it only with a stated
 reason. A `PLAUSIBLE` verdict is itself a hint that the point is a question rather than a statement.
@@ -115,7 +116,7 @@ an opinion. Agreement is a conclusion, not a courtesy: no "hai ragione" before s
 ## Traps
 
 1. A CONFIRMED security finding kept in chat "to be polite" → the author never sees it → confirmed
-   security, regression and completeness findings are posted, as questions.
+   security, regression and completeness findings are posted, as questions, under the posting gate.
 2. A style note posted on the PR → noise, and the real questions get skimmed → chat.
 3. Three questions merged into one comment → one gets answered → one question per thread.
 4. A question posted that the diff already answers → the enclosing function was not read → read the

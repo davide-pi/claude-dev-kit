@@ -150,5 +150,5 @@ Two routes, in order:
 2. The MCP PR-thread tools — the accepted fallback (`mcp-fallback.md`) only when the inline
    anchor's thread context (file path, line range, iteration) cannot be verified for route 1.
 
-`pr-review` depends on this: it reads threads to avoid repeating an existing comment, and posts
+`/code-review <pr>` depends on this: it reads threads to avoid repeating an existing comment, and posts
 inline — route 1 first, route 2 only for an unverifiable anchor, and it says which one it used.

@@ -1,7 +1,7 @@
 # Project-management hours and the gap prompt
 
 The "management" case: time **attributable to no product item** — client meetings and calls,
-backlog analysis and grooming, estimates, coordination, `/workitem-create` session-mode runs. It
+backlog analysis and grooming, estimates, coordination, item-creation sessions. It
 does not go on the Tasks of the work done (that is `scrittura.md`) but into a **fixed structure per
 account**. Most of it never shows in a transcript: the gap prompt is where it is recovered.
 

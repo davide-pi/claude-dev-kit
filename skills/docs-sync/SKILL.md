@@ -20,8 +20,7 @@ Arguments: `$ARGUMENTS`
 - `/docs-sync` after a change that moved something the docs describe; `/docs-sync --audit` for drift
   and gaps independent of any diff.
 
-Not for: a single README edit (a normal edit); the wiki's structure and page rules
-(`project-wiki-standard`); creating a docs tree from nothing.
+Not for: a single README edit (a normal edit); creating a docs tree from nothing.
 
 ## Decide
 
@@ -39,7 +38,7 @@ Not for: a single README edit (a normal edit); the wiki's structure and page rul
 | --- | --- |
 | tree | the path found |
 | mode | `change-scoped` (diff file) or `audit` (paths) |
-| language | tech tree **English**; wiki pages **Italian**, per `project-wiki-standard` |
+| language | tech tree **English**; wiki pages **Italian**, one fact on one page |
 | output | its fixed report, ≤ 40 lines |
 
 No tree found → say so and stop. Empty diff and no `--audit` → nothing to sync, stop.

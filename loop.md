@@ -14,6 +14,6 @@ Read-only, one pass, report in Italian; follow the `azdo-cli` skill for every `a
    `failed` with `status` `completed`.
 4. Report one line per item: PR (status, unresolved threads), run (result). Nothing changed since the last
    pass → "nessuna novità".
-5. `result` `failed` → suggest `/fix-ci`, which proposes only.
+5. `result` `failed` → suggest reading the failing step's log (`azdo-cli`), then `debug-systematic`; it proposes only.
 
 Never push, comment, resolve a thread, vote, complete the PR or re-run a pipeline.

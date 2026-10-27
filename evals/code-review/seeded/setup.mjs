@@ -5,7 +5,7 @@
  *
  *   node evals/code-review/seeded/setup.mjs <empty-target-dir> [--kit] [--kit-md] [--no-user-md]
  *
- *   --kit         copy this kit's 3 review agents and the `code-review` + `pr-review` skills into the target's
+ *   --kit         copy this kit's 3 review agents and the `code-review` skill into the target's
  *                 .claude/ (project-level install; kept out of git via .git/info/exclude)
  *   --kit-md      also install the kit's CLAUDE.md and the owner-80-20 style (project-level)
  *   --no-user-md  exclude the user-level ~/.claude/CLAUDE.md for that project, so the main session
@@ -46,7 +46,7 @@ if (args.includes('--kit')) {
   for (const a of ['code-reviewer', 'review-security', 'review-performance']) {
     cpSync(join(KIT, 'agents', `${a}.md`), join(claude, 'agents', `${a}.md`));
   }
-  for (const s of ['code-review', 'pr-review']) cpSync(join(KIT, 'skills', s), join(claude, 'skills', s), { recursive: true });
+  cpSync(join(KIT, 'skills', 'code-review'), join(claude, 'skills', 'code-review'), { recursive: true });
   exclude.push('.claude/');
 }
 const settings = {};

@@ -1,6 +1,6 @@
 # Review report format — the summary tables go last
 
-Shared by `/pr-review`, `/code-review`, the built-in `/review` and `/security-review`, ad-hoc
+Shared by `/code-review`, the built-in `/review` and `/security-review`, ad-hoc
 reviews and merged runs. The user reads the table first, then scrolls up to the rows that matter,
 so every report **ends** with the summary tables, after all the detail.
 
@@ -8,7 +8,7 @@ so every report **ends** with the summary tables, after all the detail.
 
 | Request | Agents, spawned in one message |
 | --- | --- |
-| any review (`/pr-review`, `/code-review`, an ad-hoc "review this"), effort `low` / `medium` | `code-reviewer` subagent, never inline |
+| any review (`/code-review`, an ad-hoc "review this"), effort `low` / `medium` | `code-reviewer` subagent, never inline |
 | effort `high` | `code-reviewer` A alone plus `review-security` and `review-performance`; merged |
 | effort `xhigh` or above | `code-reviewer` ×2 with the **same brief** — reviewer A and reviewer B on two different models — plus `review-security` and `review-performance`; merged |
 | "security review" / "performance review" | that specialist alone |
@@ -80,7 +80,7 @@ taken from the code.
 
 ## Order and tables
 
-The mandatory skeleton — `/code-review` and `/pr-review` carry a byte-identical copy inline (the
+The mandatory skeleton — `/code-review` carries a byte-identical copy inline (the
 validator compares them), and so does the `/review-large` merger prompt; edit all together:
 
 ```text

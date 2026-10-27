@@ -13,8 +13,8 @@ length limit). This file covers the behavioural half.
 
 ## Automated suites
 
-Seventeen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
-`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard`, `deliver`, `commit`, `grill-me`, `item` and the `paths:` skills (`angular`,
+Sixteen skills are covered by `claude plugin eval` suites under `evals/<skill>/`: `pr-create`,
+`azdo-cli`, `worklog`, `branch-flow`, `user-story-standard`, `deliver`, `commit`, `grill-me` and the `paths:` skills (`angular`,
 `react`, `ef-core`, `sql-server`, `rabbitmq`, `pipeline`, `docker-dev-env`, `dotnet-backend`). Their
 MUST / MUST NOT rows moved there, one case folder per row (`prompt.md` + `graders/*.md`); run them with
 `pwsh tools/run-evals.ps1` (only the suites whose skill changed) and see the README row for the flags.
@@ -37,32 +37,16 @@ what actually happened, not what should have.
 `MUST` = the skill has to load. `MUST NOT` = it has to stay out. The parenthetical says why the case
 exists.
 
-### `workitem-create` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/workitem-create` | MUST load |
-| "crea un work item per il bug del filtro date" | MUST NOT (the skill is trigger-only by design; without the trigger, do it plainly) |
-| "apri una issue su GitHub per questo" | MUST NOT (different platform, different flow) |
-| "abbiamo fatto una riunione, ti racconto i punti" | MUST NOT without the trigger (meeting-driven creation, writes to a real board) |
-
-### `pr-review` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/pr-review` | MUST load |
-| `/pr-review 4312 high security` | MUST load, and the focus must narrow the fan-out to `review-security` |
-| "guarda la PR 4312 e dimmi se ci sono problemi" | MUST NOT post anything; a chat review is the correct answer |
-| "commenta tu la PR con i dubbi" | MUST load (that is exactly its contract) |
-| "il code-reviewer dice che questo id può essere null, ha ragione?" | MUST load (receiving findings) |
-
-### `code-review` — the local diff
+### `code-review` — the local diff or a PR
 
 | Prompt | Expected |
 |--------|----------|
 | `/code-review` | MUST run on the working diff, chat-only |
 | `/code-review high` | MUST fan out to the two specialists as well |
 | "rivedi le modifiche che hai appena fatto" | MUST route through the review subagents (per the CLAUDE.md convention), not an inline read-through |
+| `/code-review 4312 high security` | MUST run in PR mode, and the focus must narrow the fan-out to `review-security` |
+| `/code-review https://dev.azure.com/org/proj/_git/repo/pullrequest/4312` | MUST run in PR mode on that PR (the URL is the scope) and post only genuine tagged questions |
+| "guarda la PR 4312 e dimmi se ci sono problemi" | MUST review in PR mode, and post nothing before the owner's ok (not typed as `/code-review <pr>`) |
 | "sistema questo bug" | MUST NOT (fixing is not reviewing) |
 
 ### `commit`
@@ -104,7 +88,7 @@ exists.
 | "rinomina questa variabile in `orderTotal`" | MUST NOT (single-file change: a plan is pure overhead) |
 | "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
 | "prendi in carico la story 4711, da dove parto?" | MUST load (item analysis) |
-| "crea gli item per questa feature" | MUST NOT (creation belongs to workitem-create) |
+| "crea gli item per questa feature" | MUST NOT (creation is `azdo-cli`, after `user-story-standard`) |
 | "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike, `references/spike.md`) |
 | "conviene spezzare questo lavoro su più agent?" | MUST load (fan-out, `references/delegation.md`) |
 
@@ -133,7 +117,7 @@ exists.
 | "voglio aggiungere una skill al kit per i deploy" | MUST load |
 | "questa skill è troppo lunga, come la spezzo?" | MUST load |
 | "crea una skill per Cosmos DB" | MUST NOT (generic or Microsoft-specific authoring belongs to the skill-creator plugins) |
-| "cosa fa la skill pr-review?" | MUST NOT (reading an asset, not authoring one) |
+| "cosa fa la skill code-review?" | MUST NOT (reading an asset, not authoring one) |
 
 ### `dotnet-testing`
 
@@ -170,7 +154,7 @@ exists.
 
 The ex-commands are invoked by name, so the risk is different from a reference skill's: the failure
 mode is the model *acting* on a phrasing the skill does not own, or doing by hand what the skill would
-have done in one shot. The forked ones (`/db`, `/logs`, `/fix-ci`) add a second check: the raw output
+have done in one shot. The forked ones (`/db`, `/logs`) add a second check: the raw output
 must stay in the subagent.
 
 ### `/docs-sync`
@@ -190,20 +174,6 @@ must stay in the subagent.
 | "facciamo una retrospettiva di questa sessione: cosa miglioriamo nel kit?" | MUST NOT invoke on its own (`disable-model-invocation`): suggest `/retro` |
 | "com'è andato lo sprint?" | MUST NOT (a team retrospective, not a session's environment) |
 
-### `/item`
-
-| Prompt | Expected |
-|--------|----------|
-| "fammi vedere i criteri di accettazione del 4821" | MUST invoke |
-| "crea un bug per il crash del login" | MUST NOT (creation belongs to workitem-create) |
-
-### `/fix-ci`
-
-| Prompt | Expected |
-|--------|----------|
-| "la build su feature/orders è rossa, perché?" | MUST invoke, forked: only the failing step's log and the verdict return |
-| "questo test fallisce in locale" | MUST NOT (belongs to debug-systematic) |
-
 ### `/db`
 
 | Prompt | Expected |
@@ -219,15 +189,6 @@ must stay in the subagent.
 | "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke, forked into `ops-analyst` |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
 
-### `items-qa` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/items-qa 101 102 https://test.example mobile` | MUST load |
-| `/items-qa` | MUST load |
-| "controlla se questo componente rispetta gli AC" | MUST NOT (no explicit trigger: it drives a real browser and posts a comment) |
-| "apri il sito e fai uno screenshot" | MUST NOT (browser use is not a work-item verdict) |
-
 ### `estimate` — explicit trigger only
 
 | Prompt | Expected |
@@ -235,14 +196,4 @@ must stay in the subagent.
 | `/estimate 12345` | MUST load |
 | `/estimate` with a pasted request and "analisi di mercato" | MUST load |
 | "quante ore ci vogliono per questa feature?" | MUST NOT (no explicit trigger; answer from the code or ask) |
-| "dividi questa epica in item" | MUST NOT (splitting items is workitem-create / user-story-standard) |
-
-## Cases for the standards ported from the PM's own skills
-
-### `project-wiki-standard` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/project-wiki-standard` | MUST load |
-| "aggiorna la documentazione di architettura del repo" | MUST NOT (a repository docs tree is doc-keeper) |
-| "scrivi la pagina Vincoli sulla wiki" | MUST NOT without the trigger (it writes to a real wiki) |
+| "dividi questa epica in item" | MUST NOT (splitting items is `user-story-standard`) |

@@ -178,7 +178,7 @@ const rawTable = () => [
   `Lacune: ${workers.filter(w => w.status === 'BLOCKED').map(w => `${w.reviewer} ${(w.files ?? []).join(', ')}`).join('; ') || 'nessuna'}`,
 ].join('\n')
 
-// Mandatory report skeleton: byte-identical to the one in skills/pr-review/references/report-format.md
+// Mandatory report skeleton: byte-identical to the one in skills/code-review/references/report-format.md
 // (tools/validate.mjs compares them). Inline because the merger does not read the kit.
 const SKELETON = `Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
 Verdetto at most one short question.

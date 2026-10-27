@@ -12,10 +12,10 @@ default, never an MCP call before the gap is proven · chat Italian, commands an
 
 ## When
 
-- A board, work item, repository, PR, wiki or pipeline is written from a shell, or read beyond a plain
-  item view (a plain item read is `item`).
-- Another asset needs the verb and flags: `workitem-create`, `pr-create`, `pr-review`,
-  `branch-flow`, `worklog`, `items-qa`, `estimate`.
+- A board, work item, repository, PR, wiki or pipeline is written from a shell, or a work item is read
+  in full or the owner's active items listed (`references/item-read.md`).
+- Another asset needs the verb and flags: `user-story-standard` (creating items), `pr-create`,
+  `code-review`, `branch-flow`, `worklog`, `estimate`.
 - A type name, field reference or flag is about to be typed, or a call fails on auth or "not found".
 
 Not for: GitHub (`gh`, in `branch-flow` and `pr-create`); pipeline YAML (`pipeline`); what an item
@@ -39,6 +39,7 @@ query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
 | Work items, queries, areas, iterations | `az boards` | `references/boards-catalogue.md` |
 | Which type name fills a role here | `az devops invoke` | `references/work-item-roles.md` |
 | Fields, attachments, inline images | `az boards` + REST | `references/workitem-content.md` |
+| Read one item in full, list my active items | `az boards` + REST | `references/item-read.md` |
 | Wiki tree, read, create, update | `az devops wiki` + REST | `references/wiki-rest.md` |
 | Repos, PRs, refs, branch policies | `az repos` | `references/repos-and-prs.md` |
 | Pipelines, runs, variables, logs | `az pipelines` | `references/pipelines-catalogue.md` |
@@ -62,7 +63,8 @@ project's types** (`invoke --area wit --resource workItemTypes`) and use a name 
 role table in `references/work-item-roles.md` is a hypothesis to confirm. `Issue` is the *analysis*
 role on Agile and the *backlog item* on Basic. No type fills a role → say so and ask; never
 substitute the nearest. Only the time role (`Task`) carries hours; a PR links the item above a Task
-(`references/work-item-roles.md` §5–6).
+(`references/work-item-roles.md` §5–6). **No create before the owner approves the item table**
+(`references/boards-catalogue.md` § Creating and updating).
 
 ### 5. Verify before typing
 
@@ -110,6 +112,7 @@ $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca697
 - `references/boards-catalogue.md` — before any WIQL or work item write.
 - `references/work-item-roles.md` — before naming a type.
 - `references/workitem-content.md` — before writing any field.
+- `references/item-read.md` — reading one item in full, or listing the owner's active items.
 - `references/wiki-rest.md` — before any wiki write.
 - `references/repos-and-prs.md` — anything on a repository or a PR.
 - `references/pipelines-catalogue.md` — anything on a pipeline.

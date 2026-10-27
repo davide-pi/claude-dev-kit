@@ -5,7 +5,7 @@
 | --- | --- |
 | code change: bug, failing test, perf, refactor, migration, feature, spike | `deliver` |
 | question, explanation, review of an existing diff | answer, `investigator`, `/code-review`: never `deliver` |
-| work item to build | `/item`, `plan-work` readiness, `deliver` |
+| work item to build | `azdo-cli` read, `plan-work` readiness, `deliver` |
 | subsystem, 5+ files, new interface | `plan-work`, then `deliver` |
 | attack a design | `grill-me` |
 | commit, PR, ship | `branch-flow`, `/commit`, `pr-create` |
@@ -17,7 +17,7 @@
    `az devops configure` default. No line, unmapped, or an added dir -> ask.
 4. Code beyond a few lines, scope decided -> `implementer`, briefed and reviewed here; a few lines (size S)
    -> inline, same review. Fan-out searches -> an agent. Briefs ask for concise reports.
-5. Reviews (`/code-review`, `/pr-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
+5. Reviews (`/code-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
 
 Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks the user.
 

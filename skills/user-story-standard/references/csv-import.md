@@ -3,8 +3,9 @@
 ## The normal path is not this file
 
 In this kit items are created **directly on the board**, through the Azure DevOps CLI, and that flow
-belongs to `workitem-create`. So the normal answer is: write the item text in the shapes this skill
-defines, then let `workitem-create` put it on the board. No file is produced, nothing is imported.
+goes through `azdo-cli`. So the normal answer is: write the item text in the shapes this skill
+defines, then create it through `azdo-cli` after the owner confirms the item table, assigned to the owner
+and read back after create. No file is produced, nothing is imported.
 
 A CSV exists for one case only: someone genuinely wants a **bulk-import file** — a batch large
 enough that clicking or calling per item is not worth it, or a hand-off to someone who will import
@@ -95,7 +96,7 @@ senza ricaricare la pagina"
 
 | Check | Why |
 | --- | --- |
-| The type names match the ones the project really has | the import fails on an unknown type; `workitem-create` discovers the real type list, this skill does not |
+| The type names match the ones the project really has | the import fails on an unknown type; `azdo-cli` discovers the real type list, this skill does not |
 | A Bug row has five fields, with the third one empty | `Repro step` has no counterpart in the body; the column stays, its value does not |
 | Every multi-line or comma-bearing field is quoted | one unquoted field shifts every column after it |
 | Inner double quotes are doubled | a single quote closes the field early |

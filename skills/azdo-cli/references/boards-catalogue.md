@@ -67,6 +67,15 @@ behind the returned URL; the CLI has no verb to download it.
 
 ## Creating and updating
 
+Before any `create`, in this order, each gate in its own message:
+
+| Gate | Rule |
+| --- | --- |
+| table | one row per item: #, role, title, type name as the project returns it, parent, assignee; the owner approves it before the first write |
+| assignee | the owner by default, resolved with the `@Me` probe and the UPN shown in the table |
+| never | a test or placeholder item; a role with no matching type is a question, never the nearest type |
+| after | read each item back (`--fields System.AssignedTo,System.State,System.Parent`); a failure mid-batch reports the ids already created, so a retry does not duplicate them |
+
 ```powershell
 az boards work-item create -p <project> --type '<type>' --title '<title>' `
   --description '<html-or-text>' --area '<project>\<area>' --iteration '<project>\<iteration>' `

@@ -1,5 +1,7 @@
 # Posting, and the chat report
 
+Every write below — a new thread, a reply, a resolve — happens only under the `SKILL.md` posting gate.
+
 ## Azure DevOps
 
 CLI first for everything readable: the active PRs, the PR itself, its base branch and head commit,

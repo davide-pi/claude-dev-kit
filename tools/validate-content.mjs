@@ -108,9 +108,9 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
   // that drifts makes the merger parse several dialects, so every copy must equal it byte for byte:
   //   - the Finding block (fenced) in the 3 review agents;
   //   - the one-defect-per-block rule (a paragraph) in the 3 review agents;
-  //   - the report skeleton (fenced) in the code-review and pr-review skills and the review-large merger.
+  //   - the report skeleton (fenced) in the code-review skill and the review-large merger.
   {
-    const FORMAT = 'skills/pr-review/references/report-format.md';
+    const FORMAT = 'skills/code-review/references/report-format.md';
     const norm = (rel) => read(rel).replace(/\r\n/g, '\n');
     const fenced = (patterns, label, copies) => {
       const canonical = has(FORMAT) ? norm(FORMAT).match(patterns)?.[1] : null;
@@ -123,7 +123,7 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
     fenced(/## Finding block[\s\S]*?```text\n([\s\S]*?)\n```/, 'Finding block', AGENTS);
     fenced(/(\*\*One defect per block[^\n]*(?:\n[^\n]+)*)/, 'one-defect-per-block rule', AGENTS);
     fenced(/## Order and tables[\s\S]*?```text\n([\s\S]*?)\n```/, 'report skeleton',
-      ['skills/code-review/SKILL.md', 'skills/pr-review/SKILL.md', 'workflows/review-large.js']);
+      ['skills/code-review/SKILL.md', 'workflows/review-large.js']);
   }
 
   // ── 4b. Every skill has triggering cases ─────────────────────────

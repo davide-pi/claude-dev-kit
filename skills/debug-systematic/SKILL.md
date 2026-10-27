@@ -19,7 +19,7 @@ evidence).
 - Something is slow and nobody knows why.
 
 Not for: a fix whose cause is already proven; tuning code that works (`review-performance`); what the
-behaviour *should* be (`/item`, `plan-work`).
+behaviour *should* be (the `azdo-cli` item read, `plan-work`).
 
 ## Decide
 
@@ -52,7 +52,7 @@ kept deliberately — never left standing as the fix.
 | right in a SQL window, wrong from the app | the EF command log (`ef-core`) | category `Microsoft.EntityFrameworkCore.Database.Command` at Information | the SQL really sent: a lost filter, N+1, client evaluation |
 | a message never arrives, or arrives twice | queues, dead-letter, consumer log (`rabbitmq`) | `docker exec <broker> rabbitmqctl list_queues name messages messages_unacknowledged consumers` | never published, stuck unacked, or dead-lettered; duplicates mean no idempotency key |
 | anything inside the browser | the browser's devtools (console, network, trace, heap) | — | come back with the failing request or stack |
-| fails only in CI | the failing step's log, then an environment diff | `/fix-ci` | the step verbatim; then locale, time zone, path case, a missing service |
+| fails only in CI | the failing step's log, then an environment diff | `azdo-cli` pipelines / `gh run view --log-failed` | the step verbatim; then locale, time zone, path case, a missing service |
 | intermittent everywhere | a forced-repro loop plus correlation logging | `1..200 \| % { dotnet test --filter <Test> }` | a failure rate (no rate, no repro); the interleaving behind it |
 | it used to work | `git bisect` | `git bisect start <bad> <good>`; `git bisect run <script>` | the single commit that introduced it |
 

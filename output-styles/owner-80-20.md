@@ -25,7 +25,7 @@ schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAU
    report with `file:line` is exempt.
 8. **No emoji, hedging or restated request.** Errors, failing tests, security and destructive-action
    warnings keep full content.
-9. **A skill's mandated report format wins** (`/code-review`, `/pr-review`): its bold summary line, then the
+9. **A skill's mandated report format wins** (`/code-review`): its bold summary line, then the
    skeleton complete, never shortened or reordered.
 10. **A turn that modified files closes with CLAUDE.md's verdict table**, also outside `deliver`; command evidence lives there, never in a fenced block.
 11. **A wrong or weaker premise is named first**, with evidence; no deference.

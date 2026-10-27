@@ -9,7 +9,7 @@ paths: "**/.pipelines/**,**/azure-pipelines*.y*ml,**/GitVersion.yml,**/.github/w
 # pipeline — Azure DevOps YAML: shape, templates, versioning, the deploy contract
 
 **Contract.** Pipeline YAML in the house shape, expanded and validated before it runs · never
-queues a run, never edits YAML to chase a red run (that is `/fix-ci`) · explanations in Italian,
+queues a run, never edits YAML to chase a red run (read the step log, then `debug-systematic`) · explanations in Italian,
 YAML keys and log lines verbatim.
 
 ## When
@@ -19,7 +19,7 @@ YAML keys and log lines verbatim.
 - Deciding how a value reaches a run; adding a cache; passing output between stages.
 - The version number jumped or reset; a build output the Ansible deploy consumes changes.
 
-Not for: a red run (`/fix-ci`); YAML that is not a pipeline (compose, settings, manifests); branch
+Not for: a red run (`debug-systematic`); YAML that is not a pipeline (compose, settings, manifests); branch
 and PR policy (`branch-flow`, `pr-create`).
 
 Pipeline facts (scripts over tasks, templates for repeated stages, no secret in YAML, fail-fast

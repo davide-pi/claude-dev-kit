@@ -13,7 +13,7 @@ production code, never promotes spike code · plan file English, everything said
 ## When
 
 - The work spans several files or sessions, or order matters (something must exist first).
-- A spec or work item has to become steps, or be judged ready to build (`/item` read it first).
+- A spec or work item has to become steps, or be judged ready to build (the `azdo-cli` item read first).
 - Half-finished work resumes and the next step is no longer obvious.
 - A "can we…" question needs a throwaway probe; or pieces could go to parallel subagents.
 

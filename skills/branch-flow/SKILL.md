@@ -17,7 +17,7 @@ branch names and commands verbatim.
 - Work needs isolation: a dirty tree, two changes in flight, an experiment, parallel agents.
 - The work is complete and the branch has to reach the default branch — or must not.
 
-Not for: the PR title and body (`pr-create`), reviewing a PR (`pr-review`), Azure DevOps verbs
+Not for: the PR title and body (`pr-create`), reviewing a PR (`code-review`), Azure DevOps verbs
 (`azdo-cli`).
 
 ## Decide
@@ -69,7 +69,7 @@ them; without it, use the git fallback in `references/worktrees.md`.
 | dead end | delete local and remote, write the lesson |
 | wanted later | keep it, rebase while cheap, name the blocker |
 
-Merge gates: pipeline green **and** reviewed (`/pr-review` plus the owner's read; a human approval
+Merge gates: pipeline green **and** reviewed (`/code-review <pr>` plus the owner's read; a human approval
 only where branch policy demands it). Squash and delete-source-branch are the only strategy; a policy
 that forbids squash → stop and say so. Completing the merge is the owner's call: prepare, report,
 never decide. Full walk: `references/finishing.md`.

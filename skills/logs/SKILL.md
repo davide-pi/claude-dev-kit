@@ -25,7 +25,7 @@ stop; the caller asks.
 - Errors of a service in a window, the lines of one trace or business id, a crash's last lines.
 
 Not for: adding or changing logging (`dotnet-diagnostics`); investigating the cause behind the error
-(`debug-systematic`, in the caller); a red CI run (`/fix-ci`).
+(`debug-systematic`, in the caller); a red CI run (its step log via `azdo-cli`, then `debug-systematic`).
 
 ## Decide
 
