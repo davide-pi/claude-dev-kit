@@ -1,8 +1,7 @@
 # Scenarios — what to prepare before the loop, and what ends it
 
-One section per scenario of `deliver` triage. The preparation runs in the main session and is written
-in the plan file, so it survives compaction. Commands and output lines are quoted verbatim in the
-verdict.
+One section per scenario of `deliver` triage; read only the one you chose. The preparation runs in the
+main session and is written in the plan file, so it survives compaction.
 
 ## bug
 
@@ -12,21 +11,19 @@ verdict.
 | repro test | write the **failing test** that names the symptom (`dotnet-testing` / the stack's test skill), run it, keep the red output line |
 | perimeter | the faulty unit and its test; the cause's neighbours are proposals, not edits |
 | loop brief | the test name, the red line, the causal sentence |
-| proof | the same test green, then the suite of the touched project; two runs seen: red, then green |
+| proof | `SKILL.md` step 4, then the suite of the touched project |
 
-A repro that cannot be automated (timing, environment) is a proxy: say so, and ask the user to accept it
-or prepare the environment.
+A repro test written after the fix was never seen failing: revert the fix, run it red, restore. A repro
+that cannot be automated (timing, environment) is a proxy: say so, and ask the user to accept it or
+prepare the environment.
 
 ## perf
 
 | Step | Rule |
 | --- | --- |
-| baseline | before any edit, on the same machine, at least 3 runs, saved in the plan file (`perf-baseline.md`) |
+| baseline | before any edit, saved in the plan file (`perf-baseline.md`: runs, ratio, spread) |
 | perimeter | the hot path named by the measurement, not a guess |
 | loop brief | the baseline numbers and the target; "faster" with no number is not a brief |
-| proof | the same command, the same input, the same machine: ratio and spread against the baseline |
-
-A result inside the spread is no result: report it as inconclusive, never as an improvement.
 
 ## refactor
 
@@ -35,7 +32,7 @@ A result inside the spread is no result: report it as inconclusive, never as an 
 | characterization | the tests that pin today's behaviour exist and are green; none → write them first, still green on the untouched code |
 | public surface | note every public signature, route and serialized shape in the plan file |
 | perimeter | the files being restructured and their tests; behaviour changes are excluded by definition |
-| proof | the same tests green, no test edited to fit, the noted signatures unchanged (`git diff` on them is empty) |
+| proof | `SKILL.md` step 4; no test edited to fit, `git diff` on the noted signatures empty |
 
 A needed test edit means the behaviour changed: stop and ask the user.
 

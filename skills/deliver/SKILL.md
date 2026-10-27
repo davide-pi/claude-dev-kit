@@ -17,9 +17,8 @@ Italian, notes English.
 - Any request that ends in an edit to code, a query, a script or a schema: bug, slowness, restructure,
   migration, feature, "can we…" probe.
 
-Not for: a question or an explanation with no code change (answer it; `investigator` to read); reviewing
-an existing diff (`/code-review`); writing item text (`user-story-standard`); a bug with no proven cause
-yet (`debug-systematic` runs inside the bug scenario).
+Not for: a question or explanation with no code change; reviewing a diff (`/code-review`); item text
+(`user-story-standard`).
 
 ## Decide
 
@@ -39,8 +38,8 @@ it at every triage (it overwrites, records the branch), close it before the verd
 pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Files 'src/Orders/OrdersQuery.cs,src/Orders/Dto/,tests/**/Orders*.cs'
 pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close -FindingsLog '<result.findingsLog>' [-Run <id>] [-Tokens <n>]
 ```
-Write the path exactly so, literal `~` (allow rules match it); entries in single quotes. `-Close` logs the
-findings line; `-LogRun` logs without closing, `-NoFindings` closes with none (`references/loop.md`).
+Write the path exactly so, literal `~` (allow rules match it); entries in single quotes. `-Close`, `-LogRun`,
+`-NoFindings`: `references/loop.md`.
 
 `scope-guard.js` reads that file only, ignoring it on another branch. Tests of the change belong to the perimeter;
 widening it is an edit to this file first, with the user's yes. `plan-work`'s plan file never holds it.
@@ -56,11 +55,11 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 | implementation | this session, inline (up to ~3 files) | `implementer`, 3-4 tasks a run | as M, a run per phase (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
-`implementer`: `medium` (`implementerEffort`: `high`), `implementerModel: haiku` if mechanical; brief: `file:line` + the change. Before the loop: `references/scenarios.md`; criteria, doubts pass and challenger: `references/loop.md`.
+`implementer` args: `references/loop.md`; its brief: `file:line` + the change. Before the loop: the section of the chosen scenario in `references/scenarios.md` (read only that one); criteria, doubts pass and challenger: `references/loop.md`.
 
 ### 3. Who asks the user
 
-Only this session. The workflow and every subagent return their state and stop; an undecidable choice comes back as an open question. Batch the questions, each with a recommendation, weighty ones only (P-weight, `references/loop.md`).
+Batch the questions, each with a recommendation, weighty ones only (P-weight, `references/loop.md`).
 
 ### 4. Tests by level — run here, not delegated
 
@@ -80,25 +79,21 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 1. Triage, then the perimeter file and the start point; scenario preparation.
 2. Analysis by size, the criteria with their proof (`references/loop.md`); ask only what the table says. S: edit inline now.
 3. Verify pre-check (`references/loop.md`), launch `impl-review-loop` once per coherent request (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
-   `OK` → `scope-guard.js --check <head>`: files outside → step 3; exit 0 → step 4; exit 2 = not checked, never clean. `STALL` (`question` too) → `references/stall.md`, ask the user, relaunch with every resolution so far.
+   `OK` → `scope-guard.js --check <head>`: files outside → step 3; exit 0 → step 4; exit 2 = not checked, never clean. `STALL` (`question` too) → `references/stall.md`.
 4. Run the matrix on the final code; every failure goes back to step 3 with the failing output as the brief (a red test after `OK`: `references/loop.md`). M, L: the proof check (assertion lines of each criterion's test).
 5. `perimeter.ps1 -Close -FindingsLog`, then the verdict (`done-claim` blocks one with the perimeter still active), then `/commit`, `pr-create` when asked.
 
-The verdict is a plain markdown table `done-claim` accepts as evidence, then the closing table of everything outside the
-perimeter (`references/loop.md`): `fatto`, `non verificato: <motivo>` or `failed` per row; S 2-3 lines.
+The verdict and the closing table of everything outside the perimeter: `references/loop.md`.
 
 ## Traps
 
 1. The change keeps growing → the perimeter was a guess → stop, widen the file with the user's yes,
    never let an edit land first (`scope-guard.js` says "out of perimeter").
-2. A bug test written after the fix → it was never seen failing → revert the fix, run it red, restore.
-3. A spike drifts into the feature → answer, delete the probe; the feature: a new triage.
 
 ## References
 
-- `references/loop.md` — the doubts pass and the challenger, the start point, the workflow's args, size S inline, the
-  cleanup pass, the scope check after `OK`, the findings log, the verdict.
-- `references/stall.md` — only when a run returns `STALL`: each `why`, the resolutions, the resume, a red test after `OK`.
-- `references/scenarios.md` — before the loop: what each scenario prepares, and the proof it ends on.
-- `references/perf-baseline.md` — scenario `perf`, or any claim of "faster": baseline, runs, BenchmarkDotNet,
-  HTTP timing, the result as ratio and spread.
+- `references/loop.md` — before and when launching the loop, after `OK`, writing the verdict.
+- `references/loop-extras.md` — the owner asked a cleanup pass, scope-guard exited 1, or a relaunch; who reads which round.
+- `references/stall.md` — a run returns `STALL`, or a test is red after `OK`.
+- `references/scenarios.md` — before the loop: the section of the chosen scenario only.
+- `references/perf-baseline.md` — scenario `perf`, or any claim of "faster".
