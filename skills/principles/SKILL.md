@@ -42,7 +42,7 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | a cleaner shape against the module's idiom | the idiom (2) | the scope is changing that idiom |
 | a boundary already violated in the touched module | leave it, one `Noticed` row | the task is to fix it |
 | the same logic in two services | duplicate (3) | it is a contract both must agree on → the shared contract package |
-| the same logic twice in one module | leave it; extract at the third copy | the copies already diverged into a bug |
+| the same logic twice in one module | leave it; extract at the third copy | the copies already diverged into a bug, or the change adds both → one shape now |
 | an interface with one implementation | the concrete class | the stack skill names it as the test seam, or the scope adds a second one |
 | a pattern against plain code | plain code (4) | the force is present today, not foreseen (`references/design.md`) |
 | a new layer, project or library against a folder | the folder | a second deployable, or a dependency that must not leak |
@@ -53,7 +53,8 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | The question is about | Read |
 | --- | --- |
 | which service, project or layer owns it; dependency direction; sync against async | `references/architecture.md` |
-| coupling, cohesion, an abstraction, inheritance, a named pattern | `references/design.md` |
+| coupling, cohesion, an abstraction, inheritance, a named pattern, testability | `references/design.md` |
+| where a business rule or invariant lives, an entity's shape, a consistency boundary | `references/domain.md` |
 | a name, a function's size, duplication, a comment, a parameter list, defensive code | `references/clean-code.md` |
 
 ### Severity, when it is a review finding
@@ -97,5 +98,8 @@ Get-ChildItem -Recurse -Filter *.csproj | Select-String 'ProjectReference Includ
 
 - `references/architecture.md` — ownership of new code, dependency direction, service boundaries,
   sync against async, shared libraries.
-- `references/design.md` — abstractions, composition, the force that justifies each common pattern.
+- `references/design.md` — abstractions, composition, the force that justifies each common pattern,
+  coupling signals, testable shape.
+- `references/domain.md` — invariants, rich against anemic entities, aggregates and consistency
+  boundaries.
 - `references/clean-code.md` — tie-breaks at function and name level, the review checklist's grey zones.

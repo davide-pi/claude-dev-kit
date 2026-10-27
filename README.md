@@ -52,7 +52,7 @@ the ceremony and rewritten for PowerShell.
 
 | Skill | Purpose |
 |---|---|
-| `skills/principles/SKILL.md` | Which principle wins when two disagree: a five-rung ladder (house facts, local convention, architecture, clean code, patterns), weekly tie-breaks, review severity; references by scope for architecture, design patterns and their forces, clean-code grey zones. |
+| `skills/principles/SKILL.md` | Which principle wins when two disagree: a five-rung ladder (house facts, local convention, architecture, clean code, patterns), weekly tie-breaks, review severity; references by scope for architecture, design patterns and their forces, coupling signals and testable shape, domain invariants and aggregates, clean-code grey zones. |
 
 **Backend .NET**
 

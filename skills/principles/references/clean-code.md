@@ -1,6 +1,6 @@
 # Clean code — tie-breaks at function and name level (rung 4)
 
-The review checklist (`code-reviewer` pass G) says what to flag. This file settles the grey zones,
+The review checklist (`code-reviewer` passes G1-G3) says what to flag. This file settles the grey zones,
 where two clean-code habits pull apart.
 
 ## Tie-breaks

@@ -44,12 +44,13 @@ answer or the timeout, and at-least-once delivery means **every message can arri
 | an answer is needed, but not now; the work outlives a request | command out, event back | correlation state to carry — the honest replacement for a long RPC |
 | several steps with compensation | hand-rolled saga | persisted state and timeouts are yours |
 
-### The two rules every handler obeys
+### The three rules every handler obeys
 
 | Rule | Because |
 | --- | --- |
 | the caller catches the timeout and returns a clean failure | otherwise a 500 arrives minutes later, after the user retried |
 | every responder and subscriber is idempotent (same input twice → one effect) | redelivery, a replayed error queue and a timed-out-but-done RPC all repeat work |
+| a handler that writes the database and publishes about it does so through an outbox (`references/principles.md`) | publish before the commit invents an event the rollback undoes; publish after it loses one on a crash |
 
 ### An RPC call failed — which case
 
@@ -97,7 +98,7 @@ docker exec <container> rabbitmqadmin -V <vhost> get queue=<name> count=1 ackmod
 
 - `references/easynetq.md` — the bus wiring here, RPC semantics, exceptions across the wire, shared
   contracts, the error queue, the advanced bus, a review checklist.
-- `references/principles.md` — shape choice, durability switches, acks and prefetch, idempotency, a
-  retry policy that terminates.
+- `references/principles.md` — shape choice, durability switches, acks and prefetch, idempotency, the
+  outbox for a write plus a publish, a retry policy that terminates.
 - `references/operations.md` — the broker-state procedure: health, depth, bindings, a
   non-destructive peek, the report, replay, the guardrails.
