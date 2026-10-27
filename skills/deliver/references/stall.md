@@ -27,12 +27,12 @@ change the approach**. Relaunch with `resumeFromRunId`, the same args, and **eve
 `accept` takes the risk (it goes in the verdict), `retry: true` is one more round with no direction, `guidance` one more
 round with the user's direction, `answers` answer a `question` stall (each `text` copied unchanged, in the same entry as
 that round's other resolution; the stall comes back while a question has none), `widen` adds perimeter entries. There is
-no cap on the rounds and no `continue` (an old one is ignored); `guidance` or `accept` on a `churn` or `not-converging`
+no cap on the rounds; `guidance` or `accept` on a `churn` or `not-converging`
 round restarts its count, `retry` does not.
 
 | `stall.why` | Meaning, and the question |
 | --- | --- |
-| `question` | the implementer, a fixer or the reviewers left a behaviour question, or the `preview` is waiting: ask it and resume with `answers` |
+| `question` | see "Questions" above |
 | `churn` | the last 3 fixes each changed more lines. `accept` closes the ids the reviewers already read; `guidance` or `retry` for another attempt |
 | `not-converging` | after each of the last 3 fix rounds the open P1/P2 count (plus the open `V` finding) did not drop below its lowest of the rounds before: every fix closes one and the reviewers open another. Same answers as `churn` |
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, `accept` is not offered |

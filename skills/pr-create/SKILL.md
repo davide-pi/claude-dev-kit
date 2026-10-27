@@ -30,7 +30,7 @@ it. An open PR already exists on this branch → push to it, never create a seco
 ### 2. The parent item — a precondition, not a step
 
 The PR links at least one **parent backlog item** — User Story or PBI, Bug, Impediment, TECH; on
-GitHub the issue — **never a Task** (a Task carries hours, not intent).
+GitHub the issue — **never a Task**.
 
 | Step | Rule |
 | --- | --- |
@@ -38,10 +38,9 @@ GitHub the issue — **never a Task** (a Task carries hours, not intent).
 | resolve | read each id's **type**; a Task → its parent; de-duplicate; link all that remain |
 | none left | **stop and ask once**, answerable with one pick: numbered options from the likely candidates — an `AB#` in the branch or commits, recent items assigned to the owner (`az boards query`, `@Me`, changed lately, never a Task) — plus "create one" (`workitem-create`); never create an item unasked |
 | parents under different Features | link them all and say so: the branch may be doing two things |
-| link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · GitHub: `Fixes #<n>` / `Closes #<n>`, `Refs #<n>` when it does not close |
+| link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · remote is github.com → `references/description.md` § GitHub |
 
-The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash
-flags: a prompt there means the precondition was skipped.
+The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash flags.
 
 ### 3. Title and body — Italian, derived from the diff
 
@@ -54,8 +53,8 @@ flags: a prompt there means the precondition was skipped.
 | `Verifica:` | only when something was run: the command, before → after; nothing run → no block |
 | never | an empty template, a commit-by-commit dump, a diff retold in prose, secrets or customer data |
 
-Source: `git log` and `git diff --stat` against `origin/<base>`, plus the linked item's text — a gap
-between what the item asked and what the branch does is a body note.
+Source: the log and diff below, plus the linked item's text — a gap between what the item asked and
+what the branch does is a body note.
 
 ### 4. `Rilascio:` — what this change forces to deploy
 
@@ -81,10 +80,6 @@ git push --set-upstream origin (git branch --show-current)
 # body as a UTF-8 file: newlines and code fences survive the shell
 Set-Content -Path pr-body.md -Encoding utf8 -Value $body
 
-# GitHub
-gh pr create --base $base --title '<titolo>' --body-file pr-body.md      # --draft when applicable
-gh pr view --json url --jq .url
-
 # Azure DevOps — org and project from the ALM: line; one --description value per line
 az repos pr create --org $org -p $proj --repository <repo> --source-branch (git branch --show-current) `
   --target-branch $base --title '<titolo>' --description (Get-Content pr-body.md -Encoding utf8) `
@@ -99,14 +94,7 @@ URL.
 ## Traps
 
 1. "No commits between …" → the branch was never pushed → push with `--set-upstream` first.
-2. The item stays Active after the merge → it was pasted as a URL → link it for real.
-3. An English title or body → the code's language leaked → title and body are Italian, always.
-4. The body reads like a changelog → `git log` was pasted → describe the change, not its history.
-5. `Rilascio:` names the changed library, or misses a consumer → the fan-out was skipped → resolve
-   consumers by project reference and by message type, not by memory.
 
 ## References
 
-- `references/description.md` — writing the body: the bullet shape with a worked example, mapping
-  files to deployables and the reference fan-out, `Rischio merge` and `Verifica` forms, the trailer,
-  draft notes.
+- `references/description.md` — writing the body, mapping files to deployables, the trailer, or the remote is github.com.

@@ -155,6 +155,17 @@ exists.
 | "la pagina Angular ci mette 4 secondi a renderizzare" | MUST NOT (browser runtime belongs to the browser tools) |
 | "aggiungi un log qui" | MUST NOT (a one-line edit, no investigation) |
 
+### `principles`
+
+| Prompt | Expected |
+|--------|----------|
+| "estraggo un'interfaccia per questo servizio o lascio la classe?" | MUST load |
+| "questa logica serve in due servizi: la condivido o la duplico?" | MUST load |
+| "che pattern uso per questi tre tipi di pagamento?" | MUST load |
+| "aggiungi il campo Note all'ordine" | MUST NOT (a code change routes to `deliver`) |
+| "fammi la review del branch" | MUST NOT (a review routes to `code-review`) |
+| "semplifica il diff che ho appena scritto" | MUST NOT (cleaning a diff routes to `simplify`) |
+
 ## One-shot skill cases
 
 The ex-commands are invoked by name, so the risk is different from a reference skill's: the failure

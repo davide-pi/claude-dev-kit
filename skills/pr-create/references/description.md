@@ -1,27 +1,17 @@
 # PR title and description
 
-The title and body are written in **Italian**, whatever language the conversation is in: they are
-read by the team, by the platform's search, and by whoever looks this change up in a year. So are
-commit messages — which is what makes a squash merge coherent, since the platform turns the PR
-title into the commit subject.
-
 ## The title
 
 One imperative line, specific to this change, no trailing period.
 
-| Bad | Why | Better |
-| --- | --- | --- |
-| `Correzioni` | says nothing | `Correggi l'arrotondamento del totale fattura su ordini multivaluta` |
-| `Aggiorna file` | describes the mechanics | `Sposta la risoluzione del tenant nel middleware` |
-| `feature/billing-export` | the branch name | `Aggiungi export fatture per tenant` |
-| `Aggiunto il nuovo endpoint.` | past tense, trailing period | `Aggiungi endpoint API fatture` |
-
-If the branch is a single logical change, the PR title and the squashed commit subject are the same
-sentence — the platform copies one into the other, so write it once and write it well (`commit`).
+| Bad | Better |
+| --- | --- |
+| `Correzioni` | `Correggi l'arrotondamento del totale fattura su ordini multivaluta` |
+| `feature/billing-export` | `Aggiungi export fatture per tenant` |
 
 ## The body
 
-Short but complete. A reviewer should know, before reading the diff, **what changed** and **why**.
+A reviewer should know, before reading the diff, **what changed** and **why**.
 
 ```markdown
 - Aggiunge `InvoiceExportService` e l'endpoint `/api/tenants/{id}/invoices/export`.
@@ -50,43 +40,20 @@ Fixes #<n>
 
 Rules:
 
-1. **One bullet per real change**, not per file and not per commit.
-2. Say **why** whenever the change is not self-evident — a why the diff cannot show is the single
+1. Say **why** whenever the change is not self-evident — a why the diff cannot show is the single
    most valuable line in the body.
-3. Call out anything the reviewer must not miss: a migration, a config key, a breaking signature, a
+2. Call out anything the reviewer must not miss: a migration, a config key, a breaking signature, a
    deliberate deviation, a follow-up left undone.
-4. Name what is **out of scope**, so the review does not turn into a design discussion.
-5. No empty template sections, no "N/A", no checklist nobody ticks — with **two exceptions**: the
-   `Rilascio:` block is always written, `nessun componente` included (see below), and so is the
-   `Rischio merge:` line.
-6. **`Rischio merge:`** — one line: **reversibile** (a revert of the squash commit undoes it all) or
+3. Name what is **out of scope**, so the review does not turn into a design discussion.
+4. **`Rischio merge:`** — **reversibile** (a revert of the squash commit undoes it all) or
    **irreversibile** (a migration that drops or rewrites data, a published contract, a message
    already consumed, an external call with side effects) and what cannot be undone; then the
-   **impatto** — who or what breaks if it is wrong. It tells the reviewer how hard to look. The
-   minimal form, for a docs-only or tooling change: `Rischio merge: reversibile — revert dello
-   squash commit; nessun impatto a runtime`.
-7. **`Verifica:`** — when a command or a check was run, the evidence before and after: the failing
-   then passing test, the output, the screenshot path. Quote the command; never paraphrase a result
-   (`plan-work`'s `evidence-by-stack.md`). Nothing was run → leave the block out rather than invent one.
-8. No secrets, connection strings, tokens or customer data — a PR body is as public as the repo.
-
-## Deriving it
-
-```powershell
-$base = (git symbolic-ref --short refs/remotes/origin/HEAD) -replace '^origin/', ''
-git log --oneline "origin/$base..HEAD"      # the intent, commit by commit
-git diff --stat "origin/$base...HEAD"       # where the weight actually is
-```
-
-Read the linked parent item or issue too: the body should answer the item, and any gap between what
-the item asked and what the branch does belongs in the body as an explicit note. On Azure DevOps
-the item text comes through `azdo-cli`; on GitHub, `gh issue view <n> --json title,body`.
+   **impatto** — who or what breaks if it is wrong. The minimal form, for a docs-only or tooling
+   change: `Rischio merge: reversibile — revert dello squash commit; nessun impatto a runtime`.
+5. **`Verifica:`** — the evidence before and after: the failing then passing test, the output, the
+   screenshot path. Quote the command; never paraphrase a result (`plan-work`'s `evidence-by-stack.md`).
 
 ## The release scope — the `Rilascio:` block
-
-Every body carries it, right after the change bullets. It answers one question: **which releasable
-components must be deployed for this PR to take effect**. One bullet per component, each with the
-reason it is in the list — the reason is what lets a reviewer contest the list.
 
 | What changed | What gets released |
 | --- | --- |
@@ -95,6 +62,9 @@ reason it is in the list — the reason is what lets a reviewer contest the list
 | a message contract — event, RPC, queue payload | the publisher **and every consumer** (`rabbitmq`) |
 | a migration | the deployable that applies it, plus the database as its own step |
 | only pipelines, docs, tests, editor config | nothing — `Rilascio: nessun componente` |
+
+Uncertain fan-out: list what is certain, then one line naming the doubt. Never "tutti i servizi": if it
+really is all of them, they are still listed by name.
 
 ### Finding the deployables
 
@@ -111,33 +81,23 @@ reason it is in the list — the reason is what lets a reviewer contest the list
      package reference, transitively;
    - a shared frontend library or a path-mapped module → every app that imports it;
    - a **message contract** — event, RPC request/response, queue payload → the **publisher and
-     every consumer**, found by searching the solution for the message type (`rabbitmq`);
-   - a database migration → the deployable that runs it, and the database itself as a release step
-     with its own ordering (usually before the services).
+     every consumer**, found by searching the solution for the message type (`rabbitmq`).
 4. **Ordering and prerequisites** where they matter: migration before services, producer before
    consumer on an additive contract, consumer before producer on a removal, a config key or a
    variable group that must exist in the environment first. One extra clause on the bullet, not a
    runbook.
-5. **Unmappable file** → say so explicitly in the block. Silence turns a doubt into a missed
-   release; a line saying "non risolto: `<path>`" is a question the reviewer can answer.
 
-### Rules
+## GitHub
 
-| Case | What the block says |
-| --- | --- |
-| Named components | `- <componente> — <perché>`, one per line, real deployable names from the repo |
-| A shared library changed | the **consumers**, never the library — a library is not deployed |
-| Nothing deployable (docs, tests, editor config, a pipeline that only builds) | `Rilascio: nessun componente` |
-| Uncertain fan-out | list what is certain, then one line naming the doubt |
+```powershell
+gh pr create --base $base --title '<titolo>' --body-file pr-body.md      # --draft when applicable
+gh pr view --json url --jq .url
+gh issue view <n> --json title,body                                      # the linked issue's text
+```
 
-Never write "tutti i servizi" as shorthand: if it really is all of them, they are still listed by
-name — that list is what makes the size of the change visible.
-
-## Linking
-
-The parent-item rule and its resolution steps are in `SKILL.md` §2. In the body: on GitHub the
-`Fixes #<n>` / `Refs #<n>` line goes last before the trailer; parents under different Features get
-one sentence saying so; other PRs are referenced by number, not described.
+Link: `Fixes #<n>` / `Closes #<n>`, `Refs #<n>` when it does not close; the line goes last before the
+trailer. On Azure DevOps the item text comes through `azdo-cli`. Other PRs are referenced by number,
+not described.
 
 ## The trailer
 
@@ -153,6 +113,4 @@ unless the commit convention already asks for a co-author trailer.
 
 ## Draft PRs
 
-A draft says "look, but do not spend a full pass". Convert to ready only once the local build and
-tests are green and the description is final; converting is a one-flag change, and the reviewer's
-notification depends on it. Say in the body what the draft is still waiting for.
+Say in the body what the draft is still waiting for.

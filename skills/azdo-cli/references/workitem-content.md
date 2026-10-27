@@ -1,8 +1,6 @@
 # Work item content — the fields a type really has, and images
 
-Two things make a created item look empty on the board even though the call succeeded: the text went
-into a field the type's form does not show, and the image went into the Attachments tab. This file
-covers both, plus the attachment REST path that the CLI reaches without a PAT.
+The fields a type really has, the Bug form, and the attachment REST path.
 
 ## 1. Discover the fields before writing them
 
@@ -22,9 +20,8 @@ az devops invoke --area wit --resource fields --route-parameters project=<projec
   --query "value[?contains(name, '<label-fragment>')].{label:name, ref:referenceName, type:type}" -o table
 ```
 
-Confirm the `--area`/`--resource` names in the `az devops invoke` listing (see
-`auth-and-config.md`) rather than trusting the spelling above; a per-type field set is the one thing
-neither route returns cleanly, and that is the MCP work-item-type read (`mcp-fallback.md`).
+Confirm the `--area`/`--resource` names in the `az devops invoke` listing (`auth-and-config.md`); a per-type
+field set is a gap listed in `mcp-fallback.md`.
 
 ## 2. A Bug has no Description field on a Scrum form
 
@@ -53,9 +50,7 @@ normally. Check the form's field set once per project and per type, then reuse t
 
 ## 3. Attachments — the CLI reaches them, in two REST steps
 
-`az boards` has no attachment verb, but this is **not** a gap: the bearer token of the current
-`az login` is enough, so no PAT and no MCP tool are needed. The Azure DevOps AAD resource id
-`499b84ac-1321-427f-aa17-267ca6975798` is a fixed constant — identical across every organization.
+`az boards` has no attachment verb, but this is **not** a gap: the `az login` bearer token is enough (no PAT, no MCP).
 
 ```powershell
 $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca6975798 `

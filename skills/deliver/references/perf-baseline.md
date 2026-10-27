@@ -1,18 +1,13 @@
 # Perf baseline — measure before the change, compare the same way after
 
-A speed claim is a ratio between two measurements taken the same way. The baseline comes **before the
-first edit**; one taken afterwards, or on another day or machine, proves nothing.
-
 ## The rules
 
-| Rule | Why |
-| --- | --- |
-| baseline first, saved in the plan file: command, input, machine, every run's number | the "after" run must repeat it exactly |
-| same machine, same build configuration (Release), same data, nothing else heavy running | a different box is a different experiment |
-| N ≥ 3 runs, N = 5 when the spread is wide; keep each run, not only the mean | the spread is part of the result |
-| result = **ratio** (after / before) **and spread** (min–max or standard deviation of both sides) | a mean alone hides noise |
-| a ratio inside the spread is inconclusive | report "no measurable change", never an improvement |
-| a regression in another path of the perimeter is a finding, even when the target improved | speed bought with a slower sibling is a trade, and the user decides |
+- Baseline **before the first edit**, saved in the plan file: command, input, machine, every run's number; the "after" run repeats it exactly.
+- Same machine, same build configuration (Release), same data, nothing else heavy running.
+- N ≥ 3 runs, N = 5 when the spread is wide; keep each run, not only the mean.
+- Result = **ratio** (after / before) **and spread** (min–max or standard deviation of both sides).
+- A ratio inside the spread is inconclusive: report "no measurable change", never an improvement.
+- A regression in another path of the perimeter is a finding, even when the target improved: a slower sibling is a trade, and the user decides.
 
 ## .NET code: BenchmarkDotNet
 
@@ -53,8 +48,7 @@ $runs | Format-Table
 ```
 
 A load tool (`bombardier`, `k6`) replaces the loop when the question is concurrency; the rules above
-hold unchanged: same command, at least 3 runs, per-run numbers kept. Time the request only, never the
-build or the start-up.
+hold. Time the request only, never the build or the start-up.
 
 ## Database queries
 
@@ -62,11 +56,7 @@ The query run through the same client before and after, three times, with `SET S
 **logical reads** are the stable number, elapsed time the noisy one. Report both, and the plan operator
 that changed (`evidence-by-stack.md`).
 
-## The result, as it goes in the verdict
+## The result
 
-```text
-| perf | bombardier ... x3 | p50 41 ms -> 33 ms (ratio 0.80, spread 40-42 / 32-34) | fatto |
-```
-
-Worse than the baseline, or inside the spread → the loop restarts, or the user is asked: **accept**,
+The verdict row carries the ratio and both spreads. Worse than the baseline, or inside the spread → the loop restarts, or the user is asked: **accept**,
 **another round**, **change approach**.

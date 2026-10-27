@@ -14,9 +14,7 @@ unconfirmed · Italian chat, tables and board text; field names, WIQL and engine
 ## When
 
 - `/worklog`, `/worklog ieri`, `/worklog <data>`, a range (default: today); or asked in prose ("segna le ore").
-- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text> | sessione <id>` (or "segna le ore di questo item/PR/questa chat"):
-  only the matching topics go through Phases 3-7, the day's target, COPERTURA and gap prompt are skipped:
-  `scoping.md`.
+- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text> | sessione <id>` (or "segna le ore di questo item/PR/questa chat"): `scoping.md`.
 - The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
 - A day already logged is re-run: only the delta reaches the board.
 
@@ -53,10 +51,10 @@ Not for: creating backlog items (`workitem-create`), Azure DevOps verbs, auth an
 
 ### 3. Development, management, internal
 
-| Case | When | Where the hours go |
+| Case | When | Detail |
 | --- | --- | --- |
-| Development | a branch, commit, PR or work item covers it | the **Task** of the item worked on (`scrittura.md`) |
-| Management | meetings, calls, grooming, estimates, coordination — most of the gap prompt | Feature `Gestione progetto` → PBI `Gestione progetto - <Epic>` → one Task per session, `Done` (`ore-gestione.md`) |
+| Development | a branch, commit, PR or work item covers it | `scrittura.md` |
+| Management | meetings, calls, grooming, estimates, coordination — most of the gap prompt | `ore-gestione.md` |
 | Internal | tooling, the kit: not billable | its own row, never logged, shown in NON FATTURATO |
 
 In doubt → ask. Never spread management hours over a product item to reach the target.
@@ -74,37 +72,22 @@ pwsh -NoProfile -File "$wl\worklog-push.ps1" -Rows "<rows.json>" -DryRun
 pwsh -NoProfile -File "$wl\worklog-push.ps1" -Rows "<rows.json>"
 ```
 
-The engine's header gives CLAUDE, TU, TOTALE (08:00-20:00) and FUORI; the **Attese lunghe**
-list (turns > 120 min counted as CLAUDE) goes into Table 1 for the user to keep or drop. `Nessuna attivita'`
-on a weekday → gap prompt or close at zero, after asking (scope `sessione`: `Sessione <id>: nessun evento` → ask period or id, no gap prompt). Read the digest for topics and decisions;
-open a transcript only for a missing detail.
+The engine's output (header, **Attese lunghe**, `Nessuna attivita'`): `tempo-e-topic.md`. Read the digest
+for topics and decisions; open a transcript only for a missing detail.
 
 ## Traps
 
-1. Hours doubled → a raw `az` update, or the delta passed as `hours` → only the push; `hours` = the
-   period total on the item.
-2. Hours doubled while adding → hours logged by hand the audit did not know → reconcile, ask; same
-   work → `"delta": 0`.
-3. A day closed at 0.5h, no question asked → coverage skipped → COPERTURA and the gap prompt on
-   every under-target day.
-4. The gap filled to 8h by itself → the target treated as a quota → hours only as the user declares.
-5. Source events logged as found → they are proposals → each row confirmed.
-6. A lunch break counted as work → a permission prompt left pending looks like a long tool call →
+1. A lunch break counted as work → a permission prompt left pending looks like a long tool call →
    show the long waits, drop them in the Table 1 loop.
-7. The reminder keeps flagging a day → no audit entry, or under target with no decision → close row,
-   or `target` row for a reduced day.
-8. A second management Task for the same day → a re-run created instead of reusing → audit and
-   date-prefix lookup first.
-9. Default-branch work vanishes → no branch topic → split it from the digest, say it is an estimate.
-10. The recap shows the plan → it is the push output plus the read-back.
+2. Default-branch work vanishes → no branch topic → split it from the digest, say it is an estimate.
 
 ## References
 
-- `tempo-e-topic.md` — period, the engine's time model (CLAUDE, TU, FUORI) and GIORNO table, `targets.json`, topics,
-  roles, rounding per day, NON FATTURATO and COPERTURA.
-- `scoping.md` — a run scoped to an item, PR, topic or session (`sessione <id>`): which topics stay, the engine flag.
-- `tabelle.md` — Table 1 with coverage, Table 2, link format, confirm loops, the recap.
-- `ore-gestione.md` — the gap prompt; management hours: fixed Feature/PBI, one Task per session.
-- `fonti-esterne.md` — board, git, Slack and calendar as proposals for an under-target day.
-- `scrittura.md` — discovery, reconciliation, Task creation, the rows file and the push, the audit,
-  the closed day.
+- `tempo-e-topic.md` — Phases 1-3: the period, the engine's output, topics and rounding.
+- `motore.md` — the hours or spans look wrong: how the engine counts CLAUDE, TU and FUORI.
+- `scoping.md` — a scoped run.
+- `tabelle.md` — Phases 4 and 6: the tables, link format, the recap.
+- `ore-gestione.md` — an under-target day, or management hours.
+- `fonti-esterne.md` — the gap prompt answered `Cercale nelle fonti`.
+- `scrittura.md` — Phases 5 and 7: discovery, reconciliation, the rows file and the push.
+- `chiusura.md` — nothing loggable, a reduced day, or the sheet root: the audit fields and closed-day rows.

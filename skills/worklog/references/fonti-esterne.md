@@ -45,18 +45,5 @@ when unknown; never written into the kit).
 
 ## In Table 1
 
-```markdown
-| 5 | allineamento cliente | Call settimanale sul rilascio | 1h | 15:00 | 16:00 | 1h | calendario |
-| 6 | supporto assistenza | Thread #prj-assistenza su ordini bloccati | 35m | 11:10 | 11:45 | 0.5h | Slack |
-```
-
-Then the usual Table 1 loop: the user keeps, edits or drops each source row; coverage is recomputed.
-
-## Traps
-
-1. A day filled to 8h by a source scan nobody checked → rows logged unconfirmed → each row a yes.
-2. A 40-message thread counted 3h → windows not merged or idle stretches kept → merge < 15 min,
-   then round like every row.
-3. The calendar route retried after 403 → the az app has no calendar scope → connector or paste.
-4. Slack search noise in the main context → searched inline → always the subagent.
-5. A meeting both in the calendar and in a Claude session → counted twice → merge into one row.
+Source rows are ordinary Table 1 rows (shape: `tabelle.md`), the source named on the `Fonte` line. Then
+the usual Table 1 loop: the user keeps, edits or drops each source row; coverage is recomputed.

@@ -48,6 +48,12 @@ the ceremony and rewritten for PowerShell.
 | `skills/skill-forge/SKILL.md` | How to add or change an asset of this kit: shape decision, front matter, caps, splitting, finish checklist. |
 | `skills/grill-me/SKILL.md` | Red-team a plan: interview the decision tree round by round — the whole frontier at once, each question with a recommended answer — then a Decision Summary. |
 
+**Principles**
+
+| Skill | Purpose |
+|---|---|
+| `skills/principles/SKILL.md` | Which principle wins when two disagree: a five-rung ladder (house facts, local convention, architecture, clean code, patterns), weekly tie-breaks, review severity; references by scope for architecture, design patterns and their forces, clean-code grey zones. |
+
 **Backend .NET**
 
 | Skill | Purpose |

@@ -82,18 +82,10 @@ discovery, reprint, ask again. Write only on explicit confirmation.
 
 From the push output (`worklog-push.ps1` prints item, before, delta, after, audit, outcome per row) and
 **after** reading the items back: per row, the item touched, hours before and after, created or not,
-parent, final state, PRs and commits linked — every item a **link with its title**. Then one line per
+parent, final state, PRs and commits linked — every item linked as in Table 2. Then one line per
 day: `copertura finale <h>/<target>h`. Close with one Italian line: total logged, on which project,
 and what did **not** happen (a 0h row, a failed row, a failed link).
 
 ## Traps
 
-1. The timeline printed beside the table → unreadable → it lives in the digest.
-2. The rounded total does not match the rows → a row corrected by hand → numbers only from the helper.
-3. An item shown as `#105060` → the user cannot check it → link with title.
-4. "Ok procedi" on Table 1 taken for Table 2 → one gate passed → each table has its own confirmation.
-5. Coverage computed once and left stale → rows added by the gap prompt → recompute after every change.
-6. The recap repeats Table 2 → the plan was trusted → the recap is the push output, read back.
-7. Table 1 falls apart in the terminal → 12 columns and long descriptions wrap, `~` pairs strike text through →
-   the six columns above, `Topic` at ~50 characters, `*` for an estimate (`tools/validate-content.mjs` checks the
-   templates: at most 8 columns, no `~`).
+1. "Ok procedi" on Table 1 taken for Table 2 → one gate passed → each table has its own confirmation.

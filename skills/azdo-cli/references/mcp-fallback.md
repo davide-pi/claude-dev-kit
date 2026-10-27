@@ -3,19 +3,8 @@
 The rule is one sentence: **try the CLI first, every time, and fall back only on a gap you have
 identified.** This file exists so the fallback is a decision with evidence behind it, not a habit.
 
-## Why the CLI is first, and not a matter of taste
-
-| Property | `az` | MCP |
-| --- | --- | --- |
-| Verbs and flags | discoverable with `--help`, in the shell, now | discoverable only by reading a tool schema |
-| Surface stability | the extension's verbs change slowly | tool names get consolidated and renamed between server versions |
-| Reproducibility | the exact command can be pasted into a script, a pipeline or a hand-off | a tool call cannot leave the session |
-| Availability | one binary, one credential | needs the server configured, connected and pointed at the right organization |
-| Cost | `--query` and `-o tsv` trim the result before it enters the context | tool names and server instructions every turn (schemas are deferred by tool search), and the full result payload on every call |
-| Visibility | the user sees the command | every `azdo-*` call sits behind an `ask` permission: the user is prompted each time |
-
-The cost row decides it: the per-turn price is small, but an MCP result arrives untrimmed, while a
-CLI call returns only the fields asked for.
+Why CLI first: `az` verbs are discoverable with `--help` and reproducible outside the session, and `--query`
+trims the result; an MCP result arrives untrimmed and every `azdo-*` call prompts the user.
 
 ## The three tests, in order
 
@@ -78,9 +67,5 @@ absent, and why no `invoke` route could be verified — before treating it as on
 - **Discover, do not assume.** Organization, project, types and states are read at runtime whichever
   route you take. A fallback is not a licence to hardcode.
 
-## What the fallback never buys you
-
-A gap in the CLI is not permission to skip the parts of a flow that exist to be careful: an MCP
-write is exactly as irreversible as a CLI write. A work item created, a comment posted, a PR
-completed, a run queued — all of them are visible to other people the moment they land, and the
-confirmation the owning asset requires still applies.
+A gap is no licence to skip care: an MCP write is as irreversible as a CLI write, and the owning asset's
+confirmation still applies.

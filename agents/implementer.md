@@ -44,7 +44,8 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming,
   error handling and logging.
 - **Comments: the strict minimum.** Only a non-obvious why, one line; never restate the code.
-- **Load the stack skill the brief names** with the Skill tool before the first edit.
+- **Load the stack skill the brief names** with the Skill tool before the first edit; a structural
+  choice the brief leaves open (extract, share, an interface, a pattern, which layer) → `principles`.
 - **Targeted tests while working.** Run only the test files the change touches (and the one you saw
   failing); the verify command runs once, at the end, before you report.
 - **Verify before reporting.** Run the verify command; report its status (`pass` · `fail` · `not-run`),
@@ -68,7 +69,7 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 1
 - **One edit per file.** Several hunks → one `Edit` per hunk sent in the same turn, or `Write` for a
   small file. No `sed -i`, `python` or `node -e` edit scripts.
 - **Trust the brief.** Facts and `file:line` it states are settled: don't re-explore them.
-- **Skills.** Load only the skill the brief names; none named → none.
+- **Skills.** Load only the skill the brief names, plus `principles` for an open structural choice.
 - **Short output.** Pipe long commands through `tail`/`head`; one test file while working, the
   verify once at the end.
 - **Tests in one call.** Run them in the foreground with a timeout long enough for the suite, output

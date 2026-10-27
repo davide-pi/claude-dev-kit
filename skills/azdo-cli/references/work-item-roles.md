@@ -1,11 +1,8 @@
 # Work item types by role — discover the name, never assume it
 
-Every other asset in this kit speaks in **roles**: a backlog item, a defect, an analysis item, a
-technical activity, a unit of time, a grouping. Azure DevOps has no roles — it has type **names**,
-and those names come from the project's **process template**. The same role is `Product Backlog
-Item` in one project and `User Story`, `Issue` or `Requirement` in the next, so an asset that
-hardcodes a name works on one board and breaks on the next. This file is the mapping, and the
-mapping is **always confirmed at runtime**.
+Other assets speak in **roles** (backlog item, defect, analysis, technical activity, time, grouping); Azure DevOps
+has type **names** from the process template. This file maps one to the other; the mapping is
+**always confirmed at runtime**.
 
 Read it whenever a command, a WIQL predicate or a confirmation table has to name a type, and before
 walking from a Task up to the item that owns it.
@@ -50,59 +47,31 @@ work-item-type read (`mcp-fallback.md`).
 | **Time** — carries hours, never linked to a PR | `Task` | `Task` | `Task` | `Task` |
 | **Grouping** — above the backlog item | `Feature`, `Epic` | `Feature`, `Epic` | `Epic` | `Feature`, `Epic` |
 
-How to read the awkward cells:
+Awkward cells:
 
-- **The defect role is always `Bug`,** wherever it exists. `Issue` is never the defect type — that
-  pairing does not exist in any template, and assuming it files a malfunction as something else
-  entirely.
-- **Basic has no defect type at all,** and no analysis type and no technical-activity type either.
-  Those roles have no home there: section 4 says to ask, not to file a defect as the backlog type.
-- **The technical-activity role is usually a custom type.** `Tech` is the name this kit's own
-  conventions expect, but a custom type exists only where somebody created it, and nothing
-  guarantees the spelling. It is the role most likely to be absent.
-- **`Feature` and `Epic` are two levels, not synonyms.** `Epic` sits above `Feature`; a project may
-  enable only one of them, or turn the portfolio backlog off entirely.
+- **The defect role is always `Bug`**, never `Issue`; Basic has no defect, analysis or technical-activity type.
+- **The technical-activity role is usually a custom type**; `Tech` is the name this kit's conventions expect, but
+  the spelling is not guaranteed and it is the role most likely to be absent.
+- **`Feature` and `Epic` are two levels, not synonyms**: `Epic` sits above `Feature`; a project may enable only one,
+  or turn the portfolio backlog off.
 
-## 3. `Issue` is why the query is not optional
+## 3. `Issue`
 
-One name, two roles — and neither of them is the defect:
+Analysis on Agile, backlog item on Basic (`SKILL.md` §4). `workItemTypes` on a Basic project returns exactly
+`Epic`, `Issue`, `Task`, which no Agile project does.
 
-| Template | What `Issue` means there |
-| --- | --- |
-| **Agile** | the **analysis** role — what you raise to be looked into before a fix is defined |
-| **Basic** | the **backlog item** — the thing you build |
+## 4. Custom types, and a role with no type
 
-A name taken from a table without checking therefore lands in the wrong place: the same
-`--type 'Issue'` files an impediment-shaped item on one project and a piece of scope on the next.
-The type list makes the difference visible in one call — `workItemTypes` on a Basic project returns
-exactly `Epic`, `Issue`, `Task`, which no Agile project does.
-
-## 4. Case sensitivity, custom types, and a role with no type
-
-- **Names are case-sensitive and process-specific.** `product backlog item` is not
-  `Product Backlog Item`, and `--type` rejects it. Copy the name out of the `workItemTypes`
-  response rather than retyping it from memory.
-- **A custom type exists only where someone created it.** Never carry one across projects, and
-  never assume one organization customised two of its projects the same way.
-- **When the project has no type for the role, say so and ask.** Do not substitute the closest
-  type, do not file a technical activity as a `Bug` because no technical type exists, and do not
-  invent one. Report which role has no home in this project and let the user decide: a wrong type
-  is visible on the board, misroutes the item's backlog level, and is tedious to correct.
-- A role can also be filled by a type this table never predicted, because the process was
-  customised. The query is the authority; the table only says where to look first.
+- Never carry a custom type across projects, nor assume one organization customised two projects the same way.
+- No type for the role → ask (`SKILL.md` §4); a wrong type misroutes the item's backlog level and is tedious to
+  correct. A role can also be filled by a type this table never predicted: the query is the authority.
 
 ## 5. Two facts about the model other assets depend on
 
-- **The time role is the only one that carries hours.** The `Microsoft.VSTS.Scheduling` fields —
-  remaining work, completed work, original estimate — are written on a `Task`, never on the backlog
-  item, defect or analysis item above it. `worklog` is the asset that writes them.
-- **A pull request never links a Task.** A PR links the item the work is *about* — the backlog
-  item, the defect or the analysis item. Linking the Task instead hides the change from the item
-  everyone reads, and from any completion-time state transition that follows the link
-  (`--transition-work-items` in `repos-and-prs.md`).
-
-So the normal shape is: grouping → backlog item / defect / analysis item → Task, with the hours on
-the Task and the pull request on the item above it.
+- The `Microsoft.VSTS.Scheduling` fields (remaining work, completed work, original estimate) are written on a
+  `Task`, never on the item above it. `worklog` writes them.
+- A PR never links a Task: linking it hides the change from the item everyone reads, and from any
+  completion-time state transition that follows the link (`--transition-work-items` in `repos-and-prs.md`).
 
 ## 6. Walking the hierarchy between roles
 

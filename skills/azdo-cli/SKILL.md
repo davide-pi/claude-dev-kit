@@ -101,17 +101,16 @@ $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca697
 3. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
    system codepage → REST `PUT` with `charset=utf-8`, then read it back.
 4. `--fields` ignored → `show` wants a comma list, `create`/`update` space-separated `field=value`.
-5. A PR completes by accident → `--status completed` merges at once → confirm it, abandon and
-   `--bypass-policy` with the user first.
+5. A PR completes by accident → `--status completed` merges at once; so do abandon and
+   `--bypass-policy` → ask first.
 
 ## References
 
-- `references/auth-and-config.md` — any auth or "not found" failure: sign-in, PAT versus Entra,
-  tenants, the per-root config dir, the identity to assign to.
-- `references/boards-catalogue.md` — before any WIQL or work item write: queries, reads, updates, links.
-- `references/work-item-roles.md` — before naming a type: role-to-type per template, the confirming query.
-- `references/workitem-content.md` — before writing any field: real field names, the Bug form, images.
-- `references/wiki-rest.md` — before any wiki write: the page tree, reading, the REST `PUT` and eTag.
-- `references/repos-and-prs.md` — anything on a repository or a PR: reviewers, votes, completion, threads.
-- `references/pipelines-catalogue.md` — anything on a pipeline: definitions, runs, queueing, failed logs.
-- `references/mcp-fallback.md` — only once the CLI is exhausted: the gap list and its counterparts.
+- `references/auth-and-config.md` — any auth or "not found" failure.
+- `references/boards-catalogue.md` — before any WIQL or work item write.
+- `references/work-item-roles.md` — before naming a type.
+- `references/workitem-content.md` — before writing any field.
+- `references/wiki-rest.md` — before any wiki write.
+- `references/repos-and-prs.md` — anything on a repository or a PR.
+- `references/pipelines-catalogue.md` — anything on a pipeline.
+- `references/mcp-fallback.md` — only once the CLI is exhausted.

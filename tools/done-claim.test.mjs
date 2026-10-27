@@ -465,6 +465,52 @@ test('rows that must stay unproven', () => {
   assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
 });
 
+// ── Real output quoted loosely: false positives from the retro of 2026-10-27 ──
+
+test('a "$(...)" inside a value is output, not a gloss to strip', () => {
+  const out = 'Server=$(SHARED.SqlServer);Database=$(FRONTIERAAPI.Database);user id=$(SHARED.SqlUser);';
+  assert.equal(stop(edited(verdict(row('`Server=$(SHARED.SqlServer);Database=$(FRONTIERAAPI.Database);...`')), out)).reason, '');
+  assert.match(stop(edited(verdict(row('`Server=$(OTHER.SqlServer);...`')), out)).reason, /"fatto"/);
+});
+
+test('one word left once the gloss is stripped is proven as a whole word, never a short token', () => {
+  assert.equal(stop(edited(verdict(row('`IDENTICO` (17,8 s)')), 'righe nuove 8 base 8 IDENTICO')).reason, '');
+  assert.equal(stop(edited(verdict(row('`written:` … (14 entries, branch x)')), 'written: C:\\repo\\perimeter.md (14 entries)')).reason, '');
+  assert.match(stop(edited(verdict(row('`IDENTICO` (17,8 s)')), 'DIVERSO')).reason, /"fatto"/);
+});
+
+test('an empty JSON array or object printed alone is proof; other punctuation is not', () => {
+  assert.equal(stop(edited(verdict(row('`[]`')), 'succeeded\n[]\n')).reason, '');
+  assert.match(stop(edited(verdict(row('`[]`')), '[1]')).reason, /"fatto"/);
+});
+
+test('pieces joined by the Italian " e " are proven piece by piece', () => {
+  const out = 'wwwroot\\appsettings.Production.json  True\nx.runtimeconfig.json  False';
+  assert.equal(stop(edited(verdict(row('`wwwroot\\appsettings.Production.json  True` e `x.runtimeconfig.json  False`')), out)).reason, '');
+  assert.match(stop(edited(verdict(row('`wwwroot\\appsettings.Production.json  True` e `x.runtimeconfig.json  True`')), out)).reason, /"fatto"/);
+});
+
+test('"exit 0" alone is proven only by a shell call that ran the cited command after the last edit', () => {
+  const shell = (command) => [prompt('x'), tool('Edit'), result('ok'), tool('PowerShell', { command }), result(''), say(verdict('| build | MSBuild `SportsAndWalletApi.vbproj` | exit code 0 | fatto |'))];
+  assert.equal(stop(shell('& msbuild .\\SportsAndWalletApi.vbproj /t:Build')).reason, '');
+  assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
+});
+
+test('"exit 0" with a Comando cell without backticks needs the whole cell in the shell call, not its first word', () => {
+  const shell = (command) => [prompt('x'), tool('Edit'), result('ok'), tool('PowerShell', { command }), result(''), say(verdict('| build | dotnet build Orders.sln | exit 0 | fatto |'))];
+  assert.equal(stop(shell('dotnet build Orders.sln -c Release')).reason, '');
+  assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
+});
+
+test('"exit 0" is not proven by a shell call that failed', () => {
+  const call = (id, command) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'PowerShell', input: { command } }] } });
+  const done = (id, text, isError) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, ...(isError ? { is_error: true } : {}) }] } });
+  const turn = (...mid) => [prompt('x'), tool('Edit'), result('ok'), ...mid, say(verdict('| build | MSBuild `X.vbproj` | exit code 0 | fatto |'))];
+  assert.match(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1\nerror', true))).reason, /"fatto"/);
+  assert.match(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1\nerror'))).reason, /"fatto"/);
+  assert.equal(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1', true), call('b', 'msbuild X.vbproj'), done('b', ''))).reason, '');
+});
+
 // ── Read-only delegates do not arm the hook (#115) ──
 
 test('an Agent or Task of a read-only type does not arm; an editing or untyped one does; Workflow always does', () => {
