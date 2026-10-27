@@ -1,9 +1,6 @@
 # Discovery, writes and idempotence
 
-CLI first, always: config, auth, org/project resolution, WIQL and the boards and repos verbs belong
-to `azdo-cli`. What counts as a real CLI gap — and so may go to the MCP server — is decided only by
-`azdo-cli` `mcp-fallback.md`; the recap states which interface wrote what. **Hours are the exception
-with no fallback**: they go only through `worklog-push.ps1`.
+CLI first (`azdo-cli`; an MCP fallback only per its `mcp-fallback.md`, the recap states which interface wrote what); **hours have no fallback**: only `worklog-push.ps1`.
 
 ## Phase 5 — discovery per topic
 
@@ -37,9 +34,7 @@ Only for **loggable** rows (rounded > 0). For each:
    | same work, and their hours cover the estimate | push row with `"delta": 0`: the user's hours beat the transcript estimate; the audit entry is still written, so the day is closed |
    | same work, the estimate is larger | push row with `"delta": <estimate − their hours>` |
 
-   The safe default is **asking**. Never inflate a Task because the audit did not know a manual entry.
-
-No cache between runs: discovery is redone every time, because items, states and PRs change.
+No cache between runs: discovery is redone every time.
 
 ## Phase 7 — writes
 
@@ -81,41 +76,5 @@ In this order, the orchestrator alone (no parallel writers: the audit is one fil
 6. **Read back** every created or updated item (hours, parent, state, links) and only then print the
    recap (`tabelle.md`). First write on an org this session → push a file with that one row first.
 
-The shell guard hook asks on any other `az boards work-item update` carrying `CompletedWork`: if it fires
-during `/worklog`, the command was not the push script — stop and use it.
-
-### The audit
-
-- Key `(periodFrom, periodTo, itemId)`; a re-run updates the entry instead of adding one.
-- Fields: `periodFrom`, `periodTo`, `topic`, `mcp`, `project`, `itemId`, `parentId`, `created`,
-  `hoursLogged` (the period's total on the item), `prs`, `commits`, `ts`, and `note`/`sheet`/`overtime`
-  when given. `hoursLogged` is the period total, not the item's cumulative value: that is what makes
-  the delta computable on a re-run.
-- **Never pruned**: an old re-run always finds its delta. The digest expires, not the audit.
-
-### The closed day
-
-A day is "closed" when **an audit entry covers it**; it is **under target** when its logged hours are
-more than 1h short of its target. `hooks/worklog-pending.js` reads both for the session-start
-reminder and the statusline badge. So:
-
-| Case | Push row |
-| --- | --- |
-| Hours logged | the hours rows |
-| Hours kept on a **sheet**, not a board (roots `workspaces.json` sends to a sheet) | a close row with the real hours: `itemId: null`, `hours: <h>`, `project: "<root>/<project>"`, `sheet: "<sheet path>"` |
-| The day happened but **nothing is loggable** (tooling only, leave, a fully `internal` day) | a close row: `topic: "nulla-da-registrare"`, `itemId: null`, `hours: 0` — a day closed at zero is never under target |
-| A **reduced day** (event, leave, course, part-time) | a `target` row with the real target and a note, plus the day's hours rows |
-| The user postpones ("lo faccio domani") | **nothing**: the day stays pending, which is exactly right |
-
-Ask before a close row at zero, in Italian: "il <data> non c'è niente da registrare, lo chiudo a zero?"
-
-## Traps
-
-1. Hours doubled → a raw `az boards work-item update` with CompletedWork, or `hours` passed as the
-   delta → only the push script, `hours` is the period total.
-2. Hours on a backlog item → they go on Tasks → create the child Task, then push.
-3. New item left `New` → the type starts there → `state` in the push row.
-4. Audit corrupted → two writers → only the push script, one run at a time.
-5. PR linked as a URL in the description → it drives nothing → the real link.
-6. The recap describes the plan → nothing was read back → push output, then read back.
-7. A Task created with hours, then pushed → the hours count twice → never set CompletedWork at creation.
+The audit: key `(periodFrom, periodTo, itemId)`, `hoursLogged` is the period total. Audit fields, and the
+closed-day rows (nothing loggable, a reduced day, a sheet): `chiusura.md`.

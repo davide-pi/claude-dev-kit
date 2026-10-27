@@ -92,30 +92,11 @@ The backlog-item type is resolved per project (`azdo-cli`), never assumed.
 
 ## In Table 2
 
-Management shows as an ordinary row, so the user sees where the hours land before anything is
-written (the full Table 2 shape is in `tabelle.md`):
-
-```markdown
-| 3 | riunione cliente | Riunione + grooming backlog | 1.5h | <Project> | padre [PBI #<id> — Gestione progetto - <titolo Epic>](<link>) → **Task DA CREARE** ("<aaaa/MM/gg> - <titolo attività>") |
-```
-
-Several management sessions in a period → **several rows and several Tasks**, one per session;
+Management shows as an ordinary row (shape: `tabelle.md`, third example row), so the user sees where
+the hours land before anything is written. Several management sessions in a period → **several rows and several Tasks**, one per session;
 never merged into one Task for the period.
 
 ## Traps
 
-1. A duplicate management PBI appears → searched by exact title, or only among non-Done Features →
-   prefix match, over every Feature of the Epic, Done included.
-2. Management hours land on a product item → the topic looked close to a backlog item → not
-   attributable to an item means management; in doubt, ask.
-3. One hours Task per item worked on → the development logic was applied → one Task per session.
-4. The hours Task is assigned to a fixed account → the identity was hardcoded → resolve it per run.
-5. The hours Task stays `New` → the state was not forced → `Done` right after creation.
-6. Same-day re-run doubles the hours → a new Task instead of the delta → audit and date-prefix
-   lookup before creating.
-7. An `internal` topic (tooling, not billable) ends up as management → they differ → `internal`
-   stays its own row and is never logged.
-8. The gap filled to exactly 8h with no answer from the user → the target treated as a quota →
-   hours only as declared; a short day becomes a `target` row, never invented meetings.
-9. A course or an event logged on a client's management PBI → it is not client work → a `target`
+1. A course or an event logged on a client's management PBI → it is not client work → a `target`
    row for the day (the reduced target) and nothing on the board, unless the user names an item.
