@@ -496,6 +496,12 @@ test('"exit 0" alone is proven only by a shell call that ran the cited command a
   assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
 });
 
+test('"exit 0" with a Comando cell without backticks needs the whole cell in the shell call, not its first word', () => {
+  const shell = (command) => [prompt('x'), tool('Edit'), result('ok'), tool('PowerShell', { command }), result(''), say(verdict('| build | dotnet build Orders.sln | exit 0 | fatto |'))];
+  assert.equal(stop(shell('dotnet build Orders.sln -c Release')).reason, '');
+  assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
+});
+
 test('"exit 0" is not proven by a shell call that failed', () => {
   const call = (id, command) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'PowerShell', input: { command } }] } });
   const done = (id, text, isError) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, ...(isError ? { is_error: true } : {}) }] } });

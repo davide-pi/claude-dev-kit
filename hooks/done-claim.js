@@ -142,10 +142,10 @@ function piecesPrinted(line, printed) {
   return pieces.length > 0 && pieces.every((p) => (elided ? looseText.includes(p) : printedAsWords(looseText, p)));
 }
 
-/** A bare `exit 0` prints nothing: proven when a shell call after the last edit ran the row's command (a backticked span, else its first word). */
+/** A bare `exit 0` prints nothing: proven when a shell call after the last edit ran the row's command (a backticked span, else the whole cell). */
 function exitZeroRan(row, shellCommands) {
   const spans = [...row.command.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
-  const keys = (spans.length ? spans : [row.command.trim().split(/\s+/)[0]]).map((k) => normalise(k)).filter((k) => k.length >= 3);
+  const keys = (spans.length ? spans : [row.command]).map((k) => normalise(k)).filter((k) => k.length >= 3);
   return keys.length > 0 && shellCommands.some((c) => keys.some((k) => normalise(c).includes(k)));
 }
 
