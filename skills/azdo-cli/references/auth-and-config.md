@@ -1,34 +1,9 @@
 # Configuration and authentication
 
-## Where the configuration lives
+## Configuration
 
-The `azure-devops` extension keeps its defaults in the Azure CLI configuration directory — the one
-`az --version` prints as `Config directory`, normally `.azure` under the user profile. Two
-consequences worth remembering:
-
-- The defaults are **per machine and per user**, not per repository. A working command is not proof
-  that the same command works in the next clone.
-- Nothing in the repository selects the organization. If a project needs a different one, either
-  pass `--org`/`-p`, or let `--detect true` read it from the git remote.
-
-```powershell
-az devops configure --defaults organization=https://dev.azure.com/<org> project=<project>
-az devops configure --list                     # read back what is set
-az devops configure --defaults project=''      # clear one default
-az devops configure --use-git-aliases true     # optional: enables `git pr list` and friends
-```
-
-## Precedence, from strongest to weakest
-
-| Rank | Source | Notes |
-| --- | --- | --- |
-| 1 | `--org` / `--organization`, `--project` / `-p` on the command | always wins; the form to use in anything scripted |
-| 2 | `--detect true` | infers the organization from the current repository's remote |
-| 3 | `az devops configure --defaults` | the machine default |
-| 4 | nothing | the command fails asking for the organization |
-
-Every verb in `az devops`, `az boards`, `az repos` and `az pipelines` accepts `--org`; every
-project-scoped verb also accepts `-p`. Organization-level verbs (`az devops project list`,
+Never rely on defaults (`az devops configure`, `--detect true`): they are per machine and user, and may point at
+another client. Pass `--org` and `-p` on every call. Organization-level verbs (`az devops project list`,
 `az devops user list`, `az boards work-item relation list-type`) take only `--org`.
 
 ## Two credential models
@@ -44,10 +19,6 @@ items does not necessarily write them, and one that reads code does not necessar
 When a read succeeds and the matching write is refused, suspect the scope before the command.
 
 ```powershell
-# Interactive, Entra
-az login
-az account show --query "{user:user.name, tenant:tenantId}" -o jsonc
-
 # PAT, non-interactive. Keep the token out of the shell history and out of any file in the repo.
 $env:AZURE_DEVOPS_EXT_PAT = (Read-Host -AsSecureString | ConvertFrom-SecureString -AsPlainText)
 az devops login --org https://dev.azure.com/<org>
@@ -55,14 +26,9 @@ az devops login --org https://dev.azure.com/<org>
 
 ## The case that actually bites: an organization on a different Entra tenant
 
-An Azure DevOps organization is backed by exactly one Entra tenant. Work across two organizations
-whose tenants differ and a single `az login` covers only one of them. The failure is confusing
-because nothing says "wrong tenant": the CLI is signed in, and the organization simply behaves as if
-it did not exist — an empty project list, or a "not found" on a project that is open in the browser.
-
-Sign in naming the tenant. `--allow-no-subscriptions` matters because a tenant that exists only to
-back a DevOps organization often has no Azure subscription at all, and without the flag the sign-in
-refuses to complete.
+An organization is backed by one Entra tenant; a single `az login` covers one. Nothing says "wrong tenant":
+the organization behaves as if it did not exist (an empty project list, "not found" on a project open in the
+browser). Sign in naming the tenant; `--allow-no-subscriptions` is needed when the tenant has no Azure subscription.
 
 ```powershell
 az login --tenant <tenant-domain> --allow-no-subscriptions
@@ -70,15 +36,11 @@ az account show --query tenantId -o tsv          # confirm which tenant is now c
 az devops project list --org https://dev.azure.com/<org> --query "value[].name" -o tsv
 ```
 
-Both tenants stay in the account list once signed in; `az account show` reports which is current and
-`az login --tenant …` switches. Treat the tenant as part of the organization's identity: record it
-next to the organization URL, so the next failure takes one command instead of an investigation.
-
-A PAT sidesteps tenants entirely — it is issued by the organization, not by a tenant — which makes
-it the pragmatic answer for the second organization when switching sign-ins becomes tiresome.
+Both tenants stay in the account list; `az account show` reports the current one and `az login --tenant …`
+switches. Record the tenant next to the organization URL. A PAT is issued by the organization, so it sidesteps tenants.
 
 ```powershell
-# Per-tenant token, when a raw REST call needs a bearer rather than the extension's own credential.
+# Per-tenant bearer for a raw REST call.
 az account get-access-token --tenant <tenant-domain> --query accessToken -o tsv
 ```
 
@@ -161,10 +123,8 @@ az devops invoke --area <area> --resource <resource> `
 | `--out-file`, `--accept-media-type` | write the response to a file; ask for a non-JSON response |
 | `--api-version` | pin the API version when the default is too old for the endpoint |
 
-Run `az devops invoke` with no `--area`/`--resource` to list every area and resource the
-organization exposes — the authoritative way to learn a name instead of guessing it. It enumerates
-the whole surface and is slow, so run it once and keep the output. If you cannot verify the area,
-resource and route this way, treat the capability as a genuine gap and read `mcp-fallback.md`.
+Run `az devops invoke` with no `--area`/`--resource` to list every area and resource the organization
+exposes. It is slow: run it once and keep the output. The three tests before a gap: `mcp-fallback.md`.
 
 ## Triage by symptom
 

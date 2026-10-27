@@ -1,17 +1,12 @@
 # Boards — the command catalogue
 
-Every verb below was read out of `az boards --help` and its sub-verbs. Where a capability has no
-verb, the row says so instead of inventing a flag.
-
 ## Querying with WIQL
 
 `az boards query` accepts a WIQL string, a saved query id, or a saved query path. It supports
 **flat** queries only — a tree or one-hop query fails, so express the relationship as a flat filter
 or query the sides separately.
 
-**`--project` / `-p` does not scope the query reliably.** It has been observed returning work items
-belonging to other projects, so the flag alone is not a filter — it is a hint. Every WIQL repeats
-the scope in its own `WHERE`, as a literal project name, **in addition to** `-p`:
+`-p` does not scope the query (`SKILL.md` §1): the `WHERE` names the project too.
 
 ```powershell
 $wiql = @"
@@ -93,12 +88,8 @@ az boards work-item update --id <id> --state '<state>' --title '<title>' `
 
 Three rules the CLI will not warn you about:
 
-1. **Set only fields the type has.** One unknown field reference fails the whole call, so
-   `Microsoft.VSTS.Common.AcceptanceCriteria` and `Microsoft.VSTS.TCM.ReproSteps` are not safe
-   defaults. Discover the type's fields first — `workitem-content.md`, section 1.
-2. **A field the form does not show is a silent loss**, not an error: the call succeeds and the item
-   looks empty on the board. A Bug is the case that bites, because on a Scrum form it has no
-   Description field at all — `workitem-content.md`, section 2.
+1. **Set only fields the type has**: one unknown field reference fails the whole call (`workitem-content.md`, section 1).
+2. **A field the form does not show is a silent loss**, not an error (`workitem-content.md`, section 2).
 3. **`--description` is rendered per the field's format.** A description field configured as HTML
    renders HTML and ignores markdown; write the markup the field expects.
 
@@ -122,8 +113,7 @@ az devops invoke --area wit --resource comments --route-parameters project=<proj
 
 The `wit`/`comments` resource is published under two route templates, so if the route parameter is
 rejected, list the areas as described in `auth-and-config.md` and read the template; if the endpoint
-rejects the default API version, pin it with `--api-version`. This is not a gap (`mcp-fallback.md`): the
-MCP work-item read is acceptable only when no route can be verified from that listing.
+rejects the default API version, pin it with `--api-version`.
 
 ## Parent and child links
 
@@ -141,30 +131,16 @@ it once rather than assuming `parent`, `child`, `related` and `duplicate` are al
 
 ## Discovering types, states and classification — do not assume a process
 
-There is no `az boards work-item type` verb. Three honest routes, cheapest first:
+There is no `az boards work-item type` verb: the authoritative type and state list is `work-item-roles.md` §1.
+Types and states in use, WIQL plus client-side dedupe (an unused type never surfaces):
 
 ```powershell
-# 1. Which types and states are actually in use — WIQL plus client-side dedupe.
 $w = "SELECT [System.Id],[System.WorkItemType],[System.State] FROM WorkItems WHERE [System.TeamProject] = '<project>'"
 $items = az boards query --wiql $w -p <project> -o json | ConvertFrom-Json
 $items.fields.'System.WorkItemType' | Sort-Object -Unique
 $items | Group-Object { $_.fields.'System.WorkItemType' } |
   ForEach-Object { "$($_.Name): $((($_.Group.fields.'System.State') | Sort-Object -Unique) -join ', ')" }
-
-# 2. The authoritative list, through the CLI's REST escape hatch.
-az devops invoke --area wit --resource workItemTypes --route-parameters project=<project> `
-  --query "value[].{name:name, ref:referenceName}" -o table
-az devops invoke --area wit --resource workItemTypeStates `
-  --route-parameters project=<project> type='<type>' --query "value[].{state:name, category:category}" -o table
-
-# 3. Which process the project runs on, when the answer needs a name.
-az devops project show --project <project> --query capabilities.processTemplate -o jsonc
 ```
-
-Route 1 is complete only for types and states that some item already uses; an unused type never
-surfaces. Route 2 is exhaustive. Say which route the answer came from, so a caller knows how far to
-trust it. The field set a create must respect is the one thing neither route returns cleanly — take
-the MCP work-item-type read for that.
 
 Classification paths do have verbs, and `--fields`/`--area`/`--iteration` will reject a path that is
 not in these lists:
@@ -177,8 +153,4 @@ az boards iteration team list --team '<team>' -p <project> -o table
 
 ## Attaching a file — no verb, but not a gap
 
-`az boards` has no attachment verb, and it does not need one: the bearer token of the current
-`az login` reaches the REST endpoint directly, with no PAT and no MCP tool. Two steps — POST the
-bytes to the attachments endpoint, then PATCH an `AttachedFile` relation onto the item. On a Bug the
-image belongs **inline in the field** rather than as a relation. Both recipes, with the fixed Azure
-DevOps resource id the token is requested for, are in `workitem-content.md`, sections 3 and 4.
+`az boards` has no attachment verb: REST with the `az login` token, `workitem-content.md`, sections 3 and 4.
