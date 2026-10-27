@@ -22,6 +22,7 @@ import {
   parseNumstat,
   parsePerimeter,
   parseWorktree,
+  repoRelative,
   upsertPr,
 } from './work'
 
@@ -109,15 +110,24 @@ async function readAzurePr($: EngineInterface, cwd: string, branch: string, url:
 }
 
 /**
+ * Whether the checkout at `root` is one of the chat's: the one this process started in (`homeRoot`), or one it edited a file in.
+ * A repo only passed through (a `cd` to read) is not, so the PR of its branch never joins the chat.
+ */
+const isRepoOfChat = (root: string | undefined, homeRoot: string | undefined, edited: readonly string[] | undefined) =>
+  Boolean(root) && (homeRoot?.toLowerCase() === root?.toLowerCase() || (edited ?? []).some(p => repoRelative(root, p) !== undefined))
+
+/**
  * Reads, in the background (never awaited by a refresh or a render), the repo's default branch from `origin/HEAD` and,
- * off it, the pull request of `branch`: `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure
+ * off it, the pull request of `branch` when the repo is one of the chat's (`isRepoOfChat`): `gh pr view` for a GitHub `origin`, `az repos pr list` for an Azure
  * DevOps one. One found joins the chat's pull requests, or updates its entry there; no CLI, no PR or a failure adds
  * nothing. The result is dropped when the branch has moved on.
  */
 async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
   const now = await $.clock.now()
-  const { alm } = await read($, snapshot)
-  const key = `${cwd}\n${branch}\n${alm?.org ?? ''}\n${alm?.project ?? ''}`
+  const { alm, git, homeRoot, edited } = await read($, snapshot)
+  const isChatRepo = isRepoOfChat(git?.root, homeRoot, edited)
+  // Whether the repo is the chat's is part of the question: a first edit there asks again at once.
+  const key = `${cwd}\n${branch}\n${alm?.org ?? ''}\n${alm?.project ?? ''}\n${isChatRepo}`
   if (isPrReading || (lastPrRead?.key === key && now - lastPrRead.at < PR_EVERY_MS)) return
   isPrReading = true
   lastPrRead = { key, at: now }
@@ -126,8 +136,8 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
     const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
     let pr: CockpitPr | undefined
-    // The default branch has no pull request of its own to look for.
-    if (!isDefaultBranch(branch, defaultBranch)) {
+    // The default branch has no pull request of its own to look for, nor has a repo the chat only passes through.
+    if (!isDefaultBranch(branch, defaultBranch) && isChatRepo) {
       const remote = await $.process.run([...base, 'remote', 'get-url', 'origin'], { timeoutMs: 2000 })
       if (remote.exitCode === 0 && isGithubRemote(remote.stdout)) {
         const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,url'], { cwd, timeoutMs: 10_000 })
@@ -238,7 +248,8 @@ export async function refreshGit($: EngineInterface): Promise<void> {
     if (!parsed) {
       return void (await patch($, s => {
         lastPrRead = undefined
-        return { ...s, cwd, git: undefined, perimeter: undefined, perimeterCheck: undefined, defaultBranch: undefined, repo: undefined }
+        // A process that starts outside any repo has no home one ('').
+        return { ...s, cwd, homeRoot: s.homeRoot ?? '', git: undefined, perimeter: undefined, perimeterCheck: undefined, defaultBranch: undefined, repo: undefined }
       }))
     }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
@@ -255,6 +266,7 @@ export async function refreshGit($: EngineInterface): Promise<void> {
       return {
         ...s,
         cwd,
+        homeRoot: s.homeRoot ?? (topLevel || undefined),
         git: { ...parsed, worktreeRoot, root: topLevel || undefined },
         perimeter,
         perimeterCheck,

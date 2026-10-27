@@ -82,6 +82,8 @@ export type World = {
   commands?: string[]
   /** The text of this branch's deliver perimeter file (`<git-dir>/deliver/perimeter.md`). */
   perimeter?: string
+  /** The session's cwd, also the top level `git rev-parse` answers (`/work/example-repo` when not given). */
+  cwd?: string
   /** The branch `git status` reports (`feature/x` when not given). */
   branch?: string
   /** The URL of remote `origin`; absent, the repository has no remote. */
@@ -188,7 +190,7 @@ export function world(on: On, options: World = {}) {
   on('session.start', (_, e) => ({ cwd: e.cwd }))
   on('session.id', () => ({ value: options.sessionId?.() ?? 's-1' }))
   on('command.register', (_, e) => ({ value: { command: e.name } }))
-  on('session.cwd', () => ({ value: '/work/example-repo' }))
+  on('session.cwd', () => ({ value: options.cwd ?? '/work/example-repo' }))
   on('session.model', () => ({ value: 'claude-opus-5-5' }))
   on('settings.read', () => ({ value: { effortLevel: 'high' } }))
   on('session.usage', async (_, e) => {
@@ -262,7 +264,7 @@ export function world(on: On, options: World = {}) {
       const hold = options.holdRevParse
       options.holdRevParse = undefined
       await hold
-      return answer(`${options.isLinkedWorktree ? '/work/example-repo/.git/worktrees/wt' : '.git'}\n.git\n/work/example-repo\n`)
+      return answer(`${options.isLinkedWorktree ? '/work/example-repo/.git/worktrees/wt' : '.git'}\n.git\n${options.cwd ?? '/work/example-repo'}\n`)
     }
     if (e.argv.includes('symbolic-ref')) return options.defaultBranch === undefined ? answer('', 128) : answer(`origin/${options.defaultBranch}\n`)
     if (e.argv.includes('get-url')) return options.remote === undefined ? answer('', 2) : answer(`${options.remote}\n`)

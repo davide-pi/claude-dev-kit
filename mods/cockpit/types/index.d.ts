@@ -251,6 +251,8 @@ export type CockpitSnapshot = {
   ctxRounds?: number[]
   /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: the Work tab marks them among the changes. Kept in the session data file. */
   edited?: string[]
+  /** The top level of the checkout the process's first git read found ('' when it started outside any repo), kept across a /clear or a resume: the PR of its branch is the chat's without an edit. */
+  homeRoot?: string
   /** The Costi tab's last reading of the context breakdown; absent until the tab was opened. */
   context?: CockpitContext
   /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
