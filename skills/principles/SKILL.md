@@ -64,7 +64,8 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | 1 | the reviewer's own scale: contract or production → P1, else P2 |
 | 3, a crossing the change creates | P2 |
 | 3, a crossing that was already there | not a finding on this change |
-| 4 or 5 | P3, unless it hides a defect |
+| 4, a copy of existing logic or two alike blocks the change adds (`duplication`) | P2 |
+| 4 or 5, anything else | P3, unless it hides a defect |
 
 ### Output
 

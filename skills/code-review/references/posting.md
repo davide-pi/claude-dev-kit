@@ -75,7 +75,7 @@ In this order, so the table is what is still on screen when the report ends:
    | # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo | Postato |
    |---|----------|-----------|-----------|---------|----------|---------|--------|---------|
    | 1 | P1 | security | `src/Api/UsersController.cs:42` | id di route concatenato nel testo SQL | CONFIRMED | basso | S | sì — thread 118 |
-   | 2 | P3 | clean-code | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne diverge | CONFIRMED | basso | S | no — solo chat |
+   | 2 | P2 | duplication | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne diverge | CONFIRMED | basso | S | no — solo chat |
 
    **Già fatti**
 

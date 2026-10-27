@@ -61,7 +61,7 @@ const FINDING = {
     side: { type: 'string', enum: ['right', 'left'] },
     category: {
       type: 'string',
-      enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'scope'],
+      enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'duplication', 'scope'],
     },
     verdict: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
     status: { type: 'string', enum: ['todo', 'done'] },

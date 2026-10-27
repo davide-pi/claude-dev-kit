@@ -525,7 +525,7 @@ const FINDING_IN = obj(['title', 'path', 'category', 'priority', 'failure'], {
   title: str(),
   path: str('repo-relative path of the anchor'),
   line: { type: 'integer' },
-  category: { type: 'string', enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'scope'] },
+  category: { type: 'string', enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'duplication', 'scope'] },
   priority: { type: 'string', enum: ['P1', 'P2', 'P3'] },
   failure: str('inputs or state, then the wrong outcome'),
   fix: str(),
