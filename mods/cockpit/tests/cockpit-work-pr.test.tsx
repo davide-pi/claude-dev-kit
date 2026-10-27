@@ -160,6 +160,51 @@ test('PR: the PR of a branch left behind stays listed on the next one, which add
   expect(rows).toContain('#42 Fix the orders filter')
 })
 
+test('PR: a repo the chat only passes through (a cd to read) adds no PR; once the chat edits a file there, its PR is read', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, cwd: '/work/home', notRepo: true, remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  await openCockpit($)
+  options.cwd = '/work/other-repo'
+  options.notRepo = false
+  options.branch = 'feature/someone-else'
+  await clock.advance(30_000)
+  await settleAll()
+  expect(ghCalls).toEqual([])
+  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+
+  await $.tool.call({ tool: 'Edit', file_path: '/work/other-repo/src/a.ts', old_string: 'a', new_string: 'b' })
+  await clock.advance(30_000)
+  await settleAll()
+  expect(ghCalls).toEqual([GH_PR_ARGS])
+  expect(await lavoroRows($)).toContain('#42 Fix the orders filter')
+})
+
+test('PR: the repo the process started in is the chat\'s, its case aside; an edit in a third repo does not make the one passed through the chat\'s', async ($, on) => {
+  const ghCalls: string[] = []
+  const options: World = { ghCalls, cwd: '/Work/Home', remote: GH_SSH, pr: 42 }
+  const clock = world(on, options)
+  on('tool.call', () => ({ result: {} }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(ghCalls).toEqual([GH_PR_ARGS])
+  await openCockpit($)
+  options.cwd = '/Work/other-repo'
+  options.branch = 'feature/someone-else'
+  await $.tool.call({ tool: 'Edit', file_path: '/Work/third/x.ts', old_string: 'a', new_string: 'b' })
+  await clock.advance(30_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(1)
+
+  options.cwd = '/work/home'
+  await clock.advance(30_000)
+  await settleAll()
+  expect(ghCalls).toHaveLength(2)
+})
+
 // ── PR read follow-ups ──
 
 test('PR: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', async ($, on) => {
