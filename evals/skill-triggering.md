@@ -164,6 +164,7 @@ exists.
 | "che pattern uso per questi tre tipi di pagamento?" | MUST load |
 | "aggiungi il campo Note all'ordine" | MUST NOT (a code change routes to `deliver`) |
 | "fammi la review del branch" | MUST NOT (a review routes to `code-review`) |
+| "semplifica il diff che ho appena scritto" | MUST NOT (cleaning a diff routes to `simplify`) |
 
 ## One-shot skill cases
 
