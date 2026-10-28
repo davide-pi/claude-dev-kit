@@ -15,7 +15,7 @@ background: false
 
 **Contract.** One proposal row per event the mode admits, enforceable lessons as ready-to-file backlog
 items · never edits a skill, hook, rule, setting or `CLAUDE.md`, never files the items itself ·
-report in the chat language; paths, tool names and quoted transcript lines verbatim, secrets as `<REDACTED>`.
+report in the chat language, its labels below written in English and translated into it; paths, tool names and quoted transcript lines verbatim, secrets as `<REDACTED>`.
 
 Arguments: `$ARGUMENTS`
 
@@ -43,9 +43,9 @@ points there. State the file read (path, size) in the report.
 
 ### What each mode proposes
 
-| Mode | Suite proposals | `Consigli per te` |
+| Mode | Suite proposals | `Advice for you` |
 | --- | --- | --- |
-| one session | only the **Automated check** row below, its `Proposta` cell ending `(da confermare nella retro a 10 giorni)`: one session is noise for anything else | yes, ≤ 3 |
+| one session | only the **Automated check** row below, its `Proposal` cell ending `(to confirm in the 10-day retro)`: one session is noise for anything else | yes, ≤ 3 |
 | `days <n>` | every category, only for events recurring in 2+ sessions | yes, ≤ 5, patterns in 2+ sessions |
 | `monthly` | environment health, only when the owner asks or the focus is `monthly`, never on your own: `references/modes.md` | no |
 | `findings` | implementer rules from the deliver log: `references/modes.md` | no |
@@ -73,15 +73,17 @@ the repo's checks: an asset that did not fire, or a check left unwired, *is* the
 
 ### Report — returned to the caller, ≤ 40 lines (`days`: ≤ 60)
 
-1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `days` and `findings` modes the line of `references/modes.md`.
-2. Proposals, most severe first, as a table `Proposta | Categoria | Evento (turno) | Dove | Rischio`;
-   `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
+1. `Transcript: <path> (<size>) · events: N · no proposal: N (why)`; in `days` and `findings` modes the line of `references/modes.md`.
+2. Proposals, most severe first, as a table `Proposal | Category | Event (turn) | Where | Risk`;
+   `Where` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
 3. `Backlog` — one block per automated check: chat-language title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
-4. `Consigli per te`, in the session and `days` modes: the table of `references/modes.md`.
-5. When `monthly` ran: `Salute: <outcome, one line per step>`.
+4. `Advice for you`, in the session and `days` modes: the table of `references/modes.md`.
+5. When `monthly` ran: `Health: <outcome, one line per step>`.
 6. `findings` mode only: the marker command of `references/modes.md`.
-7. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
+7. Last line: `Which rows do I apply? The caller files the backlog items after your yes.`
+
+At chat `it` the labels are fixed, never freely translated: `Advice for you`=`Consigli per te`, `(to confirm in the 10-day retro)`=`(da confermare nella retro a 10 giorni)`, `Transcript:`=`Trascritto:`, `events`=`eventi`, `no proposal`=`senza proposta`, `why`=`perché`, `Proposal | Category | Event (turn) | Where | Risk`=`Proposta | Categoria | Evento (turno) | Dove | Rischio`, `Health:`=`Salute:`, last line=`Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`; those of `references/modes.md` are named there.
 
 ## Do
 
@@ -103,4 +105,4 @@ denials and user turns, then Read slices around each hit (`offset`/`limit`).
 ## References
 
 - `references/modes.md` — the arguments read `days <n>`, `monthly` or `findings`, or any mode that carries
-  `Consigli per te`: the period's transcripts, the coaching patterns and limits, the health steps, the deliver log.
+  `Advice for you`: the period's transcripts, the coaching patterns and limits, the health steps, the deliver log.
