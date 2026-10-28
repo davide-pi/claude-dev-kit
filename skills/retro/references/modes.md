@@ -39,3 +39,16 @@ Runs only when the owner asks, or when the focus argument is `monthly`; never on
 | Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
 
 Report line 5: `Salute: <outcome, one line per step>`.
+
+## `findings` — implementer rules from the deliver log
+
+Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`):
+no transcript needed. Read `$(git rev-parse --git-dir)/deliver/findings.jsonl` of the cwd (you derive the
+path; one JSON line per run, `{ "retro": … }` lines mark a settled retro): the lines after the last marker,
+grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
+(`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count,
+files); a line a check could enforce is a backlog item, as in the fix table.
+
+- Report line 1 reads `Log: <path> · righe dopo l'ultimo retro: N`.
+- Report line 6, for the caller: the owner approves, then the caller appends the marker with
+  `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.
