@@ -13,15 +13,11 @@ never mixes store and signal state in one app · code English, explanations Ital
 
 ## When
 
-- Writing, reviewing or debugging a component, service, store, form, route, interceptor or spec.
-- Choosing between a signal, an observable and store state.
-- A view does not update, a request fires twice, memory grows per navigation, TestBed fails in setup.
-
 Not for: AngularJS (`.module('app', [...])`, `$scope`, no `angular.json`) — keep it running, port
 features out, never modernise it; visual design, web-platform APIs and browser debugging → the
 `frontend-design` and `modern-web-guidance` plugins, and driving the page itself → `browser-use`.
 
-Facts also in `rules/angular.md` and `rules/typescript.md`, loaded when such a file is touched.
+House facts: rules `angular`, `typescript`.
 
 ## Decide
 
@@ -41,12 +37,10 @@ the release. A signal in a store-fed module component, or a standalone component
 
 | The value | Reach for |
 | --- | --- |
-| derived synchronously from other state, read in a template | `computed` — never a getter or a lifecycle hook |
 | component-local UI state (open, selected tab, filter text) | `signal` (signals era) · a field with `OnPush` and immutable updates (store era) |
 | an async stream needing cancel, retry, debounce or combination | RxJS; convert to a signal at the component edge in signals-era code |
 | one HTTP call whose result renders | the observable consumed by the template (`async` pipe, or a signal conversion) |
 | shared across unrelated features | a store: signal service with `readonly` computeds, or the existing NgRx store — one mechanism per app |
-| something that must *happen* on a change | the handler that caused the change, not an `effect` |
 
 ### Do I need the store
 
@@ -64,27 +58,18 @@ Used by more than one feature, or must survive navigation?
 
 | Rule | In practice |
 | --- | --- |
-| escape-hatch ladder, stop at the first rung that works | narrowing → `unknown` + guard → schema parse at the boundary → assertion function → `satisfies` → `as` to a narrower type with a comment; a forced suppression is `@ts-expect-error` with a reason, never `@ts-ignore` |
 | `strict` off (store era) | price it with `npx tsc --noEmit --strict`, fix folder by folder; never a `@ts-nocheck` amnesty |
 | the verdict | `npx tsc --noEmit -p tsconfig.app.json` on the build's project; editor green proves nothing |
 
-### Migration ladder — one feature, one pull request
+### Migration — one feature, one pull request
 
-| Rung | Move |
-| --- | --- |
-| 1 Safe ground | `strict` on, `OnPush` where inputs are already immutable, derivation into selectors |
-| 2 Templates and leaves | control-flow schematic per folder; leaf components standalone, still imported by their module |
-| 3 Feature boundary | containers standalone, the empty module deleted, providers on the route, `loadComponent`, functional guards |
-| 4 State | manual `subscribe` → template or signal conversion; store slices used by one feature → a signal service |
+The rungs, in order: `references/testing-and-migration.md`.
 
 ## Do
 
 ```powershell
 npx ng version                          # release and builders; the CLI is never global
-npx ng generate component features/orders/order-list --dry-run
-npx ng build --configuration production
 npx ng test --watch=false               # add --browsers=ChromeHeadless on Karma
-npx tsc --noEmit -p tsconfig.app.json
 npx ng generate @angular/core:control-flow   # official migrations: one folder, reviewed as a diff
 npx ng generate @angular/core:standalone
 ```
@@ -108,4 +93,4 @@ npx ng generate @angular/core:standalone
 - `references/legacy-modules-store.md` — store era: `NgModule` anatomy, NgRx selectors and effects, Material.
 - `references/rxjs.md` — operator choice, subscription lifetime, cold and hot, errors, signal interop.
 - `references/forms-http-routing.md` — typed reactive forms, interceptors, guards, lazy loading.
-- `references/testing-and-migration.md` — the two harnesses, specs in each, the migration ladder in full.
+- `references/testing-and-migration.md` — the two harnesses and specs in each; when migrating, the ladder in full.

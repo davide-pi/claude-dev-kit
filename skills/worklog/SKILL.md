@@ -8,18 +8,16 @@ description: >-
 # worklog — what was done, each day against its target, the hours on the board
 
 **Contract.** Per day: Table 1 with its coverage, Table 2, then hours on Tasks and an audit entry ·
-never estimates by hand, never writes hours outside `worklog-push.ps1`, never logs a source event
-unconfirmed · Italian chat, tables and board text; field names, WIQL and engine output verbatim.
+never writes outside the fixed rules below · Italian chat, tables and board text; field names, WIQL
+and engine output verbatim.
 
 ## When
 
-- `/worklog`, `/worklog ieri`, `/worklog <data>`, a range (default: today); or asked in prose ("segna le ore").
-- **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text> | sessione <id>` (or "segna le ore di questo item/PR/questa chat"): `scoping.md`.
-- The session-start reminder names a day **non registrato** or **sotto target** → `/worklog <data>`.
+- Period: `/worklog`, `ieri`, `<data>`, a range (default: today). **Scoped**: `/worklog [period] AB#<id> | PR <n> | topic <text> | sessione <id>` (or "segna le ore di questo item/PR/questa chat"): `scoping.md`.
 - A day already logged is re-run: only the delta reaches the board.
 
 Not for: creating backlog items (`user-story-standard`, `azdo-cli`), Azure DevOps verbs, auth and identity
-(`azdo-cli`), PR links (`pr-create`). Asked by the user only, never on Claude's own initiative.
+(`azdo-cli`), PR links (`pr-create`).
 
 ## Decide
 
@@ -29,7 +27,7 @@ Not for: creating backlog items (`user-story-standard`, `azdo-cli`), Azure DevOp
 | --- | --- |
 | Time only from the engine | never estimated by hand; splitting a bucket is said out loud |
 | Every day against its **target** | 8h Monday-Friday, 0 at weekends, a date's own value in `targets.json`; **under target** = more than 1h short → gap prompt |
-| Hours come from the user, sources propose | Slack, calendar, board and git events are candidate rows, confirmed one by one |
+| Hours come from the user, sources propose | Slack, calendar, board and git events are candidate rows, confirmed one by one; never logged unconfirmed |
 | Two gates | Table 1 and Table 2, each with its own explicit confirmation |
 | Hours **only** through `worklog-push.ps1` | it adds the delta to `CompletedWork` (never overwrites), reads it back, writes the audit; the shell guard asks on any other `CompletedWork` write |
 | Hours already on the item are reconciled | hours the audit does not know → ask; same work → `"delta": 0` |

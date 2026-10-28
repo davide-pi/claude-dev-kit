@@ -12,11 +12,6 @@ a plugin, `CLAUDE.md` or another asset · asset prose English, chat with the use
 
 ## When
 
-- A skill, agent, hook, rule or reference is added to the kit or reshaped.
-- A skill never fires, fires unasked, or is over its cap.
-- The shape is unclear: rule, skill, user-invoked or fork skill, agent, hook, settings.
-- An asset is about to be called finished.
-
 Not for: generic authoring machinery and eval runs (`skill-creator` plugin); settings, permissions
 and hook registration (`update-config`); a project's own docs (`doc-keeper`).
 
@@ -38,15 +33,15 @@ and hook registration (`update-config`); a project's own docs (`doc-keeper`).
 
 Two shapes for one need is duplication: one asset owns it, the others route to it in one line.
 
-### 2. The contract — normative copy (`rules/kit-assets.md` is its summary)
+### 2. The contract — the only copy (`rules/kit-assets.md` points here)
 
 | Rule | Value | Enforced by |
 | --- | --- | --- |
 | Folder | `skills/<name>/SKILL.md`, `references/*.md`, scripts beside `SKILL.md` | convention |
 | `name` | identical to the folder | validator |
 | Description | ≤ 25 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
-| Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | review |
-| Skeleton | title, contract, `## When` (+ `Not for:`, ≤ 3 items), `## Decide`, `## Do`, `## Traps`, `## References` | validator |
+| Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | validator |
+| Skeleton | title, contract, `## When`, `## Decide`, `## Do`, `## Traps`, `## References`; `## When` holds `Not for:` (≤ 3 items) and a bullet only for what the description cannot carry (an argument grammar) — never a restatement of the description, already read when the body loads | validator |
 | Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 · bytes: SKILL.md 7,000, output style 2,500, `CLAUDE.md` 2,750 | validator |
 | Compaction | an invoked body re-injects capped at ~5 k tokens, cut from the bottom: `## Decide` near the top, nothing load-bearing after `## Do` | review |
 | Phrasing | the outcome, where the model already knows how; procedure only where the house way differs; the body is the 20 % of paths that cover 80 % of cases, rare branches go to a reference — every section earns its tokens | review |

@@ -13,10 +13,6 @@ branch names and commands verbatim.
 
 ## When
 
-- New work starts and nothing is branched yet, or a branch has the wrong prefix or case.
-- Work needs isolation: a dirty tree, two changes in flight, an experiment, parallel agents.
-- The work is complete and the branch has to reach the default branch — or must not.
-
 Not for: the PR title and body (`pr-create`), reviewing a PR (`code-review`), Azure DevOps verbs
 (`azdo-cli`).
 
@@ -58,21 +54,11 @@ repos under the Windows path limit. The native tools (`EnterWorktree`, `isolatio
 create under `<repo>\.claude\worktrees\` unless the `worktree-root.js` hook redirects
 them; without it, use the git fallback in `references/worktrees.md`.
 
-### 4. Finish — the menu
+### 4. Finish
 
-| State of the work | Move |
-| --- | --- |
-| done, verified, wanted | push → PR (`pr-create`) → review → **squash-merge** → delete the branch |
-| gates red | fix the gate first; a red pipeline or a pending review is not a merge |
-| works, wrong approach | do not merge; write why it loses, usually as a work item |
-| partly wanted | cherry-pick the wanted commits onto a fresh branch |
-| dead end | delete local and remote, write the lesson |
-| wanted later | keep it, rebase while cheap, name the blocker |
-
-Merge gates: pipeline green **and** reviewed (`/code-review <pr>` plus the owner's read; a human approval
-only where branch policy demands it). Squash and delete-source-branch are the only strategy; a policy
-that forbids squash → stop and say so. Completing the merge is the owner's call: prepare, report,
-never decide. Full walk: `references/finishing.md`.
+Merge gates: pipeline green **and** reviewed. Squash and delete-source-branch are the only strategy.
+Completing the merge is the owner's call: prepare, report, never decide. The menu (merge, cherry-pick,
+dead end, later), the per-platform merge and the clean-up: `references/finishing.md`.
 
 ## Do
 
@@ -87,9 +73,6 @@ git switch --create feature/<kebab-name> "origin/$base"
 # wrong name: before the push / after the push
 git branch --move <old> feature/<new>
 git push origin --delete <old>; git push --set-upstream origin feature/<new>
-
-# after the PR is merged (check its state): a squash looks unmerged to git, so -D
-git switch $base; git pull --ff-only; git branch -D feature/<name>; git fetch --prune
 ```
 
 ## Traps
@@ -99,12 +82,6 @@ git switch $base; git pull --ff-only; git branch -D feature/<name>; git fetch --
 2. A commit lands on the default branch → work started before branching → the default-branch hook
    asks first; branch, switch, commit there.
 3. Stash used to juggle two changes → one is forgotten or popped on the wrong branch → a worktree.
-4. A worktree removed with `Remove-Item` → git keeps a dangling entry → `git worktree remove`, or
-   `git worktree prune` after the fact.
-5. A deleted branch reappears in `git branch -a` → the remote-tracking ref survives →
-   `git fetch --prune`.
-6. A dead-end branch kept "just in case" → the branch list stops meaning anything → the finish
-   menu; a written lesson beats a branch nobody dares delete.
 
 ## References
 

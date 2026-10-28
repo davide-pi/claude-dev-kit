@@ -2,7 +2,7 @@
 name: plan-work
 description: >-
   Use when work spans several files or sessions, a work item needs steps, half-done work resumes,
-  a feasibility spike, or subagents fan out.
+  or subagents fan out.
 ---
 
 # plan-work — a plan file with verifiable tasks, sized to the change
@@ -11,11 +11,6 @@ description: >-
 production code, never promotes spike code · plan file English, everything said in chat Italian.
 
 ## When
-
-- The work spans several files or sessions, or order matters (something must exist first).
-- A spec or work item has to become steps, or be judged ready to build (the `azdo-cli` item read first).
-- Half-finished work resumes and the next step is no longer obvious.
-- A "can we…" question needs a throwaway probe; or pieces could go to parallel subagents.
 
 Not for: a single-file change; a bug (`debug-systematic` — the reproduction is the plan).
 
@@ -31,7 +26,7 @@ Not for: a single-file change; a bug (`debug-systematic` — the reproduction is
 | migration + code + tests where order matters | **yes** |
 | work will pause, or another agent executes it | **yes** — the file is the handoff |
 | requirements unknown | **no** — probe first (§5) |
-| it starts from a work item | the readiness verdict first (`references/from-work-item.md`) |
+| it starts from a work item | the `azdo-cli` item read, then the readiness verdict (`references/from-work-item.md`) |
 
 ### 2. Size it to the change
 
@@ -63,14 +58,8 @@ No `docs/`, or the work may be abandoned → the session scratchpad. One plan pe
 
 ### 5. Spike — answer one question, leave nothing behind
 
-| Step | Rule |
-| --- | --- |
-| claim | one testable line ("does `GET /orders?page=2` return page two?"); readable from the code → read it, no spike |
-| instrument | the cheapest that fits: `csharprepl`, one `SELECT` via `/db`, `Invoke-RestMethod`, `node -e` |
-| timebox | said out loud, minutes; blown → report what is known and what is not |
-| throwaway | scratch code outside the repo, read-only, never production, never promoted; `git status` unchanged |
-
-Report shape, instruments and guardrails: `references/spike.md`.
+One testable claim, the cheapest instrument, a timebox said out loud, scratch code outside the repo:
+the procedure, instruments and report are in `references/spike.md`, read before the probe.
 
 ### 6. Delegation — when and how to brief
 
@@ -81,22 +70,13 @@ Report shape, instruments and guardrails: `references/spike.md`.
 | they must agree on an interface not yet written? | write it first |
 | a task needs the conversation to be judged? | keep it here |
 
-Brief = owned absolute paths · the change · the conventions skill by name · the verify command and
-its expected output · forbidden operations · an output cap (**≤ 30 lines, table**; the agent's own
-contract when it has one, e.g. `implementer`). Ask for the conclusion, never the dump: every report
-lands in this context. Never delegate: irreversible commands, deciding *what* to build, integration,
-the final review and evidence check. Details: `references/delegation.md`.
+Never delegate: irreversible commands, deciding *what* to build, integration, the final review and
+evidence check. The brief's fields and the output contract: `references/delegation.md`.
 
 ## Do
 
-```powershell
-$plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --show-toplevel) 'docs/plans')
-$exclude = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'info/exclude'; New-Item -ItemType Directory -Force (Split-Path $exclude) | Out-Null
-if (@(Get-Content $exclude -EA Ignore) -notcontains '/docs/plans/') { Add-Content $exclude "`n/docs/plans/" }   # never committed
-$file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
-```
-
-Fill it from `references/plan-template.md` (a multi-session plan ends with its `/goal` line). While executing: dependency order;
+Create the file with the script in `references/plan-template.md` (it keeps `docs/plans/` out of git) and
+fill it from that skeleton (a multi-session plan ends with its `/goal` line). While executing: dependency order;
 each task's verify before the next; tick `- [x]`; a wrong task → edit the plan first, the code second. Finished → verify the whole change, not the last task (`references/evidence-by-stack.md`).
 
 ## Traps
@@ -112,7 +92,7 @@ each task's verify before the next; tick `- [x]`; a wrong task → edit the plan
 
 - `references/from-work-item.md` — the work starts from an item: S/D/A tags, the readiness verdict,
   the questions worth asking, the split test.
-- `references/plan-template.md` — a first plan in a repo, or one with phases: skeleton, example, the closing `/goal` line.
+- `references/plan-template.md` — writing any plan file: the creation script, skeleton, example, the closing `/goal` line.
 - `references/spike.md` — a feasibility probe: instruments, the Italian report, the guardrails.
 - `references/delegation.md` — before a fan-out: sizing waves, the pasted output contract, the
   correction round.

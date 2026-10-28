@@ -12,11 +12,6 @@ textbook definition, never a refactor outside the scope · explanation in Italia
 
 ## When
 
-- Two shapes compete: extract or inline, share or duplicate, interface or concrete class, a
-  pattern or plain code.
-- New code needs an owner: which service, project, layer or module.
-- A review finding trades one principle against another ("duplicated" against "coupled").
-
 Not for: a stack's idioms (`dotnet-backend`, `ef-core`, `angular`, `react`), the procedure of a
 change (`deliver`), attacking a whole design (`grill-me`).
 
@@ -57,16 +52,6 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | where a business rule or invariant lives, an entity's shape, a consistency boundary | `references/domain.md` |
 | a name, a function's size, duplication, a comment, a parameter list, defensive code | `references/clean-code.md` |
 
-### Severity, when it is a review finding
-
-| Breaks rung | Priority |
-| --- | --- |
-| 1 | the reviewer's own scale: contract or production → P1, else P2 |
-| 3, a crossing the change creates | P2 |
-| 3, a crossing that was already there | not a finding on this change |
-| 4, a copy of existing logic or two alike blocks the change adds (`duplication`) | P2 |
-| 4 or 5, anything else | P3, unless it hides a defect |
-
 ### Output
 
 The choice, the rung that decided it, what was given up: one line each. No principle is named
@@ -74,15 +59,10 @@ without the concrete cost it saves in this code.
 
 ## Do
 
-The "already exists?" rung comes before any new abstraction:
+"Already exists?" comes before any new abstraction:
 
-```powershell
-# An existing helper before writing one: search by the noun and the verb of the intent
-Get-ChildItem -Recurse -Include *.cs, *.ts | Select-String -Pattern '<Noun>.*<Verb>|<Verb>.*<Noun>' -List |
-  Select-Object Path, LineNumber, Line
-# Dependency direction: which projects already reference the one you are about to depend on
-Get-ChildItem -Recurse -Filter *.csproj | Select-String 'ProjectReference Include=".*<Project>\.csproj'
-```
+- An existing helper: Grep `<Noun>.*<Verb>|<Verb>.*<Noun>` in `*.cs` and `*.ts`.
+- Dependency direction: Grep `ProjectReference Include=".*<Project>\.csproj` in `*.csproj`.
 
 ## Traps
 

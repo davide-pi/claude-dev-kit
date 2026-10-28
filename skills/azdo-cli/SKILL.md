@@ -12,12 +12,6 @@ default, never an MCP call before the gap is proven · chat Italian, commands an
 
 ## When
 
-- A board, work item, repository, PR, wiki or pipeline is written from a shell, or a work item is read
-  in full or the owner's active items listed (`references/item-read.md`).
-- Another asset needs the verb and flags: `user-story-standard` (creating items), `pr-create`,
-  `code-review`, `branch-flow`, `worklog`, `estimate`.
-- A type name, field reference or flag is about to be typed, or a call fails on auth or "not found".
-
 Not for: GitHub (`gh`, in `branch-flow` and `pr-create`); pipeline YAML (`pipeline`); what an item
 should say (`user-story-standard`).
 
@@ -25,11 +19,8 @@ should say (`user-story-standard`).
 
 ### 1. Target — the `ALM:` line, passed on every call
 
-Org, project and az identity come from the session's `ALM:` line (written at start by the
-`workspace-context.js` hook from the local `workspaces.json`). Pass `--org` and `-p` on **every**
-command. No line, `unmapped`, or a directory added later → **ask**; never let `--detect` or the
-machine default fill the hole — it may still point at the previous client. `-p` does not scope a
-query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
+`CLAUDE.md` rule 3 sets the target; `--detect` is the machine default too, never a filler. `-p` does
+not scope a query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<project>'`.
 
 ### 2. Which surface owns the call
 
@@ -95,16 +86,10 @@ $token = az account get-access-token --resource 499b84ac-1321-427f-aa17-267ca697
 
 ## Traps
 
-1. A WIQL returns nothing a saved query returns → `az boards query` is flat-only → rewrite it flat,
-   or query the link table separately.
-2. A created item looks empty, or its image goes unnoticed → the text went into a field the form
-   does not show (a Bug has no Description) and an `AttachedFile` shows only in Attachments →
-   discover the type's fields; inline the `<img>` into the field HTML.
-3. An accented wiki page reads as mojibake → `wiki page create`/`update` re-read the content in the
-   system codepage → REST `PUT` with `charset=utf-8`, then read it back.
-4. `--fields` ignored → `show` wants a comma list, `create`/`update` space-separated `field=value`.
-5. A PR completes by accident → `--status completed` merges at once; so do abandon and
-   `--bypass-policy` → ask first.
+1. `--fields` ignored → `show` wants a comma list, `create`/`update` space-separated `field=value`.
+
+Flat-only WIQL, the Bug without Description, wiki mojibake and the PR that merges on `--status
+completed`: the reference of each action, read before it.
 
 ## References
 

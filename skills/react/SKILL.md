@@ -13,15 +13,10 @@ adds a store, query or form library under its threshold · code English, explana
 
 ## When
 
-- Writing, reviewing or debugging a component, hook, form or fetch in the Vite + Tailwind apps.
-- Deciding where state lives: component, parent, URL, context or the server.
-- A render loop, a double fetch, a race, state lost or not reset on navigation.
-- A library is proposed, or the Vite or Tailwind configuration changes.
-
 Not for: visual design, web-platform APIs and browser debugging → the `frontend-design`
 and `modern-web-guidance` plugins, and driving the page itself → `browser-use`.
 
-Facts also in `rules/react.md` and `rules/typescript.md`, loaded when such a file is touched.
+House facts: rules `react`, `typescript`.
 
 ## Decide
 
@@ -45,35 +40,20 @@ none aware the data changed. The fix is one owner, not another `useEffect`.
 
 ### Do I need an effect
 
-| The goal | Tool |
-| --- | --- |
-| transform data for rendering | compute in the render body |
-| respond to a user event | the event handler |
-| reset state when a prop changes | a `key` on the component |
-| sync with something outside React (subscription, timer, storage, widget) | `useEffect` with cleanup |
-| fetch on mount | `useEffect` with an `AbortController`, or the resource's hook |
-| measure the DOM before paint | the layout effect, sparingly |
-
-An effect whose only job is `setState` from other state is deleted: it renders twice and its
-dependency array is a latent loop.
+Rule `react` settles it: derive in render, events in handlers, a `key` to reset, an effect only to
+sync outside React. Beyond it: measure the DOM before paint → the layout effect, sparingly; fetch on
+mount → the resource's hook, or an effect with an `AbortController`.
 
 ### Do we add a library yet
 
-None exists in these apps; that holds until a threshold is reached, then exactly one is added, in a
-pull request of its own that names the threshold.
-
-| Threshold | Add |
-| --- | --- |
-| three or more unrelated components share server data needing cache and invalidation | a query library |
-| global client state mutated from many places, with derived values | a small store, not a Redux-style rewrite |
-| forms with dozens of fields and cross-field async validation | a form library |
-| none of the above | nothing — a hook plus `useState` is not debt |
+None exists in these apps; the thresholds are in rule `react`, plus a small store (not a Redux-style
+rewrite) for global client state mutated from many places with derived values. Exactly one is added,
+in a pull request of its own that names the threshold; below them a hook plus `useState` is not debt.
 
 ### Types — beyond `rules/typescript.md`
 
 | Rule | In practice |
 | --- | --- |
-| escape-hatch ladder, stop at the first rung that works | narrowing → `unknown` + guard → schema parse at the boundary → assertion function → `satisfies` → `as` to a narrower type with a comment; a forced suppression is `@ts-expect-error` with a reason, never `@ts-ignore` |
 | `strict` off somewhere | price it with `npx tsc --noEmit --strict`, fix folder by folder; never a `@ts-nocheck` amnesty |
 | the verdict | `npx tsc --noEmit` or `npm run build` — the dev server does not type-check |
 
@@ -87,8 +67,7 @@ npm test -- --run              # single pass, CI shape; runner flags go after --
 npx vite build --mode staging  # a named mode loads the matching .env file
 ```
 
-Component tests: the runner already in `package.json`, asserting what the user sees, not hook
-internals; what deserves a test is `dotnet-testing`'s strategy reference.
+Component tests: the runner already in `package.json`, asserting what the user sees, not hook internals.
 
 ## Traps
 

@@ -14,17 +14,10 @@ and object names verbatim.
 
 ## When
 
-- Writing or reviewing T-SQL: a query, view, function, stored procedure or data script.
-- Something is slow, times out, deadlocks, or got slower after a deploy; an index is proposed.
-- Inspecting an unfamiliar database; porting between SQL Server and Postgres; the read cache.
-
-A script that writes always carries `@DryRun bit = 1` (rollback by default, commit only at 0): `rules/sql.md`.
-
 Not for: EF modelling, LINQ translation, migrations (`ef-core`); starting a database container
 (`docker-dev-env`); client-side latency (`dotnet-diagnostics`).
 
-SQL house facts (SARGable predicates, named columns, `TOP`/`LIMIT`, statistics before an index,
-non-dev through `/db`) are in `rules/sql.md`, loaded with any `.sql` file.
+House facts: rule `sql`.
 
 ## Decide
 
@@ -49,10 +42,9 @@ Npgsql, schema managed outside EF.
 | 1 | waiting, not working? | high duration, low CPU, a `blocking_session_id` | `pg_stat_activity.wait_event` set | blocked → the head blocker, not the query |
 | 2 | fast for one value, slow for another? | plan compiled for a sniffed parameter | generic vs custom plan on a prepared statement | parameter-sensitive plan |
 | 3 | estimate vs actual off by 10x? | actual plan, `STATISTICS XML` | `EXPLAIN (ANALYZE, BUFFERS)`, per-loop times | stale statistics or a non-SARGable predicate |
-| 4 | a function or type mismatch around a column? | `CONVERT_IMPLICIT`, `CAST(col …)` | `lower(col)`, `col::text` | rewrite first — no index helps |
-| 5 | row-by-row work? | cursor, `WHILE`, scalar UDF, a call per row from the app | a function per row, a statement loop | set-based rewrite |
-| 6 | lookups or a large scan for a selective filter? | Key/RID Lookup, Index Scan | `Seq Scan`, `Rows Removed by Filter` | now an index — `db-analyst` designs it |
-| 7 | good plan, good index, still slow? | — | — | too much data asked for: page, pre-aggregate, narrow |
+| 4 | row-by-row work? | cursor, `WHILE`, scalar UDF, a call per row from the app | a function per row, a statement loop | set-based rewrite |
+| 5 | lookups or a large scan for a selective filter? | Key/RID Lookup, Index Scan | `Seq Scan`, `Rows Removed by Filter` | now an index — `db-analyst` designs it |
+| 6 | good plan, good index, still slow? | — | — | too much data asked for: page, pre-aggregate, narrow |
 
 ### Isolation — choose it, never inherit it
 
@@ -64,7 +56,7 @@ missing, duplicated rows. Postgres `SERIALIZABLE` raises 40001 instead of waitin
 
 | Statement | Rule |
 | --- | --- |
-| DML, `UPDATE STATISTICS`, `CREATE INDEX`, `ALTER` on a local database | announced, inside an explicit transaction, verified with a `SELECT` before `COMMIT` |
+| DML, `UPDATE STATISTICS`, `CREATE INDEX`, `ALTER` on a local database | announced; the `@DryRun` script of rule `sql`: rollback by default, commit only at `@DryRun = 0` |
 | `DROP`, `TRUNCATE`, an unfiltered `UPDATE`/`DELETE` on a database you did not create | never — ask |
 | Postgres `EXPLAIN ANALYZE` of a write | it **executes**: wrap it in `BEGIN; … ROLLBACK;` |
 | a schema change for a shared database | an EF migration shipped as `migration.sql` (`pipeline`); hand-run DDL is drift |

@@ -13,15 +13,10 @@ second idiom the codebase lacks · explanations in Italian, code in English.
 
 ## When
 
-- Adding a responder, subscriber, hosted service, typed HTTP client, options class, or Redis use.
-- A lifetime, captive-dependency or thread-safety bug; a hang or timeout that shows only under load.
-- Deciding what a failure becomes (exception or data) and what a Polly policy may wrap.
-
 Not for: EF modelling and queries (`ef-core`), message semantics (`rabbitmq`), evidence from a
 running process (`dotnet-diagnostics`).
 
-The always-true C# facts (async and tokens, no blocking waits, lifetimes, typed HTTP clients,
-Serilog templates, no secrets in settings) are in `rules/csharp.md`, loaded with any `.cs` file.
+House facts: rule `csharp`.
 
 ## Decide
 
@@ -51,9 +46,7 @@ subscriber touches must be singleton-safe.
 | The dependency | Lifetime | Rule |
 | --- | --- | --- |
 | subscriber / responder | singleton (scanned) | no per-message state in fields |
-| data access | singleton factory; `await using var db = factory.Create()` per handler call | never a `DbContext` or scoped service in a subscriber |
 | `IBus` | one per process (or a named bus collection) | never created per call |
-| HTTP dependency | typed client, `AddHttpClient<T>` | never a hand-rolled singleton `HttpClient` |
 | hosted service doing scoped work | singleton | a scope per unit of work from `IServiceScopeFactory` |
 
 A shorter lifetime injected into a longer one is captive; `ValidateScopes` + `ValidateOnBuild` in
@@ -61,14 +54,9 @@ Development catch it at startup (`references/di-lifetimes.md`).
 
 ### Failure: exception or data
 
-| The failure is | Model it as |
-| --- | --- |
-| a business outcome the RPC caller branches on (refused, not found, not allowed) | **data**: the response's outcome fields (`IsSuccess`, an error status) |
-| a bug or an impossible state | an exception, logged with context, never swallowed into a success |
-| a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by Polly — only around idempotent work |
-| invalid input at an HTTP edge | a 400 with field-level problem details, validated once at the edge |
-
-A responder's exception crosses the bus as a bare message string: for RPC, data is the contract.
+A business outcome is data; a transient failure is a Polly retry on idempotent work only. A
+responder's exception crosses the bus as a bare message string: for RPC, data is the contract. The
+full table: `references/errors-and-config.md`.
 
 ### Polly — retry only what is safe to repeat
 
@@ -80,14 +68,8 @@ A responder's exception crosses the bus as a bare message string: for RPC, data 
 
 ## Do
 
-```powershell
-# The idioms available: every package the tree references
-Get-ChildItem -Recurse -Include *.csproj, Directory.Packages.props |
-  Select-String 'Package(Reference|Version) Include="([^"]+)"' | ForEach-Object { $_.Matches[0].Groups[2].Value } | Sort-Object -Unique
-
-# Lifetimes as registered
-Get-ChildItem -Recurse -Filter *.cs | Select-String 'With(Singleton|Scoped|Transient)Lifetime|Add(Singleton|Scoped|Transient)<'
-```
+- The idioms available: Grep `Package(Reference|Version) Include="[^"]+"` in `*.csproj` and `Directory.Packages.props`.
+- Lifetimes as registered: Grep `With(Singleton|Scoped|Transient)Lifetime|Add(Singleton|Scoped|Transient)<` in `*.cs`.
 
 ## Traps
 
@@ -104,7 +86,8 @@ Get-ChildItem -Recurse -Filter *.cs | Select-String 'With(Singleton|Scoped|Trans
 - `references/di-lifetimes.md` — captive dependencies, scopes in singletons and hosted services,
   typed clients with resilience, scope validation.
 - `references/async-concurrency.md` — cancellation, sync-over-async deadlocks, bounded fan-out.
-- `references/errors-and-config.md` — exceptions against results, validation placement, options,
+- `references/errors-and-config.md` — when a failure's shape is open (exception, data, retry, HTTP
+  400): the failure table; also exceptions against results, validation placement, options,
   configuration precedence, secret remediation.
 - `references/redis.md` — the cache SDK wiring, Streams consumer groups and their traps, reading a
   `RedisTimeoutException`, inspecting a local instance.

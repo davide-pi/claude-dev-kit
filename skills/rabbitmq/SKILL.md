@@ -14,10 +14,6 @@ Italian, queue names, counts and exceptions verbatim.
 
 ## When
 
-- Writing or reviewing a `RequestAsync`/`RespondAsync` pair, a publish, or a subscriber.
-- Adding or changing a type in a `*.ServiceContract` project.
-- An RPC call times out or never gets an answer; a queue grows, a consumer idles, messages dead-letter.
-
 Not for: reaching the broker container (`docker-dev-env`), DI and async in C# (`dotnet-backend`),
 Redis Streams used as a work queue (`dotnet-backend`, its redis reference).
 
@@ -26,14 +22,6 @@ Redis Streams used as a work queue (`dotnet-backend`, its redis reference).
 The backend talks over RabbitMQ through EasyNetQ, and **RPC is the default call** (about ten
 request/respond pairs per subscription). Two facts shape everything: an RPC caller blocks until an
 answer or the timeout, and at-least-once delivery means **every message can arrive twice**.
-
-### Where is the flow — never a grep job for the main thread
-
-| Question | Route |
-| --- | --- |
-| which service answers this request / handles this event | `investigator` agent, `locate` |
-| what happens end to end when X is called (the hop map) | `investigator` agent, `trace` |
-| what the broker holds right now | `references/operations.md` |
 
 ### RPC, event, or command
 
@@ -71,16 +59,9 @@ answer or the timeout, and at-least-once delivery means **every message can arri
 
 ## Do
 
-```powershell
-# Before changing a contract: every caller and responder of the type
-Get-ChildItem -Recurse -Filter *.cs | Select-String '(Request|Respond|Publish|Subscribe)Async<\s*<Type>\b' |
-  Select-Object Path, LineNumber
-Get-ChildItem -Recurse -Filter appsettings*.json | Select-String 'host=.*timeout='   # RPC timeout in force
-
-# Broker state: rabbitmqctl lives inside the container — read-only
-docker exec <container> rabbitmqctl list_queues --vhost <vhost> name messages messages_ready messages_unacknowledged consumers
-docker exec <container> rabbitmqadmin -V <vhost> get queue=<name> count=1 ackmode=reject_requeue_true   # peek only
-```
+- Before changing a contract, every caller and responder of the type: Grep `(Request|Respond|Publish|Subscribe)Async<\s*<Type>\b` in `*.cs`.
+- The RPC timeout in force: Grep `host=.*timeout=` in `appsettings*.json`.
+- Broker state, read-only: `references/operations.md`.
 
 ## Traps
 
@@ -100,5 +81,5 @@ docker exec <container> rabbitmqadmin -V <vhost> get queue=<name> count=1 ackmod
   contracts, the error queue, the advanced bus, a review checklist.
 - `references/principles.md` — shape choice, durability switches, acks and prefetch, idempotency, the
   outbox for a write plus a publish, a retry policy that terminates.
-- `references/operations.md` — the broker-state procedure: health, depth, bindings, a
+- `references/operations.md` — what the broker holds right now: health, depth, bindings, a
   non-destructive peek, the report, replay, the guardrails.

@@ -20,11 +20,9 @@ report in Italian; paths, tool names and quoted transcript lines verbatim, secre
 Arguments: `$ARGUMENTS`
 
 You start with no conversation history: the session you judge exists only as its transcript on
-disk (the `findings` mode reads the deliver log instead). You cannot ask the user; the caller relays your report and asks which rows to apply.
+disk (the `findings` mode reads the deliver log instead). The caller relays your report and asks which rows to apply.
 
 ## When
-
-- After a session that went badly or slowly, to change the environment the next one runs in.
 
 Not for: reviewing the code the session wrote (`/code-review`); a team or sprint retrospective; a
 single correction the user already gave (it is one event, not a retro).
@@ -50,7 +48,7 @@ points there. State the file read (path, size) in the report.
 | one session | only the **Automated check** row below, its `Proposta` cell ending `(da confermare nella retro a 10 giorni)`: one session is noise for anything else | yes, ≤ 3 |
 | `days <n>` | every category, only for events recurring in 2+ sessions | yes, ≤ 5, patterns in 2+ sessions |
 | `monthly` | environment health, only when the owner asks or the focus is `monthly`, never on your own: `references/modes.md` | no |
-| `findings` | its section below | no |
+| `findings` | implementer rules from the deliver log: `references/modes.md` | no |
 
 ### Friction events — what to collect
 
@@ -73,25 +71,16 @@ failed, retried call · a permission prompt · a fact asked for · a huge output
 Before proposing, grep what exists — `~/.claude/{skills,agents,hooks,rules}`, `~/.claude/CLAUDE.md`,
 the repo's checks: an asset that did not fire, or a check left unwired, *is* the finding.
 
-### Findings — implementer rules from the deliver log
-
-Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`): no transcript needed. Read
-`$(git rev-parse --git-dir)/deliver/findings.jsonl` of the cwd (you derive the path; one JSON line per run, `{ "retro": … }` lines mark a settled
-retro): the lines after the last marker, grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
-(`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count, files); a line a
-check could enforce is a backlog item, as above. The owner approves; after the yes the caller appends the marker `{"retro":"<date>"}`: the
-report carries the exact command (Report, row 6).
-
 ### Report — returned to the caller, ≤ 40 lines (`days`: ≤ 60)
 
-1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `findings` mode `Log: <path> · righe dopo l'ultimo retro: N`; in `days` mode the line of `references/modes.md`.
+1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `days` and `findings` modes the line of `references/modes.md`.
 2. Proposals, most severe first, as a table `Proposta | Categoria | Evento (turno) | Dove | Rischio`;
    `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
 3. `Backlog` — one block per automated check: Italian title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
 4. `Consigli per te`, in the session and `days` modes: the table of `references/modes.md`.
 5. When `monthly` ran: `Salute: <outcome, one line per step>`.
-6. `findings` mode only: the line for the caller, the command that appends the marker after the owner's yes: `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.
+6. `findings` mode only: the marker command of `references/modes.md`.
 7. Last line: `Quali righe applico? Le voci di backlog le apre il chiamante dopo il tuo sì.`
 
 ## Do
@@ -113,5 +102,5 @@ denials and user turns, then Read slices around each hit (`offset`/`limit`).
 
 ## References
 
-- `references/modes.md` — the arguments read `days <n>` or `monthly`, or any mode that carries `Consigli per te`:
-  the period's transcripts, the coaching patterns and limits, the health steps.
+- `references/modes.md` — the arguments read `days <n>`, `monthly` or `findings`, or any mode that carries
+  `Consigli per te`: the period's transcripts, the coaching patterns and limits, the health steps, the deliver log.
