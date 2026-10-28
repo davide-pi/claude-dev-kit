@@ -12,10 +12,6 @@ never merges, never opens a PR with no parent item · title and body Italian, id
 
 ## When
 
-- A branch is complete, or complete enough to review, and needs a PR.
-- A PR title or description has to be written or rewritten.
-- A PR exists and new commits have to reach it (push; no second PR).
-
 Not for: branch naming and the merge (`branch-flow`), reviewing a PR (`code-review`), Azure DevOps
 verbs and auth (`azdo-cli`).
 
@@ -36,7 +32,7 @@ GitHub the issue — **never a Task**.
 | --- | --- |
 | collect | candidate ids from the branch name, commit messages, the session's work |
 | resolve | read each id's **type**; a Task → its parent; de-duplicate; link all that remain |
-| none left | **stop and ask once**, answerable with one pick: numbered options from the likely candidates — an `AB#` in the branch or commits, recent items assigned to the owner (`az boards query`, `@Me`, changed lately, never a Task) — plus "create one" (`user-story-standard` text, then `azdo-cli` after the owner's ok); never create an item unasked |
+| none left | **stop and ask once**, one pick from numbered candidates (`references/description.md` § No parent item); never create an item unasked |
 | parents under different Features | link them all and say so: the branch may be doing two things |
 | link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · remote is github.com → `references/description.md` § GitHub |
 
@@ -97,4 +93,4 @@ URL.
 
 ## References
 
-- `references/description.md` — writing the body, mapping files to deployables, the trailer, or the remote is github.com.
+- `references/description.md` — writing the body, mapping files to deployables, the trailer, no parent item found, or the remote is github.com.

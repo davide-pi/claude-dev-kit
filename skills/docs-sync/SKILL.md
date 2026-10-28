@@ -17,9 +17,6 @@ Arguments: `$ARGUMENTS`
 
 ## When
 
-- `/docs-sync` after a change that moved something the docs describe; `/docs-sync --audit` for drift
-  and gaps independent of any diff.
-
 Not for: a single README edit (a normal edit); creating a docs tree from nothing.
 
 ## Decide
