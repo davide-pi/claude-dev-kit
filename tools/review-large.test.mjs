@@ -38,33 +38,59 @@ async function dryRun(count, extra = {}, handler = null, noFiles = false) {
   return { out, logs, reviewers, spawned };
 }
 
-test('30 files at xhigh effort: 5 reviewers x 2 models, the count logged before any reviewer runs', async () => {
+test('30 files: 3 groups + 1 whole-change reviewer + 1 merger, the count logged before any reviewer runs', async () => {
   const { logs, reviewers, spawned } = await dryRun(30, { effort: 'xhigh', modelB: 'opus' });
-  assert.equal(reviewers.length, 10);
-  assert.equal(reviewers.filter((r) => r.model === 'opus').length, 5);
-  assert.equal(spawned.length, 11, '10 reviewers + the merger');
-  assert.ok(logs.some((l) => /5 reviewers x 2 models/.test(l) && /11 agents/.test(l)), logs.join('\n'));
+  assert.equal(reviewers.length, 4);
+  assert.equal(reviewers.filter((r) => r.model === 'opus').length, 1);
+  assert.equal(spawned.length, 5, '3 groups + 1 whole + the merger');
+  assert.ok(logs.some((l) => l === '30 files -> 3 group reviewers (sonnet) + 1 whole-change reviewer (opus) + 1 merger = 5 agents'), logs.join('\n'));
 });
 
-test('modelB is honoured only at xhigh effort and above', async () => {
-  const { reviewers } = await dryRun(12, { effort: 'medium', modelB: 'opus' });
-  assert.equal(reviewers.length, 2, 'one model: 12 files / 6 per reviewer');
-  assert.ok(reviewers.every((r) => r.model === undefined), 'no second model below xhigh');
+test('100 files are still 3 groups: the files per group grow, no refusal', async () => {
+  const { reviewers, out } = await dryRun(100, { effort: 'low' });
+  assert.equal(reviewers.length, 4);
+  assert.equal(out, 'REPORT');
+  const groups = reviewers.filter((r) => r.model === undefined);
+  assert.equal(groups.length, 3);
+  assert.deepEqual(groups.map((g) => Number(/These (\d+) file/.exec(g.prompt)[1])), [33, 33, 34]);
 });
 
-test('above 8 reviewers it refuses, naming the two ways out', async () => {
-  for (const [count, extra] of [[60, { effort: 'xhigh' }], [49, { effort: 'low' }]]) {
-    const { out, spawned } = await dryRun(count, extra);
-    assert.match(out, /above the cap of 8/);
-    assert.match(out, /Narrow `files` or raise `filesPerReviewer`/);
-    assert.equal(spawned.length, 0, 'nothing was spawned');
+test('filesPerReviewer defaults to 10 and sets the group count under the cap of 3', async () => {
+  assert.equal((await dryRun(10)).reviewers.length, 2, '1 group + whole');
+  assert.equal((await dryRun(11)).reviewers.length, 3, '2 groups + whole');
+  assert.equal((await dryRun(12, { filesPerReviewer: 3 })).reviewers.length, 4, 'capped at 3 groups');
+});
+
+test('the files of one directory land in one group', async () => {
+  const files = [...['z', 'a', 'm'].flatMap((d) => Array.from({ length: 10 }, (_, i) => `src/${d}/f${i}.cs`))];
+  const { reviewers } = await dryRun(0, { files });
+  const groups = reviewers.filter((r) => r.label !== 'whole change (cross-file)');
+  assert.equal(groups.length, 3);
+  for (const g of groups) {
+    const scope = g.prompt.split('\n')[0];
+    const dirs = new Set([...scope.matchAll(/'(src\/\w)\//g)].map((m) => m[1]));
+    assert.equal(dirs.size, 1, scope);
   }
 });
 
-test('raising filesPerReviewer brings a big diff under the cap', async () => {
-  const { reviewers, out } = await dryRun(60, { effort: 'low', filesPerReviewer: 10 });
-  assert.equal(reviewers.length, 6);
-  assert.equal(out, 'REPORT');
+test('B reviews the whole range at any effort, on modelB, and the groups know the full list', async () => {
+  for (const effort of ['low', 'xhigh']) {
+    const { reviewers } = await dryRun(30, { effort, modelB: 'fable' });
+    const whole = reviewers.filter((r) => r.label === 'whole change (cross-file)');
+    assert.equal(whole.length, 1, effort);
+    assert.equal(whole[0].model, 'fable');
+    assert.equal(whole[0].effort, effort);
+    assert.match(whole[0].prompt, /f29\.cs/);
+    assert.match(whole[0].prompt, /groups cover per-file defects/);
+    const groups = reviewers.filter((r) => r !== whole[0]);
+    assert.equal(groups.length, 3);
+    assert.ok(groups.every((g) => g.model === undefined && /All the changed files: .*f29\.cs/.test(g.prompt) && /read them in full/.test(g.prompt)));
+  }
+});
+
+test('past 60 files the briefs carry the count and the directories, not the list', async () => {
+  const { reviewers } = await dryRun(61);
+  assert.ok(reviewers.every((r) => /The change has 61 files in: src\//.test(r.prompt) && !/All the changed files/.test(r.prompt)));
 });
 
 test('reviewers get the effort; the merger runs on sonnet', async () => {
@@ -105,7 +131,7 @@ test('a null merger returns the raw findings table', async () => {
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
   const { out } = await dryRun(6, {}, (o) => (o.label === 'merge the reviews into one report' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
   assert.match(out, /merger returned nothing/);
-  assert.ok(out.includes('| 1 | P2 | PLAUSIBLE | correctness | src/a.cs:3 | Rotto | A |'), out);
+  assert.ok(out.includes('| 1 | P2 | CONFIRMED | correctness | src/a.cs:3 | Rotto | A+B |'), out);
 });
 
 test('A and B findings on the same anchor reach the merger as one CONFIRMED, checked is capped', async () => {

@@ -64,10 +64,14 @@ const BLOCKING = new Set(['P1', 'P2'])
 
 const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
 
+const WIDE_FILES = 10   // past either, the change is wide: the single whole reviewer of S and M runs on opus instead of sonnet; there is never a split
+const WIDE_LINES = 600
+
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
-const reviewersFor = (size, touches = [], mechanical = false) => {
+const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
   const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const modelA = wide && !mechanical ? 'opus' : 'sonnet'
+  const list = size === 'S' ? [code('A', modelA, mechanical ? 'low' : 'high', !mechanical)] : size === 'M' ? [code('A', modelA, 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -216,7 +220,7 @@ const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) =>
 const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium', whole: true }
 const deltaReviewers = (everyone, finders = []) => {
   const has = new Set(everyone.map(r => r.key))
-  const wanted = new Set(finders.flatMap(k => (has.has(k) ? [k] : everyone.filter(r => r.key[0] === k[0]).map(r => r.key))))
+  const wanted = new Set(finders.filter(k => has.has(k)))
   const sonnet = everyone.find(r => r.delta || (r.whole && r.model === 'sonnet' && r.effort === 'medium'))
   const list = everyone.filter(r => wanted.has(r.key) || r === sonnet)
   return sonnet ? list : [...list, WATCHER]
@@ -225,7 +229,7 @@ const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews 
 // The size can change the panel under a key (A is a Sonnet high at M and L, the Opus is B at L): a key stands only while it names the same reviewer.
 const finderKey = (raised, everyone) => {
   const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
-  if (!raised.model || everyone.some(r => r.key[0] === raised.key[0] && same(r))) return raised.key
+  if (!raised.model || everyone.some(r => r.key === raised.key && same(r))) return raised.key
   return [...everyone, WATCHER].find(same)?.key ?? raised.key
 }
 
@@ -537,6 +541,7 @@ let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = fal
 let fixChurns = [], openCounts = [], afterFix = false
 let nextRound = { only: null, coverage: false, final: false }
 let finalReading = false, finalReadDone = false, round1Tree = ''
+let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
 let fixReaders = [], lastFixIsReview = false, bigFiles = []   // fixReaders: per review fix, the panel keys that read its delta
 
 const ask = async (prompt, opts) => {
@@ -705,6 +710,7 @@ if (!inline) {
     })
   }
   const implStall = absorb(impl)
+  if (Number.isFinite(impl.snapshot?.churn)) changeLines = impl.snapshot.churn
   if (implStall) return verifyStall(0, implStall)
 
   if (previewText && sizeFor(givenSize, risk) !== 'S') {
@@ -763,7 +769,10 @@ const reviewersForRound = () => {
   const size = sizeFor(givenSize, risk)
   const signal = sizeSignal(size, seen.size)
   if (signal && !gaps.includes(signal)) gaps.push(signal)
-  const reviewers = reviewersFor(size, risk, mechanical)
+  const wasWide = wide
+  wide = wide || (!mechanical && (expected.length > WIDE_FILES || changeLines > WIDE_LINES))
+  if (wide && !wasWide) log(`wide change (${expected.length > WIDE_FILES ? `${expected.length} files, more than ${WIDE_FILES}` : `${changeLines} changed lines, more than ${WIDE_LINES}`}): ${size === 'L' ? 'the L panel is unchanged' : 'reviewer A runs on opus'}`)
+  const reviewers = reviewersFor(size, risk, mechanical, wide)
   return { size, list: reviewers, expected }
 }
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit()}`
