@@ -1,8 +1,9 @@
 /**
- * PreToolUse hook on Agent|Task: keeps subagent spawns cheap and explicit.
+ * PreToolUse hook on Agent|Task: keeps subagent spawns explicit.
  *
- * Denies a spawn with no `subagent_type`, and a `general-purpose`, `claude` or `Plan` spawn with no `model`:
- * it would inherit the session model, often Opus. Anything else passes in silence.
+ * Denies a spawn with no `subagent_type`, and a `Plan` spawn with no `model`: its size picks the model
+ * (opus for L, sonnet for M). `general-purpose` and `claude` without a model pass: settings.json's
+ * CLAUDE_CODE_SUBAGENT_MODEL gives them one. Anything else passes in silence.
  *
  * Not a security guard: any error lets the spawn through. Always exits 0.
  *
@@ -18,10 +19,10 @@ try {
   if (input && typeof input === 'object') {
     const type = typeof input.subagent_type === 'string' ? input.subagent_type.trim() : '';
     if (!type) {
-      deny('Name the agent type (subagent_type): a kit agent (Explore, analyst, implementer, code-reviewer, …) or `fork`; general-purpose only with an explicit model.');
+      deny('Name the agent type (subagent_type): a kit agent (Explore, analyst, implementer, code-reviewer, …) or `fork`.');
     }
-    if (['general-purpose', 'claude', 'Plan'].includes(type) && !input.model) {
-      deny(`${type} has no model of its own here: pass model (Plan: opus for L, sonnet for M), or use a kit agent with its own model.`);
+    if (type === 'Plan' && !input.model) {
+      deny('Plan needs a model: opus for L, sonnet for M.');
     }
   }
 } catch {

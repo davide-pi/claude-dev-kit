@@ -1,6 +1,7 @@
 #Requires -Version 5.1
 <#
-  Hook PreToolUse per i tool mcp__plugin_browser-use_browser-use__*.
+  Percorso lento del hook PreToolUse hooks/edge-cdp.js (tool mcp__plugin_browser-use_browser-use__*):
+  edge-cdp.js lo lancia solo quando nessuna porta CDP risponde.
 
   browser-use (browser-harness) non avvia un browser: si aggancia alla porta CDP
   scritta dal profilo Edge PRINCIPALE in "User Data\DevToolsActivePort". Il toggle di

@@ -1,5 +1,5 @@
 /**
- * PostToolUse (Write|Edit|MultiEdit) + UserPromptSubmit hook: one line into the turn when the main session
+ * PostToolUse (Write|Edit|MultiEdit) hook: one line into the turn when the main session
  * is hand-writing code that should be delegated.
  *
  * The standing rule is "code beyond a few lines, scope decided -> `implementer`; this session briefs
@@ -8,11 +8,13 @@
  * decided and the rest is the implementer's job. Only a nudge — a deliberate multi-file edit by the
  * user's own request goes on untouched.
  *
- * Two events, one script, told apart by `hook_event_name`:
- *
- *   - PostToolUse counts the edit in `<config>/.cache/edits-<session_id>.json`; on the third it prints
- *     the line as `additionalContext`, and never again that turn (the count only grows);
- *   - UserPromptSubmit deletes that file: a new user turn starts from zero.
+ * Each edit is counted in `<config>/.cache/edits-<session_id>.json`, with the timestamp of the prompt it
+ * belongs to; on the third the line goes out as `additionalContext`, and never again that turn (the count
+ * only grows). The turn is told from `<config>/history.jsonl`, where the harness logs every prompt: when the
+ * session's last prompt there is not the counter's, a new turn started and the count restarts. No node per
+ * prompt, and a turn interrupted with Esc (no Stop) cannot leak its count into the next. A prompt not in the
+ * last 64 KB of the log (other sessions typing a lot) keeps the count: the nudge comes early, never late. A
+ * message queued while the turn runs is logged too and restarts the count mid-turn: the nudge then comes late.
  *
  * Main session only. An edit made by a subagent (the implementer itself, doc-keeper) is exactly the
  * delegation this hook wants, so it is never counted. The harness marks a hook fired inside a subagent
@@ -37,13 +39,16 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { CACHE_DIR, prune } = require('./lib/cache');
+const { CONFIG_DIR, CACHE_DIR, prune } = require('./lib/cache');
 
 const THRESHOLD = 3;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const COUNTER_FILE = /^edits-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
+/** The harness's prompt log: one line per user prompt, with `sessionId` and a millisecond `timestamp`. */
+const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
+const HISTORY_TAIL_BYTES = 64 * 1024;
 
 /** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
 function canonical(file, base) {
@@ -64,12 +69,38 @@ function isScratch(file, cwd) {
 /** True for a doc or data file by extension: editing one is not code written by hand. */
 const isDocOrData = (file) => typeof file === 'string' && /\.(?:mdx?|txt|jsonc?|ya?ml|toml|ini|csv|xml|env)$/i.test(file);
 
-function readCount(file) {
+/** `{ count, prompt }` from the counter file; a missing or unreadable file is a count of 0. */
+function readCounter(file) {
   try {
-    const { count } = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return Number.isFinite(count) ? count : 0;
+    const { count, prompt } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { count: Number.isFinite(count) ? count : 0, prompt: prompt ?? null };
   } catch {
-    return 0;
+    return { count: 0, prompt: null };
+  }
+}
+
+/** The timestamp of the session's last prompt in the tail of `<config>/history.jsonl`, or null when none is there. */
+function lastPrompt(id) {
+  let fd;
+  try {
+    fd = fs.openSync(HISTORY, 'r');
+    const size = fs.fstatSync(fd).size;
+    const length = Math.min(size, HISTORY_TAIL_BYTES);
+    const buffer = Buffer.alloc(length);
+    fs.readSync(fd, buffer, 0, length, size - length);
+    const lines = buffer.toString('utf8').split('\n');
+    for (let i = lines.length - 1; i >= 0; i -= 1) {
+      if (!lines[i].includes(id)) continue;
+      try {
+        const entry = JSON.parse(lines[i]);
+        if (entry.sessionId === id && Number.isFinite(entry.timestamp)) return entry.timestamp;
+      } catch { /* the first line of the tail is usually cut */ }
+    }
+    return null;
+  } catch {
+    return null;
+  } finally {
+    if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
@@ -79,18 +110,16 @@ function run(payload) {
   if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) return null;
   const file = path.join(CACHE_DIR, `edits-${id}.json`);
 
-  if (payload.hook_event_name === 'UserPromptSubmit') {
-    fs.rmSync(file, { force: true });
-    return null;
-  }
   if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) return null;
   if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) return null;
   if (isScratch(payload.tool_input?.file_path, payload.cwd)) return null;
   if (isDocOrData(payload.tool_input?.file_path)) return null;
 
-  const count = readCount(file) + 1;
+  const prompt = lastPrompt(id);
+  const counter = readCounter(file);
+  const count = (prompt !== null && prompt !== counter.prompt ? 0 : counter.count) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ count }));
+  fs.writeFileSync(file, JSON.stringify({ count, prompt: prompt ?? counter.prompt }));
   if (count !== THRESHOLD) return null;
 
   prune(COUNTER_FILE);

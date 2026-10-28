@@ -695,13 +695,10 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh",
+            "command": "node",
             "args": [
-              "-NoProfile",
-              "-ExecutionPolicy",
-              "Bypass",
-              "-Command",
-              "$d = if ($env:CLAUDE_HOOKS) { $env:CLAUDE_HOOKS } else { \"$HOME\\.claude\\hooks\" }; & \"$d\\ensure-edge-cdp.ps1\""
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/edge-cdp.js')}catch{process.exit(0)}"
             ],
             "timeout": 30,
             "statusMessage": "Checking Edge's CDP port for browser-use..."
@@ -796,21 +793,6 @@
             ],
             "timeout": 10,
             "statusMessage": "Checking for days whose hours were never logged..."
-          }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          {
-            "type": "command",
-            "command": "node",
-            "args": [
-              "-e",
-              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/nudges.js')}catch{process.exit(0)}"
-            ],
-            "timeout": 5
           }
         ]
       }

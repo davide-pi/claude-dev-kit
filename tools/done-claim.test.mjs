@@ -408,6 +408,14 @@ test('a proven verdict table is sent back once while the perimeter is still acti
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
 });
 
+test('the perimeter is read off the disk, no git process: found from a subdirectory with git off the PATH', () => {
+  const repo = repoWithPerimeter('active');
+  mkdirSync(join(repo, 'src'));
+  const final = verdict(row('Passed: 48'));
+  const noGit = { CLAUDE_DONE_CLAIM: '1', PATH: '', Path: '' };
+  assert.match(stop(edited(final, 'Passed: 48'), { env: noGit, extra: { cwd: join(repo, 'src') } }).reason, /Close the perimeter/);
+});
+
 test('a closed perimeter, another branch, no cwd or no verdict table: silent', () => {
   const final = verdict(row('Passed: 48'));
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repoWithPerimeter('closed') } }).reason, '');

@@ -74,10 +74,7 @@ function run(box, cwd, { source = 'startup', env = {} } = {}) {
 test('mapped root → ALM line with org, project, identity; env file pinned', () => {
   const box = sandbox();
   const { context, envFile } = run(box, p('D:\\work\\product\\repo-a\\src'));
-  assert.match(context, /^ALM: Azure DevOps · org org-a · project Product · az identity work /);
-  assert.match(context, /AZ_IDENTITY/);
-  assert.match(context, /az outside the allow list.*prefix/, 'the manual prefix is for the az the guard does not pin');
-  assert.doesNotMatch(context, /ad az/, 'not "every az command": the guard pins the allowed ones');
+  assert.equal(context, 'ALM: Azure DevOps · org org-a · project Product · az identity work', 'the manual az prefix lives in azdo-cli, not in every session');
   assert.match(envFile, /^export AZURE_CONFIG_DIR='.*\/\.azure-work'\nexport AZ_IDENTITY=work\n$/);
   assert.doesNotMatch(envFile, /\\/);
 });

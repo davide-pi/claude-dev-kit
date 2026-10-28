@@ -1,6 +1,6 @@
 /**
- * SessionStart hook: at most four lines saying where the work stands, plus one when the `deliver` findings
- * log says a retro would pay.
+ * SessionStart hook: at most four lines saying where the work stands, plus one at startup (not on a resume,
+ * clear or compact re-fire) when the `deliver` findings log says a retro would pay.
  *
  * The first question of every session is the same one — which branch am I on, is the tree dirty,
  * what did I last commit, am I in step with the remote, what is this branch for — and answering it
@@ -345,8 +345,9 @@ try {
   const key = found.gitDir;
   const entry = cache[key];
 
-  const since = sinceRetro(found.gitDir);
-  const nudge = withRuns(findingsNudge(since), since);
+  // The retro lines once per session: a resume, clear or compact re-fire repeats only the brief.
+  const since = payload.source && payload.source !== 'startup' ? null : sinceRetro(found.gitDir);
+  const nudge = since && withRuns(findingsNudge(since), since);
   if (entry && Date.now() - entry.at < TTL_MS && Array.isArray(entry.lines)) {
     emit(entry.lines, nudge);
   }

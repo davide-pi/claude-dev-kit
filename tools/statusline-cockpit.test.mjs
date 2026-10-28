@@ -12,6 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -219,4 +220,31 @@ test('cache hit: absent with no usage, a null usage, a zero total or a bad numbe
   }
   // a provider that reports no cache tokens but plain input: 0 % is a reading, not an absence
   assert.match(plain(renderUsage({ input_tokens: 100 })), /⚡0%/);
+});
+
+/** Renders with a pre-written git cache entry of `ageMs` for a directory that is no repository: the branch shows only when the entry is reused. */
+function renderWithGitCache(name, value, ageMs) {
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-git-'));
+  try {
+    const cwd = join(dir, 'not-a-repo');
+    mkdirSync(join(dir, '.cache'), { recursive: true });
+    mkdirSync(cwd);
+    const hash = createHash('sha1').update(cwd).digest('hex').slice(0, 16);
+    writeFileSync(join(dir, '.cache', `${name}-${hash}.json`), JSON.stringify({ at: Date.now() - ageMs, value }));
+    const r = spawnSync(process.execPath, [STATUSLINE], {
+      input: JSON.stringify({ ...SAMPLE, cwd }), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, COLUMNS: '200' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    return plain(r.stdout);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+}
+
+test('git cache: the branch outlives several 5 s renders (no git process), and expires after 30 s', () => {
+  const git = { branch: 'cached-branch', remote: null, staged: 0, modified: 0, untracked: 0 };
+  assert.match(renderWithGitCache('git', git, 12_000), /cached-branch/, 'a 12 s old entry is reused');
+  assert.doesNotMatch(renderWithGitCache('git', git, 31_000), /cached-branch/, 'a 31 s old entry is recomputed');
+});
+
+test('worktree cache: the linked-worktree root is kept for minutes, not seconds', () => {
+  assert.match(renderWithGitCache('worktree', { root: 'C:/wt/cached-tree' }, 5 * 60_000), /cached-tree/);
 });

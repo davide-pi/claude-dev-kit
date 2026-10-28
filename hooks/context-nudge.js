@@ -2,7 +2,8 @@
  * UserPromptSubmit hook, OFF by default: it runs only when `CLAUDE_NUDGE_STEPS` (comma-separated
  * absolute tokens, e.g. `250000` for one nudge at 250k) is set and valid; unset, empty or invalid,
  * it is silent (auto-compaction, on in the template, handles the window). When on, one line into the turn each time the
- * context crosses a step.
+ * context crosses a step. The template wires no UserPromptSubmit hook (no node per prompt): turning it on also means
+ * adding a `UserPromptSubmit` entry that runs `nudges.js`, as the `PostToolUse` one does.
  *
  * Cost is context size times turns. The steps are absolute on purpose: on a 1M window a percentage band of 50 %
  * is 500k tokens, above what almost any session reaches, so it would never fire. A hook cannot see

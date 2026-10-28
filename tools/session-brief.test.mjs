@@ -243,6 +243,18 @@ test('a category that recurs 5 times since the last retro adds one line, even be
   assert.ok(!nudgeOf(lines)[0].includes('correctness'));
 });
 
+test('the retro lines come at startup only: a resume, clear or compact re-fire keeps the brief without them', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression')), runLine(finding('regression'), finding('regression')), runLine()]);
+  assert.equal(nudgeOf(run(root)).length, 1, 'startup');
+  for (const source of ['resume', 'clear', 'compact']) {
+    const lines = run(root, undefined, JSON.stringify({ hook_event_name: 'SessionStart', source, cwd: root }));
+    assert.equal(lines.length, 4, source);
+    assert.equal(nudgeOf(lines).length + runsOf(lines).length, 0, source);
+  }
+  assert.equal(nudgeOf(run(root, undefined, JSON.stringify({ hook_event_name: 'SessionStart', cwd: root }))).length, 1, 'no source: as startup');
+});
+
 test('four findings of a category are no nudge; neither is a missing, empty or unreadable log', () => {
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression'), finding('regression'))]);
