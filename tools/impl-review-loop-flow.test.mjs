@@ -29,9 +29,6 @@ test('deltaReviewers (W6): the reviewers that raised the open findings plus one 
   const L = reviewersFor('L', ['security']);
   assert.deepEqual(keys(deltaReviewers(L, ['B'])), ['B', 'S']);
   assert.deepEqual(keys(deltaReviewers(L, ['security', 'B'])), ['B', 'security', 'S']);
-  const grouped = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
-  assert.deepEqual(keys(deltaReviewers(grouped, ['A2'])), ['A2', 'S']);
-  assert.deepEqual(keys(deltaReviewers(grouped, ['A'])), ['A1', 'A2', 'S']);              // 'A' was the key before the group split
 });
 
 test('finderKey: a key stands for the reviewer that raised the finding, also after the size changes the panel under that key', () => {
@@ -40,8 +37,6 @@ test('finderKey: a key stands for the reviewer that raised the finding, also aft
   const L = reviewersFor('L', ['security']);
   assert.equal(finderKey(opusM, M), 'A');
   assert.equal(finderKey(opusM, L), 'B');                                             // M -> L: the Opus is B now, A is a Sonnet
-  const grouped = [{ ...L[0], key: 'A1', group: 0, whole: false }, { ...L[0], key: 'A2', group: 1, whole: false }, ...L.slice(1)];
-  assert.equal(finderKey({ ...L[0], key: 'A' }, grouped), 'A');                       // the Sonnet before the group split: still A (deltaReviewers fans it out)
   assert.equal(finderKey({ key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, L), 'S');   // the watcher itself
   assert.equal(finderKey({ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, M), 'S');   // S -> M: the Sonnet medium that raised it is the watcher, not the Opus A
   assert.equal(finderKey({ key: 'security' }, L), 'security');                        // an entry without a model keeps its key

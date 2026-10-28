@@ -10,26 +10,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, review, finding, DONE, MANY, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, decideRound, mergeReviews, classify, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
+import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, review, finding, DONE, MANY, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, decideRound, mergeReviews, classify, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
 
-// ── reviewer budget, fan-out by group of files, an agent that throws ─────────────────────────────────
-test('groupFiles: at most 8 per group, in order; a list within the limit is one group', () => {
-  const n = k => Array.from({ length: k }, (_, i) => `src/f${i}.cs`);
-  assert.deepEqual(groupFiles(n(8)).map(g => g.length), [8]);
-  assert.deepEqual(groupFiles(n(9)).map(g => g.length), [8, 1]);
-  assert.deepEqual(groupFiles(n(14)).map(g => g.length), [8, 6]);
-  assert.deepEqual(groupFiles(n(17)).map(g => g.length), [8, 8, 1]);
-  assert.equal(groupFiles(n(14))[1][0], 'src/f8.cs');
-  assert.deepEqual(groupFiles([]), [[]]);
-});
-
-test('groupOf: a path goes to the group listing it (root, case and slashes ignored), a stray one to the last', () => {
-  const groups = [['src/a.cs', 'src/b.cs'], ['src/c.cs']];
-  assert.equal(groupOf('src/b.cs', groups, ROOT), 0);
-  assert.equal(groupOf('C:\\repo\\SRC\\c.cs', groups, ROOT), 1);
-  assert.equal(groupOf('src/stray.cs', groups, ROOT), 1);
-});
-
+// ── reviewer budget, an agent that throws ─────────────────────────────────
 test('reviewersFor: S one Sonnet at high, M one Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
   const spec = (size, touches) => reviewersFor(size, touches).map((r) => `${r.key}:${r.agentType}:${r.model}:${r.effort}${r.whole ? ':whole' : ''}`);
   assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:high:whole']);
@@ -102,79 +85,53 @@ test('script: every implementer, reviewer and fixer prompt names the repository 
   for (const c of calls) assert.ok(c.prompt.includes(`REPOSITORY: ${ROOT}.`), c.opts.label);
 });
 
-test('script: more than 8 changed files, reviewer A fans out per group; B stays whole; the budget is on each', async () => {
-  const { out, calls } = await run(manyArgs(), [review([]), review([]), review([])], [manyImpl]);
+test('script: more than 8 changed files, every reviewer stays whole: no share, the budget is on each', async () => {
+  const { out, calls } = await run(manyArgs(), [review([]), review([])], [manyImpl]);
   assert.equal(out.status, 'OK');
   const r1 = calls.filter(c => isReview(c.opts.label, 1));
-  assert.deepEqual(r1.map(c => c.opts.label), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2', 'reviewer B · round 1 · second opinion']);
-  assert.deepEqual(r1.map(c => c.opts.model), ['sonnet', 'sonnet', 'opus']);
-  assert.match(r1[0].prompt, /review ONLY these files.*src\/Orders\/F0\.cs.*src\/Orders\/F7\.cs/);
-  assert.doesNotMatch(r1[0].prompt, /You also own/);
-  assert.match(r1[1].prompt, /review ONLY these files.*F8\.cs.*F13\.cs.*You also own any touched file/s);
-  assert.doesNotMatch(r1[2].prompt, /review ONLY/);
+  assert.deepEqual(r1.map(c => c.opts.label), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
+  assert.deepEqual(r1.map(c => c.opts.model), ['sonnet', 'opus']);
+  r1.forEach(c => assert.doesNotMatch(c.prompt, /Your share|review ONLY/));
+  r1.forEach(c => assert.match(c.prompt, /Review the change made since the start/));
   r1.forEach(c => assert.match(c.prompt, /TOOL BUDGET/));
-  assert.equal(out.roundLog[0].reviewers, 3);
+  assert.equal(out.roundLog[0].reviewers, 2);
 });
 
-test('script: 8 changed files or fewer, reviewer A stays one reviewer', async () => {
-  const { calls } = await run(manyArgs(), [review([]), review([])], [{ ...manyImpl, files: MANY.slice(0, 8) }]);
-  assert.deepEqual(calls.filter(c => isReview(c.opts.label, 1)).map(c => c.opts.label), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
-});
-
-test('script: a group reviewer is asked only for the previous findings on its files', async () => {
+test('script: every reviewer is asked all the previous findings, whatever file they are on', async () => {
   const { out, calls } = await run(manyArgs(), [
-    review([], [finding({ path: 'src/Orders/F1.cs' })]), review([], [finding({ path: 'src/Orders/F12.cs', line: 50, title: 'a second defect elsewhere' })]), review([]),
-    review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F2', status: 'closed' }]),     // R2: the two raisers; the Sonnet S is answered by the harness
+    review([], [finding({ path: 'src/Orders/F1.cs' })]), review([], [finding({ path: 'src/Orders/F12.cs', line: 50, title: 'a second defect elsewhere' })]),
+    review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }]),     // R2: the two raisers; the Sonnet S is answered by the harness
   ], [manyImpl, manyImpl]);
   assert.equal(out.status, 'OK');
   const r2 = Object.fromEntries(calls.filter(c => isReview(c.opts.label, 2)).map(c => [c.opts.label, c.prompt]));
-  assert.match(r2['reviewer A1 · round 2 · code, files 1/2'], /- F1 \[open\]/);
-  assert.doesNotMatch(r2['reviewer A1 · round 2 · code, files 1/2'], /- F2 /);
-  assert.match(r2['reviewer A2 · round 2 · code, files 2/2'], /- F2 \[open\]/);
-  assert.doesNotMatch(r2['reviewer A2 · round 2 · code, files 2/2'], /- F1 /);
-  assert.match(r2['reviewer S · round 2 · check the fixes'], /- F1 \[open\].*- F2 \[open\]/s);                                // the whole-change Sonnet is asked for both
-  assert.equal(r2['reviewer B · round 2 · second opinion'], undefined);                                                       // B raised nothing: it comes back in the final read
+  for (const label of ['reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes']) assert.match(r2[label], /- F1 \[open\].*- F2 \[open\]/s, label);
 });
 
 // An answer that lists the files it read; the files the round owes are `pending` plus the `changed` argument (round 1: every changed file).
 const ABC = ['a', 'b', 'c'];
 
-test('unreviewedFiles: a failed group is unreviewed unless a whole-change reviewer listed its files', () => {
-  const groups = [['a', 'b'], ['c']];
-  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
-  assert.deepEqual(unreviewedFiles([null, read('c'), null], rs, groups, [], '', ABC), ['a', 'b']);
-  assert.deepEqual(unreviewedFiles([null, read('c'), read(...ABC)], rs, groups, [], '', ABC), []);
-  assert.deepEqual(unreviewedFiles([null, null, read(...ABC)], rs, groups, [], '', ABC), []);
-  assert.deepEqual(unreviewedFiles([null, null, null], rs, groups, [], '', ABC), ABC);                    // null = all unread
-  assert.deepEqual(unreviewedFiles([read('a')], [{ key: 'A', whole: true }], [['a']], [], '', ['a']), []);
+test('unreviewedFiles: a whole reviewer that fails or omits a file from filesReviewed leaves it unread; it clears only the files it lists', () => {
+  const rs = [{ key: 'A', whole: true }, { key: 'B', whole: true }];
+  assert.deepEqual(unreviewedFiles([read('a', 'b', 'c'), null], rs, [], '', ABC), []);
+  assert.deepEqual(unreviewedFiles([read('a'), read('c')], rs, [], '', ABC), ['b']);
+  assert.deepEqual(unreviewedFiles([null, null], rs, [], '', ABC), ABC);                    // null = all unread
+  assert.deepEqual(unreviewedFiles([{ previous: [], found: [] }, null], rs, [], '', ABC), ABC);   // no filesReviewed: read nothing
+  assert.deepEqual(unreviewedFiles([read('C:\\repo\\SRC\\a.cs')], [{ key: 'A', whole: true }], [], ROOT, ['src/a.cs']), []);   // root, case, slashes ignored
 });
 
-test('unreviewedFiles: a group reviewer that omits a file from filesReviewed leaves it unread; it clears only its own files', () => {
-  const groups = [['a', 'b'], ['c']];
-  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
-  assert.deepEqual(unreviewedFiles([read('a'), read('c'), null], rs, groups, [], '', ABC), ['b']);
-  assert.deepEqual(unreviewedFiles([read('a', 'b', 'c'), null, null], rs, groups, [], '', ABC), ['c']);   // listing another group's file clears nothing
-  assert.deepEqual(unreviewedFiles([{ previous: [], found: [] }, read('c'), null], rs, groups, [], '', ABC), ['a', 'b']);   // no filesReviewed: read nothing
-  assert.deepEqual(unreviewedFiles([null, null, read('a', 'c')], rs, groups, [], '', ABC), ['b']);        // a whole reviewer clears the changed files it lists
-  assert.deepEqual(unreviewedFiles([read('C:\\repo\\SRC\\a.cs')], [{ key: 'A', whole: true }], [['src/a.cs']], [], ROOT, ['src/a.cs']), []);   // root, case, slashes ignored
+test('unreviewedFiles: a specialist that answers never covers the files a failed whole reviewer left unread', () => {
+  const rs = [{ key: 'A', whole: true }, { key: 'security' }];
+  assert.deepEqual(unreviewedFiles([null, read(...ABC)], rs, [], '', ABC), ABC);
+  assert.deepEqual(unreviewedFiles([read(...ABC), read()], rs, [], '', ABC), []);
 });
 
-test('unreviewedFiles: a specialist that answers never covers the files a failed group and a failed whole reviewer left unread', () => {
-  const groups = [['a', 'b'], ['c']];
-  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }, { key: 'security' }];
-  assert.deepEqual(unreviewedFiles([null, read('c'), null, read(...ABC)], rs, groups, [], '', ABC), ['a', 'b']);
-  assert.deepEqual(unreviewedFiles([null, null, null, read(...ABC)], rs, groups, [], '', ABC), ABC);
-  assert.deepEqual(unreviewedFiles([null, null, read(...ABC), read()], rs, groups, [], '', ABC), []);
-});
-
-test('unreviewedFiles: the unread files are carried; a group that lists its own clears them, a delta round owes only the fix files', () => {
-  const groups = [['a', 'b'], ['c']];
-  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
-  assert.deepEqual(unreviewedFiles([read('a', 'b'), read('c'), null], rs, groups, ['a', 'b']), []);
-  assert.deepEqual(unreviewedFiles([null, read('c'), null], rs, groups, ['a', 'b']), ['a', 'b']);
-  assert.deepEqual(unreviewedFiles([read('a'), null, null], rs, groups, ['a', 'b'], '', ['c']), ['b', 'c']);
-  assert.deepEqual(unreviewedFiles([null, read('a', 'b'), read('a', 'b')], rs, groups, ['a', 'b']), []);
-  assert.deepEqual(unreviewedFiles([read(), read('c'), null], rs, groups, [], '', ['c']), []);            // round 2 owes the delta only: a and b were read in round 1
+test('unreviewedFiles: the unread files are carried until a whole reviewer lists them, a delta round owes only the fix files', () => {
+  const rs = [{ key: 'A', whole: true }];
+  assert.deepEqual(unreviewedFiles([read('a', 'b')], rs, ['a', 'b']), []);
+  assert.deepEqual(unreviewedFiles([null], rs, ['a', 'b']), ['a', 'b']);
+  assert.deepEqual(unreviewedFiles([read('a')], rs, ['a', 'b'], '', ['c']), ['b', 'c']);
+  assert.deepEqual(unreviewedFiles([read()], rs, [], '', ['c']), ['c']);
+  assert.deepEqual(unreviewedFiles([read('c')], rs, [], '', ['c']), []);            // round 2 owes the delta only: a and b were read in round 1
 });
 
 test('coverageAction: nothing unread is ok, the first time unread is a rerun, after a rerun it is a stall', () => {
@@ -186,32 +143,26 @@ test('coverageAction: nothing unread is ok, the first time unread is a rerun, af
   assert.equal(coverageAction({}), 'ok');
 });
 
-test('coverageOwners: the group reviewer of each unread file; the whole reviewers when there are no groups', () => {
-  const groups = [['a', 'b'], ['c']];
-  const fanned = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }, { key: 'security' }];
-  assert.deepEqual(coverageOwners(['a'], fanned, groups, ROOT), ['A1']);
-  assert.deepEqual(coverageOwners(['c', 'b'], fanned, groups, ROOT), ['A1', 'A2']);
-  assert.deepEqual(coverageOwners(['stray.cs'], fanned, groups, ROOT), ['A2']);                          // a stray file belongs to the last group
-  const single = [{ key: 'A', whole: true }, { key: 'B', whole: true }, { key: 'security' }];
-  assert.deepEqual(coverageOwners(['a'], single, [['a']], ROOT), ['A', 'B']);
-  assert.deepEqual(coverageOwners([], fanned, groups, ROOT), []);
+test('coverageOwners: every whole reviewer when something is unread, never a specialist; nobody when nothing is', () => {
+  const rs = [{ key: 'A', whole: true }, { key: 'B', whole: true }, { key: 'security' }];
+  assert.deepEqual(coverageOwners(['a'], rs), ['A', 'B']);
+  assert.deepEqual(coverageOwners([], rs), []);
 });
 
-
-test('script: a reviewer that throws is a gap; a whole reviewer covers its group; otherwise one rerun of the owner alone, then a resumable STALL "gap" naming the files; all throwing is a STALL', async () => {
+test('script: a reviewer that throws is a gap; a whole reviewer covers it; otherwise one rerun of the whole reviewers, then a resumable STALL "gap" naming the files; all throwing is a STALL', async () => {
   const boom = new Error('subagent completed without calling StructuredOutput');
-  const partial = await run(manyArgs(), [boom, review([]), review([])], [manyImpl]);
+  const partial = await run(manyArgs(), [boom, review([])], [manyImpl]);
   assert.equal(partial.out.status, 'OK');
-  assert.match(partial.out.gaps.join('\n'), /round 1: reviewer A1 returned nothing: subagent completed without calling StructuredOutput/);
-  assert.deepEqual(reviewLabels(partial.calls), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2', 'reviewer B · round 1 · second opinion']);                       // covered by B: no rerun
-  const uncovered = await run(manyArgs(), [boom, review([]), boom, boom], [manyImpl]);              // R1: A1 and B throw; R2: the rerun of A1 throws again
+  assert.match(partial.out.gaps.join('\n'), /round 1: reviewer A returned nothing: subagent completed without calling StructuredOutput/);
+  assert.deepEqual(reviewLabels(partial.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);                       // covered by B: no rerun
+  const uncovered = await run(manyArgs(), [boom, review([], [], MANY.slice(8)), boom, boom], [manyImpl]);              // R1: A throws, B omits F0..F7; R2: the rerun of A and B throws again
   assert.equal(uncovered.out.status, 'STALL');
   assert.equal(uncovered.out.stall.why, 'gap');
   assert.deepEqual(uncovered.out.stall.files, MANY.slice(0, 8));
   assert.match(uncovered.out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
   assert.doesNotMatch(uncovered.out.stall.reason, /F8\.cs/);
   assert.match(uncovered.out.resume, /resumeFromRunId/);
-  assert.deepEqual(reviewLabels(uncovered.calls), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2', 'reviewer B · round 1 · second opinion', 'reviewer A1 · round 2 · code, files 1/2']);               // only the owner of the unread files reruns
+  assert.deepEqual(reviewLabels(uncovered.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion']);
   assert.equal(uncovered.out.rounds, 2);
   assert.match(uncovered.out.gaps.join('\n'), /round 1: src\/Orders\/F0\.cs .*not read/);            // one gap entry per unread file
   assert.equal(uncovered.out.gaps.filter(g => /not read/.test(g)).length, 8);
@@ -221,28 +172,29 @@ test('script: a reviewer that throws is a gap; a whole reviewer covers its group
   assert.match(none.out.resume, /resumeFromRunId/);
 });
 
-test('script: a group reviewer that leaves files out of filesReviewed is rerun alone, those files in full, and then the loop ends OK', async () => {
+test('script: a reviewer that leaves files out of filesReviewed is rerun with ALL those files in full, and then the loop ends OK', async () => {
   const { out, calls } = await run(manyArgs(), [
-    review([], [], MANY.slice(0, 4)), review([], [], MANY.slice(8)), review([], [], []),             // R1: A1 omits F4..F7, B lists nothing
-    review([]),                                                                                    // R2: A1 alone, now reads everything
+    review([], [], MANY.slice(0, 4)), review([], [], []),                                          // R1: A omits F4..F13, B lists nothing
+    review([]), review([]),                                                                        // R2: both whole reviewers again, now reading everything
   ], [manyImpl]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);
-  assert.deepEqual(reviewLabels(calls), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2', 'reviewer B · round 1 · second opinion', 'reviewer A1 · round 2 · code, files 1/2']);
-  assert.deepEqual(out.roundLog.map(r => r.reviewers), [3, 1]);
-  assert.match(calls.find(c => c.opts.label === 'reviewer A1 · round 2 · code, files 1/2').prompt, /IN FULL, as changed since the start, not just the delta: src\/Orders\/F4\.cs, src\/Orders\/F5\.cs, src\/Orders\/F6\.cs, src\/Orders\/F7\.cs\./);
-  assert.deepEqual(out.gaps.filter(g => /not read/.test(g)).length, 4);
+  assert.deepEqual(reviewLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion']);
+  assert.deepEqual(out.roundLog.map(r => r.reviewers), [2, 2]);
+  const full = calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt.match(/not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
+  assert.deepEqual(full, MANY.slice(4));                                                           // 10 files: no cut at 8
+  assert.deepEqual(out.gaps.filter(g => /not read/.test(g)).length, 10);
 });
 
-test('script: size L with a specialist: A1 and B throw, A2 and the specialist answer, one rerun of A1, then a STALL "gap" naming the unread files, never OK', async () => {
+test('script: size L with a specialist: A throws, B and the specialist leave files unread, one rerun of A and B, then a STALL "gap" naming the unread files, never OK', async () => {
   const boom = new Error('max turns');
-  const { out, calls } = await run(manyArgs({ touches: ['security'] }), [boom, review([]), boom, review([]), boom], [manyImpl]);
+  const { out, calls } = await run(manyArgs({ touches: ['security'] }), [boom, review([], [], MANY.slice(8)), review([]), boom, boom], [manyImpl]);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.why, 'gap');
   assert.deepEqual(out.stall.files, MANY.slice(0, 8));
   assert.match(out.stall.reason, /no reviewer read these files.*F0.cs.*F7.cs/);
   assert.doesNotMatch(out.stall.reason, /F8.cs/);
-  assert.deepEqual(reviewLabels(calls), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A1 · round 2 · code, files 1/2']);
+  assert.deepEqual(reviewLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion']);
 });
 
 test('script: a specialist that returns nothing is a STALL "gap" naming it, never rerun; one that failed in a fix round and answers later is not', async () => {
@@ -266,51 +218,45 @@ test('script: a specialist that returns nothing is a STALL "gap" naming it, neve
   assert.equal(never.out.stall.round, 2);
 });
 
-test('script: a group whose reviewer threw in round 1 is not asked in a delta round: the Sonnet S, a whole reviewer, reads its files in full', async () => {
+test('script: a reviewer that threw in round 1 is not asked in a delta round: the Sonnet S reads the unread files in full, the raiser too', async () => {
   const boom = new Error('subagent completed without calling StructuredOutput');
+  const f9 = 'src/Orders/F9.cs';
   const { out, calls } = await run(manyArgs(), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,                   // R1: A1 and B throw, A2 has a P2
-    review([{ id: 'F1', status: 'closed' }]),                                          // R2: A2, the raiser, answers; S (answered by the harness) reads the rest
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }]);
+    boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
+    review([{ id: 'F1', status: 'closed' }]),                                          // R2: B, the raiser, answers; S (answered by the harness) reads the rest
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }]);
   assert.equal(out.status, 'OK');
   const r = Object.fromEntries(calls.filter(c => isReview(c.opts.label)).map(c => [c.opts.label, c.prompt]));
-  assert.doesNotMatch(r['reviewer A1 · round 1 · code, files 1/2'], /never been reviewed/);
-  assert.equal(r['reviewer A1 · round 2 · code, files 1/2'], undefined);
+  assert.doesNotMatch(r['reviewer A · round 1 · code'], /never been reviewed/);
+  assert.equal(r['reviewer A · round 2 · code'], undefined);
   assert.match(r['reviewer S · round 2 · check the fixes'], /DELTA of the last fix/);
-  assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F7\.cs/s);
-  assert.doesNotMatch(r['reviewer A2 · round 2 · code, files 2/2'], /never been reviewed/);
+  assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
+  assert.match(r['reviewer B · round 2 · second opinion'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
 });
 
-test('script: a whole reviewer that answers after a fix is asked for the files left unread in full, not only the delta', async () => {
+test('script: a whole reviewer that answers after a fix is asked for ALL the files left unread in full, not only the delta', async () => {
   const boom = new Error('max turns');
+  const f9 = 'src/Orders/F9.cs';
   const { out, calls } = await run(manyArgs(), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,                   // R1: A1 and B throw, A2 has a P2
-    boom,                                                                              // R2: A2 throws; S answers alone
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
+    boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
+    boom,                                                                              // R2: B throws; S answers alone
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
-  const r = Object.fromEntries(calls.filter(c => isReview(c.opts.label)).map(c => [c.opts.label, c.prompt]));
-  assert.match(r['reviewer S · round 2 · check the fixes'], /DELTA of the last fix/);
-  assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F7\.cs/s);
-  assert.deepEqual(out.gaps.filter(g => /reviewer A2 returned nothing/.test(g)).length, 1);
-});
-
-test('script: the Sonnet S is given at most MAX_REVIEW_FILES unread files in full, not all of them', async () => {
-  const boom = new Error('max turns');
-  const { calls } = await run(manyArgs(), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })], ['src/Orders/F9.cs']), boom,    // R1: only F9 is read: 13 files unread
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   const prompt = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
+  assert.match(prompt, /DELTA of the last fix/);
   const full = prompt.match(/review them IN FULL, as changed since the start, not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
-  assert.equal(full.length, 8);
+  assert.deepEqual(full, MANY.filter(x => x !== f9));                                  // 13 files: no cut at 8
+  assert.deepEqual(out.gaps.filter(g => /reviewer B returned nothing/.test(g)).length, 1);
 });
 
-test('script: a group that threw in round 1 and again in round 2 is a STALL naming its files, never OK', async () => {
+test('script: a reviewer that threw in round 1 and a rerun that reads only part of the files in round 2 is a STALL naming the rest, never OK', async () => {
   const boom = new Error('max turns');
+  const f9 = 'src/Orders/F9.cs';
   const { out } = await run(manyArgs(), [
-    boom, review([], [finding({ path: 'src/Orders/F9.cs' })]), boom,
-    review([{ id: 'F1', status: 'closed' }]),                                          // R2: A2 answers, S returns nothing (watcher: null)
-    boom,                                                                              // R3: the coverage rerun of A1 throws again
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F9.cs'], evidence: 'ok' }], { watcher: null });
+    boom, review([], [finding({ path: f9 })], [f9]),
+    review([{ id: 'F1', status: 'closed' }], [], [f9]),                                // R2: B answers still reading only F9, S returns nothing (watcher: null)
+    boom, boom,                                                                        // R3: the coverage rerun of A and B throws again
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }], { watcher: null });
   assert.equal(out.status, 'STALL');
   assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
 });
