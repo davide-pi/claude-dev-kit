@@ -30,7 +30,7 @@ test('script: a round that would end OK with minor findings inside the perimeter
   assert.deepEqual(out.outOfScope.filter(o => o.source === 'review').map(o => o.title), ['other file nit']);
   assert.deepEqual(out.roundLog.map(r => [r.toFix, r.cleanup]), [[[], ['F1', 'F2']], [[], undefined]]);
   assert.equal(out.stall, undefined);
-  assert.match(calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt, /DELTA of the last fix/);
+  assert.match(calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt, /Review the changes since/);
 });
 
 test('script: a finding the cleanup fixer rejects stays minor; a P2 of the cleanup delta goes through the normal loop and no second cleanup runs', async () => {
@@ -45,8 +45,8 @@ test('script: a finding the cleanup fixer rejects stays minor; a P2 of the clean
   assert.deepEqual(out.cleaned.map(x => x.id), ['F1']);
   assert.deepEqual(out.minor.map(x => x.id).sort(), ['F2', 'F4']);
   assert.equal(out.stall, undefined);
-  assert.deepEqual(out.roundLog.map(r => r.toFix), [[], ['F3'], []]);                        // no final read: the fix of F3 changed 3 lines
-  assert.deepEqual(out.roundLog.map(r => r.churn), [null, 3, null]);                    // the cleanup pass has no churn
+  assert.deepEqual(out.roundLog.map(r => r.toFix), [[], ['F3'], [], []]);                    // R4 is the final full read after the fix of F3
+  assert.deepEqual(out.roundLog.map(r => r.churn), [null, 3, null, null]);              // the cleanup pass has no churn
 });
 
 test('script: no cleanup for a finding outside the perimeter or a change-unrelated one in an untouched file; the verify gate still applies to the cleanup', async () => {
@@ -168,7 +168,7 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
   const { out, calls } = await run(CLEAN, [
     review([], [nit(1), p2(1, 'alpha query broken')]),                                 // R1: P2 F2 + a P3 F1
     review([]),                                                                         // R1: B
-    review(closed('F2')),                                                               // R2: A closes F2 (DONE, count 0); the cleanup pass follows (the fix delta was read by A, no final read)
+    review(closed('F2')),                                                               // R2: A closes F2 (DONE, count 0); the final full read (R3) and the cleanup pass follow
   ], [], { watcher: [
     review([]),                                                                         // R2: S
     review(closed('F2'), [p2(3, 'beta cache stale')]),                                  // R3: the cleanup delta (S alone) finds F3 -> fix
@@ -179,8 +179,8 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
   ] });
   assert.equal(out.stall, undefined);
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 7);                                                       // no R8 final read: the five fixes changed 15 lines in all
-  assert.equal(calls.filter(c => c.opts.label === 'cleanup of round 2 minor findings').length, 1);
+  assert.equal(out.rounds, 8);                                                       // R3 is the final full read after the F2 fix; the cleanup follows it
+  assert.equal(calls.filter(c => c.opts.label === 'cleanup of round 3 minor findings').length, 1);
 });
 
 test('script: a cleanup id whose file the delta review did not read stays pending until the round that reads it (F4)', async () => {

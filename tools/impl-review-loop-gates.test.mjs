@@ -48,7 +48,7 @@ test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → 
 test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
   const { out, calls } = await run({ ...ARGS_M, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 2);                                                    // the V1 fix changed 3 lines: no final read
+  assert.equal(out.rounds, 3);                                                    // R3 is the final full read after the V1 fix
   assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
   const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
   assert.match(fix, /- V1 \[P1\] \(verify\) - .*node --test.*# fail 2/);

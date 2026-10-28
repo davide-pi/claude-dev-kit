@@ -211,8 +211,8 @@ test('script: a specialist that returns nothing is a STALL "gap" naming it, neve
   assert.equal(later.out.status, 'OK');
   const secR2 = later.calls.find(c => c.opts.label === 'reviewer security · round 2').prompt;      // it never read its area: it reviews the whole change, not the fix delta
   assert.match(secR2, /Review the change made since the start/);
-  assert.doesNotMatch(secR2, /DELTA of the last fix/);
-  assert.match(later.calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix/);
+  assert.doesNotMatch(secR2, /Review the changes since/);
+  assert.match(later.calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /Review the changes since/);
   const never = await run(sec, [review([], [finding()]), review([]), boom, review([{ id: 'F1', status: 'closed' }]), boom]);
   assert.equal(never.out.status, 'STALL');
   assert.equal(never.out.stall.why, 'gap');
@@ -230,7 +230,7 @@ test('script: a reviewer that threw in round 1 is not asked in a delta round: th
   const r = Object.fromEntries(calls.filter(c => isReview(c.opts.label)).map(c => [c.opts.label, c.prompt]));
   assert.doesNotMatch(r['reviewer A · round 1 · code'], /never been reviewed/);
   assert.equal(r['reviewer A · round 2 · code'], undefined);
-  assert.match(r['reviewer S · round 2 · check the fixes'], /DELTA of the last fix/);
+  assert.match(r['reviewer S · round 2 · check the fixes'], /Review the changes since/);
   assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
   assert.match(r['reviewer B · round 2 · second opinion'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
 });
@@ -244,7 +244,7 @@ test('script: a whole reviewer that answers after a fix is asked for ALL the fil
   ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
   const prompt = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
-  assert.match(prompt, /DELTA of the last fix/);
+  assert.match(prompt, /Review the changes since/);
   const full = prompt.match(/review them IN FULL, as changed since the start, not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
   assert.deepEqual(full, MANY.filter(x => x !== f9));                                  // 13 files: no cut at 8
   assert.deepEqual(out.gaps.filter(g => /reviewer B returned nothing/.test(g)).length, 1);
@@ -328,16 +328,16 @@ test('script: a report without a snapshot adds its declared files, the dirty one
   assert.deepEqual([...fixer.out.files].sort(), [a, b, mine]);
 });
 
-test('script: round 2 reviewers get git diff t1 t2; a fixer without a snapshot leaves the old wording', async () => {
+test('script: round 2 reviewers get git diff t1 t2; a fixer without a snapshot names no command', async () => {
   const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
     impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } }),
   ]);
   const r1 = calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt;
   const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
   assert.doesNotMatch(r1, /git diff t1/);
-  assert.match(r2, /DELTA of the last fix is `git diff t1 t2`/);
+  assert.match(r2, /Review the changes since t1: `git diff t1 t2`/);
   const plain = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), { scope: 'f', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
-  assert.doesNotMatch(plain.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix is/);
+  assert.doesNotMatch(plain.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /git diff t1 t2/);
 });
 
 test('script: lastTree is kept across rounds: the second fixer measures from the first fixer tree, round 3 reviewers see git diff t2 t3', async () => {
@@ -372,18 +372,17 @@ test('script: a snapshot with no files is a real empty change, not a missing sna
   assert.deepEqual(absent.out.files, [a]);
 });
 
-test('script: a delta that starts at the start head, not at an earlier snapshot, is "changes since <head>", never "the DELTA of the last fix"', async () => {
+test('script: a delta that starts at the start head, not at an earlier snapshot, reads "Review the changes since <head>"', async () => {
   const noSnap = await run({ ...ARGS, start: { head: 'abc123', dirty: [] } }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
     impl({ snapshot: null }), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } }),
   ]);
   const r2 = noSnap.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
-  assert.match(r2, /changes since abc123 are `git diff abc123 t2`/);
-  assert.doesNotMatch(r2, /DELTA of the last fix/);
+  assert.match(r2, /Review the changes since abc123: `git diff abc123 t2`/);
   const inline = await run({ ...ARGS, inline: true, changed: ['src/Orders/OrdersQuery.cs'], start: { head: 'abc123', dirty: [] } },
     [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl({ snapshot: { tree: 't9', files: ['src/Orders/OrdersQuery.cs'], churn: 5 } })]);
-  assert.doesNotMatch(inline.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix/);
+  assert.match(inline.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /Review the changes since abc123: `git diff abc123 t9`/);
   const both = await run({ ...ARGS, start: { head: 'abc123', dirty: [] } }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } })]);
-  assert.match(both.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix is `git diff t1 t2`/);   // a tree to start from: still the fix delta
+  assert.match(both.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /Review the changes since t1: `git diff t1 t2`/);   // a tree to start from: still the fix delta
 });
 
 // ── a wide change: M's reviewer B on opus, never a split ──────────────

@@ -356,17 +356,15 @@ test('script: a scope-revert proposal exists only once the fixer has reported: a
   assert.deepEqual(reverted.out.outOfScope.map(o => [o.source, o.title]), [['scope-revert', 'extra logging added to the query']]);
 });
 
-test('script: t1, a fix without snapshot, a fix with t3: round 3 reviewers read "changes since t1", not "the DELTA of the last fix"', async () => {
+test('script: t1, a fix without snapshot, a fix with t3: round 3 reviewers read "the changes since t1"', async () => {
   const f2 = finding({ line: 90, title: 'second defect in the query' });
   const { out, calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }], [f2]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [
     impl(), { scope: 'fixed once', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, impl({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 2 } }),
   ]);
   assert.equal(out.status, 'OK');
   const r3 = calls.find(c => c.opts.label === 'reviewer A · round 3 · code').prompt;
-  assert.match(r3, /Review the changes since t1, /);
-  assert.match(r3, /changes since t1 are `git diff t1 t3`/);
-  assert.doesNotMatch(r3, /DELTA of the last fix/);
-  assert.match(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix/);                // the fix after a snapshot is still its own delta
+  assert.match(r3, /Review the changes since t1: `git diff t1 t3`/);
+  assert.match(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /Review the changes since t1/);
 });
 
 test('script: rejected[].kind decides a "not reproduced" stall; the reason text only when kind is absent; kind is in the schema', async () => {
@@ -440,7 +438,7 @@ test('script: a churn stall is accepted on its own round: the reviewers already 
   assert.equal(out.rounds, 5);
   assert.deepEqual(out.accepted.map(x => x.id), ['F5']);
   const r5 = calls.find(c => c.opts.label === 'reviewer A · round 5 · code').prompt;                    // the last fix was read before F5 is let go
-  assert.match(r5, /DELTA of the last fix is `git diff t4 t5`/);
+  assert.match(r5, /Review the changes since t4: `git diff t4 t5`/);
   assert.equal(calls.filter(c => c.opts.label?.startsWith('fix')).length, 4);
   assert.deepEqual(out.roundLog.map(r => r.churn), [30, 10, 20, 30, null]);
 });

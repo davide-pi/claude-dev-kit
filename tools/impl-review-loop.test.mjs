@@ -382,7 +382,7 @@ test('script: round 1 reviews the files the implementer changed; from round 2 th
   const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
   assert.match(r1, /git diff HEAD --name-only.*git ls-files -o --exclude-standard/);
   assert.match(r1, /list the implementer declared \(src\/Orders\/OrdersQuery\.cs\) is a hint/);
-  assert.match(r2, /DELTA of the last fix/);
+  assert.match(r2, /Review the changes since/);
   assert.match(r2, /Files the fix changed: src\/Orders\/Dto\/A\.cs/);
   assert.match(r2, /git diff HEAD --name-only/);
   assert.match(r2, /fixed the null guard/);
@@ -475,7 +475,7 @@ test('script: a P2 on the spot of a known minor finding is a new blocking findin
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),   // the delta of the cleanup pass (the P3 left over)
   ]);
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 4);
+  assert.equal(out.rounds, 5);   // R4 is the final full read, R5 the cleanup delta
   assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix round 1 findings', 'fix round 2 findings']);
 });
 
