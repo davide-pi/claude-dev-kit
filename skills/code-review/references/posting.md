@@ -68,23 +68,28 @@ In this order, so the table is what is still on screen when the report ends:
    GitHub) and, for each finding kept in chat, why. If nothing was posted, say so explicitly. On an
    incremental pass, name the reviewed range (`<last-reviewed>..<head>`).
 3. **Summary tables** — the **last** blocks, same numbers and order as above. Shape and columns per
-   `report-format.md`, with `Postato` added:
+   `report-format.md`, with `Posted` added:
 
-   **Da fare**
+   **To do**
 
-   | # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo | Postato |
-   |---|----------|-----------|-----------|---------|----------|---------|--------|---------|
-   | 1 | P1 | security | `src/Api/UsersController.cs:42` | id di route concatenato nel testo SQL | CONFIRMED | basso | S | sì — thread 118 |
-   | 2 | P2 | duplication | `src/Core/Mapper.cs:88` | duplica `MapAddress` e ne diverge | CONFIRMED | basso | S | no — solo chat |
+   | # | Priority | Category | Location | Finding | Verdict | Risk | Effort | Posted |
+   |---|----------|----------|----------|---------|---------|------|--------|--------|
+   | 1 | P1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | low | S | yes — thread 118 |
+   | 2 | P2 | duplication | `src/Core/Mapper.cs:88` | duplicates `MapAddress` and diverges from it | CONFIRMED | low | S | no — chat only |
 
-   **Già fatti**
+   **Already done**
 
-   | # | Categoria | Posizione | Rilievo | Risolto da |
-   |---|-----------|-----------|---------|------------|
-   | 3 | correctness | `src/Core/Sync.cs:51` | null check rimosso sul path di retry | `a1b2c3d` |
+   | # | Category | Location | Finding | Resolved by |
+   |---|----------|----------|---------|-------------|
+   | 3 | correctness | `src/Core/Sync.cs:51` | null check removed on the retry path | `a1b2c3d` |
 
-4. **Fix rapidi** and **Verdict** — one line each:
-   `N rilievi (X da fare, Y già fatti · P1: N · X postati) · security: N · completezza: N`, plus
+   Labels follow the chat language, as in `report-format.md`: at `it` they are the equivalents on the
+   `At chat it:` line after its skeleton, plus yes=sì, chat only=solo chat. Only text posted on the PR follows the
+   prComment language.
+
+4. **Quick fixes** and **Verdict** — one line each:
+   `N findings (X to do, Y already done · P1: N · X posted) · security: N · completeness: N` (at `it`:
+   `N rilievi (X da fare, Y già fatti · P1: N · X postati) · security: N · completezza: N`), plus
    which agents ran at which effort, and which interface posted. Nothing after it.
 
 No findings at all → say exactly that, list what was verified, and **skip the table**.

@@ -30,7 +30,7 @@ Only for **loggable** rows (rounded > 0). For each:
    | Situation | Action |
    | --- | --- |
    | item ↔ audit agree | normal idempotence: the push computes delta = row hours − hours already audited **for this period** |
-   | the item has hours the audit does not know | **do not just add.** Table 2 shows `su item Xh (Yh non da worklog)` and **asks**: same work (the estimate **replaces** them, or covers only the difference) or different work (then it really adds)? |
+   | the item has hours the audit does not know | **do not just add.** Table 2 shows `on item Xh (Yh not from the worklog)` and **asks**: same work (the estimate **replaces** them, or covers only the difference) or different work (then it really adds)? |
    | same work, and their hours cover the estimate | push row with `"delta": 0`: the user's hours beat the transcript estimate; the audit entry is still written, so the day is closed |
    | same work, the estimate is larger | push row with `"delta": <estimate − their hours>` |
 

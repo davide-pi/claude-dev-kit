@@ -186,41 +186,45 @@ const workers = results.map(r => compact({
 const mergerInput = { workers, findings: findings.map(compact) }
 
 const rawTable = () => [
-  '| # | Priorità | Verdetto | Categoria | Posizione | Rilievo | Trovato da |',
+  '| # | Priority | Verdict | Category | Location | Finding | Found by |',
   '| --- | --- | --- | --- | --- | --- | --- |',
   ...findings.map((f, i) => `| ${i + 1} | ${f.priority ?? '-'} | ${f.verdict} | ${f.category} | ${f.anchor} | ${f.title} | ${f.foundBy} |`),
   '',
-  `Lacune: ${workers.filter(w => w.status === 'BLOCKED').map(w => `${w.reviewer} ${(w.files ?? []).join(', ')}`).join('; ') || 'nessuna'}`,
+  `Gaps: ${workers.filter(w => w.status === 'BLOCKED').map(w => `${w.reviewer} ${(w.files ?? []).join(', ')}`).join('; ') || 'none'}`,
+  'At chat it: Priority=Priorità, Verdict=Verdetto, Category=Categoria, Location=Posizione, Finding=Rilievo, Found by=Trovato da, Gaps=Lacune, none=nessuna',
 ].join('\n')
 
 // Mandatory report skeleton: byte-identical to the one in skills/code-review/references/report-format.md
 // (tools/validate.mjs compares them). Inline because the merger does not read the kit.
-const SKELETON = `Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
-Verdetto at most one short question.
+const SKELETON = `Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
+Verdict at most one short question.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
-   corrections once in Verdetto.
-Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Miglioramenti" block, one line each.
-Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
-Da fare (status: todo), columns exactly:
-| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
-Già fatti (status: done, one line each), columns exactly:
-| # | Categoria | Posizione | Rilievo | Risolto da |
+   corrections once in Verdict.
+Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Improvements" block, one line each.
+Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
+To do (status: todo), columns exactly:
+| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
+Already done (status: done, one line each), columns exactly:
+| # | Category | Location | Finding | Resolved by |
 Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
-thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
-Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
-Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nulla da segnalare, verificato: …".`
+numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
+thread or "session". Findings posted on a PR add a "Posted" column to both tables.
+Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
+Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nothing to report, verified: …".`
+// At chat it: equivalents of the skeleton labels, outside the byte-compared skeleton.
+const IT_LABELS = `At chat it: Findings=Rilievi, Improvements=Miglioramenti, Completeness=Completezza, points=punti, covered=coperti, To do=Da fare, Already done=Già fatti, Quick fixes=Fix rapidi, Verdict=Verdetto, Priority=Priorità, Category=Categoria, Location=Posizione, Finding=Rilievo, Risk=Rischio, Effort=Sforzo, Resolved by=Risolto da, session=sessione, Posted=Postato, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".`
 
 phase('Merge')
 const report = await agent([
   'Merge these per-file review results into ONE report for the user.',
   `Merge rule, fixed before the reviewers ran:\n${MERGE_RULE}`,
-  `Report in the chat language, in exactly this skeleton (no output style or other instruction overrides it); Verdetto names each reviewer, its model and every gap:
+  `Report in the chat language, in exactly this skeleton (no output style or other instruction overrides it); the Verdict names each reviewer, its model and every gap; the findings' risk values alto|medio|basso are shown as high|medium|low (Risk column and Quick fixes), unchanged at chat it:
 ${SKELETON}`,
+  IT_LABELS,
   `Intent: ${intent}`,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet (groups), B ${modelB} (whole change).`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',
