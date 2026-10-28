@@ -39,7 +39,7 @@ reviewer per group of files, at most 8, same ladder, one merger) and wait for th
 | `priority` — impact if not fixed | **P1** blocks the merge (CONFIRMED security, data loss, crash, broken contract) · **P2** before release · **P3** improvement |
 | `risk` — what applying the fix can break | `alto` behaviour, data or a public contract · `medio` localized logic, verifiable by tests · `basso` cosmetic |
 | `effort` | **S** minutes, one place · **M** a few files · **L** design change or migration |
-| `status` | `todo` → **Da fare**; `done` → **Già fatti** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
+| `status` | `todo` → **To do**; `done` → **Already done** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
 
 ## Finding block — what every reviewer agent returns
 
@@ -84,44 +84,46 @@ The mandatory skeleton — `/code-review` carries a byte-identical copy inline (
 validator compares them), and so does the `/review-large` merger prompt; edit all together:
 
 ```text
-Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
-Verdetto at most one short question.
+Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
+Verdict at most one short question.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
-   corrections once in Verdetto.
-Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Miglioramenti" block, one line each.
-Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
-Da fare (status: todo), columns exactly:
-| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
-Già fatti (status: done, one line each), columns exactly:
-| # | Categoria | Posizione | Rilievo | Risolto da |
+   corrections once in Verdict.
+Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Improvements" block, one line each.
+Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
+To do (status: todo), columns exactly:
+| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
+Already done (status: done, one line each), columns exactly:
+| # | Category | Location | Finding | Resolved by |
 Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
-thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
-Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
-Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nulla da segnalare, verificato: …".
+numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
+thread or "session". Findings posted on a PR add a "Posted" column to both tables.
+Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
+Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nothing to report, verified: …".
 ```
+At chat it: Findings=Rilievi, Improvements=Miglioramenti, Completeness=Completezza, points=punti, covered=coperti, To do=Da fare, Already done=Già fatti, Quick fixes=Fix rapidi, Verdict=Verdetto, Priority=Priorità, Category=Categoria, Location=Posizione, Finding=Rilievo, Risk=Rischio, Effort=Sforzo, Resolved by=Risolto da, session=sessione, Posted=Postato, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".
 
 The same rules, in full:
 
-0. **Blocks, top to bottom**: **Rilievi** (the findings that matter first: a full block per P1 and
+0. **Blocks, top to bottom**: **Findings** (the findings that matter first: a full block per P1 and
    P2 `todo` — what breaks, the scenario, `file:line`, the minimal fix; the P3s grouped under one
-   `Miglioramenti` block, one line each; `done` one line) · **Completezza** (`N punti — coperti N`, each
-   partial, missing or wrong point, scope creep) · the tables · `Verdetto` naming each agent that
+   `Improvements` block, one line each; `done` one line) · **Completeness** (`N points — covered N`, each
+   partial, missing or wrong point, scope creep) · the tables · `Verdict` naming each agent that
    ran, its model and effort, and any worker that was blocked or missing (a gap, never a pass).
 
 1. **Sort**: P1 → P3, `CONFIRMED` before `PLAUSIBLE`, `clean-code` last within its priority. Rows
    keep the findings' numbers (`#3` = block `3.`). A `done` finding is one line.
-2. **Da fare** columns: `#`, `Priorità`, `Categoria`, `Posizione` (`file:line`), `Rilievo` (~80
-   chars), `Verdetto`, `Rischio`, `Sforzo`.
-3. **Già fatti** columns: `#`, `Categoria`, `Posizione`, `Rilievo`, `Risolto da` (commit, thread,
-   "sessione"). Add `Postato` to both when findings went onto a PR.
-4. **Fix rapidi**: one line with the `#` of every P3 + `basso` + `S` finding, approvable with one "ok".
+2. **To do** columns: `#`, `Priority`, `Category`, `Location` (`file:line`), `Finding` (~80
+   chars), `Verdict`, `Risk`, `Effort`.
+3. **Already done** columns: `#`, `Category`, `Location`, `Finding`, `Resolved by` (commit, thread,
+   "session"). Add `Posted` to both when findings went onto a PR.
+4. **Quick fixes**: one line with the `#` of every P3 + `low` + `S` finding, approvable with one "ok".
 5. Every finding gets a row. After the tables: at most a one-line verdict and one short question.
 6. No findings → no table; say what was verified.
-7. Headers and section names exactly as written above (fixed kit vocabulary); statements, `Rilievo` text and the closing
-   question in the chat language; verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs,
-   `P1|P2|P3`, `S|M|L`.
+7. Headers and section names exactly as written above (fixed kit vocabulary, English); at chat `it` the
+   `At chat it:` line right after the skeleton gives the equivalents. The agents emit `risk` as `alto|medio|basso`: the report shows
+   them as `high|medium|low`. Statements, `Finding` text and the closing question in the chat language;
+   verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs, `P1|P2|P3`, `S|M|L`.

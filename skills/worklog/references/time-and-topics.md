@@ -70,7 +70,7 @@ Certainty about the item comes in Phase 5: classify by judgement here, re-check 
 
 Usage as in `SKILL.md` Do.
 
-- Entry `minutes|label|role`, role default `main`: `minutes` = the row's `Totale` as adjusted in Table 1; the chat-language label seeds the Task title.
+- Entry `minutes|label|role`, role default `main`: `minutes` = the row's `Total` (at chat `it`: `Totale`) as adjusted in Table 1; the chat-language label seeds the Task title.
 - **Nearest 0.5h per topic**, no cap: 45 min → 1.0h (ties away from zero), under ~15 min → 0h.
 - **All of one day's topics in one call**: the donor spread depends on how many `main` rows there are.
 - `-TargetHours` = the day's `TARGET` from the GIORNO table. The helper prints:

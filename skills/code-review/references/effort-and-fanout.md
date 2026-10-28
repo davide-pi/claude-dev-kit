@@ -53,7 +53,7 @@ Merge before triage:
 5. Re-sort across agents in the `report-format.md` order, keep the **higher** priority on a
    conflict, number the survivors `1..n` — the chat report and the tables use that numbering.
 6. Track which agent (and model) produced each survivor — it decides the tag.
-7. Already fixed in this session → `status: done`, `Risolto da: sessione`.
+7. Already fixed in this session → `status: done`, `Resolved by: session`.
 
 ## Attribution
 
