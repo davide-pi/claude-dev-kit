@@ -10,7 +10,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, DONE, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, nit, ASK, asking, decideRound, mergeReviews, readReport, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, recheckReviewers, idsToAsk, notConverging, reviewLabels } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS as ARGS_M, CLEAN, review, finding, DONE, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, nit, ASK, asking, decideRound, mergeReviews, readReport, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, recheckReviewers, idsToAsk, notConverging, reviewLabels } from './impl-review-loop.harness.mjs';
+const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
 
 // ── churn stall, targeted recheck, follow-ups (T9, T11, T12) ─────────────────────────────────────────
 test('decideRound: an id with no verdict this round follows the no-verdict rule, a kept challenge is fixed (F1, F4, F5)', () => {
@@ -613,7 +614,7 @@ test('script: questions from a fixer are a STALL "question" at the round of the 
   const answers = [{ text: ASK[0].text, answer: 'caller' }];
   const resumed = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), asking, impl()]);
   assert.equal(resumed.out.status, 'OK');
-  assert.deepEqual(resumed.calls.map(c => c.opts.label), ['implement the change', 'reviewer A · round 1 · code', 'fix round 1 findings', 'fix round 1 findings (answers)', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(resumed.calls.map(c => c.opts.label), ['implement the change', 'reviewer A · round 1 · code', 'fix round 1 findings', 'fix round 1 findings (answers)', 'reviewer A · round 2 · code']);
   assert.match(resumed.calls.find(c => c.opts.label === 'fix round 1 findings (answers)').prompt, /- Which tenant owns the order\? -> caller/);
   assert.match(resumed.calls.find(c => c.opts.label === 'fix round 1 findings (answers)').prompt, /- F1 \[P2\]/);
 });
@@ -644,6 +645,7 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
   const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
   const { out, calls } = await run(CLEAN, [
     review([], [nit(1), p2(1, 'alpha query broken')]),                                 // R1: P2 F2 + a P3 F1
+    review([]),                                                                         // R1: B
     review(closed('F2')),                                                               // R2: A closes F2 (DONE, count 0); the cleanup pass follows (the fix delta was read by A, no final read)
   ], [], { watcher: [
     review([]),                                                                         // R2: S
@@ -662,6 +664,7 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
 test('script: a cleanup id whose file the delta review did not read stays pending until the round that reads it (F4)', async () => {
   const { out } = await run(CLEAN, [
     review([], [nit(1), nit(2)]),                                                       // R1: two nits -> cleanup
+    review([]),                                                                         // R1: B
     review([], [{ ...nit(1), line: 42 }]),                                              // R3: the rerun (reviewer A) reads the file and still finds F1's nit
   ], [], { watcher: review([], [], []) });                                             // R2: the delta review (S) lists no file: unread, a coverage rerun follows
   assert.equal(out.status, 'OK');

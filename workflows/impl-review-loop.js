@@ -64,14 +64,13 @@ const BLOCKING = new Set(['P1', 'P2'])
 
 const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
 
-const WIDE_FILES = 10   // past either, the change is wide: the single whole reviewer of S and M runs on opus instead of sonnet; there is never a split
+const WIDE_FILES = 10   // past either, the change is wide: M's second reviewer B runs on opus instead of sonnet; S keeps one Sonnet, L is always Sonnet + Opus; there is never a split
 const WIDE_LINES = 600
 
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
 const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
   const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
-  const modelA = wide && !mechanical ? 'opus' : 'sonnet'
-  const list = size === 'S' ? [code('A', modelA, mechanical ? 'low' : 'high', !mechanical)] : size === 'M' ? [code('A', modelA, 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', size === 'L' || wide ? 'opus' : 'sonnet', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -227,9 +226,11 @@ const deltaReviewers = (everyone, finders = []) => {
 }
 const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
 // The size can change the panel under a key (A is a Sonnet high at M and L, the Opus is B at L): a key stands only while it names the same reviewer.
-const finderKey = (raised, everyone) => {
+// A wide flip changes only the model of B at M: the finding stays with the same key.
+const finderKey = (raised, everyone, wide = false) => {
   const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
-  if (!raised.model || everyone.some(r => r.key === raised.key && same(r))) return raised.key
+  const flipped = r => r.key === raised.key && r.agentType === raised.agentType && r.effort === raised.effort && raised.wide === false && wide
+  if (!raised.model || everyone.some(r => r.key === raised.key && same(r)) || everyone.some(flipped)) return raised.key
   return [...everyone, WATCHER].find(same)?.key ?? raised.key
 }
 
@@ -771,7 +772,7 @@ const reviewersForRound = () => {
   if (signal && !gaps.includes(signal)) gaps.push(signal)
   const wasWide = wide
   wide = wide || (!mechanical && (expected.length > WIDE_FILES || changeLines > WIDE_LINES))
-  if (wide && !wasWide) log(`wide change (${expected.length > WIDE_FILES ? `${expected.length} files, more than ${WIDE_FILES}` : `${changeLines} changed lines, more than ${WIDE_LINES}`}): ${size === 'L' ? 'the L panel is unchanged' : 'reviewer A runs on opus'}`)
+  if (wide && !wasWide) log(`wide change (${expected.length > WIDE_FILES ? `${expected.length} files, more than ${WIDE_FILES}` : `${changeLines} changed lines, more than ${WIDE_LINES}`}): ${size === 'M' ? 'reviewer B runs on opus' : `the ${size} panel is unchanged`}`)
   const reviewers = reviewersFor(size, risk, mechanical, wide)
   return { size, list: reviewers, expected }
 }
@@ -801,7 +802,7 @@ while (true) {
   nextRound = { only: null, coverage: false, final: false }
   finalReading = final
   if (round === 1) round1Tree = lastTree
-  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => (raisedBy[id] ?? []).map(r => finderKey(r, everyone))))]
+  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => (raisedBy[id] ?? []).map(r => finderKey(r, everyone, wide))))]
   const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
     : round === 1 || final ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
@@ -824,7 +825,7 @@ while (true) {
     dirtyText,
     'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
-    `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
+    `Effort: ${r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(),
     challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
@@ -870,7 +871,7 @@ while (true) {
   cleanupSent = cleanupWait
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
-  found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot).map(k => { const r = reviewers.find(x => x.key === k); return { key: k, agentType: r?.agentType, model: r?.model, effort: r?.effort } }) })
+  found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot).map(k => { const r = reviewers.find(x => x.key === k); return { key: k, agentType: r?.agentType, model: r?.model, effort: r?.effort, wide } }) })
   const resolution = resolutions.find(r => Number(r.round) === round)
   const roundFiles = widenedFiles(files, resolutions, round)
   const asked = challenged   // the challenges this decision judges; `challenged` below keeps only the unanswered ones

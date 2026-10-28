@@ -105,11 +105,23 @@ if (!files) {
 }
 if (!files.length) return `review-large: no changed files in ${range} (generated files excluded).`
 
-// Cohesive groups: the path-sorted list (directory first) cut into contiguous, balanced chunks, so a directory stays in one group where it can.
+// Cohesive groups: the path-sorted list (directory first) cut into contiguous, balanced chunks; each cut snaps to the
+// nearest directory boundary within half a chunk of the balanced cut, so a directory stays in one group where it can.
 const dirOf = f => f.slice(0, f.lastIndexOf('/') + 1)
 const sorted = [...files].sort((x, y) => (dirOf(x) < dirOf(y) ? -1 : dirOf(x) > dirOf(y) ? 1 : x < y ? -1 : x > y ? 1 : 0))
 const groupCount = Math.min(MAX_GROUPS, Math.ceil(sorted.length / perReviewer))
-const groups = Array.from({ length: groupCount }, (_, i) => sorted.slice(Math.floor(i * sorted.length / groupCount), Math.floor((i + 1) * sorted.length / groupCount)))
+const snapWindow = Math.ceil(sorted.length / groupCount / 2)
+const boundaries = sorted.map((f, i) => i).filter(i => i > 0 && dirOf(sorted[i - 1]) !== dirOf(sorted[i]))
+const cuts = [0]
+for (let i = 1; i < groupCount; i++) {
+  const balanced = Math.floor(i * sorted.length / groupCount)
+  const lo = cuts[i - 1] + 1, hi = sorted.length - (groupCount - i) // keeps every group non-empty
+  const near = boundaries.filter(b => b >= lo && b <= hi && Math.abs(b - balanced) <= snapWindow)
+    .sort((x, y) => Math.abs(x - balanced) - Math.abs(y - balanced) || x - y)
+  cuts.push(near.length ? near[0] : Math.min(hi, Math.max(lo, balanced)))
+}
+cuts.push(sorted.length)
+const groups = cuts.slice(1).map((end, i) => sorted.slice(cuts[i], end))
 // The spawn count is stated before the first reviewer starts, so the cost is known up front.
 const spawns = groups.length + 2
 log(`${files.length} files -> ${groups.length} group reviewers (sonnet) + 1 whole-change reviewer (${modelB}) + 1 merger = ${spawns} agents`)

@@ -73,6 +73,21 @@ test('the files of one directory land in one group', async () => {
   }
 });
 
+test('a cut snaps to a directory boundary within half a chunk: 11 files of one directory straddling a balanced cut stay together', async () => {
+  const dir = (d, n) => Array.from({ length: n }, (_, i) => `src/${d}/f${i}.cs`);
+  const { reviewers } = await dryRun(0, { files: [...dir('a', 5), ...dir('m', 11), ...dir('z', 14)] });
+  const groups = reviewers.filter((r) => r.label !== 'whole change (cross-file)');
+  assert.equal(groups.length, 3);
+  const inM = groups.map((g) => (g.prompt.split('\n')[0].match(/'src\/m\//g) ?? []).length);
+  assert.deepEqual(inM.filter((n) => n > 0), [11], inM.join(','));
+});
+
+test('a single directory of 30 files has no boundary to snap to: still 3 non-empty groups', async () => {
+  const { reviewers } = await dryRun(30);
+  const groups = reviewers.filter((r) => r.label !== 'whole change (cross-file)');
+  assert.deepEqual(groups.map((g) => Number(/These (\d+) file/.exec(g.prompt)[1])), [10, 10, 10]);
+});
+
 test('B reviews the whole range at any effort, on modelB, and the groups know the full list', async () => {
   for (const effort of ['low', 'xhigh']) {
     const { reviewers } = await dryRun(30, { effort, modelB: 'fable' });
