@@ -8,13 +8,14 @@
  * decided and the rest is the implementer's job. Only a nudge — a deliberate multi-file edit by the
  * user's own request goes on untouched.
  *
- * Each edit is counted in `<config>/.cache/edits-<session_id>.json`, with the timestamp of the prompt it
- * belongs to; on the third the line goes out as `additionalContext`, and never again that turn (the count
- * only grows). The turn is told from `<config>/history.jsonl`, where the harness logs every prompt: when the
- * session's last prompt there is not the counter's, a new turn started and the count restarts. No node per
- * prompt, and a turn interrupted with Esc (no Stop) cannot leak its count into the next. A prompt not in the
- * last 64 KB of the log (other sessions typing a lot) keeps the count: the nudge comes early, never late. A
- * message queued while the turn runs is logged too and restarts the count mid-turn: the nudge then comes late.
+ * Each edit is counted in `<config>/.cache/edits-<session_id>.json`, with the uuid of the prompt it belongs
+ * to and the byte offset the session transcript (`transcript_path`) was read up to; on the third the line goes
+ * out as `additionalContext`, and never again that turn (the count only grows). The turn is told from the
+ * transcript: only what was appended since that offset is scanned, and when the last human prompt in it is not
+ * the counter's, a new turn started and the count restarts. No node per prompt, and a turn interrupted with Esc
+ * (no Stop) cannot leak its count into the next. No transcript, or one that cannot be read, keeps the count: the
+ * nudge comes early, never late. A message queued while the turn runs is a user entry in the transcript only if
+ * the harness writes it as one; if it does, it restarts the count mid-turn and the nudge comes late.
  *
  * Main session only. An edit made by a subagent (the implementer itself, doc-keeper) is exactly the
  * delegation this hook wants, so it is never counted. The harness marks a hook fired inside a subagent
@@ -39,16 +40,14 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { CONFIG_DIR, CACHE_DIR, prune } = require('./lib/cache');
+const { CACHE_DIR, prune } = require('./lib/cache');
+const { lastPromptSince } = require('./lib/session-turn');
 
 const THRESHOLD = 3;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
 const COUNTER_FILE = /^edits-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
-/** The harness's prompt log: one line per user prompt, with `sessionId` and a millisecond `timestamp`. */
-const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
-const HISTORY_TAIL_BYTES = 64 * 1024;
 
 /** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
 function canonical(file, base) {
@@ -69,38 +68,22 @@ function isScratch(file, cwd) {
 /** True for a doc or data file by extension: editing one is not code written by hand. */
 const isDocOrData = (file) => typeof file === 'string' && /\.(?:mdx?|txt|jsonc?|ya?ml|toml|ini|csv|xml|env)$/i.test(file);
 
-/** `{ count, prompt }` from the counter file; a missing or unreadable file is a count of 0. */
+/** `{ count, prompt, offset }` from the counter file; a missing or unreadable file is a count of 0. */
 function readCounter(file) {
   try {
-    const { count, prompt } = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return { count: Number.isFinite(count) ? count : 0, prompt: prompt ?? null };
+    const { count, prompt, offset } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { count: Number.isFinite(count) ? count : 0, prompt: prompt ?? null, offset: Number.isInteger(offset) ? offset : null };
   } catch {
-    return { count: 0, prompt: null };
+    return { count: 0, prompt: null, offset: null };
   }
 }
 
-/** The timestamp of the session's last prompt in the tail of `<config>/history.jsonl`, or null when none is there. */
-function lastPrompt(id) {
-  let fd;
+/** `{ prompt, offset }` read from the session transcript past the counter's offset; no transcript or unreadable: nothing new. */
+function readPrompt(transcript, offset) {
   try {
-    fd = fs.openSync(HISTORY, 'r');
-    const size = fs.fstatSync(fd).size;
-    const length = Math.min(size, HISTORY_TAIL_BYTES);
-    const buffer = Buffer.alloc(length);
-    fs.readSync(fd, buffer, 0, length, size - length);
-    const lines = buffer.toString('utf8').split('\n');
-    for (let i = lines.length - 1; i >= 0; i -= 1) {
-      if (!lines[i].includes(id)) continue;
-      try {
-        const entry = JSON.parse(lines[i]);
-        if (entry.sessionId === id && Number.isFinite(entry.timestamp)) return entry.timestamp;
-      } catch { /* the first line of the tail is usually cut */ }
-    }
-    return null;
+    return typeof transcript === 'string' && transcript ? lastPromptSince(transcript, offset) : { prompt: null, offset: null };
   } catch {
-    return null;
-  } finally {
-    if (fd !== undefined) fs.closeSync(fd);
+    return { prompt: null, offset: null };
   }
 }
 
@@ -115,11 +98,11 @@ function run(payload) {
   if (isScratch(payload.tool_input?.file_path, payload.cwd)) return null;
   if (isDocOrData(payload.tool_input?.file_path)) return null;
 
-  const prompt = lastPrompt(id);
   const counter = readCounter(file);
-  const count = (prompt !== null && prompt !== counter.prompt ? 0 : counter.count) + 1;
+  const seen = readPrompt(payload.transcript_path, counter.offset);
+  const count = (seen.prompt !== null && seen.prompt !== counter.prompt ? 0 : counter.count) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ count, prompt: prompt ?? counter.prompt }));
+  fs.writeFileSync(file, JSON.stringify({ count, prompt: seen.prompt ?? counter.prompt, offset: seen.offset ?? counter.offset }));
   if (count !== THRESHOLD) return null;
 
   prune(COUNTER_FILE);

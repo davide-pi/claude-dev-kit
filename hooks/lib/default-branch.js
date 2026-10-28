@@ -23,7 +23,7 @@
 const fs = require('fs');
 const path = require('path');
 const { parseSegments, expandTexts } = require('./shell-parse');
-const { findGitDir, readRef, currentBranch } = require('./git-dir');
+const { findGitDir, readRef, currentBranch, commonDir } = require('./git-dir');
 
 /**
  * Blank out the values of message-carrying flags, including combined ones (-am, -sm), so a branch
@@ -88,19 +88,6 @@ function refParts(token) {
  */
 function pushesEveryRef(call) {
   return call.args.includes('--all') || call.args.includes('--mirror');
-}
-
-/**
- * Where refs live. A linked worktree keeps only its own HEAD in `.git/worktrees/<name>`; branches,
- * packed-refs and origin/HEAD are in the common directory that `commondir` points at.
- */
-function commonDir(gitDir) {
-  try {
-    const pointer = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
-    return pointer ? path.resolve(gitDir, pointer) : gitDir;
-  } catch {
-    return gitDir;
-  }
 }
 
 /** The repo's default branch: origin/HEAD if it is set, else whichever of main/master exists. */
@@ -173,4 +160,4 @@ function checkDefaultBranch(command, cwd) {
     + `'${fallback}'. Confirm anyway?`;
 }
 
-module.exports = { checkDefaultBranch };
+module.exports = { checkDefaultBranch, parseGitCall };

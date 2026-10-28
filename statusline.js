@@ -130,7 +130,14 @@ function gitInfo(cwd) {
   const branch = header.replace(/^(?:No commits yet|Initial commit) on /, "")
     .split("...")[0].replace(/ \(no branch\)$/, "").trim();
   if (!branch) return null;
-  const remote = run("remote", "get-url", "origin");
+  // The remote is read off `.git/config`: no second process.
+  let remote = null;
+  try {
+    // Required here, not at the top: a missing hooks/ costs the link, never the whole line.
+    const { findGitDir, remoteUrl } = require("./hooks/lib/git-dir");
+    const repo = findGitDir(cwd);
+    remote = repo ? remoteUrl(repo.gitDir) : null;
+  } catch { /* no remote link */ }
 
   let staged = 0, modified = 0, untracked = 0;
   for (const line of lines) {

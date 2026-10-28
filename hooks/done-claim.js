@@ -66,18 +66,15 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { findGitDir, currentBranch } = require('./lib/git-dir');
+const { tailEntries, blocks, entryText, isNotification, isPeerMessage, isPrompt } = require('./lib/session-turn');
+const { READ_ONLY_AGENTS } = require('./lib/read-only-agents');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
-/** The transcript is read backward in chunks of this size, to the start of the turn, up to MAX_BYTES. */
-const CHUNK_BYTES = 512 * 1024;
-const MAX_BYTES = 8 * 1024 * 1024;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
 /** Tools that hand work to a workflow or an agent: they arm the hook like an edit and their results come back as notifications. */
 const DELEGATE_TOOLS = new Set(['Workflow', 'Agent', 'Task']);
-/** `subagent_type`s that only read: an Agent / Task of one of these is not a change made now and does not arm the hook. */
-const READ_ONLY_AGENTS = new Set(['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']);
 /** A quoted span (straight, curly or guillemets, same line, short): a word mentioned, not claimed. */
 const QUOTED = /"[^"\n]{1,40}"|“[^”\n]{1,40}”|«[^»\n]{1,40}»/g;
 /** The Bash tool prints no exit code on success, so a row's `exit 0` is never in the output. */
@@ -185,72 +182,6 @@ function blockOpenPerimeter(payload, rows, message) {
   log(payload, 'perimeter-open', 'verdict', message);
   process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));
   process.exit(0);
-}
-
-/**
- * The JSON lines of the transcript from the end back to the start of the turn (the last genuine human prompt), read backward in
- * CHUNK_BYTES chunks (the first, probably partial, line of what is read is dropped until an earlier chunk completes it), and whether the
- * turn is still cut: `truncated` is true only when MAX_BYTES were read (or the file ended) without finding that prompt.
- */
-function tailEntries(file) {
-  const fd = fs.openSync(file, 'r');
-  try {
-    const size = fs.fstatSync(fd).size;
-    let end = size;
-    let carry = Buffer.alloc(0);                 // the partial first line of what is read so far
-    let entries = [];
-    let found = false;
-    while (end > 0 && !found && size - end < MAX_BYTES) {
-      const start = Math.max(0, end - CHUNK_BYTES);
-      const chunk = Buffer.alloc(end - start);
-      fs.readSync(fd, chunk, 0, chunk.length, start);
-      const data = Buffer.concat([chunk, carry]);
-      const cut = start > 0 ? data.indexOf(0x0a) : -1;
-      carry = start > 0 ? data.subarray(0, Math.max(cut, 0)) : Buffer.alloc(0);
-      const whole = start > 0 ? (cut < 0 ? null : data.subarray(cut + 1)) : data;
-      end = start;
-      if (!whole) { carry = data; continue; }   // not one line end in the chunk: keep reading
-      const fresh = [];
-      for (const line of whole.toString('utf8').split('\n')) {
-        if (!line.trim()) continue;
-        try { fresh.push(JSON.parse(line)); } catch { /* a torn line */ }
-      }
-      entries = [...fresh, ...entries];
-      found = fresh.some(isPrompt);
-    }
-    return { entries, truncated: !found && end > 0 };
-  } finally {
-    fs.closeSync(fd);
-  }
-}
-
-const blocks = (entry) => (Array.isArray(entry?.message?.content) ? entry.message.content : []);
-
-/** The text of a user or assistant entry: its string content, or its text blocks. */
-function entryText(entry) {
-  const content = entry?.message?.content;
-  return typeof content === 'string' ? content : blocks(entry).filter((b) => b?.type === 'text').map((b) => b.text).join('\n');
-}
-
-/** The result of a background workflow or agent: a user entry (`origin.kind` "task-notification", or just its
- *  `<task-notification>` text), written as a prompt-shaped entry, not as a `tool_result` block. */
-const isNotification = (entry) => entry?.type === 'user'
-  && (entry.origin?.kind === 'task-notification' || /^\s*<task-notification\b/.test(entryText(entry)));
-
-/** A message from another Claude session (`<cross-session-message …>`): the harness writes it as a meta user
- *  entry (`isMeta`, `origin.kind` / `turnOrigin` "peer"). */
-function isPeerMessage(entry) {
-  if (entry?.type !== 'user') return false;
-  if (entry.origin?.kind === 'peer' || entry.turnOrigin === 'peer') return true;
-  // Anchored: a human prompt that quotes the tag mid-text is still a prompt.
-  return /^\s*(?:Another Claude session sent a message:\s*)?<cross-session-message\b/.test(entryText(entry));
-}
-
-/** A user entry the human typed (not a tool result, not a notification or peer message, not injected meta). */
-function isPrompt(entry) {
-  if (entry?.type !== 'user' || entry.isMeta || isNotification(entry) || isPeerMessage(entry)) return false;
-  const content = entry.message?.content;
-  return typeof content === 'string' || blocks(entry).some((b) => b?.type === 'text');
 }
 
 /** What a user entry carries for the proof: its `tool_result` text, or a notification's or peer message's text. */

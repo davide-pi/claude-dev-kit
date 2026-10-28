@@ -59,4 +59,37 @@ function currentBranch(gitDir) {
   return m ? m[1].trim() : null;
 }
 
-module.exports = { repoRoot, gitDirOf, findGitDir, readRef, currentBranch };
+/**
+ * Where refs and config live. A linked worktree keeps only its own HEAD in `.git/worktrees/<name>`; branches,
+ * packed-refs, origin/HEAD and `config` are in the common directory that `commondir` points at.
+ */
+function commonDir(gitDir) {
+  try {
+    const pointer = fs.readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim();
+    return pointer ? path.resolve(gitDir, pointer) : gitDir;
+  } catch {
+    return gitDir;
+  }
+}
+
+/**
+ * The `url` of remote `name` from the repo's `config`, or null when absent or unreadable. The value as written:
+ * `url.<base>.insteadOf`, `include` and an inline `#` comment are not applied, unlike `git remote get-url`.
+ */
+function remoteUrl(gitDir, name = 'origin') {
+  const config = readRef(commonDir(gitDir), 'config');
+  if (config === null) return null;
+  let inSection = false;
+  for (const line of config.split(/\r?\n/)) {
+    const section = line.match(/^\s*\[\s*([^\s\]"]+)(?:\s+"((?:[^"\\]|\\.)*)")?\s*\]/);
+    if (section) {
+      inSection = section[1].toLowerCase() === 'remote' && section[2] === name;
+      continue;
+    }
+    const url = inSection && line.match(/^\s*url\s*=\s*(.*?)\s*$/i);
+    if (url) return url[1].replace(/^"(.*)"$/, '$1') || null;
+  }
+  return null;
+}
+
+module.exports = { repoRoot, gitDirOf, findGitDir, readRef, currentBranch, commonDir, remoteUrl };
