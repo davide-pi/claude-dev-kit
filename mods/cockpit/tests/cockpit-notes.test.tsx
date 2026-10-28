@@ -149,6 +149,19 @@ test('notes: delete removes the note; deleting the one in the field leaves the n
   await ui.unmount()
 })
 
+type Drawn = { props?: { key?: string; width?: number }; children?: unknown[] } | null
+
+/** The width of the box that holds the Button keyed `key`, found in the drawn tree. */
+function toggleBoxWidth(node: unknown, key: string): number | undefined {
+  const o = node as Drawn
+  for (const c of o?.children ?? []) {
+    if ((c as Drawn)?.props?.key === key) return o?.props?.width
+    const found = toggleBoxWidth(c, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
 test('notes: every note has its three buttons, in the pane width at 30, 40 and 58 columns, in both languages', async ($, on) => {
   const options: World = { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 4, text: 'ask Anna' }] }) }
   world(on, options)
@@ -159,6 +172,11 @@ test('notes: every note has its three buttons, in the pane width at 30, 40 and 5
       for (const columns of [30, 40, 58]) {
         const ui = await notesPane($, columns)
         for (const key of ['note:edit:4', 'note:send:4', 'note:delete:4', 'note:save', 'bar:compact']) expect(await ui.find({ key })).toBeDefined()
+        // the text's box leaves the icons their columns: a cut note never runs under them
+        const textWidth = toggleBoxWidth(await ui.drawn(), 'note:toggle:4')
+        expect(typeof textWidth).toBe('number')
+        expect((textWidth as number) + 8).toBeLessThanOrEqual(columns)
+        expect(textWidth as number).toBeGreaterThanOrEqual(columns - 16)
         await ui.unmount()
       }
     } finally {
