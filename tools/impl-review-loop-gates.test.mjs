@@ -739,3 +739,21 @@ test('script: a delta that starts at the start head, not at an earlier snapshot,
   const both = await run({ ...ARGS, start: { head: 'abc123', dirty: [] } }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 1 } })]);
   assert.match(both.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix is `git diff t1 t2`/);   // a tree to start from: still the fix delta
 });
+
+// ── a wide change: one whole reviewer on opus, never a split ──────────────
+test('wide: past 10 files or 600 changed lines the single reviewer of S and M is opus, never a split; mechanical and L unchanged', async () => {
+  const some = (n) => MANY.slice(0, n);
+  const implOf = (n, churn) => ({ scope: 's', files: some(n), evidence: 'ok', ...(churn === undefined ? {} : { snapshot: { tree: 't1', files: some(n), churn } }) });
+  const round1 = async (args, impl1) => {
+    const { calls } = await run({ ...manyArgs(), ...args }, [review([]), review([])], [impl1]);
+    return calls.filter(c => isReview(c.opts.label, 1)).map(c => `${c.opts.label.split(' · ')[0]}:${c.opts.model}:${c.opts.effort}`);
+  };
+  assert.deepEqual(await round1({ size: 'M' }, implOf(11)), ['reviewer A:opus:high']);
+  assert.deepEqual(await round1({ size: 'M' }, implOf(10)), ['reviewer A:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'S' }, implOf(2, 601)), ['reviewer A:opus:high']);
+  assert.deepEqual(await round1({ size: 'S' }, implOf(2, 600)), ['reviewer A:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'S', mechanical: true }, implOf(14)), ['reviewer A:sonnet:low']);
+  assert.deepEqual(await round1({ size: 'L' }, implOf(14)), ['reviewer A:sonnet:high', 'reviewer B:opus:high']);
+  assert.deepEqual(reviewersFor('M', [], false, true).map((r) => `${r.model}:${r.effort}`), ['opus:high']);
+  assert.deepEqual(reviewersFor('S', [], true, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
+});

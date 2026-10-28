@@ -1,39 +1,35 @@
 export const meta = {
   name: 'review-large',
-  description: 'Review a large diff: one code-reviewer per group of files (two models from xhigh), one merger, one Italian report',
-  whenToUse: 'A diff of 30+ files that one reviewer cannot hold; at most 8 reviewers per model. args: { range, files?, intent, effort, modelB, filesPerReviewer }',
+  description: 'Review a large diff: at most 3 cohesive groups of files plus one reviewer of the whole change on a second model, one merger, one Italian report',
+  whenToUse: 'A diff of 30+ files that one reviewer cannot hold; at most 3 group reviewers plus one whole-change reviewer. args: { range, files?, intent, effort, modelB, filesPerReviewer }',
   phases: [
     { title: 'Scope', detail: 'list the changed files when args.files is absent' },
-    { title: 'Review', detail: 'one code-reviewer per group of files; reviewer B on a second model at xhigh effort and above' },
+    { title: 'Review', detail: 'at most 3 code-reviewers, one per cohesive group of files; reviewer B on a second model reads the whole change for what a group cannot see' },
     { title: 'Merge', detail: 'one merger applies the declared rule and writes the report' },
   ],
 }
 
 // args: a range string, or { range, files?, intent?, effort?, modelB?, filesPerReviewer? }.
-// modelB is reviewer B's model, default opus; it is used only at xhigh effort and above: below that one model reviews.
-// Cost guard: filesPerReviewer defaults to 6 and the reviewers are capped (MAX_REVIEWERS per model),
-// so a 30-file diff is 5 reviewers (10 with B) instead of 30 (60 with B) before anyone sees a cost line.
+// modelB is the model of reviewer B, the one reviewer of the whole change, default opus; it always runs.
+// Cost guard: filesPerReviewer defaults to 10 and the groups are capped (MAX_GROUPS), so any diff is at most
+// 3 group reviewers + 1 whole-change reviewer: the files per group grow past filesPerReviewer instead of adding reviewers.
 const input = typeof args === 'string' ? { range: args } : (args ?? {})
 const range = typeof input.range === 'string' ? input.range.trim() : ''
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const effort = EFFORTS.includes(input.effort) ? input.effort : 'medium'
-const twoModels = ['xhigh', 'max'].includes(effort)
 const MODELS = ['sonnet', 'opus', 'haiku', 'fable']
 const modelB = typeof input.modelB === 'string' && input.modelB ? input.modelB : 'opus'
 const intent = typeof input.intent === 'string' && input.intent.trim()
   ? input.intent.trim()
   : 'NOT STATED: report completeness as unjudgeable; never invent the intent.'
-const perReviewer = Number.isInteger(input.filesPerReviewer) && input.filesPerReviewer > 0 ? input.filesPerReviewer : 6
-const MAX_REVIEWERS = 8
+const perReviewer = Number.isInteger(input.filesPerReviewer) && input.filesPerReviewer > 0 ? input.filesPerReviewer : 10
+const MAX_GROUPS = 3
+const LIST_ALL_MAX = 60
 const EXCLUDE = `':!*.lock' ':!package-lock.json' ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'`
 
 const MERGE_RULE = [
-  twoModels
-    ? '1. A and B report the same defect at the same anchor -> the script already merged them (foundBy "A+B"): one finding, CONFIRMED, first within its priority.'
-    : '1. One model ran: keep each reviewer\'s CONFIRMED/PLAUSIBLE as reported.',
-  twoModels
-    ? '2. Found by one model only -> PLAUSIBLE, unless its evidence quotes the line or failing call that settles it.'
-    : '2. A finding whose evidence quotes nothing is PLAUSIBLE.',
+  '1. A and B report the same defect at the same anchor -> the script already merged them (foundBy "A+B"): one finding, CONFIRMED, first within its priority.',
+  '2. Found by one model only -> PLAUSIBLE, unless its evidence quotes the line or failing call that settles it.',
   '3. Same line, different failure -> two findings. Same defect across files -> one finding per anchor.',
   '4. Priority conflict -> the higher. Sort P1 -> P3, CONFIRMED before PLAUSIBLE, clean-code last; number 1..n.',
   '5. A BLOCKED or missing worker is a gap: name its files in the verdict as not reviewed; never a pass.',
@@ -44,7 +40,7 @@ log(`Merge rule, fixed before any agent runs:\n${MERGE_RULE}`)
 
 if (!range) return 'review-large: args.range is required, e.g. { range: "origin/main...HEAD", effort: "xhigh", modelB: "opus" }'
 if (!MODELS.includes(modelB)) return `review-large: modelB "${modelB}" is not one of ${MODELS.join('/')}.`
-if (twoModels && modelB === 'sonnet') log('Reviewer B on sonnet = same model as A: degraded review, no cross-model signal.')
+if (modelB === 'sonnet') log('Reviewer B on sonnet = same model as A: degraded review, no cross-model signal.')
 
 const FILES = {
   type: 'object',
@@ -109,39 +105,46 @@ if (!files) {
 }
 if (!files.length) return `review-large: no changed files in ${range} (generated files excluded).`
 
-const groups = []
-for (let i = 0; i < files.length; i += perReviewer) groups.push(files.slice(i, i + perReviewer))
-if (groups.length > MAX_REVIEWERS) {
-  return `review-large: ${files.length} files at ${perReviewer} per reviewer would spawn ${groups.length} reviewers${twoModels ? ' per model' : ''}, above the cap of ${MAX_REVIEWERS}. Narrow \`files\` or raise \`filesPerReviewer\`.`
-}
+// Cohesive groups: the path-sorted list (directory first) cut into contiguous, balanced chunks, so a directory stays in one group where it can.
+const dirOf = f => f.slice(0, f.lastIndexOf('/') + 1)
+const sorted = [...files].sort((x, y) => (dirOf(x) < dirOf(y) ? -1 : dirOf(x) > dirOf(y) ? 1 : x < y ? -1 : x > y ? 1 : 0))
+const groupCount = Math.min(MAX_GROUPS, Math.ceil(sorted.length / perReviewer))
+const groups = Array.from({ length: groupCount }, (_, i) => sorted.slice(Math.floor(i * sorted.length / groupCount), Math.floor((i + 1) * sorted.length / groupCount)))
 // The spawn count is stated before the first reviewer starts, so the cost is known up front.
-const spawns = groups.length * (twoModels ? 2 : 1) + 1
-log(`${files.length} files -> ${groups.length} reviewers${twoModels ? ` x 2 models (A sonnet, B ${modelB})` : ' (sonnet)'} + 1 merger = ${spawns} agents`)
+const spawns = groups.length + 2
+log(`${files.length} files -> ${groups.length} group reviewers (sonnet) + 1 whole-change reviewer (${modelB}) + 1 merger = ${spawns} agents`)
 
-// One brief per group, built once and passed unchanged to A and B: only `model` differs.
-const brief = group => [
-  `Review your part of one change. Scope: \`git diff ${range} -- ${group.map(f => `'${f}'`).join(' ')}\`.`,
-  `These ${group.length} file(s) are yours; ${files.length - group.length} other changed file(s) belong to other reviewers. Read callers and contracts elsewhere only to judge your files.`,
+const SHARED = [
   `Intent (acceptance criteria verbatim): ${intent}`,
   `Effort: ${effort}.`,
-  twoModels ? 'You may be one of two reviewers on different models with this same brief: report what you see, do not soften for agreement.' : '',
   'Status: PASS (nothing wrong; `checked` names the passes run and what you read), ISSUES (findings), BLOCKED (you could not review; `blockedReason`).',
   'Values verbatim: CONFIRMED/PLAUSIBLE, P1|P2|P3, alto|medio|basso, S|M|L, category slugs. title, failure and forAuthor in Italian.',
-].filter(Boolean).join('\n')
+]
+const allFilesText = files.length <= LIST_ALL_MAX
+  ? `All the changed files: ${sorted.join(', ')}.`
+  : `The change has ${files.length} files in: ${[...new Set(sorted.map(dirOf))].join(', ')}.`
+const brief = group => [
+  `Review your part of one change. Scope: \`git diff ${range} -- ${group.map(f => `'${f}'`).join(' ')}\`.`,
+  `These ${group.length} file(s) are yours: read them in full. ${files.length - group.length} other changed file(s) belong to other reviewers: read them only to judge callers and contracts of yours. ${allFilesText}`,
+  'Another reviewer, on a second model, reads the whole change for what a group cannot see: you cover the per-file defects.',
+  ...SHARED,
+].join('\n')
+const briefWhole = [
+  `Review the WHOLE change. Scope: \`git diff ${range} -- ${sorted.map(f => `'${f}'`).join(' ')}\`.`,
+  `The groups cover per-file defects (${groups.length} reviewers, each reading its own files in full). You see what a group cannot: a contract or signature changed in one file and used in another, callers left behind, the same rule applied inconsistently across files, missing pieces of the intent. ${allFilesText}`,
+  'Report what you see, do not soften for agreement with the group reviewers.',
+  ...SHARED,
+].join('\n')
 
 phase('Review')
-const reviews = await pipeline(groups, group => {
-  const prompt = brief(group)
-  const label = group.length === 1 ? group[0] : `${group[0]} +${group.length - 1}`
-  const run = (opts, who) => () => agent(prompt, { phase: 'Review', agentType: 'code-reviewer', schema: REVIEW, effort, ...opts })
-    .then(r => settle(r, who), () => settle(null, who))
-  const a = run({ label: `review ${label}` }, { files: group, reviewer: 'A', model: 'sonnet' })
-  if (!twoModels) return a()
-  const b = run({ label: `second opinion on ${label}`, model: modelB }, { files: group, reviewer: 'B', model: modelB })
-  return parallel([a, b])
-})
+const run = (prompt, opts, who) => () => agent(prompt, { phase: 'Review', agentType: 'code-reviewer', schema: REVIEW, effort, ...opts })
+  .then(r => settle(r, who), () => settle(null, who))
+const reviews = await parallel([
+  ...groups.map(group => run(brief(group), { label: `review ${group[0]}${group.length > 1 ? ` +${group.length - 1}` : ''}` }, { files: group, reviewer: 'A', model: 'sonnet' })),
+  run(briefWhole, { label: 'whole change (cross-file)', model: modelB }, { files: sorted, reviewer: 'B', model: modelB }),
+])
 
-const results = reviews.flat().filter(Boolean)
+const results = reviews.filter(Boolean)
 const gaps = results.filter(r => r.status === 'BLOCKED').length
 if (gaps) log(`${gaps} worker(s) blocked: their files are reported as not reviewed.`)
 
@@ -207,7 +210,7 @@ const report = await agent([
   `Report in Italian, in exactly this skeleton (no output style or other instruction overrides it); Verdetto names each reviewer, its model and every gap:
 ${SKELETON}`,
   `Intent: ${intent}`,
-  `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet${twoModels ? `, B ${modelB}` : ''}.`,
+  `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet (groups), B ${modelB} (whole change).`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',
   `Results (JSON):\n${JSON.stringify(mergerInput)}`,
 ].join('\n\n'), { label: 'merge the reviews into one report', phase: 'Merge', model: 'sonnet' }).catch(() => null)

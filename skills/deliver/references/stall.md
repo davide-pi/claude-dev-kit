@@ -50,8 +50,7 @@ round restarts its count, `retry` does not.
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
 cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report or a non-empty `remaining` is continued (twice at most), never reviewed partial. A red implementer verify at round 0 is no stall: it
 becomes a synthetic P1 `V<n>` that heads the fixer's list. A reviewer or a fixer that stops without its structured
-result (turn cap) counts as no answer: a reviewer is a `gaps` line, no reviewer at all or the fixer is a `STALL`. A group
-reviewer that returned nothing while no whole-change reviewer answered stalls naming the unreviewed files, never `OK`.
+result (turn cap) counts as no answer: a reviewer is a `gaps` line, no reviewer at all or the fixer is a `STALL`.
 `outOfScope` (`noticed` by the implementer or fixer, `scope-revert`: a hunk the brief did not require, reverted) goes
 to the closing table as proposals.
 

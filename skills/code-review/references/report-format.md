@@ -29,8 +29,8 @@ Cross-model merge: same anchor and same defect from A and B → `CONFIRMED`, sor
 priority; found by one model only → `PLAUSIBLE`, unless the finding quotes evidence (the line, the
 failing call) that settles it.
 
-A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (one
-reviewer per group of files, at most 8, same ladder, one merger) and wait for the user's yes; never launch it unasked.
+A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (at most 3 groups
+by directory plus one reviewer of the whole change on a second model, same ladder, one merger) and wait for the user's yes; never launch it unasked.
 
 ## Fields (emitted by the agents, values verbatim)
 

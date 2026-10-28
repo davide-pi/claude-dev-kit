@@ -193,12 +193,12 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
 });
 
-test('script: 17 changed files at size M spawn exactly the panel of the size: one Sonnet high, the whole-change scope, no share', async () => {
+test('script: 17 changed files at size M spawn one whole reviewer, on opus because the change is wide: the whole-change scope, no share', async () => {
   const seventeen = Array.from({ length: 17 }, (_, i) => `src/Orders/F${i}.cs`);
   const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([])], [{ scope: 's', files: seventeen, evidence: 'ok' }]);
   assert.equal(out.status, 'OK');
   const reviews = calls.filter((c) => isReview(c.opts.label, 1));
-  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:sonnet:high']);
+  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:opus:high']);
   assert.match(reviews[0].prompt, /Review the change made since the start/);
   assert.doesNotMatch(reviews[0].prompt, /Your share/);
 });
