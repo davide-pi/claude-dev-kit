@@ -83,7 +83,7 @@ function Resolve-Day([string]$s) {
   elseif ($s -match '^(?i)(yesterday|ieri)$') { return (Get-Date).Date.AddDays(-1) }
   elseif ($s -match '^(?i)(today|oggi)$')     { return (Get-Date).Date }
   elseif ($s -match '^\d{4}-\d{2}-\d{2}$')    { return [datetime]::ParseExact($s, 'yyyy-MM-dd', $null) }
-  else   { throw "Data non valida: '$s'. Usa yyyy-MM-dd, 'yesterday'/'ieri' o vuoto (=oggi)." }
+  else   { throw "Invalid date: '$s'. Use yyyy-MM-dd, 'yesterday'/'ieri' or empty (=today)." }
 }
 $fromD = Resolve-Day $From
 $sid = $SessionId.Trim()

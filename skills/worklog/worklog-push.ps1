@@ -146,11 +146,11 @@ foreach ($row in $rowList) {
 
     $pf, $pt = Period $row
     $r.Periodo = if ($pf -eq $pt) { $pf } else { "$pf..$pt" }
-    if ($pf -notmatch '^\d{4}-\d{2}-\d{2}$' -or $pt -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "periodo mancante o non yyyy-MM-dd" }
-    if (-not (Has $row 'hours')) { throw "'hours' mancante" }
+    if ($pf -notmatch '^\d{4}-\d{2}-\d{2}$' -or $pt -notmatch '^\d{4}-\d{2}-\d{2}$') { throw "period missing or not yyyy-MM-dd" }
+    if (-not (Has $row 'hours')) { throw "'hours' missing" }
     # Hours are always whole half-hours (round.ps1): anything else is a hand-made number.
     foreach ($k in 'hours', 'delta') {
-      if ((Has $row $k) -and ([double]$row.$k * 2) % 1 -ne 0) { throw "'$k' = $($row.$k): non e' un multiplo di 0.5" }
+      if ((Has $row $k) -and ([double]$row.$k * 2) % 1 -ne 0) { throw "'$k' = $($row.$k): not a multiple of 0.5" }
     }
 
     if (-not (Has $row 'itemId')) {
@@ -165,7 +165,7 @@ foreach ($row in $rowList) {
 
     # ---- hours on an item ----
     $r.Tipo = 'ore'; $r.Item = "#$($row.itemId)"
-    if (-not $row.org) { throw "'org' mancante" }
+    if (-not $row.org) { throw "'org' missing" }
     $idx = AuditIndex $pf $pt $row.itemId $null
     $already = if ($idx -ge 0) { [double]$audit[$idx].hoursLogged } else { 0.0 }
     $delta = if (Has $row 'delta') { [double]$row.delta } else { [double]$row.hours - $already }
@@ -208,7 +208,7 @@ foreach ($row in $rowList) {
   }
 }
 
-if ($DryRun) { Write-Output "=== WORKLOG PUSH (dry run: nessuna scrittura) ===" } else { Write-Output "=== WORKLOG PUSH ===" }
+if ($DryRun) { Write-Output "=== WORKLOG PUSH (dry run: no writes) ===" } else { Write-Output "=== WORKLOG PUSH ===" }
 $report | Format-Table -AutoSize | Out-String -Width 200 | Write-Output
 Write-Output ("Righe: {0} | riuscite: {1} | fallite: {2}" -f $report.Count, ($report.Count - $failed), $failed)
 Write-Output "Audit: $auditPath"

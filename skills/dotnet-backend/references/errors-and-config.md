@@ -133,5 +133,3 @@ and caches keep it.
 | a bug or an impossible state | an exception, logged with context, never swallowed into a success |
 | a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by Polly, only around idempotent work |
 | invalid input at an HTTP edge | a 400 with field-level problem details, validated once at the edge |
-
-A responder's exception crosses the bus as a bare message string: for RPC, data is the contract.
