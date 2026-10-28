@@ -108,8 +108,8 @@ const HISTORY_ROWS_SHOWN = 5
 const AGENT_COST_ROWS_SHOWN = 3
 /** The height of the note field: three lines, a longer text scrolls inside it. */
 const NOTE_INPUT_ROWS = 3
-/** Cells a note row keeps for its three icon buttons (✎ ➤ 🗑 and the gaps), so the text never runs under them. */
-const NOTE_ICONS_W = 8
+/** Cells a note row keeps for its three icon buttons (`[ ✎ ]` `[ ➤ ]` `[ 🗑 ]` and the gaps), so the text never runs under them. */
+const NOTE_ICONS_W = 19
 
 // ── Agents: the workflow run in one row, every agent listed, the history behind a toggle ──
 
@@ -470,13 +470,13 @@ export function notesBlocks(k: Kit): Block[] {
             )}
           </Box>
           <Box columnGap={1} alignItems="flex-start">
-            <Button key={`note:edit:${n.id}`} plain onPress={() => actions.editNote(n.id)}>
+            <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
               {isEditing ? '✕' : '✎'}
             </Button>
-            <Button key={`note:send:${n.id}`} plain onPress={() => actions.sendNote(n.id)}>
+            <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
               ➤
             </Button>
-            <Button key={`note:delete:${n.id}`} plain onPress={() => actions.deleteNote(n.id)}>
+            <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
               🗑
             </Button>
           </Box>
