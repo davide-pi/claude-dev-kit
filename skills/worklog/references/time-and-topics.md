@@ -25,7 +25,7 @@ subagents — and never touches Azure DevOps. Two kinds of minutes: `CLAUDE` (Cl
 across sessions) and `TU` (the user writing and reading, counted once). `TOTALE` = `CLAUDE` + `TU`
 inside 08:00-20:00 (`-DayStart`, `-DayEnd`); minutes outside go to `FUORI`, never dropped. A minute
 goes to the topic (project + branch) the session's events say at that moment and to its local **day**.
-Counting rules: `motore.md`.
+Counting rules: `engine.md`.
 
 Stdout, the authoritative numbers:
 
@@ -39,12 +39,12 @@ Stdout, the authoritative numbers:
 - the paths of the raw digest, the audit and `targets.json`.
 
 **Targets**: `~/.claude/worklog/targets.json` — `{ "targetHours": 8, "days": { "<yyyy-MM-dd>": { "hours": 6, "note": "corso 4h + straordinario 2h" } } }`.
-Only `worklog-push.ps1` writes it (a `target` row, `chiusura.md`); the user may edit it by hand for a
+Only `worklog-push.ps1` writes it (a `target` row, `closing.md`); the user may edit it by hand for a
 known event.
 
 Retention: at launch the engine prunes **digests** older than 7 days; the **audit is never pruned**.
 `Nessuna attivita'` → say so; on a weekday ask whether the day still has hours to cover (gap prompt,
-`ore-gestione.md`) or closes at zero.
+`hours-management.md`) or closes at zero.
 
 Then **read the digest** (`_raw/<period>.md`): project → branch → prompts and replies. Topics,
 descriptions and decisions come from there; open a transcript only for a missing detail.

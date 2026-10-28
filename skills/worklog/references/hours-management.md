@@ -2,7 +2,7 @@
 
 The "management" case: time **attributable to no product item** — client meetings and calls,
 backlog analysis and grooming, estimates, coordination, item-creation sessions. It
-does not go on the Tasks of the work done (that is `scrittura.md`) but into a **fixed structure per
+does not go on the Tasks of the work done (that is `writing.md`) but into a **fixed structure per
 account**. Most of it never shows in a transcript: the gap prompt is where it is recovered.
 
 ## The gap prompt — an under-target day
@@ -15,7 +15,7 @@ Fires on every day whose COPERTURA is more than 1h short of the target, right af
 | --- | --- |
 | `Riunioni e chiamate (Recommended)` — first, the management item | follow-up: hours (default: the whole gap) and a one-line subject per session → management rows, one Task per session (below) |
 | `Test manuali e verifiche` | follow-up: hours and the product item they belong to (default: the day's main topic) → a development row on that item's Task |
-| `Cercale nelle fonti (Slack, calendario)` | `fonti-esterne.md`: candidate rows named on the `Fonte` line, each confirmed or dropped by the user |
+| `Cercale nelle fonti (Slack, calendario)` | `external-sources.md`: candidate rows named on the `Fonte` line, each confirmed or dropped by the user |
 | `Giornata ridotta (ferie, permesso, evento, corso)` | follow-up: the real target for the day and a note → a `target` row for `worklog-push.ps1`; nothing logged for the difference |
 | *Other* (free text, automatic) | `altro`: whatever the user says, mapped to one of the cases above; unclear → ask |
 
@@ -92,7 +92,7 @@ The backlog-item type is resolved per project (`azdo-cli`), never assumed.
 
 ## In Table 2
 
-Management shows as an ordinary row (shape: `tabelle.md`, third example row), so the user sees where
+Management shows as an ordinary row (shape: `tables.md`, third example row), so the user sees where
 the hours land before anything is written. Several management sessions in a period → **several rows and several Tasks**, one per session;
 never merged into one Task for the period.
 

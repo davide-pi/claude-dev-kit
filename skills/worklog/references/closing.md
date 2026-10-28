@@ -1,6 +1,6 @@
 # The audit and the closed day
 
-Open when a day has nothing loggable, is reduced, or its hours sit on a sheet. Rows and push: `scrittura.md`.
+Open when a day has nothing loggable, is reduced, or its hours sit on a sheet. Rows and push: `writing.md`.
 
 ## The audit
 

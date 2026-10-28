@@ -16,7 +16,7 @@ Only for **loggable** rows (rounded > 0). For each:
 
    Hours go on **Tasks**, never on backlog items: a topic clearly part of an item with no suitable
    Task gets one. A **management** topic — attributable to no product item — is not searched for:
-   its destination is the fixed structure in `ore-gestione.md`.
+   its destination is the fixed structure in `hours-management.md`.
 3. **Hours currently on the Task.** Read completed work (a read, outside the push): it is shown in
    Table 2 and **reconciled** with the audit (step 5).
 4. **PRs and commits to link** (best effort, confirmed in Table 2):
@@ -74,7 +74,7 @@ In this order, the orchestrator alone (no parallel writers: the audit is one fil
    saved after every row. Exit 1 → the failed rows say why; fix and re-run the file: the rows already
    written now have delta 0.
 6. **Read back** every created or updated item (hours, parent, state, links) and only then print the
-   recap (`tabelle.md`). First write on an org this session → push a file with that one row first.
+   recap (`tables.md`). First write on an org this session → push a file with that one row first.
 
 The audit: key `(periodFrom, periodTo, itemId)`, `hoursLogged` is the period total. Audit fields, and the
-closed-day rows (nothing loggable, a reduced day, a sheet): `chiusura.md`.
+closed-day rows (nothing loggable, a reduced day, a sheet): `closing.md`.

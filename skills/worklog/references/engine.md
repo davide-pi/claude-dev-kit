@@ -1,6 +1,6 @@
 # The engine's time model
 
-Open when the hours or spans look wrong. Output and usage: `tempo-e-topic.md`.
+Open when the hours or spans look wrong. Output and usage: `time-and-topics.md`.
 
 | Kind | Rule |
 | --- | --- |

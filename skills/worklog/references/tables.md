@@ -41,7 +41,7 @@ Attese lunghe contate: 10:45-13:10 (2h25m, <repo>) — tienile o toglile
 `donor` rows do not appear (they were spread): say so in one line if there were any.
 
 **Under target** (more than 1h short) → the **gap prompt** right after the table — one
-`AskUserQuestion`, shape and follow-ups in `ore-gestione.md`. The answers become new rows, each named on
+`AskUserQuestion`, shape and follow-ups in `hours-management.md`. The answers become new rows, each named on
 the `Fonte` line; reprint, recompute the coverage, then the usual question. Not under target → straight to:
 
 **"Vuoi modificare qualcosa (topic, descrizioni, tempi, accorpare o dividere righe, attese lunghe)?"**
@@ -64,7 +64,7 @@ Minutes changed → re-round, reprint, ask again — until confirmed.
   - existing Task → `[Task #<id> — <titolo>](<link>) (esistente, su item <T>h → +<delta>h)`. Hours
     already on the item are **always shown**, zero included. Re-run → add
     `già scritto <X>h → delta <±Y>h`. Hours the audit does not know → `su item <T>h (<Y>h non da worklog)`
-    and the row stays **undecided** until the user says whether it is the same work (`scrittura.md`);
+    and the row stays **undecided** until the user says whether it is the same work (`writing.md`);
   - Task to create → `padre [<Tipo> #<id> — <titolo>](<link>) → **Task DA CREARE** ("<titolo previsto>")`.
 - **Always a link with the title, never a bare number** — parent, Task and recap alike. Text
   `<Tipo> #<id> — <titolo>` read at runtime; URL from the item's HTML link or `_workitems/edit/<id>`

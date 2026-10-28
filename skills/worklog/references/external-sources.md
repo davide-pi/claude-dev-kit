@@ -2,7 +2,7 @@
 
 The transcripts see only the time spent with Claude. Meetings, calls, chat threads, manual tests and
 reviews leave traces elsewhere. This file is opened **only** when the gap prompt's answer is
-`Cercale nelle fonti` (`ore-gestione.md`): on an under-target day, each time, never by default.
+`Cercale nelle fonti` (`hours-management.md`): on an under-target day, each time, never by default.
 
 ## Rules
 
@@ -45,5 +45,5 @@ when unknown; never written into the kit).
 
 ## In Table 1
 
-Source rows are ordinary Table 1 rows (shape: `tabelle.md`), the source named on the `Fonte` line. Then
+Source rows are ordinary Table 1 rows (shape: `tables.md`), the source named on the `Fonte` line. Then
 the usual Table 1 loop: the user keeps, edits or drops each source row; coverage is recomputed.
