@@ -37,7 +37,7 @@ function describe(entry, dir, envFile) {
   const parts = [`ALM: ${PLATFORMS[entry.platform] || entry.platform || '?'}`];
   if (entry.org) parts.push(`org ${entry.org}`);
   if (entry.platform !== 'github') parts.push(projectOf(entry, dir));
-  if (entry.account) parts.push(`utente ${entry.account}`);
+  if (entry.account) parts.push(`user ${entry.account}`);
   if (/^[\w.-]+$/.test(entry.identity ?? '')) {
     const azDir = path.join(os.homedir(), `.azure-${entry.identity}`);
     if (fs.existsSync(azDir)) {
