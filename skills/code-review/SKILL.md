@@ -63,7 +63,7 @@ Same defect at the same anchor from A and B → `CONFIRMED`; one model only → 
 ### Report
 
 One merged report in Italian, in exactly this skeleton (fields and column meanings:
-`references/report-format.md`). The host's output style or CLAUDE.md never overrides it:
+`references/report-format.md`):
 
 ```text
 Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after

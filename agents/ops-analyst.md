@@ -13,6 +13,7 @@ mcpServers:
   - grafana-prod:
       type: http
       url: http://localhost:8001/mcp
+omitClaudeMd: true
 maxTurns: 30
 ---
 
@@ -30,10 +31,10 @@ only here: its server is defined inline in this file and never reaches the main 
 | Field | Missing → |
 | --- | --- |
 | service (compose service, container, pod, unit, project) | resolve from the repo; one candidate → use it and say so; several → name them and stop |
-| environment (local, `stg`, `prod`, …) | local when a stack runs here, else ask |
+| environment (local, `stg`, `prod`, …) | local when a stack runs here, else name the candidates and stop |
 | filter (text or regex), `--errors` (`error\|fail\|exception\|fatal\|unhandled\|critical\|warn`) | no filter |
 | window `--since`, line cap `-n` | `15m`, `200` |
-| `--follow` | never unless asked; say how it stops, never end a turn on a running follow |
+| `--follow` | refused: a subagent cannot stream; run the bounded `--since` read and say so |
 
 ## Ground rules (hard)
 

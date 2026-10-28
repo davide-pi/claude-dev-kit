@@ -142,7 +142,7 @@ default to Sonnet, except `Explore` (Haiku); the caller can override.
 | `agents/ops-analyst.md` | Logs, metrics, profiles and traces of a running service, and where `/logs` runs: Grafana through an inline MCP server (`GRAFANA_URL`, `GRAFANA_TOKEN`) that never reaches the main conversation, plus compose, containers, kubectl, Aspire and log files. Read-only, redacts secrets. |
 | `agents/doc-keeper.md` | Maintains code-derived and experience-derived docs against the source. Active only where the repository actually has a docs tree. |
 | `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Haiku at medium effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
-| `agents/analyst.md` | Where `/retro` runs forked: the whole tool set minus Edit and Write (`disallowedTools`), so the file tools are removed rather than merely forbidden (a shell can still write: the agent's rules say what it may create); the skill supplies the task and the report. |
+| `agents/analyst.md` | Where `/retro` runs forked: a read-only tool allowlist with no Edit or Write (a shell can still write: the agent's rules say what it may create); the skill supplies the task and the report. |
 
 ## Hooks
 
