@@ -645,3 +645,10 @@ test('a blocked verdict never carries the /clear message', () => {
   assert.equal(out.systemMessage, undefined);
   assert.equal(handoff, null);
 });
+
+test('an English verdict table is judged like the Italian one', () => {
+  const en = '| Level | Command | Deciding line | Status |\n| --- | --- | --- | --- |';
+  assert.equal(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`, 'Passed: 48')).reason, '');
+  assert.match(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`)).reason, /"done"/);
+  assert.equal(stop(edited(`${en}\n| e2e | npm run e2e | - | not verified: needs staging |`)).reason, '');
+});

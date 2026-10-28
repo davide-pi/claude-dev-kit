@@ -8,7 +8,8 @@ description: >-
 # pr-create — turn a pushed branch into a reviewable PR
 
 **Contract.** An open PR with title, body, `Rilascio:` block and the parent work item linked ·
-never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim.
+never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim; at pr language `en` the labels are `Release:`,
+`no components`, `Merge risk:`, `reversible`/`irreversible`, `impact:`, `Verification:`.
 
 ## When
 
@@ -44,9 +45,9 @@ The shell guard's `alm-contract.js` check asks on an `az repos pr create` lackin
 | --- | --- |
 | title | one imperative line, specific, no period: `Aggiungi export fatture per tenant`; it becomes the squash commit subject |
 | body | one bullet per real change and its why; anything the reviewer must not miss (migration, config key, breaking signature); out of scope named |
-| `Rilascio:` | always present — see §4 |
-| `Rischio merge:` | always present: `reversibile` or `irreversibile` (what cannot be undone); `impatto:` who or what breaks |
-| `Verifica:` | only when something was run: the command, before → after; nothing run → no block |
+| `Rilascio:` (en `Release:`) | always present — see §4 |
+| `Rischio merge:` (en `Merge risk:`) | always present: `reversibile` or `irreversibile` (what cannot be undone); `impatto:` who or what breaks |
+| `Verifica:` (en `Verification:`) | only when something was run: the command, before → after; nothing run → no block |
 | never | an empty template, a commit-by-commit dump, a diff retold in prose, secrets or customer data |
 
 Source: the log and diff below, plus the linked item's text — a gap between what the item asked and

@@ -33,11 +33,11 @@ logic, testable; **basso** cosmetic.
 
 ## Language
 - Chat: the `language` setting (unset: English), agent reports too.
-- Commit, pr, prComment, items, wiki: each in its `Lang:` line language (none: en).
+- Commit, pr, prComment, items, wiki: each per the `Lang:` line (none: en).
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
-  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`; the kit's fixed
-  labels (headers, columns, item keywords, `Rilascio:`-style markers, `fatto`).
+  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
+- Labels: as here at chat `it`; else `Level|Command|Deciding line|Status` `done`, `#|Proposal|Reason|Risk`.
 
 ## Done means verified
 Never claim done, fixed, passing or verified without a command run this turn (reading code or a report isn't

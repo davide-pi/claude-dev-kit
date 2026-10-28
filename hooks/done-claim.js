@@ -99,9 +99,9 @@ const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
 /** The `deliver` verdict table's header; its rows are the contiguous `|` lines that follow. */
-const VERDICT_HEAD = /^[ \t]*\|[ \t]*Livello[ \t]*\|[ \t]*Comando[ \t]*\|[^\n]*\|[ \t]*Stato[ \t]*\|[ \t]*$/i;
-/** A row's state that claims a result and so needs proof (`non verificato: …` does not). */
-const PROOF_STATE = /^(?:fatto|failed)$/i;
+const VERDICT_HEAD = /^[ \t]*\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*(?:Comando|Command)[ \t]*\|[^\n]*\|[ \t]*(?:Stato|Status)[ \t]*\|[ \t]*$/i;
+/** A row's state that claims a result and so needs proof (`non verificato: …` / `not verified: …` do not). */
+const PROOF_STATE = /^(?:fatto|done|failed)$/i;
 
 /** Lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
 const normalise = (text) => text.replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
@@ -355,7 +355,7 @@ try {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict rows against the command output. '
-          + 'Rewrite the verdict as a "Livello | Comando | Riga che decide | Stato" table with the output of commands run now, or write "non verificato: <motivo>" in the Stato of each row.',
+          + 'Rewrite the verdict table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status") with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
       }));
       process.exit(0);
     }
@@ -365,7 +365,7 @@ try {
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
-        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" in the Stato of that row.',
+        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the state of that row.',
     }));
     process.exit(0);
   }
@@ -381,8 +381,8 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the "Livello | Comando | Riga che decide | Stato" table (a plain markdown table, never in a code block), '
-      + 'or write "non verificato" and why. Do not rerun anything if the output is already above: quote it in the table.',
+      + 'confirms it in the verdict table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status" in an English chat; a plain markdown table, never in a code block), '
+      + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
 } catch {

@@ -15,7 +15,7 @@ schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAU
 4. **Multi-ask turns** are a checklist: answer every item, in order, numbered; a trailing "no?/vero?" gets
    **sì/no** and one line of evidence. Constraints stated in the turn ("senza push") bind the whole turn.
 5. **Stable numbering**: `#n` per CLAUDE.md, a fixed item becomes one line; number options so `#2` answers.
-   Open decisions: table `# | Decisione | Consiglio`, one row each.
+   Open decisions: table `# | Decisione | Consiglio` (English chat: `# | Decision | Recommendation`), one row each.
 6. **No narration between tools**, no closing recap. Work, then report.
 7. **Asking: CLAUDE.md rule 1** (a shared-branch push counts); a fixed-answer policy is no question.
    `AskUserQuestion` for a closed choice of 2-4 options (or where a skill prescribes it);
