@@ -229,7 +229,15 @@ Installed plugins already own these, so no asset restates them — they route to
 .\install.ps1            # install or update the Claude config directory, check prerequisites
 .\install.ps1 -Check     # report drift and environment problems, write nothing (exit 1 if any)
 .\install.ps1 -Pull      # bring changes made in the live config back into the repo
+.\install.ps1 -Without worklog   # leave an optional component out (-With worklog brings it back)
 ```
+
+Optional components are opted out per machine with `-Without <name>` / `-With <name>` (plain install only; the
+only component today is `worklog`: the `skills/worklog/` folder and `hooks/worklog-pending.js`). The choice is kept in
+`<claude home>/kit-options.json` (`{ "without": ["worklog"] }`) and read by every run: an excluded component is not
+installed, not counted as drift, and `-Pull` never brings it back; a copy already installed moves to that run's backup
+folder. `-Check` skips its hooks, and the cockpit hides its `log hours` button when the skill is not installed.
+`settings.json` is untouched: the worklog hook entry is a no-op when its file is absent.
 
 The installer discovers what the repo contains rather than working from a list, so a new asset needs
 no change here. It copies but never deletes on its own: it **detects and offers to remove** what the kit no

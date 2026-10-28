@@ -35,6 +35,8 @@ export async function refreshWorklog($: EngineInterface, now: number): Promise<v
   try {
     const dir = await configDir($)
     if (!dir) return
+    const isSkillMissing = await $.fs.stat(`${dir}/skills/worklog/SKILL.md`).then(() => undefined, () => true)
+    await patch($, s => (s.isWorklogSkillMissing === isSkillMissing ? s : { ...s, isWorklogSkillMissing: isSkillMissing }))
     const text = await $.fs.read(`${dir}/.worklog-pending.json`)
     const parsed: unknown = JSON.parse(typeof text === 'string' ? text : '')
     if (typeof parsed !== 'object' || parsed === null) return

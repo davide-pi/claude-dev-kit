@@ -44,6 +44,8 @@ export type World = {
   closed?: string[]
   /** A worklog snapshot with one pending day, as the worklog hook writes it. */
   hasWorklog?: boolean
+  /** True: `skills/worklog/SKILL.md` does not exist in the config directory (the kit installed without the worklog). */
+  noWorklogSkill?: boolean
   /** Receives every `$.fs.write`: the text by path, the last write winning. */
   writes?: Map<string, string>
   /** What `$.session.id()` answers (`s-1` when not given). */
@@ -292,6 +294,7 @@ export function world(on: On, options: World = {}) {
     }
   })
   on('fs.stat', (_, e) => {
+    if (options.noWorklogSkill && /skills[\\/]worklog[\\/]SKILL\.md$/.test(e.path)) throw new Error('ENOENT: no such file or directory')
     if (/done-claim\.log$/.test(e.path)) return { value: { kind: 'file', size: options.doneClaims?.length ?? 0, mtimeMs: options.claimsMtime?.() ?? 0, isLink: false } }
     if (/[\\/]\.azure-[\w.-]+$/.test(e.path)) {
       if (options.azDirs?.some(d => e.path.endsWith(d))) return { value: { kind: 'dir', size: 0, mtimeMs: 0, isLink: false } }

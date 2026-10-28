@@ -38,6 +38,10 @@ param(
     # Skip the confirmation prompt when overwriting CLAUDE.md / settings.json and when moving a
     # retired asset to the backup folder.
     [switch]$Force,
+    # Optional components to leave out of (-Without) or bring back into (-With) this machine; the choice is
+    # kept in <ClaudeHome>/kit-options.json and read by every run. Names: see $Components.
+    [string[]]$Without,
+    [string[]]$With,
     [string]$ClaudeHome = (Join-Path $env:USERPROFILE '.claude')
 )
 
@@ -59,6 +63,18 @@ $RepoRoot = Resolve-RootPath $PSScriptRoot
 $ClaudeHome = Resolve-RootPath $ClaudeHome
 
 if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
+
+# Optional components: a name and the config-relative assets (file or folder) it is made of. A component the
+# machine opted out of (kit-options.json) behaves like $LocalOnly: not installed, not drift, not pulled.
+$Components = [ordered]@{ worklog = @('skills/worklog', 'hooks/worklog-pending.js') }
+$script:Excluded = @()
+
+$Without = @($Without | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+$With = @($With | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() })
+foreach ($name in @($Without) + @($With)) {
+    if ($name -notin $Components.Keys) { throw "Unknown component '$name'. Known components: $($Components.Keys -join ', ')." }
+}
+if (($Without -or $With) -and ($Check -or $Pull)) { throw '-Without and -With change kit-options.json: use them with a plain install.' }
 
 # The directories Claude Code loads assets from. Discovery recurses into them, so a new skill
 # folder, hook, agent or reference file is picked up without touching this file.
@@ -112,7 +128,52 @@ function Test-Ignorable([string]$Name) {
 
 function Test-LocalOnly([string]$Relative) {
     foreach ($entry in $LocalOnly) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
+    return (Test-Excluded $Relative)
+}
+
+function Test-Excluded([string]$Relative) {
+    foreach ($entry in $script:Excluded) { if ($Relative -eq $entry -or $Relative -like "$entry/*") { return $true } }
     return $false
+}
+
+function Get-KitOptions {
+    # The component names kit-options.json opts out of; an unreadable file or an unknown name is reported and ignored.
+    $file = Join-Path $ClaudeHome 'kit-options.json'
+    if (-not (Test-Path -LiteralPath $file)) { return @() }
+    try { $json = Get-Content -Raw -LiteralPath $file | ConvertFrom-Json }
+    catch { Write-Problem "kit-options.json cannot be read — $($_.Exception.Message)"; return @() }
+    $names = foreach ($name in @($json.without | Where-Object { $_ })) {
+        if ("$name" -in $Components.Keys) { "$name" } else { Write-Problem "kit-options.json names an unknown component '$name' — known: $($Components.Keys -join ', ')" }
+    }
+    return @($names)
+}
+
+function Set-KitOptions {
+    # Applies -Without / -With to kit-options.json (sorted, no duplicates), then fixes the run's exclusions.
+    $current = @(Get-KitOptions)
+    $wanted = @(@($current) + @($Without) | Where-Object { $_ -and ($_ -notin $With) } | Sort-Object -Unique)
+    if (($Without -or $With) -and (($wanted -join ',') -ne ($current -join ',') -or -not (Test-Path -LiteralPath (Join-Path $ClaudeHome 'kit-options.json')))) {
+        $json = [ordered]@{ without = $wanted } | ConvertTo-Json
+        [System.IO.File]::WriteAllText((Join-Path $ClaudeHome 'kit-options.json'), "$json`n", [System.Text.UTF8Encoding]::new($false))
+        Write-Change "kit-options.json: without = [$($wanted -join ', ')]"
+    }
+    $script:Excluded = @($wanted | ForEach-Object { $Components[$_] })
+}
+
+function Move-ToRunBackup([string]$Relative, [string]$Reason) {
+    $source = Join-Path $ClaudeHome $Relative.Replace('/', '\')
+    $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\$($Relative.Replace('/', '\'))"
+    New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
+    Move-Item -LiteralPath $source -Destination $backup -Force
+    Write-Change "$Relative $Reason (moved to backups\kit-install-$script:RunStamp)"
+}
+
+function Move-ExcludedAssets {
+    # An excluded asset already installed goes to this run's backup folder, like a retired one.
+    foreach ($rel in $script:Excluded) {
+        if (-not (Test-Path -LiteralPath (Join-Path $ClaudeHome $rel.Replace('/', '\')))) { continue }
+        Move-ToRunBackup $rel 'is excluded by kit-options.json'
+    }
 }
 
 function Test-Retired([string]$Relative) {
@@ -392,6 +453,7 @@ function Test-Hooks {
 
     foreach ($name in ($wired.Keys | Sort-Object)) {
         $events = $wired[$name] -join ', '
+        if (Test-Excluded "hooks/$name") { Write-Info "$name ($events) belongs to a component excluded by kit-options.json — not checked"; continue }
         if ($name -notin $shipped) {
             Write-Problem "settings.json wires $events -> $name, which the repo does not ship"
             continue
@@ -444,7 +506,7 @@ function Test-Hooks {
 
     # The reminder hook reads its roots from settings.json → env; the template ships them empty, and
     # empty is silence — the one state in which forgotten hours stay forgotten without a sign.
-    if ($wired.ContainsKey('worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
+    if ($wired.ContainsKey('worklog-pending.js') -and -not (Test-Excluded 'hooks/worklog-pending.js') -and -not "$($settings.env.CLAUDE_WORKSPACE_ROOTS)".Trim()) {
         Write-Problem 'CLAUDE_WORKSPACE_ROOTS is empty in settings.json → env — worklog-pending.js will never report a day'
     }
 
@@ -702,11 +764,7 @@ function Test-RetiredAssets {
             }
             if ("$answer" -notmatch '^(y|yes)$') { Write-Info "$rel kept"; continue }
         }
-        $source = Join-Path $ClaudeHome $rel.Replace('/', '\')
-        $backup = Join-Path $ClaudeHome "backups\kit-install-$script:RunStamp\$($rel.Replace('/', '\'))"
-        New-Item -ItemType Directory -Force -Path (Split-Path -Parent $backup) | Out-Null
-        Move-Item -LiteralPath $source -Destination $backup -Force
-        Write-Change "$rel retired (moved to backups\kit-install-$script:RunStamp)"
+        Move-ToRunBackup $rel 'retired'
     }
 }
 
@@ -731,6 +789,9 @@ if (-not (Test-Path -LiteralPath $ClaudeHome)) {
     New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
     $ClaudeHome = Resolve-RootPath $ClaudeHome   # now that it exists, in its canonical form
 }
+
+Set-KitOptions
+if (-not $Check -and -not $Pull) { Move-ExcludedAssets }
 
 Sync-Assets
 Test-InstalledOnlyAssets

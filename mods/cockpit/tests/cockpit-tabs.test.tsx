@@ -194,6 +194,15 @@ test('footer: between two sessions (no id) log hours is not offered', async ($, 
   await ui.unmount()
 })
 
+test('footer: without the worklog skill installed log hours is not offered', async ($, on) => {
+  world(on, { noWorklogSkill: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const ui = await mountPane($)
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
+  await ui.unmount()
+})
+
 test('tab bar: one row at every width: full labels, then short ones (the selected tab stays full), then 3 cells; counters read 9+ past 9', () => {
   const counts = { agents: 12, signals: 3 }
   const cells = (labels: Record<string, string>, dot: boolean) => TABS.reduce((n, id) => n + textCells(labels[id] ?? '') + 4 + (id === 'work' && dot ? 2 : 0), 0) + TABS.length - 1

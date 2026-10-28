@@ -287,6 +287,8 @@ export type CockpitSnapshot = {
   signalsAt?: Record<string, number>
   git?: CockpitGit
   worklog: CockpitWorklog
+  /** True when `<config>/skills/worklog/SKILL.md` is absent (the kit installed without the worklog): the log hours button is not offered. */
+  isWorklogSkillMissing?: boolean
   /** The main thread's tasks (task tools and TodoWrite, merged); absent in a state written before tasks existed. */
   tasks?: CockpitTask[]
   /** Entries of the active deliver perimeter of the branch checked out (`<git-dir>/deliver/perimeter.md`); absent without one. */
