@@ -175,7 +175,18 @@ test('notes: delete removes the note; deleting the one in the field leaves the n
   await ui.unmount()
 })
 
-type Drawn = { props?: { key?: string; width?: number }; children?: unknown[] } | null
+type Drawn = { props?: { key?: string; width?: number; plain?: boolean }; children?: unknown[] } | null
+
+/** The props of the node keyed `key`, found in the drawn tree. */
+function propsOf(node: unknown, key: string): NonNullable<Drawn>['props'] | undefined {
+  const o = node as Drawn
+  if (o?.props?.key === key) return o.props
+  for (const c of o?.children ?? []) {
+    const found = propsOf(c, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
 
 /** The width of the box that holds the Button keyed `key`, found in the drawn tree. */
 function toggleBoxWidth(node: unknown, key: string): number | undefined {
@@ -201,8 +212,11 @@ test('notes: every note has its three buttons, in the pane width at 30, 40 and 5
         // the text's box leaves the icons their columns: a cut note never runs under them
         const textWidth = toggleBoxWidth(await ui.drawn(), 'note:toggle:4')
         expect(typeof textWidth).toBe('number')
-        expect((textWidth as number) + 8).toBeLessThanOrEqual(columns)
-        expect(textWidth as number).toBeGreaterThanOrEqual(columns - 16)
+        expect((textWidth as number) + 19).toBeLessThanOrEqual(columns)
+        expect(textWidth as number).toBeGreaterThanOrEqual(columns - 24)
+        // the icons are drawn as framed buttons (`[ ✎ ]`), not bare glyphs
+        for (const key of ['note:edit:4', 'note:send:4', 'note:delete:4']) expect(propsOf(await ui.drawn(), key)?.plain).toBeFalsy()
+        expect(propsOf(await ui.drawn(), 'note:toggle:4')?.plain).toBe(true)
         await ui.unmount()
       }
     } finally {
