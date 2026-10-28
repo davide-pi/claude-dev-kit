@@ -112,8 +112,6 @@ const EN = {
   notesTitle: (n: number) => `NOTES · ${n}`,
   notePlaceholder: 'quick note',
   noNotes: 'no saved notes',
-  moreLines: (n: number) => `▸ +${n} ${plural(n, 'line', 'lines')}`,
-  lessLines: (n: number) => `▾ −${n} ${plural(n, 'line', 'lines')}`,
 
   // The diff pane
   nothingToShow: 'nothing to show',
@@ -218,8 +216,6 @@ const IT: Strings = {
   notesTitle: (n: number) => `NOTE · ${n}`,
   notePlaceholder: 'nota rapida',
   noNotes: 'nessuna nota salvata',
-  moreLines: (n: number) => `▸ +${n} ${plural(n, 'riga', 'righe')}`,
-  lessLines: (n: number) => `▾ −${n} ${plural(n, 'riga', 'righe')}`,
 
   nothingToShow: 'niente da mostrare',
   diffUnreadable: 'file troppo grande o illeggibile',
