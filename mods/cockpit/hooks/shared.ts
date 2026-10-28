@@ -18,6 +18,7 @@ export const COLORS = {
   red: '#f07a6f',
   gap: '#8a3b33',
   empty: '#33363c',
+  band: '#808080', // the odd rows of a list: a mid grey, the theme's default text (white or black) keeps contrast >= 3.9 on it in light and dark terminals
   gray: '#8c8c8c',
 } as const
 

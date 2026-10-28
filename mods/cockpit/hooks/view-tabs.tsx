@@ -11,7 +11,7 @@ import { agentCosts, signalId, signalsOf } from './signals'
 import type { AgentCost, Signal } from './signals'
 import { t } from './strings'
 import { agentCostDetails, agentCostRow, agentRow, agentWarning, fitPair, modelCounts, orderAgents, pairRow, subagentDetails, taskCounts, taskRow, visibleAgents } from './view-agents'
-import { BUTTON_GAP, buttonRowWidth, dim, line, sp, spanNodes } from './view-base'
+import { BUTTON_GAP, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { categoryRows, contextBar } from './view-context'
 import { bigResultSpans } from './view-insights'
@@ -53,7 +53,7 @@ export type PaneActions = {
   setNoteDraft: (text: string) => void
   /** Saves the field as a note (replacing the one it was loaded from, if any): the text of the field on Enter, the kept draft when none is given. */
   saveNote: (text?: string) => void
-  /** Loads a saved note into the field. */
+  /** Opens a saved note for editing on its own row; on the note already being edited, cancels the edit. */
   editNote: (id: number) => void
   /** Appends a saved note to the prompt box; the note stays in the list. */
   sendNote: (id: number) => void
@@ -106,9 +106,10 @@ const MAX_FILE_ROWS = 8
 const MAX_LINK_ROWS = 4
 const HISTORY_ROWS_SHOWN = 5
 const AGENT_COST_ROWS_SHOWN = 3
-const NOTE_LINES_SHOWN = 3
-/** The height of the note field: multi-line notes are common. */
-const NOTE_INPUT_ROWS = 6
+/** The height of the note field: three lines, a longer text scrolls inside it. */
+const NOTE_INPUT_ROWS = 3
+/** Cells a note row keeps for its three icon buttons (✎ ➤ 🗑 and the gaps), so the text never runs under them. */
+const NOTE_ICONS_W = 8
 
 // ── Agents: the workflow run in one row, every agent listed, the history behind a toggle ──
 
@@ -445,32 +446,42 @@ export function notesBlocks(k: Kit): Block[] {
   const { Box, Button, Input, Text } = ui
   const S = t()
   const notes = s.notes ?? []
-  const noteButtons = [S.buttons.edit, S.buttons.send, S.buttons.delete]
-  const noteRow = (n: CockpitNote) => {
+  // Every note is one row: its text (one line cut with … until pressed, then all its lines) and the three icon buttons on the right; odd rows get a band
+  const noteRow = (n: CockpitNote, i: number) => {
     const lines = n.text.trimEnd().split(/\r?\n/)
     const isOpen = s.notesOpen?.includes(n.id) === true
-    const hidden = Math.max(0, lines.length - NOTE_LINES_SHOWN)
+    const first = lines[0] === '' ? ' ' : lines[0]
+    const isEditing = Input !== undefined && s.noteEditing === n.id
     return (
-      <Box flexDirection="column">
-        {/* a note's lines wrap by display width (the Text's own wrap), indentation and empty lines kept */}
-        {(isOpen ? lines : lines.slice(0, NOTE_LINES_SHOWN)).map(text => <Text wrap="wrap">{spanNodes(ui, [sp(text === '' ? ' ' : text)])}</Text>)}
-        {hidden > 0 && (
-          <Button key={`note:more:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
-            <Text color={COLORS.title}>{isOpen ? S.lessLines(hidden) : S.moreLines(hidden)}</Text>
-          </Button>
-        )}
-        {s.confirm === `note:${n.id}` && confirmRow(k, S.confirmNoteDelete)}
-        <Box flexDirection={buttonRowWidth(noteButtons) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
-          <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
-            {S.buttons.edit}
-          </Button>
-          <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
-            {S.buttons.send}
-          </Button>
-          <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
-            {S.buttons.delete}
-          </Button>
+      <Box flexDirection="column" backgroundColor={i % 2 === 1 ? COLORS.band : undefined}>
+        <Box columnGap={1}>
+          <Box width={Math.max(1, width - NOTE_ICONS_W)}>
+            {isEditing ? (
+              <Input key="note:edit-field" rows={NOTE_INPUT_ROWS} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} autoFocus onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
+            ) : (
+              <Button key={`note:toggle:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
+                {isOpen ? (
+                  // one Text so the Button cannot lay the lines side by side; lines wrap by display width, indentation and empty lines kept
+                  <Text wrap="wrap">{lines.map(text => (text === '' ? ' ' : text)).join('\n')}</Text>
+                ) : (
+                  <Text wrap="truncate-end">{lines.length > 1 ? `${first}…` : first}</Text>
+                )}
+              </Button>
+            )}
+          </Box>
+          <Box columnGap={1} alignItems="flex-start">
+            <Button key={`note:edit:${n.id}`} plain onPress={() => actions.editNote(n.id)}>
+              {isEditing ? '✕' : '✎'}
+            </Button>
+            <Button key={`note:send:${n.id}`} plain onPress={() => actions.sendNote(n.id)}>
+              ➤
+            </Button>
+            <Button key={`note:delete:${n.id}`} plain onPress={() => actions.deleteNote(n.id)}>
+              🗑
+            </Button>
+          </Box>
         </Box>
+        {s.confirm === `note:${n.id}` && confirmRow(k, S.confirmNoteDelete)}
       </Box>
     )
   }
@@ -479,15 +490,16 @@ export function notesBlocks(k: Kit): Block[] {
       gap(),
       title(S.notesTitle(notes.length)),
       gap(),
-      Input && (
+      // The bottom field is for new notes: while a note is edited on its row it is hidden (the draft is shared, a draft typed here is replaced)
+      Input && s.noteEditing === undefined && (
         <Input key="note" rows={NOTE_INPUT_ROWS} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
       ),
-      Input && (
+      Input && s.noteEditing === undefined && (
         <Button key="note:save" onPress={() => actions.saveNote()}>
           {S.buttons.save}
         </Button>
       ),
-      ...(notes.length > 0 ? [gap(), notes.flatMap((n, i) => [i > 0 && gap(), noteRow(n)])] : [gap(), line(ui, [dim(S.noNotes)])]),
+      ...(notes.length > 0 ? [gap(), notes.map(noteRow)] : [gap(), line(ui, [dim(S.noNotes)])]),
     ],
   ]
 }

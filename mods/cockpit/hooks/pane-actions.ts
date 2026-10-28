@@ -69,10 +69,12 @@ export function paneActions($: EngineInterface): PaneActions {
     refresh: () => void pressRefresh($).catch(() => undefined),
     toggleNote: id => void patch($, s => ({ ...s, notesOpen: toggled(s.notesOpen, id) })).catch(() => undefined),
     toggleOpen: key => void patch($, s => ({ ...s, openKeys: toggled(s.openKeys, key) })).catch(() => undefined),
-    setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX), noteEditing: text === '' ? undefined : s.noteEditing })).catch(() => undefined),
+    setNoteDraft: text => void patch($, s => ({ ...s, noteDraft: text === '' ? undefined : normalizeNewlines(text).slice(0, NOTE_MAX) })).catch(() => undefined),
     saveNote: text => void patch($, s => saveNote(s, text)).catch(() => undefined),
+    // Pressed again on the note being edited, it cancels: the draft is dropped and the note is left as it was.
     editNote: id =>
       void patch($, s => {
+        if (s.noteEditing === id) return { ...s, noteDraft: undefined, noteEditing: undefined }
         const note = s.notes?.find(n => n.id === id)
         return note ? { ...s, noteDraft: note.text, noteEditing: id } : s
       }).catch(() => undefined),
