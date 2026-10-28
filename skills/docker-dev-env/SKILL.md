@@ -14,16 +14,10 @@ output verbatim.
 
 ## When
 
-- A local service will not start, restarts in a loop, or the app cannot connect to it.
-- A compose service is added, renamed, re-ported or given a healthcheck; a port is already taken.
-- Local data must survive a rebuild, be reset, or be thrown away; a client is needed that is not
-  installed (`psql`, `redis-cli`, `rabbitmqctl`).
-
 Not for: what to type into a client (`sql-server`, `rabbitmq`, `dotnet-backend` for Redis);
 containers a test suite owns (`dotnet-testing`); build-agent containers (`pipeline`).
 
-Local-stack facts (healthcheck = readiness, named volumes, tags from `.env`, clients inside the
-container, Aspire over the backend's old compose file) are in `rules/docker.md`.
+House facts: rule `docker`.
 
 ## Decide
 
@@ -58,13 +52,8 @@ container, Aspire over the backend's old compose file) are in `rules/docker.md`.
 
 ### Where the client runs
 
-| Target | Shape |
-| --- | --- |
-| a compose service that is up | `docker compose exec -T <svc> <client> …` (`-it` only to type into it) |
-| a bare container, or one that is down | `docker exec <container> …`, or a throwaway `docker run --rm -i --network <net> <image> <client>` with the image from `docker compose config` |
-| a host tool or .NET app | `localhost` and the published port (`docker compose port`) |
-| `psql` / `redis-cli` without a stack | native if installed, else `wsl <client>`, else a throwaway `postgres` / `redis` image |
-| anything not a dev host | `/db` — never a raw client (`sql-server`) |
+The shape per target (compose service up, bare or down container, host tool, no stack):
+`references/clients-in-containers.md`. Anything not a dev host: `/db`, never a raw client (`sql-server`).
 
 ## Do
 
@@ -102,6 +91,6 @@ docker compose down                          # containers go; volumes survive
 - `references/aspire.md` — app host, profiles, dashboard, service discovery, connection handover.
 - `references/compose-stack.md` — the annotated stack file: services, networks, profiles, overrides.
 - `references/healthchecks.md` — a real probe per service, `--wait`, `service_healthy`, start periods.
-- `references/clients-in-containers.md` — exec, throwaway, wsl; piping files; exit codes; per-client recipes.
+- `references/clients-in-containers.md` — when a client must run: exec, throwaway, wsl by target; piping files; exit codes; per-client recipes.
 - `references/volumes-and-reset.md` — what each volume holds, a safe reset per engine, backup first.
 - `references/env-and-secrets.md` — `.env` resolution, `${VAR}` with no default, user secrets, gitignore.

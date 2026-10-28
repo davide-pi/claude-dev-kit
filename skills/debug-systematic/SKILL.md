@@ -14,10 +14,6 @@ evidence).
 
 ## When
 
-- A bug, exception, wrong result, hang or crash whose cause is not proven.
-- A test that fails, locally or only in CI; an intermittent failure; "it used to work".
-- Something is slow and nobody knows why.
-
 Not for: a fix whose cause is already proven; tuning code that works (`review-performance`); what the
 behaviour *should* be (the `azdo-cli` item read, `plan-work`).
 
@@ -48,13 +44,10 @@ kept deliberately — never left standing as the fix.
 | --- | --- | --- | --- |
 | .NET process slow, leaking, hung, burning CPU | counters → trace → dump (`dotnet-diagnostics`) | `dotnet-counters monitor -n <proc>` | which resource saturates (GC, thread pool, exceptions, queue); for a hang, every stack at the freeze |
 | behaviour inside a dependency with no source | `ilspycmd`, then `csharprepl` | `ilspycmd -p -o <outDir> <assembly>` | the real logic, then the API exercised outside the app |
-| a query slow or returning wrong rows | statistics and the plan (`sql-server`) | `SET STATISTICS IO, TIME ON; <query>` via `sqlcmd`, or `/db` off-dev | logical reads per table, scan vs seek, a bad estimate |
-| right in a SQL window, wrong from the app | the EF command log (`ef-core`) | category `Microsoft.EntityFrameworkCore.Database.Command` at Information | the SQL really sent: a lost filter, N+1, client evaluation |
-| a message never arrives, or arrives twice | queues, dead-letter, consumer log (`rabbitmq`) | `docker exec <broker> rabbitmqctl list_queues name messages messages_unacknowledged consumers` | never published, stuck unacked, or dead-lettered; duplicates mean no idempotency key |
-| anything inside the browser | the browser's devtools (console, network, trace, heap) | — | come back with the failing request or stack |
-| fails only in CI | the failing step's log, then an environment diff | `azdo-cli` pipelines / `gh run view --log-failed` | the step verbatim; then locale, time zone, path case, a missing service |
 | intermittent everywhere | a forced-repro loop plus correlation logging | `1..200 \| % { dotnet test --filter <Test> }` | a failure rate (no rate, no repro); the interleaving behind it |
 | it used to work | `git bisect` | `git bisect start <bad> <good>`; `git bisect run <script>` | the single commit that introduced it |
+
+Slow or wrong query, EF, missing or doubled message → `references/data-and-messaging.md`; browser, CI-only → `references/intermittent-and-ci.md`.
 
 ## Do
 
@@ -92,5 +85,5 @@ dotnet test --filter "FullyQualifiedName~<NewTest>"     # expect: passed
 
 - `references/data-and-messaging.md` — a query slow or wrong, a message missing or doubled: plans,
   statistics, broker triage, dead-letter handling.
-- `references/intermittent-and-ci.md` — cannot reproduce, or only CI fails: what to log to force a
-  repro, the flake taxonomy, the local-against-CI environment diff.
+- `references/intermittent-and-ci.md` — cannot reproduce, a browser symptom, or only CI fails: what to
+  log to force a repro, the flake taxonomy, the local-against-CI environment diff.

@@ -13,11 +13,6 @@ Italian, log lines and counter names verbatim.
 
 ## When
 
-- A deployed or local service is slow, erroring, leaking or hung, and evidence is needed.
-- A local process needs counters, a CPU trace, a gcdump, a stack report or a dump.
-- Deciding what to log, at which level, with which correlation — before the incident.
-- Adding or fixing OpenTelemetry instrumentation, or reading a span tree.
-
 Not for: choosing the hypothesis (`debug-systematic`), query plans (`sql-server`, `db-analyst`),
 browser-side performance.
 
@@ -25,10 +20,8 @@ browser-side performance.
 
 ### Which instrument — production first
 
-Deployed services log through Serilog's OpenTelemetry sink into Loki, export metrics to Prometheus
-and are profiled into Pyroscope, all behind Grafana. **Grafana exists only inside the `ops-analyst`
-agent**: the main thread spawns it (or runs `/logs`) and receives lines plus a reading, never the
-raw result set.
+Deployed telemetry (Loki, Prometheus, Pyroscope) sits behind Grafana, which exists only inside the
+`ops-analyst` agent: spawn it or run `/logs`; the main thread gets lines plus a reading.
 
 | Where | Need | Instrument |
 | --- | --- | --- |
@@ -55,15 +48,7 @@ which span dominates?
 
 ### Log level, decided once
 
-| Level | Means |
-| --- | --- |
-| Debug / Trace | developer detail, off in production |
-| Information | a business event happened: a bet placed, a settlement done, a message consumed |
-| Warning | degraded but handled: a retry fired, a fallback used, input rejected |
-| Error | a human should look: a unit of work failed unhandled |
-| Critical | the process or a dependency is unusable |
-
-A deployed service's levels come from its `serilog.json`, merged at deploy time: raise one namespace
+The level table: `references/logging.md`. A deployed service's levels come from its `serilog.json`, merged at deploy time: raise one namespace
 briefly there, never Debug globally — volume and cost bury the useful lines.
 
 ## Do
@@ -94,5 +79,6 @@ Collect **while it is bad**: a trace from after the incident describes a healthy
 - `references/tools.md` — installing the `dotnet-*` tools, targeting a process, containers, which
   tool answers which question.
 - `references/dumps.md` — reading a dump: threads and stacks, the heap, roots, locks.
-- `references/logging.md` — Serilog: templates, enrichment, correlation, level policy, never-log list.
+- `references/logging.md` — deciding what to log: Serilog templates, enrichment, correlation, the level
+  table and policy, never-log list.
 - `references/telemetry.md` — OpenTelemetry traces and metrics, propagation, the Aspire dashboard.
