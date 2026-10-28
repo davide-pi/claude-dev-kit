@@ -48,7 +48,7 @@ test('notes: Input + save adds a note at the end of the list and empties the fie
   await ui.unmount()
 })
 
-test('notes: edit opens an Input on the note\'s own row (the bottom field is hidden), then submit replaces that note and no other', async ($, on) => {
+test('notes: edit opens an Input on the note\'s own row (the bottom field is hidden), then submit replaces that note and no other and leaves it open', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
@@ -60,13 +60,13 @@ test('notes: edit opens an Input on the note\'s own row (the bottom field is hid
   expect(await ui.find({ type: 'Input', key: 'note' })).toBeUndefined()
   expect(await ui.find({ key: 'note:toggle:1' })).toBeUndefined()
   expect(await ui.find({ key: 'note:toggle:2' })).toBeDefined()
-  await ui.input({ key: 'note:edit-field', text: 'first, amended', kind: 'submit' })
+  await ui.input({ key: 'note:edit-field', text: 'first, amended\nand its second line', kind: 'submit' })
   await settleAll()
   expect(await ui.find({ key: 'note:edit-field' })).toBeUndefined()
   expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
   expect(await noteKeys(ui, 'edit')).toEqual(['note:edit:1', 'note:edit:2'])
   const rows = rowTexts(await ui.drawn())
-  expect(rows.some(r => r.startsWith('first, amended'))).toBe(true)
+  expect(rows.some(r => r.startsWith('first, amended\nand its second line'))).toBe(true)
   expect(rows.some(r => r.startsWith('second'))).toBe(true)
   expect(rows.some(r => /^first(?!,)/.test(r))).toBe(false)
   // the field is free again: the next save is a new note

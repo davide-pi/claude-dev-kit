@@ -131,7 +131,7 @@ export function toggled<T>(list: readonly T[] | undefined, item: T): T[] | undef
 
 /**
  * Saves the field's text (`typed`, the text of the field on Enter; else the draft the snapshot holds): a new note at the end of the list,
- * or, when the field was loaded from a note (`noteEditing`) that is still there, that note's text replaced. The field is emptied; a blank text changes nothing.
+ * or, when the field was loaded from a note (`noteEditing`) that is still there, that note's text replaced and the note left open, all its lines shown. The field is emptied; a blank text changes nothing.
  */
 export function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
   const text = normalizeNewlines(typed ?? s.noteDraft ?? '').slice(0, NOTE_MAX)
@@ -141,7 +141,8 @@ export function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
   const next = isEdit
     ? notes.map(n => (n.id === s.noteEditing ? { ...n, text } : n))
     : [...notes, { id: Math.max(0, ...notes.map(n => n.id)) + 1, text }]
-  return { ...s, notes: next, noteDraft: undefined, noteEditing: undefined }
+  const notesOpen = isEdit && s.noteEditing !== undefined && !s.notesOpen?.includes(s.noteEditing) ? [...(s.notesOpen ?? []), s.noteEditing] : s.notesOpen
+  return { ...s, notes: next, notesOpen, noteDraft: undefined, noteEditing: undefined }
 }
 
 /**
