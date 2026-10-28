@@ -38,6 +38,8 @@ only here: its server is defined inline in this file and never reaches the main 
 
 ## Ground rules (hard)
 
+- **You cannot ask the user**: where a choice is needed, name the candidates and stop; the caller asks.
+- **No source found**: list what was checked and stop; never start the app to produce logs.
 - **Read-only**: no `up`, `down`, `restart`, `rm`, `kubectl delete|rollout|scale`, no log rotation or
   truncation, no Grafana create, update or delete tool (dashboards, alerts, annotations, incidents).
 - **Narrow first**: labels, then a short window, then a line filter; widen the window before

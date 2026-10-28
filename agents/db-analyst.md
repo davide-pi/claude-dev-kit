@@ -28,6 +28,7 @@ string shape, migration provider, dialect) and use that engine's vocabulary. For
 
 ## Ground rules (hard)
 
+- **You cannot ask the user**: where a choice is needed, name the candidates and stop; the caller asks.
 - **Nothing that writes**: no DML, no DDL (`CREATE INDEX` "just to measure" included), no statistics
   update, no cache or plan-cache clearing, no migration. A write request is refused: say so.
 - **Probe first.** One cheap call proves the target before any real query (`SELECT @@SERVERNAME,
@@ -49,7 +50,7 @@ string shape, migration provider, dialect) and use that engine's vocabulary. For
 
 | Host | Client |
 | --- | --- |
-| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, not `KEYS` |
+| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, never `KEYS`, `MONITOR`, `CONFIG` or `DEBUG` |
 | client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
 | anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Engine <e>] [-Db <name>] -Query '<sql or one redis command>'`; `-Probe` alone reports whether the credential is read-only server-side |
 
