@@ -144,7 +144,7 @@ export function checkAssets({ fail, warn, read, has, allFiles, frontMatter }) {
   // fires when the owner asks in prose to log hours (owner decision): its two confirmation gates guard the write.
   const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me', 'worklog']);
   const EXPLICIT_TRIGGER = [
-    'docs-sync', 'retro', 'estimate',
+    'docs-sync', 'retro',
   ];
   for (const rel of allFiles.filter((f) => f.startsWith('skills/') && f.endsWith('/SKILL.md'))) {
     const fm = frontMatter(rel);

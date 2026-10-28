@@ -194,11 +194,3 @@ must stay in the subagent.
 | "mostrami gli errori dell'api negli ultimi 30 minuti" | MUST invoke, forked into `ops-analyst` |
 | "aggiungi Serilog al progetto" | MUST NOT (belongs to dotnet-diagnostics) |
 
-### `estimate` — explicit trigger only
-
-| Prompt | Expected |
-|--------|----------|
-| `/estimate 12345` | MUST load |
-| `/estimate` with a pasted request and "analisi di mercato" | MUST load |
-| "quante ore ci vogliono per questa feature?" | MUST NOT (no explicit trigger; answer from the code or ask) |
-| "dividi questa epica in item" | MUST NOT (splitting items is `user-story-standard`) |
