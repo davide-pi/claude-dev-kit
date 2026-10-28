@@ -8,8 +8,9 @@ description: >-
 # pr-create — turn a pushed branch into a reviewable PR
 
 **Contract.** An open PR with title, body, `Release:` block and the parent work item linked ·
-never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim; the labels below are English, at pr language `it`
-`Rilascio:`, `nessun componente`, `Rischio merge:`, `reversibile`/`irreversibile`, `impatto:`, `Verifica:`, `non risolto`.
+never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim; the labels are English, at pr language `it` exactly
+`Release:`=`Rilascio:`, `no components`=`nessun componente`, `Merge risk:`=`Rischio merge:`, `reversible`/`irreversible`=`reversibile`/`irreversibile`,
+`impact:`=`impatto:`, `Verification:`=`Verifica:`, `Before`/`After`=`Prima`/`Dopo`, `Notes for the reviewer:`=`Note per il reviewer:`, `unresolved`=`non risolto`.
 
 ## When
 

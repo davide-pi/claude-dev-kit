@@ -77,7 +77,7 @@ Criteria with proof (step 2): per criterion, the proof and what it asserts: an a
 (browser screenshot, HTTP call, read-only query, CLI output; UI or legacy code with no tests, never "it compiles"); else "the owner tests". The matrix runs on the final
 code, after the review: a fix can change what a proof proved. Proof check (M, L, before the verdict): read only the
 assertion lines of each criterion's test (and the hunks behind `defaults` and any ledger contradiction); a proof that
-cannot fail on the old code is `non verificato`. The verdict ends with "Test locale: proposta <chi/cosa>"; the owner decides.
+cannot fail on the old code is `not verified`. The verdict ends with "Local test: proposal <who/what>" (chat `it`: "Test locale: proposta <chi/cosa>"); the owner decides.
 
 ## After OK: the mechanical scope check
 
@@ -116,7 +116,7 @@ run, on an `OK` or a `STALL` the owner gives up on: never on a resume (the resum
 findings). Before a relaunch WITHOUT `resumeFromRunId` (a red test after `OK`, scope-guard exit 1: a new run with empty
 state) `-LogRun` the previous run; the perimeter stays active. The last run of the change closes it. `/retro`: `references/loop-extras.md`.
 
-`defaults` ([{ choice, alternative, path }]) go in the verdict under "Default scelti"; read the hunks behind them in the
+`defaults` ([{ choice, alternative, path }]) go in the verdict under "Defaults chosen" (chat `it`: "Default scelti"); read the hunks behind them in the
 proof check. A file that grew past 600 lines (or 200+ and grew 30%) comes back in `outOfScope` as a `growth` split
 proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding and no reviewer is asked for it.
 
@@ -125,7 +125,8 @@ proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding an
 The verdict is the standing evidence table, emitted as a plain markdown table, never inside a code fence; `done-claim`
 accepts it when the third cell looks like output (a digit, ok, verde, green, passed, failed, exit, succeeded). S gets two or three lines. Then:
 
-Review: giro 2, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: <elenco, o nessuno>. Default scelti: <defaults, o nessuno>. Test locale: proposta <chi/cosa>.
+Review: round 2, 0 open P1/P2. Gaps: <gaps, or none>. Residual risks: <list, or none>. Defaults chosen: <defaults, or none>. Local test: proposal <who/what>.
+Chat `it`: `giro`, `P1/P2 aperti`, `Gap`, `nessuno`, `Rischi residui`, `Default scelti`, `Test locale: proposta`.
 
 Close with everything outside the perimeter (`outOfScope` with `noticed`, `scope-revert` and growth proposals,
 `minor`, open questions) in the standing change-scope table, `#` stable; the user picks.
