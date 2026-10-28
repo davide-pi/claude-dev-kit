@@ -41,7 +41,7 @@ No cache between runs: discovery is redone every time.
 In this order, the orchestrator alone (no parallel writers: the audit is one file):
 
 1. **Create the missing Tasks** (CLI, `azdo-cli`): children of the backlog item (they inherit area and
-   iteration), Italian title and description, assignee resolved **against the organization** at
+   iteration), title and description in the items language, assignee resolved **against the organization** at
    runtime — never hardcoded, never `git config user.email`. **No hours at creation.**
 2. **PR links**: the real PR ↔ work item link, never a URL in the text. Commits: no verb for the
    artifact link → hash and URL in the description or a comment, and say so.

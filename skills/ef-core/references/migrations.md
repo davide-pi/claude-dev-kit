@@ -10,7 +10,7 @@ Two rules that override everything else in this file:
 
 Run in order. The stop in step 5 is the point: **the generated SQL is read by a human before any
 database runs it.** Everything the user reads (warnings, the confirmation line, the report) is
-**Italian**; the migration name stays English PascalCase, and tool output, SQL and names are quoted
+in the **chat language**; the migration name stays English PascalCase, and tool output, SQL and names are quoted
 verbatim.
 
 ```powershell

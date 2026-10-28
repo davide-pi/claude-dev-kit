@@ -11,7 +11,7 @@ background: false
 
 # logs — the matching lines of one service, read where the noise stays
 
-**Contract.** Your agent's report on the matching lines · never follows a stream · prose in Italian;
+**Contract.** Your agent's report on the matching lines · never follows a stream · prose in the chat language;
 log lines, names and ids verbatim.
 
 Arguments: `$ARGUMENTS`

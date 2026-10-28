@@ -8,7 +8,7 @@ description: >-
 # branch-flow — branch it, isolate it, finish it
 
 **Contract.** A correctly named branch, an isolated worktree, a finish decision · never a commit or
-push on the default branch, never a merge with red gates or without the owner · Italian prose,
+push on the default branch, never a merge with red gates or without the owner · prose in the chat language,
 branch names and commands verbatim.
 
 ## When

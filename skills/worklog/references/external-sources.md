@@ -12,7 +12,7 @@ reviews leave traces elsewhere. This file is opened **only** when the gap prompt
 | Never auto-logged | a source row without an explicit yes is dropped, not kept "to be safe" |
 | No double count | an event overlapping a transcript window already in Table 1 is shown once, merged into that row |
 | Read-only | search and read; never send, react, draft, schedule or change anything in a source |
-| No bodies | a short Italian topic per event; never quote messages or invite text in a table |
+| No bodies | a short topic in the chat language per event; never quote messages or invite text in a table |
 | Hours from the window | a calendar event's duration; a chat thread's first-to-last message, rounded by `round.ps1` like any row |
 | Project from the place | channel, meeting organiser, repo or item → project; unknown → ask, never guess the client |
 
@@ -35,7 +35,7 @@ Goal: the user's Slack activity on <yyyy-MM-dd> (local time), to cover hours not
 Load the tools with ToolSearch "+slack search". Find the user's id with slack_read_user_profile, then
 slack_search_public_and_private with `from:<@id> on:<yyyy-MM-dd>`; page until done; include huddle
 and call messages.
-Report in Italian, max 15 lines: one table | Fascia | Canale/DM | Argomento (max 8 parole) | Progetto |
+Report in the chat language, max 15 lines: one table | Fascia | Canale/DM | Argomento (max 8 parole) | Progetto |
 — windows merged when messages are < 15 min apart; mark messages sent through the Claude integration;
 huddles/calls with their duration if visible. No message bodies, no preamble.
 ```

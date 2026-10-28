@@ -11,7 +11,7 @@ background: false
 
 # db — one read-only query or table description, rows kept out of the main thread
 
-**Contract.** Your agent's `/db` output · never writes, never echoes a credential · prose in Italian;
+**Contract.** Your agent's `/db` output · never writes, never echoes a credential · prose in the chat language;
 SQL, object names and values verbatim.
 
 Arguments: `$ARGUMENTS`

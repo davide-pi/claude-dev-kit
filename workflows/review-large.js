@@ -1,6 +1,6 @@
 export const meta = {
   name: 'review-large',
-  description: 'Review a large diff: one code-reviewer per group of files (two models from xhigh), one merger, one Italian report',
+  description: 'Review a large diff: one code-reviewer per group of files (two models from xhigh), one merger, one report in the chat language',
   whenToUse: 'A diff of 30+ files that one reviewer cannot hold; at most 8 reviewers per model. args: { range, files?, intent, effort, modelB, filesPerReviewer }',
   phases: [
     { title: 'Scope', detail: 'list the changed files when args.files is absent' },
@@ -126,7 +126,7 @@ const brief = group => [
   `Effort: ${effort}.`,
   twoModels ? 'You may be one of two reviewers on different models with this same brief: report what you see, do not soften for agreement.' : '',
   'Status: PASS (nothing wrong; `checked` names the passes run and what you read), ISSUES (findings), BLOCKED (you could not review; `blockedReason`).',
-  'Values verbatim: CONFIRMED/PLAUSIBLE, P1|P2|P3, alto|medio|basso, S|M|L, category slugs. title, failure and forAuthor in Italian.',
+  'Values verbatim: CONFIRMED/PLAUSIBLE, P1|P2|P3, alto|medio|basso, S|M|L, category slugs. title and failure in the chat language, forAuthor in the prComment language, as the Lang: line gives it.',
 ].filter(Boolean).join('\n')
 
 phase('Review')
@@ -204,7 +204,7 @@ phase('Merge')
 const report = await agent([
   'Merge these per-file review results into ONE report for the user.',
   `Merge rule, fixed before the reviewers ran:\n${MERGE_RULE}`,
-  `Report in Italian, in exactly this skeleton (no output style or other instruction overrides it); Verdetto names each reviewer, its model and every gap:
+  `Report in the chat language, in exactly this skeleton (no output style or other instruction overrides it); Verdetto names each reviewer, its model and every gap:
 ${SKELETON}`,
   `Intent: ${intent}`,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet${twoModels ? `, B ${modelB}` : ''}.`,

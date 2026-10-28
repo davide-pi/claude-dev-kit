@@ -15,7 +15,7 @@ background: false
 
 **Contract.** One proposal row per event the mode admits, enforceable lessons as ready-to-file backlog
 items · never edits a skill, hook, rule, setting or `CLAUDE.md`, never files the items itself ·
-report in Italian; paths, tool names and quoted transcript lines verbatim, secrets as `<REDACTED>`.
+report in the chat language; paths, tool names and quoted transcript lines verbatim, secrets as `<REDACTED>`.
 
 Arguments: `$ARGUMENTS`
 
@@ -76,7 +76,7 @@ the repo's checks: an asset that did not fire, or a check left unwired, *is* the
 1. `Trascritto: <path> (<size>) · eventi: N · senza proposta: N (perché)`; in `days` and `findings` modes the line of `references/modes.md`.
 2. Proposals, most severe first, as a table `Proposta | Categoria | Evento (turno) | Dove | Rischio`;
    `Dove` is the file or asset; an automated check reads `backlog: <hook|lint|CI|validate>`.
-3. `Backlog` — one block per automated check: Italian title · what the check matches and where it
+3. `Backlog` — one block per automated check: chat-language title · what the check matches and where it
    runs · the event that proves it · acceptance: the event's command or edit, replayed, is caught.
 4. `Consigli per te`, in the session and `days` modes: the table of `references/modes.md`.
 5. When `monthly` ran: `Salute: <outcome, one line per step>`.

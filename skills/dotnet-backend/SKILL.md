@@ -9,7 +9,7 @@ paths: "**/*.cs"
 # dotnet-backend — the stack as it is: singleton handlers, RPC, async all the way
 
 **Contract.** Code that matches the neighbouring layout and idioms · never adds a library or a
-second idiom the codebase lacks · explanations in Italian, code in English.
+second idiom the codebase lacks · explanations in the chat language, code in English.
 
 ## When
 

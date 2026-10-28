@@ -5,7 +5,7 @@ are **not on PATH**: they live inside the broker container and are reached with 
 management HTTP API is called directly. Topology and retry design are in `principles.md`; the client
 stack is `docker-dev-env`.
 
-**Language:** the diagnosis and the report are **Italian**; queue, exchange, vhost and container
+**Language:** the diagnosis and the report are in the **chat language**; queue, exchange, vhost and container
 names, routing keys, header names such as `x-death`, counters and payloads pass through verbatim.
 
 ## The procedure
@@ -71,7 +71,7 @@ names, routing keys, header names such as `x-death`, counters and payloads pass 
    message carries the exception text in its body), and the payload with any token or connection
    string redacted. A peek reorders the head of the queue — say so when order matters.
 
-7. **Report**: broker container and vhost · a table of queues worst first (Italian headers over the
+7. **Report**: broker container and vhost · a table of queues worst first (headers in the chat language over the
    real field values) · dead-letter and error queues separately with their reason · the peeked
    message if asked · one line with the most likely cause from step 4 and the next look
    (`/logs <service>`, the `investigator` agent in trace mode for which service should be answering).

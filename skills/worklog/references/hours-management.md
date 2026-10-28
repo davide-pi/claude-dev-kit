@@ -8,7 +8,7 @@ account**. Most of it never shows in a transcript: the gap prompt is where it is
 ## The gap prompt — an under-target day
 
 Fires on every day whose COPERTURA is more than 1h short of the target, right after Table 1. One
-`AskUserQuestion`, `multiSelect: true`, question in Italian:
+`AskUserQuestion`, `multiSelect: true`, question in the chat language:
 "Il <gg/MM> mancano <x>h al target di <t>h. Come le copriamo?"
 
 | Option (label) | Leads to |
@@ -30,8 +30,7 @@ Rules:
 
 ## The fixed structure
 
-Per account, where **the account is the Epic's title**. The titles below are board data —
-Italian and exact:
+Per account, where **the account is the Epic's title**. The titles below are fixed board data, kept verbatim (not translated) and exact:
 
 ```text
 Epic  <Epic title>                                   ← the account
@@ -77,7 +76,7 @@ The backlog-item type is resolved per project (`azdo-cli`), never assumed.
 | Field | Value |
 | --- | --- |
 | type | the time role (`Task`), child of the management PBI |
-| title | `<yyyy/MM/dd> - <activity title>` — the date of the logged session; the title is a one-line Italian summary of the session, consistent with Table 1 |
+| title | `<yyyy/MM/dd> - <activity title>` — the date of the logged session; the title is a one-line summary in the items language of the session, consistent with Table 1 |
 | assignee | the user, identity resolved **against the organization** at runtime (`azdo-cli`, "Resolving the identity to assign to"); never fixed, never the machine's |
 | completed work | **not** at creation: the session's hours go through `worklog-push.ps1` like every other row |
 | state | **Done** — in the push row (`"state": "Done"`) or right after creation; an hours Task never stays `New` |

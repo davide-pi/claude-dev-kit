@@ -479,7 +479,7 @@ const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|per
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
 
 // The agents start in the session's folder, which may be another repo.
-const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything.`
+const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. Write in the chat language; any PR comment in the prComment language, as the Lang: line gives it.`
 // The implementer body already says the rest (Open questions, the Never list); reviewers and Explore get it here.
 const RULES = `${REPO} A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
 const quote = s => `'${String(s).replace(/'/g, "''")}'`

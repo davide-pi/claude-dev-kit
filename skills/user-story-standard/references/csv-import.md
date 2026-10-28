@@ -32,7 +32,7 @@ Work Item Type,Title,Repro step,Actual result,Expected result
 The value of `Work Item Type` is the project's real type for that role — resolve it through
 `azdo-cli` and never assume the name used in the examples below. The headers themselves are machine
 text: they must match what the Azure DevOps import expects, so they stay English and stay exactly as
-written above, even though every value under them is Italian.
+written above, even though every value under them is in the items language.
 
 ## Which part of the body goes into which column
 
@@ -47,7 +47,7 @@ mapping is fixed:
 | CSV column | What goes in it |
 | --- | --- |
 | `Work Item Type` | the project's type for the Bug role |
-| `Title` | the Bug title — Italian, problem-oriented, as `item-formats.md` requires |
+| `Title` | the Bug title — in the items language, problem-oriented, as `item-formats.md` requires |
 | `Repro step` | **nothing: the column is emitted and left empty.** See below |
 | `Actual result` | the text of `Comportamento attuale`, without its `Comportamento attuale:` label — the column header already says it |
 | `Expected result` | the text of `Comportamento atteso`, without its `Comportamento atteso:` label |

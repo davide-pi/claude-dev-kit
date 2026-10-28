@@ -9,7 +9,7 @@ paths: "**/*Tests*/**/*.cs,**/*.Tests.csproj"
 # dotnet-testing — risk decides what gets a test; the codebase decides how
 
 **Contract.** A test-or-not verdict with its reason, and tests in the repository's own style · never
-a second framework, never a coverage target · the recommendation in Italian, test code in English.
+a second framework, never a coverage target · the recommendation in the chat language, test code in English.
 
 ## When
 

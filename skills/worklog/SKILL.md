@@ -8,7 +8,7 @@ description: >-
 # worklog — what was done, each day against its target, the hours on the board
 
 **Contract.** Per day: Table 1 with its coverage, Table 2, then hours on Tasks and an audit entry ·
-never writes outside the fixed rules below · Italian chat, tables and board text; field names, WIQL
+never writes outside the fixed rules below · chat and tables in the chat language, board text in the items language; field names, WIQL
 and engine output verbatim.
 
 ## When

@@ -3,11 +3,11 @@
 One shape per role. The four headings below are the **roles** the company classifies by, not Azure
 DevOps type names: which type each one is created as is resolved per project through `azdo-cli`. The
 shape is the standard: it is copied straight into the board, so consistency matters more than
-elegance. Item text is Italian; this guidance is English.
+elegance. Item text is in the items language; this guidance is English.
 
 ## User Story
 
-Body — exactly these three lines, in Italian, and nothing else:
+Body — exactly these three lines, in the items language, and nothing else:
 
 ```
 Come [utente/ruolo]

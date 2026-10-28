@@ -1,8 +1,7 @@
 ---
 name: commit
 description: >-
-  Use when about to run `git commit`, or the user says "commit" or "committa": writes the Italian
-  message from the diff. Never pushes.
+  Use when about to run `git commit`, or the user says "commit" or "committa": writes the message from the diff. Never pushes.
 argument-hint: "[branch] | -b [new-branch] | -m \"message\""
 allowed-tools: Bash(git add*), Bash(git commit*), Bash(git switch*), PowerShell(git add*), PowerShell(git commit*), PowerShell(git switch*)
 ---
@@ -10,7 +9,7 @@ allowed-tools: Bash(git add*), Bash(git commit*), Bash(git switch*), PowerShell(
 # commit — one commit, the message generated from the diff
 
 **Contract.** A commit on the intended branch and a four-field report · never pushes, amends,
-rebases, forces or skips hooks · message and report in Italian; identifiers, paths, `AB#<id>`,
+rebases, forces or skips hooks · message in the commit language, report in the chat language; identifiers, paths, `AB#<id>`,
 `Fixes #<n>` verbatim.
 
 Arguments: `$ARGUMENTS`
@@ -46,7 +45,7 @@ in the report.
 
 | Rule | Detail |
 | --- | --- |
-| Italian, imperative | `Aggiungi`, `Correggi`, `Sposta` — or the infinitive if `git log --oneline -10` shows the repo uses it; one convention per repo |
+| Imperative in the commit language | `Aggiungi`, `Correggi`, `Sposta` — or the infinitive if `git log --oneline -10` shows the repo uses it; one convention per repo |
 | subject | ~50–72 chars, what changed in which area, not how |
 | body | only for several areas or a non-obvious why: a few `-m` bullet lines |
 | banned | marketing words (`migliora`, `ottimizza`, `potenzia`, robust, seamless), an AI or tool footer |

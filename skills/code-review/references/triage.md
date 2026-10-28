@@ -48,7 +48,7 @@ reason. A `PLAUSIBLE` verdict is itself a hint that the point is a question rath
 5. **No hedging stack** ("maybe possibly consider perhaps") and no apologising. A question is not a
    confrontation.
 6. **Start with the tag**, then the question.
-7. **Write the question in Italian** — the author reads it. The tag itself never changes.
+7. **Write the question in the prComment language** — the author reads it. The tag itself never changes.
 
 Bad: *"Questo metodo è O(n²) perché il loop interno ri-interroga per ogni elemento e non scalerà al
 crescere dei tenant; valuta un batch."* — a lecture with no ask.
@@ -109,7 +109,7 @@ The checks that settle the recurring false positives in one minute each:
 | "breaks existing behaviour" | the acceptance criteria — the change may be the point |
 | a claim about a file not in the diff | open it: an unopened file makes the claim a hypothesis |
 
-A rejection is written in Italian and is checkable: **the false premise**, **the evidence**
+A rejection is written in the chat language and is checkable: **the false premise**, **the evidence**
 (`file:line` or the doc), **what would change my mind**. "That cannot happen" with no location is
 an opinion. Agreement is a conclusion, not a courtesy: no "hai ragione" before step 3.
 

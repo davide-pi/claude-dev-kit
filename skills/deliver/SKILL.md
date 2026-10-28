@@ -10,7 +10,7 @@ description: >-
 **Contract.** A change inside a written perimeter, reviewed in a loop, tested by level and closed by
 a verdict block and a table of everything left outside · never edits outside the perimeter, reverts the
 user's own uncommitted work, commits or pushes unasked, or lets a subagent ask the user · chat and verdict
-Italian, notes English.
+in the chat language, notes English.
 
 ## When
 

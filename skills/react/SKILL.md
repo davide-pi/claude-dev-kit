@@ -9,7 +9,7 @@ paths: "**/*.tsx,**/vite.config.*,**/tailwind.config.*"
 # react — state in the right place, effects almost nowhere
 
 **Contract.** Components, hooks and config written to the placement and effect rules below · never
-adds a store, query or form library under its threshold · code English, explanations Italian.
+adds a store, query or form library under its threshold · code English, explanations in the chat language.
 
 ## When
 

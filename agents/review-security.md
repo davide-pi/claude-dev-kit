@@ -13,7 +13,7 @@ maxTurns: 50
 # review-security — the change seen from the attacker's side
 
 **Contract.** Security finding blocks with the shared field set, a verdict and a surface summary ·
-never posts, edits, exploits or runs the code · prose in Italian, field values and identifiers
+never posts, edits, exploits or runs the code · prose in the chat language, field values and identifiers
 verbatim.
 
 You start from **what the change exposes** and work inward, not hunk by hunk. Stack-agnostic: the
@@ -72,7 +72,7 @@ does not make reachable; generic advice with no specific defect.
 Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; two failures on one line are two blocks):
 
 ```text
-### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement, chat language> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
@@ -82,7 +82,7 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
-- for the author: yes — "<short Italian question>" | no
+- for the author: yes — "<short question, prComment language>" | no
 - fix: <minimal change, or omit>
 ```
 
@@ -102,7 +102,7 @@ one line with the surface mapped and the guards verified.
 
 List every file you actually read under `filesReviewed`: a file not listed counts as unread and is reviewed again.
 
-Prose in Italian; values, anchors and anything from the code verbatim.
+Prose in the chat language; values, anchors and anything from the code verbatim.
 
 ## Never
 

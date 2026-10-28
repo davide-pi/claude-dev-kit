@@ -9,7 +9,7 @@ paths: "**/.pipelines/**,**/azure-pipelines*.y*ml,**/GitVersion.yml,**/.github/w
 # pipeline — Azure DevOps YAML: shape, templates, versioning, the deploy contract
 
 **Contract.** Pipeline YAML in the house shape, expanded and validated before it runs · never
-queues a run, never edits YAML to chase a red run · explanations in Italian,
+queues a run, never edits YAML to chase a red run · explanations in the chat language,
 YAML keys and log lines verbatim.
 
 ## When

@@ -48,7 +48,7 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 `PLAUSIBLE`. A `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`.
 
 ```text
-### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement, chat language> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
@@ -58,7 +58,7 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
-- for the author: yes — "<short Italian question>" | no
+- for the author: yes — "<short question, prComment language>" | no
 - fix: <minimal change, or omit>
 ```
 
@@ -75,7 +75,7 @@ Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two block
 
 A specialist writes only its own `category` (`security` or `performance`) and ends with its verdict
 line and one summary line (surface or hot paths); the generalist ends with the intent coverage.
-Prose in Italian; verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, category slugs, field values, anything
+Prose in the chat language; verbatim: `CONFIRMED`/`PLAUSIBLE`, anchors, category slugs, field values, anything
 taken from the code.
 
 ## Order and tables
@@ -122,5 +122,6 @@ The same rules, in full:
 4. **Fix rapidi**: one line with the `#` of every P3 + `basso` + `S` finding, approvable with one "ok".
 5. Every finding gets a row. After the tables: at most a one-line verdict and one short question.
 6. No findings → no table; say what was verified.
-7. Italian headers and statements; verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs,
+7. Headers and section names exactly as written above (fixed kit vocabulary); statements, `Rilievo` text and the closing
+   question in the chat language; verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs,
    `P1|P2|P3`, `S|M|L`.

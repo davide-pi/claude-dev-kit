@@ -9,7 +9,7 @@ paths: "**/angular.json,**/*.component.ts,**/*.component.html,**/*.module.ts"
 # angular — the era decides the idiom
 
 **Contract.** Code, reviews and fixes written in the project's own era · never modernises in place,
-never mixes store and signal state in one app · code English, explanations Italian.
+never mixes store and signal state in one app · code English, explanations in the chat language.
 
 ## When
 

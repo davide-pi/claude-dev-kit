@@ -8,7 +8,7 @@ argument-hint: "[scope] [effort] [focus]"
 
 # code-review — a change or PR reviewed by subagents, reported in chat
 
-**Contract.** Findings, completeness and the Da fare / Già fatti tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in Italian; `file:line`, field values and code verbatim.
+**Contract.** Findings, completeness and the Da fare / Già fatti tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in the chat language; `file:line`, field values and code verbatim.
 
 Arguments: `$ARGUMENTS`
 
@@ -62,7 +62,7 @@ Same defect at the same anchor from A and B → `CONFIRMED`; one model only → 
 
 ### Report
 
-One merged report in Italian, in exactly this skeleton (fields and column meanings:
+One merged report in the chat language, in exactly this skeleton (fields and column meanings:
 `references/report-format.md`):
 
 ```text

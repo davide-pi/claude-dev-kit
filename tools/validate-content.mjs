@@ -165,6 +165,25 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
     });
   }
 
+  // ── 4b. No output language is hardcoded: assets name the aspect's language, never "Italian" ──
+  // Bans the output-language phrasing, not the bare word (trigger phrases and example data stay).
+  const OUTPUT_ITALIAN = new RegExp([
+    String.raw`\bin\s+\*{0,2}Italian\b`,
+    String.raw`\bItalian\*{0,2}\s+(?:report|prose|chat|comments?|commits?|titles?|bod(?:y|ies)|answers?|text|messages?|headers?|headings?|questions?|line)\b`,
+    String.raw`\b(?:report|prose|chat|comments?|commits?|title|body|explanations?|answers?|text)\s+\*{0,2}Italian\b`,
+    String.raw`\bItalian\*{0,2}\s+(?:reading|summary|topic|label|name|verdict)\b`,
+    String.raw`\b(?:is|are|stays?)\s+\*{0,2}Italian\b`,
+    String.raw`[,·—:(<]\s*\*{0,2}Italian\*{0,2}\s*[;,.>)]`,
+  ].join('|'), 'g');
+  const languageScoped = (f) => f === 'CLAUDE.md' || f === 'loop.md' || /^(?:agents|skills|workflows|output-styles|rules)\/.+\.(?:md|js)$/.test(f);
+  for (const rel of textFiles.filter(languageScoped)) {
+    const text = read(rel).replace(/\r\n/g, '\n');
+    for (const m of text.matchAll(OUTPUT_ITALIAN)) {
+      const line = text.slice(0, m.index).split('\n').length;
+      fail(`${rel}:${line}`, `names Italian as an output language ("${m[0].replace(/\s+/g, ' ')}"): use the aspect's token ("the chat language", "the commit language", ...)`);
+    }
+  }
+
   // ── 5. Environment variables the kit needs are documented ────────────────────
   const SYSTEM_VARS = new Set(['USERPROFILE', 'LOCALAPPDATA', 'HOME', 'TEMP', 'TMP', 'PATH', 'APPDATA', 'COMPUTERNAME', 'CLAUDE_PROJECT_DIR']);
   const readme = read('README.md');

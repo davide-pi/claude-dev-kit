@@ -145,6 +145,16 @@ test('the unproven-row and tail-truncated done-claim rules are counted with the 
   assert.match(report(r), /2\s+unproven-row \/ fatto/);
 });
 
+test('a Lang: line is attributed to workspace-context', () => {
+  const { projects, log } = fixture();
+  writeFileSync(join(projects, 'proj-d.jsonl'), [
+    hook(1, 'SessionStart', 'Lang: commit en · pr en · prComment en · items en · wiki en'),
+    turn('d1', 1, { input: 1, read: 1000 }),
+  ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = audit({ projects, log, now: NOW });
+  assert.equal(r.hooks.get('workspace-context'), 1);
+});
+
 test('input and output are reported apart; the new hook markers are recognised per line', () => {
   const { projects, log } = fixture();
   writeFileSync(join(projects, 'proj-c.jsonl'), [

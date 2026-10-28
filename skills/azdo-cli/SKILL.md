@@ -8,7 +8,7 @@ description: >-
 # azdo-cli — Azure DevOps through `az`, MCP only for a proven gap
 
 **Contract.** Exact `az` calls with explicit `--org` and `-p` · never the `az devops configure`
-default, never an MCP call before the gap is proven · chat Italian, commands and output verbatim.
+default, never an MCP call before the gap is proven · chat in the chat language, commands and output verbatim.
 
 ## When
 

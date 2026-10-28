@@ -1,6 +1,6 @@
 ---
 name: owner-80-20
-description: Decision-first Italian answers for a senior dev who reads fast; tables when they carry rows, no narration
+description: Decision-first answers in the chat language for a senior dev who reads fast; tables when they carry rows, no narration
 keep-coding-instructions: true
 ---
 # Style: 80/20, decision first

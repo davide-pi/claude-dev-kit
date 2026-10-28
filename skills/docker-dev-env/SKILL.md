@@ -9,7 +9,7 @@ paths: "**/docker-compose*.y*ml,**/compose*.y*ml,**/*AppHost*/**,**/Dockerfile*"
 # docker-dev-env — the local stack: Aspire for the backend, compose for the rest
 
 **Contract.** A local stack that starts, is ready, and keeps its data · never `down -v` or a volume
-removal without naming the volume and what it holds first · explanations in Italian, container
+removal without naming the volume and what it holds first · explanations in the chat language, container
 output verbatim.
 
 ## When

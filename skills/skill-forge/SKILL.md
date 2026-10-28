@@ -8,7 +8,7 @@ description: >-
 # skill-forge — the kit's asset contract, as a procedure
 
 **Contract.** Assets that fit the kit contract and pass the validator · never an asset that restates
-a plugin, `CLAUDE.md` or another asset · asset prose English, chat with the user Italian.
+a plugin, `CLAUDE.md` or another asset · asset prose English, chat with the user in the chat language.
 
 ## When
 

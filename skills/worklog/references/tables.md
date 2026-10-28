@@ -1,7 +1,7 @@
 # The two tables, coverage and the recap
 
 Two gates, one protocol each: print the table, ask for changes, apply, **reprint**, ask again. The
-next phase starts **only** on explicit confirmation. Everything here is Italian: the short description
+next phase starts **only** on explicit confirmation. Everything here is in the chat language: the short description
 also seeds the Task title and description.
 
 ## Table 1 — the day, against its target
@@ -83,7 +83,7 @@ discovery, reprint, ask again. Write only on explicit confirmation.
 From the push output (`worklog-push.ps1` prints item, before, delta, after, audit, outcome per row) and
 **after** reading the items back: per row, the item touched, hours before and after, created or not,
 parent, final state, PRs and commits linked — every item linked as in Table 2. Then one line per
-day: `copertura finale <h>/<target>h`. Close with one Italian line: total logged, on which project,
+day: `copertura finale <h>/<target>h`. Close with one line in the chat language: total logged, on which project,
 and what did **not** happen (a 0h row, a failed row, a failed link).
 
 ## Traps

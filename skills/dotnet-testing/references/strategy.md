@@ -7,7 +7,7 @@ Risk decides, not ritual. Coverage is not the goal and test-first is not a rule.
    the gap is stated in the change description.
 2. **Every test is seen failing before it is trusted.** Break the code or the assertion once.
 
-**Language:** the strategy and recommendation are written for the user in **Italian**; test names, code
+**Language:** the strategy and recommendation are written for the user in the **chat language**; test names, code
 and fixtures follow the repository's conventions (English).
 
 ## What earns a test, and when

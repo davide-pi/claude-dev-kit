@@ -39,7 +39,7 @@ section.
 
 One row per check. "Accept when" is what has to be in the output; anything less is the third state
 ("non verificato"), regardless of how confident the change feels. Every command and every output
-line below is quoted verbatim; only the report around them is Italian.
+line below is quoted verbatim; only the report around them is in the chat language.
 
 ## .NET
 

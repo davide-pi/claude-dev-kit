@@ -8,7 +8,7 @@ description: >-
 # principles — which principle wins when two disagree
 
 **Contract.** A design choice settled by the ladder, naming the rung that decided it · never a
-textbook definition, never a refactor outside the scope · explanation in Italian, code in English.
+textbook definition, never a refactor outside the scope · explanation in the chat language, code in English.
 
 ## When
 

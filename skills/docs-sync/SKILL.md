@@ -11,7 +11,7 @@ disable-model-invocation: true
 
 **Contract.** The `doc-keeper` report relayed, approvals collected · never touches source or
 configuration, never creates a docs tree, never commits, pushes or publishes a wiki page · report in
-Italian; paths and `file:line` verbatim.
+the chat language; paths and `file:line` verbatim.
 
 Arguments: `$ARGUMENTS`
 
@@ -35,14 +35,14 @@ Not for: a single README edit (a normal edit); creating a docs tree from nothing
 | --- | --- |
 | tree | the path found |
 | mode | `change-scoped` (diff file) or `audit` (paths) |
-| language | tech tree **English**; wiki pages **Italian**, one fact on one page |
+| language | tech tree **English**; wiki pages **in the wiki language**, one fact on one page |
 | output | its fixed report, ≤ 40 lines |
 
 No tree found → say so and stop. Empty diff and no `--audit` → nothing to sync, stop.
 
 ### After the report
 
-Relay in Italian: tree, files verified / updated / created / removed, pending approvals
+Relay in the chat language: tree, files verified / updated / created / removed, pending approvals
 (experience-derived entries), gaps and hand-offs. Pending entries stay pending until the user
 approves; then re-spawn `doc-keeper` with the approval.
 

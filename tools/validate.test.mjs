@@ -225,3 +225,19 @@ test('duplicates count only between files that can share a context', () => {
   const omitted = run((write) => { write('rules/r.md', rule); write(A, agent('a', 'omitClaudeMd: true\n', `${twelve}.`)); });
   assert.doesNotMatch(omitted.out, shared, 'omitClaudeMd keeps CLAUDE.md and rules out of the agent');
 });
+
+test('an asset naming Italian as an output language fails; the bare word passes', () => {
+  const bad = run((write, read) => write(SKILL, `${read(SKILL)}\nReply in Italian.\n`));
+  assert.equal(bad.code, 1);
+  assert.match(bad.out, /skills\/demo\/SKILL\.md:\d+: names Italian as an output language/);
+  const wrapped = run((write, read) => write(AGENT, `${read(AGENT)}\nreport in\nItalian, paths verbatim.\n`));
+  assert.equal(wrapped.code, 1, 'a phrase wrapped across lines is still caught');
+  for (const line of ['### <n>. <one-line statement, Italian>', 'Out · Italian; code verbatim', 'The report is Italian.', 'one Italian reading line']) {
+    const r = run((write, read) => write(SKILL, `${read(SKILL)}\n${line}\n`));
+    assert.equal(r.code, 1, `caught: ${line}`);
+  }
+  const loop = run((write) => write('loop.md', 'Read-only, report in Italian.\n'));
+  assert.equal(loop.code, 1, 'loop.md is in scope');
+  const bare = run((write, read) => write(SKILL, `${read(SKILL)}\nAn Italian prompt never matches an English trigger list.\n`));
+  assert.equal(bare.code, 0, bare.out);
+});

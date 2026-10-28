@@ -38,7 +38,7 @@ share the prompt-cache prefix:
    performance pass, but they still report what their other passes surface.
 7. For the pair: "you may be one of two reviewers on different models — report what you see, do not
    soften for agreement".
-8. **The output contract in one line** — Finding blocks in the agent's Output format, Italian prose, anchors
+8. **The output contract in one line** — Finding blocks in the agent's Output format, prose in the chat language, anchors
    on working-tree lines, one defect per block.
 
 ## Merging

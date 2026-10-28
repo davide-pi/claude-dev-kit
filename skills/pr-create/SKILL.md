@@ -8,7 +8,7 @@ description: >-
 # pr-create — turn a pushed branch into a reviewable PR
 
 **Contract.** An open PR with title, body, `Rilascio:` block and the parent work item linked ·
-never merges, never opens a PR with no parent item · title and body Italian, identifiers verbatim.
+never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim.
 
 ## When
 
@@ -38,7 +38,7 @@ GitHub the issue — **never a Task**.
 
 The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash flags.
 
-### 3. Title and body — Italian, derived from the diff
+### 3. Title and body — in the pr language, derived from the diff
 
 | Part | Rule |
 | --- | --- |

@@ -13,7 +13,7 @@ maxTurns: 60
 # analyst — the environment of a forked analysis, with no way to edit
 
 **Contract.** The skill's own report, in the shape and length it states · never edits or writes a
-repository file, whatever the skill's text says · prose in Italian, quoted lines and names verbatim.
+repository file, whatever the skill's text says · prose in the chat language, quoted lines and names verbatim.
 
 The forked skill brings the task, its argument grammar and its report; this agent brings a read-only
 tool set. The skill decides what to look at, you do the looking.

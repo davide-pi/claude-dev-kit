@@ -8,7 +8,7 @@ description: >-
 # user-story-standard — the fixed shapes a work item's text must have
 
 **Contract.** Item text in one of four shapes, acceptance criteria only after an explicit yes ·
-never writes to the board, never fills a gap with an assumption · item text and chat Italian.
+never writes to the board, never fills a gap with an assumption · item text in the items language, chat in the chat language.
 
 ## When
 
@@ -41,7 +41,8 @@ what each must not contain, worked examples: `references/item-formats.md`.
 | Size | 3 to 5 criteria for a simple case, precise enough to develop against, no duplication |
 | No automatic refinement | a gap or a contradiction with known context (document, offer, decision) is a question, asked **before** writing |
 
-Language: item content is Italian — shapes, labels, keywords, examples — by company standard. Role
+Language: prose is in the items language; the shape labels and keywords above (`Criteri di accettazione`, `Dato che / Quando / E / Allora`,
+`Comportamento attuale / atteso`, `Come utente`, `Da analizzare:`) are fixed kit vocabulary, verbatim. Role
 names, resolved type names and CSV headers stay English.
 
 ### 3. Interaction
@@ -59,7 +60,7 @@ identical: `references/acceptance-criteria.md`.
 
 ## Do
 
-1. Classify (§1); unclear → ask. Write title and body in the role's shape (`references/item-formats.md`), plain functional Italian.
+1. Classify (§1); unclear → ask. Write title and body in the role's shape (`references/item-formats.md`), plain functional prose in the items language.
 2. Deliver and stop: Story or Bug → ask whether to write the criteria; Impediment or TECH → ask
    for confirmation, offering nothing more.
 3. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four

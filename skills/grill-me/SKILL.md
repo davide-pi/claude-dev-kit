@@ -9,7 +9,7 @@ argument-hint: "[the plan or design, or nothing to use the one under discussion]
 # grill-me — interrogate the plan until every branch is decided
 
 **Contract.** Question rounds until the decision frontier is empty, then a Decision Summary ·
-builds nothing, acts on nothing before the summary is confirmed · Italian; code and paths verbatim.
+builds nothing, acts on nothing before the summary is confirmed · chat language; code and paths verbatim.
 
 ## When
 
