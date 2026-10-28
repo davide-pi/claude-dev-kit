@@ -41,60 +41,43 @@ BEGIN
 END
 ```
 
-Why each line is there:
-
-| Element                        | Reason                                                                 |
-| ------------------------------ | ---------------------------------------------------------------------- |
-| `CREATE OR ALTER`              | the script is idempotent, so it can be deployed repeatedly and diffed in git |
-| `SET NOCOUNT ON`               | avoids extra result sets that confuse clients and ORMs                  |
-| `SET XACT_ABORT ON`            | without it, some errors leave the transaction open and the connection poisoned |
-| `@@TRANCOUNT` guard            | a nested `ROLLBACK` would abort the **caller's** transaction            |
-| `SAVE TRANSACTION`             | the only way to undo just this procedure's work when nested             |
-| `XACT_STATE()`                 | `-1` means the transaction is doomed and cannot be committed or partially rolled back |
-| `THROW` with no arguments      | preserves the original error; `RAISERROR` re-wraps and loses the number |
-| `THROW <n>, ...` with n ≥ 50000 | application errors get their own numeric range, documented per procedure |
-| Explicit column list on `INSERT` | survives a column being added to the table                            |
+Non-obvious: a nested `ROLLBACK` aborts the **caller's** transaction (hence the `@@TRANCOUNT` guard and
+the savepoint); `XACT_STATE() = -1` means a doomed transaction; bare `THROW` keeps the original error
+where `RAISERROR` loses the number; application errors use `THROW <n>` with n ≥ 50000, documented per
+procedure.
 
 ## Contract rules
 
-- **Schema-qualify everything** (`dbo.X`, not `X`): unqualified names force a per-user cache lookup
-  and can resolve to a different object.
+- **Schema-qualify everything** (`dbo.X`): unqualified names force a per-user cache lookup and can
+  resolve to a different object.
 - **Never prefix a procedure with `sp_`**: the engine searches `master` first.
-- One result set per procedure, with an explicit column list. Two result sets is a hidden contract
-  the caller cannot discover.
-- Return values are for status only (`0` / non-zero); real data goes through result sets or `OUTPUT`
-  parameters.
-- Declare parameter types to match the columns they filter — an `nvarchar` parameter on a `varchar`
-  column removes every seek in the procedure.
+- One result set per procedure, with an explicit column list. Return values are for status only
+  (`0` / non-zero); data goes through result sets or `OUTPUT` parameters.
+- Parameter types match the columns they filter — an `nvarchar` parameter on a `varchar` column
+  removes every seek.
 - Table-valued parameters instead of a comma-separated string plus a split function.
-- Deterministic ordering: any procedure whose result feeds pagination needs a total-order `ORDER BY`.
+- Any procedure whose result feeds pagination needs a total-order `ORDER BY`.
 
 ## Dynamic SQL
 
 ```sql
 DECLARE @sql nvarchar(max) = N'
     SELECT OrderId, Total FROM dbo.Orders WHERE 1 = 1'
-  + CASE WHEN @customerId IS NOT NULL THEN N' AND CustomerId = @customerId' ELSE N'' END
-  + CASE WHEN @from       IS NOT NULL THEN N' AND CreatedAt >= @from'       ELSE N'' END;
+  + CASE WHEN @customerId IS NOT NULL THEN N' AND CustomerId = @customerId' ELSE N'' END;
 
-EXEC sys.sp_executesql @sql,
-     N'@customerId int, @from datetime2',
-     @customerId = @customerId, @from = @from;
+EXEC sys.sp_executesql @sql, N'@customerId int', @customerId = @customerId;
 ```
 
-- **Values are always parameters**, never concatenated — that is the injection boundary.
-- **Identifiers** (a table or column name chosen at runtime) cannot be parameters: pass them through
-  `QUOTENAME()` and validate them against `sys.columns` / `sys.tables` first.
+- **Values are always parameters**, never concatenated — the injection boundary.
+- **Identifiers** chosen at runtime go through `QUOTENAME()` and are validated against `sys.columns` /
+  `sys.tables` first.
 - `EXEC (@sql)` without `sp_executesql` gets no parameters and no plan reuse — do not use it.
-- Dynamic SQL runs under the caller's permissions unless the procedure uses `EXECUTE AS`, which
-  breaks the ownership chain that made the procedure safe in the first place.
 
 ## Permissions and ownership chaining
 
-Grant `EXECUTE` on the procedure and **nothing** on the tables. Because the procedure and the tables
-share an owner, the ownership chain lets the procedure read and write them while the caller cannot
-touch them directly. That property is lost the moment the procedure uses dynamic SQL against those
-tables — then the caller needs table rights, and the encapsulation is gone.
+Grant `EXECUTE` on the procedure and **nothing** on the tables: the ownership chain lets the procedure
+touch them while the caller cannot. Dynamic SQL against those tables (or `EXECUTE AS`) breaks the
+chain and the caller needs table rights, so the encapsulation is gone.
 
 ```sql
 GRANT EXECUTE ON SCHEMA::dbo TO [app_role];   -- role, never a user
@@ -117,7 +100,7 @@ GRANT EXECUTE ON SCHEMA::dbo TO [app_role];   -- role, never a user
 
 ## Deployment
 
-Procedures live in source control as one idempotent file each (`CREATE OR ALTER`), deployed in
-dependency order. Before replacing one, capture the current definition so the change is reversible:
-`SELECT OBJECT_DEFINITION(OBJECT_ID('dbo.Order_Cancel'));`. Find what would break with
-`sys.dm_sql_referencing_entities('dbo.Orders', 'OBJECT')` — see `sqlcmd-workflow.md`.
+One idempotent file per procedure (`CREATE OR ALTER`) in source control, deployed in dependency order.
+Before replacing one, capture the current definition (`SELECT OBJECT_DEFINITION(OBJECT_ID('dbo.Order_Cancel'));`)
+so the change is reversible; find what would break with `sys.dm_sql_referencing_entities` — see
+`sqlcmd-workflow.md`.

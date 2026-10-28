@@ -86,12 +86,9 @@ and a note in the pull request.
 
 ## Custom SQL and data migrations
 
-Generate the migration, then add raw SQL to the generated `Up`. That is the supported way to seed, to
-backfill, to create a view or a function, and to migrate data alongside a schema change. Two habits:
-write the matching statement in `Down`, and keep the SQL idempotent where it may be re-run.
-
-A view or a function used by a keyless entity belongs in a migration, so its definition is versioned
-with the code that depends on it.
+Add raw SQL to the generated `Up` to seed, backfill, create a view or function, or migrate data. Write
+the matching statement in `Down`, and keep the SQL idempotent where it may be re-run. A view or
+function used by a keyless entity belongs in a migration, so its definition is versioned with the code.
 
 ## Never-drop, expand and contract
 
@@ -101,10 +98,8 @@ Any change that removes or narrows something is split across two deployments:
 2. Deploy the code that reads the new shape.
 3. **Contract** — a later migration removes the old shape, once nothing reads it.
 
-This is what makes a deployment reversible and a rolling deployment possible: at every moment, the
-database works with both the old and the new code. A single migration that drops the old column the
-moment the new one appears cannot be rolled back, and takes the previous version of the application
-down with it.
+A single migration that drops the old column the moment the new one appears cannot be rolled back, and
+takes the previous version of the application down with it.
 
 ## Repairing a bad migration
 
@@ -127,8 +122,7 @@ Applied on some databases and not others?
 ```
 
 The single unrecoverable mistake is removing an applied migration and re-adding a different one with
-the same name: the history rows then refer to a migration that no longer matches, and the only exit is
-manual reconciliation of every affected database.
+the same name: the history rows then refer to a migration that no longer matches.
 
 ## Shared and production databases
 
@@ -141,12 +135,9 @@ dotnet ef migrations script <From> <To> --idempotent --output .\delta.sql
 dotnet ef migrations bundle --self-contained --output .\efbundle.exe  # an executable the pipeline runs
 ```
 
-Always `--idempotent`: it wraps each operation in a check against the history table, so a re-run or a
-partially applied state is safe. A non-idempotent script run twice fails halfway and leaves the
-database in a state nobody planned for.
-
-`database update 0` reverts every migration — that is a full teardown of the schema. It is a local
-development tool and nothing else.
+Always `--idempotent`: a non-idempotent script run twice fails halfway and leaves the database in a
+state nobody planned for. `database update 0` is a full teardown of the schema: a local development
+tool and nothing else.
 
 ## Design-time gotchas
 
@@ -163,16 +154,14 @@ development tool and nothing else.
 
 - **`Unable to create a DbContext`**: the startup project cannot be built, or its host builder does
   work at startup that fails without a real environment. Add a design-time factory in the data
-  project — it is a few lines, it makes the commands independent of the host, and it is the reason the
-  same project can serve as both `--project` and `--startup-project`.
+  project; it makes the commands independent of the host and lets the same project serve as both
+  `--project` and `--startup-project`.
 - A factory that resolves a different connection string than the running application is how a
-  migration reaches the wrong database. `dotnet ef dbcontext info` before every `database update`.
-- The environment matters: the factory reads configuration, so `DOTNET_ENVIRONMENT` or
-  `ASPNETCORE_ENVIRONMENT` can change which database you are about to modify.
+  migration reaches the wrong database: `dotnet ef dbcontext info` before every `database update`.
+  `DOTNET_ENVIRONMENT` / `ASPNETCORE_ENVIRONMENT` can change which database you are about to modify.
 
 ## Commit hygiene
 
-The migration file, its designer file and the snapshot change are one commit. A snapshot committed
-without its migration, or the reverse, breaks the next person's `migrations add` with a spurious diff.
-Two migrations added in parallel on two branches will conflict in the snapshot — resolve it by keeping
-one, removing the other locally, and regenerating it on top. Never merge two snapshots by hand.
+The migration file, its designer file and the snapshot change are one commit. Two migrations added in
+parallel on two branches conflict in the snapshot: keep one, remove the other locally, regenerate it
+on top. Never merge two snapshots by hand.

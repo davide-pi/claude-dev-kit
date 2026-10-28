@@ -17,44 +17,32 @@ system-of-record data in it, written by a cache-updater and read by query servic
 
 ## The connection is a server process
 
-| Concern | SqlClient | Npgsql |
-| --- | --- | --- |
-| Server cost per connection | a thread | a forked **process** — keep the pool small and deliberate |
-| Plan caching | server-side, automatic | client-side, prepared statements only |
-| Many app instances | a pool each is fine | total backends is the budget: `SHOW max_connections;` ÷ instances |
-| Cancellation | best effort | a real cancel request on a second connection |
+A Postgres connection is a forked **process**: keep the pool small and deliberate. Size
+`Maximum Pool Size` against the server's budget (`SHOW max_connections;` ÷ instances), not the request
+rate. `Timeout` is the **connect** timeout, `Command Timeout` the per-command one: raise it on the one
+slow report, not globally.
 
-Size `Maximum Pool Size` against that budget, not against the request rate. `Connection Idle
-Lifetime` returns idle backends; `Timeout` is the **connect** timeout, `Command Timeout` the per-command
-one — raise it on the one slow report, not globally.
-
-**Prepared statements are the performance switch.** An ad-hoc parameterised statement is re-planned
-every time. `Max Auto Prepare` (with `Auto Prepare Min Usages`) prepares the repeated ones per
-physical connection; a transaction-pooling proxy in front of the server breaks this and every other
-piece of session state — disable auto-prepare there.
+**Prepared statements are the performance switch.** `Max Auto Prepare` (with `Auto Prepare Min Usages`)
+prepares repeated statements per physical connection; a transaction-pooling proxy in front of the
+server breaks this and every other piece of session state — disable auto-prepare there.
 
 ## Type mapping traps
 
-| .NET | Postgres | Note |
-| --- | --- | --- |
-| `DateTime` (`Kind=Utc`) | `timestamptz` | the client enforces the `Kind`; write UTC everywhere |
-| `DateTime` (`Unspecified`) | `timestamp` | wall clock, no zone — rarely what you want |
-| `DateTimeOffset` | `timestamptz` | the instant is stored, the offset is not |
-| `decimal` | `numeric` | exact; never `double` for money or odds |
-| `string[]`, `int[]` | `text[]`, `integer[]` | arrays are first class — `= ANY(@ids)` instead of a split table |
-| `enum` | `text` or a Postgres enum | storing the name as `text` survives a reorder |
-| a POCO | `jsonb` | serialise explicitly; the casing of the JSON keys is part of the contract |
+- `DateTime` with `Kind=Utc` → `timestamptz` (the client enforces the `Kind`; write UTC everywhere);
+  `Unspecified` → `timestamp`, rarely what you want. `DateTimeOffset` stores the instant, not the offset.
+- `decimal` → `numeric`; never `double` for money or odds.
+- Arrays are first class: `= ANY(@ids)` instead of a split table.
+- Enum: store the name as `text`, which survives a reorder.
+- A POCO → `jsonb`: serialise explicitly; the casing of the JSON keys is part of the contract.
 
 ## Dapper rules
 
-- Parameterise everything (`@p`); Dapper maps by property name. A list parameter becomes an array.
-- `QueryAsync<T>` buffers the whole set — a large stream wants `QueryUnbufferedAsync` and a
+- A list parameter becomes an array.
+- `QueryAsync<T>` buffers the whole set: a large stream wants `QueryUnbufferedAsync` and a
   `CommandDefinition` carrying the `CancellationToken`.
-- Column names come back as the database spells them: alias snake_case in the SQL rather than
-  renaming database columns to please a POCO.
+- Alias snake_case in the SQL rather than renaming database columns to please a POCO.
 - Bulk load is `COPY` through the binary importer, not a loop of `INSERT`s.
-- An upsert's optional `WHERE … IS DISTINCT FROM excluded.…` skips no-op writes — on a hot cache
-  table that is most of the dead-tuple and vacuum load gone.
+- An upsert's optional `WHERE … IS DISTINCT FROM excluded.…` skips no-op writes.
 
 ## psql through docker
 

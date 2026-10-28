@@ -50,7 +50,8 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | Cross-refs | bare asset names; never a link to a file not yet committed; a hook not yet shipped is named by its bare file name | validator |
 | Shadowing | no project `.claude/skills/<name>` reuses a kit skill's name — it replaces the kit skill there | review |
 
-Over a cap, split into a reference — never trim substance. A thin `## Decide` means the skill is not
+Over a cap, first delete what the model already knows (generic material, restated defaults);
+split into a reference only what is house-specific and rare. A thin `## Decide` means the skill is not
 needed.
 
 ### 3. Frontmatter and the listing budget

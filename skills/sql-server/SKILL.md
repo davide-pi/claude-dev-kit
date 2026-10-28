@@ -95,8 +95,8 @@ sqlcmd -S $s -d master -U <user> -C -W -Q 'SELECT r.session_id, r.blocking_sessi
 
 ## References
 
-- `references/sqlcmd-workflow.md` — read-only inspection: connecting, schema, sizes, dependencies,
-  what is running, change scripts that roll back, which route per host.
+- `references/sqlcmd-workflow.md` — read-only inspection: connecting, finding code, dependencies,
+  the procedure hot list, change scripts that roll back, which route per host.
 - `references/stored-procedures.md` — header, transactions, error handling, dynamic SQL, permissions.
 - `references/from-sql-server.md` — porting to Postgres: identifiers, types, collation, upsert,
   sequences, transactional DDL, reading the Postgres plan.
