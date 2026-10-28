@@ -8,8 +8,8 @@
  * actually broke this way: an asset referenced from settings.json but never committed, a
  * machine-specific path in a public repo, a plugin enabled but undocumented.
  *
- * This file walks the tree and reports; the rules live in validate-assets.mjs, validate-content.mjs
- * and validate-contract.mjs, called in that order with one shared context.
+ * This file walks the tree and reports; the rules live in validate-assets.mjs, validate-content.mjs,
+ * validate-contract.mjs and validate-budget.mjs, called in that order with one shared context.
  */
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
@@ -18,6 +18,7 @@ import { fileURLToPath } from 'node:url';
 import { checkAssets } from './validate-assets.mjs';
 import { checkContent } from './validate-content.mjs';
 import { checkContract } from './validate-contract.mjs';
+import { checkBudget } from './validate-budget.mjs';
 
 // VALIDATE_ROOT lets tools/validate.test.mjs run the rules against a fixture tree.
 const ROOT = process.env.VALIDATE_ROOT ?? join(dirname(fileURLToPath(import.meta.url)), '..');
@@ -73,11 +74,14 @@ const ctx = { ROOT, fail, warn, read, has, allFiles, textFiles, frontMatter };
 Object.assign(ctx, checkAssets(ctx));
 Object.assign(ctx, checkContent(ctx));
 Object.assign(ctx, checkContract(ctx));
-const { descriptionBudget, hiddenDescriptions, DESCRIPTION_BUDGET_CHARS, hiddenTotal, descriptionTotal } = ctx;
+Object.assign(ctx, checkBudget(ctx));
+const { descriptionBudget, hiddenDescriptions, DESCRIPTION_BUDGET_CHARS, hiddenTotal, descriptionTotal, bodyLine, sessionLine } = ctx;
 
 // ── Report ───────────────────────────────────────────────────────────────────
 const label = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 console.log(`descriptions: listed ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars (${descriptionBudget.length} agents and skills), hidden ${hiddenTotal} chars (${hiddenDescriptions.length} skills: user-invoked or paths-gated)`);
+console.log(bodyLine);
+if (sessionLine) console.log(sessionLine);
 
 // In Actions, also emit annotations so findings land on the file and line in the PR view.
 if (process.env.GITHUB_ACTIONS) {

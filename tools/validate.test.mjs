@@ -126,3 +126,47 @@ test('the listed description budget fails over 8000 chars; hidden skills do not 
   assert.equal(perDescription.code, 1);
   assert.match(perDescription.out, /description is \d+ chars; keep it under 1536/);
 });
+
+test('skill bodies are counted in words, listed apart from paths-gated and user-invoked ones', () => {
+  const { code, out } = run();
+  assert.equal(code, 0, out);
+  assert.match(out, /skill bodies: listed \d+ words \(\d+ skills\), hidden \d+ words \(\d+ skills\); largest: /);
+});
+
+test('a SessionStart hook injecting more than 1500 bytes warns; a short one does not', () => {
+  const settings = (file) => JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node', args: ['-e', `require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/${file}')`] }] }] } });
+  const emit = (n) => `process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'x'.repeat(${n}) } }))\n`;
+  const big = run((write) => { write('hooks/brief.js', emit(1600)); write('settings.json', settings('brief.js')); });
+  assert.equal(big.code, 0, big.out);
+  assert.match(big.out, /SessionStart hooks inject 1600 bytes .*over the 1500-byte cap/);
+  const small = run((write) => { write('hooks/brief.js', emit(200)); write('settings.json', settings('brief.js')); });
+  assert.equal(small.code, 0, small.out);
+  assert.doesNotMatch(small.out, /over the 1500-byte cap/);
+  assert.match(small.out, /session start: 200 bytes injected/);
+});
+
+test('a 12-word passage shared by two assets warns; 11 words or a byte-identical contract copy do not', () => {
+  const twelve = 'the cache key carries the tenant id so two tenants never share one entry';
+  const words = twelve.split(' ');
+  const rule = (text) => `---\npaths: "**/*.cs"\n---\n# r\n\n- ${text}\n`;
+  const dup = run((write, read) => {
+    write(SKILL, `${read(SKILL)}\n${twelve}.\n`);
+    write('rules/r.md', rule(`${twelve}.`));
+  });
+  assert.equal(dup.code, 0, dup.out);
+  assert.match(dup.out, /rules\/r\.md:6: shares a 1\d-word passage with skills\/demo\/SKILL\.md:\d+ "the cache key carries/);
+  const eleven = words.slice(0, 11).join(' ');
+  const short = run((write, read) => {
+    write(SKILL, `${read(SKILL)}\n${eleven}.\n`);
+    write('rules/r.md', rule(`${eleven} differently.`));
+  });
+  assert.doesNotMatch(short.out, /shares a \d+-word passage/);
+  const skeleton = 'Order: findings first, then completeness, then the tables, then the verdict line, always';
+  const FORMAT = 'skills/code-review/references/report-format.md';
+  const exempt = run((write, read) => {
+    write(FORMAT, read(FORMAT).replace('Order: x', skeleton));
+    write('skills/code-review/SKILL.md', `${read('skills/code-review/SKILL.md')}\n## Order and tables\n\n\`\`\`text\n${skeleton}\n\`\`\`\n`);
+  });
+  assert.equal(exempt.code, 0, exempt.out);
+  assert.doesNotMatch(exempt.out, /shares a \d+-word passage/);
+});
