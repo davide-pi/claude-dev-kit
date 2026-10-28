@@ -10,7 +10,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
+import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS as ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
+const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
 
 // ── the verify gate: delta command, verify finding, gate stalls (T10, T4) ──────────────────────────
 test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {
@@ -46,7 +47,7 @@ test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → 
 });
 
 test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
-  const { out, calls } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl()]);
+  const { out, calls } = await run({ ...ARGS_M, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);                                                    // the V1 fix changed 3 lines: no final read
   assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);

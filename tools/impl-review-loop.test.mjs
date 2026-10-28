@@ -13,7 +13,8 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS as ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
+const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
 
 test('inPerimeter: file, directory, glob, absolute path under the root, case, anchored at the root', () => {
   assert.ok(inPerimeter('src/Orders/OrdersQuery.cs', FILES));
@@ -147,17 +148,19 @@ test('script: a closed finding that reappears → STALL', async () => {
 test('script: reviewers by size, effort and model', async () => {
   const sizes = {};
   for (const size of ['S', 'M', 'L']) {
-    const { calls } = await run({ ...ARGS, size, ...(size === 'S' ? {} : { touches: ['security', 'performance'] }) }, size === 'S' ? [review([])] : size === 'M' ? [review([]), review([]), review([])] : [review([]), review([]), review([]), review([])]);
+    const { calls } = await run({ ...ARGS, size, ...(size === 'S' ? {} : { touches: ['security', 'performance'] }) }, size === 'S' ? [review([])] : [review([]), review([]), review([]), review([])]);
     sizes[size] = calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
   assert.deepEqual(sizes.S, ['code-reviewer:sonnet:high']);
-  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
+  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
   assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
 });
 
-test('script: M without touches is one Sonnet reviewer at high', async () => {
-  const { calls } = await run(ARGS, [review([])]);
-  assert.deepEqual(calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high']);
+test('script: M without touches is two Sonnet reviewers at high, S one', async () => {
+  const { calls } = await run(ARGS_M, [review([]), review([])]);
+  assert.deepEqual(calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high', 'code-reviewer:sonnet:high']);
+  const s = await run(ARGS, [review([])]);
+  assert.deepEqual(s.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`), ['code-reviewer:sonnet:high']);
 });
 
 test('script: an S change that grows to 5 files stays S: the file count is a gaps signal, never a size', async () => {
@@ -176,31 +179,34 @@ test('script: an S change that grows to 5 files stays S: the file count is a gap
 });
 
 test('script: risk raises the floor of the triage size, never lowers it: data lifts S to M, three axes besides logic lift to L; touches is the old alias', async () => {
-  const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
+  const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
   assert.deepEqual(await panel('S', {}), ['reviewer A · round 1 · code']);
   assert.deepEqual(await panel('S', { risk: ['logic'] }), ['reviewer A · round 1 · code']);
-  const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([])]);
-  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.model, 'sonnet');      // M: one Sonnet at high
+  const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([]), review([])]);
+  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.model, 'sonnet');      // M: Sonnet and Sonnet at high
+  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer B · round 1 · second opinion').opts.model, 'sonnet');
   assert.deepEqual(lifted.out.roundLog.map((r) => r.size), ['M']);
   assert.deepEqual(await panel('M', { risk: ['data', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer performance · round 1']);   // three axes: L, plus the specialist
-  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer performance · round 1']);   // logic never counts toward L
-  assert.deepEqual(await panel('M', { risk: ['security'] }), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
-  assert.deepEqual(await panel('M', { touches: ['security'] }), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
+  assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer performance · round 1']);   // logic never counts toward L
+  assert.deepEqual(await panel('M', { risk: ['security'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
+  assert.deepEqual(await panel('M', { touches: ['security'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
   assert.deepEqual(await panel('L', { risk: ['logic'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok' }]);
   assert.equal(many.out.roundLog[0].size, 'M');                                               // 9+ files never split the reviewers, the size stays
-  assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A · round 1 · code']);
+  assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
 });
 
-test('script: 17 changed files at size M spawn one whole reviewer, on opus because the change is wide: the whole-change scope, no share', async () => {
+test('script: 17 changed files at size M spawn two whole reviewers, B on opus because the change is wide: the whole-change scope, no share', async () => {
   const seventeen = Array.from({ length: 17 }, (_, i) => `src/Orders/F${i}.cs`);
-  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([])], [{ scope: 's', files: seventeen, evidence: 'ok' }]);
+  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: seventeen, evidence: 'ok' }]);
   assert.equal(out.status, 'OK');
   const reviews = calls.filter((c) => isReview(c.opts.label, 1));
-  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:opus:high']);
-  assert.match(reviews[0].prompt, /Review the change made since the start/);
-  assert.doesNotMatch(reviews[0].prompt, /Your share/);
+  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:sonnet:high', 'reviewer B · round 1 · second opinion:opus:high']);
+  for (const r of reviews) {
+    assert.match(r.prompt, /Review the change made since the start/);
+    assert.doesNotMatch(r.prompt, /Your share/);
+  }
 });
 
 test('script: the carried fields are in the schemas, a report without them is still read', async () => {
@@ -464,6 +470,7 @@ test('script: a P2 on the spot of a known minor finding is a new blocking findin
   const mnr = (priority) => finding({ priority, line: 40, title: 'minor naming' });
   const { out, calls } = await run(CLEAN, [
     review([], [finding(), mnr('P3')]),
+    review([]),                                                                 // B
     review([{ id: 'F1', status: 'closed' }], [mnr('P2')]),
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),   // the delta of the cleanup pass (the P3 left over)

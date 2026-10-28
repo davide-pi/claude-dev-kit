@@ -10,20 +10,22 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { f, ROOT, snapshot, run, ARGS, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
+import { f, ROOT, snapshot, run, ARGS as ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
+const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
 
 // ── reviewer budget, an agent that throws ─────────────────────────────────
-test('reviewersFor: S one Sonnet at high, M one Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
+test('reviewersFor: S one Sonnet at high, M Sonnet and Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
   const spec = (size, touches) => reviewersFor(size, touches).map((r) => `${r.key}:${r.agentType}:${r.model}:${r.effort}${r.whole ? ':whole' : ''}`);
-  assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:high:whole']);
-  assert.deepEqual(spec('M', []), ['A:code-reviewer:sonnet:high:whole']);
-  assert.deepEqual(spec('L', []), ['A:code-reviewer:sonnet:high:whole', 'B:code-reviewer:opus:high:whole']);
-  assert.deepEqual(spec('S', ['security', 'performance']), ['A:code-reviewer:sonnet:high:whole']);
-  assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
+  const A = 'A:code-reviewer:sonnet:high:whole';
+  assert.deepEqual(spec('S', []), [A]);
+  assert.deepEqual(spec('M', []), [A, 'B:code-reviewer:sonnet:high:whole']);
+  assert.deepEqual(spec('L', []), [A, 'B:code-reviewer:opus:high:whole']);
+  assert.deepEqual(spec('S', ['security', 'performance']), [A]);
+  assert.deepEqual(spec('M', ['security']), [A, 'B:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
   assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
-  assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
+  assert.deepEqual(spec('M', undefined), [A, 'B:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(reviewersFor('S', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
-  assert.deepEqual(reviewersFor('M', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
+  assert.deepEqual(reviewersFor('M', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high', 'sonnet:high']);
 });
 
 test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes besides logic lift to L, never downward', () => {
@@ -199,20 +201,20 @@ test('script: size L with a specialist: A throws, B and the specialist leave fil
 
 test('script: a specialist that returns nothing is a STALL "gap" naming it, never rerun; one that failed in a fix round and answers later is not', async () => {
   const boom = new Error('max turns');
-  const sec = { ...ARGS, touches: ['security'] };
-  const gone = await run(sec, [review([]), boom]);
+  const sec = { ...ARGS_M, touches: ['security'] };
+  const gone = await run(sec, [review([]), review([]), boom]);
   assert.equal(gone.out.status, 'STALL');
   assert.equal(gone.out.stall.why, 'gap');
   assert.match(gone.out.stall.reason, /security/);
   assert.deepEqual(gone.out.stall.reviewers, ['security']);
-  assert.deepEqual(reviewLabels(gone.calls), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
-  const later = await run(sec, [review([], [finding()]), boom, review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }])]);
+  assert.deepEqual(reviewLabels(gone.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
+  const later = await run(sec, [review([], [finding()]), review([]), boom, review([{ id: 'F1', status: 'closed' }]), review([{ id: 'F1', status: 'closed' }])]);
   assert.equal(later.out.status, 'OK');
   const secR2 = later.calls.find(c => c.opts.label === 'reviewer security · round 2').prompt;      // it never read its area: it reviews the whole change, not the fix delta
   assert.match(secR2, /Review the change made since the start/);
   assert.doesNotMatch(secR2, /DELTA of the last fix/);
   assert.match(later.calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix/);
-  const never = await run(sec, [review([], [finding()]), boom, review([{ id: 'F1', status: 'closed' }]), boom]);
+  const never = await run(sec, [review([], [finding()]), review([]), boom, review([{ id: 'F1', status: 'closed' }]), boom]);
   assert.equal(never.out.status, 'STALL');
   assert.equal(never.out.stall.why, 'gap');
   assert.equal(never.out.stall.round, 2);
@@ -385,20 +387,23 @@ test('script: a delta that starts at the start head, not at an earlier snapshot,
   assert.match(both.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /DELTA of the last fix is `git diff t1 t2`/);   // a tree to start from: still the fix delta
 });
 
-// ── a wide change: one whole reviewer on opus, never a split ──────────────
-test('wide: past 10 files or 600 changed lines the single reviewer of S and M is opus, never a split; mechanical and L unchanged', async () => {
+// ── a wide change: M's reviewer B on opus, never a split ──────────────
+test('wide: past 10 files or 600 changed lines reviewer B of M is opus, never a split; S, mechanical and L unchanged', async () => {
   const some = (n) => MANY.slice(0, n);
   const implOf = (n, churn) => ({ scope: 's', files: some(n), evidence: 'ok', ...(churn === undefined ? {} : { snapshot: { tree: 't1', files: some(n), churn } }) });
   const round1 = async (args, impl1) => {
     const { calls } = await run({ ...manyArgs(), ...args }, [review([]), review([])], [impl1]);
     return calls.filter(c => isReview(c.opts.label, 1)).map(c => `${c.opts.label.split(' · ')[0]}:${c.opts.model}:${c.opts.effort}`);
   };
-  assert.deepEqual(await round1({ size: 'M' }, implOf(11)), ['reviewer A:opus:high']);
-  assert.deepEqual(await round1({ size: 'M' }, implOf(10)), ['reviewer A:sonnet:high']);
-  assert.deepEqual(await round1({ size: 'S' }, implOf(2, 601)), ['reviewer A:opus:high']);
-  assert.deepEqual(await round1({ size: 'S' }, implOf(2, 600)), ['reviewer A:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'M' }, implOf(11)), ['reviewer A:sonnet:high', 'reviewer B:opus:high']);
+  assert.deepEqual(await round1({ size: 'M' }, implOf(10)), ['reviewer A:sonnet:high', 'reviewer B:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'M' }, implOf(2, 601)), ['reviewer A:sonnet:high', 'reviewer B:opus:high']);
+  assert.deepEqual(await round1({ size: 'M' }, implOf(2, 600)), ['reviewer A:sonnet:high', 'reviewer B:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'S' }, implOf(14)), ['reviewer A:sonnet:high']);
+  assert.deepEqual(await round1({ size: 'S' }, implOf(2, 601)), ['reviewer A:sonnet:high']);
   assert.deepEqual(await round1({ size: 'S', mechanical: true }, implOf(14)), ['reviewer A:sonnet:low']);
   assert.deepEqual(await round1({ size: 'L' }, implOf(14)), ['reviewer A:sonnet:high', 'reviewer B:opus:high']);
-  assert.deepEqual(reviewersFor('M', [], false, true).map((r) => `${r.model}:${r.effort}`), ['opus:high']);
+  assert.deepEqual(reviewersFor('M', [], false, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high', 'opus:high']);
+  assert.deepEqual(reviewersFor('S', [], false, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
   assert.deepEqual(reviewersFor('S', [], true, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
 });
