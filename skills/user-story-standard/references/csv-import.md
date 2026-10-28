@@ -4,8 +4,8 @@
 
 In this kit items are created **directly on the board**, through the Azure DevOps CLI, and that flow
 goes through `azdo-cli`. So the normal answer is: write the item text in the shapes this skill
-defines, then create it through `azdo-cli` after the owner confirms the item table, assigned to the owner
-and read back after create. No file is produced, nothing is imported.
+defines, then create it through `azdo-cli` as the skill's `## Do` says. No file is produced, nothing is
+imported.
 
 A CSV exists for one case only: someone genuinely wants a **bulk-import file** — a batch large
 enough that clicking or calling per item is not worth it, or a hand-off to someone who will import

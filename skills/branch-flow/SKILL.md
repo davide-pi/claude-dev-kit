@@ -49,8 +49,7 @@ assumed: `git symbolic-ref --short refs/remotes/origin/HEAD`.
 | dirty tree, two changes in flight, a likely throwaway, a multi-session plan | a **worktree** |
 | parallel agents on one repo | one worktree **per agent** |
 
-Worktrees live under `$env:CLAUDE_WORKTREE_ROOT` as `<repo>-<short-topic>` — a short root keeps deep
-repos under the Windows path limit. The native tools (`EnterWorktree`, `isolation: "worktree"`)
+Worktrees live under `$env:CLAUDE_WORKTREE_ROOT` (naming: `references/worktrees.md`). The native tools (`EnterWorktree`, `isolation: "worktree"`)
 create under `<repo>\.claude\worktrees\` unless the `worktree-root.js` hook redirects
 them; without it, use the git fallback in `references/worktrees.md`.
 
