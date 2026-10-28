@@ -39,6 +39,8 @@ test('reviewersFor: S one Sonnet at medium, M one Sonnet at high, L Sonnet and O
   assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
   assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
   assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
+  assert.deepEqual(reviewersFor('S', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
+  assert.deepEqual(reviewersFor('M', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
 });
 
 test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes besides logic lift to L, never downward', () => {

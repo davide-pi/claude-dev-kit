@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, implementerModel?, cleanup?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
+  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, implementerModel?, mechanical?, cleanup?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -76,9 +76,10 @@ const groupOf = (path, groups, root) => {
   return i < 0 ? groups.length - 1 : i
 }
 
-const reviewersFor = (size, touches = []) => {
+// A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
+const reviewersFor = (size, touches = [], mechanical = false) => {
   const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
-  const list = size === 'S' ? [code('A', 'sonnet', 'medium')] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'medium')] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -444,9 +445,11 @@ if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
   return `impl-review-loop: perimeter file(s) already modified before the start: ${dirtyInPerimeter.join(', ')}. Ask the user, then relaunch with dirtyConfirmed: true (or change the perimeter).`
 }
 const givenSize = SIZES.includes(input.size) ? input.size : 'M'
-const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : 'medium'
-const implModel = ['haiku', 'sonnet', 'opus'].includes(input.implementerModel) ? input.implementerModel : undefined
 const risk = riskAxes(input.risk, input.touches)
+// mechanical holds only while the size stays S: a risk axis that lifts it brings back the default models.
+const mechanical = input.mechanical === true && sizeFor(givenSize, risk) === 'S'
+const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : mechanical ? 'low' : 'medium'
+const implModel = ['haiku', 'sonnet', 'opus'].includes(input.implementerModel) ? input.implementerModel : mechanical ? 'haiku' : undefined
 const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
 
 const perimeterTextFor = (list, forWriter = true) => [
@@ -785,7 +788,7 @@ const reviewersForRound = () => {
   const size = sizeFor(givenSize, risk)
   const signal = sizeSignal(size, seen.size)
   if (signal && !gaps.includes(signal)) gaps.push(signal)
-  const reviewers = reviewersFor(size, risk)
+  const reviewers = reviewersFor(size, risk, mechanical)
   const [first, ...rest] = reviewers
   if (groups.length < 2) return { size, groups, list: reviewers, expected }
   return { size, groups, expected, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
