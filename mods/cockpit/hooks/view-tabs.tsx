@@ -53,7 +53,7 @@ export type PaneActions = {
   setNoteDraft: (text: string) => void
   /** Saves the field as a note (replacing the one it was loaded from, if any): the text of the field on Enter, the kept draft when none is given. */
   saveNote: (text?: string) => void
-  /** Loads a saved note into the field. */
+  /** Opens a saved note for editing on its own row; on the note already being edited, cancels the edit. */
   editNote: (id: number) => void
   /** Appends a saved note to the prompt box; the note stays in the list. */
   sendNote: (id: number) => void
@@ -451,22 +451,27 @@ export function notesBlocks(k: Kit): Block[] {
     const lines = n.text.trimEnd().split(/\r?\n/)
     const isOpen = s.notesOpen?.includes(n.id) === true
     const first = lines[0] === '' ? ' ' : lines[0]
+    const isEditing = Input !== undefined && s.noteEditing === n.id
     return (
       <Box flexDirection="column" backgroundColor={i % 2 === 1 ? COLORS.band : undefined}>
         <Box columnGap={1}>
           <Box width={Math.max(1, width - NOTE_ICONS_W)}>
-            <Button key={`note:toggle:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
-              {isOpen ? (
-                // one Text so the Button cannot lay the lines side by side; lines wrap by display width, indentation and empty lines kept
-                <Text wrap="wrap">{lines.map(text => (text === '' ? ' ' : text)).join('\n')}</Text>
-              ) : (
-                <Text wrap="truncate-end">{lines.length > 1 ? `${first}…` : first}</Text>
-              )}
-            </Button>
+            {isEditing ? (
+              <Input key="note:edit-field" rows={NOTE_INPUT_ROWS} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} autoFocus onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
+            ) : (
+              <Button key={`note:toggle:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
+                {isOpen ? (
+                  // one Text so the Button cannot lay the lines side by side; lines wrap by display width, indentation and empty lines kept
+                  <Text wrap="wrap">{lines.map(text => (text === '' ? ' ' : text)).join('\n')}</Text>
+                ) : (
+                  <Text wrap="truncate-end">{lines.length > 1 ? `${first}…` : first}</Text>
+                )}
+              </Button>
+            )}
           </Box>
           <Box columnGap={1} alignItems="flex-start">
             <Button key={`note:edit:${n.id}`} plain onPress={() => actions.editNote(n.id)}>
-              ✎
+              {isEditing ? '✕' : '✎'}
             </Button>
             <Button key={`note:send:${n.id}`} plain onPress={() => actions.sendNote(n.id)}>
               ➤
@@ -485,10 +490,11 @@ export function notesBlocks(k: Kit): Block[] {
       gap(),
       title(S.notesTitle(notes.length)),
       gap(),
-      Input && (
+      // The bottom field is for new notes: while a note is edited on its row it is hidden (the draft is shared, a draft typed here is replaced)
+      Input && s.noteEditing === undefined && (
         <Input key="note" rows={NOTE_INPUT_ROWS} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
       ),
-      Input && (
+      Input && s.noteEditing === undefined && (
         <Button key="note:save" onPress={() => actions.saveNote()}>
           {S.buttons.save}
         </Button>
