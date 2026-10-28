@@ -13,6 +13,8 @@
  *                             delete, assignee), hours written outside /worklog, global defaults;
  *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
+ *   - lib/guard.js          — a DENY too: a read-only agent (`agent_type` in `lib/read-only-agents.js`) running a
+ *                             git write (checkout, switch, reset, stash, rebase, commit, push); no `agent_type`, no deny;
  *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
  *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /
@@ -29,7 +31,7 @@
  * PreToolUse matcher can only filter by tool name, not by command text): one Node start-up, one
  * stdin parse. Node, not PowerShell — the whole hook is ~150ms against ~370ms just to start `pwsh`.
  *
- * The two denying checks run first: when one denies, nothing else matters. The others always run.
+ * The denying checks run first: when one denies, nothing else matters. The others always run.
  * When both fire (`git push origin main && docker compose down -v`), the user gets one prompt
  * carrying both reasons.
  *

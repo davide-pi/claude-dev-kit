@@ -917,3 +917,29 @@ test('a missing file is an ordinary state and is not logged (no workspace map fo
   spawnSync(process.execPath, [HOOK], { input, encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config } });
   assert.throws(() => readFileSync(join(config, '.cache', 'hook-errors.log'), 'utf8'), /ENOENT/);
 });
+
+// A read-only agent (its `agent_type`, which the harness puts on every hook fired inside a subagent) never moves HEAD,
+// the index or the stash: a reviewer once ran `git checkout <sha>` and left the worktree on a detached HEAD.
+test('a read-only agent is denied git checkout, switch, reset, stash, rebase, commit and push', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'guard-ro-'));
+  for (const command of ['git checkout 26460bf', 'git -C C:/repo switch main', 'git reset --hard HEAD~1', 'git stash',
+    'git rebase main', 'git commit -m x', 'git push', 'git status && git checkout -b x', 'git stash -m list', 'git stash push -m show']) {
+    for (const agent_type of ['code-reviewer', 'Explore', 'review-security']) {
+      const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type });
+      assert.equal(r?.decision, 'deny', `${agent_type}: ${command}`);
+      assert.match(r.reason, /read-only agent/);
+    }
+  }
+  rmSync(cwd, { recursive: true, force: true });
+});
+
+test('a read-only agent may still read git; an editing agent or the main session is not denied by this rule', () => {
+  const cwd = mkdtempSync(join(tmpdir(), 'guard-ro-'));
+  for (const command of ['git diff 26460bf..HEAD', 'git log --oneline -5', 'git show 26460bf', 'git status', 'git stash list', 'git branch --show-current']) {
+    assert.notEqual(evaluate({ tool_name: 'PowerShell', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'code-reviewer' })?.decision, 'deny', command);
+  }
+  for (const extra of [{ agent_id: 'a1', agent_type: 'implementer' }, {}]) {
+    assert.notEqual(evaluate({ tool_name: 'Bash', tool_input: { command: 'git checkout 26460bf' }, cwd, ...extra })?.decision, 'deny', JSON.stringify(extra));
+  }
+  rmSync(cwd, { recursive: true, force: true });
+});

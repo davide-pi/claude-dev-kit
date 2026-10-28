@@ -13,6 +13,7 @@ import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -247,4 +248,23 @@ test('git cache: the branch outlives several 5 s renders (no git process), and e
 
 test('worktree cache: the linked-worktree root is kept for minutes, not seconds', () => {
   assert.match(renderWithGitCache('worktree', { root: 'C:/wt/cached-tree' }, 5 * 60_000), /cached-tree/);
+});
+
+test('the remote URL comes from .git/config, also in a linked worktree (its config is in the common dir), no git process', () => {
+  const { remoteUrl } = createRequire(import.meta.url)('../hooks/lib/git-dir.js');
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-remote-'));
+  try {
+    const main = join(dir, '.git');
+    mkdirSync(join(main, 'worktrees', 'wt'), { recursive: true });
+    writeFileSync(join(main, 'config'), '[core]\n\tbare = false\n[remote "upstream"]\n\turl = https://x/other.git\n[remote "origin"]\n\turl = https://dev.azure.com/o/p/_git/r\n\tfetch = +refs/heads/*:refs/remotes/origin/*\n');
+    writeFileSync(join(main, 'worktrees', 'wt', 'commondir'), '../..\n');
+    assert.equal(remoteUrl(main), 'https://dev.azure.com/o/p/_git/r');
+    assert.equal(remoteUrl(join(main, 'worktrees', 'wt')), 'https://dev.azure.com/o/p/_git/r');
+    writeFileSync(join(main, 'config'), '[core]\n\tbare = false\n');
+    assert.equal(remoteUrl(main), null, 'no origin');
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('statusline.js asks git for the status only, never for the remote', () => {
+  assert.doesNotMatch(readFileSync(STATUSLINE, 'utf8'), /["']remote["']\s*,\s*["']get-url["']/);
 });

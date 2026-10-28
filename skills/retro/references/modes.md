@@ -36,7 +36,9 @@ Runs only when the owner asks, or when the focus argument is `monthly`; never on
 | Step | Source | Fix |
 | --- | --- | --- |
 | Asset usage | the owner's `/skill-doctor` and `/doctor prompt-audit` output, pasted in the arguments (slash commands, a fork cannot run them) | never-invoked or over-budget descriptions → `skill-forge` |
-| Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
+| Reference usage | `node ~/.claude/scripts/kit-usage.mjs --days 30`: `references.neverOpened` | a reference never opened → a proposal to delete or merge it via `skill-forge`, never on its own |
+| Automatic warnings | the same report's `doneClaim` (rule → count), the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
+| Hook crashes | the same report's `hookErrors` (hook → count, last message; from `hook-errors.log`) | a guard that crashes is silent: a backlog item to fix that hook |
 
 Report line 5: `Salute: <outcome, one line per step>`.
 
