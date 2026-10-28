@@ -376,10 +376,13 @@ test('script: mechanical at size S runs the implementer on haiku at low and the 
     const opts = mech.calls.find(c => c.opts.label === label).opts;
     assert.deepEqual([opts.model, opts.effort], ['haiku', 'low'], label);
   }
-  assert.equal(mech.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1')).opts.effort, 'low');
+  const reviewer = mech.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1'));
+  assert.equal(reviewer.opts.effort, 'low');
+  assert.match(reviewer.prompt, /declared MECHANICAL/);
   const lifted = await run({ ...ARGS, size: 'S', mechanical: true, risk: ['data'] }, reviews());
   const impl = lifted.calls.find(c => c.opts.label === 'implement the change').opts;
   assert.deepEqual(['model' in impl, impl.effort], [false, 'medium']);
+  assert.doesNotMatch(lifted.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1')).prompt, /declared MECHANICAL/);
   const pinned = await run({ ...ARGS, size: 'S', mechanical: true, implementerModel: 'sonnet' }, reviews());
   assert.equal(pinned.calls.find(c => c.opts.label === 'implement the change').opts.model, 'sonnet');
 });
