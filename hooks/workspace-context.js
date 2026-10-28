@@ -7,8 +7,9 @@
  * (a name or "ask") or `projects` (first subfolder -> project), optional `identity` (suffix of the
  * private Azure CLI config dir `~/.azure-<identity>`), `account`, `note`. Longest `path` wins.
  *
- * Output, one context line: `ALM: Azure DevOps · org <x> · project <y> · az identity <z>`, or
- * `ALM: unmapped — ask` when a map exists but no root matches. `az account set` is
+ * Output, two context lines: `ALM: Azure DevOps · org <x> · project <y> · az identity <z>`, or
+ * `ALM: unmapped — ask` when a map exists but no root matches (no ALM line without a usable map), then
+ * `Lang: commit it · pr it · …` (lib/workspaces.js `langLine`, always printed). `az account set` is
  * machine-global, so the identity travels through CLAUDE_ENV_FILE as plain `export` lines:
  * AZURE_CONFIG_DIR reaches Bash, AZ_IDENTITY (no backslash) also reaches PowerShell. How to prefix an az
  * the guard does not pin is the `azdo-cli` skill's (`references/auth-and-config.md`), not every session's.
@@ -18,7 +19,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 
-const { readRoots, resolveDir, matchRoot } = require('./lib/workspaces');
+const { readRoots, resolveDir, matchRoot, langLine } = require('./lib/workspaces');
 
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
 
@@ -59,10 +60,15 @@ function describe(entry, dir, envFile) {
 try {
   const input = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
   const dir = resolveDir(input.cwd);
-  const hit = matchRoot(readRoots(), dir);
-  const line = hit ? describe(hit, dir, process.env.CLAUDE_ENV_FILE) : 'ALM: unmapped — ask';
+  let alm = null;
+  try {
+    const hit = matchRoot(readRoots(), dir);
+    alm = hit ? describe(hit, dir, process.env.CLAUDE_ENV_FILE) : 'ALM: unmapped — ask';
+  } catch {
+    // no map or a malformed one: no ALM line, the Lang line still prints
+  }
   process.stdout.write(JSON.stringify({
-    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: line },
+    hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [alm, langLine(dir)].filter(Boolean).join('\n') },
   }));
 } catch {
   // never block a session start

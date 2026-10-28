@@ -18,9 +18,14 @@ const path = require('path');
 
 const { CONFIG_DIR } = require('./cache');
 
-/** Every root of the map, longest path first, each with its lowercased absolute `root`. */
+/** The languages a person reads, one per aspect; chat is not one of them (the native `language` setting). */
+const LANG_ASPECTS = ['commit', 'pr', 'prComment', 'items', 'wiki'];
+
+const readMap = () => JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'workspaces.json'), 'utf8'));
+
+/** Every root of the map, longest path first, each with its lowercased absolute `root` (and its `lang`, kept as written). */
 function readRoots() {
-  const roots = JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'workspaces.json'), 'utf8'))?.roots;
+  const roots = readMap()?.roots;
   if (!Array.isArray(roots)) throw new Error('no roots');
   return roots
     .filter((r) => r && typeof r.path === 'string')
@@ -28,8 +33,31 @@ function readRoots() {
     .sort((a, b) => b.root.length - a.root.length);
 }
 
-/** A directory in the form `matchRoot` compares: absolute and lowercased. */
-const resolveDir = (cwd) => path.resolve(cwd || process.cwd()).toLowerCase();
+/**
+ * The main repository of a linked worktree: walk up to the first `.git`; when it is a file reading
+ * `gitdir: <main>/.git/worktrees/<name>`, return `<main>`. Anything else (a `.git` directory, none, a
+ * submodule, an unreadable file) returns `dir` unchanged. Cheap fs reads only, no git process.
+ */
+function mainRepoOf(dir) {
+  try {
+    for (let d = dir; ; d = path.dirname(d)) {
+      let stat = null;
+      try { stat = fs.statSync(path.join(d, '.git')); } catch { /* none at this level */ }
+      if (stat) {
+        if (!stat.isFile()) return dir;
+        const gitdir = /^gitdir:\s*(.+?)\s*$/m.exec(fs.readFileSync(path.join(d, '.git'), 'utf8'))?.[1];
+        const main = gitdir && /^(.*)[\\/]\.git[\\/]worktrees[\\/][^\\/]+[\\/]?$/.exec(path.resolve(d, gitdir))?.[1];
+        return main || dir;
+      }
+      if (path.dirname(d) === d) return dir;
+    }
+  } catch {
+    return dir;
+  }
+}
+
+/** A directory in the form `matchRoot` compares: absolute, a linked worktree replaced by its main repository, lowercased. */
+const resolveDir = (cwd) => mainRepoOf(path.resolve(cwd || process.cwd())).toLowerCase();
 
 /** The root containing `dir` (already through `resolveDir`), else undefined. */
 const matchRoot = (roots, dir) => roots.find(({ root }) => dir === root || dir.startsWith(root + path.sep));
@@ -41,4 +69,31 @@ function azConfigDir(entry) {
   return fs.existsSync(dir) ? dir : null;
 }
 
-module.exports = { CONFIG_DIR, readRoots, resolveDir, matchRoot, azConfigDir };
+const langValue = (v) => (typeof v === 'string' && v.trim() ? v.trim() : null);
+
+/** Every aspect's language for `dir` (through `resolveDir`): `en` <- top-level `lang` <- the matching root's `lang`, per key. Never throws. */
+function resolveLang(dir) {
+  const out = Object.fromEntries(LANG_ASPECTS.map((k) => [k, 'en']));
+  try {
+    const map = readMap();
+    const hit = matchRoot(readRoots(), dir);
+    for (const layer of [map?.lang, hit?.lang]) {
+      for (const k of LANG_ASPECTS) out[k] = langValue(layer?.[k]) ?? out[k];
+    }
+  } catch {
+    // a missing or broken map leaves the defaults; a broken root list still honours the global block below
+    try {
+      const layer = readMap()?.lang;
+      for (const k of LANG_ASPECTS) out[k] = langValue(layer?.[k]) ?? out[k];
+    } catch { /* no map at all: English everywhere */ }
+  }
+  return out;
+}
+
+/** The session line: `Lang: commit it · pr it · prComment it · items it · wiki it`. */
+function langLine(dir) {
+  const lang = resolveLang(dir);
+  return `Lang: ${LANG_ASPECTS.map((k) => `${k} ${lang[k]}`).join(' · ')}`;
+}
+
+module.exports = { CONFIG_DIR, LANG_ASPECTS, readRoots, resolveDir, matchRoot, azConfigDir, resolveLang, langLine };

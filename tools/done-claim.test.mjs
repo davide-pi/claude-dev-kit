@@ -52,6 +52,22 @@ function stop(entries, { env = { CLAUDE_DONE_CLAIM: '1' }, extra = {} } = {}) {
 /** An edit turn ending in `final`; `printed` is what the tool results of the turn showed (the proof of a verdict row). */
 const edited = (final, printed = 'ok') => [prompt('sistema il bug'), tool('Edit'), result(printed), say(final)];
 
+test('English claim words without proof are blocked; "works" before a qualifier is not a claim', () => {
+  assert.match(stop(edited('All tests passes now.')).reason, /"passes"/);
+  assert.match(stop(edited('The change is verified.')).reason, /"verified"/);
+  assert.match(stop(edited('It works.')).reason, /"works"/);
+  assert.equal(stop(edited('The new helper works for every locale.')).reason, '');
+  assert.equal(stop(edited('All tests passes, `npm test` → 12 passed.')).reason, '');
+  assert.equal(stop(edited('The handler now passes the token to the service.')).reason, '');
+  assert.equal(stop(edited('The middleware passes the request through.')).reason, '');
+  assert.equal(stop(edited('The signature should be verified by the caller.')).reason, '');
+  assert.equal(stop(edited("The migration hasn't been verified against a real database.")).reason, '');
+  assert.equal(stop(edited('This could not be verified here.')).reason, '');
+  assert.equal(stop(edited('The old path no longer works.')).reason, '');
+  assert.match(stop(edited('It works as expected.')).reason, /"works"/);
+  assert.match(stop(edited('Login works as intended now.')).reason, /"works"/);
+});
+
 test('an edit turn ending "fatto" with no evidence is blocked and logged', () => {
   const { reason, dir } = stop(edited('Fatto: il totale ora somma le righe.'));
   assert.match(reason, /"Fatto"/);
