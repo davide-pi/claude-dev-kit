@@ -538,7 +538,6 @@ test('script: inline, the session edited: no implementer on the first step, the 
 
 // ── one perimeter rule for the workflow and the scope-guard hook ─────────────────────────────────────
 test('the workflow and hooks/scope-guard.js match perimeter entries the same way', () => {
-  global.__nudgesDispatch = true;                         // required, not run: the hook must not read stdin
   const guard = createRequire(import.meta.url)(join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'scope-guard.js'));
   const table = [
     ['src/Orders/OrdersQuery.cs', 'src/Orders/OrdersQuery.cs'], ['src/Orders/OrdersQuery.cs', 'SRC/orders/ORDERSQUERY.cs'],

@@ -90,6 +90,7 @@ $LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.
 $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
              'skills/fix-ci', 'skills/item', 'skills/workitem-create', 'skills/items-qa',
              'skills/project-wiki-standard', 'skills/pr-review',
+             'hooks/edit-nudge.js', 'hooks/context-nudge.js', 'hooks/nudges.js',
              'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
              'hooks/az-identity.js', 'scripts/sql-ro.ps1',
              'mods/cockpit/hooks/format.ts', 'mods/cockpit/tests/cockpit.test.tsx', 'mods/cockpit/tests/format.test.ts')
@@ -383,15 +384,6 @@ function Test-Hooks {
             }
         }
     } catch { Write-Problem "cannot read the hook wiring from $settingsPath — $($_.Exception.Message)" }
-
-    # nudges.js runs the nudges itself, so a script listed in its NUDGES table is wired through it.
-    if ($wired.ContainsKey('nudges.js')) {
-        $dispatcher = Get-Content -Raw -LiteralPath (Join-Path $hookDir 'nudges.js') -ErrorAction SilentlyContinue
-        $table = [regex]::Match("$dispatcher", '(?s)const NUDGES = \{(.*?)\};').Groups[1].Value
-        foreach ($file in @([regex]::Matches($table, '[\w.-]+\.js') | ForEach-Object { $_.Value } | Sort-Object -Unique)) {
-            if (-not $wired.ContainsKey($file)) { $wired[$file] = @('via nudges.js') }
-        }
-    }
 
     $parsed = 0
     $failed = 0
