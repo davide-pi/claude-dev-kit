@@ -12,7 +12,7 @@
 
 1. Ask only before the irreversible: data, deploy, money, deletes. Else the approach in one line, then go;
    a shared contract (API, event, schema) -> agree the interface first.
-2. CLI before MCP: `az devops|boards|repos|pipelines`, `gh`; `azdo-*` MCP only for a real CLI gap, saying so.
+2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
 3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly, never the
    `az devops configure` default. No line, unmapped, or an added dir -> ask.
 4. Code beyond a few lines, scope decided -> `implementer`, briefed and reviewed here; a few lines (size S)
@@ -36,7 +36,7 @@ logic, testable; **basso** cosmetic.
 - Italian: what I read - chat, reports, questions, commits, PRs, comments, items, wiki.
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
-  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`.
+  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
 
 ## Done means verified
 Never claim done, fixed, passing or verified without a command run this turn (reading code or a report isn't
@@ -45,5 +45,4 @@ never a code block; Riga che decide = an output line, verbatim. Stato: `fatto`, 
 (Comando: how to check), `failed` (quoted).
 
 ## Search, no prompts
-Grep/Read tools over shell; a command starts with the program:
-`grep -rn x <abs-path>`, `git -C <path> log`; `cd X && ...` always prompts.
+A command starts with the program: `grep -rn x <abs-path>`, `git -C <path> log`; `cd X && ...` always prompts.

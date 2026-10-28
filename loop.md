@@ -5,8 +5,7 @@ or any recurring run in its place) on your own initiative.
 
 Read-only, one pass, report in Italian; follow the `azdo-cli` skill for every `az` call.
 
-1. Target: the org, project and identity from the `ALM:` session line, passed explicitly on every call. No
-   line → say so and stop.
+1. Target: the `ALM:` line, as CLAUDE.md rule 3. No line → say so and stop.
 2. Pull request of the current branch: `az repos pr list --source-branch <branch> --status active`, then
    `az repos pr show`: status, mergeability, reviewer votes, policy state. Comment threads have no `az repos pr`
    verb: read them with `az devops invoke --area git --resource pullRequestThreads` (`azdo-cli`), active ones only.

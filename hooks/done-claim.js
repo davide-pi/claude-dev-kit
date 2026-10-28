@@ -65,7 +65,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { findGitDir, currentBranch } = require('./lib/git-dir');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
@@ -165,15 +165,15 @@ function unprovenRows(rows, resultsText, shellCommands = []) {
 
 const allow = () => process.exit(0);
 
-const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 3000 }).trim();
-
-/** True when the repo at `cwd` has a `deliver` perimeter still `status: active` for the branch checked out now. */
+/** True when the repo at `cwd` has a `deliver` perimeter still `status: active` for the branch checked out now (read off the disk, no git process). */
 function perimeterOpen(cwd) {
   try {
     if (typeof cwd !== 'string' || !cwd) return false;
-    const text = fs.readFileSync(path.join(git(cwd, 'rev-parse', '--absolute-git-dir'), 'deliver', 'perimeter.md'), 'utf8');
+    const repo = findGitDir(cwd);
+    if (!repo) return false;
+    const text = fs.readFileSync(path.join(repo.gitDir, 'deliver', 'perimeter.md'), 'utf8');
     const branch = /^branch:\s*(.+)$/im.exec(text);
-    return /^status:\s*active\s*$/im.test(text) && !!branch && branch[1].trim() === git(cwd, 'branch', '--show-current');
+    return /^status:\s*active\s*$/im.test(text) && !!branch && branch[1].trim() === currentBranch(repo.gitDir);
   } catch {
     return false;
   }
