@@ -1,6 +1,6 @@
 ---
 tags: [user-story-standard]
-plugins: [../../../skills/user-story-standard, ../../../skills/workitem-create, ../../../skills/azdo-cli]
+plugins: [../../../skills/user-story-standard, ../../../skills/azdo-cli]
 runs: 2
 max_turns: 4
 allowed_tools: [Skill]

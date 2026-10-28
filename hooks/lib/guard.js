@@ -3,7 +3,8 @@
  * into a PreToolUse decision, and what the tests call in-process instead of spawning Node once per
  * case. The ordering and the isolation are the contract:
  *
- *   - the two DENIES first (a raw database client on a non-dev host, a shell read of a secret file):
+ *   - the DENIES first (a raw database client on a non-dev host, a shell read of a secret file, a git write by a
+ *     read-only agent):
  *     when one fires nothing else matters;
  *   - then every ASK, gathered, so one prompt carries all the reasons;
  *   - then the REWRITES (az identity pin, output filter), which never meet an ask.
@@ -16,7 +17,9 @@
 
 'use strict';
 
-const { checkDefaultBranch } = require('./default-branch');
+const { checkDefaultBranch, parseGitCall } = require('./default-branch');
+const { expandTexts, parseSegments } = require('./shell-parse');
+const { READ_ONLY_AGENTS } = require('./read-only-agents');
 const { checkDestructive } = require('./destructive');
 const { checkSqlTarget } = require('./sql-target');
 const { checkAlmContract } = require('./alm-contract');
@@ -38,6 +41,23 @@ function safely(name, check) {
   }
 }
 
+/** git verbs that move HEAD, the index or the stash, or publish: never for an agent that only reads. */
+const GIT_WRITE_VERBS = new Set(['checkout', 'switch', 'reset', 'stash', 'rebase', 'commit', 'push']);
+
+/** `{ reason }` when a read-only agent's command runs a git write, else null (no `agent_type`: fail open). */
+function checkReadOnlyAgent(command, agentType) {
+  if (!READ_ONLY_AGENTS.has(agentType)) return null;
+  const verb = expandTexts(command)
+    .flatMap((text) => parseSegments(text).map(parseGitCall))
+    .find((call) => {
+      if (!call || !GIT_WRITE_VERBS.has(call.subcommand)) return false;
+      // Only the token right after `stash` names a read: in `stash -m list` the `list` is a message.
+      const next = call.args[call.args.indexOf(call.subcommand) + 1];
+      return !(call.subcommand === 'stash' && (next === 'list' || next === 'show'));
+    });
+  return verb ? { reason: `A read-only agent (${agentType}) may not run 'git ${verb.subcommand}': it would move HEAD, the index or the stash, or publish. Read with git diff / git show / git log on a ref instead.` } : null;
+}
+
 /**
  * `{ decision: 'deny' | 'ask', reason }`, `{ rewrite: updatedInput }`, or null when the command is
  * left to the normal permission flow.
@@ -47,7 +67,8 @@ function evaluate(payload) {
   if (typeof command !== 'string' || !command.trim()) return null;
 
   const target = safely('sql-target', () => checkSqlTarget(command))
-    ?? safely('secret-read', () => checkSecretRead(command));
+    ?? safely('secret-read', () => checkSecretRead(command))
+    ?? safely('read-only-agent', () => checkReadOnlyAgent(command, payload.agent_type));
   if (target) return { decision: 'deny', reason: target.reason };
 
   const reasons = [

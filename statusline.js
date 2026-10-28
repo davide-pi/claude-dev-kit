@@ -130,7 +130,14 @@ function gitInfo(cwd) {
   const branch = header.replace(/^(?:No commits yet|Initial commit) on /, "")
     .split("...")[0].replace(/ \(no branch\)$/, "").trim();
   if (!branch) return null;
-  const remote = run("remote", "get-url", "origin");
+  // The remote is read off `.git/config`: no second process.
+  let remote = null;
+  try {
+    // Required here, not at the top: a missing hooks/ costs the link, never the whole line.
+    const { findGitDir, remoteUrl } = require("./hooks/lib/git-dir");
+    const repo = findGitDir(cwd);
+    remote = repo ? remoteUrl(repo.gitDir) : null;
+  } catch { /* no remote link */ }
 
   let staged = 0, modified = 0, untracked = 0;
   for (const line of lines) {
@@ -161,14 +168,16 @@ function worktreeInfo(cwd) {
 }
 
 // With `refreshInterval` the line renders every couple of seconds, far more often than a branch or a
-// dirty count moves: the git results are kept per cwd for a few seconds in a small file (the process is
-// new on every render, so memory is no use). Best-effort: any failure just runs `fn`.
-const GIT_CACHE_MS = 5000;
-function cachedByCwd(name, cwd, fn) {
+// dirty count moves: the git results are kept per cwd in a small file (the process is new on every render,
+// so memory is no use). The status (branch, dirty counts, remote) for several renders; whether cwd is a
+// linked worktree, which almost never changes, for minutes. Best-effort: any failure just runs `fn`.
+const GIT_CACHE_MS = 30_000;
+const WORKTREE_CACHE_MS = 10 * 60_000;
+function cachedByCwd(name, cwd, ttlMs, fn) {
   const file = path.join(CONFIG_DIR, ".cache", `${name}-${crypto.createHash("sha1").update(String(cwd)).digest("hex").slice(0, 16)}.json`);
   try {
     const hit = JSON.parse(fs.readFileSync(file, "utf8"));
-    if (hit && Date.now() - hit.at < GIT_CACHE_MS) return hit.value ?? null;
+    if (hit && Date.now() - hit.at < ttlMs) return hit.value ?? null;
   } catch { /* no cache yet */ }
   const value = fn();
   try {
@@ -357,7 +366,7 @@ function saveContextSnapshot(sessionId, ctx, cache) {
 // left alone. The current session's files are never removed.
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const PRUNE_RULES = [
-  { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 5 s only
+  { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 30 s / 10 min only
   { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // the nudge distrusts it past 6 h
   { re: /^cockpit-(?!data-)[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 }, // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
 ];
@@ -711,8 +720,8 @@ process.stdin.on("end", () => {
   // Line 1: what the session runs as, the workspace and the budgets. Line 2: badges, printed only when any.
   const line1 = [
     [segModel(modelName, modelStale), segEffort(effortLevel, effortStale)].filter(Boolean).join(" "),
-    segFolder(cwd, cachedByCwd("worktree", cwd, () => worktreeInfo(cwd))),
-    segGit(cachedByCwd("git", cwd, () => gitInfo(cwd))),
+    segFolder(cwd, cachedByCwd("worktree", cwd, WORKTREE_CACHE_MS, () => worktreeInfo(cwd))),
+    segGit(cachedByCwd("git", cwd, GIT_CACHE_MS, () => gitInfo(cwd))),
     segContext(data.context_window),
     ...segRateWindows(rl, rlStale),
     segCost(data.cost?.total_cost_usd, cockpit?.lastTurnUsd),

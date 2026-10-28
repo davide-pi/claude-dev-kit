@@ -10,7 +10,8 @@
  * Output, one context line: `ALM: Azure DevOps · org <x> · project <y> · az identity <z>`, or
  * `ALM: unmapped — ask` when a map exists but no root matches. `az account set` is
  * machine-global, so the identity travels through CLAUDE_ENV_FILE as plain `export` lines:
- * AZURE_CONFIG_DIR reaches Bash, AZ_IDENTITY (no backslash) also reaches PowerShell.
+ * AZURE_CONFIG_DIR reaches Bash, AZ_IDENTITY (no backslash) also reaches PowerShell. How to prefix an az
+ * the guard does not pin is the `azdo-cli` skill's (`references/auth-and-config.md`), not every session's.
  * No map, malformed map, any error: silent, exit 0. No network, no `az` call.
  */
 const fs = require('fs');
@@ -20,7 +21,6 @@ const path = require('path');
 const { readRoots, resolveDir, matchRoot } = require('./lib/workspaces');
 
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
-const PS_PREFIX = 'PowerShell: az outside the allow list → prefix $env:AZURE_CONFIG_DIR="$HOME\\.azure-$env:AZ_IDENTITY"; (the guard pins the others), never az account set';
 
 function projectOf(entry, dir) {
   if (entry.projects && typeof entry.projects === 'object') {
@@ -37,7 +37,7 @@ function describe(entry, dir, envFile) {
   const parts = [`ALM: ${PLATFORMS[entry.platform] || entry.platform || '?'}`];
   if (entry.org) parts.push(`org ${entry.org}`);
   if (entry.platform !== 'github') parts.push(projectOf(entry, dir));
-  if (entry.account) parts.push(`utente ${entry.account}`);
+  if (entry.account) parts.push(`user ${entry.account}`);
   if (/^[\w.-]+$/.test(entry.identity ?? '')) {
     const azDir = path.join(os.homedir(), `.azure-${entry.identity}`);
     if (fs.existsSync(azDir)) {
@@ -47,7 +47,7 @@ function describe(entry, dir, envFile) {
         const value = azDir.replace(/\\/g, '/').replace(/'/g, `'\\''`);
         fs.appendFileSync(envFile, `export AZURE_CONFIG_DIR='${value}'\nexport AZ_IDENTITY=${entry.identity}\n`);
       }
-      parts.push(`az identity ${entry.identity} (${PS_PREFIX})`);
+      parts.push(`az identity ${entry.identity}`);
     } else {
       parts.push(`az identity ${entry.identity} assente (~/.azure-${entry.identity}): config az di default`);
     }

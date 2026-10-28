@@ -95,8 +95,7 @@ The no-op test is model-relative, not reader-relative: settle a disagreement by 
 2. Every step has a clear, demanding completion criterion.
 3. Every prohibition either has a positive form or is a hard guardrail.
 4. No sentence is a no-op, a cache, or a duplicate of another asset.
-5. Reference that only some branches need sits behind a pointer: the body is the 20 % of paths that
-   cover 80 % of cases.
+5. Reference that only some branches need sits behind a pointer (`SKILL.md` § 2, Phrasing).
 6. Every check the asset adds (a test, a hook, a validator rule) was seen failing once on a bad input: a
    check never seen failing proves nothing.
 7. Instructions are CLI first with the fallback stated; examples in PowerShell unless bash is genuinely better.

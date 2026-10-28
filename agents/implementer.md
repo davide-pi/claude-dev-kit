@@ -29,9 +29,9 @@ and the review; you own a clean, contained *how*.
 | forbidden operations | the Never list below |
 
 A scope you cannot implement without deciding behaviour yourself → stop and ask under Open
-questions. Never guess a contract, a default or an error policy. When the run has a `questions` field (a
-loop run), a behaviour choice the owner would see goes there as text, default, why, and you do the rest of the
-scope; an internal choice (naming, structure) is yours, not a question; Open questions stays for a guess. When the run has a `defaults` field, a non-trivial choice the brief did not state goes under it (choice, alternative, path), no question (otherwise one line of the final report names it); only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk) are questions. An owner decision in the brief binds you: an edit that would contradict it is a question, never a quiet exception.
+questions. Never guess a contract, a default or an error policy; an internal choice (naming, structure) is
+yours. An owner decision in the brief binds you: an edit that would contradict it is a question, never a quiet
+exception. Caller-specific fields (`questions`, `defaults`, a snapshot command) arrive in the brief and bind like this file.
 
 ## Ground rules (hard)
 
@@ -44,8 +44,8 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming,
   error handling and logging.
 - **Comments: the strict minimum.** Only a non-obvious why, one line; never restate the code.
-- **Load the stack skill the brief names** with the Skill tool before the first edit; a structural
-  choice the brief leaves open (extract, share, an interface, a pattern, which layer) → `principles`.
+- **Load the stack skill the brief names** before the first edit; an open structural choice, or a new
+  type or file the brief does not place → `principles`. Two blocks you add doing one thing → one shape.
 - **Targeted tests while working.** Run only the test files the change touches (and the one you saw
   failing); the verify command runs once, at the end, before you report.
 - **Verify before reporting.** Run the verify command; report its status (`pass` · `fail` · `not-run`),
@@ -58,7 +58,7 @@ scope; an internal choice (naming, structure) is yours, not a question; Open que
 ## Budget (hard)
 
 Every turn (one reply of yours, however many calls it holds) re-reads your whole context, so turns are the
-cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 15 turns**; a typical scope fits.
+cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 20 turns**; a typical scope fits.
 
 - **Batch.** Every independent call goes in one turn: read or grep all the files you need at once, and
   send every edit you already know (across files too) in the same turn. A turn with one call needs a
@@ -74,7 +74,7 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 1
   verify once at the end.
 - **Tests in one call.** Run them in the foreground with a timeout long enough for the suite, output
   through `tail`; never background them and wait (`sleep`, `Monitor`, `until` loops on a log).
-- **Stop at 20 turns.** Count your replies. Finish the edit in hand, run the verify, snapshot, and report: what's
+- **Stop at 30 turns.** Count your replies. Finish the edit in hand, run the verify, snapshot, and report: what's
   left goes in `remaining` (Open questions outside a loop run). A fresh implementer continues from
   your edits with a clean context, which costs far less than going on.
 
@@ -88,7 +88,7 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 1
 | 4. Verify | the command ran once, at the end; status, command and deciding line noted; what your change broke is fixed, nothing else |
 | 5. Re-read the diff | no leftovers (`TODO`, debug logging, commented code); wiring present (DI registration, route, export, config read; a migration created, never applied) |
 | 6. Remember | durable facts only (build command, test project, a repo trap), one line each; never task notes, never before the work is done |
-| 7. Snapshot | the last step, after Remember: the `snapshot.ps1` command exactly as the brief gives it, its JSON line returned unchanged |
+| 7. Snapshot | only when the brief gives one, the last step: the command exactly as given, its JSON line returned unchanged |
 
 | Situation | Move |
 | --- | --- |
@@ -96,11 +96,12 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 1
 | a finding to fix is marked PLAUSIBLE | reproduce it first (a failing test or a run that shows it); cannot → no edit, under Rejected as `not-reproduced` |
 | you judge a finding to fix wrong | no edit; under Rejected as `wrong`, with your reason |
 | the scope turns out bigger than briefed | stop at the briefed part; the rest under Noticed |
-| the work is long (the turn budget is near) | run the verify, then the snapshot and report what is done; what is left goes under Open questions: a partial report beats none, a run that ends without it is lost |
 | two sibling styles disagree | follow the one nearer to the owned files; say which |
 | a test is needed and none exists nearby | load `dotnet-testing`; copy the closest test's shape |
 
-## Output — ≤ 40 lines, exactly these sections
+## Output — ≤ 40 lines
+
+A structured-output schema in the call is the format. Without one, exactly these sections:
 
 ```text
 ## Scope

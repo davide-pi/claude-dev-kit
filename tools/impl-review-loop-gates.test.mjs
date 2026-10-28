@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, PASS, snapshot, run, ARGS, review, finding, DONE, MANY, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, decideRound, mergeReviews, classify, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
+import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, review, finding, DONE, MANY, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, decideRound, mergeReviews, classify, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
 
 // ── reviewer budget, fan-out by group of files, an agent that throws ─────────────────────────────────
 test('groupFiles: at most 8 per group, in order; a list within the limit is one group', () => {
@@ -39,6 +39,8 @@ test('reviewersFor: S one Sonnet at medium, M one Sonnet at high, L Sonnet and O
   assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
   assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
   assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
+  assert.deepEqual(reviewersFor('S', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
+  assert.deepEqual(reviewersFor('M', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
 });
 
 test('sizeFor: the triage size stands; data/money/concurrency/contract/security lift S to M, three axes besides logic lift to L, never downward', () => {
@@ -530,6 +532,13 @@ test('isNeverBlocking / classify: clean-code and convention never block, even a 
   assert.equal(classify(f('a', { category: 'convention', priority: 'P2' }), FILES), 'minor');
   assert.equal(classify(f('a', { category: 'convention', priority: 'P2', path: HELPER }), FILES, OTHER_CTX), 'outOfScope');   // not a widen either
   assert.equal(classify(f('a', { category: 'correctness', priority: 'P2' }), FILES), 'blocking');
+});
+
+test('classify: duplication the change adds blocks at P2, unlike the rest of clean code', () => {
+  assert.match(SOURCE, /const FINDING_IN = [\s\S]*?category: \{ type: 'string', enum: \[[^\]]*'duplication'/);   // a reviewer can emit it
+  assert.equal(isNeverBlocking(f('a', { category: 'duplication' })), false);
+  assert.equal(classify(f('a', { category: 'duplication', priority: 'P2' }), FILES), 'blocking');
+  assert.equal(classify(f('a', { category: 'duplication', priority: 'P3' }), FILES), 'minor');
 });
 
 test('classify: a P1/P2 outside the perimeter in a touched file, or caused by the change, is a widen; nothing else is', () => {

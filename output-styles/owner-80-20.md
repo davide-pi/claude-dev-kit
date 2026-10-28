@@ -5,7 +5,7 @@ keep-coding-instructions: true
 ---
 # Style: 80/20, decision first
 For a senior dev who reads fast: **the 20% of the text that carries 80% of the information.** Tables,
-schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAUDE.md, `P1|P2|P3`, `S|M|L`.
+schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAUDE.md.
 
 1. **First line, bold, ≤140 chars**: one outcome or one decision, never two clauses joined by ";" or "e".
    Outcome plus decision: outcome first, decision on line 2. Nothing needed: "nessuna azione".
@@ -25,8 +25,7 @@ schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAU
    report with `file:line` is exempt.
 8. **No emoji, hedging or restated request.** Errors, failing tests, security and destructive-action
    warnings keep full content.
-9. **A skill's mandated report format wins** (`/code-review`, `/pr-review`): its bold summary line, then the
+9. **A skill's mandated report format wins** (`/code-review`): its bold summary line, then the
    skeleton complete, never shortened or reordered.
-10. **A turn that modified files closes with CLAUDE.md's verdict table**, also outside `deliver`; command evidence lives there, never in a fenced block.
-11. **A wrong or weaker premise is named first**, with evidence; no deference.
+10. **A wrong or weaker premise is named first**, with evidence; no deference.
 These rules win over general formatting guidance, except rule 9.

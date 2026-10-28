@@ -31,6 +31,7 @@ house answer for a .NET service. This file decides what that table leaves open.
 | only announces a fact; others decide what to do | an event (publish), handlers idempotent |
 | starts long work and comes back later | a command message plus a completion event, never a long RPC timeout |
 | needs several services to change together | events with idempotent handlers and a compensating step; never a distributed transaction |
+| saves data and announces it | an outbox in the same transaction as the write, the solution's own if it has one (`rabbitmq`) |
 
 ## Shared code across services
 

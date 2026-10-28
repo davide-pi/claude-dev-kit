@@ -88,6 +88,8 @@ $LocalOnly = @('skills/my-voice', 'skills/.trash', 'skills/synced', 'workspaces.
 # them, and a plain install moves them to the run's backup folder after asking. Commands are not
 # listed: every live commands/<name>.md that a skill of the same name replaced is found by name.
 $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
+             'skills/fix-ci', 'skills/item', 'skills/workitem-create', 'skills/items-qa',
+             'skills/project-wiki-standard', 'skills/pr-review',
              'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
              'hooks/az-identity.js', 'scripts/sql-ro.ps1',
              'mods/cockpit/hooks/format.ts', 'mods/cockpit/tests/cockpit.test.tsx', 'mods/cockpit/tests/format.test.ts')

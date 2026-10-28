@@ -1,7 +1,7 @@
 # From a work item — tag every statement, then judge readiness
 
-Reading the item — description, criteria, attachments, discussion, parent, links — is `/item`'s
-job; this page starts from what it printed. Two rules decide everything here: every statement in
+Reading the item — description, criteria, attachments, discussion, parent, links — is the
+`azdo-cli` item read (`azdo-cli` `references/item-read.md`); this page starts from what it printed. Two rules decide everything here: every statement in
 the plan is **tagged**, and a **readiness verdict** comes before any task list.
 
 Markers stay verbatim in the Italian verdict: `[S]` `[D]` `[A]`, the verdict keywords,
@@ -41,7 +41,7 @@ that crosses services or the bus. Two touchpoints → two agents in parallel. An
 | 3 | Has children, or is a grouping item | **container** | work a child, or propose a split |
 | 4 | No criteria on a role that needs them, or criteria nobody can test without asking you | **not ready** | propose criteria, get them confirmed, re-verdict |
 | 5 | An unresolved blocking dependency, or an **A** on observable behaviour | **blocked** | questions first; no editor |
-| 6 | Several independent deliverables (split test below) | **needs splitting** | the split proposal → `/workitem-create` |
+| 6 | Several independent deliverables (split test below) | **needs splitting** | the split proposal → `user-story-standard` + `azdo-cli` |
 | 7 | 5+ files with a new interface, or a new module, integration or schema change | **needs a plan** | the plan file, sized by `plan-work` |
 | 8 | Otherwise | **implementable** | 3-task plan in chat, the domain skill, `evidence-by-stack.md` |
 
@@ -69,7 +69,7 @@ Split when **any** holds: two deliverables could ship on different days and each
 they land in different repositories or need different reviewers; the criteria fall into groups with
 no overlap; one part is blocked and the other is not. Size alone is **not** a reason: one coherent
 change across eight files is one item with a plan. The proposal — role, Italian title, one-line
-scope per item, and the parent — goes to `/workitem-create`; nothing here writes to the board.
+scope per item, and the parent — goes to `user-story-standard` (text) and `azdo-cli` (creation); nothing here writes to the board.
 
 ## 6. In the plan file
 

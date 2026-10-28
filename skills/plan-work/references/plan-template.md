@@ -7,6 +7,15 @@ The file itself is written in **English**, whatever language the conversation is
 reads it back as a technical artifact, next to the code. Only the chat around it — the proposal, the
 sizing question, the confirmation — is Italian (`plan-work`).
 
+## Creating the file
+
+```powershell
+$plans = New-Item -ItemType Directory -Force -Path (Join-Path (git rev-parse --show-toplevel) 'docs/plans')
+$exclude = Join-Path (git rev-parse --path-format=absolute --git-common-dir) 'info/exclude'; New-Item -ItemType Directory -Force (Split-Path $exclude) | Out-Null
+if (@(Get-Content $exclude -EA Ignore) -notcontains '/docs/plans/') { Add-Content $exclude "`n/docs/plans/" }   # never committed
+$file = Join-Path $plans ('{0}-{1}.md' -f (Get-Date -Format 'yyyy-MM-dd'), '<slug>')
+```
+
 ## Skeleton
 
 ```markdown

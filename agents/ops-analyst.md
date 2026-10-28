@@ -13,6 +13,7 @@ mcpServers:
   - grafana-prod:
       type: http
       url: http://localhost:8001/mcp
+omitClaudeMd: true
 maxTurns: 30
 ---
 
@@ -30,13 +31,15 @@ only here: its server is defined inline in this file and never reaches the main 
 | Field | Missing → |
 | --- | --- |
 | service (compose service, container, pod, unit, project) | resolve from the repo; one candidate → use it and say so; several → name them and stop |
-| environment (local, `stg`, `prod`, …) | local when a stack runs here, else ask |
+| environment (local, `stg`, `prod`, …) | local when a stack runs here, else name the candidates and stop |
 | filter (text or regex), `--errors` (`error\|fail\|exception\|fatal\|unhandled\|critical\|warn`) | no filter |
 | window `--since`, line cap `-n` | `15m`, `200` |
-| `--follow` | never unless asked; say how it stops, never end a turn on a running follow |
+| `--follow` | refused: a subagent cannot stream; run the bounded `--since` read and say so |
 
 ## Ground rules (hard)
 
+- **You cannot ask the user**: where a choice is needed, name the candidates and stop; the caller asks.
+- **No source found**: list what was checked and stop; never start the app to produce logs.
 - **Read-only**: no `up`, `down`, `restart`, `rm`, `kubectl delete|rollout|scale`, no log rotation or
   truncation, no Grafana create, update or delete tool (dashboards, alerts, annotations, incidents).
 - **Narrow first**: labels, then a short window, then a line filter; widen the window before
@@ -75,7 +78,6 @@ sum by (service_name) (count_over_time({deployment_environment="<env>"} |= "Exce
 | --- | --- |
 | everyone or one instance, since when | Prometheus: request rate, error rate, latency histogram, process CPU and memory |
 | where CPU or allocations go | Pyroscope profiles over the bad window |
-| one request across services | the trace id from a log line, then Tempo where the datasource exists |
 | a dump, a trace, counters on a host | not here: an operator action on that host, requested by the caller |
 
 ## Output — ≤ 50 lines, exactly these sections

@@ -12,11 +12,6 @@ textbook definition, never a refactor outside the scope · explanation in Italia
 
 ## When
 
-- Two shapes compete: extract or inline, share or duplicate, interface or concrete class, a
-  pattern or plain code.
-- New code needs an owner: which service, project, layer or module.
-- A review finding trades one principle against another ("duplicated" against "coupled").
-
 Not for: a stack's idioms (`dotnet-backend`, `ef-core`, `angular`, `react`), the procedure of a
 change (`deliver`), attacking a whole design (`grill-me`).
 
@@ -42,7 +37,7 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | a cleaner shape against the module's idiom | the idiom (2) | the scope is changing that idiom |
 | a boundary already violated in the touched module | leave it, one `Noticed` row | the task is to fix it |
 | the same logic in two services | duplicate (3) | it is a contract both must agree on → the shared contract package |
-| the same logic twice in one module | leave it; extract at the third copy | the copies already diverged into a bug |
+| the same logic twice in one module | leave it; extract at the third copy | the copies already diverged into a bug, or the change adds both → one shape now |
 | an interface with one implementation | the concrete class | the stack skill names it as the test seam, or the scope adds a second one |
 | a pattern against plain code | plain code (4) | the force is present today, not foreseen (`references/design.md`) |
 | a new layer, project or library against a folder | the folder | a second deployable, or a dependency that must not leak |
@@ -53,17 +48,9 @@ sits above the whole ladder: a rung that wants an edit outside the scope gets a 
 | The question is about | Read |
 | --- | --- |
 | which service, project or layer owns it; dependency direction; sync against async | `references/architecture.md` |
-| coupling, cohesion, an abstraction, inheritance, a named pattern | `references/design.md` |
+| coupling, cohesion, an abstraction, inheritance, a named pattern, testability | `references/design.md` |
+| where a business rule or invariant lives, an entity's shape, a consistency boundary | `references/domain.md` |
 | a name, a function's size, duplication, a comment, a parameter list, defensive code | `references/clean-code.md` |
-
-### Severity, when it is a review finding
-
-| Breaks rung | Priority |
-| --- | --- |
-| 1 | the reviewer's own scale: contract or production → P1, else P2 |
-| 3, a crossing the change creates | P2 |
-| 3, a crossing that was already there | not a finding on this change |
-| 4 or 5 | P3, unless it hides a defect |
 
 ### Output
 
@@ -72,15 +59,10 @@ without the concrete cost it saves in this code.
 
 ## Do
 
-The "already exists?" rung comes before any new abstraction:
+"Already exists?" comes before any new abstraction:
 
-```powershell
-# An existing helper before writing one: search by the noun and the verb of the intent
-Get-ChildItem -Recurse -Include *.cs, *.ts | Select-String -Pattern '<Noun>.*<Verb>|<Verb>.*<Noun>' -List |
-  Select-Object Path, LineNumber, Line
-# Dependency direction: which projects already reference the one you are about to depend on
-Get-ChildItem -Recurse -Filter *.csproj | Select-String 'ProjectReference Include=".*<Project>\.csproj'
-```
+- An existing helper: Grep `<Noun>.*<Verb>|<Verb>.*<Noun>` in `*.cs` and `*.ts`.
+- Dependency direction: Grep `ProjectReference Include=".*<Project>\.csproj` in `*.csproj`.
 
 ## Traps
 
@@ -97,5 +79,8 @@ Get-ChildItem -Recurse -Filter *.csproj | Select-String 'ProjectReference Includ
 
 - `references/architecture.md` — ownership of new code, dependency direction, service boundaries,
   sync against async, shared libraries.
-- `references/design.md` — abstractions, composition, the force that justifies each common pattern.
+- `references/design.md` — abstractions, composition, the force that justifies each common pattern,
+  coupling signals, testable shape.
+- `references/domain.md` — invariants, rich against anemic entities, aggregates and consistency
+  boundaries.
 - `references/clean-code.md` — tie-breaks at function and name level, the review checklist's grey zones.

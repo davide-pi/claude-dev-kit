@@ -47,7 +47,7 @@ Both platforms: **squash** (one commit per PR, linear history) and **delete the 
 after the merge. This is not a preference to weigh per PR — it is the only strategy used here, and a
 merge commit or a surviving branch is a mistake to fix, not an outcome to report. If a repository
 policy forbids squash, **stop and say so**; do not quietly merge some other way. Both gates apply
-on both platforms: pipeline green, and the PR reviewed — `/pr-review` (AI) plus the owner's own
+on both platforms: pipeline green, and the PR reviewed — `/code-review <pr>` (AI) plus the owner's own
 read. There is no second human reviewer: a human approval is required only where the repository's
 branch policy demands one.
 

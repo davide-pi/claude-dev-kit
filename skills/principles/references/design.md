@@ -32,6 +32,16 @@ another provider") is not a force: the owner states it, or it does not count.
 | Template method | — | composition: pass the varying step as a delegate or strategy |
 | Singleton by hand | — | a singleton DI lifetime |
 | Specification | the same filter composed in several queries | a named query method |
+| Command + handler | a request needs to be queued, retried, logged or authorised as one unit | a method on the owning service |
+| Pipeline / middleware | a cross-cutting step (auth, validation, logging, transaction) around every handler of one kind | the host's middleware or the bus's own hook, never a call repeated per handler |
+| Null object | the same "nothing to do" branch repeated at every call site of one dependency | one null check where the value enters |
+| Anti-corruption layer | a foreign model (vendor, legacy service) whose names and rules differ from yours | the Adapter row, when only the calls differ and the model is yours |
+| Outbox | a database write and a message publish must both happen or neither | none: publishing in the same flow without one loses or invents events (`rabbitmq`) |
+| Saga / process manager | several services change in steps, each with a compensation | one owner doing the work in one transaction, when the data allows it (`rabbitmq`) |
+
+A present force with no shape is a finding too, inside the room rung 2 leaves: the change grows a
+`switch` past the Strategy or State machine threshold above where the neighbours do not use that
+`switch` shape, or copies the same construction decision a third time.
 
 ## Cohesion signals
 
@@ -41,3 +51,21 @@ another provider") is not a force: the owner states it, or it does not count.
 | a method that changes for two unrelated reasons | split along the reasons |
 | a change that always edits the same three files together | they belong closer: one module or one type |
 | a "Manager", "Helper" or "Utils" growing with each feature | name the real responsibility; move each part to its owner |
+
+## Coupling signals
+
+| Signal | Move, inside the scope only |
+| --- | --- |
+| a chain through other objects' parts (`order.Customer.Address.City`) to decide something | ask the nearest owner for the answer; a read-only projection or DTO is exempt |
+| methods that work only when called in a set order (`Init` before `Run`) | make the order impossible to get wrong: the constructor, or one method that does both |
+| two units reading and writing the same mutable state (a static, a shared cache, a singleton field) | one owner of the state; the others ask it |
+| a caller that branches on another type's internal state or type check | move the decision into that type |
+| a change to one type's fields that forces edits in unrelated callers | the callers depend on a shape they should not see: narrow what the type exposes |
+
+## Testable shape
+
+| Tension | Winner | Unless |
+| --- | --- | --- |
+| a rule computed inside the method that does the I/O | the rule as a pure function, the I/O around it: the test needs no mock | the rule is one line and the neighbours keep it inline (rung 2) |
+| the clock, a random value or a GUID read inside the logic | passed in, or an injected provider the stack skill names | — |
+| a mock to reach the code under test | a smaller unit with a pure input and output | the code under test is the I/O itself: an integration test |

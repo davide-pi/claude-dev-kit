@@ -46,6 +46,25 @@ declare each queue in exactly one place.
 
 A replay from an error queue is a deliberate duplicate: idempotency is what makes it safe.
 
+## A database write plus a publish — the outbox
+
+The broker and the database never share a transaction, so either order of "save, then publish" fails:
+
+| Order | Failure |
+| --- | --- |
+| publish, then commit | the commit fails or rolls back; subscribers act on a change that never happened |
+| commit, then publish | the process dies or the broker is down between the two; the event is gone, nobody knows |
+
+| Step | Rule |
+| --- | --- |
+| write | the event goes into an outbox table in the **same transaction** as the state change |
+| relay | a background worker reads unsent rows in order, publishes with confirms, marks them sent |
+| delivery | at least once: the relay can publish a row twice, so subscribers stay idempotent (above) |
+| cleanup | sent rows deleted or archived on a schedule; an unsent row older than minutes is an alert |
+
+The solution already has an outbox (a table, a library feature) → use it (rung 2); never a second
+mechanism. An RPC call that only reads needs none; neither does a publish with no database write.
+
 ## Failure handling that terminates
 
 | Cause | Action |

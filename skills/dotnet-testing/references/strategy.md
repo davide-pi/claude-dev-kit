@@ -59,7 +59,7 @@ Then stop. A second test on path 1 beats a first test on path 9, and no percenta
 | Do these units compose? | unit with a substitute at the boundary only | milliseconds |
 | Does the query, mapping or transaction work? | integration against a real engine | seconds |
 | Does the request reach the right code and come back right? | integration through the in-memory host | seconds |
-| Does the user's flow work? | manual, or the `items-qa` browser pass | minutes |
+| Does the user's flow work? | manual, or a browser pass | minutes |
 
 There is no browser-automation layer in these workspaces, and this skill does not invent one.
 

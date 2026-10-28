@@ -17,9 +17,6 @@ Arguments: `$ARGUMENTS`
 
 ## When
 
-- `/commit`, "fai il commit", "committa", or any `git commit` you are about to run: the current changes,
-  ready to record. Load this first, so the message is the Italian one generated from the diff.
-
 Not for: naming or creating a branch for new work, worktrees, finishing a branch (`branch-flow`);
 pushing or opening a PR (`pr-create`); deciding whether the change is done (the evidence row below).
 
@@ -56,9 +53,9 @@ in the report.
 
 ### Evidence
 
-The change type's evidence line (`skills/plan-work/references/evidence-by-stack.md`) seen in this
-session → quote it in the report. Not seen → commit anyway, and the report says
-`non verificato: <motivo>`, the checking command in the verdict table's Comando cell. This skill does not build or test.
+The change type's evidence line (`plan-work`'s `evidence-by-stack.md`) seen in this session → quote it
+in the report; not seen → commit anyway, `non verificato` as `CLAUDE.md` § Done means verified says.
+This skill does not build or test.
 
 ## Do
 

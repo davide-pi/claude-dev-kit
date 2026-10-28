@@ -76,7 +76,7 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 ```text
 ### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
-- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | scope
+- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
 - risk: alto | medio | basso        (todo only)

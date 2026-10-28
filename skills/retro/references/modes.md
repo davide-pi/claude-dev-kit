@@ -36,6 +36,21 @@ Runs only when the owner asks, or when the focus argument is `monthly`; never on
 | Step | Source | Fix |
 | --- | --- | --- |
 | Asset usage | the owner's `/skill-doctor` and `/doctor prompt-audit` output, pasted in the arguments (slash commands, a fork cannot run them) | never-invoked or over-budget descriptions → `skill-forge` |
-| Automatic warnings | `~/.claude/.cache/done-claim.log`, the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
+| Reference usage | `node ~/.claude/scripts/kit-usage.mjs --days 30`: `references.neverOpened` | a reference never opened → a proposal to delete or merge it via `skill-forge`, never on its own |
+| Automatic warnings | the same report's `doneClaim` (rule → count), the worklog reminder, the statusline badge: for each, the false-positive rate (fired, then the user ignored or contradicted it) | a noisy one → a proposal to fix or remove it; the hooks themselves stay untouched here |
+| Hook crashes | the same report's `hookErrors` (hook → count, last message; from `hook-errors.log`) | a guard that crashes is silent: a backlog item to fix that hook |
 
 Report line 5: `Salute: <outcome, one line per step>`.
+
+## `findings` — implementer rules from the deliver log
+
+Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`):
+no transcript needed. Read `$(git rev-parse --git-dir)/deliver/findings.jsonl` of the cwd (you derive the
+path; one JSON line per run, `{ "retro": … }` lines mark a settled retro): the lines after the last marker,
+grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
+(`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count,
+files); a line a check could enforce is a backlog item, as in the fix table.
+
+- Report line 1 reads `Log: <path> · righe dopo l'ultimo retro: N`.
+- Report line 6, for the caller: the owner approves, then the caller appends the marker with
+  `Add-Content -Path "$(git rev-parse --git-dir)/deliver/findings.jsonl" -Value '{"retro":"<date>"}'`.

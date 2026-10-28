@@ -1,7 +1,7 @@
 # Asset rules — why the kit looks the way it does
 
 The enforced contract (folder, front matter, skeleton, caps, phrasing) has one normative copy: the
-`skill-forge` skill, § 2, summarised by `rules/kit-assets.md`. This page holds the reasons behind it,
+`skill-forge` skill, § 2 (`rules/kit-assets.md` keeps only the facts needed on every edit). This page holds the reasons behind it,
 so a change to the contract starts from the problem the rule solves.
 
 ## The problem

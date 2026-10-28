@@ -31,7 +31,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 ## Args
 
 `Workflow` with `name: impl-review-loop` and
-`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, risk, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview }`
+`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview }`
 
 | Arg | Rule |
 | --- | --- |
@@ -41,14 +41,15 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
 | `size` | `S`, `M` or `L` from the triage (panel: `SKILL.md` step 2). The file count never changes it: past 8 changed files reviewer A splits into one per group of 8, and more files than the size implies (S: 2+, M: 7+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
 | `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes besides `logic` → L. An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
-| `implementerEffort` | `high` only when the brief asks; default `medium` |
-| `implementerModel` | `haiku` for mechanical batches (moves, splits, renames, label updates) the tests fully cover; default: the agent's own model |
+| `mechanical` | `true` for an S batch with no judgment in it (rename, move, split, config, generated, label updates) the tests fully cover: implementer on `haiku` at `low`, reviewer at `low`. Needs `size: 'S'` (a missing size is M) and never goes with `inline`; a risk axis that lifts the size drops it |
+| `implementerEffort` | `high` only when the brief asks; default `medium` (`low` with `mechanical`) |
+| `implementerModel` | only to override; default: the agent's own model (`haiku` with `mechanical`) |
 | `cleanup` | `true` only when the owner asks for the P3 cleanup pass (M, L); default: the P3s go to the closing table |
 
 Who reads which round, the final full read and the cleanup pass: `references/loop-extras.md`.
 
-**Size S**: edit inline, then launch with `inline: true, changed: [the files you edited]`. No implementer runs
-first; a finding is fixed by `implementer` inside the loop. S has no final full read, no cleanup pass, no preview
+**Size S**: above ~120k of context (`edit-nudge` says so) launch without `inline` and the implementer makes it; else edit inline, then launch with `inline: true, changed: [the files you edited]`; a mechanical batch is never
+edited inline: launch with `mechanical: true` and the implementer makes it. Inline, no implementer runs first; a finding is fixed by `implementer` inside the loop. S has no final full read, no cleanup pass, no preview
 stop, no proof check.
 
 ## Verify pre-check
@@ -62,7 +63,7 @@ red (the bug scenario's repro test) is fine: note it. A fixer meeting an environ
 A run has a large fixed cost whatever its size: launch once per coherent request. One implementer works through the plan tasks in order, testing after each; the
 reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
 for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
-The implementer aims at 30 turns and stops itself at 50 tool calls, reporting what's left; a fresh one continues from its edits with a
+The implementer stops itself at its turn budget (its agent definition), reporting what's left; a fresh one continues from its edits with a
 clean context, up to four times (`stall.why: incomplete` after that: split the plan). It runs only the tests the change touches while it
 works, and `verify` once at the end.
 

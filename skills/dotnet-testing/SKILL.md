@@ -13,15 +13,10 @@ a second framework, never a coverage target · the recommendation in Italian, te
 
 ## When
 
-- A change is about to be written and the test question is open: what, at which level, first or after.
-- A reproduced bug needs locking in; legacy code with no tests has to change.
-- A first test project is needed, or a suite is flaky, hangs, or is too slow for anyone to run.
-
 Not for: diagnosing the product's behaviour (`debug-systematic`), Angular or React harnesses
 (`angular`, `react`), what the code under test should do (the owning stack skill).
 
-House test facts (sibling style, determinism, the handler seam, real engine for SQL, failing test
-first for a bug) are in `rules/csharp-tests.md`, loaded with any test file.
+House facts: rule `csharp-tests` (the handler seam, a real engine for SQL, a failing test first for a bug).
 
 ## Decide
 
@@ -37,10 +32,7 @@ there, follow what they already use.
 | The change | Answer | Detail |
 | --- | --- | --- |
 | a rule touching money, odds, settlement, permissions or data loss | yes, **first** — open the project if none exists | `references/strategy.md` |
-| a reproduced bug | yes, first: the failing test is the repro | `references/strategy.md` |
 | legacy code about to change, behaviour not fully understood | a characterization test first, committed alone | `references/untested-legacy.md` |
-| an RPC responder or subscriber | the handler method directly — it is the seam | `references/untested-legacy.md` |
-| a query or raw SQL | a real engine in a container | `references/untested-legacy.md` |
 | wiring, a pass-through, generated code, a spike | no — verify the house way and say so | `references/strategy.md` |
 
 ### Substitute or hand-written fake
@@ -49,9 +41,7 @@ there, follow what they already use.
 | --- | --- |
 | one or two calls, and you assert they happened (an outgoing RPC request, a published event) | substitute |
 | a query surface used across many tests, or the test stores then reads back | fake — dictionary-backed |
-| the setup block is longer than the assertion | fake |
 | a type you own and can simply construct | neither — the real thing |
-| a `DbContext` | neither — a real database |
 | mocking three levels deep to reach one value | the design is wrong, not the test |
 
 Two doubles is normal; four means the class orchestrates too much — split it and test the piece that
@@ -59,18 +49,13 @@ holds the logic.
 
 ## Do
 
-```powershell
-# What the repository already uses — copy it, never invent beside it
-Get-ChildItem -Recurse -Filter *.csproj |
-  Select-String 'xunit|NUnit|MSTest|NSubstitute|Moq|FluentAssertions|Shouldly|Testcontainers' |
-  Select-Object -ExpandProperty Line -Unique
+What the repository already uses — copy it, never invent beside it: Grep
+`xunit|NUnit|MSTest|NSubstitute|Moq|FluentAssertions|Shouldly|Testcontainers` in `*.csproj`.
 
+```powershell
 dotnet test --filter "FullyQualifiedName~<Class>"   # one class, or one test by full name
 dotnet test --blame-hang-timeout 2m                 # names the test that never returns
 dotnet test --logger "trx;LogFileName=results.trx"  # a file to read, not a wall of console
-
-# Prove a new test can fail: before the fix (expect failed), after (expect passed)
-dotnet test --filter "FullyQualifiedName~<NewTest>"
 
 # No tests in this tree: the house verification, stated in the change description
 dotnet build <solution>   # then the app-host profile with the service (docker-dev-env), /health, the path

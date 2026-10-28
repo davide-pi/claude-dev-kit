@@ -14,16 +14,12 @@ never `database update` on a shared database · Italian prose, SQL and tool outp
 
 ## When
 
-- Adding or changing an entity, relationship, key, constraint, converter or `DbContext`.
-- A query is slow, returns the wrong rows, or throws on translation.
-- Adding, removing, scripting or applying a migration; design-time commands failing.
-
 Not for: plans, indexes, deadlocks and the Postgres read cache, which has no EF model (`sql-server`,
 `db-analyst`); test setup against a real database (`dotnet-testing`).
 
-Migration facts (no hand edits, idempotent script before any update, rename not drop-then-add, fix
-forward once shared) are in `rules/ef-migrations.md`. The procedure that owns them:
-`references/migrations.md` — follow it step by step, including the stop that shows the SQL.
+House facts: rule `ef-migrations`. The procedure: `references/migrations.md` — follow it step by
+step, including the stop that shows the SQL. Several `DbContext`s: `--context` on every command, each
+with its own Migrations folder.
 
 ## Decide
 
@@ -52,20 +48,6 @@ forward once shared) are in `rules/ef-migrations.md`. The procedure that owns th
 | a part EF cannot translate | project the translatable part, compute the rest in memory **deliberately** | rely on a silent fallback |
 
 Lazy loading stays off: it turns property access into invisible N+1.
-
-### Migration decision tree
-
-```text
-applied anywhere shared (a colleague's DB, an environment)?
-  no  -> dotnet ef migrations remove, fix the model, add it again
-  yes -> a new corrective migration on top
-the Up() drops a column and adds a similar one?
-  -> EF read a rename as drop + add: replace it with a rename in Up() and Down() before it is applied
-target is shared or production?
-  -> no `database update`: the idempotent script goes to the pipeline as `migration.sql`
-several DbContexts?
-  -> --context on every command; each context has its own Migrations folder
-```
 
 ## Do
 

@@ -47,7 +47,7 @@ az pipelines runs show --id <run-id> -o jsonc
 | `--branch`, `--tags`, `--requested-for`, `--top` | the remaining filters |
 
 `--result failed` combined with `--top` is the whole of "what is red right now" and is the first
-command `/fix-ci` should run.
+command to run on a red CI run, then read the failing step's log.
 
 ## Queueing a run
 

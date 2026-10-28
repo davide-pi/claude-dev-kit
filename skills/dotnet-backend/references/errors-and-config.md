@@ -124,3 +124,12 @@ and caches keep it.
   that may contain any of those, or a whole entity because it was convenient.
 - A caught-and-handled expected outcome is information or debug, not error. Reserve error for "a human
   should look at this", or alerting becomes noise nobody reads. See `dotnet-diagnostics`, `logging.md`.
+
+## Failure on the RPC bus: exception or data
+
+| The failure is | Model it as |
+| --- | --- |
+| a business outcome the RPC caller branches on (refused, not found, not allowed) | **data**: the response's outcome fields (`IsSuccess`, an error status) |
+| a bug or an impossible state | an exception, logged with context, never swallowed into a success |
+| a transient dependency failure (timeout, deadlock, broker blip) | an exception, retried by Polly, only around idempotent work |
+| invalid input at an HTTP edge | a 400 with field-level problem details, validated once at the edge |

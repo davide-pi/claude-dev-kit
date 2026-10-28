@@ -94,3 +94,8 @@ minutes per attempt and pollutes the history.
    (a network call), it belongs in production code with a bounded policy, not in the test.
 3. `Skip` on a flaky test is a decision with a cost: link it to a work item or delete the test.
 4. The fix is proven by the same loop that measured the rate, at the same count.
+
+## Quick routes
+
+- Inside the browser: the devtools (console, network, trace, heap); come back with the failing request or stack.
+- Fails only in CI: the failing step's log first (`azdo-cli` pipelines, `gh run view --log-failed`), then the environment diff: locale, time zone, path case, a missing service.

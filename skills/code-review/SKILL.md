@@ -1,33 +1,36 @@
 ---
 name: code-review
 description: >-
-  Use when the working diff, a branch or a commit range needs a local review reported in chat:
-  /code-review [scope] [effort] [focus]. Never posts.
+  Use when a diff, branch, commit range or PR needs review: /code-review [scope|pr] [effort] [focus];
+  posts PR questions only when typed.
 argument-hint: "[scope] [effort] [focus]"
 ---
 
-# code-review — a local change reviewed by subagents, reported in chat
+# code-review — a change or PR reviewed by subagents, reported in chat
 
-**Contract.** Findings, completeness and the Da fare / Già fatti tables in chat · never posts, edits,
-stages, commits or builds · report in Italian; `file:line`, field values and code verbatim.
+**Contract.** Findings, completeness and the Da fare / Già fatti tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in Italian; `file:line`, field values and code verbatim.
 
 Arguments: `$ARGUMENTS`
 
 ## When
 
-- `/code-review`, or "rivedi le modifiche" on uncommitted work, a branch or a range.
-- Before a PR, when the change touches a contract, data or auth (`/code-review high`).
+- `/code-review`, or "rivedi le modifiche" on uncommitted work, a branch or a range; before a PR that
+  touches a contract, data or auth (`/code-review high`).
+- `/code-review <pr-id|url>`, or "rivedi la PR": PR mode.
 
-Not for: a PR on Azure DevOps or GitHub, with posted questions (`pr-review`); quality-only cleanup
-across the change (`/simplify`); fixing what a review found (a normal edit, after the user's ok).
+Not for: quality-only cleanup across the change (`/simplify`); fixing what a review found (a normal edit, after the user's ok).
 
 ## Decide
+
+| Posting gate | Rule |
+| --- | --- |
+| PR mode writes on the PR (thread, reply, resolve) **only** when the owner typed `/code-review <pr-id\|url>` this turn | reached any other way (model-invoked, "rivedi la PR") → the questions go to chat and the owner's ok comes first |
 
 ### Argument grammar — order free, every part optional
 
 | Part | Values | Absent → |
 | --- | --- | --- |
-| scope | `<branch>` → `git fetch origin <branch>`, diff `origin/<branch>...HEAD` · `HEAD~<n>`, `<sha>`, `<sha>..<sha>` → that range · paths → the diff restricted to them, or the files as they stand (say so) | `git diff HEAD` + `--staged`; both empty → `git show HEAD`, said |
+| scope | `<branch>` → `git fetch origin <branch>`, diff `origin/<branch>...HEAD` · `HEAD~<n>`, `<sha>`, `<sha>..<sha>` → that range · paths → the diff restricted to them, or the files as they stand (say so) · a PR id or URL → **PR mode**: read it via `gh`/`azdo-cli`, same fan-out, post only genuine tagged questions (`references/pr-mode.md`) | `git diff HEAD` + `--staged`; both empty → `git show HEAD`, said |
 | effort | `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
 | focus | `security` · `performance` · `completeness` · any axis | none |
 
@@ -40,38 +43,27 @@ across the change (`/simplify`); fixing what a review found (a normal edit, afte
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 
-Every Agent call (A, B, the specialists) passes the requested effort as its `effort` parameter, never only in
-the brief text.
-
-"advanced" / "agent `<model>`" from the user: the model table in
-`skills/pr-review/references/report-format.md`. The brief, built **once** and passed to A (and B, from `xhigh`)
-unchanged: diff file path, base, intent (acceptance criteria verbatim), effort, which specialists
-run beside it, previous findings, "you may be one of two reviewers on different models: do not
-soften for agreement" (only when B runs), and the output contract in one line: Finding blocks in your Output format, Italian
-prose, anchors on working-tree lines, one defect per block. Never review inline unless no subagent can be spawned — then say so; a
-missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
+Every Agent call passes the requested effort as its `effort` parameter, never only in the brief text.
+"advanced" / "agent `<model>`" from the user: the model table in `references/report-format.md`. The brief
+is built **once** and passed to A (and B, from `xhigh`) unchanged; its contents are in
+`references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
+a missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
 `/review-large`, never launch it unasked.
 
 ### Intent — before spawning
 
-What the user asked in this conversation → the branch's `git log <base>..HEAD` → the linked work
-item or PR with its acceptance criteria. Still unclear → ask the user for one line; completeness
-cannot be judged without it.
+The user's request → the branch's `git log <base>..HEAD` → the linked work item or PR with its
+acceptance criteria. Still unclear → ask for one line; completeness cannot be judged without it.
 
 ### Merge
 
-| Case | Result |
-| --- | --- |
-| A and B (from `xhigh`) report the same defect at the same anchor | one finding, `CONFIRMED`, first within its priority |
-| only A or only B | kept; `PLAUSIBLE` unless it quotes the evidence that settles it |
-| a specialist and a reviewer at the same anchor, same defect | keep one: the more specific category, the higher verdict |
-| same line, different failures | keep both |
-| already fixed in this session | `status: done`, `Risolto da: sessione` |
+Same defect at the same anchor from A and B → `CONFIRMED`; one model only → `PLAUSIBLE`; a fixed one →
+`status: done`, `Risolto da: sessione`: the full rules in `references/effort-and-fanout.md` § Merging.
 
 ### Report
 
 One merged report in Italian, in exactly this skeleton (fields and column meanings:
-`skills/pr-review/references/report-format.md`). The host's output style or CLAUDE.md never overrides it:
+`references/report-format.md`):
 
 ```text
 Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
@@ -115,6 +107,13 @@ and stop.
    one brief.
 2. Compiler or linter errors reported as findings → CI owns them → no build, no test run.
 3. Findings invented to fill the report → "nulla da segnalare, verificato: …" is a valid result.
-4. Summary table first → it scrolls away → tables are the last block.
-5. At `xhigh`+ the pair returns identical findings in identical words → both ran on one model, or one read the
+4. At `xhigh`+ the pair returns identical findings in identical words → both ran on one model, or one read the
    other's output → separate spawns in one message, different `model`.
+
+## References
+
+- `references/pr-mode.md` — scope is a PR: golden rules, platform table, triage, steps.
+- `references/effort-and-fanout.md` — the package every agent gets, effort depth, merging, tags.
+- `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
+- `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
+- `references/report-format.md` — report fields, column meanings, the model table.

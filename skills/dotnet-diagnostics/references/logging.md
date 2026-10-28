@@ -108,3 +108,13 @@ Logging is not free: it allocates, it serializes, and at high volume it dominate
 observability bill. Guard an expensive message with a level check so its arguments are not evaluated
 when the level is off, keep Debug out of production, and sample high-frequency Information events
 rather than dropping the level for everything.
+
+## Level meanings
+
+| Level | Means |
+| --- | --- |
+| Debug / Trace | developer detail, off in production |
+| Information | a business event happened: a bet placed, a settlement done, a message consumed |
+| Warning | degraded but handled: a retry fired, a fallback used, input rejected |
+| Error | a human should look: a unit of work failed unhandled |
+| Critical | the process or a dependency is unusable |

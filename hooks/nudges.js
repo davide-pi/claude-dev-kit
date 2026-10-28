@@ -1,8 +1,9 @@
 /**
- * UserPromptSubmit + PostToolUse hook: one node process for the nudges and the formatter.
+ * PostToolUse hook (and UserPromptSubmit, when the opt-in context nudge is wired): one node process for the
+ * nudges and the formatter.
  *
- * `context-nudge.js` (UserPromptSubmit), `edit-nudge.js` (PostToolUse on Write|Edit|MultiEdit, and the
- * per-turn counter reset on UserPromptSubmit), `scope-guard.js` (PostToolUse on Edit|Write|MultiEdit) and
+ * `context-nudge.js` (UserPromptSubmit), `edit-nudge.js` (PostToolUse on Write|Edit|MultiEdit),
+ * `scope-guard.js` (PostToolUse on Edit|Write|MultiEdit) and
  * `format-on-edit.js` (PostToolUse on Write|Edit|MultiEdit; it formats the file and prints nothing) would
  * each cost a node start per event. This entry point reads the payload once, hands it to the hooks that belong
  * to the event and prints one `additionalContext` with their lines joined. They keep their own logic and
@@ -22,7 +23,7 @@ const path = require('path');
 global.__nudgesDispatch = true;
 
 const NUDGES = {
-  UserPromptSubmit: ['context-nudge.js', 'edit-nudge.js'],
+  UserPromptSubmit: ['context-nudge.js'],
   PostToolUse: ['edit-nudge.js', 'scope-guard.js', 'format-on-edit.js'],
 };
 

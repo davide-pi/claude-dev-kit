@@ -77,7 +77,7 @@ Only when the invocation asked for it (`commenta`) and the input was a work item
 1. Show the exact comment text — the summary sentence, the components table, the approximation,
    compreso / NON compreso — and wait for an explicit "ok".
 2. Post it with the CLI (`az boards work-item update --org $org --id <id> --discussion "<html>"`),
-   prefixed `[Claude AI Review - stima]` (the `pr-review` tag shape with a scope).
+   prefixed `[Claude AI Review - stima]` (the `code-review` tag shape with a scope).
 3. Read the discussion back (`azdo-cli` `boards-catalogue.md`) and confirm it landed.
 
 Never write a field: no `OriginalEstimate`, no `Effort`, no tag, no state change.

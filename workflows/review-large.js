@@ -61,7 +61,7 @@ const FINDING = {
     side: { type: 'string', enum: ['right', 'left'] },
     category: {
       type: 'string',
-      enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'scope'],
+      enum: ['correctness', 'regression', 'security', 'completeness', 'concurrency', 'performance', 'api-contract', 'convention', 'clean-code', 'duplication', 'scope'],
     },
     verdict: { type: 'string', enum: ['CONFIRMED', 'PLAUSIBLE'] },
     status: { type: 'string', enum: ['todo', 'done'] },
@@ -178,7 +178,7 @@ const rawTable = () => [
   `Lacune: ${workers.filter(w => w.status === 'BLOCKED').map(w => `${w.reviewer} ${(w.files ?? []).join(', ')}`).join('; ') || 'nessuna'}`,
 ].join('\n')
 
-// Mandatory report skeleton: byte-identical to the one in skills/pr-review/references/report-format.md
+// Mandatory report skeleton: byte-identical to the one in skills/code-review/references/report-format.md
 // (tools/validate.mjs compares them). Inline because the merger does not read the kit.
 const SKELETON = `Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
 Verdetto at most one short question.

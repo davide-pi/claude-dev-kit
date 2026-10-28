@@ -32,11 +32,15 @@ test('no subagent_type is denied', () => {
   assert.match(d.permissionDecisionReason, /Name the agent type/);
 });
 
-test('general-purpose, claude and Plan without a model are denied', () => {
-  for (const subagent_type of ['general-purpose', 'claude', 'Plan']) {
-    const d = decision(spawn({ subagent_type, prompt: 'x' }));
-    assert.equal(d.permissionDecision, 'deny');
-    assert.match(d.permissionDecisionReason, /pass model/);
+test('Plan without a model is denied', () => {
+  const d = decision(spawn({ subagent_type: 'Plan', prompt: 'x' }));
+  assert.equal(d.permissionDecision, 'deny');
+  assert.match(d.permissionDecisionReason, /Plan needs a model/);
+});
+
+test('general-purpose and claude without a model pass in silence: CLAUDE_CODE_SUBAGENT_MODEL covers them', () => {
+  for (const subagent_type of ['general-purpose', 'claude']) {
+    assert.equal(spawn({ subagent_type, prompt: 'x' }), '');
   }
 });
 

@@ -1,5 +1,5 @@
 /**
- * PostToolUse (Write|Edit|MultiEdit) + UserPromptSubmit hook: one line into the turn when the main session
+ * PostToolUse (Write|Edit|MultiEdit) hook: one line into the turn when the main session
  * is hand-writing code that should be delegated.
  *
  * The standing rule is "code beyond a few lines, scope decided -> `implementer`; this session briefs
@@ -8,11 +8,14 @@
  * decided and the rest is the implementer's job. Only a nudge — a deliberate multi-file edit by the
  * user's own request goes on untouched.
  *
- * Two events, one script, told apart by `hook_event_name`:
- *
- *   - PostToolUse counts the edit in `<config>/.cache/edits-<session_id>.json`; on the third it prints
- *     the line as `additionalContext`, and never again that turn (the count only grows);
- *   - UserPromptSubmit deletes that file: a new user turn starts from zero.
+ * Each edit is counted in `<config>/.cache/edits-<session_id>.json`, with the uuid of the prompt it belongs
+ * to and the byte offset the session transcript (`transcript_path`) was read up to; on the third the line goes
+ * out as `additionalContext`, and never again that turn (the count only grows). The turn is told from the
+ * transcript: only what was appended since that offset is scanned, and when the last human prompt in it is not
+ * the counter's, a new turn started and the count restarts. No node per prompt, and a turn interrupted with Esc
+ * (no Stop) cannot leak its count into the next. No transcript, or one that cannot be read, keeps the count: the
+ * nudge comes early, never late. A message queued while the turn runs is a user entry in the transcript only if
+ * the harness writes it as one; if it does, it restarts the count mid-turn and the nudge comes late.
  *
  * Main session only. An edit made by a subagent (the implementer itself, doc-keeper) is exactly the
  * delegation this hook wants, so it is never counted. The harness marks a hook fired inside a subagent
@@ -24,6 +27,10 @@
  * `<tmp>/claude/…`) is not code to delegate: a report or a diff written there is never counted.
  *
  * A doc or data file (.md, .json, .yml, .toml, .csv, .env, …) is not code to delegate either: it is never counted.
+ *
+ * Once per main session, when the context is at `LARGE_CONTEXT` or more (lib/context-size.js; never inside a subagent,
+ * `agent_type` set), one more line says the next small change goes to `implementer` and a /clear follows the task;
+ * the line is remembered in `<config>/.cache/large-<session_id>.json`.
  *
  * Counter files are pruned after a few days whenever the nudge fires, so one file per session never
  * accumulates for good. Always exits 0; any error is silence.
@@ -38,11 +45,13 @@ const os = require('os');
 const path = require('path');
 
 const { CACHE_DIR, prune } = require('./lib/cache');
+const { lastPromptSince } = require('./lib/session-turn');
+const { contextTokens, LARGE_CONTEXT } = require('./lib/context-size');
 
 const THRESHOLD = 3;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
-const COUNTER_FILE = /^edits-[\w-]+\.json$/;
+const COUNTER_FILE = /^(?:edits|large)-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
 
 /** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
@@ -64,12 +73,22 @@ function isScratch(file, cwd) {
 /** True for a doc or data file by extension: editing one is not code written by hand. */
 const isDocOrData = (file) => typeof file === 'string' && /\.(?:mdx?|txt|jsonc?|ya?ml|toml|ini|csv|xml|env)$/i.test(file);
 
-function readCount(file) {
+/** `{ count, prompt, offset }` from the counter file; a missing or unreadable file is a count of 0. */
+function readCounter(file) {
   try {
-    const { count } = JSON.parse(fs.readFileSync(file, 'utf8'));
-    return Number.isFinite(count) ? count : 0;
+    const { count, prompt, offset } = JSON.parse(fs.readFileSync(file, 'utf8'));
+    return { count: Number.isFinite(count) ? count : 0, prompt: prompt ?? null, offset: Number.isInteger(offset) ? offset : null };
   } catch {
-    return 0;
+    return { count: 0, prompt: null, offset: null };
+  }
+}
+
+/** `{ prompt, offset }` read from the session transcript past the counter's offset; no transcript or unreadable: nothing new. */
+function readPrompt(transcript, offset) {
+  try {
+    return typeof transcript === 'string' && transcript ? lastPromptSince(transcript, offset) : { prompt: null, offset: null };
+  } catch {
+    return { prompt: null, offset: null };
   }
 }
 
@@ -79,29 +98,39 @@ function run(payload) {
   if (typeof id !== 'string' || !/^[\w-]{1,128}$/.test(id)) return null;
   const file = path.join(CACHE_DIR, `edits-${id}.json`);
 
-  if (payload.hook_event_name === 'UserPromptSubmit') {
-    fs.rmSync(file, { force: true });
-    return null;
-  }
   if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) return null;
   if (payload.agent_id || SUBAGENT_TRANSCRIPT.test(payload.transcript_path ?? '')) return null;
   if (isScratch(payload.tool_input?.file_path, payload.cwd)) return null;
   if (isDocOrData(payload.tool_input?.file_path)) return null;
 
-  const count = readCount(file) + 1;
+  const counter = readCounter(file);
+  const seen = readPrompt(payload.transcript_path, counter.offset);
+  const count = (seen.prompt !== null && seen.prompt !== counter.prompt ? 0 : counter.count) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });
-  fs.writeFileSync(file, JSON.stringify({ count }));
-  if (count !== THRESHOLD) return null;
+  fs.writeFileSync(file, JSON.stringify({ count, prompt: seen.prompt ?? counter.prompt, offset: seen.offset ?? counter.offset }));
+  const lines = [];
+  if (count === THRESHOLD) {
+    lines.push('Third edit this turn: if the scope is decided, delegate to `implementer` and review its diff '
+      + 'instead of writing the code here.');
+  }
+  if (largeContextOnce(payload, id)) {
+    lines.push(`Context ≥ ${Math.round(LARGE_CONTEXT / 1000)}k: the next S change goes to \`implementer\` (clean context), not inline; after this task, /clear.`);
+  }
+  if (!lines.length) return null;
 
   prune(COUNTER_FILE);
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
-      additionalContext:
-        `Third edit this turn: if the scope is decided, delegate to \`implementer\` and review its diff `
-        + 'instead of writing the code here.',
-    },
-  };
+  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } };
+}
+
+/** True the first time this main session is seen at `LARGE_CONTEXT` or more; recorded in `large-<session>.json`. */
+function largeContextOnce(payload, id) {
+  if (payload.agent_type) return false;
+  const tokens = contextTokens(id);
+  if (tokens === null || tokens < LARGE_CONTEXT) return false;
+  const file = path.join(CACHE_DIR, `large-${id}.json`);
+  if (fs.existsSync(file)) return false;
+  fs.writeFileSync(file, JSON.stringify({ at: Date.now() }));
+  return true;
 }
 
 module.exports = { run };

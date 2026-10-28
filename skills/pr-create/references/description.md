@@ -111,6 +111,12 @@ states it; the default is below), and nothing after it:
 It goes on the PR body only — never in the title, never in a commit message
 unless the commit convention already asks for a co-author trailer.
 
+## No parent item
+
+Ask once, answerable with one pick: numbered options from the likely candidates — an `AB#` in the
+branch or commits, recent items assigned to the owner (`az boards query`, `@Me`, changed lately, never
+a Task) — plus "create one" (`user-story-standard` text, then `azdo-cli` after the owner's ok).
+
 ## Draft PRs
 
 Say in the body what the draft is still waiting for.

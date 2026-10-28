@@ -369,6 +369,24 @@ test('script: implementerModel sends model on the implementer and the fixer; abs
   }
 });
 
+test('script: mechanical at size S runs the implementer on haiku at low and the reviewer at low; a risk floor above S or an explicit model wins', async () => {
+  const reviews = () => [review([], [finding()]), review(closedIds('F1'))];
+  const mech = await run({ ...ARGS, size: 'S', mechanical: true }, reviews());
+  for (const label of ['implement the change', 'fix round 1 findings']) {
+    const opts = mech.calls.find(c => c.opts.label === label).opts;
+    assert.deepEqual([opts.model, opts.effort], ['haiku', 'low'], label);
+  }
+  const reviewer = mech.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1'));
+  assert.equal(reviewer.opts.effort, 'low');
+  assert.match(reviewer.prompt, /declared MECHANICAL/);
+  const lifted = await run({ ...ARGS, size: 'S', mechanical: true, risk: ['data'] }, reviews());
+  const impl = lifted.calls.find(c => c.opts.label === 'implement the change').opts;
+  assert.deepEqual(['model' in impl, impl.effort], [false, 'medium']);
+  assert.doesNotMatch(lifted.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1')).prompt, /declared MECHANICAL/);
+  const pinned = await run({ ...ARGS, size: 'S', mechanical: true, implementerModel: 'sonnet' }, reviews());
+  assert.equal(pinned.calls.find(c => c.opts.label === 'implement the change').opts.model, 'sonnet');
+});
+
 test('script: without cleanup: true the P3s stay in minor and no cleanup pass runs', async () => {
   const { out, calls } = await run(ARGS, [review([], [nit(1), nit(2)])]);
   assert.equal(out.status, 'OK');

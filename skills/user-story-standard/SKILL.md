@@ -12,12 +12,8 @@ never writes to the board, never fills a gap with an assumption · item text and
 
 ## When
 
-- A User Story, PBI, Bug, Impediment or TECH item is written, reworded, split or reviewed.
-- Acceptance criteria are written or reviewed, new or already on the board.
-- The user describes a feature, a malfunction or something to analyse, without naming an item.
-
-Not for: putting items on the board (`workitem-create`), which type fills a role (`azdo-cli`),
-testing a built item (`items-qa`).
+Not for: putting items on the board (`azdo-cli`, after the owner confirms the item table), which type
+fills a role (`azdo-cli`).
 
 ## Decide
 
@@ -39,9 +35,6 @@ what each must not contain, worked examples: `references/item-formats.md`.
 
 | Rule | Detail |
 | --- | --- |
-| User Story = three lines | title plus `Come / voglio / così da`; no criteria, notes or alternatives in the body |
-| Bug is problem-oriented | `Comportamento attuale`, `Comportamento atteso`; never "Come utente" |
-| Impediment and TECH | one free Description, no criteria offered |
 | Criteria never ship with the story | story first, delivered; criteria in a later message, after a yes |
 | Criteria format | section title `Criteri di accettazione`; `Dato che / Quando / E / Allora` (never Given/When/Then); labelled `AC01…` or `Scenario N`, never bullets or `1.` |
 | Clean block | nothing before or after the pasted criteria block; a note goes in the chat message |
@@ -56,7 +49,6 @@ names, resolved type names and CSV headers stay English.
 - What looks like one story often holds several: propose the split **before** any criteria.
 - The reviewer's removal of a family of criteria is final: never re-flag it, never re-insert it.
 - An uncovered pertinent family gets **one** note in chat, on the first proposal only.
-- Impediment and TECH end on a confirmation request, offering nothing more.
 
 ### 4. Platform coverage — a project datum
 
@@ -67,13 +59,13 @@ identical: `references/acceptance-criteria.md`.
 
 ## Do
 
-1. Classify (§1); unclear → ask.
-2. Write title and body in the role's shape (`references/item-formats.md`), plain functional Italian.
-3. Deliver and stop: Story or Bug → ask whether to write the criteria; Impediment or TECH → ask
-   for confirmation.
-4. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four
+1. Classify (§1); unclear → ask. Write title and body in the role's shape (`references/item-formats.md`), plain functional Italian.
+2. Deliver and stop: Story or Bug → ask whether to write the criteria; Impediment or TECH → ask
+   for confirmation, offering nothing more.
+3. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four
    coverage families as the grid, per-platform labels where behaviour differs.
-5. Hand it over paste-ready; the board is `workitem-create`'s job. A bulk file only on a genuine
+4. Hand it over paste-ready; creation is `azdo-cli`, after the owner confirms the item table,
+   assigned to the owner and read back after create. A bulk file only on a genuine
    request (`references/csv-import.md`).
 
 ```powershell
@@ -84,11 +76,8 @@ Set-Clipboard -Value (Get-Content .\item-body.txt -Raw)    # paste-ready handove
 
 1. An Impediment gets criteria → it read like a bug → it states what was observed, what does not
    add up and the question; a criterion presumes an expected behaviour nobody agreed.
-2. A TECH gets the Impediment structure → "no criteria" was read as "same shape" → a TECH is what
-   has to be done and why.
-3. Desktop and mobile share one generic criterion → the platform datum was never set → ask once per
+2. Desktop and mobile share one generic criterion → the platform datum was never set → ask once per
    project, then label per platform inside the same item.
-4. A criteria set grows past what was agreed → an "obvious" gap was filled → it is a question.
 
 ## References
 

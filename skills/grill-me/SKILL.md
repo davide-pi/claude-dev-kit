@@ -13,10 +13,6 @@ builds nothing, acts on nothing before the summary is confirmed · Italian; code
 
 ## When
 
-- The user asks for scrutiny, not execution: `/grill-me`, "grill me", "fammi le pulci", "poke holes", "red-team",
-  "attack this design", "devil's advocate".
-- A design is on the table and the question is whether it holds.
-
 Not for: designing the solution yourself, writing the plan (`plan-work`), a bug (`debug-systematic`).
 
 ## Decide
@@ -43,13 +39,9 @@ A recommendation answers one question; it is never a redesign of the plan.
 | Field | Content |
 | --- | --- |
 | `header` | `D<n> <topic>`, ≤ 12 characters — the number survives into the summary |
-| `question` | the full question, ending in `?`, with the context needed to decide |
 | `options` | 2–4 real alternatives; the recommended one **first**, label ending `(Consigliata)`, `description` = the reason in one line; the others' trade-offs in theirs |
-| `multiSelect` | `true` only when the choices genuinely combine |
-| `preview` | only to compare concrete artefacts: code shapes, layouts, configs |
 
-Up to 4 questions per call; a bigger frontier is several calls in the same round. The tool adds a
-free-text "Other" by itself. An open question (a number, a name) still gets 2–4 plausible values.
+Up to 4 questions per call; a bigger frontier is several calls in the same round. An open question (a number, a name) still gets 2–4 plausible values.
 Phrase each question so the recommended option is the affirmative one. Tool unavailable → numbered
 questions in chat, recommended answer first, so "sì" accepts it.
 
