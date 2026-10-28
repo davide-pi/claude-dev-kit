@@ -25,7 +25,7 @@ Not for: a single README edit (a normal edit); creating a docs tree from nothing
 
 | Part | Values | Absent → |
 | --- | --- | --- |
-| scope | `<branch>` → `git fetch origin <branch>`, diff `origin/<branch>...HEAD` · `HEAD~<n>`, `<sha>..<sha>` · paths (a docs or source area) | `git diff HEAD` + `--staged`; both empty → the last commit, said |
+| scope | a branch or a range, as in `/code-review` (`skills/code-review/SKILL.md` § Argument grammar) · paths (a docs or source area) | `git diff HEAD` + `--staged`; both empty → the last commit, said |
 | tree | `tech` (`docs/`, `docs/tech*`, `architecture/`, `adr/`) · `wiki` (a `wiki/` folder, or the repo is a cloned project wiki) | whichever exists; both → ask |
 | `--audit` | walk the whole tree or the given paths against the source | change-scoped |
 

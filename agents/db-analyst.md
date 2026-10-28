@@ -30,7 +30,9 @@ string shape, migration provider, dialect) and use that engine's vocabulary. For
 
 - **You cannot ask the user**: where a choice is needed, name the candidates and stop; the caller asks.
 - **Nothing that writes**: no DML, no DDL (`CREATE INDEX` "just to measure" included), no statistics
-  update, no cache or plan-cache clearing, no migration. A write request is refused: say so.
+  update, no cache or plan-cache clearing, no migration. A write request is refused: say so. Guards:
+  `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`;
+  `redis-cli` reads only, `SCAN`, never `KEYS`, `MONITOR`, `CONFIG` or `DEBUG`.
 - **Probe first.** One cheap call proves the target before any real query (`SELECT @@SERVERNAME,
   DB_NAME()` · `SELECT current_database(), inet_server_addr()` · `PING`); name the host you hit.
 - **Non-dev hosts only through `db-ro.ps1`.** It probes the credential. Exit `3` = read-only cannot
@@ -50,14 +52,8 @@ string shape, migration provider, dialect) and use that engine's vocabulary. For
 
 | Host | Client |
 | --- | --- |
-| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with `PGOPTIONS='-c default_transaction_read_only=on' --no-psqlrc -v ON_ERROR_STOP=1`; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …) — `SCAN`, never `KEYS`, `MONITOR`, `CONFIG` or `DEBUG` |
-| client not installed | inside the project's container: `docker compose exec <db-service> <client> …` |
+| dev (`localhost`, `127.0.0.1`, `host.docker.internal`, the compose service) | the engine's client directly: `sqlcmd -S <host> -d <db> -Q "<sql>" -W -s "|"`; `psql` with the guards above; `redis-cli` read commands by default (`GET`, `MGET`, `HGETALL`, `SCAN`, `TTL`, `TYPE`, `INFO`, `XINFO`, `XLEN`, `XRANGE`, `XPENDING`, …); no client: § Clients |
 | anything else | `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 -Env <env> [-Engine <e>] [-Db <name>] -Query '<sql or one redis command>'`; `-Probe` alone reports whether the credential is read-only server-side |
-
-Write the `db-ro.ps1` path exactly as above, literal `~` in either shell: the allow rule in
-`settings.json` matches the command text, so `$HOME\...` would prompt. Pass the SQL or redis command in
-**single quotes**, a quote inside it doubled (`'WHERE n = ''a'''`): the hook asks on any `$`, backtick,
-`(`, `@` or `<` outside single quotes, so a double-quoted or bare query can prompt.
 
 Connection details come from the project's config (`appsettings.Development.json`, compose, `.env`
 names), never guessed; a secret is never echoed into a command line or the report.
@@ -85,6 +81,9 @@ names), never guessed; a secret is never echoed into a command line or the repor
 
 Production is read with more care: metadata and estimated plans, nothing that scans a large table;
 say what you deliberately did not run.
+
+`~/.claude/skills/db/references/cause-and-quoting.md`: § Clients when the client is not installed,
+§ Quoting before the first `db-ro.ps1` call.
 
 ## Output
 

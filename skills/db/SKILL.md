@@ -66,3 +66,7 @@ the client per host is your agent's Method table.
 1. `0 righe` on a guessed table or column → the name was wrong, not the data → describe first.
 2. A dev connection string pointing at a shared server → it is non-dev → `db-ro.ps1`, or stop.
 3. A row count from `sys.partitions` read as exact → it is an estimate → say so, or `COUNT(*)`.
+
+## References
+
+- `references/cause-and-quoting.md` — the `db-analyst` agent names the § it needs (clients when the client is not installed, quoting); not opened from here.

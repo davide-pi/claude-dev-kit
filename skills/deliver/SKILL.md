@@ -97,3 +97,4 @@ The verdict and the closing table of everything outside the perimeter: `referenc
 - `references/stall.md` — a run returns `STALL`, or a test is red after `OK`.
 - `references/scenarios.md` — before the loop: the section of the chosen scenario only.
 - `references/perf-baseline.md` — scenario `perf`, or any claim of "faster".
+- `references/implementer-craft.md` — the `implementer` agent names the § it needs; not opened from here.
