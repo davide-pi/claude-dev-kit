@@ -102,15 +102,38 @@ export function checkBudget({ ROOT, warn, read, has, allFiles, frontMatter }) {
   const blank = (t) => t.replace(/[^\n]/g, ' ');
   const blanked = (rel) => canonical.reduce((text, c) => text.split(c).join(blank(c)), read(rel).replace(/\r\n/g, '\n'))
     .replace(/^```(?!text|markdown|md)\w[^\n]*\n[\s\S]*?^```[ \t]*$/gm, blank);
-  const first = new Map();          // shingle → [file, line]
+  // A copy costs only where both files can sit in one context: the main session's set (CLAUDE.md, output
+  // style, rules, skills, references) pairs freely; an agent pairs with no other agent, with CLAUDE.md and
+  // rules unless it sets `omitClaudeMd`, and with a skill only when that skill forks into it or it loads it.
+  const agentOf = (f) => f.match(/^agents\/([\w.-]+)\.md$/)?.[1];
+  const agents = new Map();         // agent → { omit, skills }
+  for (const rel of assets.filter(agentOf)) {
+    const body = read(rel);
+    agents.set(agentOf(rel), { omit: frontMatter(rel)?.omitClaudeMd === 'true', skills: new Set([...body.matchAll(/`([\w-]+)` skill/g)].map((m) => m[1])) });
+  }
+  for (const rel of assets.filter((f) => /^skills\/[\w-]+\/SKILL\.md$/.test(f))) {
+    const forkInto = frontMatter(rel)?.agent;
+    if (agents.has(forkInto)) agents.get(forkInto).skills.add(rel.split('/')[1]);
+  }
+  const together = (a, b) => {
+    const [agent, other] = agentOf(a) ? [agentOf(a), b] : [agentOf(b), a];
+    if (!agent) return true;
+    if (agentOf(other)) return false;
+    if (other === 'CLAUDE.md' || other.startsWith('rules/')) return !agents.get(agent).omit;
+    if (other.startsWith('skills/')) return agents.get(agent).skills.has(other.split('/')[1]);
+    return false;                   // output style: main session only
+  };
+  const seenAt = new Map();         // shingle → [[file, line], …]
   for (const rel of assets) {
     const words = tokens(blanked(rel));
     const runs = new Map();         // other file → [{ start, end, line, otherLine }]
     for (let i = 0; i + SHINGLE <= words.length; i++) {
       const key = words.slice(i, i + SHINGLE).map(([w]) => w).join(' ');
-      const seen = first.get(key);
-      if (!seen) { first.set(key, [rel, words[i][1]]); continue; }
-      if (seen[0] === rel) continue;
+      const places = seenAt.get(key) ?? [];
+      if (!places.length) seenAt.set(key, places);
+      if (places[places.length - 1]?.[0] !== rel) places.push([rel, words[i][1]]);
+      const seen = places.find(([file]) => file !== rel && together(rel, file));
+      if (!seen) continue;
       const list = runs.get(seen[0]) ?? [];
       const last = list[list.length - 1];
       if (last && last.end === i - 1) last.end = i;

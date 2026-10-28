@@ -170,3 +170,21 @@ test('a 12-word passage shared by two assets warns; 11 words or a byte-identical
   assert.equal(exempt.code, 0, exempt.out);
   assert.doesNotMatch(exempt.out, /shares a \d+-word passage/);
 });
+
+test('duplicates count only between files that can share a context', () => {
+  const twelve = 'the cache key carries the tenant id so two tenants never share one entry';
+  const agent = (name, extra = '', body = '') => `---\nname: ${name}\ndescription: >-\n  Use when a fixture needs the ${name} agent to return a short answer for the caller.\ntools: Read\nmodel: sonnet\n${extra}---\n\n# ${name}\n\n**Contract.** An answer · never edits · English.\n\n${body}\n\n## Output\n\nOne line.\n`;
+  const rule = `---\npaths: "**/*.cs"\n---\n# r\n\n- ${twelve}.\n`;
+  const shared = /shares a \d+-word passage/;
+  const [A, B] = ['a', 'b'].map((n) => ['agents', `${n}.md`].join('/'));
+  const agents = run((write) => { write(A, agent('a', '', `${twelve}.`)); write(B, agent('b', '', `${twelve}.`)); });
+  assert.doesNotMatch(agents.out, shared, 'two agents never share a context');
+  const skill = run((write, read) => { write(SKILL, `${read(SKILL)}\n${twelve}.\n`); write(A, agent('a', '', `${twelve}.`)); });
+  assert.doesNotMatch(skill.out, shared, 'an agent and a main-session skill do not share a context');
+  const loaded = run((write, read) => { write(SKILL, `${read(SKILL)}\n${twelve}.\n`); write(A, agent('a', '', `Load the \`demo\` skill when needed. ${twelve}.`)); });
+  assert.match(loaded.out, /agents\/a\.md:\d+: shares a \d+-word passage with skills\/demo\/SKILL\.md/, 'a skill the agent loads shares its context');
+  const withRule = run((write) => { write('rules/r.md', rule); write(A, agent('a', '', `${twelve}.`)); });
+  assert.match(withRule.out, /agents\/a\.md:\d+: shares a \d+-word passage with rules\/r\.md/);
+  const omitted = run((write) => { write('rules/r.md', rule); write(A, agent('a', 'omitClaudeMd: true\n', `${twelve}.`)); });
+  assert.doesNotMatch(omitted.out, shared, 'omitClaudeMd keeps CLAUDE.md and rules out of the agent');
+});
