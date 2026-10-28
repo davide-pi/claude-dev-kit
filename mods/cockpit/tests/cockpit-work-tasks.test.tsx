@@ -31,7 +31,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   await clock.advance(15_000 * 8) // 2m00s: the tick moves `now`
 
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 2\/4◐ 1 {2}○ 1 {2}✓ 2$/)
+  expect(rows[i]).toMatch(/^TASK · 2\/4󱎖 1 {2}󰄰 1 {2}󰄬 2$/)
   expect(rows[i - 1]).toBe(' ')
   // the tasks belong to the main agent's block
   expect(rows[i - 2]).toBe('IN PROGRESS')
@@ -40,9 +40,9 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   expect(rows[i + 1]).toBe(' ')
   expect(rows[i + 2]).toMatch(/^[▰▱]{48}$/)
   // in progress first, with its elapsed time; then pending; then the completed row
-  expect(rows[i + 3]).toMatch(/^◐ Working on it +2m00s$/)
-  expect(rows[i + 4]).toMatch(/^○ Pending one +$/)
-  expect(rows[i + 5]).toBe('✓ 2 done')
+  expect(rows[i + 3]).toMatch(/^󱎖 Working on it +2m00s$/)
+  expect(rows[i + 4]).toMatch(/^󰄰 Pending one +$/)
+  expect(rows[i + 5]).toBe('󰄬 2 done')
 })
 
 test('the bar splits its width by done, in progress and the rest', async ($, on) => {
@@ -84,9 +84,9 @@ test('the task list comes from the task tools: create, start, complete, delete',
   await clock.advance(3000)
 
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 1\/2◐ 1 {2}○ 0 {2}✓ 1$/)
-  expect(rows[i + 3]).toMatch(/^◐ First +/)
-  expect(rows[i + 4]).toBe('✓ 1 done')
+  expect(rows[i]).toMatch(/^TASK · 1\/2󱎖 1 {2}󰄰 0 {2}󰄬 1$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 First +/)
+  expect(rows[i + 4]).toBe('󰄬 1 done')
   expect(flagOf(writes)).toMatchObject({ tasks: { done: 1, total: 2 } })
 })
 
@@ -98,8 +98,8 @@ test('TodoWrite replaces its own items and leaves the task-tool items', async ($
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Old todo', 'pending')] })
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('New todo', 'pending'), todo('Other todo', 'pending')] })
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 0\/3◐/)
-  expect(rows.filter(r => /^○ /.test(r)).map(r => r.trim())).toEqual(['○ From a tool', '○ New todo', '○ Other todo'])
+  expect(rows[i]).toMatch(/^TASK · 0\/3󱎖/)
+  expect(rows.filter(r => /^󰄰 /.test(r)).map(r => r.trim())).toEqual(['󰄰 From a tool', '󰄰 New todo', '󰄰 Other todo'])
 })
 
 test('the task list is shared: a subagent TaskCreate/TaskUpdate counts, its TodoWrite does not', async ($, on) => {
@@ -111,8 +111,8 @@ test('the task list is shared: a subagent TaskCreate/TaskUpdate counts, its Todo
   await createTask($, 'by a subagent', 'a1')
   await $.tool.call({ tool: 'TaskUpdate', taskId: '1', status: 'in_progress', agentId: 'a1' })
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 0\/1◐ 1 {2}○ 0 {2}✓ 0$/)
-  expect(rows[i + 3]).toMatch(/^◐ by a subagent/)
+  expect(rows[i]).toMatch(/^TASK · 0\/1󱎖 1 {2}󰄰 0 {2}󰄬 0$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 by a subagent/)
 })
 
 test('an update of a task the mod never saw adds it; a delete of one it never saw adds nothing', async ($, on) => {
@@ -125,8 +125,8 @@ test('an update of a task the mod never saw adds it; a delete of one it never sa
   await $.tool.call({ tool: 'TaskUpdate', taskId: '8', status: 'completed' })
   await $.tool.call({ tool: 'TaskUpdate', taskId: '9', subject: 'no status: not a task state' })
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 1\/2◐ 1 {2}○ 0 {2}✓ 1$/)
-  expect(rows[i + 3]).toMatch(/^◐ Resumed work/)
+  expect(rows[i]).toMatch(/^TASK · 1\/2󱎖 1 {2}󰄰 0 {2}󰄬 1$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 Resumed work/)
 })
 
 test('the section is omitted with no tasks, and the state file says tasks:null', async ($, on) => {
@@ -147,9 +147,9 @@ test('long subjects are cut with … and more than 6 open tasks end in … +N', 
   for (let n = 1; n <= 7; n++) todos.push(todo(`Pending ${n}`, 'pending'))
   await $.tool.call({ tool: 'TodoWrite', todos })
   const { rows, i } = await taskRows($, 40)
-  expect(rows[i + 3]).toMatch(/^◐ A very long subject.*… +0s$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 A very long subject.*… +0s$/)
   expect([...(rows[i + 3] ?? '')].length).toBe(38)
-  expect(rows.slice(i + 3, i + 9).filter(r => /^[◐○]/.test(r)).length).toBe(6)
+  expect(rows.slice(i + 3, i + 9).filter(r => /^[󱎖󰄰]/u.test(r)).length).toBe(6)
   expect(rows[i + 9]).toBe('… +2')
 })
 
@@ -195,7 +195,7 @@ test('the other tabs draw the current sections: Agents the agents, Work tasks an
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
 
   const agents = (await paneRows($, 50, 'agents')).rows
-  expect(agents.some(r => /^◐ code-reviewer/.test(r))).toBe(true)
+  expect(agents.some(r => /^󱎖 code-reviewer/.test(r))).toBe(true)
   expect(agents.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 
   const work = (await paneRows($, 50, 'work')).rows

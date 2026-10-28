@@ -24,11 +24,11 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     }
     // collapsed: the agent is exactly one row, as wide as the pane: the name cut with …, the model, effort, share and time in fixed columns
     const collapsed = await body()
-    const row = collapsed.filter(r => /^◐ a-co/.test(r))
+    const row = collapsed.filter(r => /^󱎖 a-co/.test(r))
     expect(row).toHaveLength(1)
     expect(textCells(row[0] ?? '')).toBe(width)
-    expect(row[0]).toMatch(/^◐ a-co[^ ]*… +son 5\.5(?: +\S+)? +2m00s$/)
-    expect(collapsed.some(r => /Review the orders|last tool|⚠/.test(r))).toBe(false)
+    expect(row[0]).toMatch(/^󱎖 a-co[^ ]*… +son 5\.5(?: +\S+)? +2m00s$/)
+    expect(collapsed.some(r => /Review the orders|last tool|󰀦/.test(r))).toBe(false)
 
     // expanded: every row of the block is one line, none wider than the pane
     await ui.press({ key: 'agent:a1' })
@@ -36,8 +36,8 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     expect(expanded.length).toBeGreaterThan(collapsed.length + 2)
     for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
     expect(expanded.find(r => /^ +Review the orders/.test(r))).toMatch(/…$/)
-    expect(expanded.filter(r => !/^◐ a-co/.test(r)).some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
-    expect(expanded.some(r => /^ +⚠ asked fable/.test(r))).toBe(true)
+    expect(expanded.filter(r => !/^󱎖 a-co/.test(r)).some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
+    expect(expanded.some(r => /^ +󰀦 asked fable/.test(r))).toBe(true)
     expect(expanded.some(r => /^ +last tool Grep$/.test(r))).toBe(true)
 
     // every pressable row of the tab is one truncating Text
@@ -75,7 +75,7 @@ test('Subagents: the history rows are one row each, the name cut by display widt
   const ui = await mountPane($, 40)
   await ui.press({ key: 'tab:agents' })
   const rows = rowTexts(await ui.drawn())
-  for (const re of [/^✓ a-re/, /^✓ 日本/]) {
+  for (const re of [/^󰄬 a-re/, /^󰄬 日本/]) {
     const row = rows.find(r => re.test(r)) ?? ''
     expect(textCells(row)).toBe(38)
     expect(row).toMatch(/…/)
@@ -91,7 +91,7 @@ test('Subagents: every agent of the session is listed, no cap and no … +n, at 
   for (let n = 1; n <= 15; n++) await spawnAgent($, `ag${n}`)
   for (const columns of [40, 58, 80]) {
     const { rows } = await paneRows($, columns, 'agents')
-    for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`◐ ag${n} `))]).toEqual([n, true])
+    for (let n = 1; n <= 15; n++) expect([n, rows.some(r => r.startsWith(`󱎖 ag${n} `))]).toEqual([n, true])
     expect(rows.some(r => /^… \+\d+$/.test(r))).toBe(false)
   }
 })

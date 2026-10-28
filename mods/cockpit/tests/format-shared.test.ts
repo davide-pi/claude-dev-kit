@@ -185,10 +185,10 @@ test('cacheColor: green from 80 %, amber from 50 to 79, red below 50', () => {
 })
 
 test('withBackground: the first cells of a row on a background, a span cut where the cells end', () => {
-  const row: Span[] = [{ t: '■ ', c: 'x' }, { t: 'abcdef', dim: true }]
-  expect(withBackground(row, 5, '#111')).toEqual([{ t: '■ ', c: 'x', bg: '#111' }, { t: 'abc', dim: true, bg: '#111' }, { t: 'def', dim: true }])
+  const row: Span[] = [{ t: '󰓛 ', c: 'x' }, { t: 'abcdef', dim: true }]
+  expect(withBackground(row, 5, '#111')).toEqual([{ t: '󰓛 ', c: 'x', bg: '#111' }, { t: 'abc', dim: true, bg: '#111' }, { t: 'def', dim: true }])
   expect(withBackground(row, 0, '#111')).toEqual(row)
-  expect(withBackground(row, 8, '#111')).toEqual([{ t: '■ ', c: 'x', bg: '#111' }, { t: 'abcdef', dim: true, bg: '#111' }])
+  expect(withBackground(row, 8, '#111')).toEqual([{ t: '󰓛 ', c: 'x', bg: '#111' }, { t: 'abcdef', dim: true, bg: '#111' }])
   expect(withBackground(row, 99, '#111').every(span => span.bg === '#111')).toBe(true)
 })
 

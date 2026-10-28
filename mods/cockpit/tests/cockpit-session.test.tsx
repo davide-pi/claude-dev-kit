@@ -553,7 +553,7 @@ test('last known: a resumed session shows the context of its last state with a d
   const ui = await mountPane($, 50)
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^~60% 600K\/1M/)).toBe('~60% 600K/1M')
-  expect(rowTexts(await ui.drawn()).some(r => /^⚠/.test(r))).toBe(false)
+  expect(rowTexts(await ui.drawn()).some(r => /^󰀦/.test(r))).toBe(false)
   await measureWith($, 61)
   await settleAll()
   expect(await text(/^ 61% 610K\/1M/)).toBe(' 61% 610K/1M')

@@ -108,9 +108,9 @@ const HISTORY_ROWS_SHOWN = 5
 const AGENT_COST_ROWS_SHOWN = 3
 /** Cells a note row keeps for its three icon buttons (`[ x ]` each and the gaps), so the text never runs under them. */
 const NOTE_ICONS_W = 19
-/** The note buttons' Nerd Font Material Design glyphs (one cell each in a Nerd Font Mono). */
 /** Cells the field loses to the gaps around the Enter label and the cursor cell at a line's end: a row too many beats a hidden last line. */
 const NOTE_FIELD_MARGIN = 3
+/** The note buttons' Nerd Font Material Design glyphs (one cell each in a Nerd Font Mono). */
 const NOTE_ICONS = { edit: '\u{F03EB}', cancel: '\u{F0156}', send: '\u{F048A}', delete: '\u{F0A79}', save: '\u{F0193}' }
 
 /** The note field's height: one row per line of `text` wrapped at `cells`, at least 1, so the whole text stays visible. */
@@ -131,7 +131,7 @@ function workflowBlock(k: Kit): Block {
   return [gap(), line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))]
 }
 
-/** The first `shown` rows, then a button that opens the rest (`▸ +K`) and folds them again (`▾ −K`); no button when every row fits. */
+/** The first `shown` rows, then a button that opens the rest (`󰍟 +K`) and folds them again (`󰍝 −K`); no button when every row fits. */
 function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {
   const { Button, Text } = k.ui
   const hidden = rows.length - shown
@@ -162,7 +162,7 @@ export function agentsBlocks(k: Kit): Block[] {
         <Text wrap="truncate">{spanNodes(ui, agentRow(agent, depth, s.now, width, sessionTotal))}</Text>
       </Button>,
       isOpen && [
-        warn !== undefined && line(ui, [sp(`${indent}⚠ ${warn}`, COLORS.yellow)]),
+        warn !== undefined && line(ui, [sp(`${indent}󰀦 ${warn}`, COLORS.yellow)]),
         ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
         gap(),
       ],
@@ -249,7 +249,7 @@ export function signalsBlocks(k: Kit): Block[] {
         // The time it arrived on the right; open, the row holds what fits of the title and the rest goes under it
         const at = s.signalsAt?.[id]
         const time = at === undefined ? [] : [dim(clockTime(at))]
-        const [head, rest] = isOpen ? splitCells(`▾ ${text.what}`, width - spanWidth(time) - 1) : [`▸ ${text.what}`, '']
+        const [head, rest] = isOpen ? splitCells(`󰍝 ${text.what}`, width - spanWidth(time) - 1) : [`󰍟 ${text.what}`, '']
         return [
           <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
             <Text wrap="truncate">{spanNodes(ui, pairRow([yellow(head)], time, width))}</Text>
@@ -361,15 +361,15 @@ export function workBlocks(k: Kit): Block[] {
       ? []
       : [
           gap(),
-          title(`${S.taskTitle} · ${counts.done}/${counts.total}`, [sp(`◐ ${counts.inProgress}`, COLORS.blue), sp('  '), dim(`○ ${counts.pending}`), sp('  '), sp(`✓ ${counts.done}`, COLORS.green)]),
+          title(`${S.taskTitle} · ${counts.done}/${counts.total}`, [sp(`󱎖 ${counts.inProgress}`, COLORS.blue), sp('  '), dim(`󰄰 ${counts.pending}`), sp('  '), sp(`󰄬 ${counts.done}`, COLORS.green)]),
           gap(),
           line(ui, taskBarCells(width, counts.done, counts.inProgress, counts.total)),
           open.slice(0, MAX_TASK_ROWS).map(task => line(ui, taskRow(task, s.now, width))),
           open.length > MAX_TASK_ROWS && line(ui, [dim(`… +${open.length - MAX_TASK_ROWS}`)]),
-          counts.done > 0 && line(ui, [sp('✓', COLORS.green), dim(S.tasksDone(counts.done))]),
+          counts.done > 0 && line(ui, [sp('󰄬', COLORS.green), dim(S.tasksDone(counts.done))]),
         ]
   const wlRows = [...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []), ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : [])]
-  const worklogPart: Block = wlRows.length > 0 ? [gap(), wlRows.map(text => line(ui, [sp('● ', COLORS.yellow), sp(text, COLORS.yellow)]))] : []
+  const worklogPart: Block = wlRows.length > 0 ? [gap(), wlRows.map(text => line(ui, [sp('󰧞 ', COLORS.yellow), sp(text, COLORS.yellow)]))] : []
 
   // The deliver perimeter: its entries, the files touched since HEAD and the ones outside it (none claimed when git could not say)
   const check = s.perimeterCheck
@@ -380,7 +380,7 @@ export function workBlocks(k: Kit): Block[] {
       : [
           gap(),
           line(ui, [dim(S.perimeter(s.perimeter.length)), ...(check ? [dim(S.filesTouched(check.files))] : [])]),
-          check && (outside.length === 0 ? line(ui, [sp('✓ ', COLORS.green), dim(S.noFileOutside)]) : line(ui, [sp(S.filesOutside(outside.length), COLORS.red)])),
+          check && (outside.length === 0 ? line(ui, [sp('󰄬 ', COLORS.green), dim(S.noFileOutside)]) : line(ui, [sp(S.filesOutside(outside.length), COLORS.red)])),
           collapsible(
             k,
             'outside',
@@ -457,7 +457,7 @@ export function notesBlocks(k: Kit): Block[] {
   // the field grows with its text; the cells it wraps at leave room for the Enter label drawn beside it while focused
   const draftRows = noteRows(s.noteDraft ?? '', textW - textCells(S.buttons.save) - NOTE_FIELD_MARGIN)
   const deleteIcon = <Text color={COLORS.red}>{NOTE_ICONS.delete}</Text>
-  // Every note is one row: its text (one line cut with … until pressed, then all its lines) and the three icon buttons on the right; odd rows get a band
+  // Every note is one row: its text (one line cut with … until pressed, then all its lines) and the three icon buttons right-aligned (save in place of send while edited); odd rows get a band
   const noteRow = (n: CockpitNote, i: number) => {
     const lines = n.text.trimEnd().split(/\r?\n/)
     const isOpen = s.notesOpen?.includes(n.id) === true
@@ -480,13 +480,19 @@ export function notesBlocks(k: Kit): Block[] {
               </Button>
             )}
           </Box>
-          <Box columnGap={1} alignItems="flex-start">
+          <Box flexGrow={1} columnGap={1} justifyContent="flex-end" alignItems="flex-start">
             <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
               {isEditing ? NOTE_ICONS.cancel : NOTE_ICONS.edit}
             </Button>
-            <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
-              {NOTE_ICONS.send}
-            </Button>
+            {isEditing ? (
+              <Button key={`note:save:${n.id}`} onPress={() => actions.saveNote()}>
+                {NOTE_ICONS.save}
+              </Button>
+            ) : (
+              <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
+                {NOTE_ICONS.send}
+              </Button>
+            )}
             <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
               {deleteIcon}
             </Button>
@@ -508,7 +514,7 @@ export function notesBlocks(k: Kit): Block[] {
           <Box width={textW}>
             <Input key="note" rows={draftRows} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
           </Box>
-          <Box columnGap={1} alignItems="flex-start">
+          <Box flexGrow={1} columnGap={1} justifyContent="flex-end" alignItems="flex-start">
             <Button key="note:save" onPress={() => actions.saveNote()}>
               {NOTE_ICONS.save}
             </Button>

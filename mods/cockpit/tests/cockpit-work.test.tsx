@@ -22,7 +22,7 @@ test('IN PROGRESS: the deliver perimeter with its entries and touched files, and
   expect(rows[i - 2]).toMatch(/^─+$/)
   expect(rows[i + 1]).toBe(' ')
   expect(rows[i + 2]).toBe('deliver perimeter · 2 entries · 5 files touched')
-  expect(rows[i + 3]).toBe('⚠ 3 files outside the perimeter')
+  expect(rows[i + 3]).toBe('󰀦 3 files outside the perimeter')
   expect(rows.slice(i + 4, i + 7)).toEqual(['  src/other.ts', '  src/new.ts', '  notes.md'])
   // computed like `scope-guard.js --check HEAD`: tracked changes against HEAD plus the untracked, not ignored files
   expect(gitCalls).toContain('git -C /work/example-repo --no-optional-locks diff --name-only --no-renames -z HEAD --')
@@ -34,11 +34,11 @@ test('IN PROGRESS: nothing outside the perimeter says so; one entry and one file
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const rows = await workRows($)
   expect(rows).toContain('deliver perimeter · 1 entry · 1 file touched')
-  expect(rows).toContain('✓ no file outside the perimeter')
-  expect(rows.some(r => /outside the perimeter$/.test(r) && r.startsWith('⚠'))).toBe(false)
+  expect(rows).toContain('󰄬 no file outside the perimeter')
+  expect(rows.some(r => /outside the perimeter$/.test(r) && r.startsWith('󰀦'))).toBe(false)
 })
 
-test('IN PROGRESS: 5 outside files are named, `▸ +n` opens the rest and `▾ −n` folds them', async ($, on) => {
+test('IN PROGRESS: 5 outside files are named, `󰍟 +n` opens the rest and `󰍝 −n` folds them', async ($, on) => {
   const changed = Array.from({ length: 7 }, (_, n) => `lib/f${n}.ts`)
   world(on, { branch: 'feat/x', perimeter: PERIMETER, changed })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -47,15 +47,15 @@ test('IN PROGRESS: 5 outside files are named, `▸ +n` opens the rest and `▾ �
   await ui.press({ key: 'tab:work' })
   await settleAll()
   let rows = rowTexts(await ui.drawn())
-  const i = rows.findIndex(r => r.startsWith('⚠'))
-  expect(rows[i]).toBe('⚠ 7 files outside the perimeter')
+  const i = rows.findIndex(r => r.startsWith('󰀦'))
+  expect(rows[i]).toBe('󰀦 7 files outside the perimeter')
   expect(rows.slice(i + 1, i + 6)).toEqual(changed.slice(0, 5).map(f => `  ${f}`))
-  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('▸ +2')
+  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('󰍟 +2')
   await ui.press({ key: 'outside:more' })
   await settleAll()
   rows = rowTexts(await ui.drawn())
   expect(rows.slice(i + 1, i + 8)).toEqual(changed.map(f => `  ${f}`))
-  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('▾ −2')
+  expect((await ui.find({ key: 'outside:more' }))?.text).toBe('󰍝 −2')
   await ui.press({ key: 'outside:more' })
   await settleAll()
   expect(rowTexts(await ui.drawn()).some(r => r === '  lib/f6.ts')).toBe(false)
@@ -93,7 +93,7 @@ test('Work: neither the workflow block nor subagent blocks; the Subagents tab ho
 
 // ── Work: the changed files ──
 
-test('Work: the changed files with +/- (a binary file bin, an untracked one ?), 8 rows, then `▸ +n` opens the rest', async ($, on) => {
+test('Work: the changed files with +/- (a binary file bin, an untracked one ?), 8 rows, then `󰍟 +n` opens the rest', async ($, on) => {
   const numstat: [string, string, string][] = [
     ['12', '3', 'src/a.ts'],
     ['0', '5', 'src/b.ts'],
@@ -120,12 +120,12 @@ test('Work: the changed files with +/- (a binary file bin, an untracked one ?), 
   const i = rows.findIndex(r => r === 'CHANGES · 10')
   expect(i).toBeGreaterThan(0)
   expect(rows[i + 1]).toBe(' ')
-  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('▸ +2')
+  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('󰍟 +2')
   await ui.press({ key: 'changes:more' })
   await settleAll()
   const all = (await ui.findAll({ type: 'Button' })).filter(b => /^file:/.test(b.key ?? '')).map(b => b.key)
   expect(all.slice(8)).toEqual(['file:x.ts', 'file:y.ts'])
-  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('▾ −2')
+  expect((await ui.find({ key: 'changes:more' }))?.text).toBe('󰍝 −2')
   await ui.unmount()
 })
 
@@ -301,10 +301,10 @@ test('Work: the files this chat edited (a subagent too) carry a marker on the ch
   await $.tool.call({ tool: 'Edit', file_path: '/elsewhere/x.ts', old_string: 'a', new_string: 'b' })
   await $.tool.call({ tool: 'Read', file_path: '/work/example-repo/other.ts' }) // a read is not an edit
   const rows = await workRows($)
-  expect(rows.find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts ●$/)
-  expect(rows.find(r => /src\/b\.ts/.test(r))).toMatch(/src\/b\.ts ●$/)
+  expect(rows.find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts 󰧞$/)
+  expect(rows.find(r => /src\/b\.ts/.test(r))).toMatch(/src\/b\.ts 󰧞$/)
   expect(rows.find(r => /other\.ts/.test(r))).toMatch(/other\.ts$/)
-  expect(rows.some(r => /^CHANGES · 3● this chat$/.test(r))).toBe(true)
+  expect(rows.some(r => /^CHANGES · 3󰧞 this chat$/.test(r))).toBe(true)
   await clock.advance(5000) // past the write throttle
   expect(dataOf(writes)?.edited).toEqual(['/work/example-repo/src/a.ts', '/work/example-repo/src/b.ts', '/elsewhere/x.ts'])
 })
@@ -312,7 +312,7 @@ test('Work: the files this chat edited (a subagent too) carry a marker on the ch
 test('Work: a resumed session marks the files its data file lists', async ($, on) => {
   world(on, { dataFile: JSON.stringify({ history: [], edited: ['/work/example-repo/src/a.ts', 7, ''] }), numstat: [['1', '1', 'src/a.ts']] })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await workRows($)).find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts ●$/)
+  expect((await workRows($)).find(r => /src\/a\.ts/.test(r))).toMatch(/src\/a\.ts 󰧞$/)
 })
 
 test('Work: with no edited file there is no marker and no legend', async ($, on) => {

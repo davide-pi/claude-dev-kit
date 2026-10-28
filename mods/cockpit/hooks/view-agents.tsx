@@ -45,7 +45,7 @@ export function taskRow(task: CockpitTask, now: number, width: number): Span[] {
   const subject = padCells(truncEnd(task.subject, subjectW), subjectW)
   const elapsed = isActive && task.startedAt !== undefined ? duration(now - task.startedAt) : ''
   return [
-    isActive ? sp('◐', COLORS.blue) : dim('○'),
+    isActive ? sp('󱎖', COLORS.blue) : dim('󰄰'),
     sp(' '),
     isActive ? sp(subject) : dim(subject),
     sp(' '),
@@ -73,7 +73,7 @@ export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgen
 
 /** An agent's state mark: running, interrupted, failed or done. */
 export const agentIcon = (a: CockpitAgent): Span =>
-  a.status === 'running' ? sp('◐', COLORS.blue) : a.isInterrupted ? sp('■', COLORS.dim) : a.isFailed ? sp('✗', COLORS.red) : sp('✓', COLORS.green)
+  a.status === 'running' ? sp('󱎖', COLORS.blue) : a.isInterrupted ? sp('󰓛', COLORS.dim) : a.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green)
 
 const MODEL_W = 9
 /** A name is worth this many cells before a row gives up other columns (the model, on the Subagents tab; the cache hit then the model, in TOP AGENTS). */
@@ -180,7 +180,7 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
           width,
         )
       : undefined
-  const toolSpans = running ? [sp(indent), sp('▸ ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
+  const toolSpans = running ? [sp(indent), sp('󰍟 ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
   const tool = toolSpans && truncateSpans(toolSpans, width)
   const task = a.description ? truncateSpans([sp(indent), dim(a.description.replace(/\s+/g, ' '))], width) : undefined
   const total = dim(`${indent}${t().costDetail.tokens(abbrevTokens(a.tokens))}`)

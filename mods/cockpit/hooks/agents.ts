@@ -7,11 +7,11 @@ import { t } from './strings'
 export const AGENT_KEEP_MS = 120_000
 
 const STATE_LOOK = {
-  idle: { icon: '○', color: COLORS.dim },
-  working: { icon: '◐', color: COLORS.blue },
-  thinking: { icon: '◌', color: COLORS.lavender },
-  tool: { icon: '▸', color: COLORS.green },
-  waiting: { icon: '◆', color: COLORS.yellow },
+  idle: { icon: '󰄰', color: COLORS.dim },
+  working: { icon: '󱎖', color: COLORS.blue },
+  thinking: { icon: '󰮍', color: COLORS.lavender },
+  tool: { icon: '󰍟', color: COLORS.green },
+  waiting: { icon: '󰜋', color: COLORS.yellow },
 } as const
 const STATE_TOOL_MAX = 14
 

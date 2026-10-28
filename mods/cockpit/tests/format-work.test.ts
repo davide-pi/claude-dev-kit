@@ -226,8 +226,8 @@ test('claimsOf: the last three blocks of the session, newest first; none without
 
 test('aheadBehindSpans: the commits ahead and behind the upstream, nothing when level or without one', () => {
   const git = { branch: 'x', staged: 0, modified: 0, untracked: 0 }
-  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 2, behind: 1 }))).toBe(' ↑2 ↓1')
-  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 3, behind: 0 }))).toBe(' ↑3')
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 2, behind: 1 }))).toBe(' 󰁝2 󰁅1')
+  expect(spanText(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 3, behind: 0 }))).toBe(' 󰁝3')
   expect(aheadBehindSpans({ ...git, upstream: 'origin/x', ahead: 0, behind: 0 })).toEqual([])
   expect(aheadBehindSpans(git)).toEqual([])
 })

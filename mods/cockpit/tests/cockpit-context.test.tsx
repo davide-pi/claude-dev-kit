@@ -96,8 +96,8 @@ test('Context: opening the tab reads a summary breakdown and draws the bar and a
   const rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^CONTEXT/.test(r))).toBe(true)
   // every row is as wide as the pane's content (its background bar spans it)
-  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^■ System prompt +8k +1% *$/) // the exact count is over: no ~
-  expect(rows.find(r => /Messages/.test(r))).toMatch(/^■ Messages +90k +9% *$/)
+  expect(rows.find(r => /System prompt/.test(r))).toMatch(/^󰝤 System prompt +8k +1% *$/) // the exact count is over: no ~
+  expect(rows.find(r => /Messages/.test(r))).toMatch(/^󰝤 Messages +90k +9% *$/)
   expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70% *$/)
   expect(textCells(rows.find(r => /Messages/.test(r)) ?? '')).toBe(48)
   expect((await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text).toBe('exact')
@@ -266,7 +266,7 @@ test('Context: worth compacting also when the autocompact forecast is three requ
 })
 
 const CTX_SUMMARY = [breakdownRow('System prompt', 8000), breakdownRow('Messages', 90_000), breakdownRow('Autocompact buffer', 33_000, 'buffer'), breakdownRow('Free space', 700_000, 'free')]
-const categoryNames = (rows: string[]) => rows.flatMap(r => (/^■ (\S+(?: \S+)*)/.exec(r) ? [/^■ (\S+(?: \S+)*)/.exec(r)?.[1] ?? ''] : []))
+const categoryNames = (rows: string[]) => rows.flatMap(r => (/^󰝤 (\S+(?: \S+)*)/.exec(r) ? [/^󰝤 (\S+(?: \S+)*)/.exec(r)?.[1] ?? ''] : []))
 
 test('Context: the categories go by tokens, biggest first, the free space and the buffer last', async ($, on) => {
   const categories = [
@@ -315,8 +315,8 @@ test('Context: the first time the tab opens while idle one exact count runs; its
   expect(fulls()).toBe(1)
   expect(await kind()).toBe('~ = estimate')
   const rows = rowTexts(await ui.drawn())
-  expect(rows.find(r => /^■ System prompt/.test(r))).toMatch(/^■ System prompt +9\.5k +1% *$/)
-  expect(rows.find(r => /^■ Messages/.test(r))).toMatch(/^■ Messages +95k +10% ~ +\+5k$/) // from the summary read of the reopened tab, 90k
+  expect(rows.find(r => /^󰝤 System prompt/.test(r))).toMatch(/^󰝤 System prompt +9\.5k +1% *$/)
+  expect(rows.find(r => /^󰝤 Messages/.test(r))).toMatch(/^󰝤 Messages +95k +10% ~ +\+5k$/) // from the summary read of the reopened tab, 90k
   expect(rows.some(r => /^CONTEXT DETAILS · 104\.5K\/1M/.test(r))).toBe(true)
   expect((await ui.find({ key: 'ctx:refresh' }))?.text).toBe('refresh') // the button stays
   await ui.unmount()
@@ -348,7 +348,7 @@ test('Context: opening the tab runs the exact count, working or not; a reopening
 
 // ── Phase 9, K5: the Context tab follows the turns ──
 
-const messagesRow = (rows: string[]) => rows.find(r => /^■ Messages/.test(r))?.replace(/ +/g, ' ').trim()
+const messagesRow = (rows: string[]) => rows.find(r => /^󰝤 Messages/.test(r))?.replace(/ +/g, ' ').trim()
 const withMessages = (tokens: number) => ({
   categories: [breakdownRow('System prompt', 8000), breakdownRow('Messages', tokens), breakdownRow('Autocompact buffer', 33_000, 'buffer'), breakdownRow('Free space', 700_000, 'free')],
   totalTokens: 8000 + tokens,
@@ -366,7 +366,7 @@ test('Context: a turn that ends while the exact count runs is on the tab once th
   const releaseFull = h.hold('full')
   await ui.press({ key: 'tab:context' }) // a summary, then the first exact count, held
   await settleAll()
-  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9% ~')
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('󰝤 Messages 90k 9% ~')
   // the conversation grows and a turn ends while the count is still running: no read is made for it
   options.breakdown = withMessages(120_000)
   await mainTurnEnd($)
@@ -375,7 +375,7 @@ test('Context: a turn that ends while the exact count runs is on the tab once th
   options.breakdown = withMessages(150_000)
   releaseFull() // the count answers with what the conversation held when it started
   await settleAll()
-  expect(messagesRow(rowTexts(await ui.drawn()))).toMatch(/^■ Messages 150k 15%/)
+  expect(messagesRow(rowTexts(await ui.drawn()))).toMatch(/^󰝤 Messages 150k 15%/)
   await ui.unmount()
 })
 
@@ -442,12 +442,12 @@ test('Context: a reload that restarts the read counter does not leave the tab be
   const ui = await mountPane($, 50)
   await ui.press({ key: 'tab:context' })
   await settleAll()
-  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 90k 9%')
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('󰝤 Messages 90k 9%')
   isAhead = true
   options.breakdown = withMessages(120_000)
   await ui.press({ key: 'ctx:refresh' })
   await settleAll()
-  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('■ Messages 120k 12%')
+  expect(messagesRow(rowTexts(await ui.drawn()))).toBe('󰝤 Messages 120k 12%')
   await ui.unmount()
 })
 
