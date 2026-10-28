@@ -39,7 +39,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | `decisions` | the owner's decisions that touch the perimeter, one line each, in their words: every agent gets them; an edit that contradicts one is a `question` |
 | `preview` | M, L with an owner-visible output: what to show (page, endpoint, report). The run stops after the implementer with a `question` stall; show a screenshot or sample and ask: "ok" goes on, anything else is a direction for one more implementer pass. The verdict carries a final screenshot of the same surface |
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
-| `size` | `S`, `M` or `L` from the triage (panel: `SKILL.md` step 2). The file count never changes it: past 8 changed files reviewer A splits into one per group of 8, and more files than the size implies (S: 2+, M: 7+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
+| `size` | `S`, `M` or `L` from the triage (panel: `SKILL.md` step 2). The file count never changes it, and every reviewer reads the whole change at any file count (past 10 changed files or 600 changed lines reviewer B of M runs on opus, S and L unchanged, never mechanical; never a split); more files than the size implies (S: 2+, M: 7+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
 | `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes besides `logic` → L. An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
 | `mechanical` | `true` for an S batch with no judgment in it (rename, move, split, config, generated, label updates) the tests fully cover: implementer on `haiku` at `low`, reviewer at `low`. Needs `size: 'S'` (a missing size is M) and never goes with `inline`; a risk axis that lifts the size drops it |
 | `implementerEffort` | `high` only when the brief asks; default `medium` (`low` with `mechanical`) |
@@ -77,7 +77,7 @@ Criteria with proof (step 2): per criterion, the proof and what it asserts: an a
 (browser screenshot, HTTP call, read-only query, CLI output; UI or legacy code with no tests, never "it compiles"); else "the owner tests". The matrix runs on the final
 code, after the review: a fix can change what a proof proved. Proof check (M, L, before the verdict): read only the
 assertion lines of each criterion's test (and the hunks behind `defaults` and any ledger contradiction); a proof that
-cannot fail on the old code is `non verificato`. The verdict ends with "Test locale: proposta <chi/cosa>"; the owner decides.
+cannot fail on the old code is `not verified`. The verdict ends with "Local test: proposal <who/what>" (chat `it`: "Test locale: proposta <chi/cosa>"); the owner decides.
 
 ## After OK: the mechanical scope check
 
@@ -116,7 +116,7 @@ run, on an `OK` or a `STALL` the owner gives up on: never on a resume (the resum
 findings). Before a relaunch WITHOUT `resumeFromRunId` (a red test after `OK`, scope-guard exit 1: a new run with empty
 state) `-LogRun` the previous run; the perimeter stays active. The last run of the change closes it. `/retro`: `references/loop-extras.md`.
 
-`defaults` ([{ choice, alternative, path }]) go in the verdict under "Default scelti"; read the hunks behind them in the
+`defaults` ([{ choice, alternative, path }]) go in the verdict under "Defaults chosen" (chat `it`: "Default scelti"); read the hunks behind them in the
 proof check. A file that grew past 600 lines (or 200+ and grew 30%) comes back in `outOfScope` as a `growth` split
 proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding and no reviewer is asked for it.
 
@@ -125,7 +125,8 @@ proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding an
 The verdict is the standing evidence table, emitted as a plain markdown table, never inside a code fence; `done-claim`
 accepts it when the third cell looks like output (a digit, ok, verde, green, passed, failed, exit, succeeded). S gets two or three lines. Then:
 
-Review: giro 2, 0 P1/P2 aperti. Gap: <gaps, o nessuno>. Rischi residui: <elenco, o nessuno>. Default scelti: <defaults, o nessuno>. Test locale: proposta <chi/cosa>.
+Review: round 2, 0 open P1/P2. Gaps: <gaps, or none>. Residual risks: <list, or none>. Defaults chosen: <defaults, or none>. Local test: proposal <who/what>.
+Chat `it`: `giro`, `P1/P2 aperti`, `Gap`, `nessuno`, `Rischi residui`, `Default scelti`, `Test locale: proposta`.
 
 Close with everything outside the perimeter (`outOfScope` with `noticed`, `scope-revert` and growth proposals,
 `minor`, open questions) in the standing change-scope table, `#` stable; the user picks.

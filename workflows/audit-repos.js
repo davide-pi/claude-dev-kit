@@ -79,7 +79,7 @@ const prompt = repo => [
   `Question: ${question}`,
   `Effort: ${effort}.`,
   'Status: ISSUES (hits, each with repo-relative path:line and the quoted evidence), PASS (nothing found; `checked` names what you searched and how), BLOCKED (you could not answer; `blockedReason`).',
-  'priority: P1 blocks or exposes something now, P2 fix before the next release, P3 improvement. `what` in Italian.',
+  'priority: P1 blocks or exposes something now, P2 fix before the next release, P3 improvement. `what` in the chat language.',
 ].join('\n')
 
 const settle = (result, repo) => {

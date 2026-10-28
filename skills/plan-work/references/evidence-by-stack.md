@@ -4,9 +4,9 @@ Every claim maps to output read **in this session**. Three states, and only thre
 
 | State | Wording |
 | --- | --- |
-| ran it, output confirms | `fatto — dotnet test …: Failed: 0, Passed: 42` |
+| ran it, output confirms | `done — dotnet test …: Failed: 0, Passed: 42` |
 | ran it, output does not confirm | not done; fix it and say nothing yet |
-| did not run it | `non verificato: <motivo>`; the checking command goes in the verdict table's Comando cell |
+| did not run it | `not verified: <reason>`; the checking command goes in the verdict table's Command cell |
 
 "Should work", "looks correct" and a subagent's report are the third state. Re-run a delegated
 agent's evidence lines for anything that matters.
@@ -38,8 +38,8 @@ section.
 ## Per stack
 
 One row per check. "Accept when" is what has to be in the output; anything less is the third state
-("non verificato"), regardless of how confident the change feels. Every command and every output
-line below is quoted verbatim; only the report around them is Italian.
+("not verified"), regardless of how confident the change feels. Every command and every output
+line below is quoted verbatim; only the report around them is in the chat language.
 
 ## .NET
 

@@ -8,7 +8,7 @@ argument-hint: "[scope] [effort] [focus]"
 
 # code-review — a change or PR reviewed by subagents, reported in chat
 
-**Contract.** Findings, completeness and the Da fare / Già fatti tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in Italian; `file:line`, field values and code verbatim.
+**Contract.** Findings, completeness and the To do / Already done tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in the chat language; `file:line`, field values and code verbatim.
 
 Arguments: `$ARGUMENTS`
 
@@ -48,7 +48,7 @@ Every Agent call passes the requested effort as its `effort` parameter, never on
 is built **once** and passed to A (and B, from `xhigh`) unchanged; its contents are in
 `references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
 a missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
-`/review-large`, never launch it unasked.
+`/review-large` (two whole-change reviewers, A on Sonnet + B on Opus), never launch it unasked.
 
 ### Intent — before spawning
 
@@ -58,36 +58,36 @@ acceptance criteria. Still unclear → ask for one line; completeness cannot be 
 ### Merge
 
 Same defect at the same anchor from A and B → `CONFIRMED`; one model only → `PLAUSIBLE`; a fixed one →
-`status: done`, `Risolto da: sessione`: the full rules in `references/effort-and-fanout.md` § Merging.
+`status: done`, `Resolved by: session`: the full rules in `references/effort-and-fanout.md` § Merging.
 
 ### Report
 
-One merged report in Italian, in exactly this skeleton (fields and column meanings:
-`references/report-format.md`):
+One merged report in the chat language, in exactly this skeleton (English labels; at chat `it` read the
+equivalents on the `At chat it:` line after the skeleton in `references/report-format.md` first, with the field meanings):
 
 ```text
-Order: Rilievi → Completezza → Da fare → Già fatti → Fix rapidi → Verdetto. Tables last; after
-Verdetto at most one short question.
+Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
+Verdict at most one short question.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
-   corrections once in Verdetto.
-Rilievi: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Miglioramenti" block, one line each.
-Completezza: N punti — coperti N, then each partial, missing or wrong point, and scope creep.
-Da fare (status: todo), columns exactly:
-| # | Priorità | Categoria | Posizione | Rilievo | Verdetto | Rischio | Sforzo |
-Già fatti (status: done, one line each), columns exactly:
-| # | Categoria | Posizione | Rilievo | Risolto da |
+   corrections once in Verdict.
+Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
+block; the P3s under one "Improvements" block, one line each.
+Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
+To do (status: todo), columns exactly:
+| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
+Already done (status: done, one line each), columns exactly:
+| # | Category | Location | Finding | Resolved by |
 Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Posizione = file:line, Rilievo ~80 chars, Risolto da = commit,
-thread or "sessione". Findings posted on a PR add a "Postato" column to both tables.
-Fix rapidi: #n, #n — every P3 + basso + S finding, one "ok" applies them.
-Verdetto: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nulla da segnalare, verificato: …".
+numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
+thread or "session". Findings posted on a PR add a "Posted" column to both tables.
+Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
+Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+No findings → no tables: "nothing to report, verified: …".
 ```
 
-Close with one line offering the P1s and "ok" for the fix rapidi. Apply nothing until the user answers.
+Close with one line offering the P1s and "ok" for the quick fixes. Apply nothing until the user answers.
 
 ## Do
 
@@ -106,7 +106,7 @@ and stop.
 1. A/B briefs differ in more than `model` → disagreement measures the brief, not the models → copy
    one brief.
 2. Compiler or linter errors reported as findings → CI owns them → no build, no test run.
-3. Findings invented to fill the report → "nulla da segnalare, verificato: …" is a valid result.
+3. Findings invented to fill the report → "nothing to report, verified: …" is a valid result.
 4. At `xhigh`+ the pair returns identical findings in identical words → both ran on one model, or one read the
    other's output → separate spawns in one message, different `model`.
 

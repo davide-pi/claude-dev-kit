@@ -21,6 +21,8 @@ import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'workspace-context.js');
 const created = [];
+const EN = 'Lang: commit en · pr en · prComment en · items en · wiki en';
+const IT = 'Lang: commit it · pr it · prComment it · items it · wiki it';
 /** A mapped path in the running OS's form: the Windows literal as is, else drive-less with forward slashes. */
 const p = (win) => (process.platform === 'win32' ? win : win.replace(/^[A-Za-z]:/, '').replaceAll('\\', '/'));
 
@@ -74,7 +76,7 @@ function run(box, cwd, { source = 'startup', env = {} } = {}) {
 test('mapped root → ALM line with org, project, identity; env file pinned', () => {
   const box = sandbox();
   const { context, envFile } = run(box, p('D:\\work\\product\\repo-a\\src'));
-  assert.equal(context, 'ALM: Azure DevOps · org org-a · project Product · az identity work', 'the manual az prefix lives in azdo-cli, not in every session');
+  assert.equal(context, `ALM: Azure DevOps · org org-a · project Product · az identity work\n${EN}`, 'the manual az prefix lives in azdo-cli, not in every session');
   assert.match(envFile, /^export AZURE_CONFIG_DIR='.*\/\.azure-work'\nexport AZ_IDENTITY=work\n$/);
   assert.doesNotMatch(envFile, /\\/);
 });
@@ -121,7 +123,7 @@ test('project "ask" → ask', () => {
 test('github root → GitHub line with the note, no project, no env', () => {
   const box = sandbox();
   const { context, envFile } = run(box, p('D:\\work\\gh\\tool'));
-  assert.equal(context, 'ALM: GitHub · org gh-org · hours on a sheet');
+  assert.equal(context, `ALM: GitHub · org gh-org · hours on a sheet\n${EN}`);
   assert.equal(envFile, '');
 });
 
@@ -133,13 +135,13 @@ test('nested root wins over its parent (longest path)', () => {
 
 test('a sibling sharing the prefix is not a match', () => {
   const { context } = run(sandbox(), p('D:\\work\\productive'));
-  assert.equal(context, 'ALM: unmapped — ask');
+  assert.equal(context, `ALM: unmapped — ask\n${EN}`);
 });
 
 test('unmapped cwd with a map → unmapped, nothing pinned', () => {
   const box = sandbox();
   const { context, envFile } = run(box, p('E:\\elsewhere'));
-  assert.equal(context, 'ALM: unmapped — ask');
+  assert.equal(context, `ALM: unmapped — ask\n${EN}`);
   assert.equal(envFile, '');
 });
 
@@ -162,20 +164,66 @@ test('no CLAUDE_ENV_FILE → line still printed', () => {
   assert.equal(readFileSync(box.envFile, 'utf8'), '');
 });
 
-test('no workspaces.json → silent', () => {
+test('no workspaces.json → no ALM line, Lang line only', () => {
   const box = sandbox({ map: null });
   assert.ok(!existsSync(join(box.config, 'workspaces.json')));
   const { context, envFile } = run(box, p('D:\\work\\product'));
-  assert.equal(context, '');
+  assert.equal(context, EN);
   assert.equal(envFile, '');
 });
 
-test('malformed workspaces.json → silent', () => {
+test('malformed workspaces.json → Lang line only', () => {
   const { context } = run(sandbox({ map: '{ not json' }), p('D:\\work\\product'));
-  assert.equal(context, '');
+  assert.equal(context, EN);
 });
 
-test('map without roots → silent', () => {
+test('map without roots → Lang line only', () => {
   const { context } = run(sandbox({ map: { other: 1 } }), p('D:\\work\\product'));
-  assert.equal(context, '');
+  assert.equal(context, EN);
+});
+
+test('Lang line follows the ALM line, mapped and unmapped', () => {
+  const map = { lang: { commit: 'it', pr: 'it', prComment: 'it', items: 'it', wiki: 'it' }, roots: ROOTS };
+  assert.equal(run(sandbox({ map }), p('D:\\work\\gh\\tool')).context, `ALM: GitHub · org gh-org · hours on a sheet\n${IT}`);
+  assert.equal(run(sandbox({ map }), p('E:\\elsewhere')).context, `ALM: unmapped — ask\n${IT}`);
+  assert.equal(run(sandbox(), p('E:\\elsewhere')).context, `ALM: unmapped — ask\n${EN}`);
+});
+
+const LIB = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'lib', 'workspaces.js');
+/** `resolveLang(resolveDir(cwd))` in a child, in the box's config dir. */
+function lang(box, cwd) {
+  const r = spawnSync(process.execPath, ['-e', 'const w=require(process.argv[1]);process.stdout.write(JSON.stringify(w.resolveLang(w.resolveDir(process.argv[2]))))', LIB, cwd], {
+    encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: box.config, USERPROFILE: box.home, HOME: box.home },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  return JSON.parse(r.stdout);
+}
+const ALL = (v) => ({ commit: v, pr: v, prComment: v, items: v, wiki: v });
+
+test('resolveLang: no file → all en; global it; root overrides one key; non-string ignored', () => {
+  assert.deepEqual(lang(sandbox({ map: null }), p('D:\\work\\product')), ALL('en'));
+  assert.deepEqual(lang(sandbox({ map: '{ not json' }), p('D:\\work\\product')), ALL('en'));
+  const roots = [{ ...ROOTS[0], lang: { pr: 'de', wiki: 5, items: '', commit: null } }, ROOTS[1]];
+  assert.deepEqual(lang(sandbox({ map: { lang: ALL('it'), roots } }), p('D:\\work\\product\\x')), { ...ALL('it'), pr: 'de' });
+  assert.deepEqual(lang(sandbox({ map: { lang: ALL('it'), roots } }), p('D:\\work\\clients')), ALL('it'));
+  assert.deepEqual(lang(sandbox({ map: { lang: { pr: 'it', other: 'fr' }, roots } }), p('E:\\elsewhere')), { ...ALL('en'), pr: 'it' });
+});
+
+test('resolveLang: the longest root wins', () => {
+  const roots = [{ ...ROOTS[2], lang: { commit: 'fr', pr: 'fr' } }, { ...ROOTS[3], lang: { commit: 'it' } }];
+  assert.deepEqual(lang(sandbox({ map: { lang: { wiki: 'es' }, roots } }), p('D:\\work\\gh\\moved\\r')), { ...ALL('en'), commit: 'it', wiki: 'es' });
+  assert.deepEqual(lang(sandbox({ map: { lang: { wiki: 'es' }, roots } }), p('D:\\work\\gh\\other')), { ...ALL('en'), commit: 'fr', pr: 'fr', wiki: 'es' });
+});
+
+test('a linked worktree resolves to its main repository for the root match', () => {
+  const box = sandbox({ map: { roots: [{ path: '', platform: 'github', org: 'o', lang: { commit: 'it' } }] } });
+  const main = join(dirname(box.config), 'main-repo');
+  const wt = join(dirname(box.config), 'elsewhere', 'wt');
+  mkdirSync(join(main, '.git', 'worktrees', 'wt'), { recursive: true });
+  mkdirSync(join(wt, 'src'), { recursive: true });
+  writeFileSync(join(wt, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'wt').replace(/\\/g, '/')}\n`);
+  writeFileSync(join(box.config, 'workspaces.json'), JSON.stringify({ roots: [{ path: main, platform: 'github', org: 'o', lang: { commit: 'it' } }] }));
+  assert.equal(lang(box, join(wt, 'src')).commit, 'it');
+  assert.equal(run(box, join(wt, 'src')).context.split('\n')[0], 'ALM: GitHub · org o');
+  assert.equal(lang(box, join(dirname(box.config), 'elsewhere')).commit, 'en');
 });

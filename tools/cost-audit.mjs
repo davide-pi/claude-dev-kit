@@ -42,7 +42,7 @@ const HOOK_MARKERS = [
   [/^⏱/, 'worklog-pending'],
   [/^(?:Contesto (?:a|al)|Context at) /, 'context-nudge'],
   [/^(?:Terzo|Third) edit/, 'edit-nudge'],
-  [/^ALM:/, 'workspace-context'],
+  [/^(?:ALM|Lang):/, 'workspace-context'],
   [/^branch /, 'session-brief'],
   [/^detached HEAD at /, 'session-brief'],
   [/^(?:Fuori perimetro|Out of perimeter)/, 'scope-guard'],

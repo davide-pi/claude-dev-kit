@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, NULL_GUARD, read, labels, impl, defect, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, defect, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './impl-review-loop.harness.mjs';
 
 // ── delivery flow "two colleagues": P-run, P-size, P-weight, W1-W15 ──────────────────────────────────────────
 const closedIds = (...ids) => ids.map(id => ({ id, status: 'closed' }));
@@ -29,22 +29,6 @@ test('deltaReviewers (W6): the reviewers that raised the open findings plus one 
   const L = reviewersFor('L', ['security']);
   assert.deepEqual(keys(deltaReviewers(L, ['B'])), ['B', 'S']);
   assert.deepEqual(keys(deltaReviewers(L, ['security', 'B'])), ['B', 'security', 'S']);
-  const grouped = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
-  assert.deepEqual(keys(deltaReviewers(grouped, ['A2'])), ['A2', 'S']);
-  assert.deepEqual(keys(deltaReviewers(grouped, ['A'])), ['A1', 'A2', 'S']);              // 'A' was the key before the group split
-});
-
-test('finderKey: a key stands for the reviewer that raised the finding, also after the size changes the panel under that key', () => {
-  const opusM = { key: 'A', agentType: 'code-reviewer', model: 'opus', effort: 'high' };
-  const M = reviewersFor('M');
-  const L = reviewersFor('L', ['security']);
-  assert.equal(finderKey(opusM, M), 'A');
-  assert.equal(finderKey(opusM, L), 'B');                                             // M -> L: the Opus is B now, A is a Sonnet
-  const grouped = [{ ...L[0], key: 'A1', group: 0, whole: false }, { ...L[0], key: 'A2', group: 1, whole: false }, ...L.slice(1)];
-  assert.equal(finderKey({ ...L[0], key: 'A' }, grouped), 'A');                       // the Sonnet before the group split: still A (deltaReviewers fans it out)
-  assert.equal(finderKey({ key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, L), 'S');   // the watcher itself
-  assert.equal(finderKey({ key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium' }, M), 'S');   // S -> M: the Sonnet medium that raised it is the watcher, not the Opus A
-  assert.equal(finderKey({ key: 'security' }, L), 'security');                        // an entry without a model keeps its key
 });
 
 test('findersOf (W6): the keys of the reviewers whose report holds the finding, on a shifted line too', () => {
@@ -95,46 +79,53 @@ test('readReport (W4): defaults keep the entries with a choice; cleanupCandidate
   assert.equal(classify(f('y', { priority: 'P1', proposal: true }), FILES), 'blocking');
 });
 
-test('script (W6): M delta round = the reviewer that raised the finding + one Sonnet medium; the full panel reads once on the cumulative fix diff before the OK when a panel key missed the fix', async () => {
-  const { out, calls } = await run({ ...ARGS, risk: ['security'] }, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl({ snapshot: T2('t1') }), impl({ snapshot: T2('t2', 40) })]);
+test('script (W6): M delta round = the reviewer that raised the finding + one Sonnet medium; the full panel reads the whole change once before the OK', async () => {
+  const { out, calls } = await run({ ...ARGS_M, risk: ['security'] }, [review([], [finding()]), review([]), review([]), review(closedIds('F1'))], [impl({ snapshot: T2('t1') }), impl({ snapshot: T2('t2', 40) })]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 3);
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer security · round 3, final read']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read', 'reviewer security · round 3, final read']);
   const watcher = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').opts;
   assert.deepEqual([watcher.model, watcher.effort, watcher.agentType], ['sonnet', 'medium', 'code-reviewer']);
   const final = calls.find(c => c.opts.label === 'reviewer A · round 3 · code, final read');
-  assert.deepEqual([final.opts.model, final.opts.effort], ['sonnet', 'high']);                // on M the full panel is the one Sonnet
+  assert.deepEqual([final.opts.model, final.opts.effort], ['sonnet', 'high']);                // on M reviewer A is a Sonnet
   assert.match(final.prompt, /FINAL FULL READ/);
-  assert.match(final.prompt, /git diff t1 t2/);
+  assert.match(final.prompt, /Review the change made/);
+  assert.doesNotMatch(final.prompt, /git diff t1 t2/);
   assert.match(final.prompt, /- F1 \[closed\]/);
   assert.doesNotMatch(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /FINAL FULL READ/);
 });
 
-test('script (#29): the final read is skipped when every panel key already read every fix delta, and runs when one missed one', async () => {
-  const m = await run(ARGS, [review([], [finding()]), review(closedIds('F1'))]);          // M: R2 = A + the watcher, A is the whole panel
+test('script (#44): M with a review fix and an unread file: the final read runs first and covers it, no coverage round precedes it', async () => {
+  const { out, calls } = await run(ARGS_M, [review([], [finding()], []), review([], [], []), review(closedIds('F1'), [], [])]);   // R1: neither whole reviewer read the file
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 3);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
+});
+
+test('script (#44): a file still unread after the final read gets the coverage rerun of the whole reviewers', async () => {
+  const { out, calls } = await run(ARGS_M, [review([], [finding()], []), review([], [], []), review(closedIds('F1'), [], []), review([]), review([])], [], { finals: [review(closedIds('F1'), [], []), review(closedIds('F1'), [], [])] });
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read', 'reviewer A · round 4 · code', 'reviewer B · round 4 · second opinion']);
+});
+
+test('script (#42): at M and L the final read runs after any review fix, whoever read the fix delta; S never gets one', async () => {
+  const m = await run(ARGS_M, [review([], [finding()]), review([], [finding()]), review(closedIds('F1')), review(closedIds('F1'))]);          // M: A and B both found it, R2 = A + B + the watcher
   assert.equal(m.out.status, 'OK');
-  assert.deepEqual(reviewerLabels(m.calls), ['reviewer A · round 1 · code', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes']);
-  assert.equal(m.out.rounds, 2);
+  assert.deepEqual(reviewerLabels(m.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
+  assert.equal(m.out.rounds, 3);
+  const mOne = await run(ARGS_M, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);          // M: only A found it, B never read the fix
+  assert.deepEqual(reviewerLabels(mOne.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
   const both = await run({ ...ARGS, size: 'L' }, [review([], [finding()]), review([], [finding()]), review(closedIds('F1')), review(closedIds('F1'))]);   // L: A and B both found it
-  assert.deepEqual(reviewerLabels(both.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(reviewerLabels(both.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
   const one = await run({ ...ARGS, size: 'L' }, [review([]), review([], [finding()]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);                          // L: only B found it, A never read the fix
   assert.deepEqual(reviewerLabels(one.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
   const twoFixes = await run(ARGS, [review([], [finding()]), review(closedIds('F1'), [finding({ line: 300, title: 'a second defect elsewhere' })]), review(closedIds('F1', 'F2'))], [impl(), impl(), impl()]);
   assert.equal(twoFixes.out.status, 'OK');
-  assert.deepEqual(reviewerLabels(twoFixes.calls), ['reviewer A · round 1 · code', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code', 'reviewer S · round 3 · check the fixes']);   // each fix delta was read by A
-});
-
-test('finalReadOwed: owed only when some panel key missed some fix delta', () => {
-  assert.equal(finalReadOwed([], ['A']), false);
-  assert.equal(finalReadOwed([new Set(['A', 'S'])], ['A']), false);
-  assert.equal(finalReadOwed([new Set(['A'])], ['A', 'B']), true);
-  assert.equal(finalReadOwed([new Set(['A', 'B']), new Set(['A'])], ['A', 'B']), true);
-  assert.equal(finalReadOwed([new Set(['A', 'B']), new Set(['A', 'B'])], ['A', 'B']), false);
-  assert.equal(finalReadOwed(undefined, ['A']), false);
+  assert.deepEqual(reviewerLabels(twoFixes.calls), ['reviewer A · round 1 · code', 'reviewer A · round 2 · code', 'reviewer A · round 3 · code']);   // S: each fix delta was read by A, the whole panel
 });
 
 test('script (W6): no fix ran, no final read; at S the delta round is the one Sonnet and there is no final read', async () => {
-  assert.deepEqual(reviewerLabels((await run(ARGS, [review([])])).calls), ['reviewer A · round 1 · code']);
+  assert.deepEqual(reviewerLabels((await run(ARGS_M, [review([]), review([])])).calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   const s = await run({ ...ARGS, size: 'S' }, [review([], [finding()]), review(closedIds('F1'))]);
   assert.equal(s.out.status, 'OK');
   assert.deepEqual(reviewerLabels(s.calls), ['reviewer A · round 1 · code', 'reviewer A · round 2 · code']);
@@ -147,28 +138,28 @@ test('script (W6): L delta round = the reviewer that raised the finding + the So
 });
 
 test('script (W6): the final read runs once: a fix after it is judged by the delta rounds only', async () => {
-  const { out, calls } = await run({ ...ARGS, touches: ['security'] }, [review([], [finding()]), review([]), review(closedIds('F1')), review(closedIds('F1', 'F2'))], [impl(), impl({ snapshot: T2('t2', 40) }), impl()], {
-    finals: [review(closedIds('F1'), [finding({ line: 300, title: 'a defect only the final read sees' })]), review(closedIds('F1'))],
+  const { out, calls } = await run({ ...ARGS_M, touches: ['security'] }, [review([], [finding()]), review([]), review([]), review(closedIds('F1')), review(closedIds('F1', 'F2'))], [impl(), impl({ snapshot: T2('t2', 40) }), impl()], {
+    finals: [review(closedIds('F1'), [finding({ line: 300, title: 'a defect only the final read sees' })]), review(closedIds('F1')), review(closedIds('F1'))],
   });
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer security · round 3, final read', 'reviewer A · round 4 · code', 'reviewer S · round 4 · check the fixes']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read', 'reviewer security · round 3, final read', 'reviewer A · round 4 · code', 'reviewer S · round 4 · check the fixes']);
   assert.deepEqual(implLabels(calls), ['implement the change', 'fix round 1 findings', 'fix round 3 findings']);
   assert.equal(out.rounds, 4);
 });
 
 test('script (W6, W7): fix, final read, then the cleanup fix and its delta read by one Sonnet medium; the cleanup fix does not bring another full read', async () => {
-  const { out, calls } = await run({ ...CLEAN, touches: ['security'] }, [review([], [finding(), nit(1)]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
+  const { out, calls } = await run({ ...CLEAN, touches: ['security'] }, [review([], [finding(), nit(1)]), review([]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer security · round 3, final read', 'reviewer S · round 4 · check the fixes']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read', 'reviewer security · round 3, final read', 'reviewer S · round 4 · check the fixes']);
   assert.deepEqual(implLabels(calls), ['implement the change', 'fix round 1 findings', 'cleanup of round 3 minor findings']);
   assert.deepEqual(out.cleaned.map(x => x.id), ['F2']);
   assert.deepEqual([calls.find(c => c.opts.label === 'reviewer S · round 4 · check the fixes').opts.model, calls.find(c => c.opts.label === 'reviewer S · round 4 · check the fixes').opts.effort], ['sonnet', 'medium']);
 });
 
 test('script (W7): without a fix before it, the cleanup is read by the Sonnet medium alone and no final read follows; S runs no cleanup', async () => {
-  const { out, calls } = await run(CLEAN, [review([], [nit(1)])]);
+  const { out, calls } = await run(CLEAN, [review([], [nit(1)]), review([])]);
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer S · round 2 · check the fixes']);
   const s = await run({ ...CLEAN, size: 'S' }, [review([], [nit(1)])]);
   assert.deepEqual(reviewerLabels(s.calls), ['reviewer A · round 1 · code']);
   assert.equal(s.calls.some(c => c.opts.label === 'cleanup of round 1 minor findings'), false);
@@ -177,7 +168,7 @@ test('script (W7): without a fix before it, the cleanup is read by the Sonnet me
 
 test('script (W2): the owner request goes to the round-1 reviewers and the final full read beside the brief, never to the implementer or a delta round', async () => {
   const request = 'Make the order list sortable by date, newest first';
-  const { calls } = await run({ ...ARGS, request, touches: ['security'] }, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
+  const { calls } = await run({ ...ARGS_M, request, touches: ['security'] }, [review([], [finding()]), review([]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
   const has = (label) => calls.find(c => c.opts.label === label).prompt.includes(request);
   assert.equal(has('reviewer A · round 1 · code'), true);
   assert.equal(has('reviewer A · round 3 · code, final read'), true);
@@ -222,7 +213,7 @@ test('script (W2, W13): a reviewer question is a STALL "question" at its round, 
 
 test('script (W2, W13): an answered reviewer question with nothing else to fix still sends the answer to the fixer once', async () => {
   const answers = [{ text: ASK_R[0].text, answer: 'restore it' }];
-  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [asking([])]);
+  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 1, answers }] }, [asking([]), review([])]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(implLabels(calls), ['implement the change', 'fix round 1 findings']);
   assert.match(calls.find(c => c.opts.label === 'fix round 1 findings').prompt, /Apply the owner's answers/);
@@ -253,7 +244,9 @@ test('script (W4): the implementer and the fixer report defaults; the result lis
 
 test('script (W5): with a preview arg an M change stops after the implementer with a question; "ok" goes on to the review, anything else is one more implementer pass', async () => {
   const preview = 'the order list page /orders';
-  const first = await run({ ...ARGS, preview }, [review([])]);
+  const two = () => [review([]), review([])];   // M: reviewers A and B
+  const AB = ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion'];
+  const first = await run({ ...ARGS_M, preview }, two());
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.why, 'question');
   assert.equal(first.out.stall.round, 0);
@@ -261,22 +254,22 @@ test('script (W5): with a preview arg an M change stops after the implementer wi
   assert.deepEqual(first.calls.map(c => c.opts.label), ['implement the change']);
   assert.equal(first.out.preview, preview);
   const text = first.out.stall.questions[0].text;
-  const ok = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'ok' }] }] }, [review([])]);
+  const ok = await run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'ok' }] }] }, two());
   assert.equal(ok.out.status, 'OK');
-  assert.deepEqual(ok.calls.map(c => c.opts.label), ['implement the change', 'reviewer A · round 1 · code']);
+  assert.deepEqual(ok.calls.map(c => c.opts.label), ['implement the change', ...AB]);
   assert.equal(ok.out.preview, preview);
   for (const answer of ['ok grazie', 'Perfetto!', 'ok, va bene così', 'va bene']) {
-    const polite = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, [review([])]);
-    assert.deepEqual(polite.calls.map(c => c.opts.label), ['implement the change', 'reviewer A · round 1 · code'], answer);               // a confirmation, not a direction
+    const polite = await run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, two());
+    assert.deepEqual(polite.calls.map(c => c.opts.label), ['implement the change', ...AB], answer);               // a confirmation, not a direction
   }
   for (const answer of ['così così', 'ok così così', 'va bene così così']) {
-    const mediocre = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, [review([])]);
-    assert.deepEqual(mediocre.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', 'reviewer A · round 1 · code'], answer);   // not a confirmation
+    const mediocre = await run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, two());
+    assert.deepEqual(mediocre.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', ...AB], answer);   // not a confirmation
   }
-  const but = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'ok ma ordina per data' }] }] }, [review([])]);
-  assert.deepEqual(but.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', 'reviewer A · round 1 · code']);
-  const change = await run({ ...ARGS, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'newest first please' }] }] }, [review([])]);
-  assert.deepEqual(change.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', 'reviewer A · round 1 · code']);
+  const but = await run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'ok ma ordina per data' }] }] }, two());
+  assert.deepEqual(but.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', ...AB]);
+  const change = await run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer: 'newest first please' }] }] }, two());
+  assert.deepEqual(change.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', ...AB]);
   assert.match(change.calls[1].prompt, /- .*-> newest first please/);
   assert.match(change.calls[1].prompt, /snapshot\.ps1/);
 });
@@ -284,7 +277,7 @@ test('script (W5): with a preview arg an M change stops after the implementer wi
 test('script (W5): no preview stop at S, inline or without the arg', async () => {
   const preview = 'the order list page /orders';
   assert.equal((await run({ ...ARGS, size: 'S', preview }, [review([])])).out.status, 'OK');
-  assert.equal((await run({ ...ARGS, preview, inline: true, changed: ['src/Orders/OrdersQuery.cs'] }, [review([])])).out.status, 'OK');
+  assert.equal((await run({ ...ARGS_M, preview, inline: true, changed: ['src/Orders/OrdersQuery.cs'] }, [review([]), review([])])).out.status, 'OK');
   assert.equal((await run(ARGS, [review([])])).out.preview, undefined);
 });
 
@@ -306,7 +299,7 @@ test('script (W8): the growth check is the snapshot\'s: a big file is one P3 cle
   assert.deepEqual(shrunk.out.outOfScope.filter(o => o.source === 'growth'), []);    // the latest snapshot is the truth: a split since then leaves no proposal
 });
 
-test('growthProposals: one clean-code P3 proposal per file, malformed entries dropped; removeById never splices -1', () => {
+test('growthProposals: one clean-code P3 proposal per file, malformed entries dropped', () => {
   assert.deepEqual(growthProposals(undefined), []);
   assert.deepEqual(growthProposals([null, { file: '', start: 1, now: 2 }, { file: 'a.cs', start: 'x', now: 700 }]), []);
   const [one, ...rest] = growthProposals([{ file: 'a.cs', start: 250, now: 330 }, { file: 'A.cs', start: 1, now: 900 }, { file: 'b.cs', start: 10, now: 650 }]);
@@ -314,18 +307,13 @@ test('growthProposals: one clean-code P3 proposal per file, malformed entries dr
   assert.deepEqual([one.source, one.category, one.priority, one.proposal, one.path], ['growth', 'clean-code', 'P3', true, 'a.cs']);
   assert.match(one.why, /grew by 30%/);
   assert.match(rest[0].why, /past 600 lines/);
-  const list = [{ id: 'F1' }, { id: 'F2' }];
-  assert.equal(removeById(list, 'F9'), false);
-  assert.deepEqual(list.map(x => x.id), ['F1', 'F2']);
-  assert.equal(removeById(list, 'F1'), true);
-  assert.deepEqual(list.map(x => x.id), ['F2']);
 });
 
 test('script (W12): the result carries the findings log line (size, rounds, findings), on an OK and on a STALL; the caller stamps it', async () => {
   const other = finding({ priority: 'P3', path: 'src/Other.cs', title: 'other' });
   const { out } = await run(ARGS, [review([], [finding(), other]), review(closedIds('F1'))]);
   assert.deepEqual(out.findingsLog, {
-    size: 'M', rounds: 2,
+    size: 'S', rounds: 2,
     findings: [
       { category: 'correctness', priority: 'P2', path: 'src/Orders/OrdersQuery.cs', title: 't', closed: true },
       { category: 'correctness', priority: 'P3', path: 'src/Other.cs', title: 'other', closed: false },
@@ -397,10 +385,25 @@ test('script: without cleanup: true the P3s stay in minor and no cleanup pass ru
   assert.equal(calls.some(c => c.opts.label?.startsWith('cleanup of round')), false);
 });
 
-test('script: the final read runs only when the review fixes changed more than 30 lines in all; a fix with no churn reported keeps it', async () => {
-  const labels = (r) => reviewerLabels(r.calls).some(l => /final read/.test(l));
-  const go = (fixImpl) => run({ ...ARGS, size: 'L' }, [review([]), review([], [finding()]), review(closedIds('F1'))], [impl(), fixImpl]);
-  assert.equal(labels(await go(impl({ snapshot: T2('t2', 30) }))), false);
-  assert.equal(labels(await go(impl({ snapshot: T2('t2', 31) }))), true);
-  assert.equal(labels(await go(impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'] } }))), true);
+test('script (#42): one small review fix at M gets a final full read whose prompt scopes the whole change; S never gets one', async () => {
+  const hasFinal = (r) => reviewerLabels(r.calls).some(l => /final read/.test(l));
+  const m = await run(ARGS_M, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 1) })]);
+  assert.equal(m.out.status, 'OK');
+  assert.deepEqual(reviewerLabels(m.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
+  const final = m.calls.find(c => c.opts.label === 'reviewer A · round 3 · code, final read').prompt;
+  assert.match(final, /FINAL FULL READ: judge every previous finding id against the code as it is now/);
+  assert.match(final, /Review the change made/);
+  assert.match(final, /- F1 \[closed\]/);
+  assert.doesNotMatch(final, /Review the changes since/);
+  const s = await run(ARGS, [review([], [finding()]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 99) })]);
+  assert.equal(hasFinal(s), false);
+  const noFix = await run(ARGS_M, [review([]), review([])]);
+  assert.equal(hasFinal(noFix), false);
+});
+
+test('script: the implementer and fixer prompts say the snapshot files are the whole change since the start', async () => {
+  const { calls } = await run({ ...ARGS, size: 'S' }, [review([], [finding()]), review(closedIds('F1'))]);
+  for (const label of ['implement the change', 'fix round 1 findings']) {
+    assert.match(calls.find(c => c.opts.label === label).prompt, /lists the whole change since the start/, label);
+  }
 });

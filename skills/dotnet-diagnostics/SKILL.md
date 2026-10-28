@@ -9,7 +9,7 @@ description: >-
 
 **Contract.** The instrument and the exact collection for the evidence needed · never pulls Grafana
 data into the main thread, never dumps or traces a production host unrequested · readings in
-Italian, log lines and counter names verbatim.
+the chat language, log lines and counter names verbatim.
 
 ## When
 

@@ -4,7 +4,7 @@ Criteria apply to a **User Story** and to a **Bug** only. Never generate them fo
 TECH. Generate them **only after asking** and receiving confirmation — never in the same pass as the
 story, because a story that turns out to contain three stories takes its criteria down with it.
 
-Section title: exactly `Criteri di accettazione`. Language: Italian. Style: discursive and clear,
+Section title: exactly `Criteri di accettazione`. Language: the items language. Style: discursive and clear,
 ready to paste into Azure DevOps with no rework.
 
 ## The four coverage families — a mental grid, never printed
@@ -82,7 +82,7 @@ list.
 
 ## The format of each criterion
 
-Discursive Italian, in this structure:
+Discursive prose in the items language, in this structure:
 
 ```
 Dato che ...
@@ -96,6 +96,7 @@ The `E ...` lines are optional: they add a condition or an outcome where one is 
 
 ## Format rules (these matter)
 
+- The section title and the keywords are fixed; the text is in the items language.
 - **Do not** use "Given / When / Then" — the Italian form `Dato che / Quando / Allora` is the
   standard.
 - **Do not** use standard bullet points for the individual criteria.

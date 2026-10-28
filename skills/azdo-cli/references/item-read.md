@@ -2,7 +2,7 @@
 
 Read when the owner asks to see one item ("fammi vedere il 4821", "quali sono i criteri del …") or the
 list of their active items. Read-only: never update, transition, comment on or link an item. Report in
-Italian; the item's content, field names, states and paths verbatim.
+the chat language; the item's content, field names, states and paths verbatim.
 
 ## Input and platform
 
@@ -30,7 +30,7 @@ recognised remote → ask which org and project.
 
 Field values are HTML: convert to markdown (lists, tables, line breaks, entities); never print raw HTML.
 An empty description or criteria field is printed as the finding — `nessun criterio di accettazione` —
-never dropped and never invented. Close with one Italian line: the obvious next step and its owner
+never dropped and never invented. Close with one line in the chat language: the obvious next step and its owner
 (`plan-work`, `pr-create`).
 
 ## Calls

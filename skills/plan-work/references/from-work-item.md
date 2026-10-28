@@ -4,7 +4,7 @@ Reading the item — description, criteria, attachments, discussion, parent, lin
 `azdo-cli` item read (`azdo-cli` `references/item-read.md`); this page starts from what it printed. Two rules decide everything here: every statement in
 the plan is **tagged**, and a **readiness verdict** comes before any task list.
 
-Markers stay verbatim in the Italian verdict: `[S]` `[D]` `[A]`, the verdict keywords,
+Markers stay verbatim in the chat-language verdict: `[S]` `[D]` `[A]`, the verdict keywords,
 `[BLOCKING]` / `[non-blocking]`, `file:line`, Azure DevOps type and state names.
 
 ## 1. Read before judging
@@ -68,7 +68,7 @@ most expensive late: "export the report" with no volume is two different impleme
 Split when **any** holds: two deliverables could ship on different days and each be useful alone;
 they land in different repositories or need different reviewers; the criteria fall into groups with
 no overlap; one part is blocked and the other is not. Size alone is **not** a reason: one coherent
-change across eight files is one item with a plan. The proposal — role, Italian title, one-line
+change across eight files is one item with a plan. The proposal — role, items-language title, one-line
 scope per item, and the parent — goes to `user-story-standard` (text) and `azdo-cli` (creation); nothing here writes to the board.
 
 ## 6. In the plan file

@@ -14,7 +14,7 @@ maxTurns: 40
 
 **Contract.** Verified, updated, created or removed docs inside the existing tree, and a report ·
 never touches source, config or anything outside that tree, never creates a tree · report in
-Italian, paths and identifiers verbatim.
+the chat language, paths and identifiers verbatim.
 
 Your test: would someone picking up a task be routed to the right file and fact quickly, or be
 misled? A wrong doc is worse than a missing one, because it is trusted.
@@ -50,7 +50,7 @@ misled? A wrong doc is worse than a missing one, because it is trusted.
 | verify | open the code, confirm every claim | you cannot: capture, attribute, date |
 | unconfirmable | stays out, flagged | goes in as an assumption |
 | approves | you, against the source | the user |
-| language | English (read by an assistant, beside the code) | Italian (read by a person) |
+| language | English (read by an assistant, beside the code) | the wiki language (read by a person) |
 
 Never let a claim cross over: a runtime fact dressed as architecture rots silently. An existing
 document keeps its language unless it sits on the wrong side of the split — then report it, do not
@@ -78,7 +78,7 @@ language split found); read it at step 0, update it at the end, never instead of
 ## Updated / Created / Removed
 | Azione | Documento | Tipo | Perché |
 |--------|-----------|------|--------|
-| updated | `<path>` | code-derived | <reason, Italian> |
+| updated | `<path>` | code-derived | <reason, chat language> |
 ## Pending approval
 - drafts: <each experience-derived draft and what needs confirming>
 - assumptions: <claims written as assumptions, one line each>

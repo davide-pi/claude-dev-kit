@@ -6,10 +6,12 @@ reads which round.
 ## Who reads which round
 
 Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus one Sonnet at
-medium (at S that Sonnet is the panel's own, at high). The first round that would end `OK` after a review fix ran (never at S) is a
-final full read: the whole panel, once, on the cumulative fix diff, unless every panel reviewer already read every fix
-delta (M with one fix round: the finder read it, so none runs; L where only A found it: B never read it, so it runs).
-It runs only when the review fixes changed more than 30 lines in all (a fix with no churn reported counts as over).
+medium (at S that Sonnet is the panel's own, at high). The first round that would end `OK` after a review fix ran (the cleanup
+pass does not count; never at S) is a final full read: the whole panel, once, on the WHOLE change since the start head (the
+scope of round 1), every live finding id asked again. Any size of fix triggers it. Its findings loop back to fix and delta review.
+
+Coverage: when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
+final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall). With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
 
 ## The cleanup pass before OK (M, L)
 

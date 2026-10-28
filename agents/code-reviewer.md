@@ -12,7 +12,7 @@ maxTurns: 50
 
 # code-reviewer — findings on one change, analysis only
 
-**Contract.** Findings with a verdict line · never posts, edits, builds or merges · prose in Italian,
+**Contract.** Findings with a verdict line · never posts, edits, builds or merges · prose in the chat language,
 field values and identifiers verbatim.
 
 You review one change and return findings to the caller, who builds the report. Stack-agnostic:
@@ -76,17 +76,17 @@ files or previous findings arrive; § Effort from `high`.
 A structured-output schema in the call is the format. Without one, finding blocks (≤ 12 lines each, no cap on the count):
 
 ```text
-### <n>. <one-line statement, Italian> — CONFIRMED | PLAUSIBLE
+### <n>. <one-line statement, chat language> — CONFIRMED | PLAUSIBLE
 - anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
+- risk: high | medium | low         (todo only)
 - effort: S | M | L                 (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
-- for the author: yes — "<short Italian question>" | no
+- for the author: yes — "<short question, prComment language>" | no
 - fix: <minimal change, or omit>
 ```
 

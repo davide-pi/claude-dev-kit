@@ -10,7 +10,7 @@ A spike's deliverable is the **answer**, in chat. The code is scaffolding and ge
 | 2 | Pick the cheapest instrument (table below) | first row that fits wins |
 | 3 | Timebox it, and say the box out loud | minutes, not an afternoon. Blown box → report what was learned and what is still unknown; a spike that fails to answer is a valid result |
 | 4 | Scratch code **outside the repo** | the session scratch directory; nothing in `src`, the solution or any `.csproj`; `git status` stays unchanged |
-| 5 | Report in Italian, then delete | shape below; delete unless the user asked to keep it, and then say where it is |
+| 5 | Report in the chat language, then delete | shape below; delete unless the user asked to keep it, and then say where it is |
 
 ## Instruments
 
@@ -26,7 +26,7 @@ A spike's deliverable is the **answer**, in chat. The code is scaffolding and ge
 A probe that needs a new project, a package restored into the solution, config or a test is no
 longer a probe: reclassify it as a bounded change or a new subsystem.
 
-## The report — Italian headings, verbatim evidence
+## The report — chat-language headings, verbatim evidence
 
 | Heading | Content |
 | --- | --- |

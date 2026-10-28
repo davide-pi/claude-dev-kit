@@ -9,7 +9,7 @@ description: >-
 
 **Contract.** Reproduce → isolate → explain → fix, each phase closed by evidence · no edit to
 production code before the phase-3 sentence exists · hypotheses, mechanism and conclusion in
-Italian; commands, exceptions, counters and log lines verbatim (a translated log line is no longer
+the chat language; commands, exceptions, counters and log lines verbatim (a translated log line is no longer
 evidence).
 
 ## When
@@ -25,7 +25,7 @@ behaviour *should* be (the `azdo-cli` item read, `plan-work`).
 | --- | --- | --- |
 | 1 | Reproduce | a command or click-path that fails on demand, its output captured verbatim |
 | 2 | Isolate | the smallest input and narrowest layer that still fails; the rest ruled out by test, not opinion |
-| 3 | Explain | one causal sentence in Italian — "il valore è null **perché** la factory lo riscrive, **quindi** il mapper lancia `NullReferenceException`". Mechanism, not correlation |
+| 3 | Explain | one causal sentence in the chat language — "il valore è null **perché** la factory lo riscrive, **quindi** il mapper lancia `NullReferenceException`". Mechanism, not correlation |
 | 4 | Fix and prove | the fix targets the mechanism; the phase-1 repro passes; a regression test locks it (`dotnet-testing`) |
 
 A change during phases 1–2 is instrumentation only (a log line, a probe, a failing test), reverted or

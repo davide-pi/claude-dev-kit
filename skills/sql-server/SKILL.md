@@ -9,7 +9,7 @@ paths: "**/*.sql"
 # sql-server — T-SQL that performs, plus the Postgres read cache beside it
 
 **Contract.** SQL that performs, and the evidence that says so · read-only by default; a non-dev host
-only through `/db`, never DDL on a shared database · explanations in Italian, SQL, plan operators
+only through `/db`, never DDL on a shared database · explanations in the chat language, SQL, plan operators
 and object names verbatim.
 
 ## When

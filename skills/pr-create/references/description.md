@@ -2,38 +2,39 @@
 
 ## The title
 
-One imperative line, specific to this change, no trailing period.
+One imperative line, specific to this change, no trailing period, in the pr language.
 
 | Bad | Better |
 | --- | --- |
-| `Correzioni` | `Correggi l'arrotondamento del totale fattura su ordini multivaluta` |
-| `feature/billing-export` | `Aggiungi export fatture per tenant` |
+| `Fixes` | `Fix invoice total rounding on multi-currency orders` |
+| `feature/billing-export` | `Add invoice export per tenant` |
 
 ## The body
 
-A reviewer should know, before reading the diff, **what changed** and **why**.
+A reviewer should know, before reading the diff, **what changed** and **why**. The example and the labels
+are English; write the body in the pr language, the labels as `SKILL.md`'s contract maps them.
 
 ```markdown
-- Aggiunge `InvoiceExportService` e l'endpoint `/api/tenants/{id}/invoices/export`.
-- Sposta la risoluzione del tenant dai controller al middleware in `Shared.Tenancy` — tre controller
-  la ripetevano e uno sbagliava il caso di impersonation.
-- La migration `20260902_AddInvoiceExportLog` aggiunge una tabella; nessuna colonna esistente cambia.
+- Adds `InvoiceExportService` and the `/api/tenants/{id}/invoices/export` endpoint.
+- Moves tenant resolution from the controllers to the middleware in `Shared.Tenancy`: three controllers
+  repeated it and one got the impersonation case wrong.
+- The `20260902_AddInvoiceExportLog` migration adds a table; no existing column changes.
 
-Rilascio:
-- `Billing.Api` — contiene il nuovo endpoint e applica la migration.
-- `Tenants.Api`, `Orders.Api` — ospitano due dei tre controller che perdono la risoluzione del
-  tenant, ora in `Shared.Tenancy`: referenziano la libreria modificata.
-- Database `billing` — migration da applicare prima dei servizi.
+Release:
+- `Billing.Api`: holds the new endpoint and applies the migration.
+- `Tenants.Api`, `Orders.Api`: host two of the three controllers that lose tenant resolution, now in
+  `Shared.Tenancy`; they reference the changed library.
+- Database `billing`: migration to apply before the services.
 
-Rischio merge: irreversibile — la migration crea una tabella che il rollback non elimina; impatto:
-export fatture di tutti i tenant.
+Merge risk: irreversible, the migration creates a table the rollback does not drop; impact: invoice
+export for every tenant.
 
-Verifica:
-- Prima: `dotnet test --filter InvoiceExport` → 2 falliti (endpoint assente).
-- Dopo: stesso comando → 14 passati; export di prova su tenant `demo` scaricato e aperto.
+Verification:
+- Before: `dotnet test --filter InvoiceExport` → 2 failed (endpoint missing).
+- After: same command → 14 passed; a test export on tenant `demo` downloaded and opened.
 
-Note per il reviewer:
-- Per ora l'export è sincrono; il percorso a coda è fuori scope (item #<id>).
+Notes for the reviewer:
+- The export is synchronous for now; the queued path is out of scope (item #<id>).
 
 Fixes #<n>
 ```
@@ -45,15 +46,15 @@ Rules:
 2. Call out anything the reviewer must not miss: a migration, a config key, a breaking signature, a
    deliberate deviation, a follow-up left undone.
 3. Name what is **out of scope**, so the review does not turn into a design discussion.
-4. **`Rischio merge:`** — **reversibile** (a revert of the squash commit undoes it all) or
-   **irreversibile** (a migration that drops or rewrites data, a published contract, a message
+4. **`Merge risk:`** — **reversible** (a revert of the squash commit undoes it all) or
+   **irreversible** (a migration that drops or rewrites data, a published contract, a message
    already consumed, an external call with side effects) and what cannot be undone; then the
-   **impatto** — who or what breaks if it is wrong. The minimal form, for a docs-only or tooling
-   change: `Rischio merge: reversibile — revert dello squash commit; nessun impatto a runtime`.
-5. **`Verifica:`** — the evidence before and after: the failing then passing test, the output, the
+   **impact** — who or what breaks if it is wrong. The minimal form, for a docs-only or tooling
+   change: `Merge risk: reversible, revert of the squash commit; no runtime impact`.
+5. **`Verification:`** — the evidence before and after: the failing then passing test, the output, the
    screenshot path. Quote the command; never paraphrase a result (`plan-work`'s `evidence-by-stack.md`).
 
-## The release scope — the `Rilascio:` block
+## The release scope — the `Release:` block
 
 | What changed | What gets released |
 | --- | --- |
@@ -61,9 +62,9 @@ Rules:
 | a shared library, a contracts package, a shared UI lib | **every deployable that references it**, one by one |
 | a message contract — event, RPC, queue payload | the publisher **and every consumer** (`rabbitmq`) |
 | a migration | the deployable that applies it, plus the database as its own step |
-| only pipelines, docs, tests, editor config | nothing — `Rilascio: nessun componente` |
+| only pipelines, docs, tests, editor config | nothing — `Release: no components` |
 
-Uncertain fan-out: list what is certain, then one line naming the doubt. Never "tutti i servizi": if it
+Uncertain fan-out: list what is certain, then one line naming the doubt. Never "all services": if it
 really is all of them, they are still listed by name.
 
 ### Finding the deployables
@@ -90,7 +91,7 @@ really is all of them, they are still listed by name.
 ## GitHub
 
 ```powershell
-gh pr create --base $base --title '<titolo>' --body-file pr-body.md      # --draft when applicable
+gh pr create --base $base --title '<title>' --body-file pr-body.md      # --draft when applicable
 gh pr view --json url --jq .url
 gh issue view <n> --json title,body                                      # the linked issue's text
 ```

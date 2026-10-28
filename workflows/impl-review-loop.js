@@ -62,24 +62,13 @@ const sameFinding = (a, b, root) => {
 const rank = f => ({ P1: 1, P2: 2 })[f?.priority] ?? 3
 const BLOCKING = new Set(['P1', 'P2'])
 
-// Past this many files reviewer A splits into one reviewer per group, in order, so a group keeps its files while fixes only append.
-const MAX_REVIEW_FILES = 8
-const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
-const groupFiles = (list, max = MAX_REVIEW_FILES) => {
-  const groups = []
-  for (let i = 0; i < list.length; i += max) groups.push(list.slice(i, i + max))
-  return groups.length ? groups : [[]]
-}
-const groupOf = (path, groups, root) => {
-  const p = rel(path, root)
-  const i = groups.findIndex(g => g.some(x => rel(x, root) === p))
-  return i < 0 ? groups.length - 1 : i
-}
+const WIDE_FILES = 10   // past either, the change is wide: M's second reviewer B runs on opus instead of sonnet; S keeps one Sonnet, L is always Sonnet + Opus; there is never a split
+const WIDE_LINES = 600
 
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
-const reviewersFor = (size, touches = [], mechanical = false) => {
+const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
   const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', size === 'L' || (wide && !mechanical) ? 'opus' : 'sonnet', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -107,11 +96,8 @@ const readReport = r => {
     ...r,
     verify: VERIFY_STATUSES.includes(r.verify?.status) ? r.verify : { ...r.verify, status: 'not-run' },
     snapshot: r.snapshot && typeof r.snapshot === 'object' && typeof r.snapshot.tree === 'string' && r.snapshot.tree ? r.snapshot : null,
-    rejected: list(r.rejected),
-    noticed: list(r.noticed),
     questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
     defaults: list(r.defaults).filter(d => d && typeof d.choice === 'string' && d.choice.trim()),
-    filesReviewed: list(r.filesReviewed),
     remaining: list(r.remaining).filter(s => typeof s === 'string' && s.trim()),
   }
 }
@@ -130,32 +116,22 @@ const verifyGate = ({ report, verifyCmd, toFixHadVerify = false, previous, next 
 }
 
 // A reviewer that returned nothing clears nothing; a specialist clears no file.
-const unreviewedFiles = (answers, reviewers, groups, pending = [], root = '', changed = []) => {
+const unreviewedFiles = (answers, reviewers, pending = [], root = '', changed = []) => {
   const owed = new Map()
   for (const f of [...pending, ...changed]) if (!owed.has(rel(f, root))) owed.set(rel(f, root), f)
   const read = new Set()
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (!a || !r || (r.group === undefined && !r.whole)) return
-    const listed = new Set((Array.isArray(a.filesReviewed) ? a.filesReviewed : []).map(f => rel(f, root)))
-    for (const [key, f] of owed) {
-      if (listed.has(key) && (r.group === undefined || groupOf(f, groups, root) === r.group)) read.add(key)
-    }
+    if (!a || !r || !r.whole) return
+    const listed = new Set(a.filesReviewed.map(f => rel(f, root)))
+    for (const key of owed.keys()) if (listed.has(key)) read.add(key)
   })
   return [...owed].filter(([key]) => !read.has(key)).map(([, f]) => f)
 }
 
 const coverageAction = ({ unread = [], retried = false } = {}) => (!unread.length ? 'ok' : retried ? 'stall' : 'rerun')
 
-const coverageOwners = (unread, reviewers, groups, root = '') => {
-  const keys = new Set()
-  for (const f of unread) {
-    const gi = groupOf(f, groups, root)
-    const owners = groups.length > 1 ? reviewers.filter(r => r.group === gi) : reviewers.filter(r => r.whole)
-    owners.forEach(r => keys.add(r.key))
-  }
-  return reviewers.filter(r => keys.has(r.key)).map(r => r.key)
-}
+const coverageOwners = (unread, reviewers) => (unread.length ? reviewers.filter(r => r.whole).map(r => r.key) : [])
 
 const findingHistory = roundLog => {
   const byId = new Map()
@@ -189,11 +165,6 @@ const notConverging = counts => {
 
 const isNeverBlocking = f => ['clean-code', 'convention'].includes(f?.category)
 
-const isTouched = (path, touched, root) => {
-  const p = rel(path, root)
-  return !!p && (touched ?? []).some(t => rel(t, root) === p)
-}
-
 const widenedFiles = (files, resolutions, round) => {
   const list = [...(files ?? [])]
   for (const r of Array.isArray(resolutions) ? resolutions : []) {
@@ -204,7 +175,7 @@ const widenedFiles = (files, resolutions, round) => {
 }
 
 const cleanupCandidates = (minor, files, { root = '', touched = [] } = {}) =>
-  (Array.isArray(minor) ? minor : []).filter(m => m.priority === 'P3' && m.category !== 'scope' && m.proposal !== true && inPerimeter(m.path, files, root) && !(m.causedByChange === false && !isTouched(m.path, touched, root)))
+  (Array.isArray(minor) ? minor : []).filter(m => m.priority === 'P3' && m.category !== 'scope' && m.proposal !== true && inPerimeter(m.path, files, root) && !(m.causedByChange === false && !isDirty(m.path, touched, root)))
 
 const readAnswers = resolution => (Array.isArray(resolution?.answers) ? resolution.answers : [])
   .filter(a => a && typeof a.text === 'string' && a.text.trim() && typeof a.answer === 'string' && a.answer.trim())
@@ -238,28 +209,12 @@ const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) =>
 const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium', whole: true }
 const deltaReviewers = (everyone, finders = []) => {
   const has = new Set(everyone.map(r => r.key))
-  const wanted = new Set(finders.flatMap(k => (has.has(k) ? [k] : everyone.filter(r => r.key[0] === k[0]).map(r => r.key))))
-  const sonnet = everyone.find(r => r.delta || (r.whole && r.model === 'sonnet' && r.effort === 'medium'))
+  const wanted = new Set(finders.filter(k => has.has(k)))
+  const sonnet = everyone.find(r => r.delta)
   const list = everyone.filter(r => wanted.has(r.key) || r === sonnet)
   return sonnet ? list : [...list, WATCHER]
 }
 const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
-// The size can change the panel under a key (A is a Sonnet high at M and L, the Opus is B at L): a key stands only while it names the same reviewer.
-const finderKey = (raised, everyone) => {
-  const same = r => r.agentType === raised.agentType && r.model === raised.model && r.effort === raised.effort
-  if (!raised.model || everyone.some(r => r.key[0] === raised.key[0] && same(r))) return raised.key
-  return [...everyone, WATCHER].find(same)?.key ?? raised.key
-}
-
-// The fix deltas each reader set saw: the final full read is owed only when a panel key missed one of them.
-const finalReadOwed = (readers, panelKeys) => (Array.isArray(readers) ? readers : []).some(set => panelKeys.some(k => !set.has(k)))
-
-// splice(-1, 1) would drop the last entry: an id that is not in the list removes nothing.
-const removeById = (list, id) => {
-  const at = list.findIndex(m => m.id === id)
-  if (at >= 0) list.splice(at, 1)
-  return at >= 0
-}
 
 // A file the snapshot reports as big becomes a P3 split proposal, once per path, never a finding to fix.
 const growthProposals = big => {
@@ -289,7 +244,7 @@ const classify = (f, files, { dirty = [], root = '', touched = [] } = {}) => {
   const scope = f.category === 'scope' && !isDirty(f.path, dirty, root)
   const priority = scope && !BLOCKING.has(f.priority) ? 'P2' : f.priority
   if (BLOCKING.has(priority) && (scope || inside)) return 'blocking'
-  if (BLOCKING.has(priority) && f.category !== 'scope' && (f.causedByChange === true || isTouched(f.path, touched, root))) return 'widen'
+  if (BLOCKING.has(priority) && f.category !== 'scope' && (f.causedByChange === true || isDirty(f.path, touched, root))) return 'widen'
   return inside ? 'minor' : 'outOfScope'
 }
 
@@ -320,10 +275,10 @@ const recheckReviewers = ({ answers = [], reviewers = [], asked = {}, answeredBy
   return reviewers.filter((r, i) => (answers[i] ? open(r.key).length > 0 : open(r.key).some(id => !answeredAsked(id)))).map(r => r.key)
 }
 
-const idsToAsk = ({ tracked = {}, known = {}, lastFixFiles = [], skipped = [], root = '' } = {}) => {
+const idsToAsk = ({ tracked = {}, known = {}, lastFixFiles = [], skipped = [], root = '', all = false } = {}) => {
   const live = id => tracked[id] && tracked[id].status !== 'accepted'
   if (skipped.length) return skipped.filter(live)
-  return Object.keys(tracked).filter(id => live(id) && (tracked[id].status !== 'closed' || isTouched(known[id]?.path, lastFixFiles, root)))
+  return Object.keys(tracked).filter(id => live(id) && (all || tracked[id].status !== 'closed' || isDirty(known[id]?.path, lastFixFiles, root)))
 }
 
 // A rejection without `kind` is read from its free-text reason.
@@ -479,12 +434,12 @@ const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|per
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
 
 // The agents start in the session's folder, which may be another repo.
-const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything.`
+const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. Write in the chat language; any PR comment in the prComment language, as the Lang: line gives it.`
 // The implementer body already says the rest (Open questions, the Never list); reviewers and Explore get it here.
 const RULES = `${REPO} A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
 const quote = s => `'${String(s).replace(/'/g, "''")}'`
 const snapshotText = since => [
-  'Last step, after the verify command and before the structured output: run this exactly with the PowerShell tool (the quoting of -Dirty is PowerShell\'s) and return the one JSON line it prints as `snapshot`, unchanged (the loop reads the files you changed from it):',
+  'Last step, after the verify command and before the structured output: run this exactly with the PowerShell tool (the quoting of -Dirty is PowerShell\'s) and return the one JSON line it prints as `snapshot`, unchanged (the loop reads the files you changed from it). The snapshot\'s `files` lists the whole change since the start (the implementer\'s files too), not only your own edits: expected, not to be reported as an anomaly.',
   ['pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1', `-Since ${since || startHead || 'HEAD'}`, startHead ? `-Start ${startHead}` : '', dirty.length ? `-Dirty ${quote(dirty.join(','))}` : ''].filter(Boolean).join(' '),
 ].join('\n')
 // The implementer has no tool budget (its run is task-sized).
@@ -549,17 +504,17 @@ const REVIEW = obj(['previous', 'found', 'checked', 'filesReviewed'], {
 
 const known = {}
 const raisedBy = {}
-const fixFiles = new Set()            // a cleanup pass is no review fix: its files are not here
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = [], minor = [], cleaned = [], gaps = [], notes = [], noticed = [], proposals = [], defaults = [], rounds = [], failures = {}
 let tracked = {}, nextId = 1, round = 0, nextV = 1, verifyOpen = [], lastReport = null
-let lastFix = null, lastTree = '', lastReportTree = '', lastDelta = '', lastDeltaIsFix = false, lastDeltaBase = ''
+let lastFix = null, lastTree = '', lastDelta = '', lastDeltaBase = ''
 let rejectionCounts = {}, challenged = {}, skipped = [], silent = {}
 let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = false, cleanupSent = []
 let fixChurns = [], openCounts = [], afterFix = false
 let nextRound = { only: null, coverage: false, final: false }
-let finalReading = false, finalReadDone = false, round1Tree = ''
-let fixReaders = [], lastFixIsReview = false, bigFiles = []   // fixReaders: per review fix, the panel keys that read its delta
+let finalReading = false, finalReadDone = false
+let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
+let reviewFixed = false, bigFiles = []   // reviewFixed: a review fix ran (a cleanup pass is none)
 
 const ask = async (prompt, opts) => {
   try { return await agent(prompt, opts) } catch (e) {
@@ -572,30 +527,32 @@ const why = label => (failures[label] ? `: ${failures[label]}` : '')
 
 // A declared dirty file is kept (the snapshot drops it) so the change's own edit of it is reviewed.
 const takeFiles = r => {
-  if (!Array.isArray(r.snapshot?.files)) return (r.files ?? []).forEach(f => changed.add(f))
-  const declaredDirty = (r.files ?? []).filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
+  if (!r.snapshot) return r.files.forEach(f => changed.add(f))
+  const declaredDirty = r.files.filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
   const listed = [...r.snapshot.files.filter(f => typeof f === 'string' && f), ...declaredDirty]
   const keep = new Set(listed.map(f => rel(f, repoRoot)))
   for (const f of [...changed]) if (!keep.has(rel(f, repoRoot)) && !isDirty(f, dirty, repoRoot)) changed.delete(f)
   const have = new Set([...changed].map(f => rel(f, repoRoot)))
   listed.forEach(f => { if (!have.has(rel(f, repoRoot))) { changed.add(f); have.add(rel(f, repoRoot)) } })
 }
-const takeNoticed = r => {
-  for (const n of r.noticed) {
-    if (n && typeof n === 'object' && !noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
-  }
-}
 const takeDefaults = r => {
   for (const d of r.defaults) if (!defaults.some(x => plain(x.choice) === plain(d.choice) && plain(x.path) === plain(d.path))) defaults.push(d)
 }
-const takeReport = r => {
+const addNotes = qs => (qs ?? []).forEach(q => { if (!notes.some(n => sameText(n.text, q))) notes.push({ source: 'implementer', text: q }) })
+// What a report says beside its files: noticed, defaults, open questions.
+const takeSide = r => {
+  for (const n of r.noticed) {
+    if (!noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
+  }
   takeDefaults(r)
+  addNotes(r.openQuestions)
+}
+const takeReport = r => {
   takeFiles(r)
-  lastReportTree = r.snapshot?.tree ?? ''
-  if (lastReportTree) lastTree = lastReportTree
+  if (r.snapshot?.tree) lastTree = r.snapshot.tree
   lastReport = r
   if (Array.isArray(r.snapshot?.big)) bigFiles = growthProposals(r.snapshot.big)
-  takeNoticed(r)
+  takeSide(r)
 }
 const gateReport = (r, toFixHadVerify) => {
   const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: lastReport?.verify.status, next: nextV })
@@ -604,24 +561,24 @@ const gateReport = (r, toFixHadVerify) => {
   return g.stall
 }
 const absorb = r => {
-  const stall = gateReport(r, false)
+  const gate = gateReport(r, false)
   takeReport(r)
-  addNotes(r.openQuestions)
-  return stall
+  return gate
 }
 
 const RESOLUTIONS = 'resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, answers?: [{ text, answer }], widen?: ["path/or/dir/"] }]'
 const RESUME_AGAIN = `Relaunch with the same args and resumeFromRunId, plus every resolution so far: ${RESOLUTIONS}.`
-const answerResume = (at, first, tail = '') => `${first} Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any), each text being the question's text unchanged (an answer whose text matches no question is ignored; while a question has no answer this stall comes back, so keep the answers already given in that entry): ${RESOLUTIONS}.${tail}`
+const relaunch = add => `Relaunch with resumeFromRunId and ALL the resolutions so far${add ? `, adding ${add}` : ''}`
+const answerResume = (at, first, tail = '') => `${first} ${relaunch(`{ round: ${at}, answers: [{ text, answer }] }`)} (in the same entry as that round's other resolution, if any), each text being the question's text unchanged (an answer whose text matches no question is ignored; while a question has no answer this stall comes back, so keep the answers already given in that entry): ${RESOLUTIONS}.${tail}`
 const ASK_EACH = 'Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table.'
 const RESUME_FRESH = 'Relaunch with the same args WITHOUT resumeFromRunId: a resume replays the cached implementer report and stalls again.'
-const stallAgain = (at, reason, extra = {}) => result({ status: 'STALL', stall: { round: at, findings: [], reason, ...extra }, resume: at === 0 ? RESUME_FRESH : RESUME_AGAIN })
-const questionStall = (at, questions, reason, resume) => result({ status: 'STALL', stall: { round: at, why: 'question', findings: [], questions, reason }, resume })
-const verifyStall = (at, s) => result({
-  status: 'STALL',
-  stall: { round: at, why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
-  resume: `Ask the user: a different approach, a direction for the fixer, or no verify command. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, guidance: "..." } (retry alone replays the cached fixer report and stalls again); a stall at round 0 replays the cached implementer report: relaunch WITHOUT resumeFromRunId.`,
-})
+// The one STALL result: `fields` are the stall's own keys after `round`, so a key a kind lacks stays absent.
+const stall = (at, fields, resume) => result({ status: 'STALL', stall: { round: at, ...fields }, resume })
+const stallAgain = (at, reason, extra = {}) => stall(at, { findings: [], reason, ...extra }, at === 0 ? RESUME_FRESH : RESUME_AGAIN)
+const questionStall = (at, questions, reason, resume) => stall(at, { why: 'question', findings: [], questions, reason }, resume)
+const verifyStall = (at, s) => stall(at,
+  { why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
+  `Ask the user: a different approach, a direction for the fixer, or no verify command. ${relaunch(`{ round: ${at}, guidance: "..." }`)} (retry alone replays the cached fixer report and stalls again); a stall at round 0 replays the cached implementer report: relaunch WITHOUT resumeFromRunId.`)
 const verifyText = () => (lastReport
   ? `Verify (run by the implementer): \`${lastReport.verify.command ?? input.verify ?? '(no command reported)'}\` → ${lastReport.verify.status}${lastReport.verify.line ? `: ${lastReport.verify.line}` : ''}`
   : '')
@@ -647,7 +604,6 @@ const result = extra => withHistory({
   ...extra,
 })
 
-const addNotes = qs => (qs ?? []).forEach(q => { if (!notes.some(n => sameText(n.text, q))) notes.push({ source: 'implementer', text: q }) })
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
 const answersBlock = answers => `The owner answered your questions: apply each answer. Your first run's edits are already in the tree: continue from them, do not start over, and list in \`files\` only the files you change in this run.\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
 // The first run is not a report: its tree stays the next -Since, so the delta keeps both runs.
@@ -664,16 +620,14 @@ const askWithQuestions = async (build, opts, at, resolution) => {
   if (pending.length) {
     return { stall: questionStall(at, pending, `${opts.label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH)) }
   }
-  takeNoticed(first)
-  takeDefaults(first)
-  addNotes(first.openQuestions)
+  takeSide(first)
   const second = readReport(await ask(build(answersBlock(answers)), { ...opts, label: `${opts.label} (answers)` }))
   addQuestionNotes(second?.questions ?? [])
   if (!second) return { report: second }
   // First-run rejections stay in the report (the ids count as rejected) but are no CHALLENGE when the second run changed their file.
-  const carried = first.rejected.filter(r => !second.rejected.some(s => s?.id === r?.id))
-  const stale = new Set(carried.filter(r => isTouched(known[r?.id]?.path, second.files, repoRoot)).map(r => r?.id))
-  const merged = [...new Set([...(Array.isArray(first.files) ? first.files : []), ...(Array.isArray(second.files) ? second.files : [])])]
+  const carried = first.rejected.filter(r => !second.rejected.some(s => s.id === r.id))
+  const stale = new Set(carried.filter(r => isDirty(known[r.id]?.path, second.files, repoRoot)).map(r => r.id))
+  const merged = [...new Set([...first.files, ...second.files])]
   return { report: { ...second, files: merged, rejected: [...second.rejected, ...carried] }, stale }
 }
 
@@ -700,7 +654,7 @@ if (!inline) {
   let continuations = 0
   // The implementer stops itself at 30 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
   while ((!impl || impl.remaining.length) && continuations < 4) {
-    if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
+    if (impl) takeSide(impl)
     continuations += 1
     const left = impl?.remaining ?? []
     const label = `implement the change (continued, ${continuations})`
@@ -715,18 +669,14 @@ if (!inline) {
     // A report lists its own files; only a missing one needs the probe.
     const done = impl ? strings(impl.files) : await recoverChanges()
     const todo = impl?.remaining ?? []
-    return result({
-      status: 'STALL',
-      stall: {
-        round: 0,
-        why: 'incomplete',
-        findings: [],
-        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
-      },
-      resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
-    })
+    return stall(0, {
+      why: 'incomplete',
+      findings: [],
+      reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+    }, 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.')
   }
   const implStall = absorb(impl)
+  if (Number.isFinite(impl.snapshot?.churn)) changeLines = impl.snapshot.churn
   if (implStall) return verifyStall(0, implStall)
 
   if (previewText && sizeFor(givenSize, risk) !== 'S') {
@@ -751,20 +701,17 @@ if (!inline) {
   }
 }
 
-const everyId = () => idsToAsk({ tracked, known, lastFixFiles: finalReading ? [...fixFiles] : (lastFix?.files ?? []), skipped, root: repoRoot })
-const askedIds = (r, groups) => (r.group === undefined ? everyId() : everyId().filter(id => groupOf(known[id].path, groups, repoRoot) === r.group))
+const everyId = () => idsToAsk({ tracked, known, lastFixFiles: lastFix?.files ?? [], skipped, root: repoRoot, all: finalReading })
 const anchor = id => `${known[id].path}${known[id].line ? `:${known[id].line}` : ''}`
-const previousBlock = (r, groups) => {
-  const mineIds = askedIds(r, groups)
+const previousBlock = () => {
+  const mineIds = everyId()
   const ids = mineIds.filter(id => !challenged[id])
-  if (!everyId().length) {
+  if (!mineIds.length) {
     return Object.keys(tracked).length
       ? 'PREVIOUS FINDINGS: none to judge (the earlier ones are closed or accepted and the last fix did not touch them: give no verdict).'
       : 'PREVIOUS FINDINGS: none (first round: review the whole change).'
   }
-  if (!ids.length) return mineIds.length
-    ? 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
-    : 'PREVIOUS FINDINGS: none on your files (give no verdict).'
+  if (!ids.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
   const list = ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)
   if (skipped.length) {
     const who = mineIds.length > ids.length ? 'for each of these ids and for each id of the CHALLENGE below' : 'for each of these ids only'
@@ -772,8 +719,8 @@ const previousBlock = (r, groups) => {
   }
   return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}`
 }
-const challengeBlock = (mine = () => true) => {
-  const list = Object.keys(challenged).filter(mine).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
+const challengeBlock = () => {
+  const list = Object.keys(challenged).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
   return list.length
     ? `CHALLENGE (the fixer rejected these findings and left the code unchanged: judge each one yourself, reading the code and reproducing the failure when you can; give a verdict for each id in previous: closed = you withdraw it, open = you keep it, and put why in note; a "not reproduced" you can reproduce is kept, with the steps):\n${list.join('\n')}`
     : ''
@@ -785,60 +732,48 @@ const reviewersForRound = () => {
   const seen = new Map()
   for (const f of changed) { const k = rel(f, repoRoot); if (!seen.has(k)) seen.set(k, f) }
   const expected = [...seen.values()]
-  const groups = groupFiles(expected)
   const size = sizeFor(givenSize, risk)
   const signal = sizeSignal(size, seen.size)
   if (signal && !gaps.includes(signal)) gaps.push(signal)
-  const reviewers = reviewersFor(size, risk, mechanical)
-  const [first, ...rest] = reviewers
-  if (groups.length < 2) return { size, groups, list: reviewers, expected }
-  return { size, groups, expected, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
+  const wasWide = wide
+  wide = wide || (!mechanical && (expected.length > WIDE_FILES || changeLines > WIDE_LINES))
+  if (wide && !wasWide) log(`wide change (${expected.length > WIDE_FILES ? `${expected.length} files, more than ${WIDE_FILES}` : `${changeLines} changed lines, more than ${WIDE_LINES}`}): ${size === 'M' ? 'reviewer B runs on opus' : `the ${size} panel is unchanged`}`)
+  const reviewers = reviewersFor(size, risk, mechanical, wide)
+  return { size, list: reviewers, expected }
 }
-const shareText = (r, groups) => (r.group === undefined ? '' : [
-  `Your share: review ONLY these files, the other reviewers hold the rest (this overrides the "hint" rule above): ${groups[r.group].join(', ')}.`,
-  r.group === groups.length - 1 ? 'You also own any touched file git lists that is not in the declared list.' : '',
-].filter(Boolean).join(' '))
-
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit()}`
-const scopeOfFinal = () => {
-  const cmd = deltaCommand(round1Tree || startHead || 'HEAD', lastTree, startHead)
-  return `FINAL FULL READ: the fixes of this run are done and the panel reads everything they changed since round 1, as one change, judging each previous finding by reading the code as it is now. Files the fixes changed: ${[...fixFiles].join(', ') || '(none reported)'}.${cmd ? ` ${round1Tree ? `The cumulative fix diff is \`${cmd}\`` : `No tree of round 1 exists (no snapshot before the first fix): \`${cmd}\` is the WHOLE change since the start, not only the fixes`} (the trees are snapshots of the working tree, untracked files included): run it first.` : ''}\n${touchedByGit()}`
-}
+const scopeOfFinal = () => `FINAL FULL READ: judge every previous finding id against the code as it is now.\n${scopeOfChange()}`
 const scopeOfDelta = () => {
   if (!lastFix) return scopeOfChange()
-  const since = `changes since ${lastDeltaBase || startHead || 'HEAD'}`
-  const fromHead = lastDelta && !lastDeltaIsFix   // the delta starts before the report that preceded the fix: it is not the fix alone
-  return `Review the ${fromHead ? since : 'DELTA of the last fix'}, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}.${lastDelta ? ` The ${fromHead ? `${since} are` : 'DELTA of the last fix is'} \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first.` : ''} What the fix says it did: ${lastFix.scope}\n${touchedByGit()}`
+  return `Review the changes since ${lastDeltaBase || startHead || 'HEAD'}${lastDelta ? `: \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first` : ''}. Judge each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit()}`
 }
-// The coverage rerun gives the rest of the unread files to their group reviewers.
-const scopeOfReview = (r, groups) => {
-  if (missing.has(r.key) && r.group === undefined && !r.whole) return scopeOfChange()
-  const full = r.group !== undefined ? groups[r.group].filter(f => unread.includes(f)) : r.whole ? unread.slice(0, MAX_REVIEW_FILES) : []
+// The coverage rerun gives every unread file, in full, to a whole reviewer.
+const scopeOfReview = r => {
+  if (missing.has(r.key) && !r.whole) return scopeOfChange()
+  const full = r.whole ? unread : []
   return (finalReading ? scopeOfFinal() : scopeOfDelta()) + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
 }
 
 while (true) {
   round += 1
   phase('Review')
-  const { size, groups, list: everyone, expected } = reviewersForRound()
+  const { size, list: everyone, expected } = reviewersForRound()
   const { only, coverage, final } = nextRound
   nextRound = { only: null, coverage: false, final: false }
   finalReading = final
-  if (round === 1) round1Tree = lastTree
-  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => (raisedBy[id] ?? []).map(r => finderKey(r, everyone))))]
+  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => raisedBy[id] ?? []))]
   const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
     : round === 1 || final ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
   const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
-  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${r.group === undefined ? '' : `, files ${r.group + 1}/${groups.length}`}${final ? ', final read' : ''}`
-  const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
+  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${final ? ', final read' : ''}`
+  const askedMap = Object.fromEntries(reviewers.map(r => [r.key, everyId()]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
   const answers = await parallel(reviewers.map(r => () => ask([
-    scopeOfReview(r, groups),
-    shareText(r, groups),
+    scopeOfReview(r),
     `Intent: ${brief}`,
     round === 1 || final ? requestText : '',
     decisionsText,
@@ -849,25 +784,24 @@ while (true) {
     dirtyText,
     'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
-    `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
-    previousBlock(r, groups),
-    challengeBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
+    `Effort: ${r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
+    previousBlock(),
+    challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     budgetText(35),
   ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
   alive.forEach(takeDefaults)
-  if (lastFix && lastFixIsReview && !final && fixReaders.length) alive.forEach(a => fixReaders[fixReaders.length - 1].add(a.key))
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
-  const owedNow = round === 1 ? expected : only ? [] : final ? [...fixFiles] : (lastFix?.files ?? [])
+  const owedNow = round === 1 || final ? expected : only ? [] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
-  unread = unreviewedFiles(answers, reviewers, groups, unread, repoRoot, owedNow)
+  unread = unreviewedFiles(answers, reviewers, unread, repoRoot, owedNow)
   unread.filter(f => !wasUnread.has(rel(f, repoRoot))).forEach(f => gaps.push(`round ${round}: ${f} was not read by its reviewer (not in filesReviewed)`))
   if (!unread.length) coverageRetried = false
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (r.group !== undefined || r.whole) return
+    if (r.whole) return
     if (a) missing.delete(r.key)
     else missing.add(r.key)
   })
@@ -887,15 +821,16 @@ while (true) {
   // An id whose file is still unread waits for the round that reads it.
   const cleanupWait = []
   for (const id of cleanupSent) {
-    if (isTouched(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
+    if (isDirty(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
     if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
-    removeById(minor, id)
+    const at = minor.findIndex(m => m.id === id)   // splice(-1, 1) would drop the last entry
+    if (at >= 0) minor.splice(at, 1)
     cleaned.push(known[id])
   }
   cleanupSent = cleanupWait
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
-  found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot).map(k => { const r = reviewers.find(x => x.key === k); return { key: k, agentType: r?.agentType, model: r?.model, effort: r?.effort } }) })
+  found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot) })
   const resolution = resolutions.find(r => Number(r.round) === round)
   const roundFiles = widenedFiles(files, resolutions, round)
   const asked = challenged   // the challenges this decision judges; `challenged` below keeps only the unanswered ones
@@ -931,18 +866,18 @@ while (true) {
       const keys = [...missing]
       return stallAgain(round, `the specialist reviewer(s) ${keys.join(', ')} returned nothing: their area was never reviewed`, { why: 'gap', reviewers: keys })
     }
-    const cover = coverageAction({ unread, retried: coverageRetried })
-    if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
-    if (cover === 'rerun') {
-      nextRound = { only: coverageOwners(unread, everyone, groups, repoRoot), coverage: true }
-      coverageRetried = true
+    // The final read is the whole panel on the whole change: it covers every file, so it goes before the coverage rerun.
+    if (!finalReadDone && reviewFixed && size !== 'S') {
+      finalReadDone = true
+      nextRound = { only: null, coverage: false, final: true }
       openCounts = []
       continue
     }
-    // The 0 of a DONE is no bar for later fix cycles.
-    if (!finalReadDone && fixFiles.size && size !== 'S' && finalReadOwed(fixReaders, everyone.map(r => r.key)) && (fixChurns.length < fixReaders.length || fixChurns.reduce((n, c) => n + c, 0) > FINAL_READ_MIN_CHURN)) {
-      finalReadDone = true
-      nextRound = { only: null, coverage: false, final: true }
+    const cover = coverageAction({ unread, retried: coverageRetried })
+    if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
+    if (cover === 'rerun') {
+      nextRound = { only: coverageOwners(unread, everyone), coverage: true }
+      coverageRetried = true
       openCounts = []
       continue
     }
@@ -953,23 +888,16 @@ while (true) {
     rounds[rounds.length - 1].cleanup = cleanupIds
   }
   if (stopped) {
-    return result({
-      status: 'STALL',
-      stall: {
-        round, why: stopWhy, findings: toFix.map(id => ({ id, why: stopWhy, ...known[id] })),
-        reason: stopWhy === 'churn'
-          ? `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging`
-          : `the open P1/P2 count after each fix round (${openCounts.join(', ')}) did not drop below its lowest in 3 fix rounds in a row: the fixes are not converging`,
-      },
-      resume: `Ask the user: accept the risk or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, accept: [ids] } to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`,
-    })
+    return stall(round, {
+      why: stopWhy, findings: toFix.map(id => ({ id, why: stopWhy, ...known[id] })),
+      reason: stopWhy === 'churn'
+        ? `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging`
+        : `the open P1/P2 count after each fix round (${openCounts.join(', ')}) did not drop below its lowest in 3 fix rounds in a row: the fixes are not converging`,
+    }, `Ask the user: accept the risk or a different approach. ${relaunch(`{ round: ${round}, accept: [ids] }`)} to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`)
   }
   if (action === 'STALL') {
-    return result({
-      status: 'STALL',
-      stall: { round, findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
-      resume: `Ask the user: accept the risk, one more round, or a different approach; a "widen" finding asks to add its file to the perimeter (only on the user's yes: the session then rewrites perimeter.md with perimeter.ps1 -Files) or to accept it as out of scope. Relaunch with resumeFromRunId and ALL the resolutions so far: ${RESOLUTIONS}.`,
-    })
+    return stall(round, { findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
+      `Ask the user: accept the risk, one more round, or a different approach; a "widen" finding asks to add its file to the perimeter (only on the user's yes: the session then rewrites perimeter.md with perimeter.ps1 -Files) or to accept it as out of scope. ${relaunch()}: ${RESOLUTIONS}.`)
   }
   if (action === 'RECHECK') {
     const stuck = Object.fromEntries(Object.entries(askedMap).map(([key, ids]) => [key, ids.filter(id => decision.unanswered.includes(id))]))
@@ -1010,22 +938,18 @@ while (true) {
   if (!fixed) return stallAgain(round, `the implementer returned nothing on the fix (stopped or failed${why(fixOpts.label)})`)
   const fixStall = gateReport(fixed, vIds.length > 0 && !resolution?.guidance && resolution?.retry !== true)
   const treeBefore = lastTree
-  lastDeltaIsFix = !!lastReportTree
   lastDeltaBase = treeBefore || startHead || 'HEAD'
   takeReport(fixed)
   lastDelta = deltaCommand(treeBefore, fixed.snapshot?.tree ?? '', startHead)
-  const rejectedIds = new Set(fixed.rejected.map(r => r?.id))
+  const rejectedIds = new Set(fixed.rejected.map(r => r.id))
   sending.filter(id => known[id]?.category === 'scope' && !rejectedIds.has(id)).forEach(id => {
     if (!proposals.some(p => p.path === known[id].path && p.title === known[id].title)) proposals.push({ source: 'scope-revert', title: known[id].title, path: known[id].path, why: known[id].failure })
   })
-  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r?.id) && tracked[r.id]?.status === 'open' && !asked1.stale?.has(r.id)), counts: rejectionCounts })
+  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r.id) && tracked[r.id]?.status === 'open' && !asked1.stale?.has(r.id)), counts: rejectionCounts })
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
-  lastFixIsReview = !cleaning
-  if (!cleaning) fixReaders.push(new Set())
-  if (!cleaning) (Array.isArray(fixed.files) ? fixed.files : []).forEach(f => fixFiles.add(f))
-  addNotes(fixed.openQuestions)
+  if (!cleaning) reviewFixed = true
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (fixStall) return verifyStall(round, fixStall)
   if (!cleaning) {

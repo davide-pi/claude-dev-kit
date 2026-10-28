@@ -25,4 +25,4 @@ reminder and the statusline badge. So:
 | A **reduced day** (event, leave, course, part-time) | a `target` row with the real target and a note, plus the day's hours rows |
 | The user postpones ("lo faccio domani") | **nothing**: the day stays pending, which is exactly right |
 
-Ask before a close row at zero, in Italian: "il <data> non c'è niente da registrare, lo chiudo a zero?"
+Ask before a close row at zero, in the chat language: "il <data> non c'è niente da registrare, lo chiudo a zero?"

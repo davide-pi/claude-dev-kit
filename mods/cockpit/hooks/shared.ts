@@ -18,6 +18,7 @@ export const COLORS = {
   red: '#f07a6f',
   gap: '#8a3b33',
   empty: '#33363c',
+  band: 'subtle', // the odd rows of a list: the theme's own faint grey, so the band follows a light or dark theme and stays quiet
   gray: '#8c8c8c',
 } as const
 

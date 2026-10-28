@@ -52,7 +52,7 @@ descriptions and decisions come from there; open a transcript only for a missing
 ## Phase 3 — topics and roles
 
 **The topic comes from the git branch.** A `feature/*`, `fix/*` or `bugfix/*` branch is a topic: give
-it a human Italian name. Work on the default branch, `HEAD` or no branch → **split it into semantic
+it a human name in the items language. Work on the default branch, `HEAD` or no branch → **split it into semantic
 topics** from the digest and spread its minutes by a reasonable estimate, **saying so**. A topic
 crosses projects only when it is clearly the same work.
 
@@ -70,7 +70,7 @@ Certainty about the item comes in Phase 5: classify by judgement here, re-check 
 
 Usage as in `SKILL.md` Do.
 
-- Entry `minutes|label|role`, role default `main`: `minutes` = the row's `Totale` as adjusted in Table 1; the Italian label seeds the Task title.
+- Entry `minutes|label|role`, role default `main`: `minutes` = the row's `Total` (at chat `it`: `Totale`) as adjusted in Table 1; the chat-language label seeds the Task title.
 - **Nearest 0.5h per topic**, no cap: 45 min → 1.0h (ties away from zero), under ~15 min → 0h.
 - **All of one day's topics in one call**: the donor spread depends on how many `main` rows there are.
 - `-TargetHours` = the day's `TARGET` from the GIORNO table. The helper prints:

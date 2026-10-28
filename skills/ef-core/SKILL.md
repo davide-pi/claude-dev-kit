@@ -10,7 +10,7 @@ paths: "**/Migrations/**,**/*DbContext*.cs,**/*Configuration.cs"
 
 **Contract.** Model, query and migration changes that keep the data (a repository's own data
 playbook wins over this skill) · never hand-writes a migration class or edits the model snapshot,
-never `database update` on a shared database · Italian prose, SQL and tool output verbatim.
+never `database update` on a shared database · prose in the chat language, SQL and tool output verbatim.
 
 ## When
 

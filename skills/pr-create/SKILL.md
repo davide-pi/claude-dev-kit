@@ -7,8 +7,10 @@ description: >-
 
 # pr-create — turn a pushed branch into a reviewable PR
 
-**Contract.** An open PR with title, body, `Rilascio:` block and the parent work item linked ·
-never merges, never opens a PR with no parent item · title and body Italian, identifiers verbatim.
+**Contract.** An open PR with title, body, `Release:` block and the parent work item linked ·
+never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim; the labels are English, at pr language `it` exactly
+`Release:`=`Rilascio:`, `no components`=`nessun componente`, `Merge risk:`=`Rischio merge:`, `reversible`/`irreversible`=`reversibile`/`irreversibile`,
+`impact:`=`impatto:`, `Verification:`=`Verifica:`, `Before`/`After`=`Prima`/`Dopo`, `Notes for the reviewer:`=`Note per il reviewer:`, `unresolved`=`non risolto`.
 
 ## When
 
@@ -38,27 +40,27 @@ GitHub the issue — **never a Task**.
 
 The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash flags.
 
-### 3. Title and body — Italian, derived from the diff
+### 3. Title and body — in the pr language, derived from the diff
 
 | Part | Rule |
 | --- | --- |
-| title | one imperative line, specific, no period: `Aggiungi export fatture per tenant`; it becomes the squash commit subject |
+| title | one imperative line, specific, no period: `Add invoice export per tenant`; it becomes the squash commit subject |
 | body | one bullet per real change and its why; anything the reviewer must not miss (migration, config key, breaking signature); out of scope named |
-| `Rilascio:` | always present — see §4 |
-| `Rischio merge:` | always present: `reversibile` or `irreversibile` (what cannot be undone); `impatto:` who or what breaks |
-| `Verifica:` | only when something was run: the command, before → after; nothing run → no block |
+| `Release:` | always present — see §4 |
+| `Merge risk:` | always present: `reversible` or `irreversible` (what cannot be undone); `impact:` who or what breaks |
+| `Verification:` | only when something was run: the command, before → after; nothing run → no block |
 | never | an empty template, a commit-by-commit dump, a diff retold in prose, secrets or customer data |
 
 Source: the log and diff below, plus the linked item's text — a gap between what the item asked and
 what the branch does is a body note.
 
-### 4. `Rilascio:` — what this change forces to deploy
+### 4. `Release:` — what this change forces to deploy
 
 One bullet per deployable with the reason, real names from the repo. A shared library, contracts
 package or message contract releases **its consumers, named one by one**, never itself; a migration
 releases its deployable plus the database as its own step, with the ordering. Nothing deployable →
-`Rilascio: nessun componente` (absent reads as forgotten). Never "tutti i servizi". A file that maps
-to nothing → `non risolto: <path>`. Mapping and fan-out: `references/description.md`.
+`Release: no components` (absent reads as forgotten). Never "all services". A file that maps
+to nothing → `unresolved: <path>`. Mapping and fan-out: `references/description.md`.
 
 ### 5. Draft or ready
 
@@ -71,14 +73,14 @@ Never ready with a red local build.
 $base = (git symbolic-ref --short refs/remotes/origin/HEAD) -replace '^origin/', ''
 git fetch origin $base
 git log --oneline "origin/$base..HEAD"; git diff --stat "origin/$base...HEAD"
-git diff --name-only "origin/$base...HEAD"            # the Rilascio fan-out starts here
+git diff --name-only "origin/$base...HEAD"            # the Release fan-out starts here
 git push --set-upstream origin (git branch --show-current)
 # body as a UTF-8 file: newlines and code fences survive the shell
 Set-Content -Path pr-body.md -Encoding utf8 -Value $body
 
 # Azure DevOps — org and project from the ALM: line; one --description value per line
 az repos pr create --org $org -p $proj --repository <repo> --source-branch (git branch --show-current) `
-  --target-branch $base --title '<titolo>' --description (Get-Content pr-body.md -Encoding utf8) `
+  --target-branch $base --title '<title>' --description (Get-Content pr-body.md -Encoding utf8) `
   --work-items <id> --squash true --delete-source-branch true --draft false
 ```
 

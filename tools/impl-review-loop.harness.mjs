@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -64,15 +64,16 @@ async function run(args, reviews, implementers = [], extra = {}) {
   return { out, calls };
 }
 
-const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'M' };
-const CLEAN = { ...ARGS, cleanup: true };   // the P3 cleanup pass runs only when asked
+const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'S' };
+const ARGS_M = { ...ARGS, size: 'M' };
+const CLEAN = { ...ARGS_M, cleanup: true };   // the P3 cleanup pass runs only when asked
 const review = (previous, found = [], filesReviewed = ALL_READ) => ({ previous, found, checked: 'read', filesReviewed });
 const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', ...extra });
 const NULL_GUARD = 'null guard missing on the order lookup';
 const DONE = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] };
 const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
 const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
-const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
+const manyImpl = { scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] };
 const read = (...filesReviewed) => ({ previous: [], found: [], filesReviewed });
 const labels = (calls, prefix) => calls.filter(c => c.opts.label?.startsWith(prefix)).map(c => c.opts.label);
 // A reviewer's label (`reviewer A · round 2 · code`), of round `round` when one is given.
@@ -88,4 +89,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, groupFiles, groupOf, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal };
+export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal };

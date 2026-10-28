@@ -14,6 +14,8 @@ default. It tells every agent how deep to go:
 | `xhigh` | the full two-model pair plus both specialists, told to follow call paths out of the diff |
 | `max` | the same, exhaustive: every touched path, every caller |
 
+A diff of 30+ files goes to the saved workflow `/review-large` on the user's yes: two `code-reviewer`s, A on Sonnet and B on Opus (or the `modelB` arg), each reading the whole change with one brief, then one merger. It never splits the files.
+
 `[focus]` overrides the ladder: `security` → `review-security` alone, `performance` →
 `review-performance` alone, anything else (`completeness`, `clean-code`, a subsystem) → the
 generalist told to concentrate on that axis. Parallel agents go out **in a single message**.
@@ -38,7 +40,7 @@ share the prompt-cache prefix:
    performance pass, but they still report what their other passes surface.
 7. For the pair: "you may be one of two reviewers on different models — report what you see, do not
    soften for agreement".
-8. **The output contract in one line** — Finding blocks in the agent's Output format, Italian prose, anchors
+8. **The output contract in one line** — Finding blocks in the agent's Output format, prose in the chat language, anchors
    on working-tree lines, one defect per block.
 
 ## Merging
@@ -53,7 +55,7 @@ Merge before triage:
 5. Re-sort across agents in the `report-format.md` order, keep the **higher** priority on a
    conflict, number the survivors `1..n` — the chat report and the tables use that numbering.
 6. Track which agent (and model) produced each survivor — it decides the tag.
-7. Already fixed in this session → `status: done`, `Risolto da: sessione`.
+7. Already fixed in this session → `status: done`, `Resolved by: session`.
 
 ## Attribution
 

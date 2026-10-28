@@ -10,7 +10,7 @@ paths: "**/*ServiceContract*/**,**/*Responder*.cs,**/*Subscriber*.cs,**/*Consume
 
 **Contract.** Bus code that survives a timeout and a duplicate, and broker state read without
 changing it · never purges, consumes, deletes or requeues while investigating · explanations in
-Italian, queue names, counts and exceptions verbatim.
+the chat language, queue names, counts and exceptions verbatim.
 
 ## When
 

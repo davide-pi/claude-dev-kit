@@ -33,7 +33,7 @@ say only "concise, your output contract". Everyone else gets this, pasted verbat
 
 ```text
 Return at most 30 lines, exactly these sections — no narrative, no restated task.
-Prose in Italian; paths, commands, quoted output, test names and verdict values verbatim.
+Prose in the chat language; paths, commands, quoted output, test names and verdict values verbatim.
 
 ## Scope
 One sentence: what you were asked, as you understood it.

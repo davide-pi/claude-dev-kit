@@ -33,7 +33,7 @@ If a gate is red, the branch is not finished. That is the whole decision.
 | Dead end | delete local and remote branch | a written lesson, not a branch |
 | Wanted later, not now | keep the branch, rebase it while it is cheap, say what blocks it | a named blocker |
 
-Presented to the user: one Italian line per option that actually applies — *"Fatto e verificato →
+Presented to the user: one line per option, in the chat language, that actually applies — *"Fatto e verificato →
 push, PR, squash-merge, cancello il branch"*.
 
 Never merge to "keep the work safe". A push already keeps it safe; merging publishes it.
@@ -80,7 +80,7 @@ appear on the base. That is expected — check the PR state, not the merge base,
 
 ## 5. Not merging, properly
 
-A branch that will not merge still owes an explanation, written in Italian because a person reads it
+A branch that will not merge still owes an explanation, written in the chat language because a person reads it
 — the branch name and any command inside it stay as they are. Write, in this order:
 
 1. what the branch does, in one line;

@@ -8,7 +8,7 @@ description: >-
 # plan-work — a plan file with verifiable tasks, sized to the change
 
 **Contract.** A plan file of verifiable tasks, a spike's answer, or delegation briefs · never writes
-production code, never promotes spike code · plan file English, everything said in chat Italian.
+production code, never promotes spike code · plan file English, everything said in chat in the chat language.
 
 ## When
 
@@ -93,7 +93,7 @@ each task's verify before the next; tick `- [x]`; a wrong task → edit the plan
 - `references/from-work-item.md` — the work starts from an item: S/D/A tags, the readiness verdict,
   the questions worth asking, the split test.
 - `references/plan-template.md` — writing any plan file: the creation script, skeleton, example, the closing `/goal` line.
-- `references/spike.md` — a feasibility probe: instruments, the Italian report, the guardrails.
+- `references/spike.md` — a feasibility probe: instruments, the report in the chat language, the guardrails.
 - `references/delegation.md` — before a fan-out: sizing waves, the pasted output contract, the
   correction round.
 - `references/evidence-by-stack.md` — before calling anything done: the three states, evidence per

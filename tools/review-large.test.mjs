@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/review-large.js: the cost guard. The saved workflow runs as the body of an
+ * Tests for workflows/review-large.js: the panel (two whole-change reviewers) and the cost guard. The saved workflow runs as the body of an
  * async function whose parameters are the orchestration primitives, so the test does the same with
  * stubs for `agent`, `pipeline`, `parallel`, `phase` and `log` and counts what would be spawned.
  * Zero dependencies — `node:test` on Node 18+.
@@ -38,33 +38,55 @@ async function dryRun(count, extra = {}, handler = null, noFiles = false) {
   return { out, logs, reviewers, spawned };
 }
 
-test('30 files at xhigh effort: 5 reviewers x 2 models, the count logged before any reviewer runs', async () => {
-  const { logs, reviewers, spawned } = await dryRun(30, { effort: 'xhigh', modelB: 'opus' });
-  assert.equal(reviewers.length, 10);
-  assert.equal(reviewers.filter((r) => r.model === 'opus').length, 5);
-  assert.equal(spawned.length, 11, '10 reviewers + the merger');
-  assert.ok(logs.some((l) => /5 reviewers x 2 models/.test(l) && /11 agents/.test(l)), logs.join('\n'));
+test('30 files: 2 whole-change reviewers (A sonnet, B opus) + 1 merger, the count logged before any reviewer runs', async () => {
+  const { logs, reviewers, spawned } = await dryRun(30, { effort: 'xhigh' });
+  assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus']);
+  assert.equal(spawned.filter((o) => o.agentType !== 'Explore').length, 3, '2 reviewers + the merger');
+  assert.ok(logs.some((l) => l === '30 files -> 2 whole-change reviewers (A sonnet, B opus) + 1 merger = 3 agents'), logs.join('\n'));
 });
 
-test('modelB is honoured only at xhigh effort and above', async () => {
-  const { reviewers } = await dryRun(12, { effort: 'medium', modelB: 'opus' });
-  assert.equal(reviewers.length, 2, 'one model: 12 files / 6 per reviewer');
-  assert.ok(reviewers.every((r) => r.model === undefined), 'no second model below xhigh');
-});
-
-test('above 8 reviewers it refuses, naming the two ways out', async () => {
-  for (const [count, extra] of [[60, { effort: 'xhigh' }], [49, { effort: 'low' }]]) {
-    const { out, spawned } = await dryRun(count, extra);
-    assert.match(out, /above the cap of 8/);
-    assert.match(out, /Narrow `files` or raise `filesPerReviewer`/);
-    assert.equal(spawned.length, 0, 'nothing was spawned');
+test('B is opus at any size, with no counting agent when files are given', async () => {
+  for (const n of [1, 6, 10, 11]) {
+    const { reviewers, spawned } = await dryRun(n);
+    assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus'], `${n} files`);
+    assert.equal(spawned.filter((o) => o.agentType === 'Explore').length, 0);
   }
 });
 
-test('raising filesPerReviewer brings a big diff under the cap', async () => {
-  const { reviewers, out } = await dryRun(60, { effort: 'low', filesPerReviewer: 10 });
-  assert.equal(reviewers.length, 6);
+test('no files given: one Explore agent lists them', async () => {
+  const { reviewers, spawned } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? { files: ['a/x.cs', 'b/y.cs'] } : undefined), true);
+  assert.equal(spawned.filter((o) => o.agentType === 'Explore').length, 1);
+  assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus']);
+});
+
+test('100 files are still two reviewers: no split, no refusal', async () => {
+  const { reviewers, out } = await dryRun(100, { effort: 'low' });
+  assert.equal(reviewers.length, 2);
   assert.equal(out, 'REPORT');
+});
+
+test('both reviewers get the same brief with every file, at any effort; modelB overrides B only', async () => {
+  for (const effort of ['low', 'xhigh']) {
+    const { reviewers } = await dryRun(30, { effort, modelB: 'fable' });
+    assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'fable']);
+    assert.ok(reviewers.every((r) => r.effort === effort && /f29.cs/.test(r.prompt) && /All the changed files: .*f29.cs/.test(r.prompt)));
+    assert.equal(reviewers[0].prompt, reviewers[1].prompt);
+    assert.match(reviewers[0].prompt, /Review the WHOLE change/);
+  }
+  const bySonnet = await dryRun(6, { modelB: 'sonnet' });
+  assert.deepEqual(bySonnet.reviewers.map((r) => r.model), ['sonnet', 'sonnet']);
+  assert.ok(bySonnet.logs.some((l) => l === '6 files -> 2 whole-change reviewers (A sonnet, B sonnet, by override) + 1 merger = 3 agents'), bySonnet.logs.join('\n'));
+  assert.deepEqual((await dryRun(6, { modelB: 'opus' })).reviewers.map((r) => r.model), ['sonnet', 'opus']);
+});
+
+test('the finding risk enum is high | medium | low', async () => {
+  const { reviewers } = await dryRun(6);
+  assert.deepEqual(reviewers[0].schema.properties.findings.items.properties.risk.enum, ['high', 'medium', 'low']);
+});
+
+test('past 60 files the briefs carry the count and the directories, not the list', async () => {
+  const { reviewers } = await dryRun(61);
+  assert.ok(reviewers.every((r) => /The change has 61 files in: src\//.test(r.prompt) && !/All the changed files/.test(r.prompt)));
 });
 
 test('reviewers get the effort; the merger runs on sonnet', async () => {
@@ -105,7 +127,7 @@ test('a null merger returns the raw findings table', async () => {
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
   const { out } = await dryRun(6, {}, (o) => (o.label === 'merge the reviews into one report' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
   assert.match(out, /merger returned nothing/);
-  assert.ok(out.includes('| 1 | P2 | PLAUSIBLE | correctness | src/a.cs:3 | Rotto | A |'), out);
+  assert.ok(out.includes('| 1 | P2 | CONFIRMED | correctness | src/a.cs:3 | Rotto | A+B |'), out);
 });
 
 test('A and B findings on the same anchor reach the merger as one CONFIRMED, checked is capped', async () => {

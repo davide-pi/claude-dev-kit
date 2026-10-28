@@ -3,7 +3,7 @@
 **Runs only when the owner types `/loop`.** Never start it, schedule it, or suggest it (nor `/schedule`
 or any recurring run in its place) on your own initiative.
 
-Read-only, one pass, report in Italian; follow the `azdo-cli` skill for every `az` call.
+Read-only, one pass, report in the chat language; follow the `azdo-cli` skill for every `az` call.
 
 1. Target: the `ALM:` line, as CLAUDE.md rule 3. No line → say so and stop.
 2. Pull request of the current branch: `az repos pr list --source-branch <branch> --status active`, then

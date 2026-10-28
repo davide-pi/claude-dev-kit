@@ -1,5 +1,6 @@
 {
-  "_comment": "Copy to ~/.claude/workspaces.json (local-only, never committed). hooks/workspace-context.js turns the entry matching the session cwd (longest path wins) into one `ALM:` context line and pins the az identity. Keys: path, platform (azure-devops | github), org, project (a name or \"ask\") or projects (first subfolder -> project; a subfolder not listed is resolved against the org's project list, else asked), identity (suffix of the private Azure CLI config dir ~/.azure-<identity>), account (who items are assigned to), note (appended verbatim).",
+  "_comment": "Copy to ~/.claude/workspaces.json (local-only, never committed). hooks/workspace-context.js turns the entry matching the session cwd (longest path wins) into one `ALM:` context line and pins the az identity. Keys: path, platform (azure-devops | github), org, project (a name or \"ask\") or projects (first subfolder -> project; a subfolder not listed is resolved against the org's project list, else asked), identity (suffix of the private Azure CLI config dir ~/.azure-<identity>), account (who items are assigned to), note (appended verbatim), lang (per-root override of the top-level block). `lang` (top level, and per root, per key; ISO 639-1 codes; default en) sets the language of commit, pr, prComment, items and wiki text and prints as a `Lang:` line (also in subagents); a linked git worktree matches the root of its main repository. The chat language is the native `language` setting, not this file.",
+  "lang": { "commit": "en", "pr": "en", "prComment": "en", "items": "en", "wiki": "en" },
   "roots": [
     {
       "path": "C:\\workspaces\\<product-root>",
@@ -7,7 +8,8 @@
       "org": "<org-a>",
       "project": "<Project>",
       "identity": "<identity-a>",
-      "account": "you@example.com"
+      "account": "you@example.com",
+      "lang": { "commit": "it", "pr": "it" }
     },
     {
       "path": "C:\\workspaces\\<clients-root>",

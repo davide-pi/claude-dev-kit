@@ -25,23 +25,25 @@ The smallest diff that fully satisfies the request, written well. No unrequested
 dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
 each at the end, then stop.
 
-| # | Proposta | Motivo | Rischio |
+| # | Proposal | Reason | Risk |
 | --- | --- | --- | --- |
 
-`#` stable all conversation, one item per row. Rischio: **alto** behaviour, data, contract; **medio** local
-logic, testable; **basso** cosmetic.
+`#` stable all conversation, one item per row. Risk: **high** behaviour, data, contract; **medium** local
+logic, testable; **low** cosmetic.
 
 ## Language
-- Italian: what I read - chat, reports, questions, commits, PRs, comments, items, wiki.
+- Chat: `language` setting (unset: English), agent reports too.
+- Commit, pr, prComment, items, wiki: each per the `Lang:` line (none: en).
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
+- Chat `it`: `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
 
 ## Done means verified
 Never claim done, fixed, passing or verified without a command run this turn (reading code or a report isn't
-proof). A main-session answer that edited files ends with the table `Livello | Comando | Riga che decide | Stato`,
-never a code block; Riga che decide = an output line, verbatim. Stato: `fatto`, `non verificato: <motivo>`
-(Comando: how to check), `failed` (quoted).
+proof). A main-session answer that edited files ends with the table `Level|Command|Deciding line|Status`,
+never a code block; Deciding line = output line, verbatim. Status: `done`, `not verified: <reason>`
+(Command: how to check), `failed` (quoted).
 
 ## Search, no prompts
 A command starts with the program: `grep -rn x <abs-path>`, `git -C <path> log`; `cd X && ...` always prompts.

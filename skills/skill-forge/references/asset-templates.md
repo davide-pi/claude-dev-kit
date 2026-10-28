@@ -116,7 +116,7 @@ omitClaudeMd: true               # when the body defines everything it needs
 <tables>
 
 ## Output — ≤ N lines, exactly these sections
-<the exact shape; Italian prose, identifiers verbatim; what an empty result looks like>
+<the exact shape; prose in the chat language, identifiers verbatim; what an empty result looks like>
 
 ## Never
 - <edits, posts, commits, merges — whatever applies>
