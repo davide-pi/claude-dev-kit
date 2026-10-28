@@ -2,11 +2,11 @@ import type { CockpitChange, CockpitDoneClaim, CockpitGit, CockpitPerimeterCheck
 import { COLORS, isRecord } from './shared'
 import type { Span } from './shared'
 
-/** ` ↑2 ↓1`: the commits ahead of and behind the upstream; empty when level or without an upstream. */
+/** ` 󰁝2 󰁅1`: the commits ahead of and behind the upstream; empty when level or without an upstream. */
 export function aheadBehindSpans(g: CockpitGit): Span[] {
   const parts: Span[] = []
-  if (g.ahead) parts.push({ t: `↑${g.ahead}`, c: COLORS.green })
-  if (g.behind) parts.push({ t: `↓${g.behind}`, c: COLORS.yellow })
+  if (g.ahead) parts.push({ t: `󰁝${g.ahead}`, c: COLORS.green })
+  if (g.behind) parts.push({ t: `󰁅${g.behind}`, c: COLORS.yellow })
   return parts.flatMap((p): Span[] => [{ t: ' ' }, p])
 }
 

@@ -102,7 +102,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     return hasDot ? (
       <Button key={`tab:${id}`} variant={variant} onPress={() => actions.selectTab(id)}>
         {label}
-        <Text color={COLORS.yellow}> ●</Text>
+        <Text color={COLORS.yellow}> 󰧞</Text>
       </Button>
     ) : (
       <Button key={`tab:${id}`} variant={variant} label={label} onPress={() => actions.selectTab(id)} />

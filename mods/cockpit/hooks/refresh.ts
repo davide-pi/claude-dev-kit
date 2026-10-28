@@ -207,7 +207,7 @@ export async function refreshOnOpen($: EngineInterface): Promise<void> {
 export async function slowTick($: EngineInterface): Promise<void> {
   if (!isOpen) {
     // The status line's badges read the snapshot: while any agent is running, the local list (no model call) keeps the agent badge from staying lit for one that ended unseen;
-    // while a permission waits, the clock lets its `⚠` signal appear once it has waited long enough.
+    // while a permission waits, the clock lets its `󰀦` signal appear once it has waited long enough.
     const s = await read($, snapshot)
     if (s.agents.some(a => a.status === 'running') || s.claudeState?.kind === 'waiting') await tickClock($).catch(() => undefined)
     return

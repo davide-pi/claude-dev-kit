@@ -64,7 +64,7 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/vs expected/)).toBe('vs expected 7d  \u22125%')
     // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
     const row = (await ui.find({ key: 'agent:a1' }))?.text
-    expect(row).toContain('✓ code-reviewer')
+    expect(row).toContain('󰄬 code-reviewer')
     expect(row).toContain('son 5.5')
     // the rest (the four counters) is one press away: collapsed on the first mount, open once pressed (the state outlives a mount)
     if ((await text(/^ *in 30k/)) === undefined) await ui.press({ key: 'agent:a1' })
@@ -184,7 +184,7 @@ test('a TaskUpdate that answers success:false changes nothing', async ($, on) =>
   await updateTask($, '1', 'completed')
   await updateTask($, '2', 'in_progress')
   const { rows, i } = await taskRows($)
-  expect(rows[i]).toMatch(/^TASK · 0\/1◐ 0 {2}○ 1 {2}✓ 0$/)
+  expect(rows[i]).toMatch(/^TASK · 0\/1󱎖 0 {2}󰄰 1 {2}󰄬 0$/)
 })
 
 const GREEN = '#7ec699'
@@ -263,8 +263,8 @@ test('the context line at 80% or more is red, with no button of its own', async 
   world(on, { ctxPercent: 87 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^⚠ context at 87%$/ })).toBeDefined()
-  expect(colorOf(await ui.drawn(), /^⚠ context at 87%$/)).toBe(RED)
+  expect(await ui.find({ type: 'Text', text: /^󰀦 context at 87%$/ })).toBeDefined()
+  expect(colorOf(await ui.drawn(), /^󰀦 context at 87%$/)).toBe(RED)
   expect(await ui.find({ key: 'compact-now' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Button' })).some(b => /compact ora/.test(b.text ?? ''))).toBe(false)
   await ui.unmount()
@@ -275,12 +275,12 @@ test('below 80% there is no warning; 80% exactly has it', async ($, on) => {
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^⚠/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /^󰀦/ })).toBeUndefined()
   await ui.unmount()
   await clock.advance(1)
   await $.session.measure({ context: { window: 1_000_000, tokens: 800_000, percent: 80 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^⚠ context at 80%$/ })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /^󰀦 context at 80%$/ })).toBeDefined()
   await ui.unmount()
 })
 
@@ -344,7 +344,7 @@ test('header: above the tab bar on every tab, with the model, effort, state, ses
     expect(header[0]).toContain('HIGH')
     expect(header[0]).toContain('ready')
     expect(header[0]).toContain('$4.82')
-    expect(header.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /↑2 ↓1/.test(r))).toBe(true)
+    expect(header.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /󰁝2 󰁅1/.test(r))).toBe(true)
     expect(header.some(r => /\+1 ~1 \?1/.test(r))).toBe(true)
     expect(header.some(r => /25% 248K\/1M/.test(r))).toBe(true)
     expect(header.some(r => /5h/.test(r))).toBe(true)
@@ -508,20 +508,20 @@ const LANGUAGES = [
   {
     name: 'English',
     files: {},
-    tabs: barLabels({ work: ' ●' }, 'en', 'agents', 2),
+    tabs: barLabels({ work: ' 󰧞' }, 'en', 'agents', 2),
     bareTabs: () => barLabels({}, 'en', 'notes'),
     buttons: { compact: 'compact', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
     header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^IN PROGRESS$/, /^CHANGES · 0$/, /^no changes$/, /^● worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^IN PROGRESS$/, /^CHANGES · 0$/, /^no changes$/, /^󰧞 worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
     files: IT_FILE,
-    tabs: barLabels({ work: ' ●' }, 'it'),
+    tabs: barLabels({ work: ' 󰧞' }, 'it'),
     bareTabs: () => barLabels({}, 'it', 'notes'),
     buttons: { compact: 'compatta', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
     header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^IN CORSO$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^● worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^IN CORSO$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^󰧞 worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 

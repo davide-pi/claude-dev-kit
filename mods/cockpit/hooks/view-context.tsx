@@ -41,7 +41,7 @@ export function categorySpans(r: CockpitContextRow, color: string, bg: string, m
   const share = max > 0 ? `${Math.round((100 * r.tokens) / max)}%` : ''
   const delta = r.delta ? padStart(`${r.delta > 0 ? '+' : '−'}${abbrevTokens(Math.abs(r.delta))}`, CTX_DELTA_W) : ' '.repeat(CTX_DELTA_W)
   const row = [
-    sp('■', color),
+    sp('󰝤', color),
     sp(' '),
     sp(padCells(truncEnd(t().contextCategories[r.name] ?? r.name, nameW), nameW)),
     sp(padStart(abbrevTokens(r.tokens), CTX_TOKENS_W)),

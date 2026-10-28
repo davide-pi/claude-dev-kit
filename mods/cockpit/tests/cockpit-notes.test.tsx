@@ -95,6 +95,27 @@ test('notes: cancel (the edit button, now the close icon) leaves the note unchan
   await ui.unmount()
 })
 
+test('notes: while a note is edited its row shows save in place of send, right-aligned; save replaces the note', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await saveNote(ui, 'first')
+  await ui.press({ key: 'note:edit:1' })
+  await settleAll()
+  expect(await ui.find({ key: 'note:send:1' })).toBeUndefined()
+  expect((await ui.find({ key: 'note:save:1' }))?.text).toBe('\u{F0193}')
+  const icons = holderProps(await ui.drawn(), 'note:save:1')
+  expect([icons?.flexGrow, icons?.justifyContent]).toEqual([1, 'flex-end'])
+  await ui.input({ key: 'note:edit-field', text: 'changed', kind: 'change' })
+  await settleAll()
+  await ui.press({ key: 'note:save:1' })
+  await settleAll()
+  expect(await ui.find({ key: 'note:edit-field' })).toBeUndefined()
+  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
+  expect(rowTexts(await ui.drawn()).some(r => r.startsWith('changed'))).toBe(true)
+  await ui.unmount()
+})
+
 test('notes: emptying the edit field keeps the edit open and the note unchanged until cancelled', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -175,7 +196,7 @@ test('notes: delete removes the note; deleting the one in the field leaves the n
   await ui.unmount()
 })
 
-type Drawn = { props?: { key?: string; width?: number; plain?: boolean }; children?: unknown[] } | null
+type Drawn = { props?: { key?: string; width?: number; plain?: boolean; flexGrow?: number; justifyContent?: string }; children?: unknown[] } | null
 
 /** The props of the node keyed `key`, found in the drawn tree. */
 function propsOf(node: unknown, key: string): NonNullable<Drawn>['props'] | undefined {
@@ -194,6 +215,17 @@ function toggleBoxWidth(node: unknown, key: string): number | undefined {
   for (const c of o?.children ?? []) {
     if ((c as Drawn)?.props?.key === key) return o?.props?.width
     const found = toggleBoxWidth(c, key)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
+
+/** The props of the box that holds the Button keyed `key`, found in the drawn tree. */
+function holderProps(node: unknown, key: string): NonNullable<Drawn>['props'] | undefined {
+  const o = node as Drawn
+  for (const c of o?.children ?? []) {
+    if ((c as Drawn)?.props?.key === key) return o?.props
+    const found = holderProps(c, key)
     if (found !== undefined) return found
   }
   return undefined

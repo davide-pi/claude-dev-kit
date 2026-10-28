@@ -35,19 +35,19 @@ test('Notifications: a command that failed twice is one row (what), its why and 
   await settleAll()
 
   expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notif 1')
-  expect(headerOf(rowTexts(await ui.drawn())).some(r => /⚠/.test(r))).toBe(false)
+  expect(headerOf(rowTexts(await ui.drawn())).some(r => /󰀦/.test(r))).toBe(false)
   expect(flagOf(writes)).not.toHaveProperty('signals')
 
   await ui.press({ key: 'tab:signals' })
   expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notifications') // opening the tab clears the count
   let rows = rowTexts(await ui.drawn())
   expect(rows.some(r => /^NOTIFICATIONS · 1/.test(r))).toBe(true)
-  const at = rows.findIndex(r => /^▸ .*npm test/.test(r))
+  const at = rows.findIndex(r => /^󰍟 .*npm test/.test(r))
   expect(at).toBeGreaterThan(0)
   expect(rows.some(r => /^ +why: /.test(r))).toBe(false)
   await ui.press({ key: 'signal:failedCommand:npm test' })
   rows = rowTexts(await ui.drawn())
-  expect(rows[at]).toMatch(/^▾ /)
+  expect(rows[at]).toMatch(/^󰍝 /)
   expect(rows[at + 1]).toMatch(/^ +why: /)
   expect(rows.slice(at + 2, at + 4).some(r => /^ +what to do: /.test(r))).toBe(true) // the why may wrap onto a second row
   expect(rows[at]?.trimEnd().endsWith(` ${clockTime(NOW)}`)).toBe(true) // the time it arrived, on the right
@@ -71,13 +71,13 @@ test('Notifications: a title too long for the row is cut closed, and open it wra
 
   await ui.press({ key: 'tab:signals' })
   let rows = rowTexts(await ui.drawn())
-  const at = rows.findIndex(r => /^▸ command failed/.test(r))
+  const at = rows.findIndex(r => /^󰍟 command failed/.test(r))
   expect(at).toBeGreaterThan(0)
   expect(rows[at]).toMatch(new RegExp(`… +${time}$`))
 
   await ui.press({ key: `signal:failedCommand:${cmd}` })
   rows = rowTexts(await ui.drawn())
-  expect(rows[at]).toMatch(new RegExp(`^▾ command .* ${time}$`))
+  expect(rows[at]).toMatch(new RegExp(`^󰍝 command .* ${time}$`))
   const end = rows.findIndex((r, i) => i > at && r.trim() === '')
   const below = rows.slice(at + 1, end < 0 ? undefined : end).map(r => r.trim())
   expect(rows.slice(at, at + below.length + 1).some(r => r.includes('…'))).toBe(false)
@@ -102,7 +102,7 @@ test('Notifications: with none, one line says so', async ($, on) => {
   const { rows } = await paneRows($, 58, 'signals')
   expect(rows.filter(r => /^no notifications/.test(r))).toHaveLength(1)
   expect(rows.some(r => /^NOTIFICATIONS/.test(r))).toBe(false)
-  expect(headerOf(rows).some(r => /⚠/.test(r))).toBe(false)
+  expect(headerOf(rows).some(r => /󰀦/.test(r))).toBe(false)
 })
 
 test('Notifications: a permission ask unanswered over 60 seconds is a notification, and it clears when the person answers', async ($, on) => {

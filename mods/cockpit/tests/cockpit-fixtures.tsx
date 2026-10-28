@@ -146,7 +146,7 @@ const SHORT_NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
 
 /**
  * The tab bar's labels at 58 columns: `level` 1 is every full name but Context (a bare bar), 2 the selected tab's name and the others short (a badge
- * or the worklog dot is on); `extras` adds a badge (` 1`, ` ●`) after a label.
+ * or the worklog dot is on); `extras` adds a badge (` 1`, ` 󰧞`) after a label.
  */
 export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}, lang: 'en' | 'it' = 'en', active: CockpitTab = 'agents', level: 1 | 2 = 1) =>
   TABS.map(tab => {

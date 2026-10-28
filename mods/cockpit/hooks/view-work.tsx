@@ -10,7 +10,7 @@ import type { Ui } from './view-base'
 /** Cells before a changed file's path: the added column, the deleted one and their gaps. */
 const CHANGE_COUNTS_W = 12
 
-/** One changed file's row: its added and deleted lines (`bin` for a binary file, `?` for an untracked one), then its path cut to fit, and `●` after it when this chat edited the file. */
+/** One changed file's row: its added and deleted lines (`bin` for a binary file, `?` for an untracked one), then its path cut to fit, and `󰧞` after it when this chat edited the file. */
 export function changeSpans(c: CockpitChange, width: number, isEdited = false): Span[] {
   const counts: Span[] = c.isUntracked
     ? [dim(padStart('?', 5)), sp(' '.repeat(6))]
@@ -18,7 +18,7 @@ export function changeSpans(c: CockpitChange, width: number, isEdited = false): 
       ? [dim(padStart('bin', 5)), sp(' '.repeat(6))]
       : [sp(padStart(`+${c.added ?? 0}`, 5), COLORS.green), sp(' '), sp(padStart(`-${c.deleted ?? 0}`, 5), COLORS.red)]
   const pathW = Math.max(4, width - CHANGE_COUNTS_W - (isEdited ? 2 : 0))
-  return [...counts, sp(' '), sp(truncMiddle(c.path, pathW)), ...(isEdited ? [sp(' ●', COLORS.lavender)] : [])]
+  return [...counts, sp(' '), sp(truncMiddle(c.path, pathW)), ...(isEdited ? [sp(' 󰧞', COLORS.lavender)] : [])]
 }
 
 /** What follows a pull request's number on its row: its title, cut to fit `width` (the number's own cells included). */

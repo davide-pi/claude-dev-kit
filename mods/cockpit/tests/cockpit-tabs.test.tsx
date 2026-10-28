@@ -41,7 +41,7 @@ test('tab labels: Agents counts the running agents, Work carries a dot when the 
   await spawnAgent($, 'implementer')
   const ui = await mountPane($, 80)
   expect((await ui.find({ key: 'tab:agents' }))?.text).toBe('Agents 2')
-  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Work ●')
+  expect((await ui.find({ key: 'tab:work' }))?.text).toBe('Work 󰧞')
   expect((await ui.find({ key: 'tab:signals' }))?.text).toBe('Notif')
   await ui.unmount()
 })

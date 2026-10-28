@@ -106,12 +106,12 @@ test('HISTORY: a row keeps the agent\'s versioned model and effort icon', async 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   await ui.press({ key: 'tab:agents' })
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^✓ two +son 5\.5 +\u{F12A3} /u)
-  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^✓ old +son 5\.5 {2}/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^󰄬 two +son 5\.5 +\u{F12A3} /u)
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^󰄬 old +son 5\.5 {2}/)
   await ui.unmount()
 })
 
-test('TOP AGENTS: every agent, 3 shown, `▸ +2` opens the other two and `▾ −2` folds them', async ($, on) => {
+test('TOP AGENTS: every agent, 3 shown, `󰍟 +2` opens the other two and `󰍝 −2` folds them', async ($, on) => {
   world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -125,10 +125,10 @@ test('TOP AGENTS: every agent, 3 shown, `▸ +2` opens the other two and `▾ �
   await ui.press({ key: 'tab:context' })
   const rows = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => /^cost:a/.test(k))
   expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5'])
-  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('▸ +2')
+  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('󰍟 +2')
   await ui.press({ key: 'costAgents:more' })
   expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5', 'cost:a1', 'cost:a3'])
-  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('▾ −2')
+  expect((await ui.find({ key: 'costAgents:more' }))?.text).toBe('󰍝 −2')
   await ui.press({ key: 'costAgents:more' })
   expect(await rows()).toEqual(['cost:a2', 'cost:a4', 'cost:a5'])
   await ui.unmount()

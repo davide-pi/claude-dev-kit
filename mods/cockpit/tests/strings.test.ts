@@ -62,7 +62,7 @@ test('Italian: a percent after its article elides it before a number read with a
   try {
     setLang('it')
     for (const [pct, text] of [[80, "all'80%"], [85, "all'85%"], [90, 'al 90%'], [100, 'al 100%']] as const) {
-      expect(t().contextAt(pct)).toBe(`⚠ contesto ${text}`)
+      expect(t().contextAt(pct)).toBe(`󰀦 contesto ${text}`)
       expect(t().alertContext(pct)).toBe(`contesto ${text}`)
     }
   } finally {
@@ -87,9 +87,9 @@ test('Italian: the context category names are translated, one the engine adds sh
 test('the context growth and changes additions are translated', () => {
   try {
     setLang('en')
-    expect([t().grewTitle, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', '● this chat'])
+    expect([t().grewTitle, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', '󰧞 this chat'])
     setLang('it')
-    expect([t().grewTitle, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', '● questa chat'])
+    expect([t().grewTitle, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', '󰧞 questa chat'])
   } finally {
     setLang('en')
   }
