@@ -78,7 +78,6 @@ sum by (service_name) (count_over_time({deployment_environment="<env>"} |= "Exce
 | --- | --- |
 | everyone or one instance, since when | Prometheus: request rate, error rate, latency histogram, process CPU and memory |
 | where CPU or allocations go | Pyroscope profiles over the bad window |
-| one request across services | the trace id from a log line, then Tempo where the datasource exists |
 | a dump, a trace, counters on a host | not here: an operator action on that host, requested by the caller |
 
 ## Output — ≤ 50 lines, exactly these sections

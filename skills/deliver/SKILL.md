@@ -28,7 +28,7 @@ Not for: a question or explanation with no code change; reviewing a diff (`/code
 | --- | --- |
 | scenario | `bug` · `perf` · `refactor` · `migration` · `feature` · `spike` |
 | size | by risk, never by file count: **S** logic only, a few lines, or a mechanical batch (rename, move, config, generated) with tests · **M** one feature, or data, money, concurrency, contract, security · **L** a subsystem, a new interface, 3+ non-`logic` risk axes |
-| risk | the axes touched: `logic` `data` `money` `concurrency` `contract` `security` `performance`; they raise the size floor (`references/loop.md`) |
+| risk | the axes the change alters; they raise the size floor (`references/loop.md` § Args) |
 | PERIMETER | files (paths, `dir/`, globs), behaviour in scope, exclusions |
 | test matrix | which levels apply (unit · integration · e2e · perf) and the command for each |
 

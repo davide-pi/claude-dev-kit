@@ -74,7 +74,5 @@ the full ladder had run.
 
 1. Agents spawned one after another → no parallelism, no shared cache → one message, several calls.
 2. An agent gets the diff but not the intent → completeness cannot be judged → items 1–4 always.
-3. The pair's briefs differ in more than `model` → disagreement measures the brief, not the model →
-   build the brief once, pass it twice.
-4. A specialist's finding posted with the generic tag → attribution lost in the merge → track the
+3. A specialist's finding posted with the generic tag → attribution lost in the merge → track the
    producer per survivor.
