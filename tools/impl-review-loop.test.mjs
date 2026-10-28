@@ -188,9 +188,19 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
   assert.deepEqual(await panel('M', { touches: ['security'] }), ['reviewer A · round 1 · code', 'reviewer security · round 1']);
   assert.deepEqual(await panel('L', { risk: ['logic'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok' }]);
-  assert.equal(many.out.roundLog[0].size, 'M');                                               // 9+ files split the reviewers, the size stays
-  assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A1 · round 1 · code, files 1/2', 'reviewer A2 · round 1 · code, files 2/2']);
+  assert.equal(many.out.roundLog[0].size, 'M');                                               // 9+ files never split the reviewers, the size stays
+  assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A · round 1 · code']);
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
+});
+
+test('script: 17 changed files at size M spawn exactly the panel of the size: one Sonnet high, the whole-change scope, no share', async () => {
+  const seventeen = Array.from({ length: 17 }, (_, i) => `src/Orders/F${i}.cs`);
+  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([])], [{ scope: 's', files: seventeen, evidence: 'ok' }]);
+  assert.equal(out.status, 'OK');
+  const reviews = calls.filter((c) => isReview(c.opts.label, 1));
+  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:sonnet:high']);
+  assert.match(reviews[0].prompt, /Review the change made since the start/);
+  assert.doesNotMatch(reviews[0].prompt, /Your share/);
 });
 
 test('script: the carried fields are in the schemas, a report without them is still read', async () => {

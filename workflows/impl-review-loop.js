@@ -62,19 +62,7 @@ const sameFinding = (a, b, root) => {
 const rank = f => ({ P1: 1, P2: 2 })[f?.priority] ?? 3
 const BLOCKING = new Set(['P1', 'P2'])
 
-// Past this many files reviewer A splits into one reviewer per group, in order, so a group keeps its files while fixes only append.
-const MAX_REVIEW_FILES = 8
 const FINAL_READ_MIN_CHURN = 30   // a small review fix is already read by its finder and the watcher
-const groupFiles = (list, max = MAX_REVIEW_FILES) => {
-  const groups = []
-  for (let i = 0; i < list.length; i += max) groups.push(list.slice(i, i + max))
-  return groups.length ? groups : [[]]
-}
-const groupOf = (path, groups, root) => {
-  const p = rel(path, root)
-  const i = groups.findIndex(g => g.some(x => rel(x, root) === p))
-  return i < 0 ? groups.length - 1 : i
-}
 
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
 const reviewersFor = (size, touches = [], mechanical = false) => {
@@ -130,32 +118,22 @@ const verifyGate = ({ report, verifyCmd, toFixHadVerify = false, previous, next 
 }
 
 // A reviewer that returned nothing clears nothing; a specialist clears no file.
-const unreviewedFiles = (answers, reviewers, groups, pending = [], root = '', changed = []) => {
+const unreviewedFiles = (answers, reviewers, pending = [], root = '', changed = []) => {
   const owed = new Map()
   for (const f of [...pending, ...changed]) if (!owed.has(rel(f, root))) owed.set(rel(f, root), f)
   const read = new Set()
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (!a || !r || (r.group === undefined && !r.whole)) return
+    if (!a || !r || !r.whole) return
     const listed = new Set((Array.isArray(a.filesReviewed) ? a.filesReviewed : []).map(f => rel(f, root)))
-    for (const [key, f] of owed) {
-      if (listed.has(key) && (r.group === undefined || groupOf(f, groups, root) === r.group)) read.add(key)
-    }
+    for (const key of owed.keys()) if (listed.has(key)) read.add(key)
   })
   return [...owed].filter(([key]) => !read.has(key)).map(([, f]) => f)
 }
 
 const coverageAction = ({ unread = [], retried = false } = {}) => (!unread.length ? 'ok' : retried ? 'stall' : 'rerun')
 
-const coverageOwners = (unread, reviewers, groups, root = '') => {
-  const keys = new Set()
-  for (const f of unread) {
-    const gi = groupOf(f, groups, root)
-    const owners = groups.length > 1 ? reviewers.filter(r => r.group === gi) : reviewers.filter(r => r.whole)
-    owners.forEach(r => keys.add(r.key))
-  }
-  return reviewers.filter(r => keys.has(r.key)).map(r => r.key)
-}
+const coverageOwners = (unread, reviewers) => (unread.length ? reviewers.filter(r => r.whole).map(r => r.key) : [])
 
 const findingHistory = roundLog => {
   const byId = new Map()
@@ -752,19 +730,16 @@ if (!inline) {
 }
 
 const everyId = () => idsToAsk({ tracked, known, lastFixFiles: finalReading ? [...fixFiles] : (lastFix?.files ?? []), skipped, root: repoRoot })
-const askedIds = (r, groups) => (r.group === undefined ? everyId() : everyId().filter(id => groupOf(known[id].path, groups, repoRoot) === r.group))
 const anchor = id => `${known[id].path}${known[id].line ? `:${known[id].line}` : ''}`
-const previousBlock = (r, groups) => {
-  const mineIds = askedIds(r, groups)
+const previousBlock = () => {
+  const mineIds = everyId()
   const ids = mineIds.filter(id => !challenged[id])
-  if (!everyId().length) {
+  if (!mineIds.length) {
     return Object.keys(tracked).length
       ? 'PREVIOUS FINDINGS: none to judge (the earlier ones are closed or accepted and the last fix did not touch them: give no verdict).'
       : 'PREVIOUS FINDINGS: none (first round: review the whole change).'
   }
-  if (!ids.length) return mineIds.length
-    ? 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
-    : 'PREVIOUS FINDINGS: none on your files (give no verdict).'
+  if (!ids.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
   const list = ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)
   if (skipped.length) {
     const who = mineIds.length > ids.length ? 'for each of these ids and for each id of the CHALLENGE below' : 'for each of these ids only'
@@ -772,8 +747,8 @@ const previousBlock = (r, groups) => {
   }
   return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}`
 }
-const challengeBlock = (mine = () => true) => {
-  const list = Object.keys(challenged).filter(mine).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
+const challengeBlock = () => {
+  const list = Object.keys(challenged).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
   return list.length
     ? `CHALLENGE (the fixer rejected these findings and left the code unchanged: judge each one yourself, reading the code and reproducing the failure when you can; give a verdict for each id in previous: closed = you withdraw it, open = you keep it, and put why in note; a "not reproduced" you can reproduce is kept, with the steps):\n${list.join('\n')}`
     : ''
@@ -785,20 +760,12 @@ const reviewersForRound = () => {
   const seen = new Map()
   for (const f of changed) { const k = rel(f, repoRoot); if (!seen.has(k)) seen.set(k, f) }
   const expected = [...seen.values()]
-  const groups = groupFiles(expected)
   const size = sizeFor(givenSize, risk)
   const signal = sizeSignal(size, seen.size)
   if (signal && !gaps.includes(signal)) gaps.push(signal)
   const reviewers = reviewersFor(size, risk, mechanical)
-  const [first, ...rest] = reviewers
-  if (groups.length < 2) return { size, groups, list: reviewers, expected }
-  return { size, groups, expected, list: [...groups.map((g, i) => ({ ...first, key: `A${i + 1}`, group: i, whole: false })), ...rest] }
+  return { size, list: reviewers, expected }
 }
-const shareText = (r, groups) => (r.group === undefined ? '' : [
-  `Your share: review ONLY these files, the other reviewers hold the rest (this overrides the "hint" rule above): ${groups[r.group].join(', ')}.`,
-  r.group === groups.length - 1 ? 'You also own any touched file git lists that is not in the declared list.' : '',
-].filter(Boolean).join(' '))
-
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit()}`
 const scopeOfFinal = () => {
   const cmd = deltaCommand(round1Tree || startHead || 'HEAD', lastTree, startHead)
@@ -810,17 +777,17 @@ const scopeOfDelta = () => {
   const fromHead = lastDelta && !lastDeltaIsFix   // the delta starts before the report that preceded the fix: it is not the fix alone
   return `Review the ${fromHead ? since : 'DELTA of the last fix'}, judging each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}.${lastDelta ? ` The ${fromHead ? `${since} are` : 'DELTA of the last fix is'} \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first.` : ''} What the fix says it did: ${lastFix.scope}\n${touchedByGit()}`
 }
-// The coverage rerun gives the rest of the unread files to their group reviewers.
-const scopeOfReview = (r, groups) => {
-  if (missing.has(r.key) && r.group === undefined && !r.whole) return scopeOfChange()
-  const full = r.group !== undefined ? groups[r.group].filter(f => unread.includes(f)) : r.whole ? unread.slice(0, MAX_REVIEW_FILES) : []
+// The coverage rerun gives every unread file, in full, to a whole reviewer.
+const scopeOfReview = r => {
+  if (missing.has(r.key) && !r.whole) return scopeOfChange()
+  const full = r.whole ? unread : []
   return (finalReading ? scopeOfFinal() : scopeOfDelta()) + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
 }
 
 while (true) {
   round += 1
   phase('Review')
-  const { size, groups, list: everyone, expected } = reviewersForRound()
+  const { size, list: everyone, expected } = reviewersForRound()
   const { only, coverage, final } = nextRound
   nextRound = { only: null, coverage: false, final: false }
   finalReading = final
@@ -832,13 +799,12 @@ while (true) {
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
   const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
-  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${r.group === undefined ? '' : `, files ${r.group + 1}/${groups.length}`}${final ? ', final read' : ''}`
-  const askedMap = Object.fromEntries(reviewers.map(r => [r.key, askedIds(r, groups)]))
+  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${final ? ', final read' : ''}`
+  const askedMap = Object.fromEntries(reviewers.map(r => [r.key, everyId()]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
   const answers = await parallel(reviewers.map(r => () => ask([
-    scopeOfReview(r, groups),
-    shareText(r, groups),
+    scopeOfReview(r),
     `Intent: ${brief}`,
     round === 1 || final ? requestText : '',
     decisionsText,
@@ -850,8 +816,8 @@ while (true) {
     'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
     `Effort: ${r.effort}. ${size === 'L' && r.key.startsWith('A') ? 'You may be one of two reviewers on different models with this same brief: do not soften for agreement.' : ''}`,
-    previousBlock(r, groups),
-    challengeBlock(r.group === undefined ? undefined : id => groupOf(known[id].path, groups, repoRoot) === r.group),
+    previousBlock(),
+    challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     budgetText(35),
@@ -862,12 +828,12 @@ while (true) {
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
   const owedNow = round === 1 ? expected : only ? [] : final ? [...fixFiles] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
-  unread = unreviewedFiles(answers, reviewers, groups, unread, repoRoot, owedNow)
+  unread = unreviewedFiles(answers, reviewers, unread, repoRoot, owedNow)
   unread.filter(f => !wasUnread.has(rel(f, repoRoot))).forEach(f => gaps.push(`round ${round}: ${f} was not read by its reviewer (not in filesReviewed)`))
   if (!unread.length) coverageRetried = false
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (r.group !== undefined || r.whole) return
+    if (r.whole) return
     if (a) missing.delete(r.key)
     else missing.add(r.key)
   })
@@ -934,7 +900,7 @@ while (true) {
     const cover = coverageAction({ unread, retried: coverageRetried })
     if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
     if (cover === 'rerun') {
-      nextRound = { only: coverageOwners(unread, everyone, groups, repoRoot), coverage: true }
+      nextRound = { only: coverageOwners(unread, everyone), coverage: true }
       coverageRetried = true
       openCounts = []
       continue

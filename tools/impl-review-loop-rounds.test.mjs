@@ -84,18 +84,18 @@ test('mergeReviews: answeredBy lists, per id, the reviewers that gave it a verdi
   assert.deepEqual(m.answeredBy, { F1: ['A', 'B'], F2: ['A'], F3: [2] });
 });
 
-test('recheckReviewers: L round where only B skipped F2 → only B reruns; a reviewer that was not asked it or answered everything does not', () => {
-  const rs = [{ key: 'A1', group: 0 }, { key: 'A2', group: 1 }, { key: 'B', whole: true }];
+test('recheckReviewers: L round where only S skipped F2 → only S reruns; a reviewer that was not asked it or answered everything does not', () => {
+  const rs = [{ key: 'A', whole: true }, { key: 'B', whole: true }, { key: 'S', whole: true }];
   const a = { previous: [], found: [] };
-  const asked = { A1: [], A2: ['F2'], B: ['F2'] };                           // F2 is unanswered: A1 was never asked it
-  assert.deepEqual(recheckReviewers({ answers: [a, null, a], reviewers: rs, asked, answeredBy: { F1: ['A1', 'B'] } }), ['B']);   // A2 returned nothing: a gap, not a skip
-  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked, answeredBy: {} }), ['A2', 'B']);
-  assert.deepEqual(recheckReviewers({ answers: [a, null, null], reviewers: rs, asked, answeredBy: {} }), ['A2', 'B']);         // nobody that answered skipped it: the ones asked rerun
-  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked: { A1: [], A2: [], B: [] }, answeredBy: {} }), []);
-  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked: { A1: [], A2: ['F2'], B: ['F2'] }, answeredBy: { F2: ['A2'] } }), []);   // someone answered it
+  const asked = { A: [], B: ['F2'], S: ['F2'] };                             // F2 is unanswered: A was never asked it
+  assert.deepEqual(recheckReviewers({ answers: [a, null, a], reviewers: rs, asked, answeredBy: { F1: ['A', 'S'] } }), ['S']);   // B returned nothing: a gap, not a skip
+  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked, answeredBy: {} }), ['B', 'S']);
+  assert.deepEqual(recheckReviewers({ answers: [a, null, null], reviewers: rs, asked, answeredBy: {} }), ['B', 'S']);         // nobody that answered skipped it: the ones asked rerun
+  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked: { A: [], B: [], S: [] }, answeredBy: {} }), []);
+  assert.deepEqual(recheckReviewers({ answers: [a, a, a], reviewers: rs, asked: { A: [], B: ['F2'], S: ['F2'] }, answeredBy: { F2: ['B'] } }), []);   // someone answered it
   // a skip and a null reviewer that was the only one asked another id: both rerun, in reviewer order
-  assert.deepEqual(recheckReviewers({ answers: [a, a, null], reviewers: rs, asked: { A1: [], A2: ['F2'], B: ['F3'] }, answeredBy: {} }), ['A2', 'B']);
-  assert.deepEqual(recheckReviewers({ answers: [a, a, null], reviewers: rs, asked: { A1: [], A2: ['F2'], B: ['F2'] }, answeredBy: {} }), ['A2']);   // B was asked the same id as A2, which answered: B is a gap
+  assert.deepEqual(recheckReviewers({ answers: [a, a, null], reviewers: rs, asked: { A: [], B: ['F2'], S: ['F3'] }, answeredBy: {} }), ['B', 'S']);
+  assert.deepEqual(recheckReviewers({ answers: [a, a, null], reviewers: rs, asked: { A: [], B: ['F2'], S: ['F2'] }, answeredBy: {} }), ['B']);   // S was asked the same id as B, which answered: S is a gap
 });
 
 test('idsToAsk: a closed finding on a file the last fix did not touch is not re-asked; open ones always; accepted never; skipped overrides', () => {
@@ -203,12 +203,12 @@ test('script: guidance or accept on a not-converging round restarts the count; a
   assert.deepEqual(stalledAt(retried.out), ['STALL', 'not-converging', 6]);      // one more fix, then the same stall: the count was not restarted
 });
 
-test('script: a group reviewer with no verdict on F1 while another finds a new P2 is not a stall: F2 is fixed, F1 follows the no-verdict rule (F5)', async () => {
+test('script: a reviewer with no verdict on F1 while another finds a new P2 is not a stall: F2 is fixed, F1 follows the no-verdict rule (F5)', async () => {
   const at = (n, extra = {}) => finding({ path: `src/Orders/F${n}.cs`, line: n, ...extra });
   const { calls } = await run(manyArgs(), [
-    review([], [at(0)]), review([]),                                                               // R1: A1 finds F1
-    null, review([], [at(9, { title: 'pagination offset calculation' })]),                          // R2: A1 returns nothing, A2 finds F2
-  ], [manyImpl]);
+    review([], [at(0)]), review([]),                                                               // R1: A finds F1
+    null,                                                                                          // R2: A returns nothing
+  ], [manyImpl], { watcher: review([], [at(9, { title: 'pagination offset calculation' })]) });    // R2: S finds F2
   assert.deepEqual(labels(calls, 'fix').slice(0, 2), ['fix round 1 findings', 'fix round 2 findings']);
 });
 
@@ -292,19 +292,19 @@ test('script: a finding history lists only the findings that were tracked, not a
   assert.deepEqual(out.roundLog[0].new, ['F1']);
 });
 
-test('script: RECHECK reruns only the reviewers that skipped the id: L round where only the Sonnet S skipped F2, round 3 has one reviewer', async () => {
+test('script: RECHECK reruns only the reviewers that skipped the id: L round where A and the Sonnet S skipped F2 and B returned nothing, round 3 has A and S', async () => {
   const boom = new Error('max turns');
   const closed = (...ids) => review(ids.map(id => ({ id, status: 'closed' })));
   const f1 = finding({ path: 'src/Orders/F1.cs' });
   const f2 = finding({ path: 'src/Orders/F12.cs', line: 50, title: 'a second defect elsewhere' });
   const { out, calls } = await run(manyArgs(), [
-    review([], [f1]), review([], [f2]), review([]),                          // R1: A1 finds F1, A2 finds F2
-    closed('F1'), boom,                                                       // R2: A2 returns nothing
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok' }], { watcher: [closed('F1'), closed('F2')] });   // R2: S skips F2; R3: S alone
+    review([], [f1]), review([], [f2]),                                      // R1: A finds F1, B finds F2
+    closed('F1'), boom,                                                       // R2: A skips F2, B returns nothing
+    closed('F2'),                                                             // R3: A answers F2
+  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok' }], { watcher: [closed('F1'), closed('F2')] });   // R2: S skips F2; R3: S closes it
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewLabels(calls, 2), ['reviewer A1 · round 2 · code, files 1/2', 'reviewer A2 · round 2 · code, files 2/2', 'reviewer S · round 2 · check the fixes']);
-  assert.deepEqual(reviewLabels(calls, 3), ['reviewer S · round 3 · check the fixes']);                          // the Sonnet is no member of the panel: a RECHECK still finds it
-  assert.deepEqual(out.roundLog.map(r => r.reviewers), [3, 2, 1, 3]);       // the last is the final read
+  assert.deepEqual(reviewLabels(calls, 2), ['reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(reviewLabels(calls, 3), ['reviewer A · round 3 · code', 'reviewer S · round 3 · check the fixes']);   // B returned nothing: a gap, not a skip
   const r3 = calls.find(c => c.opts.label === 'reviewer S · round 3 · check the fixes').prompt;
   assert.match(r3, /you skipped last round.*ids only/s);
   assert.match(r3, /- F2 \[open\]/);
