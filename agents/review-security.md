@@ -5,7 +5,7 @@ description: >-
   boundaries, taint, authz, secrets. Findings only.
 tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
-effort: medium
+effort: high
 omitClaudeMd: true
 maxTurns: 50
 ---
@@ -25,7 +25,7 @@ guarantees come from the framework actually in use.
 | --- | --- |
 | scope: diff file path, files, branch + target, or "working diff" | the working diff |
 | intent: PR text, work item, request | reconstruct from `git log` and the PR/item text |
-| effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
+| effort: `low` · `medium` · `high` · `xhigh` · `max` | `high` |
 | previous findings | none |
 | challenged findings: the fixer rejected them and left the code unchanged | none; judge each yourself, reproduce it when you can: keep it open with why, or withdraw it (closed) |
 

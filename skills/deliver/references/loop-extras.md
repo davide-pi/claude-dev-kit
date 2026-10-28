@@ -6,7 +6,7 @@ reads which round.
 ## Who reads which round
 
 Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus one Sonnet at
-medium (at S that Sonnet is the panel). The first round that would end `OK` after a review fix ran (never at S) is a
+medium (at S that Sonnet is the panel's own, at high). The first round that would end `OK` after a review fix ran (never at S) is a
 final full read: the whole panel, once, on the cumulative fix diff, unless every panel reviewer already read every fix
 delta (M with one fix round: the finder read it, so none runs; L where only A found it: B never read it, so it runs).
 It runs only when the review fixes changed more than 30 lines in all (a fix with no churn reported counts as over).

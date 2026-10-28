@@ -86,6 +86,20 @@ test('-Close -FindingsLog appends one line (the log plus at, run, minutes, token
   assert.ok(!('run' in second) && !('tokens' in second));
 });
 
+test('-Close twice with the same -Run appends one line; another run id appends again', { skip }, () => {
+  const repo = join(sandbox, 'main4b');
+  git(sandbox, 'init', '-b', 'trunk', repo);
+  git(repo, 'commit', '--allow-empty', '-m', 'init');
+  const lines = join(repo, '.git', 'deliver', 'findings.jsonl');
+  perimeter(repo, '-Files', 'a.cs');
+  const log = '{"size":"S","rounds":1,"findings":[]}';
+  assert.equal(perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-9').status, 0);
+  assert.equal(perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-9').status, 0);
+  assert.equal(readFileSync(lines, 'utf8').trim().split('\n').length, 1);
+  assert.equal(perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-10').status, 0);
+  assert.equal(readFileSync(lines, 'utf8').trim().split('\n').length, 2);
+});
+
 test('-LogRun appends a line and keeps the perimeter active; minutes count from the previous logged run; -Close then needs a run logged since opened', { skip }, () => {
   const repo = join(sandbox, 'main5');
   git(sandbox, 'init', '-b', 'trunk', repo);

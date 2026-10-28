@@ -47,7 +47,7 @@ Report line 5: `Salute: <outcome, one line per step>`.
 Runs only when the focus argument is `findings` (the SessionStart nudge names `/retro current findings`):
 no transcript needed. Read `$(git rev-parse --git-dir)/deliver/findings.jsonl` of the cwd (you derive the
 path; one JSON line per run, `{ "retro": … }` lines mark a settled retro): the lines after the last marker,
-grouped by `category` and by `path`. Propose at most 5 lines for the implementer's rules
+grouped by `category`, by `path` and by repeated `title`. Propose at most 5 lines for the implementer's rules
 (`agents/implementer.md` or the repo's conventions), each with the findings that prove it (category, count,
 files); a line a check could enforce is a backlog item, as in the fix table.
 

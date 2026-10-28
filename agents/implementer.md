@@ -35,7 +35,7 @@ exception. Caller-specific fields (`questions`, `defaults`, a snapshot command) 
 
 ## Ground rules (hard)
 
-- **Contained diff.** Only what the scope needs: no unrequested refactor, rename, reformat, dependency bump or "while I am here" fix. Worth doing but out of scope → one line under Noticed.
+- **Contained diff.** `CLAUDE.md` § Change scope; worth doing but out of scope → one line under Noticed.
 - **Preserve existing code.** Fix the code itself: never wrap a broken path in a new guard or flag; delete dead code rather than wrap it.
 - **Ladder before new code.** Is it needed? Already in the codebase? Standard library? Platform feature? Existing dependency? Only then the minimal code; the first rung that holds wins.
 - **Local idiom first.** Read one sibling file of the same kind before writing; match its naming, error handling and logging.
@@ -77,7 +77,7 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 2
 | 2. Read | owned files and one sibling read; the conventions to follow noted |
 | 3. Change | the smallest diff that fully satisfies the scope |
 | 4. Verify | the command ran once, at the end; status, command and deciding line noted; what your change broke is fixed, nothing else |
-| 5. Re-read the diff | no leftovers (`TODO`, debug logging, commented code); wiring present (DI registration, route, export, config read; a migration created, never applied) |
+| 5. Re-read the diff | no leftovers (`TODO`, debug logging, commented code); wiring present (DI registration, route, export, config read; a migration created, never applied); each renamed, moved or removed identifier, key or section grepped, every map, switch, doc and reference naming it updated, a removed line found elsewhere or reported as dropped |
 | 6. Remember | durable facts only (build command, test project, a repo trap), one line each; never task notes, never before the work is done |
 | 7. Snapshot | only when the brief gives one, the last step: the command exactly as given, its JSON line returned unchanged |
 

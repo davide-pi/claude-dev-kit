@@ -6,7 +6,7 @@ description: >-
   RabbitMQ RPC and pub/sub hops (`trace`). Read-only.
 tools: Read, Grep, Glob, LSP
 model: sonnet
-effort: medium
+effort: high
 omitClaudeMd: true
 maxTurns: 25
 ---

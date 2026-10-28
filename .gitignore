@@ -10,6 +10,10 @@
 # `claude plugin eval` writes run results here unless --output-dir says otherwise.
 /evals/results/
 
+# .NET build output (eval fixtures)
+**/bin/
+**/obj/
+
 # Backups / editor / OS noise
 *.bak
 *.bkp

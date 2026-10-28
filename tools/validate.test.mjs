@@ -48,6 +48,27 @@ test('the base kit validates clean and reports listed vs hidden descriptions', (
   assert.match(out, /descriptions: listed \d+ \/ 8000 chars \(2 agents and skills\), hidden \d+ chars \(1 skills/);
 });
 
+test('bin/ and obj/ directories are build output: never scanned', () => {
+  const { code, out } = run((write) => {
+    write('src/obj/Debug/x.json', '{"path": "C:\\\\Users\\\\someone\\\\x"');
+    write('src/bin/y.js', "require('./gone')\n");
+  });
+  assert.equal(code, 0, out);
+});
+
+test('the workflows listing is counted, and warned about past its cap', () => {
+  const { code, out } = run((write) => write('workflows/big.js', `export const meta = {\n  name: 'big',\n  description: 'x',\n  whenToUse: '${'y'.repeat(1300)}',\n}\n`));
+  assert.equal(code, 0, out);
+  assert.match(out, /workflows listed: 1301 \/ 1200 chars/);
+  assert.match(out, /WARN[\s\S]*workflows: description \+ whenToUse total 1301/);
+});
+
+test('the workflows listing counts double-quoted and template strings too', () => {
+  const { code, out } = run((write) => write('workflows/quoted.js', `export const meta = {\n  name: 'quoted',\n  description: "it's x",\n  whenToUse: \`${'y'.repeat(10)}\`,\n}\n`));
+  assert.equal(code, 0, out);
+  assert.match(out, /workflows listed: 16 \/ 1200 chars/);
+});
+
 test('a relative require that does not resolve fails, in hooks, hooks/lib and tools', () => {
   for (const [rel, text] of [
     ['hooks/guard.js', "require('./lib/missing.js')\n"],

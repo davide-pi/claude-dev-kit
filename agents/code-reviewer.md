@@ -5,7 +5,7 @@ description: >-
   Findings only; never posts or edits.
 tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
-effort: medium
+effort: high
 omitClaudeMd: true
 maxTurns: 50
 ---
@@ -25,7 +25,7 @@ questions, defaults, a second model beside you) arrive in the brief and bind lik
 | --- | --- |
 | scope: diff file path, files, branch + target, or "working diff" | the working diff |
 | intent: PR text, work item, the request, commit messages | reconstruct from `git log <target>..HEAD` and the PR/item text; still unknown → say so (pass E depends on it) |
-| effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
+| effort: `low` · `medium` · `high` · `xhigh` · `max` | `high` |
 | specialists beside you (`review-security`, `review-performance`) | none: run F and H in full |
 | previous findings | none |
 

@@ -30,12 +30,12 @@ test('groupOf: a path goes to the group listing it (root, case and slashes ignor
   assert.equal(groupOf('src/stray.cs', groups, ROOT), 1);
 });
 
-test('reviewersFor: S one Sonnet at medium, M one Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
+test('reviewersFor: S one Sonnet at high, M one Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
   const spec = (size, touches) => reviewersFor(size, touches).map((r) => `${r.key}:${r.agentType}:${r.model}:${r.effort}${r.whole ? ':whole' : ''}`);
-  assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:medium:whole']);
+  assert.deepEqual(spec('S', []), ['A:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(spec('M', []), ['A:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(spec('L', []), ['A:code-reviewer:sonnet:high:whole', 'B:code-reviewer:opus:high:whole']);
-  assert.deepEqual(spec('S', ['security', 'performance']), ['A:code-reviewer:sonnet:medium:whole']);
+  assert.deepEqual(spec('S', ['security', 'performance']), ['A:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(spec('M', ['security']), ['A:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
   assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
   assert.deepEqual(spec('M', undefined), ['A:code-reviewer:sonnet:high:whole']);
@@ -89,12 +89,12 @@ test('readReport: a report without verify is not-run, without rejected/noticed e
 });
 
 
-test('script: every reviewer and fixer prompt carries the tool-call budget; the implement prompt does not, and asks for targeted tests', async () => {
+test('script: every reviewer and fixer prompt carries the tool-call budget; the implement prompt does not, and leaves the targeted-tests rule to the agent body', async () => {
   const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
   for (const c of calls.filter(c => c.opts.label !== 'implement the change')) assert.match(c.prompt, /TOOL BUDGET: at most \d+ tool calls.*partial result beats none/s, c.opts.label);
   const implement = calls.find(c => c.opts.label === 'implement the change').prompt;
   assert.doesNotMatch(implement, /TOOL BUDGET/);
-  assert.match(implement, /run only the test files your change touches.*run the verify command once, at the end, before reporting/);
+  assert.doesNotMatch(implement, /run only the test files your change touches/);
 });
 
 test('script: every implementer, reviewer and fixer prompt names the repository to work in', async () => {

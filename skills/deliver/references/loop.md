@@ -97,7 +97,7 @@ node ~/.claude/hooks/scope-guard.js --check <start.head> --dirty 'a.cs,b.cs'   #
 
 ## The findings log and the defaults
 
-Every result carries `findingsLog` = `{ size, rounds, findings: [{ category, priority, path, closed }] }`, cumulative over
+Every result carries `findingsLog` = `{ size, rounds, findings: [{ category, priority, path, title, closed }] }` (`title` cut to 80 chars), cumulative over
 every finding the run saw. The log is written by `perimeter.ps1`, once per run, never by hand:
 
 ```powershell

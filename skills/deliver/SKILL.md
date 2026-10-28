@@ -53,7 +53,7 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 | analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, doubts pass, challenger `Plan` (risk: data, money, contract, security) | `plan-work`, criteria + proof, questions, owner ok, doubts pass, challenger `Plan` (Opus) |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
 | implementation | this session, inline (up to ~3 files) while the context is small, else `implementer`; a mechanical batch → `mechanical: true`, `implementer` on Haiku | `implementer`, 3-4 tasks a run | as M, a run per phase (P-run, `references/loop.md`) |
-| review | 1 `code-reviewer`, Sonnet medium (mechanical: low) | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
+| review | 1 `code-reviewer`, Sonnet high (mechanical: low) | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
 **Docs only** (README, `docs/`, code comments; never a skill, agent, rule or hook): no perimeter, no loop.
 Edit inline, then one `code-reviewer` (Sonnet, effort `low`) on the diff; fix its P1/P2 inline, run the project's doc or lint check (this kit: `node tools/validate.mjs`).

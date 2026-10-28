@@ -15,8 +15,7 @@
 2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
 3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly, never the
    `az devops configure` default. No line, unmapped, or an added dir -> ask.
-4. Code beyond a few lines, scope decided -> `implementer`, briefed and reviewed here; a few lines (size S)
-   -> inline, same review. Fan-out searches, wide reads -> `Explore`. Briefs ask for concise reports.
+4. Fan-out searches, wide reads -> `Explore`. Briefs ask for concise reports.
 5. Reviews (`/code-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
 
 Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks the user.

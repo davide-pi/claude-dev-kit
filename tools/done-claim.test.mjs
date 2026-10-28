@@ -329,6 +329,23 @@ test('a Workflow result that arrives as a task-notification entry is the turn\'s
   assert.equal(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ verify: 'Passed: 48, Failed: 0' })), say(claim)]).reason, '');
 });
 
+test('a `"status":"OK"` row is proven by a Workflow notification, string or text-block content; a different status still blocks', () => {
+  const claim = verdict(row('`"status":"OK"`'));
+  const asBlocks = (body) => ({ ...notification(body), message: { role: 'user', content: [{ type: 'text', text: notification(body).message.content }] } });
+  assert.equal(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ status: 'OK', rounds: 2 })), say(claim)]).reason, '');
+  assert.equal(stop([prompt('x'), tool('Workflow'), asBlocks(JSON.stringify({ status: 'OK' })), say(claim)]).reason, '');
+  assert.match(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ status: 'STALL' })), say(claim)]).reason, /"fatto"/);
+});
+
+test('a cell of backticked fragments joined by / or + is proven when each fragment is printed; a paraphrase stays blocked', () => {
+  const out = 'Tests 390 passed (390)\nFailed 0 failed';
+  for (const line of ['`390 pass` / `0 fail`', '`390 pass` + `0 fail`']) assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
+  assert.match(stop(edited(verdict(row('`390 pass` / `2 fail`')), out)).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('`390 pass` e `0 fail`')), out)).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('nessuna riga `OVER`')), 'caps-checked')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('lettura del sorgente di `x.ts`')), 'caps-checked')).reason, /"fatto"/);
+});
+
 test('an Agent or Task hand-back (notification or cross-session message) carries the proof; the delegate alone arms the hook', () => {
   const claim = verdict(row('Passed: 48, Failed: 0'));
   const handBack = peer({ message: { role: 'user', content: '<cross-session-message from="uds:x" from-name="agent">\nPassed: 48, Failed: 0\n</cross-session-message>' } });
