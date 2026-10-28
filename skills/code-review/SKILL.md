@@ -48,7 +48,7 @@ Every Agent call passes the requested effort as its `effort` parameter, never on
 is built **once** and passed to A (and B, from `xhigh`) unchanged; its contents are in
 `references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
 a missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
-`/review-large`, never launch it unasked.
+`/review-large` (two whole-change reviewers, A on Sonnet + B on Opus), never launch it unasked.
 
 ### Intent — before spawning
 

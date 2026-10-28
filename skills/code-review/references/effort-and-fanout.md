@@ -14,6 +14,8 @@ default. It tells every agent how deep to go:
 | `xhigh` | the full two-model pair plus both specialists, told to follow call paths out of the diff |
 | `max` | the same, exhaustive: every touched path, every caller |
 
+A diff of 30+ files goes to the saved workflow `/review-large` on the user's yes: two `code-reviewer`s, A on Sonnet and B on Opus (or the `modelB` arg), each reading the whole change with one brief, then one merger. It never splits the files.
+
 `[focus]` overrides the ladder: `security` → `review-security` alone, `performance` →
 `review-performance` alone, anything else (`completeness`, `clean-code`, a subsystem) → the
 generalist told to concentrate on that axis. Parallel agents go out **in a single message**.

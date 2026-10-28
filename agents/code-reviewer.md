@@ -81,7 +81,7 @@ A structured-output schema in the call is the format. Without one, finding block
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
+- risk: high | medium | low         (todo only)
 - effort: S | M | L                 (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>

@@ -29,15 +29,15 @@ Cross-model merge: same anchor and same defect from A and B → `CONFIRMED`, sor
 priority; found by one model only → `PLAUSIBLE`, unless the finding quotes evidence (the line, the
 failing call) that settles it.
 
-A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (at most 3 groups
-by directory plus one reviewer of the whole change on a second model, same ladder, one merger) and wait for the user's yes; never launch it unasked.
+A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (two reviewers of the whole change,
+A on Sonnet + B on Opus, one merger) and wait for the user's yes; never launch it unasked.
 
 ## Fields (emitted by the agents, values verbatim)
 
 | Field | Values |
 | --- | --- |
 | `priority` — impact if not fixed | **P1** blocks the merge (CONFIRMED security, data loss, crash, broken contract) · **P2** before release · **P3** improvement |
-| `risk` — what applying the fix can break | `alto` behaviour, data or a public contract · `medio` localized logic, verifiable by tests · `basso` cosmetic |
+| `risk` — what applying the fix can break | `high` behaviour, data or a public contract · `medium` localized logic, verifiable by tests · `low` cosmetic |
 | `effort` | **S** minutes, one place · **M** a few files · **L** design change or migration |
 | `status` | `todo` → **To do**; `done` → **Already done** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
 
@@ -53,7 +53,7 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
+- risk: high | medium | low         (todo only)
 - effort: S | M | L                 (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
@@ -124,6 +124,6 @@ The same rules, in full:
 5. Every finding gets a row. After the tables: at most a one-line verdict and one short question.
 6. No findings → no table; say what was verified.
 7. Headers and section names exactly as written above (fixed kit vocabulary, English); at chat `it` the
-   `At chat it:` line right after the skeleton gives the equivalents. The agents emit `risk` as `alto|medio|basso`: the report shows
-   them as `high|medium|low`. Statements, `Finding` text and the closing question in the chat language;
+   `At chat it:` line right after the skeleton gives the equivalents (`risk` included: `high|medium|low`
+   shown as `alto|medio|basso`). Statements, `Finding` text and the closing question in the chat language;
    verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs, `P1|P2|P3`, `S|M|L`.

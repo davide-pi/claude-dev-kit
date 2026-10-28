@@ -10,8 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS as ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
-const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
+import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
 
 // ── the verify gate: delta command, verify finding, gate stalls (T10, T4) ──────────────────────────
 test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {

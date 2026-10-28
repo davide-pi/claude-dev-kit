@@ -64,8 +64,9 @@ async function run(args, reviews, implementers = [], extra = {}) {
   return { out, calls };
 }
 
-const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'M' };
-const CLEAN = { ...ARGS, cleanup: true };   // the P3 cleanup pass runs only when asked
+const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'S' };
+const ARGS_M = { ...ARGS, size: 'M' };
+const CLEAN = { ...ARGS_M, cleanup: true };   // the P3 cleanup pass runs only when asked
 const review = (previous, found = [], filesReviewed = ALL_READ) => ({ previous, found, checked: 'read', filesReviewed });
 const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', ...extra });
 const NULL_GUARD = 'null guard missing on the order lookup';
@@ -88,4 +89,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal };
+export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals, riskAxes, sizeSignal };

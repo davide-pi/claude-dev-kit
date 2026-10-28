@@ -77,7 +77,7 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: alto | medio | basso        (todo only)
+- risk: high | medium | low         (todo only)
 - effort: S | M | L                 (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
@@ -90,7 +90,7 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
 Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
 
-Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `alto` behaviour, data or a public contract · `medio` localized logic · `basso` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
+Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `high` behaviour, data or a public contract · `medium` localized logic · `low` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
 
 Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
 is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink

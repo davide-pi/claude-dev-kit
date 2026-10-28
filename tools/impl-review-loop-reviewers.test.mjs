@@ -10,8 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { f, ROOT, snapshot, run, ARGS as ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
-const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
+import { f, ROOT, snapshot, run, ARGS, ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
 
 // ── reviewer budget, an agent that throws ─────────────────────────────────
 test('reviewersFor: S one Sonnet at high, M Sonnet and Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
@@ -404,6 +403,7 @@ test('wide: past 10 files or 600 changed lines reviewer B of M is opus, never a 
   assert.deepEqual(await round1({ size: 'S', mechanical: true }, implOf(14)), ['reviewer A:sonnet:low']);
   assert.deepEqual(await round1({ size: 'L' }, implOf(14)), ['reviewer A:sonnet:high', 'reviewer B:opus:high']);
   assert.deepEqual(reviewersFor('M', [], false, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high', 'opus:high']);
+  assert.deepEqual(reviewersFor('M', [], true, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high', 'sonnet:high'], 'a mechanical change stays on sonnet even when wide');
   assert.deepEqual(reviewersFor('S', [], false, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
   assert.deepEqual(reviewersFor('S', [], true, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
 });

@@ -35,7 +35,8 @@ Goal: the user's Slack activity on <yyyy-MM-dd> (local time), to cover hours not
 Load the tools with ToolSearch "+slack search". Find the user's id with slack_read_user_profile, then
 slack_search_public_and_private with `from:<@id> on:<yyyy-MM-dd>`; page until done; include huddle
 and call messages.
-Report in the chat language, max 15 lines: one table | Fascia | Canale/DM | Argomento (max 8 parole) | Progetto |
+Report in the chat language, max 15 lines: one table | Slot | Channel/DM | Topic (max 8 words) | Project |
+(at chat `it`: Slot=Fascia, Channel/DM=Canale/DM, Topic (max 8 words)=Argomento (max 8 parole), Project=Progetto)
 — windows merged when messages are < 15 min apart; mark messages sent through the Claude integration;
 huddles/calls with their duration if visible. No message bodies, no preamble.
 ```

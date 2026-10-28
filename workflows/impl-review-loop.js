@@ -70,7 +70,7 @@ const WIDE_LINES = 600
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
 const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
   const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', size === 'L' || wide ? 'opus' : 'sonnet', 'high')]
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', size === 'L' || (wide && !mechanical) ? 'opus' : 'sonnet', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }

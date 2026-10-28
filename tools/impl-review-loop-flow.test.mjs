@@ -10,8 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS as ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, defect, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals } from './impl-review-loop.harness.mjs';
-const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, defect, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, finderKey, routeQuestions, reviewerQuestions, findingsLog, removeById, finalReadOwed, growthProposals } from './impl-review-loop.harness.mjs';
 
 // ── delivery flow "two colleagues": P-run, P-size, P-weight, W1-W15 ──────────────────────────────────────────
 const closedIds = (...ids) => ids.map(id => ({ id, status: 'closed' }));

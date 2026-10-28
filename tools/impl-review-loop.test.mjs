@@ -13,8 +13,7 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { FILES, f, ROOT, snapshot, run, ARGS as ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
-const ARGS = { ...ARGS_M, size: 'S' };   // S is the single-reviewer path; M scripts reviewer B too
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
 
 test('inPerimeter: file, directory, glob, absolute path under the root, case, anchored at the root', () => {
   assert.ok(inPerimeter('src/Orders/OrdersQuery.cs', FILES));
