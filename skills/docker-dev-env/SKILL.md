@@ -88,7 +88,7 @@ docker compose down                          # containers go; volumes survive
 
 ## References
 
-- `references/aspire.md` — app host, profiles, dashboard, service discovery, connection handover.
+- `references/aspire.md` — app host of the large backend, `ASPIRE_PROFILE`, data and ports, Aspire vs compose.
 - `references/compose-stack.md` — the annotated stack file: services, networks, profiles, overrides.
 - `references/healthchecks.md` — a real probe per service, `--wait`, `service_healthy`, start periods.
 - `references/clients-in-containers.md` — when a client must run: exec, throwaway, wsl by target; piping files; exit codes; per-client recipes.

@@ -146,6 +146,16 @@ function piecesPrinted(line, printed) {
   return pieces.length > 0 && pieces.every((p) => (elided ? looseText.includes(p) : printedAsWords(looseText, p)));
 }
 
+/**
+ * A cell made only of backticked fragments joined by ` / ` or ` + ` (`390 pass` / `0 fail`): proven when each fragment (3+ chars)
+ * is printed, as the start of a word, so `390 pass` is read in "390 passed". One fragment alone is never judged this way.
+ */
+function fragmentsPrinted(rawLine, printed) {
+  const spans = [...rawLine.matchAll(/`([^`]+)`/g)].map((m) => normalise(m[1]));
+  if (spans.length < 2 || !/^\u0000(?:\s+[/+]\s+\u0000)+$/.test(rawLine.trim().replace(/`[^`]+`/g, '\u0000'))) return false;
+  return spans.every((s) => s.length >= 3 && new RegExp(`(?<![\\p{L}\\p{N}])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(printed));
+}
+
 /** A bare `exit 0` prints nothing: proven when a shell call after the last edit ran the row's command (a backticked span, else the whole cell). */
 function exitZeroRan(row, shellCommands) {
   const spans = [...row.command.matchAll(/`([^`]+)`/g)].map((m) => m[1]);
@@ -163,7 +173,7 @@ function unprovenRows(rows, resultsText, shellCommands = []) {
     if (/^(?:\[\]|\{\})$/.test(line)) return !new RegExp(`(?:^|\\s)${line.replace(/[[\]{}]/g, '\\$&')}(?:\\s|$)`).test(printed);
     if (!/[\p{L}\p{N}]/u.test(line)) return true;
     if (EXIT_ZERO.test(line.replace(/=/g, ' ')) && exitZeroRan(r, shellCommands)) return false;
-    return !printedAsWords(printed, line) && !piecesPrinted(line, printed);
+    return !printedAsWords(printed, line) && !piecesPrinted(line, printed) && !fragmentsPrinted(r.line, printed);
   });
 }
 

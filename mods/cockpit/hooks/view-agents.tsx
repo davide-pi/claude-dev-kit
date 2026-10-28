@@ -187,11 +187,12 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
   return [truncateSpans([total], width), task, counters, tool].filter((r): r is Span[] => r !== undefined)
 }
 
+/** Cheapest first (pricing.ts). */
 const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [
+  { family: 'haiku', label: 'haiku', color: COLORS.green },
   { family: 'sonnet', label: 'son', color: COLORS.blue },
   { family: 'opus', label: 'opus', color: COLORS.amber },
   { family: 'fable', label: 'fable', color: COLORS.lavender },
-  { family: 'haiku', label: 'haiku', color: COLORS.green },
 ]
 
 export function modelCounts(list: readonly CockpitAgent[]): Span[] {

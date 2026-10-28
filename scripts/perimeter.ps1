@@ -20,7 +20,7 @@
   -Close appends ONE line to `<git dir>/deliver/findings.jsonl` (never committed): the -FindingsLog object
   (the loop's `result.findingsLog`, a JSON string; PowerShell doubles the quotes inside single quotes) plus `at`
   (now, UTC), `run` (-Run, when given), `minutes` (since `opened:`, when the file has it) and `tokens` (-Tokens, when
-  given). With -LogRun the line is appended and the perimeter stays active; `minutes` then counts from the previous
+  given). A line is skipped when the log's last line already carries the same -Run. With -LogRun the line is appended and the perimeter stays active; `minutes` then counts from the previous
   logged run's `at` (from `opened:` for the first). -Close without -FindingsLog needs a run logged since `opened:`
   or -NoFindings, else exit 2 and nothing is closed.
 
@@ -75,6 +75,12 @@ function LastLoggedAt([string]$Text) {
 function AppendLog([string]$Json, [string]$Text) {
   try { $log = $Json | ConvertFrom-Json -ErrorAction Stop } catch { Fail "the findings JSON is not valid: $($_.Exception.Message)" }
   if ($log -isnot [pscustomobject] -or $log.PSObject.TypeNames[0] -ne 'System.Management.Automation.PSCustomObject') { Fail 'the findings JSON must be an object' }
+  if ($Run -and (Test-Path -LiteralPath $logPath)) {
+    $tail = @([System.IO.File]::ReadAllLines($logPath) | Where-Object { $_.Trim() }) | Select-Object -Last 1
+    $prev = $null
+    if ($tail) { try { $prev = $tail | ConvertFrom-Json -ErrorAction Stop } catch { $prev = $null } }
+    if ($prev -is [pscustomobject] -and $prev.PSObject.Properties['run'] -and $prev.run -eq $Run) { Write-Output "skipped: run $Run already logged"; return }
+  }
   $now = [DateTime]::UtcNow
   $since = LastLoggedAt $Text
   $opened = [regex]::Match($Text, '(?im)^opened:[ \t]*(\S+)')

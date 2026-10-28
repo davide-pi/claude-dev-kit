@@ -46,9 +46,9 @@ and returning the response contract. That method *is* the seam.
 5. Commit the tests **alone**, then change the code. A red test is either the intended change (update
    it in the same commit, so the diff shows the behaviour change) or a regression (stop).
 
-Output too large to assert field by field → a golden master: serialize to indented JSON beside the
-test and compare. No timestamps, generated ids, dictionary ordering or culture-dependent formatting
-inside it, and regenerated deliberately, never automatically in CI.
+Output too large to assert field by field → a golden master: indented JSON beside the test, no
+timestamps, generated ids, dictionary ordering or culture-dependent formatting, regenerated
+deliberately, never automatically in CI.
 
 ## Breaking dependencies without a rewrite
 
@@ -61,12 +61,10 @@ inside it, and regenerated deliberately, never automatically in CI.
 | an HTTP client | an interface for the *operation*, not for the client | mocking the raw client makes brittle tests |
 | Redis through the cache SDK | the SDK's interfaces (`ICacheAdapter`, `IStreamManager`) are already the seam | assert the key and the TTL, not the serializer |
 
-Each move is mechanical and reviewable, committed separately from the feature.
-
-**Sprout** — new logic in a new tested class, called from one line of the legacy method. **Wrap** —
-rename the old method intact, add a new one with the old name calling it plus the new, tested step.
-Both leave the untested mass exactly as untested as before; that is the right trade in a codebase of
-hundreds of projects.
+Each move is mechanical, committed separately from the feature. **Sprout**: new logic in a new tested
+class, called from one line of the legacy method. **Wrap**: rename the old method intact, add a new one
+with the old name calling it plus the new, tested step. Both leave the untested mass as untested as
+before — the right trade in a codebase of hundreds of projects.
 
 ## Opening the first test project
 
@@ -84,26 +82,20 @@ dotnet test .\src\<Tree>\tests\<Project>.Tests
 
 ## Integration host and real database — a note, not a plan
 
-- **Host test**: for an HTTP-facing service, one test that boots the host in memory and calls one
-  endpoint catches missing registrations, captive dependencies and bad binding. For a pure RPC
-  service, the equivalent is building the service provider and resolving every subscriber.
-- **Real database**: a SQL Server container through Testcontainers, migrated with the real
-  migrations, reset per test. The in-memory EF provider is not relational and passes queries the real
-  engine rejects. The Postgres read cache is tested against a Postgres container, because its SQL has
-  no compiler at all.
+- **Host test**: for an HTTP-facing service, one in-memory host test calling one endpoint catches
+  missing registrations, captive dependencies and bad binding. For a pure RPC service, build the service
+  provider and resolve every subscriber.
+- **Real database**: a SQL Server container through Testcontainers, migrated with the real migrations,
+  reset per test; the in-memory EF provider is not relational and passes queries the real engine
+  rejects. The Postgres read cache is tested against a Postgres container, because its SQL has no
+  compiler at all.
 - Both cost seconds per test and a running container runtime: they earn their place on data-loss and
   money paths, not as the default.
 
 ## What to leave alone
 
-| Leave it | Reason |
-| --- | --- |
-| code you are not changing | tests written for their own sake rot |
-| generated code, migrations, snapshots | the generator is the contract |
-| a pass-through responder that only forwards to one DAO call | the test asserts the compiler |
-| a class scheduled for deletion | test its replacement |
-| the whole estate "for coverage" | a number nobody acts on, bought with weeks |
-
-Stop when the next test would cover a path that cannot lose money, leak data or corrupt state, and the
-change at hand does not touch it. Write the gap in the change description: a gap that is written down
-is a decision, one that is not is an accident.
+Code you are not changing; generated code, migrations, snapshots; a pass-through responder that only
+forwards to one DAO call; a class scheduled for deletion (test its replacement); the whole estate "for
+coverage". Stop when the next test would cover a path that cannot lose money, leak data or corrupt
+state and the change does not touch it. Write the gap in the change description: a gap written down is
+a decision, one that is not is an accident.

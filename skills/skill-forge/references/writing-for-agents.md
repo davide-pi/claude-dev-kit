@@ -43,8 +43,8 @@ reach. Reference left in-file buries the steps and makes following them a coin f
 **Co-location:** a concept's definition, rules and caveats sit under one heading. Scattered meaning
 is as bad as duplicated meaning.
 
-**Sprawl:** a file too long even when every line is live. The cure is the ladder, not trimming
-substance (that is the kit's "split, never shrink" rule).
+**Sprawl:** a file too long even when every line is live. The cure is the ladder in `SKILL.md` § 2: delete
+first, split second.
 
 ## Completion criteria
 

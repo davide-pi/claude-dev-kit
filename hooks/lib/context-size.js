@@ -1,7 +1,7 @@
 /**
  * The main session's context size, as the statusline last measured it: `used_tokens` in
- * `<config>/.cache/context-<session_id>.json`. One reader for the hooks that act on a large context
- * (done-claim's /clear hand-off, edit-nudge's delegation line).
+ * `<config>/.cache/context-<session_id>.json`. The reader for the hooks that act on a large context
+ * (done-claim's /clear hand-off).
  *
  * `LARGE_CONTEXT` is the token count from which a session counts as large: `CLAUDE_LARGE_CONTEXT`
  * (a positive number) or 120 000.

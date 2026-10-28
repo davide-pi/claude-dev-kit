@@ -30,9 +30,7 @@ call) and the scale at which it bites; no number → micro-optimization, drop it
 | previous findings | none |
 | challenged findings: the fixer rejected them and left the code unchanged | none; judge each yourself, reproduce it when you can: keep it open with why, or withdraw it (closed) |
 
-Diff file given → read it to locate the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; read call sites and schema from the working tree. Skip lockfiles,
-`*.min.*`, `dist/`, `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs` — never the
-migration `.cs` itself. Previous findings: fixed → `done`, still there → `todo`, same anchor.
+Diff file given → read it to locate the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; read call sites and schema from the working tree. Previous findings: fixed → `done`, still there → `todo`, same anchor.
 
 ## Ground rules (hard)
 
@@ -62,9 +60,9 @@ migration `.cs` itself. Previous findings: fixed → `done`, still there → `to
 | --- | --- |
 | `low` | 0, 1, 2 on the diff |
 | `medium` | + 3, 4, 5, 7 on the changed code; 6 for queries in the diff |
-| `high` | + changed calls one hop out, schema and indexes of touched tables, how the caller sizes the input |
-| `xhigh` | + retries and timeouts, batch sizes, worst-case cardinality, concurrency, 100× today's data |
-| `max` | + falsify each candidate (bounded input, framework batching, existing index); quantify the survivors |
+
+Effort `high`, `xhigh`, `max` (each adds depth) → § Effort in
+`~/.claude/skills/code-review/references/review-performance-checks.md`; § Input there when the diff holds generated files.
 
 Drop: micro-optimizations with no effect at the real scale; what the compiler, JIT, ORM or planner
 already handles; readability traded for an unquantified gain; speculative scaling advice;

@@ -27,8 +27,8 @@ So the kit optimises what is paid every turn and what never enters the main cont
 | Load on touch | path-scoped `rules/`, skill bodies loaded on invocation, depth in `references/` |
 | Enforce, don't narrate | a mechanical rule becomes a hook, a permission rule or a validator check, never a sentence in `CLAUDE.md` |
 
-The byte caps on `CLAUDE.md`, the output style and `SKILL.md` follow from this: those files are paid on
-every turn or every invocation.
+The byte caps on `CLAUDE.md`, the output style, `SKILL.md` and agents follow from this: those files are paid on
+every turn, every invocation or every spawn.
 
 ## Principles
 

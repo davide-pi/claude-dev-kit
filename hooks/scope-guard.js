@@ -1,6 +1,5 @@
 /**
- * PostToolUse (Edit|Write|MultiEdit) hook: one line into the turn when a file outside the active
- * `deliver` perimeter has just been edited.
+ * The `deliver` perimeter check: `--check` lists the changed files the active perimeter does not cover.
  *
  * `deliver` writes the perimeter of a change into one file per worktree, inside the git directory:
  * `$(git rev-parse --git-dir)/deliver/perimeter.md` (never committed; in a linked worktree that is
@@ -17,16 +16,7 @@
  * `workflows/impl-review-loop.js`, which a test holds them to). The perimeter counts only while it says
  * `status: active` AND its `branch:` is the branch checked out now; `deliver` overwrites the file at
  * each triage and sets `status: closed` at the verdict. No file, a closed or another branch's
- * perimeter, no git repository above the file (the session's scratchpad has none), a plan file itself
- * or a file outside the repository: the hook says nothing.
- *
- * A nudge, never a block: the edit has happened, the line tells the session to note it and ask the
- * user. Inside a subagent (`agent_id` in the payload) the line says to note it under Noticed
- * instead, because a subagent never asks the user.
- *
- * Wired through `nudges.js` (one node process for every PostToolUse nudge); run alone
- * (`node hooks/scope-guard.js`) it reads stdin and prints for itself. Always exits 0; any error is
- * silence.
+ * perimeter or no git repository above the working directory: no active perimeter.
  *
  * CLI mode, `node hooks/scope-guard.js --check <head> [--dirty a,b]`: the mechanical scope check after a
  * review says OK. It lists, one per line, the files changed since `<head>` (`git diff --name-only <head>` plus
@@ -44,16 +34,9 @@ const path = require('path');
 const { execFileSync } = require('child_process');
 const { repoRoot, gitDirOf, currentBranch } = require('./lib/git-dir');
 
-const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const MAX_BYTES = 64 * 1024;
 
 const slashes = (p) => p.replace(/\\/g, '/');
-
-/** Realpath when the file exists (symlinks, 8.3 names), else the resolved path. */
-function canonical(file, base) {
-  const abs = path.resolve(base || process.cwd(), file);
-  try { return fs.realpathSync.native(abs); } catch { return abs; }
-}
 
 /** A perimeter entry as a regex over a repo-relative, slash-separated path (anchored, case-insensitive). */
 function entryRegex(entry) {
@@ -88,33 +71,6 @@ function activePerimeter(root) {
   const p = readPerimeter(text);
   if (!p.active || !p.entries.length || !p.branch || p.branch !== currentBranch(dir)) return null;
   return { entries: p.entries, branch: p.branch };
-}
-
-/** The hook's output for one payload, or null when there is nothing to say. */
-function run(payload) {
-  if (payload.hook_event_name !== 'PostToolUse' || !EDIT_TOOLS.has(payload.tool_name)) return null;
-  const file = payload.tool_input?.file_path;
-  if (typeof file !== 'string' || !file) return null;
-
-  const abs = canonical(file, payload.cwd);
-  const root = repoRoot(path.dirname(abs));
-  if (!root) return null;
-  const rel = slashes(path.relative(root, abs));
-  if (!rel || rel.startsWith('../') || path.isAbsolute(rel)) return null;
-  if (/^docs\/plans\//i.test(rel) || /^\.git\//i.test(rel)) return null;
-
-  const perimeter = activePerimeter(root);
-  if (!perimeter || perimeter.entries.some((e) => entryRegex(e).test(rel))) return null;
-
-  const what = payload.agent_id
-    ? 'note it under Noticed and leave it alone: a subagent does not ask the user.'
-    : 'note it as a proposal and ask the user before keeping the change.';
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
-      additionalContext: `Out of perimeter: \`${rel}\` is not in the active perimeter (branch \`${perimeter.branch}\`); ${what}`,
-    },
-  };
 }
 
 /** The files of `paths` (repo-relative) that no perimeter entry covers and that were not already `dirty`.
@@ -172,18 +128,8 @@ function check(args, cwd) {
   return outside.length ? 1 : 0;
 }
 
-module.exports = { run, entryRegex, readPerimeter, outsidePerimeter };
+module.exports = { entryRegex, readPerimeter, outsidePerimeter };
 
-// Run as a script, or required by `node -e` as a settings.json entry wires it; `hooks/nudges.js` sets the
-// flag and calls `run` itself.
 if (require.main === module && process.argv[2] === '--check') {
   process.exitCode = check(process.argv.slice(3), process.cwd());
-} else if (require.main === module || !global.__nudgesDispatch) {
-  try {
-    const output = run(JSON.parse(fs.readFileSync(0, 'utf8') || '{}'));
-    if (output) process.stdout.write(JSON.stringify(output));
-  } catch {
-    /* silence */
-  }
-  process.exit(0);
 }

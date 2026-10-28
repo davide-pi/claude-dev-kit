@@ -65,14 +65,17 @@ test('routeQuestions (W2, W3, W13): a reviewer question is pending until the own
   assert.deepEqual(reviewerQuestions([{ questions: [q('a?'), q(' A? ')] }, { questions: [q('b?')] }, null]).map(x => x.text), ['a?', 'b?']);
 });
 
-test('findingsLog (W12): category, priority, path and whether it closed, for every finding but the verify one', () => {
+test('findingsLog (W12): category, priority, path, title (cut to 80, no straight apostrophe) and whether it closed, for every finding but the verify one', () => {
   const known = { F1: f('F1'), F2: f('F2', { priority: 'P3', path: 'src/Other.cs', category: 'clean-code' }), F3: f('F3', { priority: 'P3' }), V1: { id: 'V1', category: 'verify', priority: 'P1', path: '(verify)' } };
   assert.deepEqual(findingsLog({ known, tracked: { F1: { status: 'closed' } }, cleaned: [known.F3] }), [
-    { category: 'correctness', priority: 'P2', path: 'src/Orders/OrdersQuery.cs', closed: true },
-    { category: 'clean-code', priority: 'P3', path: 'src/Other.cs', closed: false },
-    { category: 'correctness', priority: 'P3', path: 'src/Orders/OrdersQuery.cs', closed: true },
+    { category: 'correctness', priority: 'P2', path: 'src/Orders/OrdersQuery.cs', title: 'F1', closed: true },
+    { category: 'clean-code', priority: 'P3', path: 'src/Other.cs', title: 'F2', closed: false },
+    { category: 'correctness', priority: 'P3', path: 'src/Orders/OrdersQuery.cs', title: 'F3', closed: true },
   ]);
   assert.deepEqual(findingsLog(), []);
+  assert.equal(findingsLog({ known: { F4: f('F4', { title: 'x'.repeat(120) }) } })[0].title.length, 80);
+  // the log travels inside a single-quoted pwsh argument: U+02BC, never a quote char for pwsh (U+2018-U+201B are)
+  assert.equal(findingsLog({ known: { F5: f('F5', { title: "the reviewer's title" }) } })[0].title, 'the reviewerʼs title');
 });
 
 test('readReport (W4): defaults keep the entries with a choice; cleanupCandidates and isNeverBlocking leave a split proposal alone (W8)', () => {
@@ -324,8 +327,8 @@ test('script (W12): the result carries the findings log line (size, rounds, find
   assert.deepEqual(out.findingsLog, {
     size: 'M', rounds: 2,
     findings: [
-      { category: 'correctness', priority: 'P2', path: 'src/Orders/OrdersQuery.cs', closed: true },
-      { category: 'correctness', priority: 'P3', path: 'src/Other.cs', closed: false },
+      { category: 'correctness', priority: 'P2', path: 'src/Orders/OrdersQuery.cs', title: 't', closed: true },
+      { category: 'correctness', priority: 'P3', path: 'src/Other.cs', title: 'other', closed: false },
     ],
   });
   const stalled = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'open' }])]);

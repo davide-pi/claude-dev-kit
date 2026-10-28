@@ -5,7 +5,7 @@ description: >-
   boundaries, taint, authz, secrets. Findings only.
 tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
-effort: medium
+effort: high
 omitClaudeMd: true
 maxTurns: 50
 ---
@@ -25,13 +25,11 @@ guarantees come from the framework actually in use.
 | --- | --- |
 | scope: diff file path, files, branch + target, or "working diff" | the working diff |
 | intent: PR text, work item, request | reconstruct from `git log` and the PR/item text |
-| effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
+| effort: `low` · `medium` · `high` · `xhigh` · `max` | `high` |
 | previous findings | none |
 | challenged findings: the fixer rejected them and left the code unchanged | none; judge each yourself, reproduce it when you can: keep it open with why, or withdraw it (closed) |
 
-Diff file given → read it, not a fresh `git diff`; it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines. Skip lockfiles, `*.min.*`, `dist/`,
-`__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs`; judge a new dependency from its
-manifest. Previous findings: fixed → `done`, still there → `todo`, same anchor. You are the
+Diff file given → read it, not a fresh `git diff`; it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines. Judge a new dependency from its manifest. Previous findings: fixed → `done`, still there → `todo`, same anchor. You are the
 subagent path, not the built-in `/security-review`: never invoke it.
 
 ## Ground rules (hard)
@@ -61,9 +59,9 @@ subagent path, not the built-in `/security-review`: never invoke it.
 | --- | --- |
 | `low` | 0 (framework baseline), 1–2 on the diff, 4 |
 | `medium` | + 3, 5, 6, 7 on the new or changed surface |
-| `high` | + sibling handlers for the expected guard; taint one hop beyond the diff |
-| `xhigh` | + a short threat model per entry point (who, gain, what stops them); trust assumptions of each new dependency |
-| `max` | + falsify every candidate by finding the guard that would stop it |
+
+Effort `high`, `xhigh`, `max` (each adds depth) → § Effort in
+`~/.claude/skills/code-review/references/review-security-checks.md`; § Input there when the diff holds generated files.
 
 Drop: no reachable path; mitigated upstream (cite the guard) or guaranteed by the framework unless
 the change bypasses it; genuinely trusted input (say so); exposure on untouched lines the change

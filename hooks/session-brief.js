@@ -29,9 +29,9 @@
  * puts it.
  *
  * The findings log line (never cached, one small file read): `<git-dir>/deliver/findings.jsonl` holds one JSON
- * line per `deliver` run ({ at, run, size, rounds, minutes, findings: [{ category, priority, path, closed }] })
+ * line per `deliver` run ({ at, run, size, rounds, minutes, findings: [{ category, priority, path, title, closed }] })
  * and a `{ "retro": <date> }` line each time a retro was settled. Counting only what follows the last retro
- * line, a category that recurs RECURRING times or a file holding OPEN_P3 open P3 findings adds one line
+ * line, a category that recurs RECURRING times among the P1/P2 findings (the line names their most frequent title) or a file holding OPEN_P3 open P3 findings adds one line
  * pointing at /retro. A missing or unreadable log adds nothing. Failing that, RETRO_RUNS or more run lines since the
  * last retro add their count to that line, or a plainer `/retro` line of their own: never dropped, like the findings line.
  *
@@ -63,8 +63,9 @@ const TTL_MS = 3 * 60 * 1000;
 /** A brief nobody waited for is worth more than a complete one. */
 const STATUS_TIMEOUT_MS = 1500;
 const MAX_LINES = 4;
-/** A category seen this many times since the last retro, or a file with this many open P3 findings, is worth a retro. */
-const RECURRING = 5;
+/** A category seen this many times (P1/P2 only) since the last retro, or a file with this many open P3 findings, is worth a retro. */
+const RECURRING = 3;
+const TITLE_MAX = 40;
 const OPEN_P3 = 3;
 /** Run lines since the last retro that make the flow worth a review. */
 const RETRO_RUNS = 3;
@@ -301,8 +302,17 @@ function findingsNudge({ findings }) {
     return seen;
   };
   const reasons = [];
-  for (const [category, n] of count((f) => f.category)) {
-    if (category && n >= RECURRING) reasons.push(`${category} came back ${n} times since the last retro`);
+  const isBlocking = (f) => f.priority === 'P1' || f.priority === 'P2';
+  for (const [category, n] of count((f) => (isBlocking(f) ? f.category : null))) {
+    if (!category || n < RECURRING) continue;
+    const titles = new Map();
+    for (const f of findings) {
+      const title = typeof f.title === 'string' ? f.title.replace(/[\s\x00-\x1f\x7f]+/g, ' ').trim() : '';
+      if (isBlocking(f) && f.category === category && title) titles.set(title, (titles.get(title) ?? 0) + 1);
+    }
+    const [top, times] = [...titles].sort((a, b) => b[1] - a[1])[0] ?? [];
+    const named = times >= 2 ? ` (most often: ${top.length > TITLE_MAX ? `${top.slice(0, TITLE_MAX - 1)}…` : top})` : '';
+    reasons.push(`${category} came back ${n} times since the last retro${named}`);
   }
   const open = count((f) => (f.priority === 'P3' && f.closed !== true ? f.path : null));
   for (const [file, n] of open) {

@@ -321,8 +321,8 @@ function segContext(ctx) {
   return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}${segCacheHit(ctx?.current_usage)}`;
 }
 
-// Per-session context snapshot for hooks/context-nudge.js, which runs on
-// UserPromptSubmit and has no access to this payload. One file per session so
+// Per-session context snapshot for hooks/lib/context-size.js (done-claim), which runs on
+// Stop and has no access to this payload. One file per session so
 // parallel sessions never read each other's numbers; `used_percentage` is null
 // before the first response and right after /compact, and is written as null.
 // Resolved like the hooks resolve it (CLAUDE_CONFIG_DIR first), so both sides
@@ -335,7 +335,7 @@ function usedTokens(ctx) {
 }
 
 // The statusline renders far more often than these numbers move, so the file is written only when a value
-// changed. Unchanged values still refresh it once an hour: the nudge distrusts a snapshot older than six.
+// changed. Unchanged values still refresh it once an hour: the reader distrusts a snapshot older than six.
 const SNAPSHOT_REFRESH_MS = 60 * 60 * 1000;
 
 function saveContextSnapshot(sessionId, ctx, cache) {
@@ -345,7 +345,7 @@ function saveContextSnapshot(sessionId, ctx, cache) {
     const file = path.join(dir, `context-${sessionId}.json`);
     const values = {
       used_percentage: Number.isFinite(ctx?.used_percentage) ? ctx.used_percentage : null,
-      // Absolute size, for the nudge's token bands: the percentage alone means little on a 1M window.
+      // Absolute size, for lib/context-size.js's token threshold: the percentage alone means little on a 1M window.
       // Derived from the percentage, not from `total_input_tokens`, which is cumulative over the session.
       used_tokens: usedTokens(ctx),
       window: Number.isFinite(ctx?.context_window_size) ? ctx.context_window_size : null,
@@ -358,7 +358,7 @@ function saveContextSnapshot(sessionId, ctx, cache) {
         && Object.keys(values).every((k) => previous[k] === values[k])) return;
     fs.mkdirSync(dir, { recursive: true });
     fs.writeFileSync(file, JSON.stringify({ ...values, at: Date.now() }));
-  } catch { /* best-effort: the nudge simply stays silent */ }
+  } catch { /* best-effort: the reader simply sees no snapshot */ }
 }
 
 // The cache folder collects per-session and per-folder files for good. Once an hour (guarded by the mtime of a
@@ -367,8 +367,8 @@ function saveContextSnapshot(sessionId, ctx, cache) {
 const PRUNE_EVERY_MS = 60 * 60 * 1000;
 const PRUNE_RULES = [
   { re: /^(?:git|worktree)-[0-9a-f]{16}\.json$/, maxAgeMs: 60 * 60 * 1000 },  // valid for 30 s / 10 min only
-  { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // the nudge distrusts it past 6 h
-  { re: /^cockpit-(?!data-)[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 }, // as hooks/context-nudge.js; a live idle session rewrites it only on change, an ended one is closed by the mod
+  { re: /^context-[\w-]+\.json$/, maxAgeMs: 6 * 60 * 60 * 1000 },              // lib/context-size.js distrusts it past 6 h
+  { re: /^cockpit-(?!data-)[\w-]+\.json$/, maxAgeMs: 3 * 24 * 60 * 60 * 1000 }, // a live idle session rewrites it only on change, an ended one is closed by the mod
 ];
 // The cockpit's session data (history, PRs, note, context samples) lives as long as the session can be resumed: no age rule,
 // it goes when `projects/*/<session>.jsonl` is gone.

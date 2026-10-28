@@ -17,15 +17,22 @@ export function checkContract({ ROOT, fail, warn, read, has, allFiles, textFiles
   const isPreV2 = (rel) => rel.startsWith('skills/') && PRE_V2_SKILLS.has(rel.split('/')[1]);
   // wc -l semantics: a trailing newline is a terminator, not an empty final line.
   const lineCount = (rel) => read(rel).replace(/\n$/, '').split('\n').length;
+  // An agent's cap counts its body: the front matter is listing metadata, not the prompt the agent runs on.
+  const bodyLineCount = (rel) => {
+    const text = read(rel);
+    const body = text.startsWith('---') ? text.slice(text.indexOf('\n---', 3) + 4).replace(/^\r?\n/, '') : text;
+    return body.replace(/\n$/, '').split('\n').length;
+  };
 
   const LINE_CAPS = [
     [(f) => f.endsWith('/SKILL.md'), 120, 'SKILL.md'],
     [(f) => /^skills\/[\w-]+\/references\/[\w.-]+\.md$/.test(f), 200, 'reference file'],
+    [(f) => /^agents\/[\w.-]+\.md$/.test(f), 110, 'subagent body', bodyLineCount],
   ];
   for (const rel of allFiles.filter((f) => f.endsWith('.md'))) {
-    for (const [matches, cap, kind] of LINE_CAPS) {
+    for (const [matches, cap, kind, count = lineCount] of LINE_CAPS) {
       if (!matches(rel)) continue;
-      const lines = lineCount(rel);
+      const lines = count(rel);
       if (lines <= cap) continue;
       const msg = `${lines} lines against the ${cap}-line cap for a ${kind}`;
       if (isPreV2(rel)) warn(rel, `${msg} — predates the contract, scheduled for the split`);
@@ -129,12 +136,16 @@ export function checkContract({ ROOT, fail, warn, read, has, allFiles, textFiles
   }
 
   // ── 6c. Byte caps: what is injected every session or invocation ─────────────
-  // CLAUDE.md and the output style load every turn; a SKILL.md re-injects on invocation, cut from the bottom.
+  // CLAUDE.md and the output style load every turn; a SKILL.md re-injects on invocation, cut from the bottom;
+  // an agent file is the whole prompt of every spawn, and long lines would slip past its line cap.
   // BYTE_CAP_WARN_ONLY lists files over a cap whose trim another change owns: they warn until trimmed.
   const BYTE_CAPS = [
     [(f) => f === 'CLAUDE.md', 2750, 'CLAUDE.md'],
     [(f) => /^output-styles\/[\w.-]+\.md$/.test(f), 2500, 'an output style'],
     [(f) => /^skills\/[\w-]+\/SKILL\.md$/.test(f), 7000, 'SKILL.md'],
+    [(f) => /^agents\/[\w.-]+\.md$/.test(f) && f !== 'agents/code-reviewer.md', 8000, 'an agent'],
+    // code-reviewer runs F and H itself whenever no specialist sits beside it: most reviews, so they stay in its body.
+    [(f) => f === 'agents/code-reviewer.md', 9500, 'code-reviewer'],
   ];
   const BYTE_CAP_WARN_ONLY = new Set(['CLAUDE.md', 'skills/deliver/SKILL.md']);
   for (const rel of allFiles) {

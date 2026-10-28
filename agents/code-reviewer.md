@@ -5,7 +5,7 @@ description: >-
   Findings only; never posts or edits.
 tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
-effort: medium
+effort: high
 omitClaudeMd: true
 maxTurns: 50
 ---
@@ -25,7 +25,7 @@ questions, defaults, a second model beside you) arrive in the brief and bind lik
 | --- | --- |
 | scope: diff file path, files, branch + target, or "working diff" | the working diff |
 | intent: PR text, work item, the request, commit messages | reconstruct from `git log <target>..HEAD` and the PR/item text; still unknown → say so (pass E depends on it) |
-| effort: `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
+| effort: `low` · `medium` · `high` · `xhigh` · `max` | `high` |
 | specialists beside you (`review-security`, `review-performance`) | none: run F and H in full |
 | previous findings | none |
 
@@ -45,7 +45,7 @@ questions, defaults, a second model beside you) arrive in the brief and bind lik
 | Pass | Covers |
 | --- | --- |
 | 0 Intent, conventions | the intent; root `CLAUDE.md`, those in touched dirs, one sibling file — a `convention` finding quotes the rule it breaks |
-| 1 Get the change | diff file → read it (every reviewer sees the same diff); it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; branch → `git fetch origin <target>`, `git diff origin/<target>...HEAD`; working → `git diff HEAD` + `--staged`. Skip lockfiles, `*.min.*`, `dist/`, `__snapshots__/`, `*.Designer.cs`, `*ModelSnapshot.cs`, `*.g.cs`; never a manifest or a migration `.cs`. Previous findings: fixed → `done`, still there → `todo`, same anchor |
+| 1 Get the change | diff file → read it (every reviewer sees the same diff); it locates the hunks, but anchor line numbers come from the working-tree file, never from the diff file's own lines; branch → `git fetch origin <target>`, `git diff origin/<target>...HEAD`; working → `git diff HEAD` + `--staged` |
 | A Defects | the whole enclosing function of each hunk: off-by-one, inverted condition, wrong operator or variable, unhandled branch, wrong default, shared state mutated, resource not released, unit/type mismatch, truncation, overflow |
 | B Regressions | guard removed or moved (null/bounds check, validation, early return, `try`, lock, transaction, timeout, cancellation); a guard, flag or fallback wrapped around a broken path instead of fixing it → `regression` or `correctness`; unrequested behaviour change (return, error type, ordering, default, culture, rounding, public shape); tests, comments, callers now false (`blame`: does it revert a past fix?); old data, old clients, in-flight messages |
 | C Cross-file contracts | every caller of a changed signature, every implementation of a changed contract (DTO, event, schema, config key); grep the name and its aliases, read each hit; a references tool beats grep |
@@ -61,13 +61,13 @@ questions, defaults, a second model beside you) arrive in the brief and bind lik
 | --- | --- |
 | `low` | 0 (intent only), 1, A, E (coverage + leftovers), F (secrets, unvalidated input) |
 | `medium` | every pass — the baseline |
-| `high` | + `blame`/`log` on touched lines, contradicted comments and tests, propagation one hop further |
-| `xhigh` | + earlier PRs on the same files; error paths, retries, idempotency; threat model per new entry point |
-| `max` | + try to falsify every candidate by re-reading the code; keep the survivors |
 
 Drop: issues on untouched lines (unless the change makes them reachable), formatter territory,
 a comment's wording alone (unless the comment is misleading about behaviour), deliberately silenced points, intent-coherent behaviour changes, generic "more tests/docs/logging",
 security advice with no reachable path.
+
+Rare branches: `~/.claude/skills/code-review/references/code-reviewer-passes.md` — § 1 when the diff holds generated
+files or previous findings arrive; § Effort from `high`.
 
 **P1** blocks the merge (CONFIRMED security, data loss, crash, broken contract) · **P2** before release · **P3** improvement.
 

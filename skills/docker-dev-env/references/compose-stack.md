@@ -4,9 +4,8 @@ One compose file per repository, at the repository root, holding **only backing 
 databases, the broker, the cache and the supporting pieces. The application itself runs from the IDE
 or from an Aspire app host; putting it in the same file means rebuilding an image on every edit.
 
-Every image tag comes from the `.env` file next to the compose file, never hardcoded in the YAML.
-That is what keeps the file version-agnostic: bumping an engine is a one-line `.env` change, and the
-file itself never has to be edited or reviewed for it.
+Every image tag comes from the `.env` file next to the compose file, never hardcoded in the YAML:
+bumping an engine is a one-line `.env` change.
 
 ```yaml
 name: <this-stack>            # explicit project name: without it, the folder name wins
@@ -111,41 +110,25 @@ volumes:
 | Reverse proxy  | 80 / 443       | IIS, another proxy, or anything already serving HTTP    |
 
 Every published port is a `${VAR}` read from `.env`, so a second stack on the same machine changes
-one file and nothing else. **The container port never changes** — only the host side does, and only
-the host side is what collides. Inside the compose network, services address each other by service
-name and container port, so an override never touches application configuration.
+one file and nothing else. **The container port never changes** — only the host side does. Inside the
+compose network, services address each other by service name and container port, so an override never
+touches application configuration.
 
-## Profiles: not everything has to start
+## Profiles and overrides
 
-```yaml
-  seeder:
-    image: postgres:${POSTGRES_TAG}
-    profiles: ["seed"]        # only with: docker compose --profile seed up
-```
+`profiles: ["seed"]` on a one-shot job (a seeder, a migration runner) or a heavy piece keeps it inert
+unless named (`docker compose --profile seed up`); cheaper than commenting services out, which gets
+committed by accident.
 
-A service in a profile is inert unless the profile is named. Use it for one-shot jobs (a seeder, a
-migration runner), for the pieces only one workflow needs, and for anything heavy that most days is
-dead weight. It is cheaper than commenting services out, which always gets committed by accident.
-
-## Overrides: local changes that are not committed
-
-`docker compose` merges `compose.yaml` with `compose.override.yaml` automatically when the latter
-exists. Commit the first, gitignore the second. That is where a personal port change, an extra
-mounted folder, or a temporarily bumped memory limit goes — not in the shared file.
-
-```powershell
-docker compose config          # ALWAYS read this, not the file: it shows the merged, resolved result
-docker compose -f compose.yaml config   # the committed file alone, ignoring the override
-```
-
-An explicit second file works the same way and is the pattern when the variant is shared rather than
-personal: `docker compose -f compose.yaml -f compose.integration.yaml up -d`. Later files win on
-scalars, and **lists are replaced, not appended** — an override that re-declares `ports:` replaces
-the whole list, which is the usual reason a port silently disappears.
+Commit `compose.yaml`, gitignore `compose.override.yaml` (merged automatically; personal port changes
+go there). `docker compose config` shows the merged, resolved result: read it, not the file;
+`docker compose -f compose.yaml config` ignores the override. A shared variant:
+`docker compose -f compose.yaml -f compose.integration.yaml up -d`. **Lists are replaced, not
+appended** — an override that re-declares `ports:` replaces the whole list, the usual reason a port
+silently disappears.
 
 ## Networks
 
-The default network compose creates is enough for a single stack: every service is reachable from
-every other by service name. Declare a network explicitly only when something outside this file has
-to join it — a throwaway client container, or a second stack that must reach this one. Then it is an
-`external: true` network created once by hand, so neither stack owns its lifecycle.
+The default network is enough for a single stack. Declare one only when something outside this file
+has to join it; then it is an `external: true` network created once by hand, so neither stack owns
+its lifecycle.

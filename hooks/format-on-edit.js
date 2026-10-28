@@ -25,8 +25,8 @@
  * `.json` is deliberately not formatted: a manifest or a settings file rewritten by a hook is a diff
  * nobody asked for.
  *
- * Wired through `nudges.js` (one node process for every PostToolUse hook, this one included); run alone
- * (`node hooks/format-on-edit.js`) it reads stdin and runs for itself.
+ * Wired directly on PostToolUse (`node -e` requires it); run alone (`node hooks/format-on-edit.js`) it
+ * reads stdin and runs for itself.
  *
  * `--dry-run` prints the formatter invocation that would run instead of running it. That is how
  * tools/format-on-edit.test.mjs asserts the routing without the SDK or a node_modules tree.
@@ -194,16 +194,11 @@ function run(payload) {
   }
 }
 
-module.exports = { run };
-
-// Run as a script, or required by `node -e` as an older settings.json wires it; `hooks/nudges.js` sets the
-// flag and calls `run` itself.
-if (require.main === module || !global.__nudgesDispatch) {
-  try {
-    const raw = fs.readFileSync(0, 'utf8');
-    if (raw.trim()) run(JSON.parse(raw));
-  } catch {
-    /* silence */
-  }
-  process.exit(0);
+// Runs when loaded: a script, or required by `node -e` as settings.json wires it.
+try {
+  const raw = fs.readFileSync(0, 'utf8');
+  if (raw.trim()) run(JSON.parse(raw));
+} catch {
+  /* silence */
 }
+process.exit(0);

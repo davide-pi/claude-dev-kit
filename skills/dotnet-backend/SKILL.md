@@ -40,8 +40,7 @@ Which project owns a behaviour → the `investigator` agent (`locate`; `trace` a
 
 ### DI lifetime — the house shape
 
-Scrutor registers subscribers, DAOs and `DbContext` factories as **singletons**: everything a
-subscriber touches must be singleton-safe.
+Scrutor registers subscribers, DAOs and `DbContext` factories as **singletons** (the lifetime rule is in `rules/csharp.md`).
 
 | The dependency | Lifetime | Rule |
 | --- | --- | --- |

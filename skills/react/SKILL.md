@@ -13,8 +13,8 @@ adds a store, query or form library under its threshold · code English, explana
 
 ## When
 
-Not for: visual design, web-platform APIs and browser debugging → the `frontend-design`
-and `modern-web-guidance` plugins, and driving the page itself → `browser-use`.
+Not for: visual design, web-platform APIs, browser debugging and driving the page itself: as in
+`angular` (§ When).
 
 House facts: rules `react`, `typescript`.
 
@@ -54,7 +54,7 @@ in a pull request of its own that names the threshold; below them a hook plus `u
 
 | Rule | In practice |
 | --- | --- |
-| `strict` off somewhere | price it with `npx tsc --noEmit --strict`, fix folder by folder; never a `@ts-nocheck` amnesty |
+| `strict` off somewhere | as in `angular` (§ Decide, Types) |
 | the verdict | `npx tsc --noEmit` or `npm run build` — the dev server does not type-check |
 
 ## Do

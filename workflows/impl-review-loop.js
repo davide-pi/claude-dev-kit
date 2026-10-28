@@ -1,7 +1,7 @@
 export const meta = {
   name: 'impl-review-loop',
   description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change. args: { brief, request?, decisions?, perimeter: { files, behaviour?, exclusions? }, repoRoot, start?: { head, dirty }, size?, inline?, changed?, dirtyConfirmed?, verify?, stackSkill?, implementerEffort?, implementerModel?, mechanical?, cleanup?, risk?, touches?, preview?, resolutions?: [{ round, accept?, guidance?, retry?, answers?, widen? }] } (one entry per stalled round, all of them on every relaunch with resumeFromRunId). After an OK the caller runs hooks/scope-guard.js --check. The caller closes the perimeter with result.findingsLog (references/loop.md); a STALL is read from references/stall.md.',
+  whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
@@ -9,7 +9,7 @@ export const meta = {
   ],
 }
 
-// Contract: args in whenToUse; a STALL returns to the caller, which relaunches with resumeFromRunId and every resolution (stall.why names the kind).
+// Contract: args in skills/deliver/references/loop.md; a STALL returns to the caller, which relaunches with resumeFromRunId and every resolution (stall.why names the kind).
 // Everything between the markers is pure and run by tools/impl-review-loop.harness.mjs.
 
 // --- pure:begin
@@ -78,8 +78,8 @@ const groupOf = (path, groups, root) => {
 
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
 const reviewersFor = (size, touches = [], mechanical = false) => {
-  const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'medium')] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
+  const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : size === 'M' ? [code('A', 'sonnet', 'high')] : [code('A', 'sonnet', 'high'), code('B', 'opus', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -239,7 +239,7 @@ const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort:
 const deltaReviewers = (everyone, finders = []) => {
   const has = new Set(everyone.map(r => r.key))
   const wanted = new Set(finders.flatMap(k => (has.has(k) ? [k] : everyone.filter(r => r.key[0] === k[0]).map(r => r.key))))
-  const sonnet = everyone.find(r => r.whole && r.model === 'sonnet' && r.effort === 'medium')
+  const sonnet = everyone.find(r => r.delta || (r.whole && r.model === 'sonnet' && r.effort === 'medium'))
   const list = everyone.filter(r => wanted.has(r.key) || r === sonnet)
   return sonnet ? list : [...list, WATCHER]
 }
@@ -279,7 +279,7 @@ const growthProposals = big => {
 
 const findingsLog = ({ known = {}, tracked = {}, cleaned = [] } = {}) => Object.values(known)
   .filter(k => k.category !== 'verify')
-  .map(k => ({ category: k.category, priority: k.priority, path: k.path, closed: tracked[k.id]?.status === 'closed' || cleaned.some(c => c.id === k.id) }))
+  .map(k => ({ category: k.category, priority: k.priority, path: k.path, title: String(k.title ?? '').replace(/'/g, 'ʼ').slice(0, 80), closed: tracked[k.id]?.status === 'closed' || cleaned.some(c => c.id === k.id) }))
 
 // Only the user can widen the perimeter.
 const classify = (f, files, { dirty = [], root = '', touched = [] } = {}) => {
@@ -479,7 +479,9 @@ const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|per
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
 
 // The agents start in the session's folder, which may be another repo.
-const RULES = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
+const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything.`
+// The implementer body already says the rest (Open questions, the Never list); reviewers and Explore get it here.
+const RULES = `${REPO} A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
 const quote = s => `'${String(s).replace(/'/g, "''")}'`
 const snapshotText = since => [
   'Last step, after the verify command and before the structured output: run this exactly with the PowerShell tool (the quoting of -Dirty is PowerShell\'s) and return the one JSON line it prints as `snapshot`, unchanged (the loop reads the files you changed from it):',
@@ -489,10 +491,9 @@ const snapshotText = since => [
 const writerTail = (budget, cleaning = false) => [
   input.stackSkill ? `Stack skill to load first: ${input.stackSkill}.` : '',
   input.verify ? `Verify with: ${input.verify}` : '',
-  'Tests: while you work run only the test files your change touches (and the one you saw failing); run the verify command once, at the end, before reporting.',
   cleaning ? '' : 'Questions: a behaviour choice the owner would see (a contract, a default, an error policy) is not yours to make and not to guess: list it under `questions` as { text, default: what you would do, why }, and do the rest of the scope. An internal choice (naming, structure) is yours, not a question.',
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
-  RULES,
+  REPO,
   budget ?? '',
   'Environment: when the verify fails for an environment reason (a missing file, tool or config), change no code for it: return verify.status fail and explain it in notVerified.',
   'Time: when the work is long, return the structured output before the turn budget runs out, with the work done so far and what is left under `openQuestions`: a partial report beats none, and a run that ends without it is lost.',
@@ -697,7 +698,7 @@ if (!inline) {
   let impl = asked0.report
   // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
   let continuations = 0
-  // The implementer stops itself at 20 turns: a fresh one continues with a clean context, cheaper than one long run.
+  // The implementer stops itself at 30 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
   while ((!impl || impl.remaining.length) && continuations < 4) {
     if (impl) { takeNoticed(impl); takeDefaults(impl); addNotes(impl.openQuestions) }
     continuations += 1

@@ -150,7 +150,7 @@ test('script: reviewers by size, effort and model', async () => {
     const { calls } = await run({ ...ARGS, size, ...(size === 'S' ? {} : { touches: ['security', 'performance'] }) }, size === 'S' ? [review([])] : size === 'M' ? [review([]), review([]), review([])] : [review([]), review([]), review([]), review([])]);
     sizes[size] = calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
-  assert.deepEqual(sizes.S, ['code-reviewer:sonnet:medium']);
+  assert.deepEqual(sizes.S, ['code-reviewer:sonnet:high']);
   assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
   assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
 });
@@ -168,8 +168,8 @@ test('script: an S change that grows to 5 files stays S: the file count is a gap
   ]);
   assert.equal(out.status, 'OK');
   const models = (round) => calls.filter((c) => isReview(c.opts.label, round)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
-  assert.deepEqual(models(1), ['reviewer A · round 1 · code:sonnet:medium']);
-  assert.deepEqual(models(2), ['reviewer A · round 2 · code:sonnet:medium']);                                        // the delta round: at S the Sonnet that raised F1 is the panel
+  assert.deepEqual(models(1), ['reviewer A · round 1 · code:sonnet:high']);
+  assert.deepEqual(models(2), ['reviewer A · round 2 · code:sonnet:high']);                                        // the delta round: at S the Sonnet that raised F1 is the panel
   assert.deepEqual(models(3), []);                                                            // S has no final full read
   assert.deepEqual(out.roundLog.map((r) => r.size), ['S', 'S']);
   assert.equal(out.gaps.filter((g) => /5 files.*size S/.test(g)).length, 1);                 // pushed once, not per round
@@ -538,7 +538,6 @@ test('script: inline, the session edited: no implementer on the first step, the 
 
 // ── one perimeter rule for the workflow and the scope-guard hook ─────────────────────────────────────
 test('the workflow and hooks/scope-guard.js match perimeter entries the same way', () => {
-  global.__nudgesDispatch = true;                         // required, not run: the hook must not read stdin
   const guard = createRequire(import.meta.url)(join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'scope-guard.js'));
   const table = [
     ['src/Orders/OrdersQuery.cs', 'src/Orders/OrdersQuery.cs'], ['src/Orders/OrdersQuery.cs', 'SRC/orders/ORDERSQUERY.cs'],

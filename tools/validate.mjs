@@ -34,6 +34,7 @@ const has = (rel) => existsSync(join(ROOT, rel));
 function walk(dir = '', out = []) {
   for (const entry of readdirSync(join(ROOT, dir), { withFileTypes: true })) {
     if (['.git', 'node_modules', '.remember', '.claude'].includes(entry.name)) continue;
+    if (entry.isDirectory() && ['bin', 'obj'].includes(entry.name)) continue; // build output, gitignored
     const rel = dir ? `${dir}/${entry.name}` : entry.name;
     if (rel === 'evals/results') continue; // untracked run output of `claude plugin eval`
     if (rel === 'tools/fixtures/validate') continue; // deliberately small kits for validate.test.mjs
@@ -75,12 +76,13 @@ Object.assign(ctx, checkAssets(ctx));
 Object.assign(ctx, checkContent(ctx));
 Object.assign(ctx, checkContract(ctx));
 Object.assign(ctx, checkBudget(ctx));
-const { descriptionBudget, hiddenDescriptions, DESCRIPTION_BUDGET_CHARS, hiddenTotal, descriptionTotal, bodyLine, sessionLine } = ctx;
+const { descriptionBudget, hiddenDescriptions, DESCRIPTION_BUDGET_CHARS, hiddenTotal, descriptionTotal, bodyLine, sessionLine, workflowLine } = ctx;
 
 // ── Report ───────────────────────────────────────────────────────────────────
 const label = (n, word) => `${n} ${word}${n === 1 ? '' : 's'}`;
 console.log(`descriptions: listed ${descriptionTotal} / ${DESCRIPTION_BUDGET_CHARS} chars (${descriptionBudget.length} agents and skills), hidden ${hiddenTotal} chars (${hiddenDescriptions.length} skills: user-invoked or paths-gated)`);
 console.log(bodyLine);
+console.log(workflowLine);
 if (sessionLine) console.log(sessionLine);
 
 // In Actions, also emit annotations so findings land on the file and line in the PR view.

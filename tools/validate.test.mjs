@@ -48,6 +48,27 @@ test('the base kit validates clean and reports listed vs hidden descriptions', (
   assert.match(out, /descriptions: listed \d+ \/ 8000 chars \(2 agents and skills\), hidden \d+ chars \(1 skills/);
 });
 
+test('bin/ and obj/ directories are build output: never scanned', () => {
+  const { code, out } = run((write) => {
+    write('src/obj/Debug/x.json', '{"path": "C:\\\\Users\\\\someone\\\\x"');
+    write('src/bin/y.js', "require('./gone')\n");
+  });
+  assert.equal(code, 0, out);
+});
+
+test('the workflows listing is counted, and warned about past its cap', () => {
+  const { code, out } = run((write) => write('workflows/big.js', `export const meta = {\n  name: 'big',\n  description: 'x',\n  whenToUse: '${'y'.repeat(1300)}',\n}\n`));
+  assert.equal(code, 0, out);
+  assert.match(out, /workflows listed: 1301 \/ 1200 chars/);
+  assert.match(out, /WARN[\s\S]*workflows: description \+ whenToUse total 1301/);
+});
+
+test('the workflows listing counts double-quoted and template strings too', () => {
+  const { code, out } = run((write) => write('workflows/quoted.js', `export const meta = {\n  name: 'quoted',\n  description: "it's x",\n  whenToUse: \`${'y'.repeat(10)}\`,\n}\n`));
+  assert.equal(code, 0, out);
+  assert.match(out, /workflows listed: 16 \/ 1200 chars/);
+});
+
 test('a relative require that does not resolve fails, in hooks, hooks/lib and tools', () => {
   for (const [rel, text] of [
     ['hooks/guard.js', "require('./lib/missing.js')\n"],
@@ -91,13 +112,29 @@ test('a workflow agentType must be an agent or a built-in; model must be allowed
   assert.match(model.out, /model 'gpt-9' is not one of/);
 });
 
-test('byte caps: output style and SKILL.md fail over the cap, CLAUDE.md only warns', () => {
+test('agent body line cap: front matter is not counted, the 111th body line fails', () => {
+  const agent = (n) => (write, read) => write(AGENT, `${read(AGENT).split('\n---\n')[0]}\n---\n${'x\n'.repeat(n)}`);
+  const ok = run(agent(110));
+  assert.doesNotMatch(ok.out, /line cap for a subagent body/, ok.out);
+  const over = run(agent(111));
+  assert.equal(over.code, 1);
+  assert.match(over.out, /agents\/helper\.md: 111 lines against the 110-line cap for a subagent body/);
+});
+
+test('byte caps: output style, SKILL.md and agents fail over the cap, CLAUDE.md only warns', () => {
   const style = run((write) => write('output-styles/s.md', `# s\n${'x'.repeat(2600)}\n`));
   assert.equal(style.code, 1);
   assert.match(style.out, /output-styles\/s\.md: \d+ bytes against the 2500-byte cap/);
   const skill = run((write, read) => write(SKILL, `${read(SKILL)}\n${('x'.repeat(99) + '\n').repeat(75)}`));
   assert.equal(skill.code, 1);
   assert.match(skill.out, /skills\/demo\/SKILL\.md: \d+ bytes against the 7000-byte cap/);
+  const agent = run((write, read) => write(AGENT, `${read(AGENT)}\n${('x'.repeat(99) + '\n').repeat(80)}`));
+  assert.equal(agent.code, 1);
+  assert.match(agent.out, /agents\/helper\.md: \d+ bytes against the 8000-byte cap/);
+  const reviewer = (n) => (write, read) =>
+    write('agents/code-reviewer.md', `${read(AGENT).replace('name: helper', 'name: code-reviewer')}\n${('x'.repeat(99) + '\n').repeat(n)}`);
+  assert.doesNotMatch(run(reviewer(80)).out, /code-reviewer\.md: \d+ bytes/);
+  assert.match(run(reviewer(95)).out, /agents\/code-reviewer\.md: \d+ bytes against the 9500-byte cap/);
   const claude = run((write) => write('CLAUDE.md', `# c\n${'x'.repeat(2800)}\n`));
   assert.equal(claude.code, 0, claude.out);
   assert.match(claude.out, /CLAUDE\.md: \d+ bytes against the 2750-byte cap/);

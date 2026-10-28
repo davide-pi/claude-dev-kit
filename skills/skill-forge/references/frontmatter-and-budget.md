@@ -21,4 +21,4 @@ least-invoked descriptions drop **silently**. Measure with `/doctor` (listing co
 (never-invoked skills) and `/usage` (per-asset attribution). A skill nobody triggers has a
 description bug, not a body bug: `references/description-craft.md`.
 
-Byte caps (validator): `CLAUDE.md` 2,750 B · an output style 2,500 B · a `SKILL.md` 7,000 B.
+Byte caps (validator): `CLAUDE.md` 2,750 B · an output style 2,500 B · a `SKILL.md` 7,000 B · an agent 8,000 B (`code-reviewer` 9,500 B: it runs the security and cost passes itself when no specialist sits beside it).

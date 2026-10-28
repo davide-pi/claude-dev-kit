@@ -117,3 +117,4 @@ and stop.
 - `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
 - `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
 - `references/report-format.md` — report fields, column meanings, the model table.
+- `references/code-reviewer-passes.md`, `references/review-security-checks.md`, `references/review-performance-checks.md` — the matching agent names the § it needs; not opened from here.

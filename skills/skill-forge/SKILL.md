@@ -42,7 +42,7 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | Description | ≤ 25 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
 | Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | validator |
 | Skeleton | title, contract, `## When`, `## Decide`, `## Do`, `## Traps`, `## References`; `## When` holds `Not for:` (≤ 3 items) and a bullet only for what the description cannot carry (an argument grammar) — never a restatement of the description, already read when the body loads | validator |
-| Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 · bytes: SKILL.md 7,000, output style 2,500, `CLAUDE.md` 2,750 | validator |
+| Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 · bytes: SKILL.md 7,000, agent 8,000 (`code-reviewer` 9,500), output style 2,500, `CLAUDE.md` 2,750 | validator |
 | Compaction | an invoked body re-injects capped at ~5 k tokens, cut from the bottom: `## Decide` near the top, nothing load-bearing after `## Do` | review |
 | Phrasing | the outcome, where the model already knows how; procedure only where the house way differs; the body is the 20 % of paths that cover 80 % of cases, rare branches go to a reference — every section earns its tokens | review |
 | Drop | restated `CLAUDE.md` rules (language, 80/20, change scope), version numbers, Traps restating a Decide row, why-prose a row already carries | review |
@@ -50,7 +50,8 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | Cross-refs | bare asset names; never a link to a file not yet committed; a hook not yet shipped is named by its bare file name | validator |
 | Shadowing | no project `.claude/skills/<name>` reuses a kit skill's name — it replaces the kit skill there | review |
 
-Over a cap, split into a reference — never trim substance. A thin `## Decide` means the skill is not
+Over a cap, first delete what the model already knows (generic material, restated defaults);
+split into a reference only what is house-specific and rare. A thin `## Decide` means the skill is not
 needed.
 
 ### 3. Frontmatter and the listing budget

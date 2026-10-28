@@ -16,8 +16,8 @@ log lines, names and ids verbatim.
 
 Arguments: `$ARGUMENTS`
 
-You start with no conversation history: this text, the repository and your agent instructions are
-everything you have.
+Starting context: as in `db` (no conversation history; this text, the repository and your agent
+instructions are everything you have).
 
 ## When
 

@@ -233,7 +233,7 @@ const finding = (category, path = 'src/a.cs', priority = 'P2', closed = true) =>
 const runLine = (...findings) => ({ at: '2026-10-20T10:00:00Z', run: 'r', size: 'M', rounds: 3, minutes: 12, findings });
 const nudgeOf = (lines) => lines.filter((l) => l.startsWith('findings log'));
 
-test('a category that recurs 5 times since the last retro adds one line, even beside four lines of brief', () => {
+test('a P1/P2 category that recurs 3+ times since the last retro adds one line, even beside four lines of brief', () => {
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression')), runLine(finding('regression'), finding('regression'), finding('correctness'))]);
   const lines = run(root);
@@ -255,9 +255,22 @@ test('the retro lines come at startup only: a resume, clear or compact re-fire k
   assert.equal(nudgeOf(run(root, undefined, JSON.stringify({ hook_event_name: 'SessionStart', cwd: root }))).length, 1, 'no source: as startup');
 });
 
-test('four findings of a category are no nudge; neither is a missing, empty or unreadable log', () => {
+test('P3 findings do not count toward a recurring category; the most frequent title is named', () => {
   const root = repo({ object: 'Add the order list projection' });
-  findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression'), finding('regression'))]);
+  const titled = (title, priority = 'P2') => ({ ...finding('regression', 'src/a.cs', priority), title });
+  findingsLog(root, [runLine(titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'))]);
+  assert.equal(nudgeOf(run(root)).length, 0);
+  findingsLog(root, [runLine(titled('null path not guarded'), titled('null path not guarded'), titled('other'), titled('x', 'P3'))]);
+  const lines = nudgeOf(run(root));
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /regression came back 3 times since the last retro \(most often: null path not guarded\)/);
+  findingsLog(root, [runLine(titled('a'), titled('b'), titled('c'))]);
+  assert.doesNotMatch(nudgeOf(run(root))[0], /most often/);
+});
+
+test('two findings of a category are no nudge; neither is a missing, empty or unreadable log', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  findingsLog(root, [runLine(finding('regression'), finding('regression'))]);
   assert.equal(nudgeOf(run(root)).length, 0);
   assert.equal(run(repo({ object: 'x' })).length, 4);                          // no log at all
   findingsLog(root, ['', 'not json', '{"findings": 3}', JSON.stringify(runLine(finding('regression')))]);

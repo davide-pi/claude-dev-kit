@@ -27,6 +27,19 @@ export function checkBudget({ ROOT, warn, read, has, allFiles, frontMatter }) {
   const bodyLine = `skill bodies: listed ${sum(bodies.listed)} words (${bodies.listed.length} skills), ` +
     `hidden ${sum(bodies.hidden)} words (${bodies.hidden.length} skills); largest: ${largest}`;
 
+  // A saved workflow's description and whenToUse sit in the Workflow tool's listing, paid every turn.
+  const WORKFLOW_LISTING_CAP = 1200;
+  const workflowChars = allFiles.filter((f) => /^workflows\/[\w.-]+\.js$/.test(f)).map((rel) => {
+    const meta = read(rel).match(/^export const meta = \{[\s\S]*?\n\}/m)?.[0] ?? '';
+    const size = [...meta.matchAll(/^\s*(?:description|whenToUse):\s*(['"`])((?:(?!\1)[^\\]|\\.)*)\1/gm)].reduce((n, m) => n + m[2].length, 0);
+    return [rel.split('/')[1], size];
+  });
+  const workflowTotal = workflowChars.reduce((n, [, c]) => n + c, 0);
+  const workflowLine = `workflows listed: ${workflowTotal} / ${WORKFLOW_LISTING_CAP} chars (${workflowChars.length} workflows, description + whenToUse)`;
+  if (workflowTotal > WORKFLOW_LISTING_CAP) {
+    warn('workflows', `description + whenToUse total ${workflowTotal} chars against ${WORKFLOW_LISTING_CAP}: ${workflowChars.map(([n, c]) => `${n} ${c}`).join(', ')} — point at a reference instead of restating args`);
+  }
+
   // ── 8b. SessionStart injection ─────────────────────────────────────────────
   // What a SessionStart hook prints as additionalContext is paid in every session before the first
   // prompt. Each hook settings.json registers runs once against this repository with an empty config
@@ -149,5 +162,5 @@ export function checkBudget({ ROOT, warn, read, has, allFiles, frontMatter }) {
     }
   }
 
-  return { bodyLine, sessionLine };
+  return { bodyLine, sessionLine, workflowLine };
 }

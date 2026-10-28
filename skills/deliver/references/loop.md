@@ -48,7 +48,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 
 Who reads which round, the final full read and the cleanup pass: `references/loop-extras.md`.
 
-**Size S**: above ~120k of context (`edit-nudge` says so) launch without `inline` and the implementer makes it; else edit inline, then launch with `inline: true, changed: [the files you edited]`; a mechanical batch is never
+**Size S**: above ~120k of context (the statusline shows it) launch without `inline` and the implementer makes it; else edit inline, then launch with `inline: true, changed: [the files you edited]`; a mechanical batch is never
 edited inline: launch with `mechanical: true` and the implementer makes it. Inline, no implementer runs first; a finding is fixed by `implementer` inside the loop. S has no final full read, no cleanup pass, no preview
 stop, no proof check.
 
@@ -97,7 +97,7 @@ node ~/.claude/hooks/scope-guard.js --check <start.head> --dirty 'a.cs,b.cs'   #
 
 ## The findings log and the defaults
 
-Every result carries `findingsLog` = `{ size, rounds, findings: [{ category, priority, path, closed }] }`, cumulative over
+Every result carries `findingsLog` = `{ size, rounds, findings: [{ category, priority, path, title, closed }] }` (`title` cut to 80 chars), cumulative over
 every finding the run saw. The log is written by `perimeter.ps1`, once per run, never by hand:
 
 ```powershell
