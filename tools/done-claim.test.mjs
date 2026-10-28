@@ -118,6 +118,8 @@ test('a "> **Dettaglio**" block is prose, not evidence', () => {
   assert.match(stop(edited(`Fatto.\n\n${detail}`)).reason, /"Fatto"/);
   // Real quoted output outside the block still counts.
   assert.equal(stop(edited(`Fatto.\n> Passed!  - Failed: 0, Passed: 42\n\n${detail}`)).reason, '');
+  // The English block is prose too.
+  assert.match(stop(edited('Done.\n\n> **Detail**\n> Moved the total into the service.')).reason, /"Done"/);
 });
 
 test('English claims are caught too', () => {

@@ -53,7 +53,7 @@ in the report.
 ### Evidence
 
 The change type's evidence line (`plan-work`'s `evidence-by-stack.md`) seen in this session → quote it
-in the report; not seen → commit anyway, `non verificato` as `CLAUDE.md` § Done means verified says.
+in the report; not seen → commit anyway, `not verified` as `CLAUDE.md` § Done means verified says.
 This skill does not build or test.
 
 ## Do
@@ -68,7 +68,7 @@ git log -1 --format="%h %s"
 ```
 
 Report: branch · short hash · files count · the final message (+ the evidence line or
-`non verificato`).
+`not verified`).
 
 ## Traps
 

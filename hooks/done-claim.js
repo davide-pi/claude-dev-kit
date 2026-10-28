@@ -22,7 +22,7 @@
  *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
  *     inline code;
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
- *     `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
+ *     `> **Detail**` / `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
  * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table) is judged row by row
@@ -94,8 +94,8 @@ const EXIT_ZERO = /^exit(?: code)? 0$/;
 const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
 const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|(?:not|n't)\s+(?:\w+\s+){0,2}(?:verified|tested|run)\b|to be (?:verified|tested)|no longer\s+(?:works|passes)|\bun(?:verified|tested)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
-/** A `> **Dettaglio**` block: the quoted lines that follow it are depth for the reader, not output. */
-const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*Dettaglio\*\*.*(?:\n[ \t]*>.*)*/gim;
+/** A `> **Detail**` (chat `it`: `Dettaglio`) block: the quoted lines that follow it are depth for the reader, not output. */
+const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
 /** The `deliver` verdict table's header; its rows are the contiguous `|` lines that follow. */
