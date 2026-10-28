@@ -96,11 +96,8 @@ const readReport = r => {
     ...r,
     verify: VERIFY_STATUSES.includes(r.verify?.status) ? r.verify : { ...r.verify, status: 'not-run' },
     snapshot: r.snapshot && typeof r.snapshot === 'object' && typeof r.snapshot.tree === 'string' && r.snapshot.tree ? r.snapshot : null,
-    rejected: list(r.rejected),
-    noticed: list(r.noticed),
     questions: list(r.questions).filter(q => q && typeof q.text === 'string' && q.text.trim()),
     defaults: list(r.defaults).filter(d => d && typeof d.choice === 'string' && d.choice.trim()),
-    filesReviewed: list(r.filesReviewed),
     remaining: list(r.remaining).filter(s => typeof s === 'string' && s.trim()),
   }
 }
@@ -126,7 +123,7 @@ const unreviewedFiles = (answers, reviewers, pending = [], root = '', changed = 
   answers.forEach((a, i) => {
     const r = reviewers[i]
     if (!a || !r || !r.whole) return
-    const listed = new Set((Array.isArray(a.filesReviewed) ? a.filesReviewed : []).map(f => rel(f, root)))
+    const listed = new Set(a.filesReviewed.map(f => rel(f, root)))
     for (const key of owed.keys()) if (listed.has(key)) read.add(key)
   })
   return [...owed].filter(([key]) => !read.has(key)).map(([, f]) => f)
@@ -530,8 +527,8 @@ const why = label => (failures[label] ? `: ${failures[label]}` : '')
 
 // A declared dirty file is kept (the snapshot drops it) so the change's own edit of it is reviewed.
 const takeFiles = r => {
-  if (!Array.isArray(r.snapshot?.files)) return (r.files ?? []).forEach(f => changed.add(f))
-  const declaredDirty = (r.files ?? []).filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
+  if (!r.snapshot) return r.files.forEach(f => changed.add(f))
+  const declaredDirty = r.files.filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
   const listed = [...r.snapshot.files.filter(f => typeof f === 'string' && f), ...declaredDirty]
   const keep = new Set(listed.map(f => rel(f, repoRoot)))
   for (const f of [...changed]) if (!keep.has(rel(f, repoRoot)) && !isDirty(f, dirty, repoRoot)) changed.delete(f)
@@ -545,7 +542,7 @@ const addNotes = qs => (qs ?? []).forEach(q => { if (!notes.some(n => sameText(n
 // What a report says beside its files: noticed, defaults, open questions.
 const takeSide = r => {
   for (const n of r.noticed) {
-    if (n && typeof n === 'object' && !noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
+    if (!noticed.some(x => x.path === n.path && x.title === n.title)) noticed.push({ source: 'noticed', ...n })
   }
   takeDefaults(r)
   addNotes(r.openQuestions)
@@ -564,23 +561,24 @@ const gateReport = (r, toFixHadVerify) => {
   return g.stall
 }
 const absorb = r => {
-  const stall = gateReport(r, false)
+  const gate = gateReport(r, false)
   takeReport(r)
-  return stall
+  return gate
 }
 
 const RESOLUTIONS = 'resolutions: [{ round, accept?: [ids], guidance?: "...", retry?: true, answers?: [{ text, answer }], widen?: ["path/or/dir/"] }]'
 const RESUME_AGAIN = `Relaunch with the same args and resumeFromRunId, plus every resolution so far: ${RESOLUTIONS}.`
-const answerResume = (at, first, tail = '') => `${first} Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, answers: [{ text, answer }] } (in the same entry as that round's other resolution, if any), each text being the question's text unchanged (an answer whose text matches no question is ignored; while a question has no answer this stall comes back, so keep the answers already given in that entry): ${RESOLUTIONS}.${tail}`
+const relaunch = add => `Relaunch with resumeFromRunId and ALL the resolutions so far${add ? `, adding ${add}` : ''}`
+const answerResume = (at, first, tail = '') => `${first} ${relaunch(`{ round: ${at}, answers: [{ text, answer }] }`)} (in the same entry as that round's other resolution, if any), each text being the question's text unchanged (an answer whose text matches no question is ignored; while a question has no answer this stall comes back, so keep the answers already given in that entry): ${RESOLUTIONS}.${tail}`
 const ASK_EACH = 'Ask the user each question (text, default, why), with your recommendation; when the user said not to be asked, apply every default and list it as an open decision in the closing table.'
 const RESUME_FRESH = 'Relaunch with the same args WITHOUT resumeFromRunId: a resume replays the cached implementer report and stalls again.'
-const stallAgain = (at, reason, extra = {}) => result({ status: 'STALL', stall: { round: at, findings: [], reason, ...extra }, resume: at === 0 ? RESUME_FRESH : RESUME_AGAIN })
-const questionStall = (at, questions, reason, resume) => result({ status: 'STALL', stall: { round: at, why: 'question', findings: [], questions, reason }, resume })
-const verifyStall = (at, s) => result({
-  status: 'STALL',
-  stall: { round: at, why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
-  resume: `Ask the user: a different approach, a direction for the fixer, or no verify command. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${at}, guidance: "..." } (retry alone replays the cached fixer report and stalls again); a stall at round 0 replays the cached implementer report: relaunch WITHOUT resumeFromRunId.`,
-})
+// The one STALL result: `fields` are the stall's own keys after `round`, so a key a kind lacks stays absent.
+const stall = (at, fields, resume) => result({ status: 'STALL', stall: { round: at, ...fields }, resume })
+const stallAgain = (at, reason, extra = {}) => stall(at, { findings: [], reason, ...extra }, at === 0 ? RESUME_FRESH : RESUME_AGAIN)
+const questionStall = (at, questions, reason, resume) => stall(at, { why: 'question', findings: [], questions, reason }, resume)
+const verifyStall = (at, s) => stall(at,
+  { why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
+  `Ask the user: a different approach, a direction for the fixer, or no verify command. ${relaunch(`{ round: ${at}, guidance: "..." }`)} (retry alone replays the cached fixer report and stalls again); a stall at round 0 replays the cached implementer report: relaunch WITHOUT resumeFromRunId.`)
 const verifyText = () => (lastReport
   ? `Verify (run by the implementer): \`${lastReport.verify.command ?? input.verify ?? '(no command reported)'}\` → ${lastReport.verify.status}${lastReport.verify.line ? `: ${lastReport.verify.line}` : ''}`
   : '')
@@ -627,9 +625,9 @@ const askWithQuestions = async (build, opts, at, resolution) => {
   addQuestionNotes(second?.questions ?? [])
   if (!second) return { report: second }
   // First-run rejections stay in the report (the ids count as rejected) but are no CHALLENGE when the second run changed their file.
-  const carried = first.rejected.filter(r => !second.rejected.some(s => s?.id === r?.id))
-  const stale = new Set(carried.filter(r => isDirty(known[r?.id]?.path, second.files, repoRoot)).map(r => r?.id))
-  const merged = [...new Set([...(Array.isArray(first.files) ? first.files : []), ...(Array.isArray(second.files) ? second.files : [])])]
+  const carried = first.rejected.filter(r => !second.rejected.some(s => s.id === r.id))
+  const stale = new Set(carried.filter(r => isDirty(known[r.id]?.path, second.files, repoRoot)).map(r => r.id))
+  const merged = [...new Set([...first.files, ...second.files])]
   return { report: { ...second, files: merged, rejected: [...second.rejected, ...carried] }, stale }
 }
 
@@ -671,16 +669,11 @@ if (!inline) {
     // A report lists its own files; only a missing one needs the probe.
     const done = impl ? strings(impl.files) : await recoverChanges()
     const todo = impl?.remaining ?? []
-    return result({
-      status: 'STALL',
-      stall: {
-        round: 0,
-        why: 'incomplete',
-        findings: [],
-        reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
-      },
-      resume: 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.',
-    })
+    return stall(0, {
+      why: 'incomplete',
+      findings: [],
+      reason: `the implementer did not finish after ${continuations} continuation(s): ${todo.length ? `left to do: ${todo.join(' | ')}` : `it returned no report (stopped or failed${why(`implement the change (continued, ${continuations})`)})`}${done.length ? `. Files already changed in the perimeter: ${done.join(', ')}` : ''}`,
+    }, 'Relaunch with the same args WITHOUT resumeFromRunId (a resume replays the cached implementer reports), with a smaller scope (split the plan into sequential runs) or a higher implementerEffort; the edits already in the tree are kept.')
   }
   const implStall = absorb(impl)
   if (Number.isFinite(impl.snapshot?.churn)) changeLines = impl.snapshot.churn
@@ -873,17 +866,18 @@ while (true) {
       const keys = [...missing]
       return stallAgain(round, `the specialist reviewer(s) ${keys.join(', ')} returned nothing: their area was never reviewed`, { why: 'gap', reviewers: keys })
     }
+    // The final read is the whole panel on the whole change: it covers every file, so it goes before the coverage rerun.
+    if (!finalReadDone && reviewFixed && size !== 'S') {
+      finalReadDone = true
+      nextRound = { only: null, coverage: false, final: true }
+      openCounts = []
+      continue
+    }
     const cover = coverageAction({ unread, retried: coverageRetried })
     if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
     if (cover === 'rerun') {
       nextRound = { only: coverageOwners(unread, everyone), coverage: true }
       coverageRetried = true
-      openCounts = []
-      continue
-    }
-    if (!finalReadDone && reviewFixed && size !== 'S') {
-      finalReadDone = true
-      nextRound = { only: null, coverage: false, final: true }
       openCounts = []
       continue
     }
@@ -894,23 +888,16 @@ while (true) {
     rounds[rounds.length - 1].cleanup = cleanupIds
   }
   if (stopped) {
-    return result({
-      status: 'STALL',
-      stall: {
-        round, why: stopWhy, findings: toFix.map(id => ({ id, why: stopWhy, ...known[id] })),
-        reason: stopWhy === 'churn'
-          ? `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging`
-          : `the open P1/P2 count after each fix round (${openCounts.join(', ')}) did not drop below its lowest in 3 fix rounds in a row: the fixes are not converging`,
-      },
-      resume: `Ask the user: accept the risk or a different approach. Relaunch with resumeFromRunId and ALL the resolutions so far, adding { round: ${round}, accept: [ids] } to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`,
-    })
+    return stall(round, {
+      why: stopWhy, findings: toFix.map(id => ({ id, why: stopWhy, ...known[id] })),
+      reason: stopWhy === 'churn'
+        ? `the fixes change more each time (${fixChurns.slice(-3).join(', ')} lines): they are not converging`
+        : `the open P1/P2 count after each fix round (${openCounts.join(', ')}) did not drop below its lowest in 3 fix rounds in a row: the fixes are not converging`,
+    }, `Ask the user: accept the risk or a different approach. ${relaunch(`{ round: ${round}, accept: [ids] }`)} to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`)
   }
   if (action === 'STALL') {
-    return result({
-      status: 'STALL',
-      stall: { round, findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
-      resume: `Ask the user: accept the risk, one more round, or a different approach; a "widen" finding asks to add its file to the perimeter (only on the user's yes: the session then rewrites perimeter.md with perimeter.ps1 -Files) or to accept it as out of scope. Relaunch with resumeFromRunId and ALL the resolutions so far: ${RESOLUTIONS}.`,
-    })
+    return stall(round, { findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
+      `Ask the user: accept the risk, one more round, or a different approach; a "widen" finding asks to add its file to the perimeter (only on the user's yes: the session then rewrites perimeter.md with perimeter.ps1 -Files) or to accept it as out of scope. ${relaunch()}: ${RESOLUTIONS}.`)
   }
   if (action === 'RECHECK') {
     const stuck = Object.fromEntries(Object.entries(askedMap).map(([key, ids]) => [key, ids.filter(id => decision.unanswered.includes(id))]))
@@ -954,11 +941,11 @@ while (true) {
   lastDeltaBase = treeBefore || startHead || 'HEAD'
   takeReport(fixed)
   lastDelta = deltaCommand(treeBefore, fixed.snapshot?.tree ?? '', startHead)
-  const rejectedIds = new Set(fixed.rejected.map(r => r?.id))
+  const rejectedIds = new Set(fixed.rejected.map(r => r.id))
   sending.filter(id => known[id]?.category === 'scope' && !rejectedIds.has(id)).forEach(id => {
     if (!proposals.some(p => p.path === known[id].path && p.title === known[id].title)) proposals.push({ source: 'scope-revert', title: known[id].title, path: known[id].path, why: known[id].failure })
   })
-  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r?.id) && tracked[r.id]?.status === 'open' && !asked1.stale?.has(r.id)), counts: rejectionCounts })
+  const ledger = rejectionLedger({ rejected: fixed.rejected.filter(r => sending.includes(r.id) && tracked[r.id]?.status === 'open' && !asked1.stale?.has(r.id)), counts: rejectionCounts })
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed

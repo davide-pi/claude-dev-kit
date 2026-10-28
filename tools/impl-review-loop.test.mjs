@@ -165,8 +165,8 @@ test('script: M without touches is two Sonnet reviewers at high, S one', async (
 test('script: an S change that grows to 5 files stays S: the file count is a gaps signal, never a size', async () => {
   const grown = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/A.cs', 'src/Orders/Dto/B.cs', 'src/Orders/Dto/C.cs', 'src/Orders/Dto/D.cs'];
   const { out, calls } = await run({ ...ARGS, size: 'S' }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
-    { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' },
-    { scope: 'fixed', files: grown, evidence: 'ok' },
+    { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] },
+    { scope: 'fixed', files: grown, evidence: 'ok', rejected: [], noticed: [] },
   ]);
   assert.equal(out.status, 'OK');
   const models = (round) => calls.filter((c) => isReview(c.opts.label, round)).map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`);
@@ -190,7 +190,7 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
   assert.deepEqual(await panel('M', { risk: ['security'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
   assert.deepEqual(await panel('M', { touches: ['security'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
   assert.deepEqual(await panel('L', { risk: ['logic'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
-  const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok' }]);
+  const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] }]);
   assert.equal(many.out.roundLog[0].size, 'M');                                               // 9+ files never split the reviewers, the size stays
   assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
@@ -198,7 +198,7 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
 
 test('script: 17 changed files at size M spawn two whole reviewers, B on opus because the change is wide: the whole-change scope, no share', async () => {
   const seventeen = Array.from({ length: 17 }, (_, i) => `src/Orders/F${i}.cs`);
-  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: seventeen, evidence: 'ok' }]);
+  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: seventeen, evidence: 'ok', rejected: [], noticed: [] }]);
   assert.equal(out.status, 'OK');
   const reviews = calls.filter((c) => isReview(c.opts.label, 1));
   assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer A · round 1 · code:sonnet:high', 'reviewer B · round 1 · second opinion:opus:high']);
@@ -209,7 +209,7 @@ test('script: 17 changed files at size M spawn two whole reviewers, B on opus be
 });
 
 test('script: the carried fields are in the schemas, a report without them is still read', async () => {
-  const { out, calls } = await run(ARGS, [review([])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
+  const { out, calls } = await run(ARGS, [review([])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(['verify', 'snapshot', 'rejected', 'noticed', 'evidence'].filter((k) => !calls[0].opts.schema.required.includes(k)), []);
   const reviewer = calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.schema;
@@ -375,8 +375,8 @@ test('script: a perimeter file already dirty is refused until the user confirmed
 // ── the loop ─────────────────────────────────────────────────────────────────────────────────────────
 test('script: round 1 reviews the files the implementer changed; from round 2 the delta of the last fix', async () => {
   const { calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
-    { scope: 'first', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' },
-    { scope: 'fixed the null guard', files: ['src/Orders/Dto/A.cs'], evidence: 'ok' },
+    { scope: 'first', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] },
+    { scope: 'fixed the null guard', files: ['src/Orders/Dto/A.cs'], evidence: 'ok', rejected: [], noticed: [] },
   ]);
   const r1 = calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt;
   const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
@@ -485,7 +485,7 @@ test('script: an implementer that returns nothing is a resumable STALL, on the f
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.round, 0);
   assert.match(first.out.resume, /WITHOUT resumeFromRunId/);   // a resume replays the cached null report
-  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, null]);
+  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }, null]);
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.resume, /resumeFromRunId/);

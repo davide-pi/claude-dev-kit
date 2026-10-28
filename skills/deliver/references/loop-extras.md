@@ -10,6 +10,9 @@ medium (at S that Sonnet is the panel's own, at high). The first round that woul
 pass does not count; never at S) is a final full read: the whole panel, once, on the WHOLE change since the start head (the
 scope of round 1), every live finding id asked again. Any size of fix triggers it. Its findings loop back to fix and delta review.
 
+Coverage: when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
+final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall). With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
+
 ## The cleanup pass before OK (M, L)
 
 Runs only with `cleanup: true` (the owner asks for it); by default the P3s stay in `minor` for the closing table. A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the

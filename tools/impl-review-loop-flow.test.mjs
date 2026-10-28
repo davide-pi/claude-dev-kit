@@ -95,6 +95,19 @@ test('script (W6): M delta round = the reviewer that raised the finding + one So
   assert.doesNotMatch(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /FINAL FULL READ/);
 });
 
+test('script (#44): M with a review fix and an unread file: the final read runs first and covers it, no coverage round precedes it', async () => {
+  const { out, calls } = await run(ARGS_M, [review([], [finding()], []), review([], [], []), review(closedIds('F1'), [], [])]);   // R1: neither whole reviewer read the file
+  assert.equal(out.status, 'OK');
+  assert.equal(out.rounds, 3);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read']);
+});
+
+test('script (#44): a file still unread after the final read gets the coverage rerun of the whole reviewers', async () => {
+  const { out, calls } = await run(ARGS_M, [review([], [finding()], []), review([], [], []), review(closedIds('F1'), [], []), review([]), review([])], [], { finals: [review(closedIds('F1'), [], []), review(closedIds('F1'), [], [])] });
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer B · round 3 · second opinion, final read', 'reviewer A · round 4 · code', 'reviewer B · round 4 · second opinion']);
+});
+
 test('script (#42): at M and L the final read runs after any review fix, whoever read the fix delta; S never gets one', async () => {
   const m = await run(ARGS_M, [review([], [finding()]), review([], [finding()]), review(closedIds('F1')), review(closedIds('F1'))]);          // M: A and B both found it, R2 = A + B + the watcher
   assert.equal(m.out.status, 'OK');

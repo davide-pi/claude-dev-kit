@@ -301,7 +301,7 @@ test('script: RECHECK reruns only the reviewers that skipped the id: L round whe
     review([], [f1]), review([], [f2]),                                      // R1: A finds F1, B finds F2
     closed('F1'), boom,                                                       // R2: A skips F2, B returns nothing
     closed('F2'),                                                             // R3: A answers F2
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok' }], { watcher: [closed('F1'), closed('F2')] });   // R2: S skips F2; R3: S closes it
+  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok', rejected: [], noticed: [] }], { watcher: [closed('F1'), closed('F2')] });   // R2: S skips F2; R3: S closes it
   assert.equal(out.status, 'OK');
   assert.deepEqual(reviewLabels(calls, 2), ['reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes']);
   assert.deepEqual(reviewLabels(calls, 3), ['reviewer A · round 3 · code', 'reviewer S · round 3 · check the fixes']);   // B returned nothing: a gap, not a skip
@@ -359,7 +359,7 @@ test('script: a scope-revert proposal exists only once the fixer has reported: a
 test('script: t1, a fix without snapshot, a fix with t3: round 3 reviewers read "the changes since t1"', async () => {
   const f2 = finding({ line: 90, title: 'second defect in the query' });
   const { out, calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }], [f2]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [
-    impl(), { scope: 'fixed once', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, impl({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 2 } }),
+    impl(), { scope: 'fixed once', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }, impl({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 2 } }),
   ]);
   assert.equal(out.status, 'OK');
   const r3 = calls.find(c => c.opts.label === 'reviewer A · round 3 · code').prompt;

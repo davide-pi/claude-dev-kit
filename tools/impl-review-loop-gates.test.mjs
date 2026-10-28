@@ -101,7 +101,7 @@ test('script: pass then fail after a fix is a STALL "green-to-red"', async () =>
 });
 
 test('script: a report that did not run the verify command is a STALL "verify-not-run" only when args.verify is set', async () => {
-  const none = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'could not run', verify: { status: 'not-run' } };
+  const none = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'could not run', verify: { status: 'not-run' }, rejected: [], noticed: [] };
   const stalled = await run({ ...ARGS, verify: 'node --test' }, [], [none]);
   assert.equal(stalled.out.status, 'STALL');
   assert.equal(stalled.out.stall.why, 'verify-not-run');

@@ -56,13 +56,10 @@ test('sizeSignal: more files than the triage size implies is a signal (S > 1 fil
   assert.equal(sizeSignal('L', 40), '');
 });
 
-test('readReport: a report without verify is not-run, without rejected/noticed empty, without snapshot null', () => {
-  const r = readReport({ scope: 's', files: ['a.cs'], evidence: 'ok' });
+test('readReport: a report without verify is not-run, without questions empty, without snapshot null', () => {
+  const r = readReport({ scope: 's', files: ['a.cs'], evidence: 'ok', rejected: [], noticed: [] });
   assert.deepEqual(r.verify, { status: 'not-run' });
-  assert.deepEqual(r.rejected, []);
-  assert.deepEqual(r.noticed, []);
   assert.deepEqual(r.questions, []);
-  assert.deepEqual(r.filesReviewed, []);
   assert.equal(r.snapshot, null);
   assert.deepEqual(r.files, ['a.cs']);
   const full = { verify: { status: 'fail', command: 'dotnet test', line: 'Failed: 2' }, snapshot: { tree: 't', files: ['a.cs'], churn: 4 }, rejected: [{ id: 'F1', reason: 'not reproduced' }], noticed: [{ title: 't', path: 'p', why: 'w' }], questions: [{ text: 'q', default: 'd', why: 'w' }], filesReviewed: ['a.cs'] };
@@ -116,7 +113,7 @@ test('unreviewedFiles: a whole reviewer that fails or omits a file from filesRev
   assert.deepEqual(unreviewedFiles([read('a', 'b', 'c'), null], rs, [], '', ABC), []);
   assert.deepEqual(unreviewedFiles([read('a'), read('c')], rs, [], '', ABC), ['b']);
   assert.deepEqual(unreviewedFiles([null, null], rs, [], '', ABC), ABC);                    // null = all unread
-  assert.deepEqual(unreviewedFiles([{ previous: [], found: [] }, null], rs, [], '', ABC), ABC);   // no filesReviewed: read nothing
+  assert.deepEqual(unreviewedFiles([{ previous: [], found: [], filesReviewed: [] }, null], rs, [], '', ABC), ABC);   // no filesReviewed: read nothing
   assert.deepEqual(unreviewedFiles([read('C:\\repo\\SRC\\a.cs')], [{ key: 'A', whole: true }], [], ROOT, ['src/a.cs']), []);   // root, case, slashes ignored
 });
 
@@ -225,7 +222,7 @@ test('script: a reviewer that threw in round 1 is not asked in a delta round: th
   const { out, calls } = await run(manyArgs(), [
     boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
     review([{ id: 'F1', status: 'closed' }]),                                          // R2: B, the raiser, answers; S (answered by the harness) reads the rest
-  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }]);
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }]);
   assert.equal(out.status, 'OK');
   const r = Object.fromEntries(calls.filter(c => isReview(c.opts.label)).map(c => [c.opts.label, c.prompt]));
   assert.doesNotMatch(r['reviewer A · round 1 · code'], /never been reviewed/);
@@ -241,7 +238,7 @@ test('script: a whole reviewer that answers after a fix is asked for ALL the fil
   const { out, calls } = await run(manyArgs(), [
     boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
     boom,                                                                              // R2: B throws; S answers alone
-  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
   const prompt = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
   assert.match(prompt, /Review the changes since/);
@@ -256,8 +253,8 @@ test('script: a reviewer that threw in round 1 and a rerun that reads only part 
   const { out } = await run(manyArgs(), [
     boom, review([], [finding({ path: f9 })], [f9]),
     review([{ id: 'F1', status: 'closed' }], [], [f9]),                                // R2: B answers still reading only F9, S returns nothing (watcher: null)
-    boom, boom,                                                                        // R3: the coverage rerun of A and B throws again
-  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok' }], { watcher: null });
+    boom, boom,                                                                        // R4: the coverage rerun of A and B throws again
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: null, finals: [boom, review([{ id: 'F1', status: 'closed' }], [], [f9])] });   // R3: the final read, A throws and B reads only F9
   assert.equal(out.status, 'STALL');
   assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
 });
@@ -267,7 +264,7 @@ test('script: an implementer or a fixer that throws is the same resumable STALL 
   assert.equal(first.out.status, 'STALL');
   assert.equal(first.out.stall.round, 0);
   assert.match(first.out.stall.reason, /implementer did not finish.*no report.*max turns/);
-  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }, new Error('max turns')]);
+  const fix = await run(ARGS, [review([], [finding()])], [{ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }, new Error('max turns')]);
   assert.equal(fix.out.status, 'STALL');
   assert.equal(fix.out.stall.round, 1);
   assert.match(fix.out.stall.reason, /on the fix.*max turns/);
@@ -302,7 +299,7 @@ test('script: the snapshot files are the changed files, kept in place; a report 
   assert.deepEqual(out.files, [a, b, c]);
   const fell = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
     impl({ snapshot: { tree: 't1', files: [a, b], churn: 2 } }),
-    { scope: 'fixed', files: [c], evidence: 'ok' },
+    { scope: 'fixed', files: [c], evidence: 'ok', rejected: [], noticed: [] },
   ]);
   assert.deepEqual(fell.out.files, [a, b, c]);
 });
@@ -323,7 +320,7 @@ test('script: a report without a snapshot adds its declared files, the dirty one
   assert.deepEqual([...noSnap.out.files].sort(), [mine, other]);
   const fixer = await run(dirtyArgs, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [
     impl({ files: [a, b], snapshot: { tree: 't1', files: [a, b], churn: 2 } }),
-    { scope: 'fixed', files: [mine], evidence: 'ok' },
+    { scope: 'fixed', files: [mine], evidence: 'ok', rejected: [], noticed: [] },
   ]);
   assert.deepEqual([...fixer.out.files].sort(), [a, b, mine]);
 });
@@ -336,7 +333,7 @@ test('script: round 2 reviewers get git diff t1 t2; a fixer without a snapshot n
   const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
   assert.doesNotMatch(r1, /git diff t1/);
   assert.match(r2, /Review the changes since t1: `git diff t1 t2`/);
-  const plain = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), { scope: 'f', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok' }]);
+  const plain = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), { scope: 'f', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }]);
   assert.doesNotMatch(plain.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /git diff t1 t2/);
 });
 
@@ -368,8 +365,6 @@ test('script: a snapshot with no files is a real empty change, not a missing sna
     impl({ files: [a], snapshot: { tree: 't2', files: [], churn: 2 } }),
   ]);
   assert.deepEqual(reverted.out.files, []);
-  const absent = await run(ARGS, [review([])], [impl({ files: [a], snapshot: { tree: 't1' } })]);      // files is not an array: the declared files
-  assert.deepEqual(absent.out.files, [a]);
 });
 
 test('script: a delta that starts at the start head, not at an earlier snapshot, reads "Review the changes since <head>"', async () => {
@@ -388,7 +383,7 @@ test('script: a delta that starts at the start head, not at an earlier snapshot,
 // ── a wide change: M's reviewer B on opus, never a split ──────────────
 test('wide: past 10 files or 600 changed lines reviewer B of M is opus, never a split; S, mechanical and L unchanged', async () => {
   const some = (n) => MANY.slice(0, n);
-  const implOf = (n, churn) => ({ scope: 's', files: some(n), evidence: 'ok', ...(churn === undefined ? {} : { snapshot: { tree: 't1', files: some(n), churn } }) });
+  const implOf = (n, churn) => ({ scope: 's', files: some(n), evidence: 'ok', rejected: [], noticed: [], ...(churn === undefined ? {} : { snapshot: { tree: 't1', files: some(n), churn } }) });
   const round1 = async (args, impl1) => {
     const { calls } = await run({ ...manyArgs(), ...args }, [review([]), review([])], [impl1]);
     return calls.filter(c => isReview(c.opts.label, 1)).map(c => `${c.opts.label.split(' · ')[0]}:${c.opts.model}:${c.opts.effort}`);

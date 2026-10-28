@@ -73,7 +73,7 @@ const NULL_GUARD = 'null guard missing on the order lookup';
 const DONE = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] };
 const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);
 const manyArgs = (extra = {}) => ({ ...ARGS, perimeter: { files: ['src/Orders/'] }, size: 'L', ...extra });
-const manyImpl = { scope: 's', files: MANY, evidence: 'ok' };
+const manyImpl = { scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] };
 const read = (...filesReviewed) => ({ previous: [], found: [], filesReviewed });
 const labels = (calls, prefix) => calls.filter(c => c.opts.label?.startsWith(prefix)).map(c => c.opts.label);
 // A reviewer's label (`reviewer A · round 2 · code`), of round `round` when one is given.
