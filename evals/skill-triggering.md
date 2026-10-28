@@ -89,7 +89,7 @@ exists.
 | "leggi il piano e comincia dal task 2" | MUST NOT (executing a plan, not writing one) |
 | "prendi in carico la story 4711, da dove parto?" | MUST load (item analysis) |
 | "crea gli item per questa feature" | MUST NOT (creation is `azdo-cli`, after `user-story-standard`) |
-| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load (throwaway spike, `references/spike.md`) |
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST NOT load first (a spike routes to `deliver`; its spike scenario then reads `references/spike.md` here) |
 | "conviene spezzare questo lavoro su più agent?" | MUST load (fan-out, `references/delegation.md`) |
 
 ### `deliver` — every code change, before the first edit
@@ -100,6 +100,9 @@ exists.
 | "aggiungi il filtro per stato alla lista ordini" | MUST load (feature, perimeter and loop) |
 | "spiegami cosa fa OrdersQuery" | MUST NOT (reading code, no change) |
 | "rivedi il diff che ho in working tree" | MUST NOT (review of an existing diff belongs to code-review) |
+| "si può leggere quel campo senza toccare l'ORM? provalo e buttalo" | MUST load first, scenario `spike` (not `plan-work`: the spike reference is read from the scenario) |
+| "OrdersQueryTests è rosso e non so perché, sistemalo" | MUST load first, scenario `bug` (not `debug-systematic`: the triage sends an unproven cause there) |
+| "perché questo test fallisce? non toccare niente" | MUST NOT (diagnosis only, no edit asked: `debug-systematic`) |
 
 ### `debug-systematic`
 
@@ -109,6 +112,8 @@ exists.
 | "questo test passa in locale e fallisce in pipeline" | MUST load |
 | "aggiungi un endpoint per esportare gli ordini in CSV" | MUST NOT (a new feature, not a defect) |
 | "spiegami come funziona il garbage collector" | MUST NOT (knowledge question, nothing to diagnose) |
+| "OrdersQueryTests è rosso e non so perché, sistemalo" | MUST NOT load first (a fix request routes to `deliver`, whose triage calls this skill for the unproven cause) |
+| "perché questo test fallisce? non toccare niente" | MUST load (diagnosis only, no edit asked) |
 
 ### `skill-forge`
 
