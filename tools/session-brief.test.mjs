@@ -332,3 +332,38 @@ test('beside a findings-log line the count is appended to that line, not a line 
   assert.equal(runsOf(lines).length, 0);
   assert.match(nudgeOf(lines)[0], /; \/retro: 3 new runs$/);
 });
+
+// ── The /clear hand-off ──────────────────────────────────────────────────────────────────────────────────
+
+function handoff(config, over = {}) {
+  mkdirSync(join(config, '.cache'), { recursive: true });
+  const file = join(config, '.cache', 'handoff.json');
+  writeFileSync(file, JSON.stringify({ at: Date.now(), cwd: null, branch: 'feature/4211-orders', head: 'a1b2c3d', rows: ['unit | fatto'], tokens: 150000, ...over }));
+  return file;
+}
+const clear = (cwd) => JSON.stringify({ hook_event_name: 'SessionStart', source: 'clear', cwd });
+
+test('after /clear the hand-off of the closed task is added to the brief and consumed', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  const cfg = temp('brief-cfg-');
+  const file = handoff(cfg, { cwd: root });
+  const lines = run(root, cfg, clear(root));
+  assert.equal(lines.length, 6);
+  assert.equal(lines[4], 'Previous task closed: branch feature/4211-orders, head a1b2c3d');
+  assert.equal(lines[5], '- unit | fatto');
+  assert.ok(!existsSync(file), 'deleted once read');
+});
+
+test('a hand-off for another cwd, a stale one, or on a non-clear start is ignored', () => {
+  const root = repo({ object: 'Add the order list projection' });
+  for (const [over, payload] of [
+    [{ cwd: join(root, 'elsewhere') }, clear(root)],
+    [{ cwd: root, at: Date.now() - 3 * 3600_000 }, clear(root)],
+    [{ cwd: root }, JSON.stringify({ hook_event_name: 'SessionStart', source: 'startup', cwd: root })],
+  ]) {
+    const cfg = temp('brief-cfg-');
+    handoff(cfg, over);
+    const lines = run(root, cfg, payload);
+    assert.equal(lines.length, 4, lines.join(' | '));
+  }
+});

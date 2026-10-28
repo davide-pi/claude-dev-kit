@@ -209,3 +209,42 @@ test('settings.json wires it, through hooks/nudges.js, on PostToolUse (Write|Edi
   assert.ok(existsSync(HOOK));
   assert.ok(existsSync(join(ROOT, 'hooks', 'nudges.js')));
 });
+
+const snapshot = (config, used_tokens, id = 'sess-1') => {
+  mkdirSync(join(config, '.cache'), { recursive: true });
+  writeFileSync(join(config, '.cache', `context-${id}.json`), JSON.stringify({ used_tokens, at: Date.now() }));
+};
+
+test('at 120k+ the main session gets one line per session: next S change to the implementer, then /clear', () => {
+  const config = sandbox();
+  snapshot(config, 150_000);
+  const first = edit(config);
+  assert.match(first.additionalContext, /^Context ≥ 120k: the next S change goes to `implementer` \(clean context\), not inline; after this task, \/clear\.$/);
+  assert.equal(edit(config), null, 'once per session');
+});
+
+test('a small context, a subagent (agent_type) or a stale snapshot gets no context line', () => {
+  const small = sandbox();
+  snapshot(small, 50_000);
+  assert.equal(edit(small), null);
+
+  const sub = sandbox();
+  snapshot(sub, 150_000);
+  assert.equal(edit(sub, { agent_type: 'implementer' }), null);
+
+  const stale = sandbox();
+  mkdirSync(join(stale, '.cache'), { recursive: true });
+  writeFileSync(join(stale, '.cache', 'context-sess-1.json'), JSON.stringify({ used_tokens: 150_000, at: Date.now() - 7 * 3600_000 }));
+  assert.equal(edit(stale), null);
+});
+
+test('the context line and the third-edit line share one additionalContext', () => {
+  const config = sandbox();
+  edit(config);
+  edit(config);
+  snapshot(config, 150_000);
+  const third = edit(config).additionalContext.split('\n');
+  assert.equal(third.length, 2);
+  assert.match(third[0], /^Third edit/);
+  assert.match(third[1], /^Context ≥ 120k/);
+});

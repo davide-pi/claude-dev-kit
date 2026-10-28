@@ -28,6 +28,10 @@
  *
  * A doc or data file (.md, .json, .yml, .toml, .csv, .env, …) is not code to delegate either: it is never counted.
  *
+ * Once per main session, when the context is at `LARGE_CONTEXT` or more (lib/context-size.js; never inside a subagent,
+ * `agent_type` set), one more line says the next small change goes to `implementer` and a /clear follows the task;
+ * the line is remembered in `<config>/.cache/large-<session_id>.json`.
+ *
  * Counter files are pruned after a few days whenever the nudge fires, so one file per session never
  * accumulates for good. Always exits 0; any error is silence.
  *
@@ -42,11 +46,12 @@ const path = require('path');
 
 const { CACHE_DIR, prune } = require('./lib/cache');
 const { lastPromptSince } = require('./lib/session-turn');
+const { contextTokens, LARGE_CONTEXT } = require('./lib/context-size');
 
 const THRESHOLD = 3;
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit']);
 const PRUNE_AFTER_MS = 3 * 24 * 60 * 60 * 1000;
-const COUNTER_FILE = /^edits-[\w-]+\.json$/;
+const COUNTER_FILE = /^(?:edits|large)-[\w-]+\.json$/;
 const SUBAGENT_TRANSCRIPT = /[\\/]subagents[\\/]/;
 
 /** A path as comparable text: absolute, symlinks and 8.3 short names resolved when the file exists, case folded on Windows. */
@@ -103,17 +108,29 @@ function run(payload) {
   const count = (seen.prompt !== null && seen.prompt !== counter.prompt ? 0 : counter.count) + 1;
   fs.mkdirSync(CACHE_DIR, { recursive: true });
   fs.writeFileSync(file, JSON.stringify({ count, prompt: seen.prompt ?? counter.prompt, offset: seen.offset ?? counter.offset }));
-  if (count !== THRESHOLD) return null;
+  const lines = [];
+  if (count === THRESHOLD) {
+    lines.push('Third edit this turn: if the scope is decided, delegate to `implementer` and review its diff '
+      + 'instead of writing the code here.');
+  }
+  if (largeContextOnce(payload, id)) {
+    lines.push(`Context ≥ ${Math.round(LARGE_CONTEXT / 1000)}k: the next S change goes to \`implementer\` (clean context), not inline; after this task, /clear.`);
+  }
+  if (!lines.length) return null;
 
   prune(COUNTER_FILE);
-  return {
-    hookSpecificOutput: {
-      hookEventName: 'PostToolUse',
-      additionalContext:
-        `Third edit this turn: if the scope is decided, delegate to \`implementer\` and review its diff `
-        + 'instead of writing the code here.',
-    },
-  };
+  return { hookSpecificOutput: { hookEventName: 'PostToolUse', additionalContext: lines.join('\n') } };
+}
+
+/** True the first time this main session is seen at `LARGE_CONTEXT` or more; recorded in `large-<session>.json`. */
+function largeContextOnce(payload, id) {
+  if (payload.agent_type) return false;
+  const tokens = contextTokens(id);
+  if (tokens === null || tokens < LARGE_CONTEXT) return false;
+  const file = path.join(CACHE_DIR, `large-${id}.json`);
+  if (fs.existsSync(file)) return false;
+  fs.writeFileSync(file, JSON.stringify({ at: Date.now() }));
+  return true;
 }
 
 module.exports = { run };

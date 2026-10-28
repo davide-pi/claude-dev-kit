@@ -79,7 +79,7 @@ test('UserPromptSubmit: the edit counter is not touched (edit-nudge tells turns 
 test('PostToolUse: the third edit nudges towards the implementer, never the context line', () => {
   const config = sandbox();
   snapshot(config, 'sess-1', 330_000);
-  assert.equal(edit(config), null);
+  assert.match(edit(config).additionalContext, /^Context ≥ 120k/, 'the large-context line, once per session');
   assert.equal(edit(config), null);
   const third = edit(config);
   assert.equal(third.hookEventName, 'PostToolUse');

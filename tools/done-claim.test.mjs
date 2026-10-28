@@ -542,3 +542,73 @@ test('a claim word inside quotes is mentioned, not claimed; bold or unquoted sti
   assert.match(stop(edited('Ho aggiornato la regola. **Fatto**')).reason, /"Fatto"/);
   assert.match(stop(edited('Ho verificato la regola.')).reason, /"verificato"/);
 });
+
+// ── One task, one session: the /clear hand-off ───────────────────────────────────────────────────────────
+
+/** Run the hook with a context snapshot of `tokens` (none when null) and a fake repo as cwd; returns the parsed stdout and the hand-off. */
+function stopWithContext(entries, tokens) {
+  const dir = mkdtempSync(join(tmpdir(), 'done-ho-'));
+  created.push(dir);
+  mkdirSync(join(dir, '.cache'));
+  if (tokens !== null) writeFileSync(join(dir, '.cache', 'context-s.json'), JSON.stringify({ used_tokens: tokens, at: Date.now() }));
+  const gitDir = join(dir, 'repo', '.git');
+  mkdirSync(join(gitDir, 'refs', 'heads'), { recursive: true });
+  writeFileSync(join(gitDir, 'HEAD'), 'ref: refs/heads/main\n');
+  writeFileSync(join(gitDir, 'refs', 'heads', 'main'), `${'abcdef0123'.repeat(4)}\n`);
+  const transcript = join(dir, 't.jsonl');
+  writeFileSync(transcript, entries.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ session_id: 's', transcript_path: transcript, stop_hook_active: false, hook_event_name: 'Stop', cwd: join(dir, 'repo') }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_DONE_CLAIM: '1', CLAUDE_LARGE_CONTEXT: '', CLAUDE_CONFIG_DIR: dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const file = join(dir, '.cache', 'handoff.json');
+  return { out: r.stdout ? JSON.parse(r.stdout) : null, handoff: existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null, dir };
+}
+
+const committed = [prompt('chiudi'), tool('Edit'), result(), tool('Bash', { command: 'git commit -m "Add the order list"' }), result('[main abc] Add the order list'), say('Committato.')];
+
+test('a passing verdict in a large context writes the hand-off and asks for /clear', () => {
+  const { out, handoff } = stopWithContext(edited(VERDICT, PRINTED), 150_000);
+  assert.equal(out.decision, undefined);
+  assert.match(out.systemMessage, /^Contesto a 150k e task chiuso: \/clear prima del prossimo/);
+  assert.deepEqual(handoff.rows, ['unit | fatto']);
+  assert.equal(handoff.branch, 'main');
+  assert.equal(handoff.head, 'abcdef0');
+  assert.equal(handoff.tokens, 150_000);
+});
+
+test('a git commit closes the task too: the subject is the hand-off row', () => {
+  const { out, handoff } = stopWithContext(committed, 150_000);
+  assert.match(out.systemMessage, /\/clear/);
+  assert.deepEqual(handoff.rows, ['Add the order list']);
+});
+
+test('a /commit turn with no edit closes the task too', () => {
+  const commitOnly = [prompt('/commit'), tool('Bash', { command: 'git commit -m "Add the order list"' }), result('[main abc] Add the order list'), say('Committato.')];
+  const { out, handoff } = stopWithContext(commitOnly, 150_000);
+  assert.match(out.systemMessage, /\/clear/);
+  assert.deepEqual(handoff.rows, ['Add the order list']);
+});
+
+test('a small context, or no snapshot, leaves no hand-off and no message', () => {
+  for (const tokens of [50_000, null]) {
+    const { out, handoff } = stopWithContext(committed, tokens);
+    assert.equal(out, null);
+    assert.equal(handoff, null);
+  }
+});
+
+test('a turn that closed nothing (no verdict, no commit) in a large context says nothing', () => {
+  const { out, handoff } = stopWithContext(edited('Ho cambiato il metodo.'), 150_000);
+  assert.equal(out, null);
+  assert.equal(handoff, null);
+});
+
+test('a blocked verdict never carries the /clear message', () => {
+  const { out, handoff } = stopWithContext(edited(VERDICT, 'something else entirely'), 150_000);
+  assert.equal(out.decision, 'block');
+  assert.equal(out.systemMessage, undefined);
+  assert.equal(handoff, null);
+});
