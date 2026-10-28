@@ -55,6 +55,9 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 | implementation | this session, inline (up to ~3 files) while the context is small, else `implementer`; a mechanical batch → `mechanical: true`, `implementer` on Haiku | `implementer`, 3-4 tasks a run | as M, a run per phase (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet medium (mechanical: low) | 1 Sonnet high, + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |
 
+**Docs only** (README, `docs/`, code comments; never a skill, agent, rule or hook): no perimeter, no loop.
+Edit inline, then one `code-reviewer` (Sonnet, effort `low`) on the diff; fix its P1/P2 inline, run the project's doc or lint check (this kit: `node tools/validate.mjs`).
+
 `implementer` args: `references/loop.md`; its brief: `file:line` + the change. Before the loop: the section of the chosen scenario in `references/scenarios.md` (read only that one); criteria, doubts pass and challenger: `references/loop.md`.
 
 ### 3. Who asks the user
@@ -76,7 +79,7 @@ goes in the verdict. A red test or a worse measurement restarts the loop.
 
 ## Do
 
-1. Triage, then the perimeter file and the start point; scenario preparation.
+1. Triage, then the perimeter file and the start point; scenario preparation. Docs only (§2): triage, then edit inline, one reviewer, that check, the verdict; no perimeter, no start point, no loop, no `-Close`.
 2. Analysis by size, the criteria with their proof (`references/loop.md`); ask only what the table says. S: edit inline now.
 3. Verify pre-check (`references/loop.md`), launch `impl-review-loop` once per coherent request (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
    `OK` → `scope-guard.js --check <head>`: files outside → step 3; exit 0 → step 4; exit 2 = not checked, never clean. `STALL` (`question` too) → `references/stall.md`.
