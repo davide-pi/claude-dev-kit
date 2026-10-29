@@ -79,8 +79,8 @@ fail to render. The browser step is the row, not an extra.
 
 | Check | Command | Accept when |
 | --- | --- | --- |
-| what the migration will do | `dotnet ef migrations script --idempotent --project .\src\Data --startup-project .\src\Api -o .\migration.sql` | the file read end to end; every `DROP`, `ALTER COLUMN`, `TRUNCATE` hit accounted for |
-| scan the script | `Select-String -Path .\migration.sql -Pattern 'DROP |ALTER COLUMN |TRUNCATE '` | each hit deliberate — a hit on a column holding data stops the change |
+| what the migration will do | `dotnet ef migrations script --idempotent --project .\src\Data --startup-project .\src\Api -o (Join-Path ([IO.Path]::GetTempPath()) migration.sql)` | the file read end to end; every `DROP`, `ALTER COLUMN`, `TRUNCATE` hit accounted for |
+| scan the script | `Select-String -Path (Join-Path ([IO.Path]::GetTempPath()) migration.sql) -Pattern 'DROP |ALTER COLUMN |TRUNCATE '` | each hit deliberate — a hit on a column holding data stops the change |
 | pending migrations | `dotnet ef migrations list --project .\src\Data --startup-project .\src\Api` | the new migration present, marked pending before update and applied after |
 | apply locally | `dotnet ef database update --project .\src\Data --startup-project .\src\Api` | `Done.` with no exception |
 | schema landed | `sqlcmd -S localhost -d AppDb -Q "SELECT name, system_type_name FROM sys.dm_exec_describe_first_result_set('SELECT * FROM dbo.Orders', NULL, 0)" -W` | the new column, with the intended type and nullability |

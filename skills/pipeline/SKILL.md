@@ -1,8 +1,8 @@
 ---
 name: pipeline
 description: >-
-  Use when a CI/CD file is created, edited or reviewed: Azure DevOps pipeline or template,
-  GitVersion config, GitHub workflow, or the Ansible deploy's artifact contract.
+  Use when a CI/CD file is created, edited or reviewed: Azure DevOps pipeline, GitVersion config,
+  GitHub workflow, Ansible deploy contract; "modifica la pipeline".
 paths: "**/.pipelines/**,**/azure-pipelines*.y*ml,**/GitVersion.yml,**/.github/workflows/*"
 ---
 
@@ -75,9 +75,11 @@ $org = 'https://dev.azure.com/<org>'; $proj = '<project>'
 az pipelines list --org $org -p $proj -o table
 
 # Expand the YAML and validate template parameters WITHOUT queueing anything
-'{ "previewRun": true }' | Set-Content .\preview.json
+$preview = New-TemporaryFile                           # never a file in the repo
+'{ "previewRun": true }' | Set-Content $preview
 az devops invoke --org $org --area pipelines --resource preview --http-method POST `
-  --route-parameters project=$proj pipelineId=<id> --in-file .\preview.json --api-version 7.1
+  --route-parameters project=$proj pipelineId=<id> --in-file $preview --api-version 7.1
+Remove-Item $preview
 ```
 
 `jq` is not assumed: shape output with `--query` (JMESPath) or `ConvertFrom-Json`.

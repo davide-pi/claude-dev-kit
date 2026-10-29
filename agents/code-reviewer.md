@@ -94,8 +94,8 @@ A structured-output schema in the call is the format. Without one, finding block
 each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
 Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
 
-Order and field values: `~/.claude/skills/code-review/references/report-format.md` § Fields. Close with
-`Intento: N punti — coperti N` plus one line per partial, missing or wrong point and the scope creep, then
-`Verdetto: N rilievi (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N) · security: N · completeness: N`.
+Order and field values: `report-format.md` § Fields; verdict line: `~/.claude/skills/code-review/references/finding-format.md`. Close with
+`Intent: N points — covered N` (chat language) plus one line per partial, missing or wrong point and the scope creep, then
+the verdict line with ` · security: N · completeness: N` appended.
 Nothing wrong → one line naming the passes run and the intent points verified. Never list covered intent
 points one by one or restate the code.

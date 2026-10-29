@@ -91,7 +91,7 @@ really is all of them, they are still listed by name.
 ## GitHub
 
 ```powershell
-gh pr create --base $base --title '<title>' --body-file pr-body.md      # --draft when applicable
+gh pr create --base $base --title '<title>' --body-file $bodyFile      # + --draft when SKILL.md §5 says draft
 gh pr view --json url --jq .url
 gh issue view <n> --json title,body                                      # the linked issue's text
 ```

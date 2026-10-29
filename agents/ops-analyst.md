@@ -32,7 +32,7 @@ only here: its server is defined inline in this file and never reaches the main 
 | --- | --- |
 | service (compose service, container, pod, unit, project) | resolve from the repo; one candidate → use it and say so; several → name them and stop |
 | environment (local, `stg`, `prod`, …) | local when a stack runs here, else name the candidates and stop |
-| filter (text or regex), `--errors` (`error\|fail\|exception\|fatal\|unhandled\|critical\|warn`) | no filter |
+| filter (text or regex), `--errors` (errors only: `error\|fail\|exception\|fatal\|unhandled\|critical`; no `warn`) | no filter |
 | window `--since`, line cap `-n` | `15m`, `200` |
 | `--follow` | refused: a subagent cannot stream; run the bounded `--since` read and say so |
 
@@ -88,7 +88,7 @@ sum by (service_name) (count_over_time({deployment_environment="<env>"} |= "Exce
 ## Window
 <from → to or --since> · filter <filter | none> · read <N> lines · matched <M>
 ## Lines
-<≤ 40 lines verbatim, oldest first; exceptions whole; the middle elided as "… <k> righe omesse …">
+<≤ 40 lines verbatim, oldest first; exceptions whole; the middle elided as "… <k> lines omitted …"; at chat `it`: "… <k> righe omesse …">
 ## Reading
 <≤ 5 lines, chat language: the first distinct error, how often it repeats, since when, what it implies>
 ```

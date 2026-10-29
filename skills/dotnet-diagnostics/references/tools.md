@@ -65,7 +65,7 @@ the tool is the only way to capture the first seconds.
 ```powershell
 dotnet-counters list                                 # every known provider on this machine
 dotnet-counters monitor -p <pid> --counters System.Runtime[cpu-usage,threadpool-queue-length]
-dotnet-counters collect -p <pid> --refresh-interval 1 --format csv -o counters.csv
+dotnet-counters collect -p <pid> --refresh-interval 1 --format csv -o (Join-Path ([IO.Path]::GetTempPath()) counters.csv)
 ```
 
 ## Collecting in a container or a cluster
@@ -78,7 +78,7 @@ sharing the process namespace when the image must stay minimal.
 ```powershell
 kubectl exec -it <pod> -- dotnet-counters monitor -p 1
 kubectl exec -it <pod> -- dotnet-dump collect -p 1 -o /tmp/proc.dmp
-kubectl cp <namespace>/<pod>:/tmp/proc.dmp .\proc.dmp
+kubectl cp <namespace>/<pod>:/tmp/proc.dmp (Join-Path ([IO.Path]::GetTempPath()) proc.dmp)
 docker stats <container>                 # cheapest external view of CPU and memory
 docker exec -it <container> dotnet-counters ps
 ```

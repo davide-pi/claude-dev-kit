@@ -1,5 +1,5 @@
 ---
-paths: "**/*.tsx,**/vite.config.*,**/tailwind.config.*"
+paths: "**/*.tsx,**/*.jsx,**/vite.config.*,**/tailwind.config.*"
 ---
 # React — house facts
 

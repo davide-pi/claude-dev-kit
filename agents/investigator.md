@@ -31,7 +31,7 @@ matters becomes a short `trace`; say so.
 
 ## Ground rules (hard)
 
-- Read-only: Read, Grep, Glob; nothing else exists here.
+- Read-only: Read, Grep, Glob, LSP (go-to-definition, find-references); nothing else exists here.
 - Docs first, grep second: a docs tree routes you, the grep confirms — paths drift.
 - Every owner and every hop cites a real `file:line` you opened; a hop you could not confirm is a gap.
 - Excerpts are pasted exactly as they stand in the file.
@@ -66,7 +66,7 @@ behaviour in `*.Business` / `*.Application`, shapes in `*.ServiceContract` (RPC)
 | Step | Rule |
 | --- | --- |
 | 1 Entry | a controller `RequestAsync`, a hosted-service subscriber, a feed handler |
-| 2 Other end | `RequestAsync<T>` → `RespondAsync<T`; `PublishAsync<T>` → every `SubscribeAsync<T` |
+| 2 Other end | `RequestAsync<T>` → `RespondAsync<T`; `PublishAsync<T>` → every `SubscribeAsync<T`; LSP find-references on `T` beside the grep |
 | 3 Next hop | inside each handler, the next `RequestAsync`/`PublishAsync`; note branches, fan-out, saga state transitions |
 | 4 Stop | a DB/cache write, an `*.ExternalApi` call, a SignalR push, a terminal event with no relevant consumer; watch for cycles |
 

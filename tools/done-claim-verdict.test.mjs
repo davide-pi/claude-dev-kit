@@ -21,6 +21,16 @@ test('a deliver verdict block whose "fatto" row quotes a line the turn printed i
   assert.equal(stop(edited(`Fatto.\n\n${both}`.replace(/\n/g, '\r\n'), `${PRINTED}\n3 failed`)).reason, '');
 });
 
+test('a quoted titled verdict block is judged row by row like the plain table', () => {
+  const quoted = (title, rowLine) => `Fatto.\n\n> **${title}**\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> ${rowLine}`;
+  const proven = '| unit | `node --test` | # fail 0 | fatto |';
+  assert.match(stop(edited(quoted('Verifica', proven), 'ok')).reason, /"# fail 0"/);
+  assert.equal(stop(edited(quoted('Verifica', proven), '# tests 5\n# fail 0')).reason, '');
+  assert.equal(stop(edited(quoted('Verification', proven).replace('Livello | Comando | Riga che decide | Stato', 'Level | Command | Deciding line | Status'), '# fail 0')).reason, '');
+  // the plain table keeps working
+  assert.equal(stop(edited(`Fatto.\n\n| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n${proven}`, '# fail 0')).reason, '');
+});
+
 test('a verdict block with no filled row, or a placeholder row, is not evidence → blocked', () => {
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
   assert.match(stop(edited(`Fatto.\n\n${head}`)).reason, /"Fatto"/);

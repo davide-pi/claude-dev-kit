@@ -122,9 +122,9 @@ test('agent body line cap: front matter is not counted, the 111th body line fail
 });
 
 test('byte caps: output style, SKILL.md and agents fail over the cap, CLAUDE.md only warns', () => {
-  const style = run((write) => write('output-styles/s.md', `# s\n${'x'.repeat(2600)}\n`));
+  const style = run((write) => write('output-styles/s.md', `# s\n${'x'.repeat(3100)}\n`));
   assert.equal(style.code, 1);
-  assert.match(style.out, /output-styles\/s\.md: \d+ bytes against the 2500-byte cap/);
+  assert.match(style.out, /output-styles\/s\.md: \d+ bytes against the 3000-byte cap/);
   const skill = run((write, read) => write(SKILL, `${read(SKILL)}\n${('x'.repeat(99) + '\n').repeat(75)}`));
   assert.equal(skill.code, 1);
   assert.match(skill.out, /skills\/demo\/SKILL\.md: \d+ bytes against the 7000-byte cap/);

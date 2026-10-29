@@ -40,8 +40,8 @@ test('Context: a TOP AGENTS row is one line at 30 and 58 columns: name, model wo
     expect(textCells(row)).toBeLessThanOrEqual(width)
     expect(row).toMatch(/\$\d/)
     expect(row.startsWith('review')).toBe(true) // the name keeps at least 5 visible characters, whatever the width
-    if (width === 30) expect(row).not.toMatch(/cache/) // too narrow: the cache hit gives way to the name
-    if (width === 58) expect(row).toMatch(/^reviewer +son 5\.5 +\S \$\d+\.\d+ {2}cache 90% *$/u)
+    if (width === 30) expect(row).not.toMatch(/\u{F09D1}/u) // too narrow: the cache hit gives way to the name
+    if (width === 58) expect(row).toMatch(/^reviewer +son 5\.5 +\S \$\d+\.\d+ {2}\u{F09D1} 90% *$/u)
     await ui.unmount()
   }
 })

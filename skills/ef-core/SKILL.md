@@ -1,16 +1,16 @@
 ---
 name: ef-core
 description: >-
-  Use when an EF Core entity, DbContext, configuration or migration changes or is applied, a
-  column added, or a LINQ query is slow, wrong, untranslatable.
+  Use when an EF Core entity, DbContext, configuration or migration changes or is applied, or a
+  LINQ query is slow or wrong; "aggiungi una migration".
 paths: "**/Migrations/**,**/*DbContext*.cs,**/*Configuration.cs"
 ---
 
 # ef-core — model, query and migrate without breaking a database
 
 **Contract.** Model, query and migration changes that keep the data (a repository's own data
-playbook wins over this skill) · never hand-writes a migration class or edits the model snapshot,
-never `database update` on a shared database · prose in the chat language, SQL and tool output verbatim.
+playbook wins over this skill) · never hand-writes a migration class or edits the model snapshot
+(the generated `Up`/`Down` bodies may be edited, e.g. an explicit rename), never `database update` on a shared database · prose in the chat language, SQL and tool output verbatim.
 
 ## When
 

@@ -1,8 +1,8 @@
 ---
 name: docs-sync
 description: >-
-  Use when the user types /docs-sync: runs doc-keeper on the repo's tech docs or wiki against the
-  working diff, a range or an audit.
+  Use when the user types /docs-sync or "aggiorna la documentazione": runs doc-keeper on tech docs
+  or wiki against the working diff or an audit.
 argument-hint: "[scope] [tech|wiki] [--audit]"
 disable-model-invocation: true
 ---

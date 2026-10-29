@@ -23,7 +23,7 @@ Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
 dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
-each at the end, then stop.
+each below, then stop.
 
 | # | Proposal | Reason | Risk |
 | --- | --- | --- | --- |
@@ -37,12 +37,12 @@ logic, testable; **low** cosmetic.
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
-- Chat `it`: `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
+- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
 
 ## Done means verified
-Never claim done, fixed, passing or verified without a command run this turn (reading code or a report isn't
-proof). A main-session answer that edited files ends with the table `Level|Command|Deciding line|Status`,
-never a code block; Deciding line = output line, verbatim. Status: `done`, `not verified: <reason>`
+Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
+isn't proof). A main-session edit answer opens with a `> **Verification**` table
+`Level|Command|Deciding line|Status`, no code block; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
 ## Search, no prompts

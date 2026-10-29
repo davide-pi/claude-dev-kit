@@ -2,7 +2,7 @@
 name: dotnet-diagnostics
 description: >-
   Use when evidence is needed from a running .NET service: metrics, profiles, counters,
-  traces, dumps; or deciding what to log or instrument.
+  traces, dumps; or what to log: "il servizio è lento".
 ---
 
 # dotnet-diagnostics — the instruments, production first
@@ -57,9 +57,10 @@ briefly there, never Debug globally — volume and cost bury the useful lines.
 # Local — the tools are NOT installed by default (install lines: references/tools.md)
 dotnet-counters ps
 dotnet-counters monitor -p <pid> --counters System.Runtime,Microsoft.AspNetCore.Hosting
-dotnet-trace collect -p <pid> --profile cpu-sampling -o trace.nettrace     # 30 s, under load
-dotnet-stack report -p <pid> > stacks.txt                                    # a hang: every thread
-dotnet-dump collect -p <pid> -o .\proc.dmp; dotnet-dump analyze .\proc.dmp
+$t = [IO.Path]::GetTempPath()                                                # outputs never land in the repo
+dotnet-trace collect -p <pid> --profile cpu-sampling -o "$t\trace.nettrace"  # 30 s, under load
+dotnet-stack report -p <pid> > "$t\stacks.txt"                               # a hang: every thread
+dotnet-dump collect -p <pid> -o "$t\proc.dmp"; dotnet-dump analyze "$t\proc.dmp"
 ```
 
 Collect **while it is bad**: a trace from after the incident describes a healthy process.

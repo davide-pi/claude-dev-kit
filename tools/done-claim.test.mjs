@@ -92,6 +92,21 @@ test('a "> **Dettaglio**" block is prose, not evidence', () => {
   assert.match(stop(edited('Done.\n\n> **Detail**\n> Moved the total into the service.')).reason, /"Done"/);
 });
 
+test('a quoted verdict title and table alone are prose, not evidence for a claim', () => {
+  const block = '> **Verifica**\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> | - | - | - | - |';
+  assert.match(stop(edited(`Fatto.\n\n${block}`)).reason, /"Fatto"/);
+  assert.match(stop(edited('Done.\n\n> **Verification**\n> | Level | Command |')).reason, /"Done"/);
+  // Real quoted output beside it still counts.
+  assert.equal(stop(edited(`Fatto.\n> 395 pass\n\n${block}`)).reason, '');
+});
+
+test('a section detail, quoted bullet lines, is prose, not evidence', () => {
+  const detail = '**Findings**\n\n| # | Sev |\n| --- | --- |\n| F1 | P2 |\n\n> - **F1**: the id stayed in `notesOpen`; fixed in `saveNote`.\n> - Two review rounds.';
+  assert.match(stop(edited(`Fatto.\n\n${detail}`)).reason, /"Fatto"/);
+  // A quoted output line among them still counts.
+  assert.equal(stop(edited(`Fatto.\n\n${detail}\n> 395 pass`)).reason, '');
+});
+
 test('English claims are caught too', () => {
   assert.match(stop(edited('Fixed the null check.')).reason, /"Fixed"/);
   assert.match(stop(edited('All tests passing now.')).reason, /"passing"/);

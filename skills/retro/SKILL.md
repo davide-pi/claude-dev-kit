@@ -1,8 +1,8 @@
 ---
 name: retro
 description: >-
-  Use when the user types /retro: mines a session's or the last days' friction, proposes
-  environment fixes and coaching advice, enforceable checks first. Proposes only.
+  Use when the user types /retro or "fai la retro": mines a session's or the last days' friction,
+  proposes fixes and coaching advice. Proposes only.
 argument-hint: "[session-id | current | days <n>] [focus | monthly | findings]"
 disable-model-invocation: true
 context: fork

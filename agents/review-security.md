@@ -90,13 +90,13 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
 Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
 
-Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `high` behaviour, data or a public contract · `medium` localized logic · `low` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
+Verdict line: `~/.claude/skills/code-review/references/finding-format.md`; order and field values: `report-format.md` § Fields in the same folder.
 
 Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
 is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink
 and the missing or present guard.
 
-Close with `Verdetto: N rilievi security (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)` and
+Close with the verdict line (`N security findings`) and
 one **surface summary** line: each entry point added or widened, guarded or not. Nothing wrong →
 one line with the surface mapped and the guards verified.
 

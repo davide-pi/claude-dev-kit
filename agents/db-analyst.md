@@ -105,8 +105,10 @@ a table (more → the count and the first 50), one reading line in the chat lang
 - impact · cause · evidence · change · cost of the change: one line each
 ## Index recommendation
 <fenced sql, first line `-- not applied: review, then ship through the project's migration path`, or "none" and why>
-Verdetto: <n> rilievi · guadagno maggiore: <#n> · non determinato: <the missing number>
+Verdict: <n> findings · biggest gain: <#n> · undetermined: <the missing number>
 ```
+
+At chat `it`: Verdict=Verdetto, findings=rilievi, biggest gain=guadagno maggiore, undetermined=non determinato.
 
 Nothing wrong is an answer: the plan is appropriate, what you checked, where the time really goes.
 Verbatim: SQL and DDL (comments inside included), operator, object, catalog view and wait names,

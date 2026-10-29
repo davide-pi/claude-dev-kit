@@ -16,8 +16,8 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
 
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
-  costCacheHit: 'cache',
-  cache: 'cache ',
+  costCacheHit: '\u{F09D1}', // nf-md-brain, the cache-hit icon of the status line
+  cache: '\u{F09D1} ',
   taskTitle: 'TASK',
   diffTitle: (file: string) => `diff · ${file}`,
   /** The four counters of an agent's row. */

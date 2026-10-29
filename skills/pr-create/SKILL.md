@@ -2,7 +2,7 @@
 name: pr-create
 description: >-
   Use when a pull request is opened or its title and description written: "open the PR", "ship
-  this branch", "write the PR description".
+  this branch", "apri la PR", "scrivi la descrizione".
 ---
 
 # pr-create — turn a pushed branch into a reviewable PR
@@ -75,18 +75,20 @@ git fetch origin $base
 git log --oneline "origin/$base..HEAD"; git diff --stat "origin/$base...HEAD"
 git diff --name-only "origin/$base...HEAD"            # the Release fan-out starts here
 git push --set-upstream origin (git branch --show-current)
-# body as a UTF-8 file: newlines and code fences survive the shell
-Set-Content -Path pr-body.md -Encoding utf8 -Value $body
+# body as a UTF-8 temp file, never in the repo: newlines and code fences survive the shell
+$bodyFile = New-TemporaryFile
+Set-Content -Path $bodyFile -Encoding utf8 -Value $body
+$draft = '<true|false: decided in §5>'
 
 # Azure DevOps — org and project from the ALM: line; one --description value per line
 az repos pr create --org $org -p $proj --repository <repo> --source-branch (git branch --show-current) `
-  --target-branch $base --title '<title>' --description (Get-Content pr-body.md -Encoding utf8) `
-  --work-items <id> --squash true --delete-source-branch true --draft false
+  --target-branch $base --title '<title>' --description (Get-Content $bodyFile -Encoding utf8) `
+  --work-items <id> --squash true --delete-source-branch true --draft $draft
 ```
 
 Merge intent goes on the **create** (squash + delete source branch): it reaches auto-complete and
 every CLI completion. The web dialog's Complete button is covered only by the `Limit merge types` →
-squash-only branch policy: suggest it where the repo lacks it. Then delete `pr-body.md` and report the
+squash-only branch policy: suggest it where the repo lacks it. Then `Remove-Item $bodyFile` and report the
 URL.
 
 ## Traps

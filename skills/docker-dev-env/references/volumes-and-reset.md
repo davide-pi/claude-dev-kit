@@ -45,7 +45,7 @@ Before destroying anything, state the compose project, the volume names, and wha
 If the data is not trivially reproducible, take a logical copy while the service is healthy:
 
 ```powershell
-docker compose exec -T postgres pg_dump -U app -d appdb -Fc | Set-Content .\appdb.dump -AsByteStream
+docker compose exec -T postgres pg_dump -U app -d appdb -Fc | Set-Content (Join-Path ([IO.Path]::GetTempPath()) appdb.dump) -AsByteStream
 docker compose exec -T sqlserver /opt/mssql-tools/bin/sqlcmd -S localhost -U sa -b `
   -Q "BACKUP DATABASE [App] TO DISK='/var/opt/mssql/backup/app.bak' WITH INIT"
 # RabbitMQ: definitions only, not messages

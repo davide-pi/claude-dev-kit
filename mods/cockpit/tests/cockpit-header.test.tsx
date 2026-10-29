@@ -244,7 +244,7 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
       },
     })
   // the title row reads as its text joined with the right side: CONTEXT, then the cache share
-  const title = async () => (await paneRows($)).rows.find(r => /^CONTEXT.*cache/.test(r))?.slice('CONTEXT'.length)
+  const title = async () => (await paneRows($)).rows.find(r => /^CONTEXT.*\u{F09D1}/u.test(r))?.slice('CONTEXT'.length)
 
   expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
@@ -252,9 +252,9 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
   await complete({ input: 0, read: 0, write: 0 })
   expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 })
-  expect(await title()).toBe('cache  94%')
+  expect(await title()).toBe('\u{F09D1}  94%')
   await complete({ input: 9_000, read: 500, write: 500 })
-  expect(await title()).toBe('cache   5%')
+  expect(await title()).toBe('\u{F09D1}   5%')
 })
 
 // ── The header's context warning ──
@@ -300,12 +300,12 @@ test('a session start (/clear) forgets the cache share', async ($, on) => {
     usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
   })
   const before = (await paneRows($)).rows
-  expect(before.some(r => /^CONTEXT.*cache {2}94%/.test(r))).toBe(true)
+  expect(before.some(r => /^CONTEXT.*\u{F09D1} {2}94%/u.test(r))).toBe(true)
 
   id = 's-2'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const after = (await paneRows($)).rows
-  expect(after.some(r => /cache/.test(r))).toBe(false)
+  expect(after.some(r => /\u{F09D1}/u.test(r))).toBe(false)
 })
 
 test('layout: the content is min(bodyColumns, 60) - 2 wide with one column of margin each side, at 40, 58 and 80 columns', async ($, on) => {
@@ -349,7 +349,7 @@ test('header: above the tab bar on every tab, with the model, effort, state, ses
     expect(header.some(r => /25% 248K\/1M/.test(r))).toBe(true)
     expect(header.some(r => /5h/.test(r))).toBe(true)
     expect(header.some(r => /7d/.test(r))).toBe(true)
-    expect(header.some(r => /cache {2}94%/.test(r))).toBe(true)
+    expect(header.some(r => /\u{F09D1} {2}94%/u.test(r))).toBe(true)
   }
 })
 
@@ -487,7 +487,7 @@ test('header: CONTEXT and CREDITS each have an empty row before and after the ti
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
   const context = at(/^CONTEXT/)
   const credits = at(/^CREDITS/)
-  expect(rows[context]).toBe('CONTEXTcache  94%')
+  expect(rows[context]).toBe('CONTEXT\u{F09D1}  94%')
   expect(rows[context - 1]).toBe(' ')
   expect(rows[context - 2]).toMatch(/^─+$/) // a rule between the model / ALM block and the CONTEXT block
   expect(rows[context + 1]).toBe(' ')

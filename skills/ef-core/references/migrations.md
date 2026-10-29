@@ -33,8 +33,9 @@ dotnet ef migrations has-pending-model-changes -c <Ctx> -p <proj> -s <startup>
 dotnet ef migrations add <Name> -c <Ctx> -p <proj> -s <startup>
 
 # 5. Show the SQL and STOP. No database is touched in this step.
-dotnet ef migrations script <PreviousMigration> <Name> --idempotent -o .\migration.sql -c <Ctx> -p <proj> -s <startup>
-Select-String -Path .\migration.sql -Pattern 'DROP TABLE|DROP COLUMN|DROP CONSTRAINT|DROP INDEX|TRUNCATE|ALTER COLUMN'
+$sql = Join-Path ([IO.Path]::GetTempPath()) 'migration.sql'      # never a file in the repo
+dotnet ef migrations script <PreviousMigration> <Name> --idempotent -o $sql -c <Ctx> -p <proj> -s <startup>
+Select-String -Path $sql -Pattern 'DROP TABLE|DROP COLUMN|DROP CONSTRAINT|DROP INDEX|TRUNCATE|ALTER COLUMN'
 #    State: tables touched, destructive statements, whether Down truly inverts Up, and whether a
 #    table with rows needs a backfill the migration lacks. Then ask for confirmation in one line.
 
@@ -130,9 +131,10 @@ Never run `database update` against them. Generate a script, review it, hand it 
 owns the deployment.
 
 ```powershell
-dotnet ef migrations script --idempotent --output .\deploy.sql        # everything, safe to re-run
-dotnet ef migrations script <From> <To> --idempotent --output .\delta.sql
-dotnet ef migrations bundle --self-contained --output .\efbundle.exe  # an executable the pipeline runs
+$out = [IO.Path]::GetTempPath()                                       # never a file in the repo
+dotnet ef migrations script --idempotent --output "$out\deploy.sql"   # everything, safe to re-run
+dotnet ef migrations script <From> <To> --idempotent --output "$out\delta.sql"
+dotnet ef migrations bundle --self-contained --output "$out\efbundle.exe"  # an executable the pipeline runs
 ```
 
 Always `--idempotent`: a non-idempotent script run twice fails halfway and leaves the database in a

@@ -2,7 +2,7 @@
 name: deliver
 description: >-
   Use when any code change is asked, before the first edit: bug fix, performance, refactor,
-  migration, feature or feasibility probe.
+  migration, feature, feasibility probe; "implementa", "correggi".
 ---
 
 # deliver — every code change: triage, perimeter, loop, tests, verdict

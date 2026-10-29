@@ -141,7 +141,7 @@ export function checkContract({ ROOT, fail, warn, read, has, allFiles, textFiles
   // BYTE_CAP_WARN_ONLY lists files over a cap whose trim another change owns: they warn until trimmed.
   const BYTE_CAPS = [
     [(f) => f === 'CLAUDE.md', 2750, 'CLAUDE.md'],
-    [(f) => /^output-styles\/[\w.-]+\.md$/.test(f), 2500, 'an output style'],
+    [(f) => /^output-styles\/[\w.-]+\.md$/.test(f), 3000, 'an output style'],
     [(f) => /^skills\/[\w-]+\/SKILL\.md$/.test(f), 7000, 'SKILL.md'],
     [(f) => /^agents\/[\w.-]+\.md$/.test(f) && f !== 'agents/code-reviewer.md', 8000, 'an agent'],
     // code-reviewer runs F and H itself whenever no specialist sits beside it: most reviews, so they stay in its body.

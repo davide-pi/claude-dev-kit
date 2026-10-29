@@ -1,5 +1,5 @@
 ---
-paths: "**/*.component.ts,**/*.module.ts,**/angular.json"
+paths: "**/*.component.ts,**/*.component.html,**/*.module.ts,**/*.service.ts,**/*.directive.ts,**/*.pipe.ts,**/*.guard.ts,**/angular.json"
 ---
 # Angular — house facts
 

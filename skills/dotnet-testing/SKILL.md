@@ -2,7 +2,7 @@
 name: dotnet-testing
 description: >-
   Use when a .NET test is written, fixed or proposed: should this change be tested, regression
-  test, first test project, mock or fake, flaky suite.
+  test, mock or fake, flaky suite; "scrivi i test".
 paths: "**/*Tests*/**/*.cs,**/*.Tests.csproj"
 ---
 

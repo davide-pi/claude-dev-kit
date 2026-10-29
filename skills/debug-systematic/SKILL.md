@@ -1,8 +1,8 @@
 ---
 name: debug-systematic
 description: >-
-  Use when a bug, exception, wrong result, hang, crash or failing test has no proven cause, flaky
-  or CI-only included.
+  Use when a bug, exception, wrong result, hang, crash or failing test has no proven cause:
+  "non funziona", "trova il bug", flaky or CI-only included.
 ---
 
 # debug-systematic — evidence before the fix

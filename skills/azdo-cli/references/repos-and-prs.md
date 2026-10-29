@@ -58,7 +58,7 @@ az repos pr create --repository <repo> -p <project> `
   --title '<title>' --description '<first line>' '<second line>' `
   --work-items <id1> <id2> `
   --required-reviewers '<upn>' --optional-reviewers '<upn>' `
-  --squash true --delete-source-branch true --draft false
+  --squash true --delete-source-branch true --draft <true|false>   # decided per pr-create §5
 ```
 
 | Flag | Note |

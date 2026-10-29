@@ -9,7 +9,7 @@ Copy the shape, then fill it. The skeleton is the contract, not a style choice.
 name: <same as the folder>
 description: >-
   Use when <situation>, <situation> or <symptom the user types> — <file types, if the skill owns
-  them>.            # ≤ 25 words, third person, trigger terms first
+  them>.            # word cap: SKILL.md § 2; third person, trigger terms first
 ---
 
 # <name> — <one-line purpose>
@@ -90,7 +90,7 @@ paths: "**/*.ext,**/Folder/**"
 Procedure: skill `<name>`.
 ```
 
-≤ 25 lines. `paths` is one comma-separated **string** (a YAML list was silently ignored). Facts a
+Rule cap: `SKILL.md` § 2. `paths` is one comma-separated **string** (a YAML list was silently ignored). Facts a
 re-read recovers: after `/compact` a `paths` rule is summarised away until the next matching read.
 
 ## Agent
@@ -99,7 +99,7 @@ re-read recovers: after `/compact` a `paths` rule is summarised away until the n
 ---
 name: <same as the filename>
 description: >-
-  Use proactively when <situation the caller is in>.      # ≤ 25 words
+  Use proactively when <situation the caller is in>.      # word cap: SKILL.md § 2
 tools: Read, Grep, Glob          # least privilege
 model: sonnet
 effort: medium
@@ -127,7 +127,7 @@ omitClaudeMd: true               # when the body defines everything it needs
 | `memory: project` | only with Write or Edit in `tools` (otherwise nothing is ever written); scope resolves against the launch directory |
 | `mcpServers` | an **inline** definition keeps the server out of the main thread; a name reference shares the parent's connection |
 | `skills` | preload the stack skill the agent always needs |
-| body | ≤ 110 lines; a routing line in some skill or `CLAUDE.md` names the agent, or nothing reaches it |
+| body | within the agent cap (`SKILL.md` § 2); a routing line in some skill or `CLAUDE.md` names the agent, or nothing reaches it |
 
 ## Hook
 
@@ -165,10 +165,10 @@ Registration lives in `settings.json` (`update-config`).
 
 | # | Check | How |
 | --- | --- | --- |
-| 1 | Caps | SKILL.md ≤ 120, reference ≤ 200, rule ≤ 25, agent body ≤ 110 |
-| 2 | Skeleton | contract line, the six headings in order, `Not for:` with ≤ 3 items |
+| 1 | Caps | every cap in `SKILL.md` § 2 Caps row |
+| 2 | Skeleton | contract line, the six headings in order, `Not for:` within its item cap (§ 2 Skeleton row) |
 | 3 | `## Decide` carries the substance | tables or a tree, in the top half |
-| 4 | Description | ≤ 25 words, `Use when …`, triggers first; `/<name>` and the flag on a user-invoked skill |
+| 4 | Description | within the word cap, `Use when …`, triggers first; `/<name>` and the flag on a user-invoked skill |
 | 5 | Fork skill self-contained | inputs, defaults and report shape restated; `background: false` |
 | 6 | No restatement | of `CLAUDE.md`, a plugin, or another asset — one owner, routing lines elsewhere |
 | 7 | Identity | placeholders only |
