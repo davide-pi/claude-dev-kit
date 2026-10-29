@@ -17,7 +17,7 @@ const CTX_TOKENS_W = 6
 const CTX_SHARE_W = 5
 const CTX_MARK_W = 2
 const CTX_DELTA_W = 6
-/** The colors of the used categories, in turn; the compaction buffer is dim and the free space empty. */
+/** The colors of the used categories, in turn; the bar alone also draws the compaction buffer, dim. */
 const CATEGORY_COLORS = [COLORS.blue, COLORS.lavender, COLORS.amber, COLORS.green, COLORS.yellow, COLORS.orange, COLORS.violet, COLORS.gray]
 
 /** The bar of the window: a part per used category (each its own color) and the compaction buffer; the rest stays empty. */
@@ -52,13 +52,12 @@ export function categorySpans(r: CockpitContextRow, color: string, bg: string, m
   return withBackground(row, r.tokens > 0 && max > 0 ? Math.max(1, Math.round((width * r.tokens) / max)) : 0, bg)
 }
 
-/** The rows of the table, in the order the reading holds them (biggest first): the categories inside the window (a deferred one is outside it), colored as the bar colors them. */
+/** The rows of the table, in the order the reading holds them (biggest first): the used categories (not the free space, the compaction buffer or a deferred one), colored as the bar colors them. */
 export function categoryRows(c: CockpitContext, width: number): Span[][] {
   let n = 0
   return c.rows.flatMap(r => {
-    if (r.kind === 'deferred') return []
-    const color = r.kind === 'free' ? COLORS.empty : r.kind === 'buffer' ? COLORS.dim : (CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray)
-    // the free space is drawn from a dim gray, whose own square is nearly invisible
-    return [categorySpans(r, color, shade(r.kind === 'free' ? COLORS.gray : color, r.kind === 'free' ? 0.2 : 0.32), c.max, width)]
+    if (r.kind !== 'used') return []
+    const color = CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray
+    return [categorySpans(r, color, shade(color, 0.32), c.max, width)]
   })
 }
