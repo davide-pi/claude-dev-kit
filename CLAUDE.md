@@ -23,7 +23,7 @@ Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
 dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
-each at the end, then stop.
+each below, then stop.
 
 | # | Proposal | Reason | Risk |
 | --- | --- | --- | --- |
@@ -41,7 +41,7 @@ logic, testable; **low** cosmetic.
 
 ## Done means verified
 Never claim done, fixed, passing or verified without a command run this turn (reading code or a report isn't
-proof). A main-session answer that edited files ends with the table `Level|Command|Deciding line|Status`,
+proof). A main-session answer that edited files opens with the table `Level|Command|Deciding line|Status`,
 never a code block; Deciding line = output line, verbatim. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 

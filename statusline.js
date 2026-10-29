@@ -196,8 +196,7 @@ function cachedByCwd(name, cwd, ttlMs, fn) {
 const ICONS = {
   folder: "\u{F024B}", // nf-md-folder          - cwd, or the worktree root inside a linked worktree
   branch: "\u{F062C}", // nf-md-source_branch  - git branch
-  brain:  "\u{F09D1}", // nf-md-brain    - context window (Material Design set: fa-brain is missing from the font)
-  gauge:  "\u{F029A}", // nf-md-gauge    - rate limits (fa-gauge is missing from the font)
+  brain:  "\u{F09D1}", // nf-md-brain    - prompt-cache hit (Material Design set: fa-brain is missing from the font)
   vim:    "\uF408", // nf-dev-vim        - vim mode
   clock:  "\uF017", // nf-fa-clock_o     - working days whose hours are not logged
   snow:   "\uF2DC", // nf-fa-snowflake_o - prompt cache expired
@@ -301,7 +300,7 @@ function segCacheHit(usage) {
   if (![read, total].every((n) => Number.isFinite(n) && n >= 0) || total === 0) return "";
   const pct = Math.round(read / total * 100);
   const col = pct >= 80 ? C.green : pct >= 50 ? C.amber : C.red;
-  return ` ${col}⚡${pct}%${R}`;
+  return ` ${col}${ICONS.brain} ${pct}%${R}`;
 }
 
 // The percentage alone doesn't say how much room is left in absolute terms, and
@@ -318,7 +317,7 @@ function segContext(ctx) {
   const used   = abbrevTokens(ctx?.total_input_tokens);
   const total  = abbrevTokens(ctx?.context_window_size);
   const tok    = (used && total) ? ` ${DIM}(${used}/${total})${R}` : "";
-  return `${ICONS.brain} ${bar} ${col}${pctStr}${R}${tok}${segCacheHit(ctx?.current_usage)}`;
+  return `${bar} ${col}${pctStr}${R}${tok}${segCacheHit(ctx?.current_usage)}`;
 }
 
 // Per-session context snapshot for hooks/lib/context-size.js (done-claim), which runs on
@@ -534,23 +533,22 @@ function reconcileCached() {
   return out;
 }
 
-// One segment per rate-limit window, labelled `5h` / `7d` (dim) and, for the first present one, led by the
-// gauge icon. `stale` marks values sourced from the cache (last-known, not live) with a dim "~" so they
+// One segment per rate-limit window, labelled `5h` / `7d` (dim). `stale` marks values sourced from the cache (last-known, not live) with a dim "~" so they
 // aren't mistaken for a fresh reading.
 function segRateWindows(rl, stale) {
   if (!rl) return [];
   const mark = stale ? `${DIM}~${R}` : "";
-  const win = (w, windowSec, label, pace, icon) => {
+  const win = (w, windowSec, label, pace) => {
     const { used_percentage: u, resets_at: r } = w;
     const col = rateColor(u, r, windowSec);
     const rem = Math.round(100 - u);
     // Pacing is a weekly notion: over five hours the target moves too fast to act on.
     const pc  = pace ? weeklyPace(rem, r, windowSec) : "";
-    return `${icon ? `${icon} ` : ""}${DIM}${label}${R} ${mark}${col}${rem}%${R}${fmtCountdown(r)}${pc}`;
+    return `${DIM}${label}${R} ${mark}${col}${rem}%${R}${fmtCountdown(r)}${pc}`;
   };
   const segs = [];
-  if (rl.five_hour != null) segs.push(win(rl.five_hour, 18000,  "5h", false, ICONS.gauge));
-  if (rl.seven_day != null) segs.push(win(rl.seven_day, 604800, "7d", true,  segs.length ? "" : ICONS.gauge));
+  if (rl.five_hour != null) segs.push(win(rl.five_hour, 18000,  "5h", false));
+  if (rl.seven_day != null) segs.push(win(rl.seven_day, 604800, "7d", true));
   return segs;
 }
 

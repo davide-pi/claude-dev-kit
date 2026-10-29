@@ -22,7 +22,7 @@
  *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
  *     inline code;
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
- *     `> **Detail**` / `> **Dettaglio**` block is prose, not output), no inline `` `command` → result ``, no honest
+ *     `> **Detail**` / `> **Dettaglio**` block and a `> - ` bullet line are prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
  * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table) is judged row by row
@@ -96,6 +96,8 @@ const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|ese
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Detail**` (chat `it`: `Dettaglio`) block: the quoted lines that follow it are depth for the reader, not output. */
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
+/** A section's detail: quoted bullet lines (`> - …`), prose like the block above, never tool output. */
+const DETAIL_BULLET = /^[ \t]*>[ \t]*[-*][ \t].*$/gm;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
 /** The `deliver` verdict table's header; its rows are the contiguous `|` lines that follow. */
@@ -308,7 +310,7 @@ function readTurn(entries, truncated = false) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, ''))) return null;
+  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
   const found = prose.match(CLAIM);
   return found ? found[1] ?? found[2] : null;

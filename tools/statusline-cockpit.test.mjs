@@ -210,17 +210,17 @@ test('cache hit: read / (read + creation + input) of the last turn, right of the
   // 90 / (90 + 5 + 5) = 90 % green; 60 / 100 = 60 % amber; 10 / 100 = 10 % red
   for (const [read, creation, input, pct, col] of [[90, 5, 5, 90, GREEN], [60, 30, 10, 60, AMBER], [10, 80, 10, 10, RED], [80, 10, 10, 80, GREEN], [50, 40, 10, 50, AMBER]]) {
     const raw = renderUsage({ cache_read_input_tokens: read, cache_creation_input_tokens: creation, input_tokens: input, output_tokens: 7 });
-    assert.ok(plain(raw).includes("(248K/1M) ⚡" + pct + "%"), plain(raw));
-    assert.ok(raw.includes(`${col}⚡${pct}%`), `${pct} % is coloured ${col}`);
+    assert.ok(plain(raw).includes("(248K/1M) \u{F09D1} " + pct + "%"), plain(raw));
+    assert.ok(raw.includes(`${col}\u{F09D1} ${pct}%`), `${pct} % is coloured ${col}`);
   }
 });
 
 test('cache hit: absent with no usage, a null usage, a zero total or a bad number', () => {
   for (const usage of [undefined, null, {}, { cache_read_input_tokens: 0, cache_creation_input_tokens: 0, input_tokens: 0 }, { cache_read_input_tokens: 'x', input_tokens: 5 }]) {
-    assert.doesNotMatch(plain(renderUsage(usage)), /⚡/);
+    assert.doesNotMatch(plain(renderUsage(usage)), /\u{F09D1}/u);
   }
   // a provider that reports no cache tokens but plain input: 0 % is a reading, not an absence
-  assert.match(plain(renderUsage({ input_tokens: 100 })), /⚡0%/);
+  assert.match(plain(renderUsage({ input_tokens: 100 })), /\u{F09D1} 0%/u);
 });
 
 /** Renders with a pre-written git cache entry of `ageMs` for a directory that is no repository: the branch shows only when the entry is reused. */
