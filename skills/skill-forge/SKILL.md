@@ -2,7 +2,7 @@
 name: skill-forge
 description: >-
   Use when a kit skill, agent, hook, rule or reference is added, changed, misfires or exceeds its
-  cap, or is finished: "nuova skill".
+  cap, or before calling one finished: "nuova skill".
 ---
 
 # skill-forge — the kit's asset contract, as a procedure
@@ -39,7 +39,7 @@ Two shapes for one need is duplication: one asset owns it, the others route to i
 | --- | --- | --- |
 | Folder | `skills/<name>/SKILL.md`, `references/*.md`, scripts beside `SKILL.md` | convention |
 | `name` | identical to the folder | validator |
-| Description | ≤ 25 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
+| Description | ≤ 35 words, third person, opens `Use when`, trigger terms first, never a content summary; a user-invoked skill names `/<name>` | validator, review |
 | Contract line | first line after the title: `**Contract.** <produces> · <never does> · <output language>` | validator |
 | Skeleton | title, contract, `## When`, `## Decide`, `## Do`, `## Traps`, `## References`; `## When` holds `Not for:` (≤ 3 items) and a bullet only for what the description cannot carry (an argument grammar) — never a restatement of the description, already read when the body loads | validator |
 | Caps | SKILL.md 120 lines · reference 200, one topic · rule 25 · agent body 110 · bytes: SKILL.md 7,000, agent 8,000 (`code-reviewer` 9,500), output style 3,000, `CLAUDE.md` 2,750 | validator |

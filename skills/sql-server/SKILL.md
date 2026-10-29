@@ -1,8 +1,8 @@
 ---
 name: sql-server
 description: >-
-  Use when T-SQL or Postgres SQL is written or reviewed, a query is slow or deadlocks, an index
-  proposed, Npgsql read-cache changes; "query lenta".
+  Use when T-SQL or Postgres SQL is written or reviewed, a query or procedure is slow or deadlocks,
+  an index proposed, or Npgsql read-cache changes; "query lenta".
 paths: "**/*.sql"
 ---
 

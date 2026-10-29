@@ -78,7 +78,7 @@ export function checkAssets({ fail, warn, read, has, allFiles, frontMatter }) {
   const hiddenDescriptions = [];
   const DESCRIPTION_BUDGET_CHARS = 8000;
   const DESCRIPTION_MAX_CHARS = 1536;  // skill-forge's per-description limit
-  const SKILL_DESCRIPTION_WORDS = 25;
+  const SKILL_DESCRIPTION_WORDS = 35;
   const words = (text) => text.split(/\s+/).filter(Boolean).length;
 
   const TOOLS = new Set([

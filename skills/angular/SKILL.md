@@ -1,8 +1,8 @@
 ---
 name: angular
 description: >-
-  Use when Angular code changes or breaks: `*.component.ts`, `angular.json`, specs; a view not
-  updating, a leaking subscription, TestBed failing; "la vista non si aggiorna".
+  Use when Angular code changes or breaks: `*.component.ts`, `*.module.ts`, `angular.json`, specs; a view not
+  updating, a leaking subscription, a double request, TestBed failing; "la vista non si aggiorna".
 paths: "**/angular.json,**/*.component.ts,**/*.component.html,**/*.module.ts"
 ---
 
