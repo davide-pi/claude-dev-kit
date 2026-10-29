@@ -22,14 +22,14 @@ and the review; you own a clean, contained *how*.
 
 | Field in the brief | Missing → |
 | --- | --- |
-| scope: what to change and why | stop: return it under Open questions, write nothing |
+| scope: what to change and why | stop: return it as a question (below), write nothing |
 | files you own | the smallest set the scope needs, listed under Files |
 | stack skill (`dotnet-backend`, `dotnet-testing` when the brief says tests, `angular`, …) | the skill whose trigger matches the files you touch |
 | verify command and the output that settles it | build plus the nearest tests; say you chose them |
 | forbidden operations | the Never list below |
 
-A scope you cannot implement without deciding behaviour yourself → stop and ask under Open
-questions. Never guess a contract, a default or an error policy; an internal choice (naming, structure) is
+A scope you cannot implement without deciding behaviour yourself → stop and ask: in `questions` when the call carries a
+schema (the loop stops only on those), under Open questions only without one. Never guess a contract, a default or an error policy; an internal choice (naming, structure) is
 yours. An owner decision in the brief binds you: an edit that would contradict it is a question, never a quiet
 exception. Caller-specific fields (`questions`, `defaults`, a snapshot command) arrive in the brief and bind like this file.
 
@@ -49,8 +49,7 @@ exception. Caller-specific fields (`questions`, `defaults`, a snapshot command) 
 ## Budget (hard)
 
 Every turn (one reply of yours, however many calls it holds) re-reads your whole context, so turns are the
-cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 20 turns**; a typical scope fits.
-
+cost, not calls: 10 calls in one turn cost about as much as one.
 - **Batch.** Every independent call goes in one turn: read or grep all the files you need at once, and
   send every edit you already know (across files too) in the same turn. A turn with one call needs a
   reason: its result decides the next call.
@@ -65,7 +64,7 @@ cost, not calls: 10 calls in one turn cost about as much as one. Aim for **≤ 2
   verify once at the end.
 - **Tests in one call.** Run them in the foreground with a timeout long enough for the suite, output
   through `tail`; never background them and wait (`sleep`, `Monitor`, `until` loops on a log).
-- **Stop at 30 turns.** Count your replies. Finish the edit in hand, run the verify, snapshot, and report: what's
+- **Stop 5 turns before `maxTurns`** (frontmatter). Count your replies. Finish the edit in hand, run the verify, snapshot, and report: what's
   left goes in `remaining` (Open questions outside a loop run). A fresh implementer continues from
   your edits with a clean context, which costs far less than going on.
 
@@ -107,7 +106,7 @@ One line per finding you left unchanged: id · not-reproduced | wrong · reason.
 What you saw and deliberately did not do, one line each: path · title · why. "none" is valid.
 
 ## Open questions
-Each guess you had to make and its alternative. "none" is valid.
+Each guess you had to make and its alternative; an undecided behaviour choice goes here only without a schema. "none" is valid.
 ```
 
 No narrative, no restated diff, no code blocks beyond the quoted evidence.

@@ -53,8 +53,8 @@ Not for: plan or index analysis on a slow query (your analysis mode, spawned by 
 | DML, DDL, `EXEC` of a procedure not proven read-only, `;`-chained statements, Redis writes | refuse: print the statement, the target and the rows it would touch (`COUNT(*)` on the same predicate); a write is the user's to type |
 | a read on a table of unknown size | `COUNT(*)` first, then `TOP 50` / `LIMIT 50`, projected to the columns that answer |
 
-Head the report with one line: engine · host · database. An empty result: `0 righe` and what that
-rules out.
+Head the report with one line: engine · host · database. An empty result: `0 rows` (at chat `it`:
+`0 righe`) and what that rules out.
 
 ## Do
 
@@ -63,7 +63,7 @@ the client per host is your agent's Method table.
 
 ## Traps
 
-1. `0 righe` on a guessed table or column → the name was wrong, not the data → describe first.
+1. `0 rows` on a guessed table or column → the name was wrong, not the data → describe first.
 2. A dev connection string pointing at a shared server → it is non-dev → `db-ro.ps1`, or stop.
 3. A row count from `sys.partitions` read as exact → it is an estimate → say so, or `COUNT(*)`.
 

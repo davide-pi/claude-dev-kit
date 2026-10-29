@@ -3,8 +3,8 @@
 ## Effort sets depth, the ladder sets who
 
 Who is spawned and on which model: `report-format.md` § "Who reviews, on which model". Effort here is review
-depth, written in the brief (the agent's "Effort → Passes" table); the agents' reasoning effort stays their own
-default. It tells every agent how deep to go:
+depth: passed as the `effort` parameter of every Agent call and also written in the brief (the agent's
+"Effort → Passes" table), so each agent knows how deep to go:
 
 | Effort | Depth asked of each agent |
 | --- | --- |
