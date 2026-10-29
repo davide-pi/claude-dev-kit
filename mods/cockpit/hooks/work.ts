@@ -95,7 +95,16 @@ export function azureRepo(url: string): { project?: string; repo: string } | und
   return isOrgOnly ? { repo } : { project, repo }
 }
 
-/** `gh pr view --json number,title,url` -> the pull request as a link (number, title, address); undefined for any other text. */
+/** A pull request's state from a CLI's words: `gh` (`OPEN`, `MERGED`, `CLOSED`) and `az` (`active`, `completed`, `abandoned`), a draft being an open one flagged so; none for words it does not know. */
+function prState(status: unknown, isDraft: unknown): CockpitPr['state'] {
+  const word = typeof status === 'string' ? status.toLowerCase() : ''
+  if (word === 'open' || word === 'active') return isDraft === true ? 'draft' : 'open'
+  if (word === 'merged' || word === 'completed') return 'merged'
+  if (word === 'closed' || word === 'abandoned') return 'closed'
+  return undefined
+}
+
+/** `gh pr view --json number,title,url,state,isDraft` -> the pull request as a link (number, title, address, state); undefined for any other text. */
 export function parseGithubPr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
@@ -103,7 +112,8 @@ export function parseGithubPr(out: string): CockpitPr | undefined {
     const { number, title, url } = parsed
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
     const link = safeUrl(url)
-    return { number, title: typeof title === 'string' ? title : '', ...(link !== undefined && { url: link }) }
+    const state = prState(parsed.state, parsed.isDraft)
+    return { number, title: typeof title === 'string' ? title : '', ...(link !== undefined && { url: link }), ...(state !== undefined && { state }) }
   } catch {
     return undefined
   }
@@ -121,17 +131,18 @@ function azureUrl(pr: Record<string, unknown>, number: number): { url?: string }
 }
 
 /**
- * `az repos pr list --output json` -> the first pull request as a link. The address is the repository's web address with the pull
- * request's path, when the list names one.
+ * `az repos pr list --output json` (the first pull request of the list) or `az repos pr show` (the one record) -> the pull request as a link.
+ * The address is the repository's web address with the pull request's path, when the record names one.
  */
 export function parseAzurePr(out: string): CockpitPr | undefined {
   try {
     const parsed: unknown = JSON.parse(out)
-    const pr = Array.isArray(parsed) ? parsed[0] : undefined
+    const pr = Array.isArray(parsed) ? parsed[0] : parsed
     if (!isRecord(pr)) return undefined
     const { pullRequestId: number, title } = pr
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0) return undefined
-    return { number, title: typeof title === 'string' ? title : '', ...azureUrl(pr, number) }
+    const state = prState(pr.status, pr.isDraft)
+    return { number, title: typeof title === 'string' ? title : '', ...azureUrl(pr, number), ...(state !== undefined && { state }) }
   } catch {
     return undefined
   }
@@ -430,7 +441,8 @@ export function parseSavedPrs(value: unknown): CockpitPr[] {
     const { number, title, url } = v
     if (typeof number !== 'number' || !Number.isInteger(number) || number <= 0 || typeof title !== 'string') continue
     const link = safeUrl(url)
-    out.push({ number, title, ...(link !== undefined && { url: link }) })
+    const state = v.state === 'draft' ? 'draft' : prState(v.state, false)
+    out.push({ number, title, ...(link !== undefined && { url: link }), ...(state !== undefined && { state }) })
   }
   return out
 }

@@ -429,7 +429,7 @@ test('session data: a resume brings back the history, the PRs, the notes and the
   await ui.press({ key: 'tab:notes' })
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:3', 'note:send:5'])
   await ui.press({ key: 'tab:work' })
-  expect(rowTexts(await ui.drawn())).toContain('LINKS · 1')
+  expect(rowTexts(await ui.drawn())).toContain('PR · 1')
   await ui.unmount()
   // written back as it was read
   expect(dataOf(writes)).toMatchObject({ notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }], ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
@@ -478,7 +478,7 @@ test('session data: once the data file exists the old place is never read again,
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
   expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
-  expect(rowTexts(await ui.drawn()).some(r => /^PR ·/.test(r))).toBe(false)
+  expect(rowTexts(await ui.drawn()).some(r => /^PR · [1-9]/.test(r))).toBe(false)
   await ui.unmount()
 })
 
@@ -512,7 +512,7 @@ test('last known: before the first live reading the credits come from the status
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
+  const text = async (re: RegExp) => rowTexts(await ui.drawn()).find(r => re.test(r))
   expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% ↻ +1h00m · /)
   expect(await text(/7d [▰▱]+ ~80%/)).toMatch(/ · 7d [▰▱]+ ~80% /)
   await measureWith($, 25, [{ kind: 'five_hour', percentUsed: 30, resetsAt: iso(3600_000) }])
@@ -528,7 +528,7 @@ test('last known: each window is drawn from the engine when it has that kind, el
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
+  const text = async (re: RegExp) => rowTexts(await ui.drawn()).find(r => re.test(r))
   await measureWith($, 25, [{ kind: 'seven_day', percentUsed: 10, resetsAt: iso(86_400_000) }])
   await settleAll()
   expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% .* · 7d /) // only the 7d is live: the 5h row does not vanish
@@ -541,7 +541,7 @@ test('last known: a cache window that is over reads 100 % left with no countdown
   world(on, { rateLimits: [], files: { [RL_FILE]: JSON.stringify({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 60 } }) } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  expect((await ui.find({ type: 'Text', text: /^5h / }))?.text).toMatch(/^5h [▰▱]+ ~100% {9}$/) // the countdown's cells stay, blank
+  expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [▰▱]+ ~100% {9}$/) // the countdown's cells stay, blank
   await ui.unmount()
 })
 

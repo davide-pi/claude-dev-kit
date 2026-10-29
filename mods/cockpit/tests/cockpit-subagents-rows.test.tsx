@@ -27,7 +27,8 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     const row = collapsed.filter(r => /^󱎖 a-co/.test(r))
     expect(row).toHaveLength(1)
     expect(textCells(row[0] ?? '')).toBe(width)
-    expect(row[0]).toMatch(/^󱎖 a-co[^ ]*… +son 5\.5(?: +\S+)? +2m00s$/)
+    // no usage read yet: the cost cell stays blank, never a made-up $0.00
+    expect(row[0]).toMatch(/^󱎖 a-co[^ ]*… [^$]* +2m00s$/)
     expect(collapsed.some(r => /Review the orders|last tool|󰀦/.test(r))).toBe(false)
 
     // expanded: every row of the block is one line, none wider than the pane
@@ -35,7 +36,9 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     const expanded = await body()
     expect(expanded.length).toBeGreaterThan(collapsed.length + 2)
     for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
-    expect(expanded.find(r => /^ +Review the orders/.test(r))).toMatch(/…$/)
+    // the description wraps instead of being cut: no expanded row ends in …, and the whole text is there
+    expect(expanded.filter(r => /^ /.test(r)).some(r => /…$/.test(r))).toBe(false)
+    expect(expanded.filter(r => /^ /.test(r)).map(r => r.trim()).join(' ')).toContain('Review the orders filter and every test around it, then report back')
     expect(expanded.filter(r => !/^󱎖 a-co/.test(r)).some(r => /son 5\.5/.test(r))).toBe(false) // no facts row: the model, effort and time are in the agent row
     expect(expanded.some(r => /^ +󰀦 asked fable/.test(r))).toBe(true)
     expect(expanded.some(r => /^ +last tool Grep$/.test(r))).toBe(true)

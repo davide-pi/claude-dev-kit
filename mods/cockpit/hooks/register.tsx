@@ -44,7 +44,7 @@ import {
   slowTick,
 } from './refresh'
 import { diffActions, paneActions } from './pane-actions'
-import { cacheHit, usdOf } from './pricing'
+import { usdOf } from './pricing'
 import { scheduleContextRead } from './refresh-context'
 import { refreshGit } from './refresh-git'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
@@ -543,7 +543,7 @@ export const register: Register = on => {
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
           events: ended
-            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage), hit: cacheHit(ended.usage) })
+            ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage) })
             : s.events,
         }
       })
@@ -558,7 +558,9 @@ export const register: Register = on => {
         void setOpen($, true).then(() => refreshOnOpen($)).catch(() => undefined)
       })
     }
-    const ui = $.ui.resolve(e)
+    // Only the terminal and the desktop run a surface module: any other surface (mobile, vscode, one to come) draws its bars static, whatever the table resolved
+    const table = $.ui.resolve(e)
+    const ui = e.surface === 'terminal' || e.surface === 'desktop' ? table : { ...table, Client: undefined }
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {

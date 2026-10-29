@@ -21,7 +21,7 @@ import { NOW, dataOf, flagOf, rowTexts, world } from './cockpit-world'
 /** The share of the session's tokens each Subagents row ends with, as `12%`, in the order the rows draw them. */
 const shares = (rows: string[]) =>
   rows.flatMap(r => {
-    const m = /^[󱎖󰄬󰅖󰓛] .* (<?\d+%) +\S+$/u.exec(r)
+    const m = /^[󱎖󰄬󰅖󰓛] .* (<?\d+%) +(?:\$\d+\.\d+ +)?\S+$/u.exec(r)
     return m ? [m[1] ?? ''] : []
   })
 
@@ -51,8 +51,8 @@ test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, c
   expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
   const keys = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('history:'))
   expect(await keys()).toEqual(['history:a2', 'history:a1'])
-  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^󰅖 two +son 5\.5 +5s$/)
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^󰄬 one +son 5\.5 +0s$/)
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^󰅖 two +son 5\.5 +\$0\.00 +5s$/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^󰄬 one +son 5\.5 +\$0\.00 +0s$/)
   expect(await ui.find({ key: 'history:more' })).toBeUndefined() // two rows: nothing to open
   await ui.unmount()
 
@@ -247,7 +247,7 @@ test('Subagents: a row ends with the agent\'s share of the session tokens before
     await ui.press({ key: 'tab:agents' })
     const row = rowTexts(await ui.drawn()).find(r => /^󱎖 /.test(r)) ?? ''
     expect(textCells(row)).toBeLessThanOrEqual(width)
-    expect(row).toMatch(/ +100% +0s$/)
+    expect(row).toMatch(/ +100% +\$\d+\.\d+ +0s$/)
     expect(row).not.toMatch(/1\.7k/) // the total tokens are in the expanded details
     await ui.unmount()
   }
@@ -381,7 +381,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await ui.press({ key: 'tab:agents' })
   const rows = async () => rowTexts(await ui.drawn())
   const facts = async () => {
-    const m = /(\d+%) +(\d+s)$/.exec((await rows()).find(r => /^[󱎖󰄬] code-reviewer/u.test(r)) ?? '')
+    const m = /(\d+%) +\$\d+\.\d+ +(\d+s)$/.exec((await rows()).find(r => /^[󱎖󰄬] code-reviewer/u.test(r)) ?? '')
     return m && `${m[1]} ${m[2]}`
   }
   const counters = /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/
@@ -392,7 +392,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await step('a1')
   let now = await rows()
   // collapsed: one row, the model a word, the effort an icon, their share of the session and the time; nothing else of the agent
-  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^󱎖 code-reviewer +son 5\.5 +\u{F12A3} +100% +0s$/u)
+  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^󱎖 code-reviewer +son 5\.5 +\u{F12A3} +100% +\$\d+\.\d+ +0s$/u)
   expect(now.some(r => counters.test(r) || /^ +go$/.test(r))).toBe(false)
   // a press expands it: what it was asked and the four counters; the next press collapses it
   await ui.press({ key: 'agent:a1' })
@@ -540,14 +540,17 @@ test('Subagenti: an agent that leaves the list joins a cumulative counter that t
   await ui.unmount()
 })
 
-test('Subagenti: the tool line (the one running, or the last) is cut to the width with an ellipsis, like the counters', () => {
+test('Subagenti: the tool line (the one running, or the last) wraps to the width, never cut with an ellipsis', () => {
   const tool = 'mcp__plugin_browser-use_browser-use__a_very_long_tool_name_indeed'
   const agent = { id: 'a1', type: 't', status: 'running' as const, startedAt: 0, tokens: 0 }
   for (const a of [{ ...agent, activeTools: [tool] }, { ...agent, status: 'done' as const, lastTool: tool }]) {
     const rows = subagentDetails(a, '  ', 30).slice(1) // under the tokens row
-    expect(rows).toHaveLength(1)
-    expect(spanWidth(rows[0] ?? [])).toBe(30)
-    expect(spanText(rows[0] ?? [])).toMatch(/…$/)
+    expect(rows.length).toBeGreaterThan(1)
+    for (const r of rows) {
+      expect(spanWidth(r)).toBeLessThanOrEqual(30)
+      expect(spanText(r)).not.toMatch(/…$/)
+    }
+    expect(rows.map(r => spanText(r).trim()).join('').replace(/^last tool|^tool/, '')).toContain(tool)
   }
   // a short one is left whole
   expect(spanText(subagentDetails({ ...agent, lastTool: 'Read' }, '  ', 30)[1] ?? [])).toBe('  last tool Read')

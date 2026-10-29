@@ -1,5 +1,5 @@
 import type { CockpitAgent, CockpitClaudeState, CockpitEvent, CockpitInsights, CockpitSnapshot, CockpitWorkflowRun } from '../types'
-import { cacheHit, usdOf } from './pricing'
+import { usdOf } from './pricing'
 import { baseName, modelFamily } from './shared'
 import { claimsOf } from './work'
 import { activeRun } from './workflow'
@@ -50,21 +50,21 @@ export type Signal = { kind: SignalKind; key: string; label?: string; n?: number
 /** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
 export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
 
-/** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. `ms` is the duration of a finished agent, `startedAt` lets a running one be timed; `isFailed` only for a finished one. */
-export type AgentCost = { id: string; type: string; description?: string; effort?: string | number; isRunning?: boolean; isFailed?: boolean; startedAt?: number; ms?: number; model?: string; tokens: number; usd: number; hit?: number }
+/** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. */
+export type AgentCost = { id: string; type: string; model?: string; tokens: number; usd?: number }
 
 /** The agents of the session with their cost: live ones from their usage, finished ones (gone from the list) from the agent events. */
 export function agentCosts(agents: readonly CockpitAgent[], events: readonly CockpitEvent[] | undefined): AgentCost[] {
-  const live = agents.map((a): AgentCost => ({ id: a.id, type: a.type, description: a.description?.trim() || undefined, effort: a.effort, isRunning: a.status === 'running', isFailed: a.isFailed, startedAt: a.startedAt, ms: a.endedAt === undefined ? undefined : a.endedAt - a.startedAt, model: a.model, tokens: a.tokens, usd: usdOf(a.model, a.usage), hit: cacheHit(a.usage) }))
+  const live = agents.map((a): AgentCost => ({ id: a.id, type: a.type, model: a.model, tokens: a.tokens, ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }) }))
   const gone = (events ?? []).flatMap((e): AgentCost[] =>
-    e.kind === 'agent' && e.id !== undefined && !live.some(a => a.id === e.id) ? [{ id: e.id, type: e.text ?? '?', description: e.desc?.trim() || undefined, effort: e.effort, isFailed: e.isFailed, ms: e.ms, model: e.model, tokens: e.tokens ?? 0, usd: e.usd ?? 0, hit: e.hit }] : [],
+    e.kind === 'agent' && e.id !== undefined && !live.some(a => a.id === e.id) ? [{ id: e.id, type: e.text ?? '?', model: e.model, tokens: e.tokens ?? 0, usd: e.usd }] : [],
   )
   return [...live, ...gone]
 }
 
 export function detectHeavyAgents(agents: readonly AgentCost[], sessionUsd: number | undefined): Signal[] {
   return agents.flatMap((a): Signal[] => {
-    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * a.usd) / sessionUsd > THRESHOLDS.subagentCostPct
+    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * (a.usd ?? 0)) / sessionUsd > THRESHOLDS.subagentCostPct
     return a.tokens > THRESHOLDS.subagentTokens || isShare ? [{ kind: 'heavyAgent', key: a.id, label: a.type, n: a.tokens }] : []
   })
 }
@@ -92,13 +92,13 @@ export function detectColdAfterIdle(ins: CockpitInsights | undefined): Signal[] 
 }
 
 /** The context grew by `ctxGrowth` or more over the last `ctxGrowthRounds` rounds (a compaction's drop in between does not hide it). */
-export function detectCtxGrowth(rounds: readonly number[] | undefined): Signal[] {
+export function detectCtxGrowth(rounds: readonly number[] | undefined, roundCount?: number): Signal[] {
   const list = rounds ?? []
   const last = list.at(-1)
   if (last === undefined) return []
   const before = list.slice(-1 - THRESHOLDS.ctxGrowthRounds, -1)
   const grew = last - Math.min(...before)
-  return before.length > 0 && grew >= THRESHOLDS.ctxGrowth ? [{ kind: 'ctxGrowth', key: String(list.length), n: grew }] : []
+  return before.length > 0 && grew >= THRESHOLDS.ctxGrowth ? [{ kind: 'ctxGrowth', key: String(roundCount ?? list.length), n: grew }] : []
 }
 
 export function detectDoneClaims(count: number): Signal[] {
@@ -132,19 +132,20 @@ export function withSignalTimes(s: CockpitSnapshot, at: number): CockpitSnapshot
   return { ...s, signalsAt: Object.fromEntries(ids.map(id => [id, prev[id] ?? at])) }
 }
 
-/** Every signal that holds now, from the snapshot alone (no clock, no model). */
+/** Every signal that holds now, from the snapshot alone (no clock, no model); one id only once (the same result read twice is one notification). */
 export function signalsOf(s: CockpitSnapshot): Signal[] {
   const costs = agentCosts(s.agents, s.events)
-  return [
+  const all = [
     ...detectHeavyAgents(costs, s.cost.usd),
     ...detectOpusReadOnly(costs),
     ...detectBigResults(s.insights?.biggest),
     ...detectRereads(s.insights?.reads),
     ...detectFailedCommands(s.insights?.failedCmds),
     ...detectColdAfterIdle(s.insights),
-    ...detectCtxGrowth(s.ctxRounds),
+    ...detectCtxGrowth(s.ctxRounds, s.insights?.rounds),
     ...detectDoneClaims(claimsOf(s.doneClaims, s.sessionId).length),
     ...detectWorkflow(s.workflowRun, s.now),
     ...detectPermissionWait(s.claudeState, s.now),
   ]
+  return all.filter((sig, i) => all.findIndex(o => signalId(o) === signalId(sig)) === i)
 }

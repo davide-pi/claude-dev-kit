@@ -141,7 +141,8 @@ export function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
   const next = isEdit
     ? notes.map(n => (n.id === s.noteEditing ? { ...n, text } : n))
     : [...notes, { id: Math.max(0, ...notes.map(n => n.id)) + 1, text }]
-  const notesOpen = isEdit && s.noteEditing !== undefined && !s.notesOpen?.includes(s.noteEditing) ? [...(s.notesOpen ?? []), s.noteEditing] : s.notesOpen
+  // a saved note, new or edited, comes back closed
+  const notesOpen = isEdit && s.noteEditing !== undefined ? s.notesOpen?.filter(id => id !== s.noteEditing) : s.notesOpen
   return { ...s, notes: next, notesOpen, noteDraft: undefined, noteEditing: undefined }
 }
 

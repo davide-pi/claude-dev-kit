@@ -65,6 +65,8 @@ test('parseHistory takes the entries with their fields from a parsed state file 
   expect(parseHistory([{ ...ok, effort: 'high' }, { ...ok, effort: 3 }, { ...ok, effort: {} }]).map(h => h.effort)).toEqual(['high', 3, undefined])
   expect(parseHistory([{ ...ok, description: 'Review the filter' }])).toEqual([{ ...ok, description: 'Review the filter' }])
   expect(parseHistory([{ ...ok, description: 3 }])[0]).not.toHaveProperty('description')
+  expect(parseHistory([{ ...ok, usd: 1.5 }, { ...ok, usd: 0 }])).toEqual([{ ...ok, usd: 1.5 }, { ...ok, usd: 0 }])
+  expect(parseHistory([{ ...ok, usd: -1 }, { ...ok, usd: '2' }, { ...ok, usd: null }]).some(h => 'usd' in h)).toBe(false)
   expect(parseHistory([{ id: 'a3', type: 'x', startedAt: 'now', endedAt: 2 }, null, 'text', { type: 'x' }])).toEqual([])
   expect(parseHistory('not a list')).toEqual([])
   expect(parseHistory(undefined)).toEqual([])

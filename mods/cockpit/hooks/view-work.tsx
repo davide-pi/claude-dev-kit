@@ -1,7 +1,7 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitChange, CockpitDiff, CockpitPr } from '../types'
-import { COLORS, textCells, truncEnd, truncMiddle } from './shared'
+import { COLORS, truncMiddle } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -21,10 +21,9 @@ export function changeSpans(c: CockpitChange, width: number, isEdited = false): 
   return [...counts, sp(' '), sp(truncMiddle(c.path, pathW)), ...(isEdited ? [sp(' 󰧞', COLORS.lavender)] : [])]
 }
 
-/** What follows a pull request's number on its row: its title, cut to fit `width` (the number's own cells included). */
-export function prSpans(pr: CockpitPr, width: number): Span[] {
-  const titleW = width - textCells(`#${pr.number} `)
-  return pr.title !== '' && titleW >= 4 ? [sp(' '), sp(truncEnd(pr.title, titleW))] : []
+/** What follows a pull request's number on its row: its title, whole (the row wraps it). */
+export function prSpans(pr: CockpitPr): Span[] {
+  return pr.title !== '' ? [sp(' '), sp(pr.title)] : []
 }
 
 

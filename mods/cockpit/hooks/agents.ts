@@ -1,4 +1,5 @@
 import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitUsage } from '../types'
+import { usdOf } from './pricing'
 import { COLORS, isRecord, truncEnd } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
@@ -89,7 +90,7 @@ export const HISTORY_KEEP = 300
 /** What the history keeps of a finished agent; undefined for one the mod only saw through its events (type `?`). */
 export function toHistory(a: CockpitAgent): CockpitHistoryEntry | undefined {
   if (a.type === '?' || a.endedAt === undefined) return undefined
-  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.isInterrupted === true && { isInterrupted: true }) }
+  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
 }
 
 /** `entries` go in front (newest first), an id already there replaced; the list is cut to `HISTORY_KEEP`. */
@@ -104,7 +105,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
   const out: CockpitHistoryEntry[] = []
   for (const v of value.slice(0, HISTORY_KEEP)) {
     if (!isRecord(v)) continue
-    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description } = v
+    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description, usd } = v
     if (typeof id !== 'string' || typeof type !== 'string' || typeof startedAt !== 'number' || typeof endedAt !== 'number') continue
     out.push({
       id,
@@ -116,6 +117,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
       isFailed: isFailed === true,
       ...((typeof effort === 'string' || typeof effort === 'number') && { effort }),
       ...(typeof description === 'string' && { description }),
+      ...(typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 && { usd }),
       ...(isInterrupted === true && { isInterrupted: true }),
     })
   }

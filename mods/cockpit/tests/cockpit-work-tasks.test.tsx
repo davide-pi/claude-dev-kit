@@ -64,9 +64,9 @@ test('the bar splits its width by done, in progress and the rest', async ($, on)
   }
   walk(await ui.drawn())
   await ui.unmount()
-  // 40 cells: 2/4 done green, 1/4 in progress blue (the context and credit bars add their own green and blue)
-  expect(cells['#7ec699']).toBeGreaterThanOrEqual(20)
-  expect(cells['#7fb4ff']).toBeGreaterThanOrEqual(10)
+  // the bar fills the pane's width: half done green, a quarter in progress blue (the CTX and credit bars are surface modules, not counted here)
+  expect(cells['#7ec699']).toBeGreaterThanOrEqual(19)
+  expect(cells['#7fb4ff']).toBeGreaterThanOrEqual(9)
 })
 
 test('the task list comes from the task tools: create, start, complete, delete', async ($, on) => {
@@ -150,7 +150,64 @@ test('long subjects are cut with … and more than 6 open tasks end in … +N', 
   expect(rows[i + 3]).toMatch(/^󱎖 A very long subject.*… +0s$/)
   expect([...(rows[i + 3] ?? '')].length).toBe(38)
   expect(rows.slice(i + 3, i + 9).filter(r => /^[󱎖󰄰]/u.test(r)).length).toBe(6)
-  expect(rows[i + 9]).toBe('… +2')
+  expect(rows[i + 9]).toBe('󰍟 +2')
+})
+
+test('tasks: `󰍟 +2` opens the open tasks past the sixth, `󰍝 −2` folds them again', async ($, on) => {
+  world(on)
+  taskTools(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'TodoWrite', todos: Array.from({ length: 8 }, (_, n) => todo(`Pending ${n + 1}`, 'pending')) })
+  const ui = await mountPane($, 40)
+  await ui.press({ key: 'tab:work' })
+  const pending = async () => rowTexts(await ui.drawn()).filter(r => /^󰄰 Pending/.test(r)).length
+  expect(await pending()).toBe(6)
+  expect((await ui.find({ key: 'tasks:more' }))?.text).toBe('󰍟 +2')
+  await ui.press({ key: 'tasks:more' })
+  expect(await pending()).toBe(8)
+  expect((await ui.find({ key: 'tasks:more' }))?.text).toBe('󰍝 −2')
+  await ui.press({ key: 'tasks:more' })
+  expect(await pending()).toBe(6)
+  await ui.unmount()
+})
+
+test('tasks: opened, a long subject wraps under its row instead of ending in …', async ($, on) => {
+  world(on)
+  taskTools(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const todos = [todo('A very long subject that cannot possibly fit in the narrow pane width', 'in_progress')]
+  for (let n = 1; n <= 7; n++) todos.push(todo(`Pending ${n}`, 'pending'))
+  await $.tool.call({ tool: 'TodoWrite', todos })
+  const ui = await mountPane($, 40)
+  await ui.press({ key: 'tab:work' })
+  expect(rowTexts(await ui.drawn()).some(r => /^󱎖 A very long subject.*…/.test(r))).toBe(true)
+  await ui.press({ key: 'tasks:more' })
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.some(r => /^󱎖 A very long/.test(r) && !r.includes('…'))).toBe(true)
+  expect(rows.some(r => /^ {2}.*width/.test(r))).toBe(true)
+  await ui.unmount()
+})
+
+test('Notifications: the worklog is "up to date", or lists its days behind when its row is pressed', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  expect((await paneRows($, 50, 'signals')).rows).toContain('󰄬 worklog up to date')
+})
+
+test('Notifications: a worklog behind says how many days, and `worklog:days` opens and folds the list of them', async ($, on) => {
+  world(on, { hasWorklog: true })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 50)
+  await ui.press({ key: 'tab:signals' })
+  expect(rowTexts(await ui.drawn())).toContain('▸ 1 day behind')
+  expect(rowTexts(await ui.drawn()).some(r => /to log/.test(r))).toBe(false)
+  await ui.press({ key: 'worklog:days' })
+  const opened = rowTexts(await ui.drawn())
+  expect(opened).toContain('▾ 1 day behind')
+  expect(opened.some(r => /to log/.test(r))).toBe(true)
+  await ui.press({ key: 'worklog:days' })
+  expect(rowTexts(await ui.drawn())).toContain('▸ 1 day behind')
+  await ui.unmount()
 })
 
 test('the list is empty again at session start (a /clear included)', async ($, on) => {
@@ -186,7 +243,7 @@ test('Work: no ALM line, and the log hours button is in the footer, not at the t
   await ui.unmount()
 })
 
-test('the other tabs draw the current sections: Agents the agents, Work tasks and worklog warnings, Notifications its own title', async ($, on) => {
+test('the other tabs draw the current sections: Agents the agents, Work tasks, Notifications its own title and the worklog', async ($, on) => {
   world(on, { hasWorklog: true })
   taskTools(on)
   spawns(on)
@@ -200,11 +257,12 @@ test('the other tabs draw the current sections: Agents the agents, Work tasks an
 
   const work = (await paneRows($, 50, 'work')).rows
   expect(work.some(r => /^TASK · 0\/1/.test(r))).toBe(true)
-  expect(work.some(r => /worklog: 1d to log/.test(r))).toBe(true)
+  expect(work.some(r => /worklog/.test(r))).toBe(false)
   expect(work.some(r => /^SUBAGENTS/.test(r))).toBe(false)
 
   const notifications = (await paneRows($, 50, 'signals')).rows
   expect(notifications.some(r => /^no notifications/.test(r))).toBe(true)
+  expect(notifications.some(r => /^WORKLOG$/.test(r))).toBe(true)
   expect(notifications.some(r => /^SUBAGENTS/.test(r) || /^TASK/.test(r))).toBe(false)
 })
 
@@ -219,19 +277,19 @@ test('Work with no tasks, no worklog warnings and no git draws no section, and n
   expect(rows.some(r => /^TASK/.test(r) || /worklog/.test(r))).toBe(false)
 })
 
-test('IN PROGRESS: the perimeter, the session tasks and the worklog warnings are one block, in that order', async ($, on) => {
+test('IN PROGRESS: the perimeter and the session tasks are one block, in that order, with no worklog notice', async ($, on) => {
   world(on, { hasWorklog: true, branch: 'feat/x', perimeter: PERIMETER, changed: ['lib/z.ts'] })
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
   const rows = await workRows($)
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
-  const [main, perimeter, tasks, worklog] = [at(/^IN PROGRESS$/), at(/^deliver perimeter/), at(/^TASK ·/), at(/worklog: 1d to log/)]
+  const [main, perimeter, tasks] = [at(/^IN PROGRESS$/), at(/^deliver perimeter/), at(/^TASK ·/)]
   expect(main).toBeLessThan(perimeter)
   expect(perimeter).toBeLessThan(tasks)
-  expect(tasks).toBeLessThan(worklog)
+  expect(rows.some(r => /worklog/.test(r))).toBe(false)
   // no rule inside the block
-  expect(rows.slice(main, worklog).some(r => /^─+$/.test(r))).toBe(false)
+  expect(rows.slice(main, tasks + 2).some(r => /^─+$/.test(r))).toBe(false)
   // and the tasks are not in the Subagents view
   expect((await paneRows($, 50, 'agents')).rows.some(r => /^TASK/.test(r))).toBe(false)
 })
