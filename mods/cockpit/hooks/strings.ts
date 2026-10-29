@@ -212,7 +212,7 @@ const IT: Strings = {
   noChanges: 'nessuna modifica',
   prTitle: (n: number) => `PR · ${n}`,
   wiTitle: (n: number) => `WI · ${n}`,
-  prStates: { open: 'aperte', draft: 'bozze', merged: 'unite', closed: 'chiuse' },
+  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   workItemsTitle: 'work item',
 
   grewTitle: 'COSA HA GONFIATO IL CONTESTO',
