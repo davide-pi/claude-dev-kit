@@ -25,7 +25,9 @@
  *     `> **Detail**` / `> **Dettaglio**` block and a `> - ` bullet line are prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
- * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table) is judged row by row
+ * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table, titled and quoted as
+ * `> **Verifica**` / `> **Verification**` with every line starting `> `; a plain unquoted table works too; the
+ * quoted title and table lines are prose, never quoted output) is judged row by row
  * instead: a row ending `fatto` or `failed` is proven only when its deciding line (normalised: whitespace
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
@@ -98,10 +100,13 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** A section's detail: quoted bullet lines (`> - …`), prose like the block above, never tool output. */
 const DETAIL_BULLET = /^[ \t]*>[ \t]*[-*][ \t].*$/gm;
+/** The quoted verdict block: its `> **Verifica**` / `> **Verification**` title and `> |` table lines are prose, never tool output. */
+const VERDICT_TITLE = /^[ \t]*>[ \t]*\*\*(?:Verifica|Verification)\*\*[ \t]*$/gim;
+const QUOTED_TABLE_LINE = /^[ \t]*>[ \t]*\|.*$/gm;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
-/** The `deliver` verdict table's header; its rows are the contiguous `|` lines that follow. */
-const VERDICT_HEAD = /^[ \t]*\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*(?:Comando|Command)[ \t]*\|[^\n]*\|[ \t]*(?:Stato|Status)[ \t]*\|[ \t]*$/i;
+/** The `deliver` verdict table's header, plain or inside the quoted `> **Verifica**` / `> **Verification**` block; its rows are the contiguous `|` lines (each with the same optional `>`) that follow. */
+const VERDICT_HEAD = /^[ \t]*(?:>[ \t]*)?\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*(?:Comando|Command)[ \t]*\|[^\n]*\|[ \t]*(?:Stato|Status)[ \t]*\|[ \t]*$/i;
 /** A row's state that claims a result and so needs proof (`non verificato: …` / `not verified: …` do not). */
 const PROOF_STATE = /^(?:fatto|done|failed)$/i;
 
@@ -114,9 +119,9 @@ function verdictRows(message) {
   const rows = [];
   for (let i = 0; i < lines.length; i += 1) {
     if (!VERDICT_HEAD.test(lines[i])) continue;
-    for (let j = i + 1; j < lines.length && /^[ \t]*\|/.test(lines[j]); j += 1) {
+    for (let j = i + 1; j < lines.length && /^[ \t]*(?:>[ \t]*)?\|/.test(lines[j]); j += 1) {
       // An escaped pipe (`\|`) is cell text, not a separator.
-      const cells = lines[j].trim().replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+      const cells = lines[j].trim().replace(/^>[ \t]*/, '').replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
       if (cells.length < 4 || cells.every((c) => /^:?-+:?$/.test(c))) continue;
       rows.push({ level: cells[0], command: cells[1], line: cells[2], state: cells[cells.length - 1].replace(/[*_`]/g, '').trim() });
     }
@@ -310,7 +315,7 @@ function readTurn(entries, truncated = false) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, ''))) return null;
+  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, '').replace(VERDICT_TITLE, '').replace(QUOTED_TABLE_LINE, ''))) return null;
   const prose = message.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
   const found = prose.match(CLAIM);
   return found ? found[1] ?? found[2] : null;
@@ -357,7 +362,7 @@ try {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict rows against the command output. '
-          + 'Rewrite the verdict table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status") with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
+          + 'Rewrite the verdict, a quoted block titled "> **Verifica**" (English: "> **Verification**") holding the table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
       }));
       process.exit(0);
     }
@@ -383,7 +388,7 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the verdict table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status" in an English chat; a plain markdown table, never in a code block), '
+      + 'confirms it in the verdict: a quoted block titled "> **Verifica**" (English chat: "> **Verification**") holding the table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
       + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);

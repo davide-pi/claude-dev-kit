@@ -60,10 +60,33 @@ test('pane open with a fresh heartbeat: a zero-width line', () => {
   assert.equal(render({ ...STATE, open: true, at: Date.now() }), '\u200B\n');
 });
 
-test('pane open but stale (no heartbeat for over 45 s): the normal line', () => {
-  const out = render({ ...STATE, open: true, at: Date.now() - 60_000 });
+test('pane open but stale (no heartbeat for over 90 s): the normal line', () => {
+  const out = render({ ...STATE, open: true, at: Date.now() - 120_000 });
   assert.notEqual(out, '\u200B\n');
   assert.match(out, /\+\$0\.38/);
+});
+
+test('narrow terminal: trailing segments move to line 2, nothing is cut with an ellipsis', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-cockpit-'));
+  try {
+    mkdirSync(join(dir, '.cache'), { recursive: true });
+    writeFileSync(join(dir, '.cache', `cockpit-${SAMPLE.session_id}.json`), JSON.stringify({ ...STATE, open: false, at: Date.now() }));
+    const r = spawnSync(process.execPath, [STATUSLINE], {
+      input: JSON.stringify(SAMPLE), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir, COLUMNS: '110' },
+    });
+    assert.equal(r.status, 0, r.stderr);
+    const out = r.stdout.replace(/\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)/g, '').replace(/\x1b\[[0-9;]*m/g, '');
+    const [l1, l2] = out.split('\n');
+    assert.doesNotMatch(out, /\u2026/);
+    assert.doesNotMatch(l1, /\u2610/);
+    assert.match(l2, /\u2610 3\/7/);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('model names are shown in full: Sonnet, Haiku, Opus', () => {
+  for (const name of ['Sonnet', 'Haiku', 'Opus']) {
+    assert.match(render(undefined, { ...SAMPLE, model: { display_name: `Claude ${name} 4.5 (1M context)` } }), new RegExp(`${name} 4\\.5`));
+  }
 });
 
 // ── Folder icon ──────────────────────────────────────────────────────────────

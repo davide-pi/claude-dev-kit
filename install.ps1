@@ -42,7 +42,7 @@ param(
     # kept in <ClaudeHome>/kit-options.json and read by every run. Names: see $Components.
     [string[]]$Without,
     [string[]]$With,
-    [string]$ClaudeHome = (Join-Path $env:USERPROFILE '.claude')
+    [string]$ClaudeHome = (Join-Path $HOME '.claude')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -298,7 +298,7 @@ function Test-LanguageServers {
 function Test-AzDevOpsExtension {
     # Fast path: an installed extension is a directory under the az config dir. Only when it is
     # not there do we pay the seconds `az extension list` costs, so a healthy machine stays quick.
-    if (Test-Path -LiteralPath (Join-Path $env:USERPROFILE '.azure\cliextensions\azure-devops')) { return $true }
+    if (Test-Path -LiteralPath (Join-Path $HOME '.azure/cliextensions/azure-devops')) { return $true }
     $names = & az extension list --query '[].name' -o tsv 2>$null
     return (@($names) -contains 'azure-devops')
 }

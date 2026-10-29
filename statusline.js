@@ -577,8 +577,7 @@ function segModel(name, stale) {
   // A trailing parenthetical (`Opus 5.5 (1M context)`) is dropped: the context segment already says it.
   const short = name
     .replace(/\s*\([^)]*\)\s*$/, "")
-    .replace("Claude ", "").replace(" Sonnet", " Son")
-    .replace(" Haiku",  " Hku").replace(" Opus", " Opx");
+    .replace("Claude ", "");
   const mark = stale ? `${DIM}~${R}` : "";
   return `${mark}${C.blue}${short}${R}`;
 }
@@ -603,9 +602,9 @@ function readCockpit(sessionId) {
 }
 
 // Agents running (blue) and agents on another model than asked (yellow); nothing when both are zero.
-// `open:true` counts only while the mod keeps refreshing `at` (its tick does, every 15 s): a leftover from a
-// reloaded mod or a close it never heard of must not hide the line forever.
-const COCKPIT_FRESH_MS = 45 * 1000;
+// `open:true` counts only while the mod keeps refreshing `at` (its slow tier does, every 30 s): a leftover from a
+// reloaded mod or a close it never heard of must not hide the line forever. 90 s is three beats.
+const COCKPIT_FRESH_MS = 90 * 1000;
 function cockpitIsOpen(cockpit) {
   return cockpit?.open === true && Number.isFinite(cockpit.at) && Date.now() - cockpit.at < COCKPIT_FRESH_MS;
 }
@@ -709,30 +708,41 @@ process.stdin.on("end", () => {
   const W      = termWidth() - 1;
 
   // Right-align a line to the terminal edge, truncating when it doesn't fit
-  // (reserving 1 column for the ellipsis appended by truncateAnsi).
+  // (reserving 1 column for the ellipsis appended by truncateAnsi). Trailing segments are moved
+  // or dropped whole before this; a head wider than the terminal is still cut here.
   const fit = (line) => {
     const width = visibleWidth(line);
     return width > W ? truncateAnsi(line, W - 1) : " ".repeat(W - width) + line;
   };
+  const wide = (segs) => visibleWidth(segs.join(sepStr)) > W;
 
   // Line 1: what the session runs as, the workspace and the budgets. Line 2: badges, printed only when any.
-  const line1 = [
+  const head = [
     [segModel(modelName, modelStale), segEffort(effortLevel, effortStale)].filter(Boolean).join(" "),
     segFolder(cwd, cachedByCwd("worktree", cwd, WORKTREE_CACHE_MS, () => worktreeInfo(cwd))),
     segGit(cachedByCwd("git", cwd, GIT_CACHE_MS, () => gitInfo(cwd))),
     segContext(data.context_window),
+  ].filter(Boolean);
+  const tail = [
     ...segRateWindows(rl, rlStale),
     segCost(data.cost?.total_cost_usd, cockpit?.lastTurnUsd),
     segAgents(cockpit),
     segTasks(cockpit),
-  ].filter(Boolean).join(sepStr);
-
-  const line2 = [
+  ].filter(Boolean);
+  const badges = [
     segWorklog(),
     segCacheCold(data.prompt_cache),
     segVim(data.vim),
-  ].filter(Boolean).join(sepStr);
+  ].filter(Boolean);
 
-  process.stdout.write([line1, line2].filter(Boolean).map(fit).join("\n") + "\n");
+  // Line 1 too wide: its trailing segments move to line 2, last first, instead of being cut mid-segment.
+  const moved = [];
+  while (tail.length && wide([...head, ...tail])) moved.unshift(tail.pop());
+  // Line 2 too wide: whole segments are dropped from its end, only a lone one is cut.
+  const second = [...moved, ...badges];
+  while (second.length > 1 && wide(second)) second.pop();
+
+  const lines = [[...head, ...tail], second].filter((segs) => segs.length).map((segs) => fit(segs.join(sepStr)));
+  process.stdout.write(lines.join("\n") + "\n");
 });
 process.stdin.on("error", () => { process.stdout.write("\n"); });
