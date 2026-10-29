@@ -187,8 +187,8 @@ export const SPAWN = {
 
 // ── Cockpit v3, phase 1: layout, header, refresh tiers, buttons at the bottom ──
 
-/** The rows above the tab bar: the always-visible header (its two inner rules told apart, the third one closes it). */
-export const headerOf = (rows: string[]): string[] => rows.slice(0, rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))[2])
+/** The rows above the tab bar: the always-visible header (its inner rule sets the budgets apart, the second one closes it). */
+export const headerOf = (rows: string[]): string[] => rows.slice(0, rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))[1])
 
 // ── Cockpit v3, phase 3: the Context tab ──
 

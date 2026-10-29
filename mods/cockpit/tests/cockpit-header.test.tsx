@@ -58,10 +58,9 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
     expect(await text(/example-repo/)).toContain('example-repo')
     expect(await text(/^\+1 ~1 \?1$/)).toBe('+1 ~1 ?1')
-    expect(await text(/25% 248K\/1M/)).toBe(' 25% 248K/1M')
-    expect(await text(/^ 62% 5h/)).toBe(' 62% 5h \u21bb  2h14m')
-    expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb  3d\d\dh$/)
-    expect(await text(/vs expected/)).toBe('vs expected 7d  \u22125%')
+    expect(await text(/25% 248K\/1M/)).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% 248K\/1M/)
+    // the two credit windows share one row: label, bar, remaining, reset countdown
+    expect(await text(/^5h /)).toMatch(/^5h [\u25b0\u25b1]+ {2}62% \u21bb +2h14m \u00b7 7d [\u25b0\u25b1]+ {2}41% \u21bb +3d\d\dh$/)
     // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('󰄬 code-reviewer')
@@ -91,7 +90,7 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$0\.00$/)).toBe('$0.00')
-  expect(await text(/^ {2}0% /)).toBe('  0% 0/1M')
+  expect(await text(/ {3}0% 0\/1M/)).toMatch(/^CTX [▰▱]+ {3}0% 0\/1M$/)
   await ui.unmount()
 })
 
@@ -100,7 +99,7 @@ test('a rule closes the header and the tab bar, and sets the SUBAGENTS title (af
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  const [, , first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
+  const [, first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^SUBAGENTS/.test(r))
   // header, rule, tab bar, rule, then the tab's own content: an empty row first
   expect(first).toBe(headerOf(rows).length)
@@ -171,7 +170,7 @@ test('deltas count from the turn start', async ($, on) => {
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$5\.20/)).toContain('$5.20')
   expect(await text(/^\+0\.38/)).toBe('+0.38')
-  expect(await text(/^ 26% /)).toBe(' 26% 260K/1M +12K')
+  expect(await text(/26% 260K/)).toMatch(/^CTX [▰▱]+ {2}26% 260K\/1M \+12K/)
   await ui.unmount()
 })
 
@@ -198,16 +197,14 @@ test('percentages are right-aligned: 87% and 7% start their label in the same co
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  const five = rows.find(r => /87% 5h/.test(r))
-  const seven = rows.find(r => /7% 7d/.test(r))
-  const context = rows.find(r => /25% 248K/.test(r))
-  expect(five).toMatch(/^[▰▱]+ 87% 5h/)
-  expect(seven).toMatch(/^[▰▱]+ {2}7% 7d/)
-  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
-  expect(context?.indexOf('%')).toBe(five?.indexOf('%'))
+  // both windows share one row, each half drawn the same width: the 7d percent sits one half after the 5h one
+  const credits = rows.find(r => /^5h /.test(r)) ?? ''
+  expect(credits).toMatch(/^5h [▰▱]+ {2}87% .* · 7d [▰▱]+ {3}7% /)
+  const [five, seven] = [credits.indexOf('87%'), credits.indexOf('7%', credits.indexOf(' 7d '))]
+  expect(seven - credits.indexOf(' · 7d ') - 3).toBe(five + 1)
 })
 
-test('percentages are right-aligned with three digits too: 100% and 87% start their label in the same column', async ($, on) => {
+test('percentages are right-aligned with three digits too: 100% fills the cell the two-digit 87% pads', async ($, on) => {
   world(on, {
     rateLimits: [
       { kind: 'five_hour', percentUsed: 0, resetsAt: iso(5 * 60 * MIN) },
@@ -216,14 +213,11 @@ test('percentages are right-aligned with three digits too: 100% and 87% start th
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  const five = rows.find(r => /100% 5h/.test(r))
-  const seven = rows.find(r => /87% 7d/.test(r))
-  expect(five).toMatch(/^[▰▱]+100% 5h/)
-  expect(seven).toMatch(/^[▰▱]+ 87% 7d/)
-  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
+  const credits = rows.find(r => /^5h /.test(r)) ?? ''
+  expect(credits).toMatch(/^5h [▰▱]+ 100% .* · 7d [▰▱]+ {2}87% /)
 })
 
-test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn and an empty one do not set it', async ($, on) => {
+test('cache share: the last main-loop turn, at the end of the CTX row; a subagent turn and an empty one do not set it', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -243,8 +237,8 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
         model: 'm',
       },
     })
-  // the title row reads as its text joined with the right side: CONTEXT, then the cache share
-  const title = async () => (await paneRows($)).rows.find(r => /^CONTEXT.*\u{F09D1}/u.test(r))?.slice('CONTEXT'.length)
+  // the CTX row ends with the cache share
+  const title = async () => (await paneRows($)).rows.find(r => /^CTX .*\u{F09D1}/u.test(r))?.replace(/^.* (?=\u{F09D1})/u, '')
 
   expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
@@ -300,7 +294,7 @@ test('a session start (/clear) forgets the cache share', async ($, on) => {
     usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
   })
   const before = (await paneRows($)).rows
-  expect(before.some(r => /^CONTEXT.*\u{F09D1} {2}94%/u.test(r))).toBe(true)
+  expect(before.some(r => /^CTX .*\u{F09D1} {2}94%$/u.test(r))).toBe(true)
 
   id = 's-2'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -471,7 +465,7 @@ test('header: the last round duration sits beside the round cost, from the main 
   expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
 })
 
-test('header: CONTEXT and CREDITS each have an empty row before and after the title, the cache share and the week pace right of it, and no burn line', async ($, on) => {
+test('header: after a rule, the CTX row with the cache share, then the 5h and 7d windows on one row, and no burn line', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -485,21 +479,12 @@ test('header: CONTEXT and CREDITS each have an empty row before and after the ti
   })
   const { rows } = await paneRows($, 58)
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
-  const context = at(/^CONTEXT/)
-  const credits = at(/^CREDITS/)
-  expect(rows[context]).toBe('CONTEXT\u{F09D1}  94%')
-  expect(rows[context - 1]).toBe(' ')
-  expect(rows[context - 2]).toMatch(/^─+$/) // a rule between the model / ALM block and the CONTEXT block
-  expect(rows[context + 1]).toBe(' ')
-  expect(rows[context + 2]).toMatch(/^[▰▱]+ 25% 248K\/1M$/)
-  expect(rows[credits]).toBe('CREDITSvs expected 7d  \u22125%')
-  expect(rows[credits - 1]).toBe(' ')
-  expect(rows[credits - 2]).toMatch(/^─+$/) // and one between the CONTEXT and the CREDITS block
-  expect(rows[credits + 1]).toBe(' ')
-  expect(rows[credits + 2]).toMatch(/ 62% 5h/)
-  expect(rows[credits + 3]).toBe(' ') // the two windows are told apart by an empty row
-  expect(rows[credits + 4]).toMatch(/ 41% 7d/)
-  expect(rows.some(r => /runs out/.test(r))).toBe(false)
+  const context = at(/^CTX /)
+  expect(rows[context - 1]).toMatch(/^─+$/) // a rule between the model / ALM block and the budgets
+  expect(rows[context]).toMatch(/^CTX [▰▱]+ {2}25% 248K\/1M \u{F09D1}.*94%$/u)
+  expect(rows[context + 1]).toMatch(/^5h [▰▱]+ {2}62% .* · 7d [▰▱]+ {2}41% /)
+  expect(rows[context + 2]).toMatch(/^─+$/) // the rule that closes the header
+  expect(rows.some(r => /runs out|^CONTEXT$|^CREDITS/.test(r))).toBe(false)
 })
 
 
@@ -511,7 +496,7 @@ const LANGUAGES = [
     tabs: barLabels({ work: ' 󰧞' }, 'en', 'agents', 2),
     bareTabs: () => barLabels({}, 'en', 'notes'),
     buttons: { compact: 'compact', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
-    header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
+    header: [/^CTX /, /^5h .* · 7d /],
     byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^IN PROGRESS$/, /^CHANGES · 0$/, /^no changes$/, /^󰧞 worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
@@ -520,7 +505,7 @@ const LANGUAGES = [
     tabs: barLabels({ work: ' 󰧞' }, 'it'),
     bareTabs: () => barLabels({}, 'it', 'notes'),
     buttons: { compact: 'compatta', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
-    header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
+    header: [/^CTX /, /^5h .* · 7d /],
     byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^IN CORSO$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^󰧞 worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]

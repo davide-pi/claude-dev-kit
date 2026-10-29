@@ -19,7 +19,6 @@ import {
   sameSnapshot,
   shade,
   shortModel,
-  signedPctCell,
   spanText,
   spanWidth,
   taskBarCells,
@@ -163,13 +162,6 @@ test('pctCell pads a percentage to four cells so one, two and three digits align
   expect(pctCell(87)).toBe(' 87%')
   expect(pctCell(100)).toBe('100%')
   expect(pctCell(0)).toBe('  0%')
-})
-
-test('signedPctCell pads the pace delta to the width of the other percentages', () => {
-  expect(signedPctCell(-5)).toBe(' −5%')
-  expect(signedPctCell(5)).toBe(' +5%')
-  expect(signedPctCell(-12)).toBe('−12%')
-  expect(signedPctCell(100)).toBe('+100%')
 })
 
 // ── Cockpit v3, phase 1: the always-visible header ──

@@ -35,13 +35,9 @@ const EN = {
   confirmNoteDelete: 'delete this note?',
 
   // Header
-  contextTitle: 'CONTEXT',
   contextDetailsTitle: 'CONTEXT DETAILS',
-  creditsTitle: 'CREDITS',
-  vsExpected: 'vs expected 7d ',
   noRateData: 'no rate-limit data',
   contextAt: (pct: number) => `󰀦 context at ${pct}%`,
-  requestsLeft: (n: number) => `~${n} ${plural(n, 'request', 'requests')}`,
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
@@ -139,13 +135,9 @@ const IT: Strings = {
   confirmRetro: 'quale retrospettiva? invia /retro',
   confirmNoteDelete: 'eliminare questa nota?',
 
-  contextTitle: 'CONTESTO',
   contextDetailsTitle: 'DETTAGLI CONTESTO',
-  creditsTitle: 'CREDITI RESIDUI',
-  vsExpected: "rispetto all'atteso 7d ",
   noRateData: 'nessun dato sui limiti',
   contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
-  requestsLeft: (n: number) => `~${n} ${plural(n, 'richiesta', 'richieste')}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,

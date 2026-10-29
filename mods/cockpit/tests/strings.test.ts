@@ -17,11 +17,7 @@ test('t: answers the language set, and English until one is', () => {
     expect(t().buttons.compact).toBe('compact')
     setLang('it')
     expect(t().buttons.compact).toBe('compatta')
-    expect(t().requestsLeft(1)).toBe('~1 richiesta')
-    expect(t().requestsLeft(18)).toBe('~18 richieste')
     setLang('en')
-    expect(t().requestsLeft(1)).toBe('~1 request')
-    expect(t().requestsLeft(18)).toBe('~18 requests')
   } finally {
     setLang('en')
   }
@@ -44,10 +40,9 @@ test('what reads the same in both languages is one value, shared by both bundles
   }
 })
 
-test('Italian: the pace and the context block title are translated', () => {
+test('Italian: the context details title and the tabs are translated', () => {
   try {
     setLang('it')
-    expect(t().vsExpected).toBe("rispetto all'atteso 7d ")
     expect(t().contextDetailsTitle).toBe('DETTAGLI CONTESTO')
     expect(t().tabs).toEqual({ agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' })
     setLang('en')

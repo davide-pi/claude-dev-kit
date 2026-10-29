@@ -60,7 +60,7 @@ export function contextText(s: CockpitSnapshot): Span[] {
   return out
 }
 
-export function rateText(label: string, r: RateRow, now: number): Span[] {
+export function rateText(r: RateRow, now: number): Span[] {
   const cd = countdown(r.resetMs, now)
-  return [...pctSpans(r.rem, r.color, r.isStale), sp(' '), dim(label), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
+  return [...pctSpans(r.rem, r.color, r.isStale), ...(cd ? [dim(' ↻ '), sp(cd)] : [])]
 }

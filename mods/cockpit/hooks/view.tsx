@@ -2,7 +2,6 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot, CockpitTab } from '../types'
 import { claudeStateSpans } from './agents'
-import { autocompactForecast } from './context'
 import { TABS } from './session'
 import {
   COLORS,
@@ -17,14 +16,13 @@ import {
   gridWidths,
   pathToFileUri,
   pctCell,
-  signedPctCell,
   spanWidth,
   textCells,
   truncMiddle,
   truncateSpans,
   ICONS,
 } from './shared'
-import type { Span } from './shared'
+import type { BarPart, Span } from './shared'
 import { signalId, signalsOf } from './signals'
 import { t } from './strings'
 import { visibleAgents } from './view-agents'
@@ -38,10 +36,10 @@ import { aheadBehindSpans } from './work'
 
 export type { PaneActions } from './view-tabs'
 
-const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
-
 /** The context fill from which the header warns. */
 const CTX_WARN_PCT = 80
+// The shortest bar a budget cell draws: below it the credit windows go one row each.
+const BUDGET_BAR_MIN = 4
 
 // ── Pane ─────────────────────────────────────────────────────────────────────
 
@@ -83,7 +81,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
   const kit = makeKit(ui, s, width, actions)
-  const { gap, title, split } = kit
+  const { gap } = kit
 
   const tab: CockpitTab = s.tab ?? 'agents'
   const running = visibleAgents(s).filter(a => a.status === 'running')
@@ -168,36 +166,38 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // The one bar width of the context and credit rows: what is left of the widest readout.
-  const five = rateRow(s, 'five_hour')
-  const seven = rateRow(s, 'seven_day')
-  const fiveText = five && rateText('5h', five, s.now)
-  const sevenText = seven && rateText('7d', seven, s.now)
-  const ctxText = contextText(s)
-  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(text => spanWidth(text ?? [])))
-  const barW = Math.max(4, width - textCol - 1)
+  // A budget cell: its label, a bar taking what the readout leaves of `cells`, the readout.
+  const budget = (label: string, cells: number, parts: BarPart[], text: Span[]): Span[] => {
+    const head = dim(`${label} `)
+    return [head, ...barCells(Math.max(BUDGET_BAR_MIN, cells - spanWidth([head, ...text]) - 1), parts), sp(' '), ...text]
+  }
 
-  // CONTEXT: from 80% a red line
+  // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds)
   const pct = s.ctx.percent ?? 0
   const shownPct = s.ctx.percent ?? s.lastCtx?.percent ?? 0
-  const ctxBar = line(ui, barCells(barW, [{ pct: shownPct, color: ctxColor(shownPct) }]))
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [sp(' '), dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
+  const ctxRow = line(ui, budget('CTX', width, [{ pct: shownPct, color: ctxColor(shownPct) }], [...contextText(s), ...cacheSpans]))
   const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
 
-  // Right of the CONTEXT title: the prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
-  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
-  const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
-  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(S.requestsLeft(forecast))]
-  const contextRight: Span[] = [...cacheSpans, ...(cacheSpans.length > 0 && forecastSpans.length > 0 ? [sp('  ')] : []), ...forecastSpans]
-
-  // CREDITS: the pace of the week sits right of the title
-  const paceDelta = seven?.pace?.delta
-  const paceSpans: Span[] =
-    paceDelta === undefined ? [] : [dim(S.vsExpected), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
-  const creditRow = (r: RateRow, text: Span[]) => {
+  // Credits row: the 5h and 7d windows side by side, half the row each, or one row each when a half cannot hold its readout and a short bar;
+  // the week's pace shows as the gap segment of the 7d bar
+  const windows = [
+    { label: '5h', r: rateRow(s, 'five_hour') },
+    { label: '7d', r: rateRow(s, 'seven_day') },
+  ].filter((w): w is { label: string; r: RateRow } => w.r !== undefined)
+  const windowSep = dim(' · ')
+  const halfCells = Math.floor((width - spanWidth([windowSep])) / 2)
+  const sideBySide = windows.length > 1 && windows.every(({ label, r }) => spanWidth([dim(`${label} `), ...rateText(r, s.now)]) + 1 + BUDGET_BAR_MIN <= halfCells)
+  const windowSpans = ({ label, r }: { label: string; r: RateRow }): Span[] => {
     const gapPct = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
     const parts = [{ pct: r.rem, color: r.color }, ...(gapPct ? [{ pct: gapPct, color: COLORS.gap }] : [])]
-    return split(line(ui, barCells(barW, parts)), barW, text)
+    return budget(label, sideBySide ? halfCells : width, parts, rateText(r, s.now))
   }
+  const creditsRows = windows.length === 0
+    ? [line(ui, [dim(S.noRateData)])]
+    : sideBySide
+      ? [line(ui, windows.flatMap((w, i) => [...(i > 0 ? [windowSep] : []), ...windowSpans(w)]))]
+      : windows.map(w => line(ui, windowSpans(w)))
 
   // The footer, the last row of every tab: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
@@ -252,25 +252,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       </Box>
     )
 
-  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, the three blocks told apart by a rule, each title with an empty row on both sides
-  const headerRows: Node[] = [
-    modelLine,
-    grid,
-    rule,
-    gap(),
-    title(S.contextTitle, contextRight),
-    gap(),
-    split(ctxBar, barW, ctxText),
-    ctxWarning,
-    rule,
-    gap(),
-    title(S.creditsTitle, paceSpans),
-    gap(),
-    five && fiveText && creditRow(five, fiveText),
-    five && seven && gap(),
-    seven && sevenText && creditRow(seven, sevenText),
-    !five && !seven && line(ui, [dim(S.noRateData)]),
-  ]
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
+  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows]
 
   // Only the selected tab is built. Blocks are told apart by a rule; an empty tab says so.
   const blocks = tabBlocks(tab, kit)

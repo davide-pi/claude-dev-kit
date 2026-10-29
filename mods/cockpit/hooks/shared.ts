@@ -125,9 +125,6 @@ export function truncateSpans(spans: readonly Span[], max: number): Span[] {
 /** `+5%` / `−5%` (true minus sign, as the mockup). */
 export const signedPct = (delta: number): string => `${delta < 0 ? '−' : '+'}${Math.abs(delta)}%`
 
-/** A signed percentage in the 4-cell column of the other percentages (` −5%`, `−12%`); a wider one keeps its width. */
-export const signedPctCell = (delta: number): string => signedPct(delta).padStart(4)
-
 /** Cost with precision that scales down; `$0.00` for an untouched session. */
 export function fmtCost(usd: number | undefined): string {
   if (usd === undefined || !Number.isFinite(usd) || usd <= 0) return '$0.00'

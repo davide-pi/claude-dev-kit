@@ -513,13 +513,13 @@ test('last known: before the first live reading the credits come from the status
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
-  expect(await text(/^~60% 5h/)).toMatch(/^~60% 5h ↻ +1h00m$/)
-  expect(await text(/^~80% 7d/)).toMatch(/^~80% 7d/)
+  expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% ↻ +1h00m · /)
+  expect(await text(/7d [▰▱]+ ~80%/)).toMatch(/ · 7d [▰▱]+ ~80% /)
   await measureWith($, 25, [{ kind: 'five_hour', percentUsed: 30, resetsAt: iso(3600_000) }])
   await settleAll()
-  expect(await text(/^ 70% 5h/)).toBeDefined()
-  expect(await text(/^~60% 5h/)).toBeUndefined()
-  expect(await text(/^~80% 7d/)).toMatch(/^~80% 7d/) // the live reading carries no 7d window: the cache's one stays, with its ~
+  expect(await text(/5h [▰▱]+ {2}70%/)).toBeDefined()
+  expect(await text(/5h [▰▱]+ ~60%/)).toBeUndefined()
+  expect(await text(/7d [▰▱]+ ~80%/)).toMatch(/ · 7d [▰▱]+ ~80% /) // the live reading carries no 7d window: the cache's one stays, with its ~
   await ui.unmount()
 })
 
@@ -531,9 +531,9 @@ test('last known: each window is drawn from the engine when it has that kind, el
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   await measureWith($, 25, [{ kind: 'seven_day', percentUsed: 10, resetsAt: iso(86_400_000) }])
   await settleAll()
-  expect(await text(/^~60% 5h/)).toMatch(/^~60% 5h/) // only the 7d is live: the 5h row does not vanish
-  expect(await text(/^ 90% 7d/)).toBeDefined()
-  expect(await text(/^~80% 7d/)).toBeUndefined()
+  expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% .* · 7d /) // only the 7d is live: the 5h row does not vanish
+  expect(await text(/7d [▰▱]+ {2}90%/)).toBeDefined()
+  expect(await text(/7d [▰▱]+ ~80%/)).toBeUndefined()
   await ui.unmount()
 })
 
@@ -541,7 +541,7 @@ test('last known: a cache window that is over reads 100 % left with no countdown
   world(on, { rateLimits: [], files: { [RL_FILE]: JSON.stringify({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 60 } }) } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  expect((await ui.find({ type: 'Text', text: /^~100% 5h/ }))?.text).toBe('~100% 5h')
+  expect((await ui.find({ type: 'Text', text: /^5h / }))?.text).toMatch(/^5h [▰▱]+ ~100%$/)
   await ui.unmount()
 })
 
@@ -552,11 +552,11 @@ test('last known: a resumed session shows the context of its last state with a d
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
-  expect(await text(/^~60% 600K\/1M/)).toBe('~60% 600K/1M')
+  expect(await text(/~60% 600K\/1M/)).toMatch(/^CTX [▰▱]+ ~60% 600K\/1M$/)
   expect(rowTexts(await ui.drawn()).some(r => /^󰀦/.test(r))).toBe(false)
   await measureWith($, 61)
   await settleAll()
-  expect(await text(/^ 61% 610K\/1M/)).toBe(' 61% 610K/1M')
+  expect(await text(/61% 610K\/1M/)).toMatch(/^CTX [▰▱]+ {2}61% 610K\/1M$/)
   await clock.advance(3000)
   await settleAll()
   expect(dataOf(writes)?.ctx).toEqual({ tokens: 610_000, window: 1_000_000, percent: 61 })
