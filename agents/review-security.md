@@ -6,6 +6,8 @@ description: >-
 tools: Read, Grep, Glob, Bash, PowerShell, LSP
 model: sonnet
 effort: high
+skills:
+  - finding-format
 omitClaudeMd: true
 maxTurns: 50
 ---
@@ -69,28 +71,8 @@ does not make reachable; generic advice with no specific defect.
 
 ## Output
 
-Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; two failures on one line are two blocks):
-
-```text
-### <n>. <one-line statement, chat language> — CONFIRMED | PLAUSIBLE
-- anchor: <repo-relative/path>:<line in the working-tree file, never in the diff file>   (side: right | left)
-- category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
-- status: todo | done
-- priority: P1 | P2 | P3            (todo only)
-- risk: high | medium | low         (todo only)
-- effort: S | M | L                 (todo only)
-- causedByChange: true              (optional: a defect outside the perimeter that this change causes)
-- failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
-- evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
-- for the author: yes — "<short question, prComment language>" | no
-- fix: <minimal change, or omit>
-```
-
-**One defect per block — hard rule.** A title that needs "and", "also" or `(a) … (b) …` is two blocks,
-each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
-Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
-
-Verdict line: `~/.claude/skills/code-review/references/finding-format.md`; order and field values: `report-format.md` § Fields in the same folder.
+Finding blocks as the preloaded `finding-format` skill gives them (the block, one defect per block, the verdict line);
+two failures on one line are two blocks.
 
 Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
 is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink
