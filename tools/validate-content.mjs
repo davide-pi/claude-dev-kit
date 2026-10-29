@@ -6,7 +6,7 @@
 import { existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 
-export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles, agentNames }) {
+export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles, agentNames, frontMatter }) {
   // ── 3. Nothing machine-specific or secret ────────────────────────────────────
   const LEAKS = [
     // Case-insensitive on purpose: `c:\users\…` must not slip past a capitalised pattern.
@@ -106,8 +106,8 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
   // The review agents run with `omitClaudeMd` and the main session may skip an external reference, so
   // the contract text each reader needs is inlined. The canonical copy lives in report-format.md; a copy
   // that drifts makes the merger parse several dialects, so every copy must equal it byte for byte:
-  //   - the Finding block (fenced) in the 3 review agents;
-  //   - the one-defect-per-block rule (a paragraph) in the 3 review agents;
+  //   - the Finding block (fenced) and the one-defect-per-block rule (a paragraph) in the finding-format skill,
+  //     which the 3 review agents preload through their `skills:` frontmatter;
   //   - the report skeleton (fenced) in the code-review skill and the review-large merger.
   {
     const FORMAT = 'skills/code-review/references/report-format.md';
@@ -119,9 +119,16 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
         if (has(rel) && !norm(rel).includes(canonical)) fail(rel, `inline ${label} differs from the one in ${FORMAT} — copy it verbatim`);
       }
     };
-    const AGENTS = ['code-reviewer', 'review-security', 'review-performance'].map((n) => `agents/${n}.md`);
-    fenced(/## Finding block[\s\S]*?```text\n([\s\S]*?)\n```/, 'Finding block', AGENTS);
-    fenced(/(\*\*One defect per block[^\n]*(?:\n[^\n]+)*)/, 'one-defect-per-block rule', AGENTS);
+    const SKILL = ['skills/finding-format/SKILL.md'];
+    fenced(/## Finding block[\s\S]*?```text\n([\s\S]*?)\n```/, 'Finding block', SKILL);
+    fenced(/(\*\*One defect per block[^\n]*(?:\n[^\n]+)*)/, 'one-defect-per-block rule', SKILL);
+    for (const n of ['code-reviewer', 'review-security', 'review-performance']) {
+      const rel = `agents/${n}.md`;
+      if (!has(rel)) continue;
+      const skills = (frontMatter(rel)?.skills ?? '').split(/[\s,[\]]+/).map((t) => t.replace(/^-/, ''));
+      if (!skills.includes('finding-format')) fail(rel, 'skills: must preload finding-format — the agent has no other copy of the Finding block');
+      else if (!has(SKILL[0])) fail(rel, `preloads finding-format, but ${SKILL[0]} is missing`);
+    }
     fenced(/## Order and tables[\s\S]*?```text\n([\s\S]*?)\n```/, 'report skeleton',
       ['skills/code-review/SKILL.md', 'workflows/review-large.js']);
   }

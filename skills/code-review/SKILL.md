@@ -116,5 +116,5 @@ and stop.
 - `references/effort-and-fanout.md` — the package every agent gets, effort depth, merging, tags.
 - `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
 - `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
-- `references/report-format.md`, `references/finding-format.md` — fields; verdict line.
+- `references/report-format.md` — fields; the `finding-format` skill — the verdict line.
 - `references/code-reviewer-passes.md`, `references/review-security-checks.md`, `references/review-performance-checks.md` — the matching agent names the § it needs; not opened from here.

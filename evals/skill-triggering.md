@@ -59,6 +59,13 @@ exists.
 | "ok, committa" after an edit turn | MUST load the skill before the first `git commit` |
 | "cosa ho modificato?" | MUST NOT (a question about the diff, not a request to commit) |
 
+### `finding-format` — preloaded by the review agents
+
+| Prompt | Expected |
+|--------|----------|
+| `code-reviewer` started on a diff | MUST have the skill in its context at start (`skills:` frontmatter), and return its Finding blocks |
+| "fammi la review" in the main session | MUST NOT load it directly (`code-review` owns the review; the agents carry the format) |
+
 ### `grill-me` — scrutiny, not execution
 
 | Prompt | Expected |
