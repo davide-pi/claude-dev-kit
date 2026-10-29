@@ -58,7 +58,8 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
     expect(await text(/example-repo/)).toContain('example-repo')
     expect(await text(/^\+1 ~1 \?1$/)).toBe('+1 ~1 ?1')
-    expect(await text(/25% 248K\/1M/)).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% 248K\/1M/)
+    // the readout keeps its cells: the tokens are right-aligned in theirs
+    expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% {3}248K\/1M/)
     // the two credit windows share one row: label, bar, remaining, reset countdown
     expect(await text(/^5h /)).toMatch(/^5h [\u25b0\u25b1]+ {2}62% \u21bb +2h14m \u00b7 7d [\u25b0\u25b1]+ {2}41% \u21bb +3d\d\dh$/)
     // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
@@ -90,7 +91,8 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$0\.00$/)).toBe('$0.00')
-  expect(await text(/ {3}0% 0\/1M/)).toMatch(/^CTX [▰▱]+ {3}0% 0\/1M$/)
+  // no cache hit yet: its cells stay blank, so the bar keeps the length it has once there is one
+  expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [▰▱]+ {3}0% {6}0\/1M {10}$/)
   await ui.unmount()
 })
 
@@ -115,7 +117,7 @@ test('the header holds the context bar and its readout, with no session-share li
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  expect(headerOf(rows).some(r => /25% 248K\/1M/.test(r))).toBe(true)
+  expect(headerOf(rows).some(r => /25% +248K\/1M/.test(r))).toBe(true)
   expect(rows.some(r => /sessione/.test(r))).toBe(false)
   await ui.unmount()
 })
@@ -170,7 +172,11 @@ test('deltas count from the turn start', async ($, on) => {
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$5\.20/)).toContain('$5.20')
   expect(await text(/^\+0\.38/)).toBe('+0.38')
-  expect(await text(/26% 260K/)).toMatch(/^CTX [▰▱]+ {2}26% 260K\/1M \+12K/)
+  // the growth is on the row under the credits, not in the CTX readout
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.find(r => /^CTX /.test(r))).toMatch(/^CTX [▰▱]+ {2}26% {3}260K\/1M/)
+  expect(rows.find(r => /^CTX /.test(r))).not.toContain('+12K')
+  expect(rows.find(r => /^turn /.test(r))).toMatch(/^turn +\+12K · pace 7d/)
   await ui.unmount()
 })
 
@@ -340,7 +346,7 @@ test('header: above the tab bar on every tab, with the model, effort, state, ses
     expect(header[0]).toContain('$4.82')
     expect(header.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /󰁝2 󰁅1/.test(r))).toBe(true)
     expect(header.some(r => /\+1 ~1 \?1/.test(r))).toBe(true)
-    expect(header.some(r => /25% 248K\/1M/.test(r))).toBe(true)
+    expect(header.some(r => /25% +248K\/1M/.test(r))).toBe(true)
     expect(header.some(r => /5h/.test(r))).toBe(true)
     expect(header.some(r => /7d/.test(r))).toBe(true)
     expect(header.some(r => /\u{F09D1} {2}94%/u.test(r))).toBe(true)
@@ -450,7 +456,7 @@ test('follow-up: opening the pane on the Context tab does not wait for the break
   await settleAll()
 })
 
-test('header: the last round duration sits beside the round cost, from the main turn only', async ($, on) => {
+test('header: no round duration beside the round cost', async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -460,9 +466,7 @@ test('header: the last round duration sits beside the round cost, from the main 
   await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
   expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38$/) // no round finished yet
   await $.turn.complete({ answer: '', durationMs: 134_000, isAborted: false, turnId: 't1', reason: 'answer' })
-  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
-  await $.turn.complete({ answer: '', durationMs: 5000, isAborted: false, turnId: 'a-t', reason: 'answer', agentId: 'a9' })
-  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
+  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38$/)
 })
 
 test('header: after a rule, the CTX row with the cache share, then the 5h and 7d windows on one row, and no burn line', async ($, on) => {
@@ -481,9 +485,10 @@ test('header: after a rule, the CTX row with the cache share, then the 5h and 7d
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
   const context = at(/^CTX /)
   expect(rows[context - 1]).toMatch(/^─+$/) // a rule between the model / ALM block and the budgets
-  expect(rows[context]).toMatch(/^CTX [▰▱]+ {2}25% 248K\/1M \u{F09D1}.*94%$/u)
+  expect(rows[context]).toMatch(/^CTX [▰▱]+ {2}25% {3}248K\/1M {4}\u{F09D1}.*94%$/u)
   expect(rows[context + 1]).toMatch(/^5h [▰▱]+ {2}62% .* · 7d [▰▱]+ {2}41% /)
-  expect(rows[context + 2]).toMatch(/^─+$/) // the rule that closes the header
+  expect(rows[context + 2]).toMatch(/^turn .* · pace 7d +[+−-]\d+%$/) // the turn's growth and the week's pace
+  expect(rows[context + 3]).toMatch(/^─+$/) // the rule that closes the header
   expect(rows.some(r => /runs out|^CONTEXT$|^CREDITS/.test(r))).toBe(false)
 })
 
@@ -541,3 +546,35 @@ for (const language of LANGUAGES) {
     }
   })
 }
+
+test('header: the CTX bar glows while Claude works, the glow flowing a cell each 200 ms, and rests still once idle', async ($, on) => {
+  const clock = world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const leaves = (el: unknown): string[] => {
+    const o = el as { props?: { color?: string }; children?: unknown[] } | null
+    const [only] = o?.children ?? []
+    return typeof only === 'string' ? [...only].map(() => o?.props?.color ?? '') : (o?.children ?? []).flatMap(leaves)
+  }
+  const ui = await mountPane($, 50)
+  const still = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(new Set(still.filter(c => c !== '#33363c')).size).toBe(1) // idle: one colour for the fill
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await ui.advance(0)
+  const first = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(first[0]).not.toBe(still[0])
+  await ui.advance(400)
+  const later = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(later[2]).not.toBe(still[2])
+  expect(later).not.toEqual(first)
+  // the round ends: the glow keeps flowing through the worklog's margin, then the bar rests still
+  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10_000)
+  await ui.advance(400)
+  expect(leaves(await ui.drawn({ in: 'ctxbar' }))).not.toEqual(still)
+  await clock.advance(16 * 60_000)
+  await ui.advance(400)
+  expect(leaves(await ui.drawn({ in: 'ctxbar' }))).toEqual(still)
+  await ui.unmount()
+})

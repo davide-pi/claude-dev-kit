@@ -263,8 +263,6 @@ export type CockpitSnapshot = {
   lastCtx?: { tokens: number; window: number; percent: number }
   /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
   lastRates?: CockpitRateLimit[]
-  /** How long the last main round took (`turn.complete`'s wall-clock length), in milliseconds; absent before one ended. */
-  lastRoundMs?: number
   /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran: the Insights tab lists them. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */

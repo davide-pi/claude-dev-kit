@@ -512,7 +512,6 @@ export const register: Register = on => {
           ...s,
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
-          lastRoundMs: e.durationMs,
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,

@@ -13,6 +13,7 @@ import {
   fmtCost,
   fmtCostDelta,
   gridWidths,
+  lighten,
   pathToFileUri,
   pctCell,
   rateColor,
@@ -27,6 +28,7 @@ import {
   truncMiddle,
   truncateSpans,
   withBackground,
+  withGlow,
 } from '../hooks/shared'
 import type { Span } from '../hooks/shared'
 import { NOW } from './format-fixtures'
@@ -204,4 +206,28 @@ test('sameSnapshot: equal data under other objects is the same, a changed field 
   expect(serialised).toBe(0)
   expect(sameSnapshot({ a: 1, shared: { toJSON: () => (serialised++, 'x') } }, { a: 1, shared: { toJSON: () => (serialised++, 'x') } })).toBe(true)
   expect(serialised).toBe(2)
+})
+
+test('lighten moves a colour toward white: 0 keeps it, 1 is white', () => {
+  expect(lighten('#204060', 0)).toBe('#204060')
+  expect(lighten('#204060', 1)).toBe('#ffffff')
+  expect(lighten('#000000', 0.5)).toBe('#808080')
+})
+
+test('withGlow lights the fill one cell a step from the left, its tail trailing, then rests past the head; the text never changes', () => {
+  const bar = barCells(10, [{ pct: 50, color: '#204060' }])
+  const colors = (cells: Span[]) => cells.flatMap(c => [...c.t].map(() => c.c))
+  expect(withGlow(bar, -1)).toBe(bar)
+  for (const step of [0, 2, 4, 5, 8, 9]) {
+    expect(spanText(withGlow(bar, step))).toBe(spanText(bar))
+    expect(spanWidth(withGlow(bar, step))).toBe(10)
+  }
+  expect(colors(withGlow(bar, 0)).slice(0, 2)).toEqual([lighten('#204060', 0.65), '#204060'])
+  // at step 2 the head is on the third cell, the two before it fade
+  expect(colors(withGlow(bar, 2)).slice(0, 4)).toEqual([lighten('#204060', 0.15), lighten('#204060', 0.35), lighten('#204060', 0.65), '#204060'])
+  // the empty part is never lit; past the fill's head the glow rests, then starts again
+  expect(colors(withGlow(bar, 4)).slice(5)).toEqual(Array(5).fill(COLORS.empty))
+  expect(withGlow(bar, 5)).toEqual(bar)
+  expect(withGlow(bar, 9)).toEqual(withGlow(bar, 0))
+  expect(withGlow(barCells(10, []), 3)).toEqual(barCells(10, []))
 })

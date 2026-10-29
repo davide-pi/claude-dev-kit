@@ -2,7 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import {
   TABS,
+  WORKING_MARGIN_MS,
   activeAlerts,
+  isWorking,
   parseRateCache,
   parseReset,
   resolveAlm,
@@ -121,4 +123,15 @@ test('parseRateCache: the status line cache read as rate limits (resets_at in se
   expect(parseRateCache({ five_hour: { used_percentage: 'x', resets_at: 1 }, seven_day: null }, now)).toEqual([])
   expect(parseRateCache('nope', now)).toEqual([])
   expect(parseRateCache(null, now)).toEqual([])
+})
+
+test('isWorking: any Claude state but idle, or a main round ended within the 15 minute margin', () => {
+  const s = INITIAL
+  const now = 1_000_000_000
+  expect(isWorking(s, now)).toBe(false)
+  expect(isWorking({ ...s, claudeState: { kind: 'idle' } }, now)).toBe(false)
+  for (const kind of ['working', 'thinking', 'tool', 'waiting'] as const) expect(isWorking({ ...s, claudeState: { kind } } as typeof s, now)).toBe(true)
+  const ended = (ago: number) => ({ ...s, claudeState: { kind: 'idle' as const }, insights: { ...s.insights, lastRoundEnd: now - ago } }) as typeof s
+  expect(isWorking(ended(WORKING_MARGIN_MS), now)).toBe(true)
+  expect(isWorking(ended(WORKING_MARGIN_MS + 1), now)).toBe(false)
 })

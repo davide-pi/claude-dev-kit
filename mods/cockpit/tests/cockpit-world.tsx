@@ -19,6 +19,9 @@ export const rowTexts = (root: unknown): string[] => {
     if (typeof el === 'string') return el
     const o = el as { text?: string; props?: { display?: string }; children?: unknown[] } | null
     if (o?.props?.display === 'none') return ''
+    // the CTX bar's surface module draws the cells it is handed (its glow changes their colour, not their text)
+    const client = (el as { type?: string; props?: { props?: { cells?: { t: string }[] } } } | null)
+    if (client?.type === 'Client') return (client.props?.props?.cells ?? []).map(c => c.t).join('')
     // the System tab's numbers are items of a wrapping Box with a gap of two cells
     const gap = (o as { props?: { flexWrap?: string; columnGap?: number } } | null)?.props
     return o?.text ?? (o?.children ?? []).map(text).join(gap?.flexWrap === 'wrap' && gap.columnGap === 2 ? '  ' : '')

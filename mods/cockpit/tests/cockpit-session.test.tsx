@@ -541,7 +541,7 @@ test('last known: a cache window that is over reads 100 % left with no countdown
   world(on, { rateLimits: [], files: { [RL_FILE]: JSON.stringify({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 60 } }) } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  expect((await ui.find({ type: 'Text', text: /^5h / }))?.text).toMatch(/^5h [▰▱]+ ~100%$/)
+  expect((await ui.find({ type: 'Text', text: /^5h / }))?.text).toMatch(/^5h [▰▱]+ ~100% {9}$/) // the countdown's cells stay, blank
   await ui.unmount()
 })
 
@@ -552,11 +552,12 @@ test('last known: a resumed session shows the context of its last state with a d
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
-  expect(await text(/~60% 600K\/1M/)).toMatch(/^CTX [▰▱]+ ~60% 600K\/1M$/)
+  const ctxRow = async () => rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))
+  expect(await ctxRow()).toMatch(/^CTX [▰▱]+ ~60% {3}600K\/1M {10}$/)
   expect(rowTexts(await ui.drawn()).some(r => /^󰀦/.test(r))).toBe(false)
   await measureWith($, 61)
   await settleAll()
-  expect(await text(/61% 610K\/1M/)).toMatch(/^CTX [▰▱]+ {2}61% 610K\/1M$/)
+  expect(await ctxRow()).toMatch(/^CTX [▰▱]+ {2}61% {3}610K\/1M {10}$/)
   await clock.advance(3000)
   await settleAll()
   expect(dataOf(writes)?.ctx).toEqual({ tokens: 610_000, window: 1_000_000, percent: 61 })

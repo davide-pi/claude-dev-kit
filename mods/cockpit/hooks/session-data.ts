@@ -199,7 +199,6 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
   lastCtx: undefined,
-  lastRoundMs: undefined,
   context: undefined,
   contextSeq: undefined,
   contextStatic: undefined,

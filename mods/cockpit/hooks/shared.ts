@@ -285,6 +285,33 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
   return out
 }
 
+/** `hex` (`#rrggbb`) moved toward white by `k`, 0 to 1. */
+export function lighten(hex: string, k: number): string {
+  const n = parseInt(hex.slice(1), 16)
+  const channel = (shift: number) => {
+    const v = (n >> shift) & 255
+    return Math.round(v + (255 - v) * k).toString(16).padStart(2, '0')
+  }
+  return `#${channel(16)}${channel(8)}${channel(0)}`
+}
+
+/** How much the glow lightens its cells, its head first: the tail trails to the left. */
+const GLOW = [0.65, 0.35, 0.15]
+/** Steps the glow rests past the fill's head before it starts again from the left. */
+const GLOW_REST = 4
+
+/** `cells` (a `barCells` bar) with a glow on the first part's run at step `phase`: it flows one cell a step from the left toward the fill's head, then rests. */
+export function withGlow(cells: Span[], phase: number): Span[] {
+  const [run, ...rest] = cells
+  if (phase < 0 || !run?.c || run.c === COLORS.empty) return cells
+  const n = run.t.length
+  const at = phase % (n + GLOW_REST)
+  if (at >= n) return cells
+  const from = Math.max(0, at - GLOW.length + 1)
+  const lit = Array.from({ length: at - from + 1 }, (_, i) => ({ t: '▰', c: lighten(run.c!, GLOW[at - from - i]!) }))
+  return [...(from > 0 ? [{ ...run, t: run.t.slice(0, from) }] : []), ...lit, ...(at + 1 < n ? [{ ...run, t: run.t.slice(at + 1) }] : []), ...rest]
+}
+
 /** `spans` with their first `cells` cells on a `bg` background: a row that carries its own bar. */
 export function withBackground(spans: readonly Span[], cells: number, bg: string): Span[] {
   const out: Span[] = []

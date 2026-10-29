@@ -2,20 +2,21 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot, CockpitTab } from '../types'
 import { claudeStateSpans } from './agents'
-import { TABS } from './session'
+import { TABS, isWorking } from './session'
 import {
   COLORS,
+  abbrevTokens,
   barCells,
   baseName,
   cacheColor,
   ctxColor,
   displayModel,
-  duration,
   fmtCost,
   fmtCostDelta,
   gridWidths,
   pathToFileUri,
   pctCell,
+  signedPct,
   spanWidth,
   textCells,
   truncMiddle,
@@ -28,7 +29,7 @@ import { t } from './strings'
 import { visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, delta, dim, line, sp } from './view-base'
 import type { Ui } from './view-base'
-import { contextText, headerEffort, rateRow, rateText } from './view-header'
+import { TOKENS_CELLS, contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit, tabBlocks } from './view-tabs'
 import type { Block, Node, PaneActions } from './view-tabs'
@@ -150,11 +151,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn), the last round's delta and duration
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn) and the last round's delta
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
-  // the last main round's length, once a second or more of it ran
-  const roundSpans: Span[] = s.lastRoundMs !== undefined && s.lastRoundMs >= 1000 ? [dim(' · '), dim(duration(s.lastRoundMs))] : []
-  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : []), ...roundSpans]
+  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : [])]
   const modelSpans = truncateSpans(
     [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
     Math.max(0, width - spanWidth(costSpans) - 1),
@@ -167,16 +166,32 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   )
 
   // A budget cell: its label, a bar taking what the readout leaves of `cells`, the readout.
+  const barLength = (head: Span, cells: number, text: Span[]): number => Math.max(BUDGET_BAR_MIN, cells - spanWidth([head, ...text]) - 1)
   const budget = (label: string, cells: number, parts: BarPart[], text: Span[]): Span[] => {
     const head = dim(`${label} `)
-    return [head, ...barCells(Math.max(BUDGET_BAR_MIN, cells - spanWidth([head, ...text]) - 1), parts), sp(' '), ...text]
+    return [head, ...barCells(barLength(head, cells, text), parts), sp(' '), ...text]
   }
 
-  // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds)
+  // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
+  // the readout keeps its cells (blank before the first turn's cache hit), so the bar keeps its length; its glow flows while Claude works
   const pct = s.ctx.percent ?? 0
   const shownPct = s.ctx.percent ?? s.lastCtx?.percent ?? 0
-  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [sp(' '), dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
-  const ctxRow = line(ui, budget('CTX', width, [{ pct: shownPct, color: ctxColor(shownPct) }], [...contextText(s), ...cacheSpans]))
+  const cacheShown: Span[] = [sp('  '), dim(S.cache), sp(pctCell(s.cacheShare ?? 0), cacheColor(s.cacheShare ?? 0))]
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [sp(' '.repeat(spanWidth(cacheShown)))] : cacheShown
+  const ctxParts = [{ pct: shownPct, color: ctxColor(shownPct) }]
+  const ctxText = [...contextText(s), ...cacheSpans]
+  const ctxHead = dim('CTX ')
+  const ctxBar = barLength(ctxHead, width, ctxText)
+  // The bar is a surface module where the surface has one: its glow moves on that region's own clock, never redrawing the pane
+  const ctxRow = ui.Client ? (
+    <Box>
+      {line(ui, [ctxHead])}
+      <ui.Client key="ctxbar" module="./ctx-bar.tsx" props={{ cells: barCells(ctxBar, ctxParts), isWorking: isWorking(s, s.now) }} width={ctxBar} />
+      {line(ui, [sp(' '), ...ctxText])}
+    </Box>
+  ) : (
+    line(ui, budget('CTX', width, ctxParts, ctxText))
+  )
   const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
 
   // Credits row: the 5h and 7d windows side by side, half the row each, or one row each when a half cannot hold its readout and a short bar;
@@ -198,6 +213,18 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     : sideBySide
       ? [line(ui, windows.flatMap((w, i) => [...(i > 0 ? [windowSep] : []), ...windowSpans(w)]))]
       : windows.map(w => line(ui, windowSpans(w)))
+
+  // Under the credits: the context the current turn added and the week's pace (the credit left against an even burn, + is ahead),
+  // each in its own cells and the row always drawn, so neither the readout nor the tabs below move
+  const grown = s.ctx.percent === undefined ? undefined : delta(s.ctx.tokens, s.ctx.startTokens)
+  const pace = rateRow(s, 'seven_day')?.pace
+  const trendRow = line(ui, [
+    dim(`${S.turnGrowth} `),
+    sp((grown !== undefined && grown > 0 ? `+${abbrevTokens(grown, true)}` : '').padStart(TOKENS_CELLS + 1)),
+    windowSep,
+    dim(`${S.weekPace} `),
+    ...(pace ? [sp(signedPct(pace.delta).padStart(5), pace.delta < 0 ? COLORS.amber : COLORS.green)] : []),
+  ])
 
   // The footer, the last row of every tab: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
@@ -253,7 +280,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     )
 
   // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
-  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows]
+  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows, trendRow]
 
   // Only the selected tab is built. Blocks are told apart by a rule; an empty tab says so.
   const blocks = tabBlocks(tab, kit)

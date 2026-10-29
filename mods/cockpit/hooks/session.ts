@@ -2,6 +2,14 @@ import type { CockpitAlm, CockpitNote, CockpitRateLimit, CockpitSnapshot, Cockpi
 import { isRecord, shortDate } from './shared'
 import { t } from './strings'
 
+/** The worklog's margin after a busy interval: Claude counts as at work this long after its last main round. */
+export const WORKING_MARGIN_MS = 15 * 60_000
+
+/** Claude works now (any state but idle) or ended a main round within the margin: the CTX bar's glow flows. */
+export const isWorking = (s: CockpitSnapshot, now: number): boolean =>
+  (s.claudeState !== undefined && s.claudeState.kind !== 'idle') ||
+  (s.insights?.lastRoundEnd !== undefined && now - s.insights.lastRoundEnd <= WORKING_MARGIN_MS)
+
 /** How much should still be left now (`target`) and the signed gap to what is (`delta`, + is ahead). */
 export function weeklyPace(
   remainingPct: number,
