@@ -18,7 +18,7 @@ schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAU
 4. **Multi-ask turns** are a checklist: answer every item, in order, numbered; a trailing "no?/vero?" gets
    **yes/no** (chat `it`: **sì/no**) and one line of evidence. Constraints stated in the turn ("senza push") bind the whole turn.
 5. **Stable ids**, one row each, kept all conversation so "#S1 ok" answers: findings `#F1`, decisions `#D1`,
-   state `#S1`, proposals `#n` (CLAUDE.md), options `#1`. A fixed item becomes one line. Tables: findings
+   state `#S1`, proposals `#P1` (CLAUDE.md), options `#1`. A fixed item becomes one line. Tables: findings
    `# | Sev | Where | Problem | Outcome`; decisions `# | Decision | Options | Recommendation` (chat `it`:
    `# | Decisione | Opzioni | Consiglio`); proposals sorted by risk.
 6. **No narration between tools**, no prose recap. Work, then report.

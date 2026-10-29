@@ -2,7 +2,7 @@
 name: docker-dev-env
 description: >-
   Use when a local stack (Aspire, compose) must run, or a local database, Redis or broker won't
-  start, a port collides: "non parte il container".
+  start, a port collides, a volume needs reset: "non parte il container".
 paths: "**/docker-compose*.y*ml,**/compose*.y*ml,**/*AppHost*/**,**/Dockerfile*"
 ---
 

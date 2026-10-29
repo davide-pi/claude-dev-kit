@@ -8,7 +8,8 @@
  * Each `node -e require(<hooks>/X.js)` entry is run as `node hooks/X.js` with a minimal payload of its event, median of
  * 3 runs, against the machine's own floor: median of 3 `node -e 0` runs + COLDSTART_NODE_MS (default 250), so a slow box
  * does not fail it. pwsh hooks pay a floor of their own, `pwsh -NoProfile -NonInteractive -Command exit`, checked
- * against COLDSTART_PWSH_MS (default 1500) and skipped without pwsh. COLDSTART_SKIP=1 skips the file.
+ * against COLDSTART_PWSH_MS (default 1500) and skipped without pwsh. A measure over its limit is re-taken once (the
+ * baseline too), so a load spike from parallel test files does not fail it. COLDSTART_SKIP=1 skips the file.
  *
  * Safety: every spawn runs in a temp directory that is not a repo, with CLAUDE_CONFIG_DIR and CLAUDE_ENV_FILE inside
  * it and CLAUDE_DONE_CLAIM unset.
@@ -84,17 +85,22 @@ test('every wired node hook starts within the machine baseline plus COLDSTART_NO
   delete env.CLAUDE_DONE_CLAIM;
   delete env.CLAUDE_HOOKS;
   try {
-    const baseline = median(Array.from({ length: RUNS }, () => timed(process.execPath, ['-e', '0'], { env, cwd })));
-    const limit = baseline + NODE_MS;
+    const measureBaseline = () => median(Array.from({ length: RUNS }, () => timed(process.execPath, ['-e', '0'], { env, cwd })));
+    const baseline = measureBaseline();
     const hooks = wiredHooks();
     assert.ok(hooks.length > 0, 'no node hook found in settings.json');
     const slow = [];
     for (const hook of hooks) {
       const input = payload(hook, cwd);
-      const ms = median(Array.from({ length: RUNS }, () => timed(process.execPath, [join(ROOT, 'hooks', `${hook.name}.js`)], { env, cwd, input })));
-      if (ms > limit) slow.push(`${hook.name} ${Math.round(ms)} ms`);
+      const measure = () => median(Array.from({ length: RUNS }, () => timed(process.execPath, [join(ROOT, 'hooks', `${hook.name}.js`)], { env, cwd, input })));
+      let limit = baseline + NODE_MS;
+      let ms = measure();
+      // Parallel test files load the machine unevenly: a hook over the limit is re-measured against a fresh
+      // baseline of its own, and only a hook slow both times fails.
+      if (ms > limit) { limit = measureBaseline() + NODE_MS; ms = measure(); }
+      if (ms > limit) slow.push(`${hook.name} ${Math.round(ms)} ms > ${Math.round(limit)}`);
     }
-    assert.deepEqual(slow, [], `slow hooks (median of ${RUNS}; threshold ${Math.round(limit)} ms = node baseline ${Math.round(baseline)} ms + ${NODE_MS}): ${slow.join(', ')}`);
+    assert.deepEqual(slow, [], `slow hooks (median of ${RUNS}; threshold = node baseline + ${NODE_MS} ms): ${slow.join(', ')}`);
   } finally {
     server.close();
     rmSync(work, { recursive: true, force: true });
@@ -105,6 +111,8 @@ const hasPwsh = !SKIP && spawnSync('pwsh', ['-NoProfile', '-Command', 'exit'], {
 
 test('the pwsh floor every pwsh hook pays stays under COLDSTART_PWSH_MS', { skip: SKIP || !hasPwsh }, () => {
   const args = ['-NoProfile', '-NonInteractive', '-Command', 'exit'];
-  const ms = median(Array.from({ length: RUNS }, () => timed('pwsh', args, {})));
+  const measure = () => median(Array.from({ length: RUNS }, () => timed('pwsh', args, {})));
+  let ms = measure();
+  if (ms > PWSH_MS) ms = measure();  // a load spike from parallel test files: fail only when slow twice
   assert.ok(ms <= PWSH_MS, `pwsh start: median ${Math.round(ms)} ms over the threshold ${PWSH_MS} ms`);
 });

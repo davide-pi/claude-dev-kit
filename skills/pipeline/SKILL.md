@@ -1,8 +1,8 @@
 ---
 name: pipeline
 description: >-
-  Use when a CI/CD file is created, edited or reviewed: Azure DevOps pipeline, GitVersion config,
-  GitHub workflow, Ansible deploy contract; "modifica la pipeline".
+  Use when a CI/CD file is created, edited or reviewed: Azure DevOps pipeline or template, GitVersion config,
+  GitHub workflow, or the Ansible deploy's artifact contract; "modifica la pipeline".
 paths: "**/.pipelines/**,**/azure-pipelines*.y*ml,**/GitVersion.yml,**/.github/workflows/*"
 ---
 

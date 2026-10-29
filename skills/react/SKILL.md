@@ -2,7 +2,7 @@
 name: react
 description: >-
   Use when React code changes or breaks: `*.tsx`, `vite.config.*`, `tailwind.config.*`; a render
-  loop, a double fetch, lost state; "il componente si ri-renderizza".
+  loop, a double fetch, lost state, or a proposed store or query library; "il componente si ri-renderizza".
 paths: "**/*.tsx,**/vite.config.*,**/tailwind.config.*"
 ---
 

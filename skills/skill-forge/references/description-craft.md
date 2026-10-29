@@ -7,7 +7,7 @@ look-alike request and drags its procedure in).
 
 ## The shape
 
-≤ 25 words, third person, a **directive opener** — `Use when …` — then the trigger terms the user
+≤ 35 words, third person, a **directive opener** — `Use when …` — then the trigger terms the user
 actually types, front-loaded. Never a summary of the body.
 
 ```text

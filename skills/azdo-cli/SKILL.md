@@ -1,8 +1,8 @@
 ---
 name: azdo-cli
 description: >-
-  Use when an Azure DevOps item, PR, wiki or pipeline is written via `az`, or an `az` call
-  fails: "crea il work item".
+  Use when an Azure DevOps item, PR, wiki or pipeline is written via `az`, a type name is
+  resolved, or an `az` call fails: "crea il work item".
 ---
 
 # azdo-cli — Azure DevOps through `az`, MCP only for a proven gap

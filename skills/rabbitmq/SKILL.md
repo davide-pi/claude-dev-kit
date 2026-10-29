@@ -2,7 +2,7 @@
 name: rabbitmq
 description: >-
   Use when code calls RequestAsync, RespondAsync, PublishAsync or SubscribeAsync, a ServiceContract
-  changes, an RPC times out, or a queue backs up; "la coda si accumula".
+  type changes, an RPC times out, or a queue backs up or dead-letters; "la coda si accumula".
 paths: "**/*ServiceContract*/**,**/*Responder*.cs,**/*Subscriber*.cs,**/*Consumer*.cs"
 ---
 

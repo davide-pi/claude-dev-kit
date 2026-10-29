@@ -11,7 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, utimesSync, existsSync, readdirSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
 import { join, dirname } from 'node:path';
@@ -289,5 +289,6 @@ test('the remote URL comes from .git/config, also in a linked worktree (its conf
 });
 
 test('statusline.js asks git for the status only, never for the remote', () => {
-  assert.doesNotMatch(readFileSync(STATUSLINE, 'utf8'), /["']remote["']\s*,\s*["']get-url["']/);
+  const modules = readdirSync(join(ROOT, 'statusline')).map((f) => readFileSync(join(ROOT, 'statusline', f), 'utf8'));
+  assert.doesNotMatch([readFileSync(STATUSLINE, 'utf8'), ...modules].join('\n'), /["']remote["']\s*,\s*["']get-url["']/);
 });

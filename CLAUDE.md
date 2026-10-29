@@ -23,12 +23,12 @@ Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
 dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
-each below, then stop.
+each, then stop.
 
 | # | Proposal | Reason | Risk |
 | --- | --- | --- | --- |
 
-`#` stable all conversation, one item per row. Risk: **high** behaviour, data, contract; **medium** local
+Number rows `#P1`, `#P2`; stable all conversation. Risk: **high** behaviour, data, contract; **medium** local
 logic, testable; **low** cosmetic.
 
 ## Language

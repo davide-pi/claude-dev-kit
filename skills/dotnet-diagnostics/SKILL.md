@@ -2,7 +2,7 @@
 name: dotnet-diagnostics
 description: >-
   Use when evidence is needed from a running .NET service: metrics, profiles, counters,
-  traces, dumps; or what to log: "il servizio è lento".
+  traces, dumps; or deciding what to log or instrument: "il servizio è lento".
 ---
 
 # dotnet-diagnostics — the instruments, production first

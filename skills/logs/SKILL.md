@@ -1,8 +1,8 @@
 ---
 name: logs
 description: >-
-  Use when a service's logs must be read: errors, a trace id, from compose, Kubernetes, Aspire
-  or Grafana; "guarda i log". Runs in ops-analyst.
+  Use when a service's logs must be read or filtered: errors, a trace id, from compose, containers,
+  Kubernetes, Aspire or Grafana; "guarda i log". Runs in ops-analyst.
 argument-hint: "[service] [filter] [--since <dur>] [-n <lines>] [--errors] [--env <env>]"
 context: fork
 agent: ops-analyst
