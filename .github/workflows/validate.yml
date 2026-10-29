@@ -31,7 +31,10 @@ jobs:
         run: node --test --test-concurrency=1 tools/*.test.mjs
 
       - name: Syntax-check the status line
-        run: node --check statusline.js
+        run: |
+          for f in statusline.js statusline/*.js; do
+            node --check "$f"
+          done
 
       - name: Syntax-check hooks and tools
         run: |
