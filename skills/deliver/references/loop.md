@@ -122,7 +122,7 @@ proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding an
 
 ## The verdict
 
-The verdict is the standing evidence table, emitted as a titled quoted block (`> **Verification**`, chat `it`: `Verifica`, then the table on `> ` lines), never inside a code fence; `done-claim`
+The verdict is the standing evidence table, emitted as a bold title line (`**Verification**`, chat `it`: `Verifica`) and a plain table, never quoted nor inside a code fence; `done-claim`
 accepts it when the third cell looks like output (a digit, ok, verde, green, passed, failed, exit, succeeded). S gets two or three lines. Then:
 
 Review: round 2, 0 open P1/P2. Gaps: <gaps, or none>. Residual risks: <list, or none>. Defaults chosen: <defaults, or none>. Local test: proposal <who/what>.

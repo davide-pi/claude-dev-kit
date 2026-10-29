@@ -1,5 +1,5 @@
 // Pure formatting and parsing helpers of the cockpit: no `$`, no state, all unit-tested.
-// Logic ported from ~/.claude/statusline.js (abbrevTokens, countdown, rateColor, weeklyPace).
+// Logic ported from ~/.claude/statusline/segments.js (abbrevTokens, countdown, rateColor, weeklyPace).
 
 export const COLORS = {
   text: '#d6d8dc',
