@@ -98,7 +98,8 @@ test('Context: opening the tab reads a summary breakdown and draws the bar and a
   // every row is as wide as the pane's content (its background bar spans it)
   expect(rows.find(r => /System prompt/.test(r))).toMatch(/^󰝤 System prompt +8k +1% *$/) // the exact count is over: no ~
   expect(rows.find(r => /Messages/.test(r))).toMatch(/^󰝤 Messages +90k +9% *$/)
-  expect(rows.find(r => /Free space/.test(r))).toMatch(/Free space +700k +70% *$/)
+  // the free space and the compaction buffer are not rows
+  expect(rows.some(r => /Free space|Autocompact buffer/.test(r))).toBe(false)
   expect(textCells(rows.find(r => /Messages/.test(r)) ?? '')).toBe(48)
   expect((await ui.find({ type: 'Text', text: /^(estimate|exact|~ = estimate)$/ }))?.text).toBe('exact')
   expect(usageCalls.filter(c => c === 'full')).toHaveLength(1) // the first opening, idle, counts once by itself
@@ -281,7 +282,7 @@ test('Context: the categories go by tokens, biggest first, the free space and th
   const ui = await mountPane($, 50)
   await ui.press({ key: 'tab:context' })
   await settleAll()
-  expect(categoryNames(rowTexts(await ui.drawn()))).toEqual(['Messages', 'Skills', 'System prompt', 'Free space', 'Autocompact buffer'])
+  expect(categoryNames(rowTexts(await ui.drawn()))).toEqual(['Messages', 'Skills', 'System prompt'])
   await ui.unmount()
 })
 
@@ -475,7 +476,7 @@ test('Context: in Italian the category names are translated, an unknown one show
   try {
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     const rows = (await paneRows($, 50, 'context')).rows
-    expect(categoryNames(rows)).toEqual(['Messaggi', 'Prompt di sistema', 'Brand new', 'Spazio libero'])
+    expect(categoryNames(rows)).toEqual(['Messaggi', 'Prompt di sistema', 'Brand new'])
     expect(rows.some(r => /^DETTAGLI CONTESTO · 99K\/1M/.test(r))).toBe(true)
   } finally {
     setLang('en')
