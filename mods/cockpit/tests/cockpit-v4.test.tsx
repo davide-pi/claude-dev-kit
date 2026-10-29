@@ -168,7 +168,7 @@ test('Context: the breakdown comes first, no cost per model, and the exact count
 
 // ── Work: links, no processes ──
 
-test('Work: the work item of the branch is a link to it (AB# in the branch name), with no state, checks or review, and no processes or ports', async ($, on) => {
+test("Work: the work item in the branch name is not the chat's (the branch may predate it): WI is empty, and no processes or ports", async ($, on) => {
   world(on, { branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'contoso', project: 'Alpha', identity: 'id-a' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
@@ -176,9 +176,8 @@ test('Work: the work item of the branch is a link to it (AB# in the branch name)
   await ui.press({ key: 'tab:work' })
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows.some(r => /^WI · 1/.test(r))).toBe(true)
-  expect(rows.some(r => /^AB#512/.test(r))).toBe(true)
+  expect(rows.some(r => /^WI · 0/.test(r))).toBe(true)
+  expect(rows.some(r => /^AB#512/.test(r))).toBe(false)
   expect(rows.some(r => /^PROCESS/.test(r))).toBe(false)
-  expect((await ui.findAll({ type: 'Link' })).map(l => l.props.href)).toContain('https://dev.azure.com/contoso/Alpha/_workitems/edit/512')
   await ui.unmount()
 })

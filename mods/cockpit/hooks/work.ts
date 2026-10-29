@@ -148,6 +148,20 @@ export function parseAzurePr(out: string): CockpitPr | undefined {
   }
 }
 
+/** When the pull request of `gh pr view --json …,createdAt` or of `az repos pr list` / `show` (`creationDate`) was opened, in ms; undefined when the text names no date. */
+export function parsePrCreatedAt(out: string): number | undefined {
+  try {
+    const parsed: unknown = JSON.parse(out)
+    const pr = Array.isArray(parsed) ? parsed[0] : parsed
+    if (!isRecord(pr)) return undefined
+    const at = typeof pr.createdAt === 'string' ? pr.createdAt : pr.creationDate
+    const ms = typeof at === 'string' ? Date.parse(at) : Number.NaN
+    return Number.isFinite(ms) ? ms : undefined
+  } catch {
+    return undefined
+  }
+}
+
 // ── The Work tab: the changed files, the diff of one ──
 
 /** `git diff --numstat --no-renames -z HEAD --` then the untracked paths -> the changed files; a binary file has `-` counts. */

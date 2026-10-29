@@ -1,10 +1,10 @@
 import { expect, test } from 'claude-code/testing'
 
 import { GH_CREATED, MIN, bashResult, lavoroRows, mountPane, openCockpit, settleAll, workRows } from './cockpit-fixtures'
-import { GH_SSH, dataOf, rowTexts, world } from './cockpit-world'
+import { GH_SSH, NOW, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-const GH_PR_ARGS = 'gh pr view --json number,title,url,state,isDraft'
+const GH_PR_ARGS = 'gh pr view --json number,title,url,state,isDraft,createdAt'
 /** The addresses of the pane's web links (the header's folder is a `file://` link too, left out). */
 const webLinks = async (ui: Awaited<ReturnType<typeof mountPane>>) =>
   (await ui.findAll({ type: 'Link' })).map(l => l.props.href).filter(h => typeof h === 'string' && h.startsWith('http'))
@@ -30,6 +30,54 @@ test('PR: a GitHub pull request of the branch as a link: number, title and addre
   expect(rows.slice(i + 1, i + 4)).toEqual([' ', '▾ open · 1', '#42 Fix the orders filter'])
   expect(rows.some(r => /review|checks|merged/.test(r))).toBe(false)
   expect(ghCalls).toEqual([GH_PR_ARGS])
+})
+
+test("PR: the branch's pull request opened before the chat began is not the chat's, so Work lists none", async ($, on) => {
+  world(on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 60_000).toISOString() } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const rows = await lavoroRows($)
+  expect(rows).toContain('PR · 0')
+  expect(rows.some(r => /#42/.test(r))).toBe(false)
+})
+
+test("PR: the branch's pull request without an opening date is not taken as the chat's", async ($, on) => {
+  world(on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: undefined } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('PR · 0')
+})
+
+test('PR: a pull request the chat already holds stays listed, whenever it was opened', async ($, on) => {
+  world(on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 86_400_000).toISOString() }, dataFile: JSON.stringify({ history: [], prs: [{ number: 42, title: 'Fix the orders filter', state: 'open' }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('#42 Fix the orders filter')
+})
+
+test('PR: a resumed chat keeps the moment it began, so a pull request opened before the resume is still its own', async ($, on) => {
+  const writes = new Map<string, string>()
+  world(on, { writes, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 60 * MIN).toISOString() }, dataFile: JSON.stringify({ history: [], startedAt: NOW - 2 * 60 * MIN }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('#42 Fix the orders filter')
+  expect(dataOf(writes)?.startedAt).toBe(NOW - 2 * 60 * MIN)
+})
+
+test("PR: a pull request opened seconds before the chat began, by a server clock behind this one, is still the chat's", async ($, on) => {
+  world(on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 5_000).toISOString() } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  expect(await lavoroRows($)).toContain('#42 Fix the orders filter')
+})
+
+test("PR: on Azure DevOps the branch's pull request opened before the chat began is not the chat's", async ($, on) => {
+  world(on, { branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: [{ pullRequestId: 7, title: 'Faster orders', status: 'active', creationDate: new Date(NOW - 60 * MIN).toISOString() }] })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await settleAll()
+  const rows = await lavoroRows($)
+  expect(rows).toContain('PR · 0')
+  expect(rows.some(r => /#7/.test(r))).toBe(false)
 })
 
 test('PR: a work item id in the branch name no longer keeps gh from being asked', async ($, on) => {

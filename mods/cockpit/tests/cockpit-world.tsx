@@ -253,7 +253,7 @@ export function world(on: On, options: World = {}) {
       }
       return options.pr === undefined
         ? answer('', 1)
-        : answer(JSON.stringify({ number: options.pr, title: 'Fix the orders filter', ...options.prExtra }))
+        : answer(JSON.stringify({ number: options.pr, title: 'Fix the orders filter', createdAt: new Date(NOW).toISOString(), ...options.prExtra }))
     }
     // On Windows the mod starts az through cmd, the way a shell would resolve az.cmd.
     if (e.argv[0] === 'az' || (e.argv.slice(0, 4).join(' ') === 'cmd /d /s /c' && e.argv[4] === 'az')) {
@@ -265,7 +265,8 @@ export function world(on: On, options: World = {}) {
         const now = options.azShow?.[e.argv[e.argv.indexOf('--id') + 1] ?? '']
         return now === undefined ? answer('', 1) : answer(JSON.stringify(now))
       }
-      return answer(JSON.stringify(options.azPr ?? []))
+      // a listed PR was opened when the chat began, unless the test says when
+      return answer(JSON.stringify((options.azPr ?? []).map(p => (typeof p === 'object' && p !== null ? { creationDate: new Date(NOW).toISOString(), ...p } : p))))
     }
     if (options.notRepo) return answer('', 128)
     if (e.argv.includes('merge-base')) return options.mergeBase === undefined ? answer('', 1) : answer(`${options.mergeBase}

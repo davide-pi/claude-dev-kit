@@ -70,7 +70,7 @@ test('Italian: the context category names are translated, one the engine adds sh
     setLang('it')
     expect(t().contextCategories.Messages).toBe('Messaggi')
     expect(t().contextCategories['System prompt']).toBe('Prompt di sistema')
-    expect(t().contextCategories['Free space']).toBe('Spazio libero')
+    expect(t().contextCategories['Free space']).toBeUndefined() // not a row: the Context table lists the used categories only
     expect(t().contextCategories['A new category']).toBeUndefined()
     setLang('en')
     expect(t().contextCategories.Messages).toBeUndefined()

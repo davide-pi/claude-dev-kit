@@ -32,7 +32,7 @@ let writeScheduledAt: number | undefined
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the saved notes, the context samples, the files the chat edited and the last measured context; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the saved notes, the context samples, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
 export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
@@ -47,6 +47,7 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(s.edited !== undefined && { edited: s.edited }),
     ...(ctx && { ctx }),
+    ...(s.startedAt !== undefined && { startedAt: s.startedAt }),
   }
 }
 
@@ -133,13 +134,14 @@ type Saved = {
   ctxRounds?: number[]
   edited?: string[]
   ctx?: { tokens: number; window: number; percent: number }
+  startedAt?: number
 }
 
 /**
  * What an earlier run of session `id` left: in its state file the tab (none for a missing file or an unknown one; the v2 Sessione
  * and Repo tabs map to Subagents and Work) and the tokens of the main loop and of the agents that left the list (a file from before
- * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the notes and the context
- * samples. A state file from before the data file still holds the history and the pull requests: a field the data file does not
+ * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the notes, the context
+ * samples and when the chat began. A state file from before the data file still holds the history and the pull requests: a field the data file does not
  * have is read from there, once (the next write moves it).
  */
 async function savedState($: EngineInterface, id: string): Promise<Saved> {
@@ -163,6 +165,7 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       edited: parseEdited(data?.edited),
       ctx: parseCtx(data?.ctx),
+      startedAt: count(data?.startedAt),
     }
   } catch {
     return { history: [] }
@@ -219,10 +222,12 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   const current = await read($, snapshot)
   if (current.sessionId === id || (!isStart && current.endedSessionId === id)) return
   const saved = await savedState($, id)
+  // A resume keeps the moment the chat began: the pull requests opened since then are the chat's.
+  const startedAt = saved.startedAt ?? (await $.clock.now())
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 

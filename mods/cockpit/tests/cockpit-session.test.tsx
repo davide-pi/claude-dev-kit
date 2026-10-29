@@ -51,7 +51,7 @@ test('the state file is written at session start with open:false and the session
   })
   expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
   // what must survive a resume is in the session data file
-  expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX })
+  expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX, startedAt: NOW })
 })
 
 const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'agents' }
@@ -324,7 +324,7 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
   // a file without agentTokens starts the count from the history it lists; the history itself is in the data file
   expect(flagOf(writes)).toEqual({ ...CLOSED, agentTokens: 5400 })
-  expect(dataOf(writes)).toEqual({ history, prs: [], ctx: LIVE_CTX })
+  expect(dataOf(writes)).toEqual({ history, prs: [], ctx: LIVE_CTX, startedAt: NOW })
 })
 
 test('follow-up: a saved state without agentTokens starts the count from the history it lists', async ($, on) => {
@@ -463,7 +463,7 @@ test('session data: a state file from before the data file hands its history and
   const history = [entry('a9', 'implementer', NOW - 30_000)]
   world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'work', history, prs: [SAVED_PR] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(dataOf(writes)).toEqual({ history, prs: [SAVED_PR], ctx: LIVE_CTX })
+  expect(dataOf(writes)).toEqual({ history, prs: [SAVED_PR], ctx: LIVE_CTX, startedAt: NOW })
   const flag = flagOf(writes) as Record<string, unknown>
   expect(flag.history).toBeUndefined()
   expect(flag.prs).toBeUndefined()
@@ -486,7 +486,7 @@ test('session data: a field of the wrong shape is left out, never thrown', async
   const writes = new Map<string, string>()
   world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, notes: [null, { id: 1, text: 7 }, { id: 'x', text: 'a' }, { id: 2, text: ' ' }], ctxRounds: ['a', -1], ctxSamples: null }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX })
+  expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX, startedAt: NOW })
 })
 
 test('session data: the end of the session writes the notes into the data file; a snapshot of another session writes none', async ($, on) => {

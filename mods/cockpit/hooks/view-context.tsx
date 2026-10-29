@@ -17,15 +17,15 @@ const CTX_TOKENS_W = 6
 const CTX_SHARE_W = 5
 const CTX_MARK_W = 2
 const CTX_DELTA_W = 6
-/** The colors of the used categories, in turn; the bar alone also draws the compaction buffer, dim. */
+/** The colors of the used categories, in turn. */
 const CATEGORY_COLORS = [COLORS.blue, COLORS.lavender, COLORS.amber, COLORS.green, COLORS.yellow, COLORS.orange, COLORS.violet, COLORS.gray]
 
-/** The bar of the window: a part per used category (each its own color) and the compaction buffer; the rest stays empty. */
+/** The bar of the window: a part per used category, each its own color; the rest stays empty. */
 export function contextBar(c: CockpitContext, width: number): Span[] {
   let n = 0
   const parts = c.rows.flatMap(r => {
-    if (r.kind !== 'used' && r.kind !== 'buffer') return []
-    const color = r.kind === 'buffer' ? COLORS.dim : (CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray)
+    if (r.kind !== 'used') return []
+    const color = CATEGORY_COLORS[n++ % CATEGORY_COLORS.length] ?? COLORS.gray
     return [{ pct: c.max > 0 ? (100 * r.tokens) / c.max : 0, color }]
   })
   return barCells(width, parts)
