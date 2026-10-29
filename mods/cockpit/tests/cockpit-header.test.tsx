@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { TABS } from '../hooks/session'
+import { TABS, isWorking } from '../hooks/session'
 import { setLang } from '../hooks/strings'
 import {
   IT_FILE,
@@ -10,6 +10,7 @@ import {
   colorOf,
   createTask,
   headerOf,
+  measureWith,
   mountPane,
   openCockpit,
   paneRows,
@@ -18,7 +19,8 @@ import {
   taskRows,
   updateTask,
 } from './cockpit-fixtures'
-import { PANE, flagOf, iso, rowTexts, world } from './cockpit-world'
+import { NOW, PANE, flagOf, iso, rowTexts, world } from './cockpit-world'
+import { textCells } from '../hooks/shared'
 import type { World } from './cockpit-world'
 
 /** The left margin of the drawn root: the column its content starts at. */
@@ -58,10 +60,10 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
     expect(await text(/example-repo/)).toContain('example-repo')
     expect(await text(/^\+1 ~1 \?1$/)).toBe('+1 ~1 ?1')
-    expect(await text(/25% 248K\/1M/)).toBe(' 25% 248K/1M')
-    expect(await text(/^ 62% 5h/)).toBe(' 62% 5h \u21bb  2h14m')
-    expect(await text(/^ 41% 7d/)).toMatch(/^ 41% 7d \u21bb  3d\d\dh$/)
-    expect(await text(/vs expected/)).toBe('vs expected 7d  \u22125%')
+    // the readout keeps its cells: the tokens are right-aligned in theirs
+    expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% {3}248K\/1M/)
+    // the two credit windows share one row: label, bar, remaining, reset countdown
+    expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [\u25b0\u25b1]+ {2}62% \u21bb +2h14m \u00b7 7d [\u25b0\u25b1]+ {2}41% \u21bb +3d\d\dh$/)
     // Subagents is the tab the pane opens on: the row is one pressable Button: its text is the whole row, the model a word
     const row = (await ui.find({ key: 'agent:a1' }))?.text
     expect(row).toContain('󰄬 code-reviewer')
@@ -91,7 +93,8 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$0\.00$/)).toBe('$0.00')
-  expect(await text(/^ {2}0% /)).toBe('  0% 0/1M')
+  // no cache hit yet: its cells stay blank, so the bar keeps the length it has once there is one
+  expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [▰▱]+ {3}0% {6}0\/1M {10}$/)
   await ui.unmount()
 })
 
@@ -100,7 +103,7 @@ test('a rule closes the header and the tab bar, and sets the SUBAGENTS title (af
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  const [, , first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
+  const [, first = -1, second = -1] = rows.flatMap((r, i) => (/^\u2500+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^SUBAGENTS/.test(r))
   // header, rule, tab bar, rule, then the tab's own content: an empty row first
   expect(first).toBe(headerOf(rows).length)
@@ -116,7 +119,7 @@ test('the header holds the context bar and its readout, with no session-share li
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const rows = rowTexts(await ui.drawn())
-  expect(headerOf(rows).some(r => /25% 248K\/1M/.test(r))).toBe(true)
+  expect(headerOf(rows).some(r => /25% +248K\/1M/.test(r))).toBe(true)
   expect(rows.some(r => /sessione/.test(r))).toBe(false)
   await ui.unmount()
 })
@@ -169,9 +172,12 @@ test('deltas count from the turn start', async ($, on) => {
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
-  expect(await text(/^\$5\.20/)).toContain('$5.20')
-  expect(await text(/^\+0\.38/)).toBe('+0.38')
-  expect(await text(/^ 26% /)).toBe(' 26% 260K/1M +12K')
+  expect(await text(/^\$5\.20$/)).toBe('$5.20')
+  // the growth and the round's cost are on the row under the credits, not in the CTX readout nor beside the session cost
+  const rows = rowTexts(await ui.drawn())
+  expect(rows.find(r => /^CTX /.test(r))).toMatch(/^CTX [▰▱]+ {2}26% {3}260K\/1M/)
+  expect(rows.find(r => /^CTX /.test(r))).not.toContain('+12K')
+  expect(rows.find(r => /^turn /.test(r))).toMatch(/^turn +\+12K +\$\+0\.38 · pace 7d/)
   await ui.unmount()
 })
 
@@ -198,16 +204,14 @@ test('percentages are right-aligned: 87% and 7% start their label in the same co
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  const five = rows.find(r => /87% 5h/.test(r))
-  const seven = rows.find(r => /7% 7d/.test(r))
-  const context = rows.find(r => /25% 248K/.test(r))
-  expect(five).toMatch(/^[▰▱]+ 87% 5h/)
-  expect(seven).toMatch(/^[▰▱]+ {2}7% 7d/)
-  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
-  expect(context?.indexOf('%')).toBe(five?.indexOf('%'))
+  // both windows share one row, each half drawn the same width: the 7d percent sits one half after the 5h one
+  const credits = rows.find(r => /^5h /.test(r)) ?? ''
+  expect(credits).toMatch(/^5h [▰▱]+ {2}87% .* · 7d [▰▱]+ {3}7% /)
+  const [five, seven] = [credits.indexOf('87%'), credits.indexOf('7%', credits.indexOf(' 7d '))]
+  expect(seven - credits.indexOf(' · 7d ') - 3).toBe(five + 1)
 })
 
-test('percentages are right-aligned with three digits too: 100% and 87% start their label in the same column', async ($, on) => {
+test('percentages are right-aligned with three digits too: 100% fills the cell the two-digit 87% pads', async ($, on) => {
   world(on, {
     rateLimits: [
       { kind: 'five_hour', percentUsed: 0, resetsAt: iso(5 * 60 * MIN) },
@@ -216,14 +220,11 @@ test('percentages are right-aligned with three digits too: 100% and 87% start th
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($)
-  const five = rows.find(r => /100% 5h/.test(r))
-  const seven = rows.find(r => /87% 7d/.test(r))
-  expect(five).toMatch(/^[▰▱]+100% 5h/)
-  expect(seven).toMatch(/^[▰▱]+ 87% 7d/)
-  expect(seven?.indexOf('%')).toBe(five?.indexOf('%'))
+  const credits = rows.find(r => /^5h /.test(r)) ?? ''
+  expect(credits).toMatch(/^5h [▰▱]+ 100% .* · 7d [▰▱]+ {2}87% /)
 })
 
-test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn and an empty one do not set it', async ($, on) => {
+test('cache share: the last main-loop turn, at the end of the CTX row; a subagent turn and an empty one do not set it', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -243,8 +244,8 @@ test('cache share: the last main-loop turn, right of CONTEXT; a subagent turn an
         model: 'm',
       },
     })
-  // the title row reads as its text joined with the right side: CONTEXT, then the cache share
-  const title = async () => (await paneRows($)).rows.find(r => /^CONTEXT.*\u{F09D1}/u.test(r))?.slice('CONTEXT'.length)
+  // the CTX row ends with the cache share
+  const title = async () => (await paneRows($)).rows.find(r => /^CTX .*\u{F09D1}/u.test(r))?.replace(/^.* (?=\u{F09D1})/u, '')
 
   expect(await title()).toBeUndefined()
   await complete({ input: 600, read: 94_000, write: 5_400 }, 'a1')
@@ -300,7 +301,7 @@ test('a session start (/clear) forgets the cache share', async ($, on) => {
     usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
   })
   const before = (await paneRows($)).rows
-  expect(before.some(r => /^CONTEXT.*\u{F09D1} {2}94%/u.test(r))).toBe(true)
+  expect(before.some(r => /^CTX .*\u{F09D1} {2}94%$/u.test(r))).toBe(true)
 
   id = 's-2'
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -346,22 +347,24 @@ test('header: above the tab bar on every tab, with the model, effort, state, ses
     expect(header[0]).toContain('$4.82')
     expect(header.some(r => /example-repo/.test(r) && /feature\/x/.test(r) && /󰁝2 󰁅1/.test(r))).toBe(true)
     expect(header.some(r => /\+1 ~1 \?1/.test(r))).toBe(true)
-    expect(header.some(r => /25% 248K\/1M/.test(r))).toBe(true)
+    expect(header.some(r => /25% +248K\/1M/.test(r))).toBe(true)
     expect(header.some(r => /5h/.test(r))).toBe(true)
     expect(header.some(r => /7d/.test(r))).toBe(true)
     expect(header.some(r => /\u{F09D1} {2}94%/u.test(r))).toBe(true)
   }
 })
 
-test('header: the last round cost sits beside the session cost', async ($, on) => {
+test('header: the last round cost is on the trend row, the session cost alone on the first line', async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
-  const [first] = headerOf((await paneRows($)).rows)
-  expect(first).toMatch(/\$5\.20 \+0\.38$/)
+  const header = headerOf((await paneRows($)).rows)
+  expect(header[0]).toMatch(/\$5\.20$/)
+  expect(header[0]).not.toContain('0.38')
+  expect(header.find(r => /^turn /.test(r))).toMatch(/^turn +\+12K +\$\+0\.38 · pace 7d/)
 })
 
 test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
@@ -456,7 +459,7 @@ test('follow-up: opening the pane on the Context tab does not wait for the break
   await settleAll()
 })
 
-test('header: the last round duration sits beside the round cost, from the main turn only', async ($, on) => {
+test('header: no round duration beside the round cost on the trend row', async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -464,14 +467,14 @@ test('header: the last round duration sits beside the round cost, from the main 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
-  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38$/) // no round finished yet
+  const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+  expect(await trend()).toMatch(/\$\+0\.38 · pace 7d/) // no round finished yet
   await $.turn.complete({ answer: '', durationMs: 134_000, isAborted: false, turnId: 't1', reason: 'answer' })
-  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
-  await $.turn.complete({ answer: '', durationMs: 5000, isAborted: false, turnId: 'a-t', reason: 'answer', agentId: 'a9' })
-  expect(headerOf((await paneRows($)).rows)[0]).toMatch(/\$5\.20 \+0\.38 · 2m14s$/)
+  expect(await trend()).toMatch(/\$\+0\.38 · pace 7d/)
+  expect(await trend()).not.toMatch(/2m|134/)
 })
 
-test('header: CONTEXT and CREDITS each have an empty row before and after the title, the cache share and the week pace right of it, and no burn line', async ($, on) => {
+test('header: after a rule, the CTX row with the cache share, then the 5h and 7d windows on one row, and no burn line', async ($, on) => {
   world(on)
   on('turn.complete', () => ({ text: '' }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -485,21 +488,13 @@ test('header: CONTEXT and CREDITS each have an empty row before and after the ti
   })
   const { rows } = await paneRows($, 58)
   const at = (re: RegExp) => rows.findIndex(r => re.test(r))
-  const context = at(/^CONTEXT/)
-  const credits = at(/^CREDITS/)
-  expect(rows[context]).toBe('CONTEXT\u{F09D1}  94%')
-  expect(rows[context - 1]).toBe(' ')
-  expect(rows[context - 2]).toMatch(/^─+$/) // a rule between the model / ALM block and the CONTEXT block
-  expect(rows[context + 1]).toBe(' ')
-  expect(rows[context + 2]).toMatch(/^[▰▱]+ 25% 248K\/1M$/)
-  expect(rows[credits]).toBe('CREDITSvs expected 7d  \u22125%')
-  expect(rows[credits - 1]).toBe(' ')
-  expect(rows[credits - 2]).toMatch(/^─+$/) // and one between the CONTEXT and the CREDITS block
-  expect(rows[credits + 1]).toBe(' ')
-  expect(rows[credits + 2]).toMatch(/ 62% 5h/)
-  expect(rows[credits + 3]).toBe(' ') // the two windows are told apart by an empty row
-  expect(rows[credits + 4]).toMatch(/ 41% 7d/)
-  expect(rows.some(r => /runs out/.test(r))).toBe(false)
+  const context = at(/^CTX /)
+  expect(rows[context - 1]).toMatch(/^─+$/) // a rule between the model / ALM block and the budgets
+  expect(rows[context]).toMatch(/^CTX [▰▱]+ {2}25% {3}248K\/1M {2}· \u{F09D1}.*94%$/u)
+  expect(rows[context + 1]).toMatch(/^5h [▰▱]+ {2}62% .* · 7d [▰▱]+ {2}41% /)
+  expect(rows[context + 2]).toMatch(/^turn .* · pace 7d +[+−-]\d+%$/) // the turn's growth and the week's pace
+  expect(rows[context + 3]).toMatch(/^─+$/) // the rule that closes the header
+  expect(rows.some(r => /runs out|^CONTEXT$|^CREDITS/.test(r))).toBe(false)
 })
 
 
@@ -508,20 +503,20 @@ const LANGUAGES = [
   {
     name: 'English',
     files: {},
-    tabs: barLabels({ work: ' 󰧞' }, 'en', 'agents', 2),
+    tabs: barLabels({ signals: ' 󰧞' }, 'en', 'agents', 2),
     bareTabs: () => barLabels({}, 'en', 'notes'),
     buttons: { compact: 'compact', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
-    header: [/^CONTEXT/, /^CREDITS/, /vs expected 7d/],
-    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^no notifications/], work: [/^IN PROGRESS$/, /^CHANGES · 0$/, /^no changes$/, /^󰧞 worklog: 1d to log/], notes: [/^NOTES · 1$/, /^ask Anna/] },
+    header: [/^CTX /, /^5h .* · 7d /],
+    byTab: { agents: [/^SUBAGENTS · 0 running/], context: [/^CONTEXT DETAILS · 248K\/1M/], signals: [/^WORKLOG$/, /^▸ 1 day behind$/, /^no notifications/], work: [/^CHANGES · 0$/, /^no changes$/], notes: [/^NOTES · 1$/, /^ask Anna/] },
   },
   {
     name: 'Italian',
     files: IT_FILE,
-    tabs: barLabels({ work: ' 󰧞' }, 'it'),
+    tabs: barLabels({ signals: ' 󰧞' }, 'it'),
     bareTabs: () => barLabels({}, 'it', 'notes'),
     buttons: { compact: 'compatta', save: '\u{F0193}', edit: '\u{F03EB}', send: '\u{F048A}', delete: '\u{F0A79}' },
-    header: [/^CONTESTO/, /^CREDITI RESIDUI/, /rispetto all'atteso 7d/],
-    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^nessuna notifica/], work: [/^IN CORSO$/, /^MODIFICHE · 0$/, /^nessuna modifica$/, /^󰧞 worklog: 1g da registrare/], notes: [/^NOTE · 1$/, /^ask Anna/] },
+    header: [/^CTX /, /^5h .* · 7d /],
+    byTab: { agents: [/^SUBAGENTI · 0 in corso/], context: [/^DETTAGLI CONTESTO · 248K\/1M/], signals: [/^REGISTRO ORE$/, /^▸ 1 giorno indietro/, /^nessuna notifica/], work: [/^MODIFICHE · 0$/, /^nessuna modifica$/], notes: [/^NOTE · 1$/, /^ask Anna/] },
   },
 ]
 
@@ -556,3 +551,198 @@ for (const language of LANGUAGES) {
     }
   })
 }
+
+test('header: the CTX bar glows while Claude works, the glow flowing a cell each 90 ms, and rests still once idle', { timeout: 60_000 }, async ($, on) => {
+  const clock = world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const leaves = (el: unknown): string[] => {
+    const o = el as { props?: { color?: string }; children?: unknown[] } | null
+    const [only] = o?.children ?? []
+    return typeof only === 'string' ? [...only].map(() => o?.props?.color ?? '') : (o?.children ?? []).flatMap(leaves)
+  }
+  const ui = await mountPane($, 50)
+  const still = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(new Set(still.filter(c => c !== '#33363c')).size).toBe(1) // idle: one colour for the fill
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await ui.advance(0)
+  const first = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(first[0]).not.toBe(still[0])
+  await ui.advance(400)
+  const later = leaves(await ui.drawn({ in: 'ctxbar' }))
+  expect(later[2]).not.toBe(still[2])
+  expect(later).not.toEqual(first)
+  // the round ends: the glow keeps flowing through the worklog's margin, then the bar rests still
+  await $.turn.complete({ answer: '', durationMs: 1000, isAborted: false, turnId: 't1', reason: 'answer' })
+  await clock.advance(10_000)
+  await ui.advance(400)
+  expect(leaves(await ui.drawn({ in: 'ctxbar' }))).not.toEqual(still)
+  await clock.advance(16 * 60_000)
+  await ui.advance(400)
+  expect(leaves(await ui.drawn({ in: 'ctxbar' }))).toEqual(still)
+  await ui.unmount()
+})
+
+// ── The credit bars pulse when their colour changes ──
+
+const FIVE_H = (percentUsed: number) => [{ kind: 'five_hour', percentUsed, resetsAt: iso(2 * 60 * MIN + 14 * MIN) }]
+
+/** The fill's colour of the `bar:5h` region on each of `steps` frames, 90 ms apart. */
+async function pulseFrames(ui: Awaited<ReturnType<typeof mountPane>>, steps: number): Promise<string[]> {
+  const first = (el: unknown): string => {
+    const o = el as { props?: { color?: string }; children?: unknown[] } | null
+    const [only] = o?.children ?? []
+    return typeof only === 'string' ? (o?.props?.color ?? '') : ((o?.children ?? []).map(first).find(c => c !== '') ?? '')
+  }
+  const frames: string[] = []
+  for (let i = 0; i < steps; i++) {
+    frames.push(first(await ui.drawn({ in: 'bar:5h' })))
+    await ui.advance(90)
+  }
+  return frames
+}
+
+test('credits: a window whose colour changes pulses its bar 3 times, then rests', async ($, on) => {
+  world(on)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  await measureWith($, 25, FIVE_H(38))
+  await settleAll()
+  const calm = await pulseFrames(ui, 16)
+  expect(new Set(calm).size).toBe(1) // no change of colour, no pulse
+  await measureWith($, 25, FIVE_H(95)) // projected over the window: red
+  await settleAll()
+  await ui.advance(0)
+  const frames = await pulseFrames(ui, 16)
+  const rest = frames[frames.length - 1]
+  expect(rest).not.toBe(calm[0])
+  const isOn = frames.map(c => c !== rest)
+  expect(isOn.filter((on2, i) => on2 && !isOn[i - 1])).toHaveLength(3) // three bright phases
+  expect(frames.slice(-3).every(c => c === rest)).toBe(true) // and then it stops
+  await ui.unmount()
+})
+
+test('credits: the first live reading after a stale one (the status line cache, with its own colour) does not pulse its bar', async ($, on) => {
+  // a resumed session: the cache holds a green 38 % reading the bar draws with a `~`, then the live one is red
+  const cache = JSON.stringify({ five_hour: { used_percentage: 38, resets_at: Math.floor((NOW + 134 * MIN) / 1000) } })
+  world(on, { rateLimits: [], files: { '.statusline-rate-limits.json': cache } })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  expect(rowTexts(await ui.drawn()).some(r => /^5h .*~/.test(r))).toBe(true) // the stale reading is drawn
+  await measureWith($, 25, FIVE_H(95))
+  await settleAll()
+  await ui.advance(0)
+  expect(new Set(await pulseFrames(ui, 16)).size).toBe(1)
+  await ui.unmount()
+})
+
+test('header: a surface without a surface module (mobile) draws the CTX row with the same text and width as the terminal', async ($, on) => {
+  world(on)
+  // every string of a node, in order: how a surface without the module draws the cells (spans as nested Texts)
+  const flat = (el: unknown): string => {
+    if (typeof el === 'string') return el
+    const o = el as { text?: string; children?: unknown[] } | null
+    return (o?.children ?? []).length > 0 ? (o?.children ?? []).map(flat).join('') : (o?.text ?? '')
+  }
+  const ctxOf = async (surface: 'terminal' | 'mobile') => {
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 58 }, surface })
+    const root = await ui.drawn()
+    const row = surface === 'terminal' ? rowTexts(root).find(r => /^CTX /.test(r)) : ((root as { children?: unknown[] }).children ?? []).map(flat).find(r => /^CTX /.test(r))
+    await ui.unmount()
+    return row ?? ''
+  }
+  const terminal = await ctxOf('terminal')
+  const mobile = await ctxOf('mobile')
+  expect(terminal).toMatch(/^CTX [▰▱]+ /)
+  expect(mobile).toBe(terminal)
+  expect([...mobile].length).toBe([...terminal].length)
+})
+
+test('header: the CTX readout joins the cache hit with a dot, the cells before it kept; the trend row shows a duck for a value not computed yet', async ($, on) => {
+  world(on)
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  const trend = rowTexts(await ui.drawn()).find(r => /^turn /.test(r)) ?? ''
+  expect(trend.match(/\u{F01E5}/gu)).toHaveLength(2) // no growth, no cost delta yet
+  await ui.unmount()
+  await $.turn.complete({
+    answer: '',
+    durationMs: 1,
+    isAborted: false,
+    turnId: 't',
+    reason: 'answer',
+    usage: { input_tokens: 600, output_tokens: 7, cache_read_input_tokens: 94_000, cache_creation_input_tokens: 5_400, model: 'm' },
+  })
+  const { rows } = await paneRows($, 58)
+  const ctx = rows.find(r => /^CTX /.test(r)) ?? ''
+  expect(ctx).toMatch(/\/1M +· \u{F09D1}/u)
+})
+
+test('header: the trend row keeps its `·` column when a value is a duck (one cell, two UTF-16 units) or a number', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const columnOf = (row: string) => textCells(row.slice(0, row.indexOf('·')))
+  const duckUi = await mountPane($, 58)
+  const duck = rowTexts(await duckUi.drawn()).find(r => /^turn /.test(r)) ?? ''
+  await duckUi.unmount()
+  expect(duck).toContain('\u{F01E5}')
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer', usage: { input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 199_900, cache_creation_input_tokens: 0, model: 'm' } })
+  const valuesUi = await mountPane($, 58)
+  const values = rowTexts(await valuesUi.drawn()).find(r => /^turn /.test(r)) ?? ''
+  await valuesUi.unmount()
+  expect(values).toMatch(/^turn +\+12K +\$\+0\.38 ·/)
+  expect(columnOf(duck)).toBe(columnOf(values))
+})
+
+test('header: every surface but terminal and desktop draws the bars as plain text (no Client), vscode included', async ($, on) => {
+  world(on)
+  const ctxOf = async (surface: 'terminal' | 'vscode') => {
+    await $.session.start({ cwd: '/', surface, isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 58 }, surface })
+    const row = rowTexts(await ui.drawn()).find(r => /^CTX /.test(r)) ?? ''
+    const clients = (await ui.findAll({ type: 'Client' })).length
+    await ui.unmount()
+    return { row, clients }
+  }
+  const terminal = await ctxOf('terminal')
+  const vscode = await ctxOf('vscode')
+  expect(terminal.clients).toBeGreaterThan(0)
+  expect(vscode.clients).toBe(0)
+  expect(vscode.row).toMatch(/^CTX [▰▱]+ /)
+})
+
+test('credits: a window whose reset has passed does not pulse when its colour changes with a new reading', async ($, on) => {
+  world(on)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 58)
+  const past = (percentUsed: number) => [{ kind: 'five_hour', percentUsed, resetsAt: iso(-MIN) }]
+  await measureWith($, 25, past(38))
+  await settleAll()
+  await measureWith($, 25, past(95))
+  await settleAll()
+  await ui.advance(0)
+  expect(new Set(await pulseFrames(ui, 16)).size).toBe(1)
+  await ui.unmount()
+})
+
+test('header: a waiting state older than the margin (a lost event) is not work; a recent one, a working one with no age and a recent round end are', () => {
+  const NOW_MS = 10_000_000
+  const snap = (claudeState: { kind: 'idle' | 'working' | 'waiting'; since?: number } | undefined, lastRoundEnd?: number) =>
+    ({ claudeState, ...(lastRoundEnd === undefined ? {} : { insights: { lastRoundEnd } }) }) as unknown as Parameters<typeof isWorking>[0]
+  expect(isWorking(snap({ kind: 'waiting', since: NOW_MS - 16 * MIN }), NOW_MS)).toBe(false)
+  expect(isWorking(snap({ kind: 'waiting', since: NOW_MS - 5 * MIN }), NOW_MS)).toBe(true)
+  expect(isWorking(snap({ kind: 'working' }), NOW_MS)).toBe(true)
+  expect(isWorking(snap({ kind: 'idle' }), NOW_MS)).toBe(false)
+  expect(isWorking(snap({ kind: 'waiting', since: NOW_MS - 16 * MIN }, NOW_MS - MIN), NOW_MS)).toBe(true)
+})

@@ -16,8 +16,7 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
 
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
-  costCacheHit: '\u{F09D1}', // nf-md-brain, the cache-hit icon of the status line
-  cache: '\u{F09D1} ',
+  cache:'\u{F09D1} ',
   taskTitle: 'TASK',
   diffTitle: (file: string) => `diff · ${file}`,
   /** The four counters of an agent's row. */
@@ -35,21 +34,18 @@ const EN = {
   confirmNoteDelete: 'delete this note?',
 
   // Header
-  contextTitle: 'CONTEXT',
   contextDetailsTitle: 'CONTEXT DETAILS',
-  creditsTitle: 'CREDITS',
-  vsExpected: 'vs expected 7d ',
   noRateData: 'no rate-limit data',
+  turnGrowth: 'turn',
+  weekPace: 'pace 7d',
   contextAt: (pct: number) => `󰀦 context at ${pct}%`,
-  requestsLeft: (n: number) => `~${n} ${plural(n, 'request', 'requests')}`,
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
   // Agents
   subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   lastTool: 'last tool ',
-  /** The rows of an expanded TOP AGENTS entry (Context tab). */
-  costDetail: { tokens: (n: string) => `tokens ${n}`, time: (d: string) => `time ${d}`, share: (pct: string) => `${pct} of the session cost`, outcome: { running: 'running', done: 'done', failed: 'failed' } },
+  costDetail: { tokens: (n: string) => `tokens ${n}` },
   historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
@@ -74,7 +70,6 @@ const EN = {
   },
 
   // Costs
-  costAgentsTitle: 'TOP AGENTS',
   exact: 'exact',
   someExact: '~ = estimate',
   /** The toggle of a list cut to its first rows: `n` rows hidden, or shown (press to fold). */
@@ -98,11 +93,18 @@ const EN = {
     pending: 'to log',
     underTarget: 'under target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}d ${what} (${dates})`,
+    title: 'WORKLOG',
+    upToDate: 'worklog up to date',
+    behind: (n: number) => `${n} ${plural(n, 'day', 'days')} behind`,
   },
+  none: 'none',
   changesTitle: 'CHANGES',
   editedHere: '󰧞 this chat',
   noChanges: 'no changes',
-  linksTitle: (n: number) => `LINKS · ${n}`,
+  prTitle: (n: number) => `PR · ${n}`,
+  wiTitle: (n: number) => `WI · ${n}`,
+  /** The pull request groups of the Work tab, by state. */
+  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   workItemsTitle: 'work item',
 
   // Context growth
@@ -139,18 +141,16 @@ const IT: Strings = {
   confirmRetro: 'quale retrospettiva? invia /retro',
   confirmNoteDelete: 'eliminare questa nota?',
 
-  contextTitle: 'CONTESTO',
   contextDetailsTitle: 'DETTAGLI CONTESTO',
-  creditsTitle: 'CREDITI RESIDUI',
-  vsExpected: "rispetto all'atteso 7d ",
   noRateData: 'nessun dato sui limiti',
+  turnGrowth: 'turno',
+  weekPace: 'ritmo 7d',
   contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
-  requestsLeft: (n: number) => `~${n} ${plural(n, 'richiesta', 'richieste')}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
   subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
-  costDetail: { tokens: (n: string) => `token ${n}`, time: (d: string) => `tempo ${d}`, share: (pct: string) => `${pct} del costo della sessione`, outcome: { running: 'in corso', done: 'finito', failed: 'fallito' } },
+  costDetail: { tokens: (n: string) => `token ${n}` },
   historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
   workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
@@ -172,7 +172,6 @@ const IT: Strings = {
     permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
   },
 
-  costAgentsTitle: 'AGENTI PIÙ CARI',
   exact: 'esatto',
   someExact: '~ = stima',
   moreRows: (n: number) => `󰍟 +${n}`,
@@ -203,11 +202,17 @@ const IT: Strings = {
     pending: 'da registrare',
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
+    title: 'REGISTRO ORE',
+    upToDate: 'worklog in pari',
+    behind: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} indietro`,
   },
+  none: 'nessuno',
   changesTitle: 'MODIFICHE',
   editedHere: '󰧞 questa chat',
   noChanges: 'nessuna modifica',
-  linksTitle: (n: number) => `LINK · ${n}`,
+  prTitle: (n: number) => `PR · ${n}`,
+  wiTitle: (n: number) => `WI · ${n}`,
+  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   workItemsTitle: 'work item',
 
   grewTitle: 'COSA HA GONFIATO IL CONTESTO',

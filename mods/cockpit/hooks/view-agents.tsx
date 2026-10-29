@@ -1,13 +1,13 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import type { AgentCost } from './signals'
-import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
 import { effortSpans } from './view-header'
 
 const TASK_TIME_W = 6
+const taskSubjectW = (width: number): number => Math.max(4, width - 2 - 1 - TASK_TIME_W)
 
 // An agent only seen through its events (no spawn yet, or an engine fork nothing lists) has type '?': not shown.
 export const visibleAgents = (s: CockpitSnapshot): CockpitAgent[] =>
@@ -39,10 +39,10 @@ export function taskCounts(s: CockpitSnapshot): { inProgress: number; pending: n
 }
 
 /** One task row: icon, subject cut with `…` to fit, and for a task in progress the time since it started. */
-export function taskRow(task: CockpitTask, now: number, width: number): Span[] {
+export function taskRow(task: CockpitTask, now: number, width: number, isFull = false): Span[] {
   const isActive = task.status === 'in_progress'
-  const subjectW = Math.max(4, width - 2 - 1 - TASK_TIME_W)
-  const subject = padCells(truncEnd(task.subject, subjectW), subjectW)
+  const subjectW = taskSubjectW(width)
+  const subject = padCells(isFull ? (wrapCells(task.subject, subjectW)[0] ?? '') : truncEnd(task.subject, subjectW), subjectW)
   const elapsed = isActive && task.startedAt !== undefined ? duration(now - task.startedAt) : ''
   return [
     isActive ? sp('󱎖', COLORS.blue) : dim('󰄰'),
@@ -52,6 +52,10 @@ export function taskRow(task: CockpitTask, now: number, width: number): Span[] {
     dim(padStart(elapsed, TASK_TIME_W)),
   ]
 }
+
+/** The rows of a task's subject after the first, for a row drawn in full (`taskRow` with `isFull`). */
+export const taskRest = (task: CockpitTask, width: number): Span[][] =>
+  wrapCells(task.subject, taskSubjectW(width)).slice(1).map(l => [sp('  '), task.status === 'in_progress' ? sp(l) : dim(l)])
 
 /** Parents first, each followed by its children; an orphan counts as a root. Every level is newest first (by start). */
 export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgent; depth: number }[] {
@@ -76,18 +80,20 @@ export const agentIcon = (a: CockpitAgent): Span =>
   a.status === 'running' ? sp('󱎖', COLORS.blue) : a.isInterrupted ? sp('󰓛', COLORS.dim) : a.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green)
 
 const MODEL_W = 9
-/** A name is worth this many cells before a row gives up other columns (the model, on the Subagents tab; the cache hit then the model, in TOP AGENTS). */
+/** A name is worth this many cells before a row gives up the model column. */
 const MIN_NAME_W = 6
 const SHARE_W = 4
 const TIME_W = 6
-// icon, gap, name, then gap + model, gap + effort, gap + share of the session's tokens, gap + time
-const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + TIME_W
+/** The widest cost `fmtCost` writes in a row. */
+const COST_W = 7
+// icon, gap, name, then gap + model, gap + effort, gap + share of the session's tokens, gap + cost, gap + time
+const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + COST_W + 1 + TIME_W
 
 /** The model with its version (`son 5.5`, `opus 5.5`); a name this build does not know is cut to the column. */
 const rowModel = (model: string | undefined): string => (model ? truncEnd(shortModel(model), MODEL_W) : '—')
 
-/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, their share of the session's `total` (blank when unknown), time. */
-export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number): Span[] {
+/** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, their share of the session's `total` (blank when unknown), its cost `usd` (blank when unknown), time. */
+export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number, usd?: number): Span[] {
   // a pane too narrow for the name drops the model column: the share and the time matter more
   const hasModel = width - ROW_FIXED_W >= MIN_NAME_W
   const nameW = Math.max(1, width - (hasModel ? ROW_FIXED_W : ROW_FIXED_W - MODEL_W - 1))
@@ -106,43 +112,12 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
       sp(' '),
       sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
       sp(' '),
+      dim(padStart(usd === undefined ? '' : fmtCost(usd), COST_W)),
+      sp(' '),
       sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
     ],
     width,
   )
-}
-
-const COST_W = 7
-
-/** An agent of the TOP AGENTS list in exactly one row of `width` cells: name (cut with `…` to fit), model, effort icon, then its cost and cache hit; a pane too narrow to leave the name its minimum drops the cache hit, then the model. */
-export function agentCostRow(a: AgentCost, width: number): Span[] {
-  const effort = effortSpans(a.effort)
-  const cost = sp(` ${fmtCost(a.usd).padStart(COST_W)}`, COLORS.yellow)
-  // the cache-hit cell has one width, blank when unknown, so the cost sits at the same offset in every row
-  const hitW = textCells(t().costCacheHit) + 1 + 4
-  const hit = (gap: string) => dim(padCells(a.hit === undefined ? '' : `${gap}${t().costCacheHit} ${a.hit}%`, gap.length + hitW))
-  const model = [sp(' '), sp(padCells(rowModel(a.model), MODEL_W), undefined, a.isRunning)]
-  const icon = [sp(' '), ...(effort.length ? effort : [sp(' ')])]
-  const tails = [[...model, ...icon, cost, hit('  ')], [...model, ...icon, cost, hit(' ')], [...model, ...icon, cost], [...icon, cost]]
-  const tail = tails.find(x => width - spanWidth(x) >= MIN_NAME_W) ?? tails[tails.length - 1] ?? []
-  const nameW = Math.max(1, width - spanWidth(tail))
-  return truncateSpans([sp(padCells(truncEnd(a.type, nameW), nameW), undefined, a.isRunning), ...tail], width)
-}
-
-/** The rows under an expanded TOP AGENTS entry: what it was asked, its tokens, its time, how it ended and its share of the session cost; each left out when unknown. */
-export function agentCostDetails(a: AgentCost, now: number, sessionUsd: number | undefined, indent: string, width: number): Span[][] {
-  const D = t().costDetail
-  const ms = a.ms ?? (a.startedAt === undefined ? undefined : now - a.startedAt)
-  const outcome = a.isRunning ? 'running' : a.isFailed === undefined ? undefined : a.isFailed ? 'failed' : 'done'
-  const share = sessionUsd === undefined ? undefined : tokenShare(a.usd, sessionUsd)
-  const row = (text: string | undefined, color?: string): Span[] | undefined => (text === undefined ? undefined : truncateSpans([sp(indent), color ? sp(text, color) : dim(text)], width))
-  return [
-    row(a.description?.replace(/\s+/g, ' ')),
-    row(D.tokens(abbrevTokens(a.tokens))),
-    row(ms === undefined ? undefined : D.time(duration(ms))),
-    row(outcome && D.outcome[outcome], outcome === 'failed' ? COLORS.red : undefined),
-    row(share === undefined ? undefined : D.share(share)),
-  ].filter((r): r is Span[] => r !== undefined)
 }
 
 /** `left` and `right` on one row of `width` cells: a gap between them, the left cut to leave the right whole; a row too short for both is cut. */
@@ -180,11 +155,16 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
           width,
         )
       : undefined
-  const toolSpans = running ? [sp(indent), sp('󰍟 ', COLORS.blue), sp(running)] : a.lastTool ? [sp(indent), dim(t().lastTool), sp(a.lastTool)] : undefined
-  const tool = toolSpans && truncateSpans(toolSpans, width)
-  const task = a.description ? truncateSpans([sp(indent), dim(a.description.replace(/\s+/g, ' '))], width) : undefined
+  const tool = running ? wrapped(indent, [sp('󰍟 ', COLORS.blue)], running, sp, width) : a.lastTool ? wrapped(indent, [dim(t().lastTool)], a.lastTool, sp, width) : []
+  const task = a.description ? wrapped(indent, [], a.description.replace(/\s+/g, ' '), dim, width) : []
   const total = dim(`${indent}${t().costDetail.tokens(abbrevTokens(a.tokens))}`)
-  return [truncateSpans([total], width), task, counters, tool].filter((r): r is Span[] => r !== undefined)
+  return [truncateSpans([total], width), ...task, ...(counters ? [counters] : []), ...tool]
+}
+
+/** `text` in full under `indent` after `label` on its first row: it wraps to `width` instead of being cut. */
+function wrapped(indent: string, label: readonly Span[], text: string, style: (t: string) => Span, width: number): Span[][] {
+  const labelW = spanWidth(label)
+  return wrapCells(text, Math.max(4, width - indent.length - labelW)).map((l, i) => [sp(indent), ...(i === 0 ? label : [sp(' '.repeat(labelW))]), style(l)])
 }
 
 /** Cheapest first (pricing.ts). */

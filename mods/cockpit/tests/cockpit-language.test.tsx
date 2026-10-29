@@ -113,17 +113,7 @@ test('language: the toasts are in the language of the pane', async ($, on) => {
   }
 })
 
-type TitleBox = { props?: { justifyContent?: string; flexDirection?: string }; children?: unknown[] }
-
-/** The space-between Box of the title row whose text matches `re`. */
-const titleBox = (el: unknown, re: RegExp): TitleBox | undefined => {
-  const o = el as TitleBox | string | null
-  if (o === null || typeof o === 'string') return undefined
-  if (o.props?.justifyContent === 'space-between' && re.test(rowTexts({ children: [o] })[0] ?? '')) return o
-  return (o.children ?? []).flatMap(c => titleBox(c, re) ?? [])[0]
-}
-
-test('Italian: the pace title is translated, and the title rows fit 40 and 58 columns', async ($, on) => {
+test('Italian: the credit windows share one row at 58 columns and take one row each at 40, never wider than the pane', async ($, on) => {
   const options: World = {
     files: IT_FILE,
     rateLimits: [
@@ -136,12 +126,11 @@ test('Italian: the pace title is translated, and the title rows fit 40 and 58 co
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     for (const columns of [40, 58]) {
       const width = Math.min(columns, 60) - 2
-      const { root, rows } = await paneRows($, columns)
-      // the pace sits right of the title, or under it where the pane is too narrow for both
-      const row = rows.find(r => /^CREDITI RESIDUI/.test(r)) ?? ''
-      expect(row).toMatch(/rispetto all'atteso 7d/)
-      expect(titleBox(root, /^CREDITI RESIDUI/)?.props?.flexDirection).toBe(textCells(row) + 1 <= width ? 'row' : 'column')
-      expect(textCells(row) + 1 <= width).toBe(columns === 58)
+      const { rows } = await paneRows($, columns)
+      const credits = rows.filter(r => /^(5h|7d) /.test(r))
+      expect(credits.length).toBe(columns === 58 ? 1 : 2)
+      if (columns === 58) expect(credits[0]).toMatch(/^5h .* · 7d /)
+      for (const r of credits) expect(textCells(r)).toBeLessThanOrEqual(width)
     }
   } finally {
     setLang('en')

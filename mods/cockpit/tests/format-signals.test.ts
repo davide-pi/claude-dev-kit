@@ -112,11 +112,11 @@ test('agentCosts: a live agent priced from its counters, a finished one from its
   const live = { id: 'a1', type: 'implementer', status: 'running' as const, startedAt: 0, tokens: 10, model: 'claude-sonnet-5-5', usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 } }
   const events = [
     { at: 1, kind: 'agent' as const, id: 'a1', text: 'implementer', usd: 99 },
-    { at: 2, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
+    { at: 2, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5 },
   ]
   expect(agentCosts([live], events)).toEqual([
-    { id: 'a1', type: 'implementer', isRunning: true, startedAt: 0, model: 'claude-sonnet-5-5', tokens: 10, usd: 2, hit: 0 },
-    { id: 'a2', type: 'Explore', description: 'Find the orders filter', model: 'claude-haiku-5', tokens: 5, usd: 0.5, hit: 80 },
+    { id: 'a1', type: 'implementer', model: 'claude-sonnet-5-5', tokens: 10, usd: 2 },
+    { id: 'a2', type: 'Explore', model: 'claude-haiku-5', tokens: 5, usd: 0.5 },
   ])
 })
 
@@ -124,6 +124,25 @@ test('agentCosts: a blank description is none, live or from the event, so the ro
   const live = { id: 'a1', type: 'implementer', description: '  ', status: 'running' as const, startedAt: 0, tokens: 0 }
   const events = [{ at: 1, kind: 'agent' as const, id: 'a2', text: 'Explore', desc: '' }]
   expect(agentCosts([live], events).map(a => a.description)).toEqual([undefined, undefined])
+})
+
+test('signalsOf: the same big result read twice is one notification and a count of 1', () => {
+  const biggest = [
+    { tool: 'Read', arg: 'a.ts', tokens: 6000 },
+    { tool: 'Read', arg: 'a.ts', tokens: 7000 },
+  ]
+  const found = signalsOf({ ...INITIAL, now: NOW, insights: { ...emptyInsights(), biggest } })
+  expect(found.filter(x => x.kind === 'bigResult')).toHaveLength(1)
+  expect(found).toHaveLength(1)
+})
+
+test('ctxGrowth: past the 20-round cap of the samples a new episode still has a new key, so it fires again', () => {
+  const capped = Array.from({ length: 20 }, (_, i) => (i < 19 ? 10_000 : 140_000))
+  const first = detectCtxGrowth(capped, 25)
+  const second = detectCtxGrowth(capped, 26)
+  expect(first).toHaveLength(1)
+  expect(second).toHaveLength(1)
+  expect(first[0]?.key).not.toBe(second[0]?.key)
 })
 
 test('signalsOf: every detector from the snapshot alone; a quiet snapshot has none, the thresholds block names every limit', () => {

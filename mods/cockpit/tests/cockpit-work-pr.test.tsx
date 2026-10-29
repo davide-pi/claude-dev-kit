@@ -4,7 +4,7 @@ import { GH_CREATED, MIN, bashResult, lavoroRows, mountPane, openCockpit, settle
 import { GH_SSH, dataOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-const GH_PR_ARGS = 'gh pr view --json number,title,url'
+const GH_PR_ARGS = 'gh pr view --json number,title,url,state,isDraft'
 /** The addresses of the pane's web links (the header's folder is a `file://` link too, left out). */
 const webLinks = async (ui: Awaited<ReturnType<typeof mountPane>>) =>
   (await ui.findAll({ type: 'Link' })).map(l => l.props.href).filter(h => typeof h === 'string' && h.startsWith('http'))
@@ -24,11 +24,11 @@ test('PR: a GitHub pull request of the branch as a link: number, title and addre
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const rows = await lavoroRows($)
-  const i = rows.findIndex(r => r === 'LINKS · 1')
+  const i = rows.findIndex(r => r === 'PR · 1')
   expect(i).toBeGreaterThan(0)
   expect(rows[i - 1]).toBe(' ')
-  expect(rows.slice(i + 1, i + 3)).toEqual([' ', '#42 Fix the orders filter'])
-  expect(rows.some(r => /review|checks|open|merged/.test(r))).toBe(false)
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', '▾ open · 1', '#42 Fix the orders filter'])
+  expect(rows.some(r => /review|checks|merged/.test(r))).toBe(false)
   expect(ghCalls).toEqual([GH_PR_ARGS])
 })
 
@@ -53,7 +53,7 @@ for (const { name, options, isGhAsked } of [
     world(on, { ghCalls, branch: 'feature/orders-filter', ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^PR · [1-9]/.test(r))).toBe(false)
     expect(ghCalls).toEqual(isGhAsked ? [GH_PR_ARGS] : [])
   })
 }
@@ -72,9 +72,9 @@ test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM l
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   const rows = await lavoroRows($)
-  const i = rows.findIndex(r => r === 'LINKS · 1')
+  const i = rows.findIndex(r => r === 'PR · 1')
   expect(i).toBeGreaterThan(0)
-  expect(rows.slice(i + 1, i + 3)).toEqual([' ', '#7 Faster orders'])
+  expect(rows.slice(i + 1, i + 4)).toEqual([' ', '▾ open · 1', '#7 Faster orders'])
   expect(rows.some(r => /review|checks/.test(r))).toBe(false)
   expect(azCalls).toEqual([
     // the org is the ALM line's, as a URL (joined, so the text is not read as a real organization's)
@@ -110,7 +110,7 @@ for (const { name, options, workspaces } of [
     world(on, { azCalls, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces, ...options })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     await settleAll()
-    expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+    expect((await lavoroRows($)).some(r => /^PR · [1-9]/.test(r))).toBe(false)
     // without an org the CLI is not asked at all: never the configured default
     expect(azCalls.length).toBe(name === 'no ALM org to ask' ? 0 : 1)
   })
@@ -135,14 +135,16 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   options.pr = 43
   await clock.advance(30_000)
   await settleAll()
-  expect(ghCalls).toHaveLength(3)
+  expect(ghCalls).toHaveLength(4) // the other branch's PR, and #42 of the branch left behind, read again by its number
   // the PR of the branch left behind stays listed: it is the chat's
   expect(await lavoroRows($)).toEqual(expect.arrayContaining(['#42 Fix the orders filter', '#43 Fix the orders filter']))
 
   options.branch = 'main'
   await clock.advance(30_000)
   await settleAll()
-  expect(ghCalls).toHaveLength(3)
+  // no branch read for main; the two saved PRs are read again by number
+  expect(ghCalls.filter(c => c === GH_PR_ARGS)).toHaveLength(3)
+  expect(ghCalls).toHaveLength(6)
 })
 
 test('PR: the PR of a branch left behind stays listed on the next one, which adds none of its own', async ($, on) => {
@@ -156,7 +158,7 @@ test('PR: the PR of a branch left behind stays listed on the next one, which add
   await clock.advance(30_000)
   await settleAll()
   const rows = await lavoroRows($)
-  expect(rows).toContain('LINKS · 1')
+  expect(rows).toContain('PR · 1')
   expect(rows).toContain('#42 Fix the orders filter')
 })
 
@@ -174,7 +176,7 @@ test('PR: a repo the chat only passes through (a cd to read) adds no PR; once th
   await clock.advance(30_000)
   await settleAll()
   expect(ghCalls).toEqual([])
-  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^PR · [1-9]/.test(r))).toBe(false)
 
   await $.tool.call({ tool: 'Edit', file_path: '/work/other-repo/src/a.ts', old_string: 'a', new_string: 'b' })
   await clock.advance(30_000)
@@ -293,7 +295,7 @@ test('az: on Windows an argument cmd would read as more than text (a branch name
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await settleAll()
   expect(windows).toEqual([])
-  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^PR · [1-9]/.test(r))).toBe(false)
 })
 
 for (const { name, env, prefix } of [
@@ -366,7 +368,7 @@ test('Work: a PR created in the session (gh pr create) is a Link, and is kept in
   await ui.press({ key: 'tab:work' })
   await settleAll()
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain('LINKS · 1')
+  expect(rows).toContain('PR · 1')
   expect(rows.some(r => /^#42 Add filter$/.test(r))).toBe(true)
   expect(await webLinks(ui)).toEqual([GH_CREATED])
   await ui.unmount()
@@ -389,6 +391,51 @@ test('Work: a PR created with az repos pr create takes its link from the reposit
   await ui.unmount()
 })
 
+test('PR: a PR created in the chat (no state yet) is read again by its address, and moves to merged; an ended one is not read again', async ($, on) => {
+  const ghCalls: string[] = []
+  const clock = world(on, { ghCalls, remote: GH_SSH, ghViews: { [GH_CREATED]: { number: 42, title: 'Add filter', url: GH_CREATED, state: 'MERGED', isDraft: false } } })
+  on('tool.call', { tool: 'Bash' }, () => bashResult(`Creating pull request\n${GH_CREATED}\n`))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter" --body "x"' })
+  expect(await lavoroRows($)).toContain('▾ open · 1')
+  await openCockpit($)
+  await clock.advance(30_000)
+  await settleAll()
+  const rows = await lavoroRows($)
+  expect(rows).toContain('▸ merged · 1')
+  expect(rows).not.toContain('▾ open · 1')
+  expect(ghCalls).toContain(`gh pr view ${GH_CREATED} --json number,title,url,state,isDraft`)
+  const reads = ghCalls.length
+  await clock.advance(5 * MIN)
+  await settleAll()
+  expect(ghCalls.filter(c => c.includes(GH_CREATED))).toHaveLength(1)
+  expect(ghCalls.length).toBeGreaterThan(reads - 1) // the branch's own read may repeat; the merged PR's never does
+})
+
+test('PR: on Azure DevOps a PR created in the chat is read again with az repos pr show, aimed at the org of the ALM line', async ($, on) => {
+  const azCalls: string[] = []
+  const clock = world(on, { azCalls, remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azShow: { 9: { pullRequestId: 9, title: 'Faster orders', status: 'abandoned' } } })
+  on('tool.call', { tool: 'Bash' }, () => bashResult(JSON.stringify({ pullRequestId: 9, title: 'Faster orders', status: 'active', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } })))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'az repos pr create --title "Faster orders"' })
+  await openCockpit($)
+  await clock.advance(30_000)
+  await settleAll()
+  expect(await lavoroRows($)).toContain('▸ closed · 1')
+  expect(azCalls.some(c => c.endsWith(`repos pr show --id 9 --organization ${['https://dev.azure.com', 'org-a'].join('/')} --output json`))).toBe(true)
+})
+
+test('PR: a saved PR that cannot be read again keeps its last state', async ($, on) => {
+  const clock = world(on, { remote: GH_SSH, ghViews: {} })
+  on('tool.call', { tool: 'Bash' }, () => bashResult(`${GH_CREATED}\n`))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
+  await openCockpit($)
+  await clock.advance(30_000)
+  await settleAll()
+  expect(await lavoroRows($)).toContain('▾ open · 1')
+})
+
 test('Work: a create that failed, was refused or printed no url adds no PR', async ($, on) => {
   world(on)
   let answer: { deny: string } | { result: object; isError?: true } = { deny: 'no' }
@@ -399,7 +446,7 @@ test('Work: a create that failed, was refused or printed no url adds no PR', asy
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
   answer = { ...bashResult(GH_CREATED), isError: true }
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
-  expect((await lavoroRows($)).some(r => /^LINKS ·/.test(r))).toBe(false)
+  expect((await lavoroRows($)).some(r => /^PR · [1-9]/.test(r))).toBe(false)
 })
 
 test('Work: the PRs of a session come back with it (the state file), as links', async ($, on) => {
@@ -411,12 +458,44 @@ test('Work: the PRs of a session come back with it (the state file), as links', 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
   const rows = rowTexts(await ui.drawn())
-  expect(rows).toContain('LINKS · 2')
-  expect(rows.some(r => /^#7 Old work$/.test(r))).toBe(true)
+  expect(rows).toContain('PR · 2')
+  // the groups are told apart by state: the open one is unfolded, the merged one folded until its title is pressed
+  expect(rows).toContain('▾ open · 1')
+  expect(rows).toContain('▸ merged · 1')
   expect(rows.some(r => /^#8 Checks$/.test(r))).toBe(true)
+  expect(rows.some(r => /^#7 Old work$/.test(r))).toBe(false)
   expect(rows.some(r => /review|checks 1/.test(r))).toBe(false)
+  await ui.press({ key: 'prs:merged' })
+  const opened = rowTexts(await ui.drawn())
+  expect(opened).toContain('▾ merged · 1')
+  expect(opened.some(r => /^#7 Old work$/.test(r))).toBe(true)
+  await ui.press({ key: 'prs:merged' })
+  expect(rowTexts(await ui.drawn())).toContain('▸ merged · 1')
+  await ui.press({ key: 'prs:merged' })
   // a PR without a url is plain text, never a link to nowhere
   expect(await webLinks(ui)).toEqual(['https://github.com/example/orders/pull/7'])
+  await ui.unmount()
+})
+
+test('Work: the WI and PR sections are always there, with a dim "none" when empty', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rows = await lavoroRows($)
+  for (const title of ['WI · 0', 'PR · 0']) {
+    const i = rows.findIndex(r => r === title)
+    expect(i).toBeGreaterThan(0)
+    expect(rows.slice(i + 1, i + 3)).toEqual([' ', 'none'])
+  }
+})
+
+test('Work: a PR title longer than the row is drawn whole (the row wraps it), never cut with …', async ($, on) => {
+  const title = 'A very long pull request title that cannot possibly fit in the narrow pane width'
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [{ number: 5, title, state: 'open' }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await mountPane($, 40)
+  await ui.press({ key: 'tab:work' })
+  const text = rowTexts(await ui.drawn()).join(' ')
+  expect(text).toContain(title)
   await ui.unmount()
 })
 
@@ -433,7 +512,7 @@ test('Work: the read of the branch updates a PR already listed (created, then re
   await clock.advance(5 * MIN + 30_000)
   await settleAll()
   const rows = await lavoroRows($)
-  expect(rows).toContain('LINKS · 1')
+  expect(rows).toContain('PR · 1')
   expect(rows.filter(r => /^#42 /.test(r))).toEqual(['#42 Fix the orders filter'])
 })
 

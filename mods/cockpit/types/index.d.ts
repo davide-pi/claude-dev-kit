@@ -49,6 +49,8 @@ export type CockpitHistoryEntry = {
   effort?: string | number
   /** The spawn's `description` of the task, kept so an expanded history row still says what the agent did; absent when it had none. */
   description?: string
+  /** What the agent cost, kept so a history row still shows it after the session is resumed (the events do not outlive it); absent when its usage was not read. */
+  usd?: number
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
 }
@@ -90,6 +92,8 @@ export type CockpitPr = {
   number: number
   title: string
   url?: string
+  /** Where the pull request stands, as the last reading said; absent (a pull request only seen created) counts as open. */
+  state?: 'open' | 'draft' | 'merged' | 'closed'
 }
 
 /** The diff the second pane draws: `text` is what `Code` takes (unified hunks); `isCut` when it was cut to fit; `isUnreadable` when the file is too big or cannot be read (no text). */
@@ -177,8 +181,8 @@ export type CockpitTab = 'agents' | 'context' | 'signals' | 'work' | 'notes'
 /** What an entry of the event ring buffer is about: a finished agent (the Context tab prices it). */
 export type CockpitEventKind = 'agent'
 
-/** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, cache hit, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
-export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; hit?: number; id?: string }
+/** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
+export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
 
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
@@ -263,8 +267,6 @@ export type CockpitSnapshot = {
   lastCtx?: { tokens: number; window: number; percent: number }
   /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
   lastRates?: CockpitRateLimit[]
-  /** How long the last main round took (`turn.complete`'s wall-clock length), in milliseconds; absent before one ended. */
-  lastRoundMs?: number
   /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran: the Insights tab lists them. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
@@ -277,8 +279,6 @@ export type CockpitSnapshot = {
   history?: CockpitHistoryEntry[]
   /** The HISTORY list shows every entry; absent shows the newest few. */
   isHistoryOpen?: boolean
-  /** The TOP AGENTS list shows every agent; absent shows the dearest few. */
-  isCostAgentsOpen?: boolean
   /** The notification whose why and what-to-do are shown (`kind:key`); absent shows none. */
   signalOpen?: string
   /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
@@ -315,7 +315,7 @@ export type CockpitSnapshot = {
   agentsOpen?: string[]
   /** The notes shown in full on the Notes tab (the others show their first lines). */
   notesOpen?: number[]
-  /** The lists shown in full and the rows expanded on the Context and Work tabs: `changes`, `outside`, `grew:<tool>:<arg>:<tokens>`. */
+  /** The lists shown in full and the rows expanded on the Context and Work tabs: `changes`, `outside`, `signals:more`, `tasks:more`, `prs:<state>` (a pull request group flipped from its default), `grew:<tool>:<arg>:<tokens>`. */
   openKeys?: string[]
   /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */
   refreshedAt?: number

@@ -76,10 +76,14 @@ test('parseNumstat: tracked files with +/-, a binary one, then the untracked one
 
 test('parseGithubPr: a PR as a link: number, title and address; anything else is none', () => {
   const json = (o: object) => JSON.stringify({ number: 42, title: 'Fix', url: 'https://github.com/example/orders/pull/42', state: 'MERGED', reviewDecision: 'APPROVED', ...o })
-  // no state, review or checks: only what a link needs
-  expect(parseGithubPr(json({}))).toEqual({ number: 42, title: 'Fix', url: 'https://github.com/example/orders/pull/42' })
-  expect(parseGithubPr(json({ url: undefined }))).toEqual({ number: 42, title: 'Fix' })
-  expect(parseGithubPr(json({ url: 'javascript:alert(1)' }))).toEqual({ number: 42, title: 'Fix' })
+  // no review or checks: what a link needs and the state that groups it
+  expect(parseGithubPr(json({}))).toEqual({ number: 42, title: 'Fix', url: 'https://github.com/example/orders/pull/42', state: 'merged' })
+  expect(parseGithubPr(json({ state: 'OPEN' }))?.state).toBe('open')
+  expect(parseGithubPr(json({ state: 'OPEN', isDraft: true }))?.state).toBe('draft')
+  expect(parseGithubPr(json({ state: 'CLOSED' }))?.state).toBe('closed')
+  expect(parseGithubPr(json({ state: 'odd' }))?.state).toBeUndefined()
+  expect(parseGithubPr(json({ url: undefined }))).toEqual({ number: 42, title: 'Fix', state: 'merged' })
+  expect(parseGithubPr(json({ url: 'javascript:alert(1)' }))).toEqual({ number: 42, title: 'Fix', state: 'merged' })
   expect(parseGithubPr(json({ title: 7 }))?.title).toBe('')
   expect(parseGithubPr(json({ number: 0 }))).toBeUndefined()
   expect(parseGithubPr(json({ number: '42' }))).toBeUndefined()
@@ -90,7 +94,10 @@ test('parseGithubPr: a PR as a link: number, title and address; anything else is
 
 test('parseAzurePr: the first PR of az repos pr list as a link: number, title and the address of its repository', () => {
   const list = (o: object) => JSON.stringify([{ pullRequestId: 7, title: 'Faster', status: 'completed', reviewers: [{ vote: 10 }], ...o }])
-  expect(parseAzurePr(list({}))).toEqual({ number: 7, title: 'Faster' })
+  expect(parseAzurePr(list({}))).toEqual({ number: 7, title: 'Faster', state: 'merged' })
+  expect(parseAzurePr(list({ status: 'active' }))?.state).toBe('open')
+  expect(parseAzurePr(list({ status: 'active', isDraft: true }))?.state).toBe('draft')
+  expect(parseAzurePr(list({ status: 'abandoned' }))?.state).toBe('closed')
   expect(parseAzurePr(list({ repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } }))?.url).toBe('https://dev.azure.com/o/p/_git/r/pullrequest/7')
   expect(parseAzurePr(list({ pullRequestId: 'x' }))).toBeUndefined()
   expect(parseAzurePr('[]')).toBeUndefined()
@@ -273,7 +280,8 @@ test('upsertPr: a PR seen again replaces its entry in place (by url, else by num
 
 test('parseSavedPrs: the entries of a state file that have a number and a title, as links; none for anything else', () => {
   const ok = { number: 7, title: 'Old', url: 'https://github.com/example/orders/pull/7' }
-  expect(parseSavedPrs([{ ...ok, state: 'merged', checks: { passed: 1 } }, { number: 'x', title: 't' }, { title: 'no number' }, null, 5])).toEqual([ok])
+  expect(parseSavedPrs([{ ...ok, state: 'merged', checks: { passed: 1 } }, { number: 'x', title: 't' }, { title: 'no number' }, null, 5])).toEqual([{ ...ok, state: 'merged' }])
+  expect(parseSavedPrs([{ number: 8, title: 't', state: 'draft' }])[0]?.state).toBe('draft')
   expect(parseSavedPrs([{ number: 8, title: 't' }])).toEqual([{ number: 8, title: 't' }])
   expect(parseSavedPrs('nope')).toEqual([])
   expect(parseSavedPrs(undefined)).toEqual([])

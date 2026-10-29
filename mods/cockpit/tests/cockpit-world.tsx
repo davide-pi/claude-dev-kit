@@ -19,6 +19,9 @@ export const rowTexts = (root: unknown): string[] => {
     if (typeof el === 'string') return el
     const o = el as { text?: string; props?: { display?: string }; children?: unknown[] } | null
     if (o?.props?.display === 'none') return ''
+    // the CTX bar's surface module draws the cells it is handed (its glow changes their colour, not their text)
+    const client = (el as { type?: string; props?: { props?: { cells?: { t: string }[] } } } | null)
+    if (client?.type === 'Client') return (client.props?.props?.cells ?? []).map(c => c.t).join('')
     // the System tab's numbers are items of a wrapping Box with a gap of two cells
     const gap = (o as { props?: { flexWrap?: string; columnGap?: number } } | null)?.props
     return o?.text ?? (o?.children ?? []).map(text).join(gap?.flexWrap === 'wrap' && gap.columnGap === 2 ? '  ' : '')
@@ -128,6 +131,10 @@ export type World = {
   prExtra?: Record<string, unknown>
   /** The list `az repos pr list` answers; absent, az answers an empty list. */
   azPr?: readonly unknown[]
+  /** What `gh pr view <number or url>` answers for a saved PR, by that argument; one not listed fails. */
+  ghViews?: Record<string, unknown>
+  /** What `az repos pr show --id <n>` answers, by id; one not listed fails. */
+  azShow?: Record<string, unknown>
   /** True: `az` is not installed (the process cannot start). */
   noAz?: boolean
   /** Receives every `az` call's argv, joined by spaces. */
@@ -239,6 +246,11 @@ export function world(on: On, options: World = {}) {
     if (e.argv[0] === 'gh') {
       options.ghCalls?.push(e.argv.join(' '))
       if (options.noGh) throw new Error('spawn gh ENOENT')
+      // `gh pr view <number or url> ...`: a saved PR read again by what the test says it is now
+      if (e.argv[3] !== undefined && e.argv[3] !== '--json' && options.ghViews) {
+        const now = options.ghViews[e.argv[3]]
+        return now === undefined ? answer('', 1) : answer(JSON.stringify(now))
+      }
       return options.pr === undefined
         ? answer('', 1)
         : answer(JSON.stringify({ number: options.pr, title: 'Fix the orders filter', ...options.prExtra }))
@@ -248,6 +260,11 @@ export function world(on: On, options: World = {}) {
       options.azCalls?.push(e.argv.join(' '))
       options.azEnvs?.push(e.init?.env)
       if (options.noAz) throw new Error('spawn az ENOENT')
+      // `az repos pr show --id <n>`: one record, by the id
+      if (e.argv.includes('show')) {
+        const now = options.azShow?.[e.argv[e.argv.indexOf('--id') + 1] ?? '']
+        return now === undefined ? answer('', 1) : answer(JSON.stringify(now))
+      }
       return answer(JSON.stringify(options.azPr ?? []))
     }
     if (options.notRepo) return answer('', 128)

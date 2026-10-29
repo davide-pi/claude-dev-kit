@@ -6,6 +6,8 @@ import type { Span } from './shared'
 export type Ui = Pick<Elements[RenderSurface], 'Box' | 'Text' | 'Button' | 'Code' | 'Link'> & {
   /** Every surface but the mobile app's draws a text field: there the note is left out. */
   Input?: Elements['terminal']['Input']
+  /** The terminal's and the desktop's: the CTX bar's glow runs in one; elsewhere the bar is drawn still. */
+  Client?: Elements['terminal']['Client']
 }
 
 /** Cells a terminal Button adds around its label (`[ label ]`), and between two of a row. */

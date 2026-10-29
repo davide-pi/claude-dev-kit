@@ -15,7 +15,7 @@ test('notes: the field is on the Notes tab only, under the tab bar; the list sta
   }
   await ui.press({ key: 'tab:notes' })
   const input = await ui.find({ type: 'Input', key: 'note' })
-  expect(input?.props.rows).toBe(1)
+  expect(input?.props.rows).toBe(2)
   expect(input?.props.value).toBe('')
   const keys = keysInOrder(await ui.drawn())
   expect(keys.indexOf('note')).toBeGreaterThan(keys.indexOf('tab:notes'))
@@ -41,14 +41,14 @@ test('notes: Input + save adds a note at the end of the list and empties the fie
   expect(await noteKeys(ui, 'send')).toEqual(['note:send:1', 'note:send:2'])
   const rows = rowTexts(await ui.drawn())
   expect(rows).toContain('NOTES · 2')
-  // a note is one row: its first line, cut with … when it has more
-  expect((await ui.find({ type: 'Text', text: /^ask Anna…$/ }))?.text).toBe('ask Anna…')
-  expect(await ui.find({ type: 'Text', text: /about the filter/ })).toBeUndefined()
+  // a note shows its first 3 lines whole: two lines are all there, no expander
+  expect((await ui.find({ type: 'Text', text: /^ask Anna/ }))?.text).toBe('ask Anna\nabout the filter')
+  expect(await ui.find({ key: 'note:more:1' })).toBeUndefined()
   expect(rows.some(r => r.startsWith('call back'))).toBe(true)
   await ui.unmount()
 })
 
-test('notes: edit opens an Input on the note\'s own row (the bottom field is hidden), then submit replaces that note and no other and leaves it open', async ($, on) => {
+test('notes: edit opens an Input on the note\'s own row (the bottom field is hidden), then submit replaces that note and no other and leaves it closed', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
@@ -259,33 +259,54 @@ test('notes: every note has its three buttons, in the pane width at 30, 40 and 5
 
 // ── Phase 9: Notes ──
 
-test('notes: every note is one line cut with … when it has more; a press on its text opens all its lines, another closes it', async ($, on) => {
+test('notes: a saved note, new or edited, is closed', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'l1\nl2\nl3\nl4\nl5' }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await notesPane($)
+  await ui.press({ key: 'note:more:1' })
+  await settleAll()
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍝 −2')
+  await ui.press({ key: 'note:edit:1' })
+  await settleAll()
+  await ui.input({ key: 'note:edit-field', text: 'm1\nm2\nm3\nm4\nm5\nm6', kind: 'submit' })
+  await settleAll()
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍟 +3')
+  await saveNote(ui, 'n1\nn2\nn3\nn4')
+  expect((await ui.find({ key: 'note:more:2' }))?.text).toBe('󰍟 +1')
+  await ui.unmount()
+})
+
+test('notes: a note shows its first 3 lines, `󰍟 +N` opens the rest and `󰍝 −N` closes them', async ($, on) => {
   world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'one\ntwo\nthree\nfour\nfive' }, { id: 2, text: 'a\nb' }, { id: 3, text: 'single' }] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
   const texts = async () => (await ui.findAll({ type: 'Text' })).map(n => n.text)
-  expect(await texts()).toContain('one…')
-  expect(await texts()).toContain('a…')
+  expect(await texts()).toContain('one\ntwo\nthree')
+  expect(await texts()).toContain('a\nb')
   expect(await texts()).toContain('single')
-  expect(await texts()).not.toContain('two')
-  await ui.press({ key: 'note:toggle:1' })
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍟 +2')
+  expect(await ui.find({ key: 'note:more:2' })).toBeUndefined()
+  await ui.press({ key: 'note:more:1' })
   await settleAll()
   expect(await texts()).toContain('one\ntwo\nthree\nfour\nfive') // one Text: the Button cannot lay the lines side by side
-  expect(await texts()).not.toContain('one…')
-  expect(await texts()).toContain('a…') // the others stay collapsed
-  await ui.press({ key: 'note:toggle:1' })
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍝 −2')
+  expect(await texts()).toContain('a\nb') // the others stay as they were
+  await ui.press({ key: 'note:toggle:1' }) // a press on the text closes it as well
   await settleAll()
-  expect(await texts()).toContain('one…')
+  expect(await texts()).toContain('one\ntwo\nthree')
   expect(await texts()).not.toContain('five')
   await ui.unmount()
 })
 
-test('notes: a collapsed note is cut at the pane width, an open one wraps by display width; the icon buttons are inline and alternate rows have a band', async ($, on) => {
+test('notes: a long line wraps inside its column, never cut with …; the icon buttons are inline and alternate rows have a band', async ($, on) => {
   const long = 'a very long line of a note that cannot fit in a narrow pane of the cockpit at all'
   world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: `${long}\nmore` }, { id: 2, text: 'second' }, { id: 3, text: 'third' }] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($, 40)
-  expect((await ui.find({ type: 'Text', text: `${long}…` }))?.props.wrap).toBe('truncate-end')
+  const shown = await ui.find({ type: 'Text', text: /^a very long/ })
+  expect(shown?.props.wrap).toBe('wrap')
+  expect(shown?.text).not.toContain('…')
+  expect((await ui.find({ key: 'note:more:1' }))?.text).toMatch(/^󰍟 \+\d+$/)
   for (const [key, glyph] of [['note:edit:1', '\u{F03EB}'], ['note:send:1', '\u{F048A}'], ['note:delete:1', '\u{F0A79}']]) expect((await ui.find({ key }))?.text).toBe(glyph)
   await ui.press({ key: 'note:toggle:1' })
   await settleAll()
@@ -299,18 +320,18 @@ test('notes: a collapsed note is cut at the pane width, an open one wraps by dis
 
 // ── Multi-line notes ──
 
-test('notes: the field starts at one row and grows with its lines and wrapped text, so the whole note stays visible', async ($, on) => {
+test('notes: the field starts at two rows (a 1-row Input is single-line and cuts) and grows with its lines and wrapped text, so the whole note stays visible', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($, 40)
   const rows = async () => (await ui.find({ type: 'Input', key: 'note' }))?.props.rows
-  expect(await rows()).toBe(1)
+  expect(await rows()).toBe(2)
   await ui.input({ key: 'note', text: 'one\ntwo\nthree', kind: 'change' })
   await settleAll()
   expect(await rows()).toBe(3)
   await ui.input({ key: 'note', text: 'a long line of words that cannot fit in the text column of a narrow pane', kind: 'change' })
   await settleAll()
-  expect(Number(await rows())).toBeGreaterThan(1)
+  expect(Number(await rows())).toBeGreaterThan(2)
   await ui.unmount()
 })
 

@@ -2,35 +2,34 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot, CockpitTab } from '../types'
 import { claudeStateSpans } from './agents'
-import { autocompactForecast } from './context'
-import { TABS } from './session'
+import { TABS, isWorking } from './session'
 import {
   COLORS,
+  abbrevTokens,
   barCells,
   baseName,
   cacheColor,
   ctxColor,
   displayModel,
-  duration,
   fmtCost,
   fmtCostDelta,
   gridWidths,
   pathToFileUri,
   pctCell,
-  signedPctCell,
+  signedPct,
   spanWidth,
   textCells,
   truncMiddle,
   truncateSpans,
   ICONS,
 } from './shared'
-import type { Span } from './shared'
+import type { BarPart, Span } from './shared'
 import { signalId, signalsOf } from './signals'
 import { t } from './strings'
 import { visibleAgents } from './view-agents'
-import { BUTTON_GAP, buttonRowWidth, delta, dim, line, sp } from './view-base'
+import { BUTTON_GAP, buttonRowWidth, delta, dim, line, padStart, sp } from './view-base'
 import type { Ui } from './view-base'
-import { contextText, headerEffort, rateRow, rateText } from './view-header'
+import { TOKENS_CELLS, contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit, tabBlocks } from './view-tabs'
 import type { Block, Node, PaneActions } from './view-tabs'
@@ -38,10 +37,14 @@ import { aheadBehindSpans } from './work'
 
 export type { PaneActions } from './view-tabs'
 
-const CTX_TEXT_MIN = '100% 999K/1M +99K'.length
-
 /** The context fill from which the header warns. */
 const CTX_WARN_PCT = 80
+// The cells of a round's cost delta (`$+12.34`) on the trend row, beside the context growth.
+const COST_DELTA_CELLS = 7
+// Stands in a trend cell whose turn value is not computed yet: nf-md-duck
+const NOT_YET = '\u{F01E5}'
+// The shortest bar a budget cell draws: below it the credit windows go one row each.
+const BUDGET_BAR_MIN = 4
 
 // ── Pane ─────────────────────────────────────────────────────────────────────
 
@@ -83,7 +86,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const width = Math.max(0, block - 2 * PANE_PADDING_X)
   const rule = <Text color={COLORS.rule}>{'─'.repeat(width)}</Text>
   const kit = makeKit(ui, s, width, actions)
-  const { gap, title, split } = kit
+  const { gap } = kit
 
   const tab: CockpitTab = s.tab ?? 'agents'
   const running = visibleAgents(s).filter(a => a.status === 'running')
@@ -95,7 +98,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // ── Tab bar: every tab shows its name; the selected one is the primary button ──
   const counts = { agents: running.length, signals: newSignals }
-  const labels = tabBarLabels(tab, counts, { work: hasWorklog }, width)
+  const labels = tabBarLabels(tab, counts, { signals: hasWorklog }, width)
   const tabButton = (id: CockpitTab, hasDot = false) => {
     const label = labels[id]
     const variant = tab === id ? 'primary' : 'secondary'
@@ -110,7 +113,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   }
   const tabBar = (
     <Box columnGap={1}>
-      {TABS.map(id => tabButton(id, id === 'work' && hasWorklog))}
+      {TABS.map(id => tabButton(id, id === 'signals' && hasWorklog))}
     </Box>
   )
 
@@ -152,11 +155,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn), the last round's delta and duration
-  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
-  // the last main round's length, once a second or more of it ran
-  const roundSpans: Span[] = s.lastRoundMs !== undefined && s.lastRoundMs >= 1000 ? [dim(' · '), dim(duration(s.lastRoundMs))] : []
-  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true), ...(costDelta ? [sp(' '), dim(costDelta)] : []), ...roundSpans]
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn); the round's delta is on the trend row
+  const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true)]
   const modelSpans = truncateSpans(
     [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
     Math.max(0, width - spanWidth(costSpans) - 1),
@@ -168,36 +168,84 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // The one bar width of the context and credit rows: what is left of the widest readout.
-  const five = rateRow(s, 'five_hour')
-  const seven = rateRow(s, 'seven_day')
-  const fiveText = five && rateText('5h', five, s.now)
-  const sevenText = seven && rateText('7d', seven, s.now)
-  const ctxText = contextText(s)
-  const textCol = Math.max(CTX_TEXT_MIN, ...[ctxText, fiveText, sevenText].map(text => spanWidth(text ?? [])))
-  const barW = Math.max(4, width - textCol - 1)
+  // A budget cell: its label, a bar taking what the readout leaves of `cells`, the readout.
+  const barLength = (head: Span, cells: number, text: Span[]): number => Math.max(BUDGET_BAR_MIN, cells - spanWidth([head, ...text]) - 1)
+  const budget = (label: string, cells: number, parts: BarPart[], text: Span[]): Span[] => {
+    const head = dim(`${label} `)
+    return [head, ...barCells(barLength(head, cells, text), parts), sp(' '), ...text]
+  }
 
-  // CONTEXT: from 80% a red line
+  // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
+  // the readout keeps its cells (blank before the first turn's cache hit), so the bar keeps its length; its glow flows while Claude works
   const pct = s.ctx.percent ?? 0
   const shownPct = s.ctx.percent ?? s.lastCtx?.percent ?? 0
-  const ctxBar = line(ui, barCells(barW, [{ pct: shownPct, color: ctxColor(shownPct) }]))
+  const cacheShown: Span[] = [dim('· '), dim(S.cache), sp(pctCell(s.cacheShare ?? 0), cacheColor(s.cacheShare ?? 0))]
+  const cacheSpans: Span[] = s.cacheShare === undefined ? [sp(' '.repeat(spanWidth(cacheShown)))] : cacheShown
+  const ctxParts = [{ pct: shownPct, color: ctxColor(shownPct) }]
+  const ctxText = [...contextText(s), ...cacheSpans]
+  // The bar is a surface module where the surface has one: its glow and pulse move on that region's own clock, never redrawing the pane; a surface without one draws it static
+  const budgetRow = (key: string, label: string, cells: number, parts: BarPart[], text: Span[], isFlowing: boolean, tone?: string): RenderElement => {
+    if (!ui.Client) return line(ui, budget(label, cells, parts, text))
+    const head = dim(`${label} `)
+    return (
+      <Box>
+        {line(ui, [head])}
+        <ui.Client key={key} module="./bar.tsx" props={{ cells: barCells(barLength(head, cells, text), parts), isFlowing, ...(tone === undefined ? {} : { tone }) }} width={barLength(head, cells, text)} />
+        {line(ui, [sp(' '), ...text])}
+      </Box>
+    )
+  }
+  const ctxRow = budgetRow('ctxbar', 'CTX', width, ctxParts, ctxText, isWorking(s, s.now))
   const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
 
-  // Right of the CONTEXT title: the prompt cache hit of the last main-loop turn (coloured by thresholds) and the requests left before auto-compaction
-  const cacheSpans: Span[] = s.cacheShare === undefined ? [] : [dim(S.cache), sp(pctCell(s.cacheShare), cacheColor(s.cacheShare))]
-  const forecast = autocompactForecast(s.ctxSamples, s.autoCompactAt)
-  const forecastSpans: Span[] = forecast === undefined ? [] : [dim(S.requestsLeft(forecast))]
-  const contextRight: Span[] = [...cacheSpans, ...(cacheSpans.length > 0 && forecastSpans.length > 0 ? [sp('  ')] : []), ...forecastSpans]
-
-  // CREDITS: the pace of the week sits right of the title
-  const paceDelta = seven?.pace?.delta
-  const paceSpans: Span[] =
-    paceDelta === undefined ? [] : [dim(S.vsExpected), sp(signedPctCell(paceDelta), paceDelta < 0 ? COLORS.red : COLORS.green, true)]
-  const creditRow = (r: RateRow, text: Span[]) => {
+  // Credits row: the 5h and 7d windows side by side, half the row each, or one row each when a half cannot hold its readout and a short bar;
+  // the week's pace shows as the gap segment of the 7d bar
+  const sevenDay = rateRow(s, 'seven_day')
+  const windows = [
+    { label: '5h', r: rateRow(s, 'five_hour') },
+    { label: '7d', r: sevenDay },
+  ].filter((w): w is { label: string; r: RateRow } => w.r !== undefined)
+  const windowSep = dim(' · ')
+  const halfCells = Math.floor((width - spanWidth([windowSep])) / 2)
+  const sideBySide = windows.length > 1 && windows.every(({ label, r }) => spanWidth([dim(`${label} `), ...rateText(r, s.now)]) + 1 + BUDGET_BAR_MIN <= halfCells)
+  const windowParts = (r: RateRow): BarPart[] => {
     const gapPct = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
-    const parts = [{ pct: r.rem, color: r.color }, ...(gapPct ? [{ pct: gapPct, color: COLORS.gap }] : [])]
-    return split(line(ui, barCells(barW, parts)), barW, text)
+    return [{ pct: r.rem, color: r.color }, ...(gapPct ? [{ pct: gapPct, color: COLORS.gap }] : [])]
   }
+  // A window's bar pulses when its colour changes; the last known reading (resumed session) has no tone, so the first live one never pulses
+  const windowRow = ({ label, r }: { label: string; r: RateRow }): RenderElement =>
+    // no tone for a window whose reset has passed: its colour then changes with the clock alone, not with a new reading
+    budgetRow(`bar:${label}`, label, sideBySide ? halfCells : width, windowParts(r), rateText(r, s.now), false, r.isStale || (r.resetMs !== undefined && r.resetMs <= s.now) ? undefined : r.color)
+  const creditsRows = windows.length === 0
+    ? [line(ui, [dim(S.noRateData)])]
+    : sideBySide
+      ? [
+          ui.Client ? (
+            <Box>
+              {windowRow(windows[0]!)}
+              {line(ui, [windowSep])}
+              {windowRow(windows[1]!)}
+            </Box>
+          ) : (
+            line(ui, windows.flatMap(({ label, r }, i) => [...(i > 0 ? [windowSep] : []), ...budget(label, halfCells, windowParts(r), rateText(r, s.now))]))
+          ),
+        ]
+      : windows.map(windowRow)
+
+  // Under the credits: what the current turn added to the context and to the cost, then the week's pace (the credit left against an even burn,
+  // + is ahead); all dim but the pace, each in its own cells and the row always drawn, so neither the readout nor the tabs below move
+  const grown = s.ctx.percent === undefined ? undefined : delta(s.ctx.tokens, s.ctx.startTokens)
+  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
+  const pace = sevenDay?.pace
+  const trendRow = line(ui, [
+    dim(`${S.turnGrowth} `),
+    // padded by cells: NOT_YET is one cell but two UTF-16 units
+    dim(padStart(grown !== undefined && grown > 0 ? `+${abbrevTokens(grown, true)}` : NOT_YET, TOKENS_CELLS + 1)),
+    dim(padStart(costDelta ? `$${costDelta}` : NOT_YET, COST_DELTA_CELLS + 2)),
+    windowSep,
+    dim(`${S.weekPace} `),
+    ...(pace ? [sp(padStart(signedPct(pace.delta), 5), pace.delta < 0 ? COLORS.red : COLORS.green)] : []),
+  ])
 
   // The footer, the last row of every tab: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
@@ -252,25 +300,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
       </Box>
     )
 
-  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then CONTEXT and CREDITS, the three blocks told apart by a rule, each title with an empty row on both sides
-  const headerRows: Node[] = [
-    modelLine,
-    grid,
-    rule,
-    gap(),
-    title(S.contextTitle, contextRight),
-    gap(),
-    split(ctxBar, barW, ctxText),
-    ctxWarning,
-    rule,
-    gap(),
-    title(S.creditsTitle, paceSpans),
-    gap(),
-    five && fiveText && creditRow(five, fiveText),
-    five && seven && gap(),
-    seven && sevenText && creditRow(seven, sevenText),
-    !five && !seven && line(ui, [dim(S.noRateData)]),
-  ]
+  // The header, above the tab bar on every tab: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
+  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows, trendRow]
 
   // Only the selected tab is built. Blocks are told apart by a rule; an empty tab says so.
   const blocks = tabBlocks(tab, kit)
