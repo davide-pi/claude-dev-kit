@@ -2,7 +2,7 @@
 name: plan-work
 description: >-
   Use when work spans several files or sessions, a work item needs steps, half-done work resumes,
-  or subagents fan out.
+  or subagents fan out: "pianifica", "riprendi il lavoro".
 ---
 
 # plan-work — a plan file with verifiable tasks, sized to the change
@@ -83,10 +83,7 @@ each task's verify before the next; tick `- [x]`; a wrong task → edit the plan
 
 1. Tasks that cannot fail ("refactor for clarity") → no verify command → restate as an observable behaviour, or drop it.
 2. The plan rots → code diverged, file untouched → update it in the same edit as the divergence.
-3. `TBD: pick a library` inside a task → a decision was deferred → decide, or promote it to an open
-   question that blocks the task.
-4. "Add a repository method" → the next agent cannot compile against prose → write the signature.
-5. A subagent report floods the context → the brief had no output cap → cap it, ask for the table.
+3. A subagent report floods the context → the brief had no output cap → cap it, ask for the table.
 
 ## References
 

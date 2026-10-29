@@ -76,8 +76,8 @@ language split found); read it at step 0, update it at the end, never instead of
 ## Verified
 - <area or document> — <what was confirmed, against which source>
 ## Updated / Created / Removed
-| Azione | Documento | Tipo | Perché |
-|--------|-----------|------|--------|
+| Action | Document | Type | Reason |
+|--------|----------|------|--------|
 | updated | `<path>` | code-derived | <reason, chat language> |
 ## Pending approval
 - drafts: <each experience-derived draft and what needs confirming>

@@ -43,7 +43,7 @@ A recommendation answers one question; it is never a redesign of the plan.
 
 Up to 4 questions per call; a bigger frontier is several calls in the same round. An open question (a number, a name) still gets 2–4 plausible values.
 Phrase each question so the recommended option is the affirmative one. Tool unavailable → numbered
-questions in chat, recommended answer first, so "sì" accepts it.
+questions in chat, recommended answer first, so a "yes" (in the chat language) accepts it.
 
 ## Do
 

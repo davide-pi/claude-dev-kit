@@ -6,9 +6,10 @@ for it when counters, stacks and traces have not answered.
 ## Collect
 
 ```powershell
-dotnet-dump collect -p <pid> -o .\proc.dmp                  # full, the default
-dotnet-dump collect -p <pid> --type Heap -o .\heap.dmp      # smaller: heap without full memory
-dotnet-dump collect -p <pid> --type Mini -o .\mini.dmp      # stacks only, useful for a hang
+$t = [IO.Path]::GetTempPath()                              # never a file in the repo
+dotnet-dump collect -p <pid> -o "$t\proc.dmp"                # full, the default
+dotnet-dump collect -p <pid> --type Heap -o "$t\heap.dmp" # smaller: heap without full memory
+dotnet-dump collect -p <pid> --type Mini -o "$t\mini.dmp" # stacks only, useful for a hang
 ```
 
 Collect where the process runs. A Linux-container dump reads on Windows with the analysis tool, not
@@ -17,7 +18,7 @@ through the runtime's dump environment variables — the only reliable evidence 
 
 ## Analyze
 
-`dotnet-dump analyze .\proc.dmp` opens a shell with SOS loaded. Non-obvious commands:
+`dotnet-dump analyze "$t\proc.dmp"` opens a shell with SOS loaded. Non-obvious commands:
 
 | Command | Answers |
 |---|---|

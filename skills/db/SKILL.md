@@ -1,8 +1,8 @@
 ---
 name: db
 description: >-
-  Use when a query must run on the project's database or a table be described: row counts, a
-  value check, a schema. Runs in db-analyst.
+  Use when a query must run on the project's database or a table be described: row counts,
+  "quante righe", "descrivi la tabella". Runs in db-analyst.
 argument-hint: "\"<sql>\" | <table|schema> [--db <name>] [--env <target>]"
 context: fork
 agent: db-analyst

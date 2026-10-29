@@ -902,6 +902,5 @@
   "preferredNotifChannel": "auto",
   "autoCompactEnabled": true,
   "inputNeededNotifEnabled": true,
-  "agentPushNotifEnabled": true,
-  "voiceEnabled": true
+  "agentPushNotifEnabled": true
 }

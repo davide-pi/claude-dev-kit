@@ -18,7 +18,7 @@ Never analyse the query as written in the repository method. Capture it:
 
 ```powershell
 sqlcmd -S <server> -d <db> -E -Q "SET STATISTICS IO, TIME ON; <query>"
-sqlcmd -S <server> -d <db> -E -Q "SET SHOWPLAN_XML ON; GO; <query>" -o plan.xml   # estimated plan, no execution
+sqlcmd -S <server> -d <db> -E -Q "SET SHOWPLAN_XML ON; GO; <query>" -o (Join-Path ([IO.Path]::GetTempPath()) plan.xml)   # estimated plan, no execution
 ```
 
 Read in this order:

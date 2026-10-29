@@ -91,13 +91,13 @@ Finding blocks, one defect per block (≤ 12 lines each, no cap on the count; tw
 each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
 Right: `### 3. null check mancante` and `### 4. cache mai invalidata`, two blocks.
 
-Order: `todo` before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`; a `done` block keeps title, anchor, category, status and `resolved by: <sha | thread id>`. `risk`: `high` behaviour, data or a public contract · `medium` localized logic · `low` cosmetic; `effort`: **S** minutes, one place · **M** a few files · **L** design change.
+Verdict line: `~/.claude/skills/code-review/references/finding-format.md`; order and field values: `report-format.md` § Fields in the same folder.
 
 Every block has `category: performance`, P1 → P3 by cost × frequency. Here **P1** is unbounded cost on a hot path; `failure` is the cost, the
 scale at which it bites and how often the path runs; `evidence` the loop and the per-item call, the
 schema or index, the caller sizing the input.
 
-Close with `Verdetto: N rilievi performance (X todo, Y done · P1: N · CONFIRMED: N, PLAUSIBLE: N)`
+Close with the verdict line (`N performance findings`)
 and one **hot-path summary** line: which changed code runs per request, message or item, at what
 assumed scale. Nothing wrong → one line with the hot paths checked and the scale assumed.
 

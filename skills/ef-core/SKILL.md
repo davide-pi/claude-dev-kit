@@ -1,8 +1,8 @@
 ---
 name: ef-core
 description: >-
-  Use when an EF Core entity, DbContext, configuration or migration changes or is applied, a
-  column added, or a LINQ query is slow, wrong, untranslatable.
+  Use when an EF Core entity, DbContext, configuration or migration changes or is applied, or a
+  LINQ query is slow or wrong; "aggiungi una migration".
 paths: "**/Migrations/**,**/*DbContext*.cs,**/*Configuration.cs"
 ---
 

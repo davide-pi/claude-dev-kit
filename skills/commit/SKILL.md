@@ -48,7 +48,7 @@ in the report.
 | Imperative in the commit language | `Aggiungi`, `Correggi`, `Sposta` — or the infinitive if `git log --oneline -10` shows the repo uses it; one convention per repo |
 | subject | ~50–72 chars, what changed in which area, not how |
 | body | only for several areas or a non-obvious why: a few `-m` bullet lines |
-| banned | marketing words (`migliora`, `ottimizza`, `potenzia`, robust, seamless), no footer, except an attribution trailer the session or the repo's convention explicitly prescribes |
+| banned | marketing words (`migliora`, `ottimizza`, `potenzia`, robust, seamless), a footer other than an attribution trailer the session or the repo's convention explicitly prescribes |
 
 ### Evidence
 

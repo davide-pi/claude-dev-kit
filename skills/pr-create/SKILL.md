@@ -2,7 +2,7 @@
 name: pr-create
 description: >-
   Use when a pull request is opened or its title and description written: "open the PR", "ship
-  this branch", "write the PR description".
+  this branch", "apri la PR", "scrivi la descrizione".
 ---
 
 # pr-create — turn a pushed branch into a reviewable PR
@@ -78,7 +78,7 @@ git push --set-upstream origin (git branch --show-current)
 # body as a UTF-8 temp file, never in the repo: newlines and code fences survive the shell
 $bodyFile = New-TemporaryFile
 Set-Content -Path $bodyFile -Encoding utf8 -Value $body
-$draft = 'false'                                       # 'true' when §5 says draft
+$draft = '<true|false: decided in §5>'
 
 # Azure DevOps — org and project from the ALM: line; one --description value per line
 az repos pr create --org $org -p $proj --repository <repo> --source-branch (git branch --show-current) `

@@ -2,7 +2,7 @@
 name: dotnet-backend
 description: >-
   Use when backend C# changes: responder, subscriber, hosted service, DI wiring, Polly retry,
-  options, Redis cache or stream; lifetime bugs, thread-pool starvation, RedisTimeoutException.
+  options, Redis cache or stream; lifetime bugs, thread-pool starvation, RedisTimeoutException; "codice backend".
 paths: "**/*.cs"
 ---
 

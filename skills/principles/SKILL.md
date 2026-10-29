@@ -1,8 +1,8 @@
 ---
 name: principles
 description: >-
-  Use when a design choice is open: extract or inline, share or duplicate, interface or class,
-  which pattern, which layer owns code, "is this overcomplicated?".
+  Use when a design choice is open: extract or inline, share or duplicate, which layer owns code,
+  "is this overcomplicated?", "è troppo complicato?".
 ---
 
 # principles — which principle wins when two disagree

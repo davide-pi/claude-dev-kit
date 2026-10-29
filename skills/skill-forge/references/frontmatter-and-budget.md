@@ -16,9 +16,9 @@ Agent frontmatter (`tools`, `model`, `memory`, `maxTurns`, `omitClaudeMd`): `ref
 ## The listing budget
 
 Listed descriptions (agents, and skills with neither `disable-model-invocation` nor `paths:`) are paid every turn of every session; the validator reports listed vs hidden. Budget: ~1 % of the context
-window in characters (~8 k on a 200 k model), 1,536 characters per description; on overflow the
+window in characters, with a per-description limit (`SKILL.md` § 2 and § 3); on overflow the
 least-invoked descriptions drop **silently**. Measure with `/doctor` (listing cost), `/skill-doctor`
 (never-invoked skills) and `/usage` (per-asset attribution). A skill nobody triggers has a
 description bug, not a body bug: `references/description-craft.md`.
 
-Byte caps (validator): `CLAUDE.md` 2,750 B · an output style 2,500 B · a `SKILL.md` 7,000 B · an agent 8,000 B (`code-reviewer` 9,500 B: it runs the security and cost passes itself when no specialist sits beside it).
+Line and byte caps: `SKILL.md` § 2 Caps row, the only copy. `code-reviewer` has a larger byte cap: it runs the security and cost passes itself when no specialist sits beside it.

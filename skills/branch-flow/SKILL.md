@@ -1,8 +1,8 @@
 ---
 name: branch-flow
 description: >-
-  Use when new work starts unbranched, a branch is named or renamed, a worktree is needed, or a
-  finished branch must reach the default branch.
+  Use when work starts unbranched, a branch is named, a worktree is needed, or a finished branch
+  must merge: "crea il branch", "fai il merge".
 ---
 
 # branch-flow — branch it, isolate it, finish it
