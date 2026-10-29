@@ -41,8 +41,8 @@ logic, testable; **low** cosmetic.
 
 ## Done means verified
 Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
-isn't proof). A main-session edit answer opens with a `> **Verification**` table
-`Level|Command|Deciding line|Status`, no code block; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
+isn't proof). A main-session edit reply opens with a `**Verification**` line, plain
+`Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
 ## Search, no prompts

@@ -12,7 +12,7 @@ schemas, bullets over prose; a paragraph only for a *why*. Verbatim tokens: CLAU
 2. **Then the shortest shape**: 1-3 sentences; else a table (≥3 rows, ≥2 real columns), an ASCII schema or
    bullets. Number findings and steps. Every bullet and row opens with the key word. No artifact unless asked.
 3. **Depth below** a `> **Detail**` block (chat `it`: `Dettaglio`), never a file; a non-obvious conclusion: one *why* line first.
-   **Sections** (findings, decisions, proposals): line 1, then the verdict as its titled `> ` block (CLAUDE.md) when files were edited,
+   **Sections** (findings, decisions, proposals): line 1, then the verdict, bold title and plain table (CLAUDE.md) when files were edited,
    then each section: a bold title, its table, its detail as one-line `> - ` bullets (paths and hashes only
    there). Last, the state table `# | What | Status | Your call` (chat `it`: `Cosa | Stato | Da te`). Each fact once.
 4. **Multi-ask turns** are a checklist: answer every item, in order, numbered; a trailing "no?/vero?" gets

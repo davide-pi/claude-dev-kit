@@ -25,9 +25,8 @@
  *     `> **Detail**` / `> **Dettaglio**` block and a `> - ` bullet line are prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
- * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table, titled and quoted as
- * `> **Verifica**` / `> **Verification**` with every line starting `> `; a plain unquoted table works too; the
- * quoted title and table lines are prose, never quoted output) is judged row by row
+ * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table, titled `**Verifica**` / `**Verification**`;
+ * the legacy form with `> ` on every line is accepted too, its title and table lines prose, never tool output) is judged row by row
  * instead: a row ending `fatto` or `failed` is proven only when its deciding line (normalised: whitespace
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
@@ -100,7 +99,7 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** A section's detail: quoted bullet lines (`> - …`), prose like the block above, never tool output. */
 const DETAIL_BULLET = /^[ \t]*>[ \t]*[-*][ \t].*$/gm;
-/** The quoted verdict block: its `> **Verifica**` / `> **Verification**` title and `> |` table lines are prose, never tool output. */
+/** The legacy quoted verdict block: its `> **Verifica**` / `> **Verification**` title and `> |` table lines are prose, never tool output. */
 const VERDICT_TITLE = /^[ \t]*>[ \t]*\*\*(?:Verifica|Verification)\*\*[ \t]*$/gim;
 const QUOTED_TABLE_LINE = /^[ \t]*>[ \t]*\|.*$/gm;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
@@ -362,7 +361,7 @@ try {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict rows against the command output. '
-          + 'Rewrite the verdict, a quoted block titled "> **Verifica**" (English: "> **Verification**") holding the table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
+          + 'Rewrite the verdict, a bold "**Verifica**" title line (English: "**Verification**") followed by the plain table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
       }));
       process.exit(0);
     }
@@ -388,7 +387,7 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the verdict: a quoted block titled "> **Verifica**" (English chat: "> **Verification**") holding the table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
+      + 'confirms it in the verdict: a bold "**Verifica**" title line (English chat: "**Verification**") followed by the plain table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
       + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
