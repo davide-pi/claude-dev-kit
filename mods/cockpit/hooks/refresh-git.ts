@@ -19,6 +19,7 @@ import {
   parseDefaultBranch,
   parseGitStatus,
   parseGithubPr,
+  parsePrCreatedAt,
   parseNumstat,
   parsePerimeter,
   parseWorktree,
@@ -28,6 +29,8 @@ import {
 
 /** The pull request (and the repo's default branch) of a branch is read again after this long. */
 const PR_EVERY_MS = 5 * 60_000
+// How far the server's clock may run behind this one: a pull request opened just as the chat began is still the chat's.
+const CLOCK_SLACK_MS = 30_000
 /** The Work tab keeps this many changed files; it draws 8 of them. */
 const REPO_FILES_KEEP = 50
 
@@ -99,14 +102,15 @@ async function runAz($: EngineInterface, args: readonly string[], cwd: string, a
  * The latest pull request of `branch` on Azure DevOps, open, completed or abandoned: `az repos pr list`, aimed at the org of the ALM line and the project of the remote,
  * never at the CLI's configured default. Undefined without an org, a repository or a project to ask about.
  */
-async function readAzurePr($: EngineInterface, cwd: string, branch: string, url: string, alm: CockpitAlm | undefined): Promise<CockpitPr | undefined> {
+async function readAzurePr($: EngineInterface, cwd: string, branch: string, url: string, alm: CockpitAlm | undefined): Promise<{ pr: CockpitPr; createdAt?: number } | undefined> {
   const repo = azureRepo(url)
   // The repository lives in the project the remote URL names; the ALM project (where the work items are) is only the fallback.
   const project = repo?.project ?? alm?.project
   if (!alm?.org || !repo || !project) return undefined
   const args = ['repos', 'pr', 'list', '--organization', azOrganization(alm.org), '--project', project, '--repository', repo.repo]
   const list = await runAz($, [...args, '--source-branch', `refs/heads/${branch}`, '--status', 'all', '--top', '1', '--output', 'json'], cwd, alm)
-  return list?.exitCode === 0 ? parseAzurePr(list.stdout) : undefined
+  const pr = list?.exitCode === 0 ? parseAzurePr(list.stdout) : undefined
+  return pr && list ? { pr, createdAt: parsePrCreatedAt(list.stdout) } : undefined
 }
 
 /** The organization URL `az` is aimed at: the ALM line's `org` as is when it is one, else its name on dev.azure.com. */
@@ -148,7 +152,7 @@ const isRepoOfChat = (root: string | undefined, homeRoot: string | undefined, ed
  */
 async function refreshPr($: EngineInterface, cwd: string, branch: string): Promise<void> {
   const now = await $.clock.now()
-  const { alm, git, homeRoot, edited, prs } = await read($, snapshot)
+  const { alm, git, homeRoot, edited, prs, startedAt } = await read($, snapshot)
   const isChatRepo = isRepoOfChat(git?.root, homeRoot, edited)
   // The chat's pull requests still to end are read again by number.
   // Only from a repo of the chat: a number asked in another repo would name another pull request.
@@ -165,6 +169,7 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     const head = await $.process.run([...base, 'symbolic-ref', '--short', 'refs/remotes/origin/HEAD'], { timeoutMs: 2000 })
     const defaultBranch = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
     let pr: CockpitPr | undefined
+    let createdAt: number | undefined
     let remote: string | undefined
     const isBranchAsked = !isDefaultBranch(branch, defaultBranch) && isChatRepo
     // The default branch has no pull request of its own to look for, nor has a repo the chat only passes through.
@@ -174,12 +179,18 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
     }
     if (remote !== undefined && isBranchAsked) {
       if (isGithubRemote(remote)) {
-        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,url,state,isDraft'], { cwd, timeoutMs: 10_000 })
+        const view = await $.process.run(['gh', 'pr', 'view', '--json', 'number,title,url,state,isDraft,createdAt'], { cwd, timeoutMs: 10_000 })
         pr = view.exitCode === 0 ? parseGithubPr(view.stdout) : undefined
+        createdAt = view.exitCode === 0 ? parsePrCreatedAt(view.stdout) : undefined
       } else if (isAzureRemote(remote)) {
-        pr = await readAzurePr($, cwd, branch, remote, alm)
+        const found = await readAzurePr($, cwd, branch, remote, alm)
+        pr = found?.pr
+        createdAt = found?.createdAt
       }
     }
+    // The branch's pull request joins the chat only when it was opened since the chat began; one already held is updated.
+    const isOfChat = (p: CockpitPr) => (prs ?? []).some(saved => saved.number === p.number) || (createdAt !== undefined && startedAt !== undefined && createdAt >= startedAt - CLOCK_SLACK_MS)
+    if (pr && !isOfChat(pr)) pr = undefined
     // The others the chat holds (not the one just read), each by its number; one that cannot be read keeps its last state.
     // Three at a time, so a long list does not wait out each CLI call in turn.
     const reads: CockpitPr[] = []

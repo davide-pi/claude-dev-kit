@@ -1,8 +1,8 @@
 import type { CockpitAlm, CockpitSnapshot } from '../types'
 
-/** The work items the chat names, once each: `AB#<id>` in the branch name and in the titles of its pull requests. */
-export function workItemIds(s: Pick<CockpitSnapshot, 'git' | 'prs'>): number[] {
-  const texts = [s.git?.branch ?? '', ...(s.prs ?? []).map(pr => pr.title)]
+/** The work items the chat names, once each: `AB#<id>` in the titles of its pull requests (the branch may predate the chat). */
+export function workItemIds(s: Pick<CockpitSnapshot, 'prs'>): number[] {
+  const texts = (s.prs ?? []).map(pr => pr.title)
   const ids = texts.flatMap(text => [...text.matchAll(/AB#(\d+)/g)].map(m => Number(m[1])))
   return [...new Set(ids)].filter(id => Number.isSafeInteger(id) && id > 0)
 }

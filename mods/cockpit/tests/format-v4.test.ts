@@ -47,8 +47,8 @@ test('recordAgentEvent: an agent that ended twice is one row', () => {
   expect(list.map(e => e.usd)).toEqual([1, 2])
 })
 
-test('workItemIds and workItemUrl: AB# ids of the branch and the PR titles, once each; a URL needs the org and the project', () => {
-  const s = { git: { branch: 'feature/AB#512-reports' }, prs: [{ number: 1, title: 'Fix AB#512 and AB#7' }, { number: 2, title: 'none' }] } as Parameters<typeof workItemIds>[0]
+test('workItemIds and workItemUrl: AB# ids of the PR titles only (not the branch), once each; a URL needs the org and the project', () => {
+  const s = { git: { branch: 'feature/AB#99-reports' }, prs: [{ number: 1, title: 'Fix AB#512 and AB#7' }, { number: 2, title: 'none' }, { number: 3, title: 'AB#512 again' }] } as Parameters<typeof workItemIds>[0]
   expect(workItemIds(s)).toEqual([512, 7])
   expect(workItemIds({})).toEqual([])
   expect(workItemUrl({ isMapped: true, org: 'contoso', project: 'My Proj' }, 7)).toBe('https://dev.azure.com/contoso/My%20Proj/_workitems/edit/7')

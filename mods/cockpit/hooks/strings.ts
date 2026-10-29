@@ -187,8 +187,6 @@ const IT: Strings = {
     'Memory files': 'File di memoria',
     Skills: 'Skill',
     Messages: 'Messaggi',
-    'Free space': 'Spazio libero',
-    'Autocompact buffer': 'Riserva di compattazione',
   },
   refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
 
