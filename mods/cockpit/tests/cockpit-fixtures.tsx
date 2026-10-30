@@ -253,10 +253,10 @@ export const notesPane = async ($: Engine, columns = 58) => {
   return ui
 }
 
-/** Types `text` into the Notes field and presses `save`. */
+/** Types `text` into the Notes field and presses Enter. */
 export const saveNote = async (ui: Awaited<ReturnType<typeof notesPane>>, text: string) => {
   await ui.input({ key: 'note', text, kind: 'change' })
-  await ui.press({ key: 'note:save' })
+  await ui.input({ key: 'note', text, kind: 'submit' })
   await settleAll()
 }
 

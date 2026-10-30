@@ -33,6 +33,7 @@ kept deliberately — never left standing as the fix.
 
 | Situation | Rule |
 | --- | --- |
+| the symptom is in a running environment, its evidence not yet gathered | `incident` first: logs, database and code in parallel, then phase 2 here |
 | phase 1 fails | reproducing *is* the task: add correlation ids and timing, loop the scenario until the failure rate is measurable (`references/intermittent-and-ci.md`) |
 | before the first probe of phase 2 | the 2–3 most probable causes first, ranked (a fourth or fifth only if those fail), each a falsifiable prediction ("se la causa è X, cambiando Y il bug sparisce"); show them to the user — they often re-rank at once — but do not wait for the answer |
 | three wrong hypotheses in a row | the mental model is wrong, not the code: stop probing, re-read the whole path, list every assumption, verify each with an instrument |
