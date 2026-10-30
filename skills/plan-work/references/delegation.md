@@ -14,7 +14,9 @@ Spawn a wave in **one message**.
 | multi-lens review | `/code-review` (a PR too) — never a hand-rolled review fan-out |
 | locate code, trace a flow | `investigator` |
 | wide read-only search | `Explore` |
+| read-only audit or opinion | `analyst` or `Explore`; `Plan` with `model: sonnet`, never Opus |
 | SQL, logs | `/db`, `/logs` (their forks run `db-analyst`, `ops-analyst`) |
+| any other job | a fork only when the parent context is needed, else a fresh agent with a brief |
 
 ## The brief — what an agent cannot infer
 

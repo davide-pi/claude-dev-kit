@@ -1,8 +1,8 @@
 /**
  * PreToolUse hook on Agent|Task: keeps subagent spawns explicit.
  *
- * Denies a spawn with no `subagent_type`, and a `Plan` spawn with no `model`: its size picks the model
- * (opus for L, sonnet for M). `general-purpose` and `claude` without a model pass: settings.json's
+ * Denies a spawn with no `subagent_type`, and a `Plan` spawn with no `model`: it runs on
+ * sonnet (never opus). `general-purpose` and `claude` without a model pass: settings.json's
  * CLAUDE_CODE_SUBAGENT_MODEL gives them one. Anything else passes in silence.
  *
  * Not a security guard: any error lets the spawn through. Always exits 0.
@@ -22,7 +22,7 @@ try {
       deny('Name the agent type (subagent_type): a kit agent (Explore, analyst, implementer, code-reviewer, …) or `fork`.');
     }
     if (type === 'Plan' && !input.model) {
-      deny('Plan needs a model: opus for L, sonnet for M.');
+      deny('Plan needs a model: sonnet (never opus).');
     }
   }
 } catch {

@@ -473,7 +473,7 @@ test('script: a P2 on the spot of a known minor finding is a new blocking findin
     review([{ id: 'F1', status: 'closed' }], [mnr('P2')]),
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),   // the delta of the cleanup pass (the P3 left over)
-  ]);
+  ], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 5);   // R4 is the final full read, R5 the cleanup delta
   assert.deepEqual(calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix round 1 findings', 'fix round 2 findings']);

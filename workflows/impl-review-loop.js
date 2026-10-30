@@ -206,7 +206,9 @@ const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) =>
   return { pending, answered }
 }
 
-const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium', whole: true }
+const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'haiku', effort: 'low', whole: true }
+// The final read (reviewer A alone) runs only past this much review-fix churn: a smaller fix was read by its finders and the watcher.
+const FINAL_READ_MIN_CHURN = 30
 const deltaReviewers = (everyone, finders = []) => {
   const has = new Set(everyone.map(r => r.key))
   const wanted = new Set(finders.filter(k => has.has(k)))
@@ -511,6 +513,7 @@ let lastFix = null, lastTree = '', lastDelta = '', lastDeltaBase = ''
 let rejectionCounts = {}, challenged = {}, skipped = [], silent = {}
 let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = false, cleanupSent = []
 let fixChurns = [], openCounts = [], afterFix = false
+let churnMissing = false, verifyFailed = false, haikuSent = new Set()   // churnMissing: a review fix without a churn number is owed a final read
 let nextRound = { only: null, coverage: false, final: false }
 let finalReading = false, finalReadDone = false
 let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
@@ -556,7 +559,7 @@ const takeReport = r => {
 }
 const gateReport = (r, toFixHadVerify) => {
   const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: lastReport?.verify.status, next: nextV })
-  if (g.finding) { known[g.finding.id] = g.finding; nextV += 1; verifyOpen = [g.finding] }
+  if (g.finding) { known[g.finding.id] = g.finding; nextV += 1; verifyOpen = [g.finding]; verifyFailed = true }
   else if (g.status === 'pass') verifyOpen = []
   return g.stall
 }
@@ -763,7 +766,8 @@ while (true) {
   finalReading = final
   const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => raisedBy[id] ?? []))]
   const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
-    : round === 1 || final ? everyone
+    : final ? everyone.filter(r => r.key === 'A')
+    : round === 1 ? everyone
     : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
@@ -866,8 +870,8 @@ while (true) {
       const keys = [...missing]
       return stallAgain(round, `the specialist reviewer(s) ${keys.join(', ')} returned nothing: their area was never reviewed`, { why: 'gap', reviewers: keys })
     }
-    // The final read is the whole panel on the whole change: it covers every file, so it goes before the coverage rerun.
-    if (!finalReadDone && reviewFixed && size !== 'S') {
+    // The final read is reviewer A alone on the whole change, past FINAL_READ_MIN_CHURN or a fix with no churn: it covers every file, so it goes before the coverage rerun.
+    if (!finalReadDone && reviewFixed && size !== 'S' && (churnMissing || fixChurns.reduce((a, b) => a + b, 0) > FINAL_READ_MIN_CHURN)) {
       finalReadDone = true
       nextRound = { only: null, coverage: false, final: true }
       openCounts = []
@@ -912,7 +916,12 @@ while (true) {
   const withRevert = id => known[id].category !== 'scope' && !inPerimeter(known[id].path, roundFiles, repoRoot) && sending.some(o => known[o]?.category === 'scope' && rel(known[o].path, repoRoot) === rel(known[id].path, repoRoot))
   const fix = sending.map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}${known[id].fix ? ` (suggested: ${known[id].fix})` : ''}${unproven(id) ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}${withRevert(id) ? ' (outside the perimeter: revert the hunk of this file; this defect should disappear with it, do not edit anything else there)' : ''}${decision.kept.includes(id) ? ` (you rejected this finding and the reviewer kept it${merged.notes[id] ? `: ${merged.notes[id]}` : ''}; reproduce it, then fix it)` : ''}`).join('\n')
   // `cleanup` stays the label's first word: askWithQuestions reads it.
-  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
+  // Haiku pilot: a small, low-risk review fix; a finding still open after a Haiku fix goes to the default model.
+  const haiku = !cleaning && !implModel && sending.length > 0 && sending.length <= 2 && !verifyFailed
+    && sending.every(id => known[id].priority !== 'P1' && !/^V/.test(id) && !haikuSent.has(id))
+  if (haiku) sending.forEach(id => haikuSent.add(id))
+  const fixOpts = { label: cleaning ? `cleanup of round ${round} minor findings` : `fix round ${round} findings`, phase: 'Fix', agentType: 'implementer', effort: haiku ? 'low' : implEffort, ...(haiku ? { model: 'haiku' } : implModel && { model: implModel }), schema: IMPLEMENTATION }
+  rounds[rounds.length - 1].fixModel = fixOpts.model ?? 'default'
   const asked1 = await askWithQuestions(extra => [
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with a one-line reason, no code change: never ask about it. No other edit.'
@@ -958,6 +967,6 @@ while (true) {
     if (Number.isFinite(churn)) {
       fixChurns.push(churn)
       rounds[rounds.length - 1].churn = churn
-    }
+    } else churnMissing = true
   }
 }

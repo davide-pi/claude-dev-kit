@@ -30,8 +30,8 @@ const ALL_READ = Symbol('every file the change touched');
 
 /**
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
- * Two reviewers are answered by the harness, not by the queue: the Sonnet watcher of the delta rounds (label "reviewer S · round <n> · check the fixes":
- * `review([])` unless `extra.watcher` is given: an answer, null = it returned nothing, or an array of one answer per round) and the full panel of the final read (label
+ * Two reviewers are answered by the harness, not by the queue: the Haiku watcher of the delta rounds (label "reviewer S · round <n> · check the fixes":
+ * `review([])` unless `extra.watcher` is given: an answer, null = it returned nothing, or an array of one answer per round) and reviewer A of the final read (label
  * "reviewer <key> · round <n> · <role>, final read": every previous id closed unless `extra.finals` queues its answers).
  */
 async function run(args, reviews, implementers = [], extra = {}) {

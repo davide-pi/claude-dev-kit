@@ -50,7 +50,7 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 
 | | S | M | L |
 | --- | --- | --- | --- |
-| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, doubts pass, challenger `Plan` (risk: data, money, contract, security) | `plan-work`, criteria + proof, questions, owner ok, doubts pass, challenger `Plan` (Opus) |
+| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), owner ok, doubts pass, challenger `Plan` (risk: data, money, contract, security) | `plan-work`, criteria + proof, questions, owner ok, doubts pass, challenger `Plan` (Sonnet) |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
 | implementation | this session, inline (up to ~3 files) while the context is small, else `implementer`; a mechanical batch → `mechanical: true`, `implementer` on Haiku | `implementer`, 3-4 tasks a run | as M, a run per phase (P-run, `references/loop.md`) |
 | review | 1 `code-reviewer`, Sonnet high (mechanical: low) | A Sonnet high + B Sonnet high, B on Opus if wide (over 10 files or 600 lines), + specialists when risk names them | A Sonnet high + B Opus high, + `review-security` / `review-performance` when risk names them |

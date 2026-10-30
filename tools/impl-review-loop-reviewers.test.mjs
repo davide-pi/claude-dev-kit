@@ -254,7 +254,7 @@ test('script: a reviewer that threw in round 1 and a rerun that reads only part 
     boom, review([], [finding({ path: f9 })], [f9]),
     review([{ id: 'F1', status: 'closed' }], [], [f9]),                                // R2: B answers still reading only F9, S returns nothing (watcher: null)
     boom, boom,                                                                        // R4: the coverage rerun of A and B throws again
-  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: null, finals: [boom, review([{ id: 'F1', status: 'closed' }], [], [f9])] });   // R3: the final read, A throws and B reads only F9
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: null, finals: [review([{ id: 'F1', status: 'closed' }], [], [f9])] });   // R3: the final read is A alone and reads only F9
   assert.equal(out.status, 'STALL');
   assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
 });

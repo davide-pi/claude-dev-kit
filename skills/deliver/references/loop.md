@@ -4,13 +4,14 @@
 
 Between the analysis and the loop, list what the request leaves implicit: requirements, edge cases (empty, first run,
 concurrent, failing dependency), ambiguities. Only a doubt whose answer changes behaviour is a question to the user,
-batched in one message, each with a recommendation; the brief states the rest as a decision. S has no pass.
+batched in one message, each with a recommendation; the brief states the rest as a decision. The pass also turns every
+choice a reviewer would otherwise ask into a `decisions` line before launch, so the run does not stop on a `question`. S has no pass.
 
 **Criteria** (M, L) cover the error path wherever the change has one: a rejection, an empty result, back to the form,
 a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
 
 **The challenger** (when it runs: `SKILL.md` step 2), after the owner's ok and before the loop: one `Plan` agent,
-`model: sonnet` at M, `opus` at L (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
+`model: sonnet` at M and L, never opus (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
 criteria, the perimeter. Output, at most 10 lines: a verdict `tenere` | `cambiare` | `scartare`, why, and the
 alternative if any. Read-only, it never asks the user. Show it to the owner only when the verdict is `cambiare` or
 `scartare`; `tenere` goes on silently.
@@ -43,7 +44,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes besides `logic` → L. An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
 | `mechanical` | `true` for an S batch with no judgment in it (rename, move, split, config, generated, label updates) the tests fully cover: implementer on `haiku` at `low`, reviewer at `low`. Needs `size: 'S'` (a missing size is M) and never goes with `inline`; a risk axis that lifts the size drops it |
 | `implementerEffort` | `high` only when the brief asks; default `medium` (`low` with `mechanical`) |
-| `implementerModel` | only to override; default: the agent's own model (`haiku` with `mechanical`) |
+| `implementerModel` | only to override; default: the agent's own model (`haiku` with `mechanical`). Without it a review fix of 1-2 findings, none P1 or a verify one, runs on `haiku` at `low` until the verify first fails; a finding still open after it goes to the default model. The delta watcher also runs on `haiku` at `low` |
 | `cleanup` | `true` only when the owner asks for the P3 cleanup pass (M, L); default: the P3s go to the closing table |
 
 Who reads which round, the final full read and the cleanup pass: `references/loop-extras.md`.

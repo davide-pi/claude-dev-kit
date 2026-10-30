@@ -36,7 +36,7 @@ test('script: a round that would end OK with minor findings inside the perimeter
 test('script: a finding the cleanup fixer rejects stays minor; a P2 of the cleanup delta goes through the normal loop and no second cleanup runs', async () => {
   const { out, calls } = await run(CLEAN, [
     review([], [nit(1), nit(2)]),
-  ], [impl(), impl({ rejected: [{ id: 'F2', kind: 'wrong', reason: 'the typo is in a quoted test name' }] }), impl()], { watcher: [
+  ], [impl(), impl({ rejected: [{ id: 'F2', kind: 'wrong', reason: 'the typo is in a quoted test name' }] }), impl({ snapshot: { tree: 't1', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })], { watcher: [
     review([], [finding({ line: 500, title: 'cleanup broke the null guard' }), nit(3)]),     // R2: the delta review (the Sonnet S) finds a P2 (F3) and a new P3 (F4)
     review([{ id: 'F3', status: 'closed' }]),                                               // R3: S again, it raised F3
   ] });
@@ -46,7 +46,7 @@ test('script: a finding the cleanup fixer rejects stays minor; a P2 of the clean
   assert.deepEqual(out.minor.map(x => x.id).sort(), ['F2', 'F4']);
   assert.equal(out.stall, undefined);
   assert.deepEqual(out.roundLog.map(r => r.toFix), [[], ['F3'], [], []]);                    // R4 is the final full read after the fix of F3
-  assert.deepEqual(out.roundLog.map(r => r.churn), [null, 3, null, null]);              // the cleanup pass has no churn
+  assert.deepEqual(out.roundLog.map(r => r.churn), [null, 40, null, null]);              // the cleanup pass has no churn
 });
 
 test('script: no cleanup for a finding outside the perimeter or a change-unrelated one in an untouched file; the verify gate still applies to the cleanup', async () => {
@@ -169,7 +169,7 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
     review([], [nit(1), p2(1, 'alpha query broken')]),                                 // R1: P2 F2 + a P3 F1
     review([]),                                                                         // R1: B
     review(closed('F2')),                                                               // R2: A closes F2 (DONE, count 0); the final full read (R3) and the cleanup pass follow
-  ], [], { watcher: [
+  ], [impl(), impl({ snapshot: { tree: 't1', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })], { watcher: [
     review([]),                                                                         // R2: S
     review(closed('F2'), [p2(3, 'beta cache stale')]),                                  // R3: the cleanup delta (S alone) finds F3 -> fix
     review(closed('F2', 'F3'), [p2(4, 'gamma lock racing')]),                           // R4: count 1 after the fix
