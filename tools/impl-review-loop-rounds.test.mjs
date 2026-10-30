@@ -477,7 +477,7 @@ test('script: the cleanup prompt never asks for questions, even with owner decis
 
 test('script: questions a cleanup fixer returns anyway never stall the run: they become notes', async () => {
   const asks = impl({ questions: [{ text: 'Rename the helper?', default: 'no', why: 'naming' }] });
-  const { out } = await run(CLEAN, [review([], [nit(1)])], [impl(), asks], { watcher: review([]) });
+  const { out } = await run(CLEAN, [review([], [nit(1)]), review([]), review([])], [impl(), asks], { watcher: review([]) });
   assert.equal(out.status, 'OK');
   assert.ok(out.outOfScope.some(o => /Rename the helper\?/.test(o.text ?? '')));
 });

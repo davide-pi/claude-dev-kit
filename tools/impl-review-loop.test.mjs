@@ -151,7 +151,7 @@ test('script: reviewers by size, effort and model', async () => {
     sizes[size] = calls.filter((c) => isReview(c.opts.label, 1)).map((c) => `${c.opts.agentType}:${c.opts.model}:${c.opts.effort}`);
   }
   assert.deepEqual(sizes.S, ['code-reviewer:sonnet:high']);
-  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'code-reviewer:sonnet:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
+  assert.deepEqual(sizes.M, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
   assert.deepEqual(sizes.L, ['code-reviewer:sonnet:high', 'code-reviewer:opus:high', 'review-security:sonnet:high', 'review-performance:sonnet:medium']);
 });
 
@@ -183,7 +183,7 @@ test('script: risk raises the floor of the triage size, never lowers it: data li
   assert.deepEqual(await panel('S', { risk: ['logic'] }), ['reviewer A · round 1 · code']);
   const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([]), review([])]);
   assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').opts.model, 'sonnet');      // M: Sonnet and Sonnet at high
-  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer B · round 1 · second opinion').opts.model, 'sonnet');
+  assert.equal(lifted.calls.find((c) => c.opts.label === 'reviewer B · round 1 · second opinion').opts.model, 'opus');   // data at M: B on opus
   assert.deepEqual(lifted.out.roundLog.map((r) => r.size), ['M']);
   assert.deepEqual(await panel('M', { risk: ['data', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer performance · round 1']);   // three axes: L, plus the specialist
   assert.deepEqual(await panel('M', { risk: ['logic', 'performance', 'money'] }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer performance · round 1']);   // logic never counts toward L
@@ -308,6 +308,13 @@ test('dedupeFound: a different defect on the spot of a closed finding is fresh, 
   });
   assert.equal(d.verdicts.F1, 'closed');
   assert.equal(d.found.length, 1);
+});
+
+test('dedupeFound: a note (soft id) seen again as a blocking finding is fresh; still soft, it is absorbed', () => {
+  const known = { F2: f('F2', { line: 8, priority: 'P2', title: 'unrequested rename' }) };
+  const seen = (blocks) => dedupeFound({ found: [f('y', { line: 8, priority: 'P2', title: 'unrequested rename' })], known, softIds: new Set(['F2']), blocks: () => blocks, root: ROOT });
+  assert.equal(seen(true).found.length, 1);
+  assert.deepEqual(seen(false).found, []);
 });
 
 test('dedupeFound: a recorded minor finding seen again is dropped, a MORE severe one on it is fresh', () => {

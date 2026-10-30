@@ -48,9 +48,30 @@ test('general-purpose with a model passes in silence', () => {
   assert.equal(spawn({ subagent_type: 'general-purpose', model: 'sonnet', prompt: 'x' }), '');
 });
 
-test('a kit agent and fork pass in silence', () => {
+test('a kit agent passes in silence', () => {
   assert.equal(spawn({ subagent_type: 'implementer', prompt: 'x' }), '');
-  assert.equal(spawn({ subagent_type: 'fork', prompt: 'x' }), '');
+  assert.equal(spawn({ subagent_type: 'Plan', model: 'sonnet', prompt: 'x' }), '');
+});
+
+test('the Plan deny names the L challenger exception', () => {
+  assert.match(decision(spawn({ subagent_type: 'Plan', prompt: 'x' })).permissionDecisionReason, /Plan needs a model: sonnet \(opus only for the L challenger, deliver loop\.md\)\./);
+});
+
+test('effort max is denied unless the description or prompt says owner asked', () => {
+  const d = decision(spawn({ subagent_type: 'analyst', effort: 'max', prompt: 'x' }));
+  assert.equal(d.permissionDecision, 'deny');
+  assert.match(d.permissionDecisionReason, /effort max only when the owner asked for it/);
+  assert.equal(decision(spawn({ subagent_type: 'analyst', effort: 'MAX', prompt: 'x' })).permissionDecision, 'deny');
+  assert.equal(spawn({ subagent_type: 'analyst', effort: 'max', description: 'audit, owner asked', prompt: 'x' }), '');
+  assert.equal(spawn({ subagent_type: 'analyst', effort: 'max', prompt: 'The owner asked for max effort' }), '');
+  assert.equal(spawn({ subagent_type: 'analyst', effort: 'high', prompt: 'x' }), '');
+});
+
+test('a fork is denied unless the prompt states parent context:', () => {
+  const d = decision(spawn({ subagent_type: 'fork', prompt: 'x' }));
+  assert.equal(d.permissionDecision, 'deny');
+  assert.match(d.permissionDecisionReason, /a fork only when the parent context is needed/);
+  assert.equal(spawn({ subagent_type: 'fork', prompt: 'parent context: the open diff' }), '');
 });
 
 test('malformed or empty input is silent', () => {

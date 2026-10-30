@@ -87,7 +87,7 @@ test('script (W6): M delta round = the reviewer that raised the finding + the Ha
   const watcher = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').opts;
   assert.deepEqual([watcher.model, watcher.effort, watcher.agentType], ['haiku', 'low', 'code-reviewer']);
   const final = calls.find(c => c.opts.label === 'reviewer A · round 3 · code, final read');
-  assert.deepEqual([final.opts.model, final.opts.effort], ['sonnet', 'high']);                // on M reviewer A is a Sonnet
+  assert.deepEqual([final.opts.model, final.opts.effort], ['opus', 'medium']);               // the security axis puts B on opus at M: the final read is opus medium whatever the churn
   assert.match(final.prompt, /FINAL FULL READ/);
   assert.match(final.prompt, /Review the change made/);
   assert.doesNotMatch(final.prompt, /git diff t1 t2/);
@@ -105,7 +105,7 @@ test('script (#44): M with a review fix and an unread file: the final read runs 
 test('script (#44): a file still unread after the final read gets the coverage rerun of the whole reviewers', async () => {
   const { out, calls } = await run(ARGS_M, [review([], [finding()], []), review([], [], []), review(closedIds('F1'), [], []), review([]), review([])], [impl(), impl({ snapshot: T2('t2', 40) })], { finals: [review(closedIds('F1'), [], [])] });
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer A · round 4 · code', 'reviewer B · round 4 · second opinion']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer A · round 4 · code']);
 });
 
 test('script (#42): at M and L the final read runs after a review fix, whoever read the fix delta; S never gets one', async () => {
@@ -160,18 +160,18 @@ test('script (W6): the final read runs once: a fix after it is judged by the del
 });
 
 test('script (W6, W7): fix, final read, then the cleanup fix and its delta read by the Haiku watcher; the cleanup fix does not bring another full read', async () => {
-  const { out, calls } = await run({ ...CLEAN, touches: ['security'] }, [review([], [finding(), nit(1)]), review([]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
+  const { out, calls } = await run({ ...CLEAN, touches: ['security'] }, [review([], [finding(), nit(1)]), review([]), review([]), review(closedIds('F1')), review([])], [impl(), impl({ snapshot: T2('t2', 40) })]);
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer S · round 4 · check the fixes']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer A · round 4 · code', 'reviewer S · round 4 · check the fixes']);
   assert.deepEqual(implLabels(calls), ['implement the change', 'fix round 1 findings', 'cleanup of round 3 minor findings']);
   assert.deepEqual(out.cleaned.map(x => x.id), ['F2']);
   assert.deepEqual([calls.find(c => c.opts.label === 'reviewer S · round 4 · check the fixes').opts.model, calls.find(c => c.opts.label === 'reviewer S · round 4 · check the fixes').opts.effort], ['haiku', 'low']);
 });
 
-test('script (W7): without a fix before it, the cleanup is read by the Haiku watcher alone and no final read follows; S runs no cleanup', async () => {
-  const { out, calls } = await run(CLEAN, [review([], [nit(1)]), review([])]);
+test('script (W7): without a fix before it, the cleanup delta is read by A beside the Haiku watcher and no final read follows; S runs no cleanup', async () => {
+  const { out, calls } = await run(CLEAN, [review([], [nit(1)]), review([]), review([])]);
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes']);
   const s = await run({ ...CLEAN, size: 'S' }, [review([], [nit(1)])]);
   assert.deepEqual(reviewerLabels(s.calls), ['reviewer A · round 1 · code']);
   assert.equal(s.calls.some(c => c.opts.label === 'cleanup of round 1 minor findings'), false);
@@ -296,7 +296,7 @@ test('script (W5): no preview stop at S, inline or without the arg', async () =>
 test('script (W8): the growth check is the snapshot\'s: a big file is one P3 clean-code proposal for the closing table, no reviewer is asked for it, it is never cleaned up', async () => {
   const big = { file: 'src/Orders/Big.cs', start: 250, now: 340 };
   const grown = (files) => impl({ snapshot: { tree: 't1', files, churn: 3, big: [big, { ...big, now: 341 }, { file: 'src/Orders/Huge.cs', start: 0, now: 700 }] } });
-  const { out, calls } = await run({ ...CLEAN, start: { head: 'abc123', dirty: [] } }, [review([], [nit(1)]), review(closedIds('F1'))], [grown(['src/Orders/OrdersQuery.cs', 'src/Orders/Big.cs'])]);
+  const { out, calls } = await run({ ...CLEAN, start: { head: 'abc123', dirty: [] } }, [review([], [nit(1)]), review(closedIds('F1')), review([])], [grown(['src/Orders/OrdersQuery.cs', 'src/Orders/Big.cs'])]);
   assert.equal(out.status, 'OK');
   for (const c of calls.filter(x => x.opts.agentType !== 'implementer')) assert.doesNotMatch(c.prompt, /Growth check|numstat|past 600 lines/, c.opts.label);
   const proposals = out.outOfScope.filter(o => o.source === 'growth');
@@ -352,7 +352,7 @@ test('script: after a resumed reviewer question the cleanup runs, and a question
   const ask = [{ text: 'Keep the public name?', default: 'yes', why: 'a caller may use it' }];
   const round1 = () => ({ ...review([], [nit(1), nit(2)]), questions: [{ text: 'Is the sort order a contract?', default: 'no', why: 'callers' }] });
   const owner = { round: 1, answers: [{ text: 'Is the sort order a contract?', answer: 'no' }] };
-  const { out, calls } = await run({ ...CLEAN, resolutions: [owner] }, [round1()], [impl(), impl(), impl({ questions: ask })]);
+  const { out, calls } = await run({ ...CLEAN, resolutions: [owner] }, [round1(), review([]), review([])], [impl(), impl(), impl({ questions: ask })]);
   assert.equal(out.status, 'OK');
   const cleanups = calls.filter(c => c.opts.label?.startsWith('cleanup'));
   assert.equal(cleanups.length, 1);
@@ -440,4 +440,59 @@ test('script: the implementer and fixer prompts say the snapshot files are the w
   for (const label of ['implement the change', 'fix round 1 findings']) {
     assert.match(calls.find(c => c.opts.label === label).prompt, /lists the whole change since the start/, label);
   }
+});
+
+test('script (#P38): when B ran on opus in the panel, the final read is opus medium whatever the churn', async () => {
+  const reviews = () => [review([], [finding()]), review([]), review(closedIds('F1'))];
+  const finalOf = (r) => r.calls.find(c => /final read/.test(c.opts.label ?? '')).opts;
+  const o = finalOf(await run({ ...ARGS_M, risk: ['data'] }, reviews(), [impl(), impl({ snapshot: T2('t2', 10) })]));
+  assert.deepEqual([o.model, o.effort], ['opus', 'medium']);
+  const s = finalOf(await run(ARGS_M, reviews(), [impl(), impl({ snapshot: T2('t2', 10) })]));
+  assert.deepEqual([s.model, s.effort], ['sonnet', 'medium']);
+});
+
+test('script (#P35): at M a scope finding raised by A alone and not CONFIRMED is a note, never fixed; CONFIRMED, B-raised and S ones stay blocking', async () => {
+  const scope = (extra = {}) => finding({ category: 'scope', title: 'unrequested rename of a helper', ...extra });
+  const fixes = (r) => implLabels(r.calls).filter(l => /^fix round/.test(l));
+  const soft = await run(ARGS_M, [review([], [scope({ confidence: 'PLAUSIBLE' })]), review([])]);
+  assert.equal(soft.out.status, 'OK');
+  assert.deepEqual(fixes(soft), []);
+  assert.deepEqual(soft.out.minor.map(m => m.title), ['unrequested rename of a helper']);
+  assert.deepEqual(soft.out.open, []);
+  const noConfidence = await run(ARGS_M, [review([], [scope()]), review([])]);
+  assert.deepEqual(fixes(noConfidence), []);
+  const confirmed = await run(ARGS_M, [review([], [scope({ confidence: 'CONFIRMED' })]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 10) })]);
+  assert.deepEqual(fixes(confirmed), ['fix round 1 findings']);
+  const byB = await run(ARGS_M, [review([]), review([], [scope({ confidence: 'PLAUSIBLE' })]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 10) })]);
+  assert.deepEqual(fixes(byB), ['fix round 1 findings']);
+  const both = await run(ARGS_M, [review([], [scope({ confidence: 'PLAUSIBLE' })]), review([], [scope({ confidence: 'PLAUSIBLE' })]), review(closedIds('F1')), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 10) })]);
+  assert.deepEqual(fixes(both), ['fix round 1 findings']);
+  const atS = await run(ARGS, [review([], [scope({ confidence: 'PLAUSIBLE' })]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 10) })]);
+  assert.deepEqual(fixes(atS), ['fix round 1 findings']);
+});
+
+test('script (#P35): a scope finding from A alone in a round B did not read (final read) stays blocking; a note raised blocking later is not discarded', async () => {
+  const scope = (extra = {}) => finding({ category: 'scope', title: 'unrequested rename of a helper', line: 300, ...extra });
+  const other = finding({ line: 300, title: 'a second defect elsewhere' });
+  // R1 finding F1 -> fix -> R2 delta A+S closes it -> final read (A alone) raises a PLAUSIBLE scope: no B, so it blocks.
+  const r = await run(ARGS_M, [review([], [finding()]), review([]), review(closedIds('F1')), review(closedIds('F1', 'F2'))], [impl(), impl({ snapshot: T2('t2', 10) }), impl({ snapshot: T2('t3', 10) })], { finals: [review(closedIds('F1'), [scope({ confidence: 'PLAUSIBLE' })])] });
+  assert.deepEqual(implLabels(r.calls).filter(l => /^fix round/.test(l)), ['fix round 1 findings', 'fix round 3 findings']);
+  assert.deepEqual(r.out.minor, []);
+  // R1 A alone PLAUSIBLE (note) beside another fixed finding; the same scope returns CONFIRMED in the final read: fresh and blocking.
+  const again = await run(ARGS_M, [review([], [other, scope({ confidence: 'PLAUSIBLE' })]), review([]), review(closedIds('F1')), review(closedIds('F1', 'F3'))], [impl(), impl({ snapshot: T2('t2', 10) }), impl({ snapshot: T2('t3', 10) })], { finals: [review(closedIds('F1'), [scope({ confidence: 'CONFIRMED' })])] });
+  assert.deepEqual(implLabels(again.calls).filter(l => /^fix round/.test(l)), ['fix round 1 findings', 'fix round 3 findings']);
+  // The same note raised PLAUSIBLE again by A alone in the final read stays a note: no fix at round 3.
+  const repeat = await run(ARGS_M, [review([], [other, scope({ confidence: 'PLAUSIBLE' })]), review([]), review(closedIds('F1')), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 10) })], { finals: [review(closedIds('F1'), [scope({ confidence: 'PLAUSIBLE' })])] });
+  assert.deepEqual(implLabels(repeat.calls).filter(l => /^fix round/.test(l)), ['fix round 1 findings']);
+  assert.deepEqual(repeat.out.minor.map(m => m.title), ['unrequested rename of a helper']);
+});
+
+test('script (#P35): the reviewer prompt makes a scope finding CONFIRMED only with the hunk file:line and the brief line it departs from', async () => {
+  const { calls } = await run(ARGS_M, [review([]), review([])]);
+  assert.match(calls.find(c => c.opts.label === 'reviewer A · round 1 · code').prompt, /"scope".*CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any/s);
+});
+
+test('script (#D1): a cleanup id is not closed when A, the only whole reader of the delta, returned nothing, whatever the watcher says', async () => {
+  const { out } = await run(CLEAN, [review([], [nit(1)]), review([]), new Error('max turns')]);
+  assert.deepEqual(out.cleaned, []);
 });
