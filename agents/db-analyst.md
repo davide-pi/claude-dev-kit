@@ -90,7 +90,7 @@ say what you deliberately did not run.
 **`/db` mode — ≤ 55 lines:** the statement as run (fenced `sql`), the host and database, ≤ 50 rows as
 a table (more → the count and the first 50), one reading line in the chat language.
 
-**Analysis — ≤ 50 lines, every heading kept even when empty:**
+**Analysis — ≤ 50 lines, every heading kept even when empty; a caller's brief may add sections, never drop one:**
 
 ```text
 ## Subject

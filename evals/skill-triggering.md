@@ -86,6 +86,21 @@ exists.
 3. Re-run the affected cases (a suite: `pwsh tools/run-evals.ps1 -Suite <skill>`), then `node tools/validate.mjs` (the description limits are enforced
    there), and note in the PR which case changed behaviour.
 
+### `incident`
+
+| Prompt | Expected |
+|--------|----------|
+| "analizza cosa è successo all'ordine 4711 ieri sera in prod" | MUST load (runtime symptom with an id and a time) |
+| "indaga: gli utenti vedono il saldo a zero da stamattina" | MUST load (no command typed: the auto trigger is the point) |
+| `/incident "timeout sul checkout" --since 2h --env staging` | MUST load |
+| "spiegami come funziona il flusso di checkout" | MUST NOT (explanation, no runtime symptom) |
+| "questo test fallisce in locale, trova il bug" | MUST NOT (`debug-systematic`: reproduced on demand) |
+| "fammi vedere gli ultimi errori del servizio orders" | MUST NOT (`/logs`: one log read asked by itself) |
+| "quante righe ha la tabella Orders?" | MUST NOT (`/db`) |
+| "analizza questo metodo, è troppo complesso?" | MUST NOT (code analysis, no runtime symptom) |
+| "mostrami gli errori di orders di ieri alle 15" | MUST NOT (`/logs`: one log read, even with a time) |
+| "il servizio orders in prod consuma sempre più memoria" | MUST NOT (`dotnet-diagnostics`: a process to measure) |
+
 ### `plan-work`
 
 | Prompt | Expected |
@@ -115,7 +130,7 @@ exists.
 
 | Prompt | Expected |
 |--------|----------|
-| "l'API va in timeout solo in produzione, non capisco perché" | MUST load |
+| "l'API va in timeout solo in produzione, non capisco perché" | MUST load after `incident` (a prod symptom, evidence not yet gathered: `incident` first, phase 2 here) |
 | "questo test passa in locale e fallisce in pipeline" | MUST load |
 | "aggiungi un endpoint per esportare gli ordini in CSV" | MUST NOT (a new feature, not a defect) |
 | "spiegami come funziona il garbage collector" | MUST NOT (knowledge question, nothing to diagnose) |
