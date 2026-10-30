@@ -169,9 +169,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // A budget cell: its label, a bar taking what the readout leaves of `cells`, the readout.
   const barLength = (head: Span, cells: number, text: Span[]): number => Math.max(BUDGET_BAR_MIN, cells - spanWidth([head, ...text]) - 1)
-  const budget = (label: string, cells: number, parts: BarPart[], text: Span[]): Span[] => {
+  const budget = (label: string, cells: number, parts: BarPart[], text: Span[], markPct?: number): Span[] => {
     const head = dim(`${label} `)
-    return [head, ...barCells(barLength(head, cells, text), parts), sp(' '), ...text]
+    return [head, ...barCells(barLength(head, cells, text), parts, markPct), sp(' '), ...text]
   }
 
   // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
@@ -183,18 +183,21 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const ctxParts = [{ pct: shownPct, color: ctxColor(shownPct) }]
   const ctxText = [...contextText(s), ...cacheSpans]
   // The bar is a surface module where the surface has one: its glow and pulse move on that region's own clock, never redrawing the pane; a surface without one draws it static
-  const budgetRow = (key: string, label: string, cells: number, parts: BarPart[], text: Span[], isFlowing: boolean, tone?: string): RenderElement => {
-    if (!ui.Client) return line(ui, budget(label, cells, parts, text))
+  const budgetRow = (key: string, label: string, cells: number, parts: BarPart[], text: Span[], isFlowing: boolean, tone?: string, markPct?: number): RenderElement => {
+    if (!ui.Client) return line(ui, budget(label, cells, parts, text, markPct))
     const head = dim(`${label} `)
     return (
       <Box>
         {line(ui, [head])}
-        <ui.Client key={key} module="./bar.tsx" props={{ cells: barCells(barLength(head, cells, text), parts), isFlowing, ...(tone === undefined ? {} : { tone }) }} width={barLength(head, cells, text)} />
+        <ui.Client key={key} module="./bar.tsx" props={{ cells: barCells(barLength(head, cells, text), parts, markPct), isFlowing, ...(tone === undefined ? {} : { tone }) }} width={barLength(head, cells, text)} />
         {line(ui, [sp(' '), ...text])}
       </Box>
     )
   }
-  const ctxRow = budgetRow('ctxbar', 'CTX', width, ctxParts, ctxText, isWorking(s, s.now))
+  // The autocompact threshold as a tick on the CTX bar, where the engine reports one and the window is measured
+  const ctxWindow = s.ctx.window ?? s.lastCtx?.window
+  const compactPct = s.autoCompactAt !== undefined && ctxWindow ? (s.autoCompactAt / ctxWindow) * 100 : undefined
+  const ctxRow = budgetRow('ctxbar', 'CTX', width, ctxParts, ctxText, isWorking(s, s.now), undefined, compactPct)
   const ctxWarning = pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(pct)), COLORS.red)])
 
   // Credits row: the 5h and 7d windows side by side, half the row each, or one row each when a half cannot hold its readout and a short bar;

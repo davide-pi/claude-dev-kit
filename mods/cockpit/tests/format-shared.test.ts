@@ -142,6 +142,16 @@ test('barCells fills the width exactly, gap after fill', () => {
   expect(spanText(barCells(4, []))).toBe('\u25b1\u25b1\u25b1\u25b1')
 })
 
+test('barCells marks the autocompact threshold with one amber cell, on the fill or the track; none outside 0-100', () => {
+  const cells = barCells(10, [{ pct: 20, color: 'a' }], 50)
+  expect(spanWidth(cells)).toBe(10)
+  expect(spanText(cells)).toBe('\u25b0\u25b0\u25b1\u25b1\u25b1\u2503\u25b1\u25b1\u25b1\u25b1')
+  expect(cells.find(c => c.t === '\u2503')?.c).toBe(COLORS.amber)
+  expect(spanText(barCells(10, [{ pct: 80, color: 'a' }], 15))).toBe('\u25b0\u25b0\u2503\u25b0\u25b0\u25b0\u25b0\u25b0\u25b1\u25b1')
+  expect(barCells(10, [{ pct: 20, color: 'a' }], 0)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
+  expect(barCells(10, [{ pct: 20, color: 'a' }], 100)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
+})
+
 test('truncateSpans cuts to the width with an unstyled ellipsis and leaves a fitting line alone', () => {
   const spans: Span[] = [{ t: 'abcd', c: 'red' }, { t: 'efgh', dim: true }]
   expect(truncateSpans(spans, 8)).toEqual(spans)

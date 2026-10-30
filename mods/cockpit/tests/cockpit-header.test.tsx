@@ -98,6 +98,27 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   await ui.unmount()
 })
 
+test('CTX bar: a tick where the engine compacts, on both surfaces', async ($, on) => {
+  world(on, { autoCompactAt: 150_000 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const bar = rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))?.match(/^CTX ([▰▱┃]+)/)?.[1] ?? ''
+    // 150k of the 1M window: the tick at 15% of the bar
+    expect([...bar].filter(c => c === '┃')).toHaveLength(1)
+    expect([...bar].indexOf('┃')).toBe(Math.min(bar.length - 1, Math.round(0.15 * bar.length)))
+    await ui.unmount()
+  }
+})
+
+test('CTX bar: no tick when the engine reports no autocompact threshold', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).not.toContain('┃')
+  await ui.unmount()
+})
+
 test('a rule closes the header and the tab bar, and sets the SUBAGENTS title (after an empty row) apart from them', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

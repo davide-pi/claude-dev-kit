@@ -280,7 +280,7 @@ export function gridWidths(total: number, diffsLen: number): { folder: number; b
 export type BarPart = { pct: number; color: string }
 
 /** Cells of a `width`-cell bar: each part gets round(pct) of the width, the rest is empty. */
-export function barCells(width: number, parts: readonly BarPart[]): Span[] {
+export function barCells(width: number, parts: readonly BarPart[], markPct?: number): Span[] {
   const out: Span[] = []
   let used = 0
   for (const p of parts) {
@@ -289,7 +289,21 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
     used += n
   }
   if (used < width) out.push({ t: '▱'.repeat(width - used), c: COLORS.empty })
-  return out
+  return markPct === undefined ? out : withMark(out, markPct)
+}
+
+/** The autocompact threshold's tick on a bar: the cell at `markPct` of the width becomes an amber `┃`; none outside 0-100. */
+function withMark(cells: Span[], markPct: number): Span[] {
+  const chars = cells.flatMap(c => [...c.t].map(t => ({ ...c, t })))
+  if (!(markPct > 0 && markPct < 100) || chars.length === 0) return cells
+  const at = Math.min(chars.length - 1, Math.round((markPct / 100) * chars.length))
+  chars[at] = { t: '┃', c: COLORS.amber }
+  return chars.reduce<Span[]>((out, cell) => {
+    const last = out[out.length - 1]
+    if (last && last.c === cell.c && last.t.at(-1) === cell.t) out[out.length - 1] = { ...last, t: last.t + cell.t }
+    else out.push(cell)
+    return out
+  }, [])
 }
 
 /** `hex` (`#rrggbb`) moved toward `to` by `k`, 0 to 1: at 0 it is itself, at 1 it is `to`. */
