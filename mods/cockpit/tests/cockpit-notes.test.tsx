@@ -1,5 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
+import { textCells, wrapCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
 import { IT_FILE, keysInOrder, mountPane, noteKeys, notesPane, saveNote, settleAll } from './cockpit-fixtures'
 import { dataOf, rowTexts, world } from './cockpit-world'
@@ -240,7 +241,7 @@ test('notes: every note has its three buttons, in the pane width at 30, 40 and 5
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
       for (const columns of [30, 40, 58]) {
         const ui = await notesPane($, columns)
-        for (const key of ['note:edit:4', 'note:send:4', 'note:delete:4', 'note:save', 'bar:compact']) expect(await ui.find({ key })).toBeDefined()
+        for (const key of ['note:edit:4', 'note:send:4', 'note:delete:4', 'bar:compact']) expect(await ui.find({ key })).toBeDefined()
         // the text's box leaves the icons their columns: a cut note never runs under them
         const textWidth = toggleBoxWidth(await ui.drawn(), 'note:toggle:4')
         expect(typeof textWidth).toBe('number')
@@ -263,50 +264,50 @@ test('notes: a saved note, new or edited, is closed', async ($, on) => {
   world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'l1\nl2\nl3\nl4\nl5' }] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
-  await ui.press({ key: 'note:more:1' })
+  const texts = async () => (await ui.findAll({ type: 'Text' })).map(n => n.text)
+  await ui.press({ key: 'note:toggle:1' })
   await settleAll()
-  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍝 −2')
+  expect(await texts()).toContain('l1\nl2\nl3\nl4\nl5')
   await ui.press({ key: 'note:edit:1' })
   await settleAll()
   await ui.input({ key: 'note:edit-field', text: 'm1\nm2\nm3\nm4\nm5\nm6', kind: 'submit' })
   await settleAll()
-  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍟 +3')
+  expect(await texts()).toContain('m1\nm2\nm3…')
   await saveNote(ui, 'n1\nn2\nn3\nn4')
-  expect((await ui.find({ key: 'note:more:2' }))?.text).toBe('󰍟 +1')
+  expect(await texts()).toContain('n1\nn2\nn3…')
   await ui.unmount()
 })
 
-test('notes: a note shows its first 3 lines, `󰍟 +N` opens the rest and `󰍝 −N` closes them', async ($, on) => {
+test('notes: a note shows its first 3 lines, the third ending with … when more follow, and no +N button; a press on the text opens and closes it', async ($, on) => {
   world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: 'one\ntwo\nthree\nfour\nfive' }, { id: 2, text: 'a\nb' }, { id: 3, text: 'single' }] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($)
   const texts = async () => (await ui.findAll({ type: 'Text' })).map(n => n.text)
-  expect(await texts()).toContain('one\ntwo\nthree')
+  expect(await texts()).toContain('one\ntwo\nthree…')
   expect(await texts()).toContain('a\nb')
   expect(await texts()).toContain('single')
-  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍟 +2')
-  expect(await ui.find({ key: 'note:more:2' })).toBeUndefined()
-  await ui.press({ key: 'note:more:1' })
+  for (const id of [1, 2, 3]) expect(await ui.find({ key: `note:more:${id}` })).toBeUndefined()
+  await ui.press({ key: 'note:toggle:1' })
   await settleAll()
   expect(await texts()).toContain('one\ntwo\nthree\nfour\nfive') // one Text: the Button cannot lay the lines side by side
-  expect((await ui.find({ key: 'note:more:1' }))?.text).toBe('󰍝 −2')
   expect(await texts()).toContain('a\nb') // the others stay as they were
-  await ui.press({ key: 'note:toggle:1' }) // a press on the text closes it as well
+  await ui.press({ key: 'note:toggle:1' }) // a second press closes it
   await settleAll()
-  expect(await texts()).toContain('one\ntwo\nthree')
+  expect(await texts()).toContain('one\ntwo\nthree…')
   expect(await texts()).not.toContain('five')
   await ui.unmount()
 })
 
-test('notes: a long line wraps inside its column, never cut with …; the icon buttons are inline and alternate rows have a band', async ($, on) => {
+test('notes: a closed note cuts a long line with …, opened it wraps in full inside its column; the icon buttons are inline and alternate rows have a band', async ($, on) => {
   const long = 'a very long line of a note that cannot fit in a narrow pane of the cockpit at all'
-  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: `${long}\nmore` }, { id: 2, text: 'second' }, { id: 3, text: 'third' }] }) })
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: `${long}\nmore` }, { id: 2, text: 'second' }, { id: 3, text: long }] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($, 40)
-  const shown = await ui.find({ type: 'Text', text: /^a very long/ })
-  expect(shown?.props.wrap).toBe('wrap')
-  expect(shown?.text).not.toContain('…')
-  expect((await ui.find({ key: 'note:more:1' }))?.text).toMatch(/^󰍟 \+\d+$/)
+  const shown = await ui.findAll({ type: 'Text', text: /^a very long/ })
+  expect(shown.map(n => n.text.split('\n').length)).toEqual([2, 1]) // one row per line, never wrapped while closed
+  for (const n of shown) expect(n.text.split('\n')[0]).toMatch(/…$/)
+  const textW = Number(toggleBoxWidth(await ui.drawn(), 'note:toggle:3'))
+  expect(shown.map(n => textCells(n.text.split('\n')[0]))).toEqual([textW, textW]) // cut at the text column's width
   for (const [key, glyph] of [['note:edit:1', '\u{F03EB}'], ['note:send:1', '\u{F048A}'], ['note:delete:1', '\u{F0A79}']]) expect((await ui.find({ key }))?.text).toBe(glyph)
   await ui.press({ key: 'note:toggle:1' })
   await settleAll()
@@ -335,16 +336,38 @@ test('notes: the field starts at two rows (a 1-row Input is single-line and cuts
   await ui.unmount()
 })
 
-test('notes: the new-note field has save and clear in the icon column; clear empties the draft', async ($, on) => {
+test('notes: a field takes the whole pane row, its buttons under it, and is as tall as the host wraps it (the pane width less the Enter hint)', async ($, on) => {
+  const long = 'a long line of words that cannot fit in the text column of a narrow pane, not even in the whole row of a wide one'
+  world(on, { dataFile: JSON.stringify({ history: [], prs: [], notes: [{ id: 1, text: long }] }) })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // the host's wrap less the cursor cell: at 30 and 40 columns the short hint ` ⏎ save` (7), at 58 the long one ` ⏎ save · shift+⏎ new line` (26)
+  for (const [columns, wrapAt] of [[30, 22], [40, 32], [58, 31]]) {
+    const ui = await notesPane($, columns)
+    for (const [field, buttons] of [['note', []], ['note:edit-field', ['note:edit:1', 'note:save:1', 'note:delete:1']]] as const) {
+      if (field === 'note') await ui.input({ key: 'note', text: long, kind: 'change' })
+      else await ui.press({ key: 'note:edit:1' })
+      await settleAll()
+      const drawn = await ui.drawn()
+      // the pane's whole width, its padding included, which the host fills with the text and the Enter hint
+      expect([holderProps(drawn, field)?.width, holderProps(drawn, field)?.marginLeft]).toEqual([columns, -1])
+      for (const key of buttons) expect(holderProps(drawn, key)?.justifyContent).toBe('flex-end')
+      expect((await ui.find({ type: 'Input', key: field }))?.props.rows).toBe(wrapCells(long, wrapAt).length)
+    }
+    await ui.press({ key: 'note:edit:1' }) // cancels the edit for the next width
+    await settleAll()
+    await ui.unmount()
+  }
+})
+
+test('notes: the new-note field has no save or clear button; Enter saves', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await notesPane($, 40)
-  expect((await ui.find({ key: 'note:save' }))?.text).toBe('\u{F0193}')
-  expect((await ui.find({ key: 'note:clear' }))?.text).toBe('\u{F0A79}')
+  for (const key of ['note:save', 'note:clear']) expect(await ui.find({ key })).toBeUndefined()
   await ui.input({ key: 'note', text: 'draft', kind: 'change' })
+  await ui.input({ key: 'note', text: 'draft', kind: 'submit' })
   await settleAll()
-  await ui.press({ key: 'note:clear' })
-  await settleAll()
+  expect(await ui.find({ key: 'note:edit:1' })).toBeDefined()
   expect((await ui.find({ type: 'Input', key: 'note' }))?.props.value).toBe('')
   await ui.unmount()
 })

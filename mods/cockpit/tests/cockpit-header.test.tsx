@@ -532,7 +532,7 @@ for (const language of LANGUAGES) {
       const ui = await mountPane($, 58)
       expect((await ui.find({ key: 'bar:compact' }))?.text).toBe(language.buttons.compact)
       await ui.press({ key: 'tab:notes' })
-      for (const [key, text] of [['note:save', language.buttons.save], ['note:edit:1', language.buttons.edit], ['note:send:1', language.buttons.send], ['note:delete:1', language.buttons.delete]] as const) {
+      for (const [key, text] of [['note:edit:1', language.buttons.edit], ['note:send:1', language.buttons.send], ['note:delete:1', language.buttons.delete]] as const) {
         expect((await ui.find({ key }))?.text).toBe(text)
       }
       await ui.unmount()

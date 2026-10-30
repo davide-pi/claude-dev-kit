@@ -5,7 +5,7 @@ import { sessionTokens } from './agents'
 import { REFRESH_COOLDOWN_MS, autocompactForecast, openTasks, shouldCompact } from './context'
 import { workItemIds, workItemUrl } from './links'
 import { worklogLabel } from './session'
-import { COLORS, abbrevTokens, clockTime, fmtCost, spanWidth, splitCells, taskBarCells, textCells, truncMiddle, truncateSpans, wrapCells } from './shared'
+import { COLORS, abbrevTokens, clockTime, fmtCost, spanWidth, splitCells, taskBarCells, textCells, truncEnd, truncMiddle, truncateSpans, wrapCells } from './shared'
 import type { Span } from './shared'
 import { agentCosts, signalId, signalsOf } from './signals'
 import type { Signal } from './signals'
@@ -94,7 +94,7 @@ const MAX_TASK_ROWS = 6
 const MAX_OUTSIDE_ROWS = 5
 const MAX_FILE_ROWS = 8
 const HISTORY_ROWS_SHOWN = 5
-/** Visual lines of a closed note. */
+/** Lines of a closed note, one row each. */
 const NOTE_LINES_SHOWN = 3
 /** The pull request states the Work tab groups by, in order, and whether each starts open. */
 const PR_GROUPS = [
@@ -105,10 +105,20 @@ const PR_GROUPS = [
 ] as const
 /** Cells a note row keeps for its three icon buttons (`[ x ]` each and the gaps), so the text never runs under them. */
 const NOTE_ICONS_W = 19
-/** Cells the field loses to the gaps around the Enter label and the cursor cell at a line's end: a row too many beats a hidden last line. */
-const NOTE_FIELD_MARGIN = 3
+/** The cursor cell at a line's end, which the field's wrap leaves free: a row too many beats a hidden last line. */
+const NOTE_FIELD_MARGIN = 1
 /** The note buttons' Nerd Font Material Design glyphs (one cell each in a Nerd Font Mono). */
 const NOTE_ICONS = { edit: '\u{F03EB}', cancel: '\u{F0156}', send: '\u{F048A}', delete: '\u{F0A79}', save: '\u{F0193}' }
+
+/**
+ * The cells a focused note field wraps at in a pane of `site` columns: the host lays an Input out at the pane's whole width, whatever Box holds it,
+ * and wraps it before the Enter hint drawn beside it, the long one (`shift+⏎` or `\⏎`, by terminal) when it leaves half the row, else the short one,
+ * never under 12 cells. The longest hint the host may pick is assumed: a row too many beats a hidden last line.
+ */
+function noteWrapCells(site: number, save: string): number {
+  const hints = [` ⏎ ${save} · shift+⏎ new line`, ` ⏎ ${save} · \\⏎ new line`].map(textCells).filter(cells => site - cells >= site / 2)
+  return Math.max(12, site - (hints[0] ?? textCells(` ⏎ ${save}`))) - NOTE_FIELD_MARGIN
+}
 
 /** The note field's height: one row per line of `text` wrapped at `cells`, at least 2 (a 1-row Input is single-line and cuts the text instead of wrapping it), so the whole text stays visible. */
 function noteRows(text: string, cells: number): number {
@@ -475,57 +485,62 @@ export function notesBlocks(k: Kit): Block[] {
   const S = t()
   const notes = s.notes ?? []
   const textW = Math.max(1, width - NOTE_ICONS_W)
-  // the field grows with its text; the cells it wraps at leave room for the Enter label drawn beside it while focused
-  const draftRows = noteRows(s.noteDraft ?? '', textW - textCells(S.buttons.save) - NOTE_FIELD_MARGIN)
+  // the field gets its own full row (the host draws it at the pane's width) and grows with its text as the host wraps it while focused;
+  // the pane is the content width and its two padding cells. Unfocused the field wraps wider, a blank row or two at its end.
+  // Its Box spans those padding cells too (marginLeft -1): the host's text and Enter hint fill the pane's width, and a narrower Box cut the row with ….
+  const draftRows = noteRows(s.noteDraft ?? '', noteWrapCells(width + 2, S.buttons.save))
   const deleteIcon = <Text color={COLORS.red}>{NOTE_ICONS.delete}</Text>
-  // Every note is one row: its text (its first lines until pressed, then all of them) and the three icon buttons right-aligned (save in place of send while edited); odd rows get a band
+  // Every note is one row: its text (its first lines until pressed, then all of them) and the three icon buttons right-aligned; odd rows get a band.
+  // Edited, the field takes the whole row and the buttons (save in place of send) go under it.
   const noteRow = (n: CockpitNote, i: number) => {
     const lines = n.text.trimEnd().split(/\r?\n/)
     const isOpen = s.notesOpen?.includes(n.id) === true
-    // the visual lines at the text column's width: a closed note shows the first few, `󰍟 +N` opens the rest
-    const visual = lines.flatMap(text => (text === '' ? [' '] : wrapCells(text, textW)))
-    const hidden = visual.length - NOTE_LINES_SHOWN
+    // a closed note shows its first few lines one row each, a longer one cut with …, and its last shown line ends with … when lines follow; a press opens the rest
+    const shown = lines.slice(0, NOTE_LINES_SHOWN).map(text => (text === '' ? ' ' : truncEnd(text, textW)))
+    const last = shown.length - 1
+    if (lines.length > shown.length && !shown[last].endsWith('…')) shown[last] = truncEnd(`${shown[last]}…`, textW)
     const isEditing = Input !== undefined && s.noteEditing === n.id
+    const icons = (
+      <Box flexGrow={1} columnGap={1} justifyContent="flex-end" alignItems="flex-start">
+        <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
+          {isEditing ? NOTE_ICONS.cancel : NOTE_ICONS.edit}
+        </Button>
+        {isEditing ? (
+          <Button key={`note:save:${n.id}`} onPress={() => actions.saveNote()}>
+            {NOTE_ICONS.save}
+          </Button>
+        ) : (
+          <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
+            {NOTE_ICONS.send}
+          </Button>
+        )}
+        <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
+          {deleteIcon}
+        </Button>
+      </Box>
+    )
     return (
       <Box flexDirection="column" backgroundColor={i % 2 === 1 ? COLORS.band : undefined}>
-        <Box columnGap={1}>
-          <Box width={textW} flexDirection="column">
-            {isEditing ? (
-              <Input key="note:edit-field" rows={draftRows} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} autoFocus onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
-            ) : (
+        {isEditing ? (
+          <Box width={width + 2} marginLeft={-1}>
+            <Input key="note:edit-field" rows={draftRows} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} autoFocus onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
+          </Box>
+        ) : (
+          <Box columnGap={1}>
+            <Box width={textW} flexDirection="column">
               <Button key={`note:toggle:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
                 {isOpen ? (
                   // one Text so the Button cannot lay the lines side by side; lines wrap by display width, indentation and empty lines kept
                   <Text wrap="wrap">{lines.map(text => (text === '' ? ' ' : text)).join('\n')}</Text>
                 ) : (
-                  <Text wrap="wrap">{visual.slice(0, NOTE_LINES_SHOWN).join('\n')}</Text>
+                  <Text wrap="wrap">{shown.join('\n')}</Text>
                 )}
               </Button>
-            )}
-            {!isEditing && hidden > 0 && (
-              <Button key={`note:more:${n.id}`} plain onPress={() => actions.toggleNote(n.id)}>
-                <Text color={COLORS.title}>{isOpen ? S.lessRows(hidden) : S.moreRows(hidden)}</Text>
-              </Button>
-            )}
+            </Box>
+            {icons}
           </Box>
-          <Box flexGrow={1} columnGap={1} justifyContent="flex-end" alignItems="flex-start">
-            <Button key={`note:edit:${n.id}`} onPress={() => actions.editNote(n.id)}>
-              {isEditing ? NOTE_ICONS.cancel : NOTE_ICONS.edit}
-            </Button>
-            {isEditing ? (
-              <Button key={`note:save:${n.id}`} onPress={() => actions.saveNote()}>
-                {NOTE_ICONS.save}
-              </Button>
-            ) : (
-              <Button key={`note:send:${n.id}`} onPress={() => actions.sendNote(n.id)}>
-                {NOTE_ICONS.send}
-              </Button>
-            )}
-            <Button key={`note:delete:${n.id}`} onPress={() => actions.deleteNote(n.id)}>
-              {deleteIcon}
-            </Button>
-          </Box>
-        </Box>
+        )}
+        {isEditing && icons}
         {s.confirm === `note:${n.id}` && confirmRow(k, S.confirmNoteDelete)}
       </Box>
     )
@@ -536,20 +551,10 @@ export function notesBlocks(k: Kit): Block[] {
       title(S.notesTitle(notes.length)),
       gap(),
       // The bottom field is for new notes: while a note is edited on its row it is hidden (the draft is shared, a draft typed here is replaced).
-      // The field in the text column, save and clear in the icon column, as on the note rows.
+      // The field on its own full row and no buttons: Enter saves, as the host's hint beside it says.
       Input && s.noteEditing === undefined && (
-        <Box columnGap={1}>
-          <Box width={textW}>
-            <Input key="note" rows={draftRows} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
-          </Box>
-          <Box flexGrow={1} columnGap={1} justifyContent="flex-end" alignItems="flex-start">
-            <Button key="note:save" onPress={() => actions.saveNote()}>
-              {NOTE_ICONS.save}
-            </Button>
-            <Button key="note:clear" onPress={() => actions.setNoteDraft('')}>
-              {deleteIcon}
-            </Button>
-          </Box>
+        <Box width={width + 2} marginLeft={-1}>
+          <Input key="note" rows={draftRows} placeholder={S.notePlaceholder} value={s.noteDraft ?? ''} submitLabel={S.buttons.save} onInput={value => actions.setNoteDraft(value)} onSubmit={value => actions.saveNote(value)} />
         </Box>
       ),
       ...(notes.length > 0 ? [gap(), notes.map(noteRow)] : [gap(), line(ui, [dim(S.noNotes)])]),
