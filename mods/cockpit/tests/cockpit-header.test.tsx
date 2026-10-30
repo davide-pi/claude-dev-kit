@@ -410,6 +410,24 @@ for (const order of ['end, measure', 'measure, end', 'end, next start, measure']
   })
 }
 
+for (const order of ['measure, end', 'end only'] as const) {
+  test(`header: a new session (/clear) does not show the previous session's turn cost (${order})`, async ($, on) => {
+    let id = 's-1'
+    world(on, { sessionId: () => id })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('session.measure', (_, e) => ({ changed: e.changed }))
+    on('turn.complete', () => ({ text: '' }))
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    if (order === 'measure, end') await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+    id = 's-2'
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const trend = headerOf((await paneRows($)).rows).find(r => /^turn /.test(r)) ?? ''
+    expect(trend).not.toMatch(/\$\+\d/)
+  })
+}
+
 test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
