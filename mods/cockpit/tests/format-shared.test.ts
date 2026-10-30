@@ -101,8 +101,10 @@ test('costCell: one width, `$` first and two decimals, so `$` and the point line
 
 test('model names, from an id or from a display name', () => {
   expect(shortModel('claude-sonnet-5-5-20260101')).toBe('son 5.5')
-  expect(shortModel('Opus 5.5')).toBe('opus 5.5')
-  expect(shortModel('opus')).toBe('opus')
+  expect(shortModel('Opus 5.5')).toBe('opu 5.5')
+  expect(shortModel('claude-haiku-5-5')).toBe('hai 5.5')
+  expect(shortModel('fable 5.1')).toBe('fab 5.1')
+  expect(shortModel('opus')).toBe('opu')
   expect(displayModel('claude-opus-5-5[1m]')).toBe('Opus 5.5')
   expect(displayModel('something-else')).toBe('something-else')
 })

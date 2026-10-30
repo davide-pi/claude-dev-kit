@@ -556,8 +556,8 @@ test('Subagenti: the tool line (the one running, or the last) wraps to the width
   expect(spanText(subagentDetails({ ...agent, lastTool: 'Read' }, '  ', 30)[1] ?? [])).toBe('  last tool Read')
 })
 
-test('Subagenti: the model counts run cheapest first: haiku, son, opus, fable', () => {
+test('Subagenti: the model counts run cheapest first: hai, son, opu, fab', () => {
   const agent = (id: string, model: string) => ({ id, type: 't', status: 'running' as const, startedAt: 0, tokens: 0, model })
   const counts = spanText(modelCounts([agent('a1', 'claude-opus-5-5'), agent('a2', 'claude-haiku-5-5'), agent('a3', 'claude-haiku-5-5')]))
-  expect(counts).toBe('haiku ×2 son ×0 opus ×1 fable ×0')
+  expect(counts).toBe('hai ×2 son ×0 opu ×1 fab ×0')
 })

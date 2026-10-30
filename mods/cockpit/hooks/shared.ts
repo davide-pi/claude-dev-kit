@@ -155,9 +155,10 @@ function modelVersion(model: string): string {
   return m[2] === undefined ? (m[1] ?? '') : `${m[1]}.${m[2]}`
 }
 
-const FAMILY_SHORT: Record<ModelFamily, string> = { opus: 'opus', sonnet: 'son', haiku: 'haiku', fable: 'fable' }
+/** Three letters each, so the version after them lines up in a column. */
+export const FAMILY_SHORT: Record<ModelFamily, string> = { opus: 'opu', sonnet: 'son', haiku: 'hai', fable: 'fab' }
 
-/** `son 5.5`, `opus 5.5`: the agent rows and counts. Unknown names pass through. */
+/** `son 5.5`, `opu 5.5`: the agent rows and counts. Unknown names pass through. */
 export function shortModel(model: string | undefined): string {
   if (!model) return ''
   const family = modelFamily(model)
