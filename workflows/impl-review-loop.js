@@ -43,6 +43,7 @@ const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '')
 
 // A reworded title must also sit within LINE_WINDOW lines, an identical one within 3x (two defects of one file can share a title).
 const LINE_WINDOW = 10
+const NOTE_WINDOW = 2   // a repeat of a soft note this close to it is the note itself
 const STOPWORDS = new Set(['non', 'per', 'con', 'del', 'della', 'dei', 'delle', 'nel', 'nella', 'che', 'una', 'uno', 'gli', 'dal', 'alla', 'sul',
   'manca', 'mancano', 'senza', 'the', 'not', 'and', 'for', 'with', 'without', 'missing', 'does', 'from', 'when', 'that', 'this', 'are', 'but'])
 const words = t => new Set(String(t ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3 && !STOPWORDS.has(w)))
@@ -311,19 +312,26 @@ const rejectionLedger = ({ rejected = [], counts = {} } = {}) => {
   return { counts: next, challenge, notReproduced }
 }
 
-// A note (softIds) seen again as a blocking finding is new, not absorbed: `blocks(f)` says whether it blocks now.
-const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '', softIds = new Set(), blocks = () => false } = {}) => {
+// A note (softIds) seen again is new, not absorbed, when `blocks(f)` says it blocks now (the note is then superseded: `superseded`)
+// or `apart(f, note)` says it is a new hunk off the note's own lines (the note stays: it is another defect).
+const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '', softIds = new Set(), blocks = () => false, apart = () => false } = {}) => {
   const next = { ...verdicts }
   const fresh = []
   const rematched = []
+  const superseded = []
   for (const f of found) {
-    const hits = Object.entries(known).filter(([id, k]) => sameFinding(f, k, root) && rank(f) >= rank(k) && !(softIds.has(id) && blocks(f)))
+    const matches = Object.entries(known).filter(([, k]) => sameFinding(f, k, root) && rank(f) >= rank(k))
+    const hits = matches.filter(([id, k]) => !(softIds.has(id) && (blocks(f) || apart(f, k))))
     const hit = hits.find(([id]) => tracked[id]) ?? hits[0]
-    if (!hit) { fresh.push(f); continue }
+    if (!hit) {
+      fresh.push(f)
+      for (const [id, k] of matches) if (softIds.has(id) && blocks(f) && !apart(f, k) && !superseded.includes(id)) superseded.push(id)
+      continue
+    }
     const [id] = hit
     if (tracked[id]) { next[id] = 'open'; rematched.push(id) }
   }
-  return { found: fresh, verdicts: next, rematched }
+  return { found: fresh, verdicts: next, rematched, superseded }
 }
 
 const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', touched = [], resolution, silent = {}, challenged = [], rejections = {}, notReproduced = [], soft = [] } = {}) => {
@@ -723,18 +731,20 @@ const anchor = id => `${known[id].path}${known[id].line ? `:${known[id].line}` :
 const previousBlock = () => {
   const mineIds = everyId()
   const ids = mineIds.filter(id => !challenged[id])
-  if (!mineIds.length) {
+  if (!mineIds.length && !cleanupSent.length) {
     return Object.keys(tracked).length
       ? 'PREVIOUS FINDINGS: none to judge (the earlier ones are closed or accepted and the last fix did not touch them: give no verdict).'
       : 'PREVIOUS FINDINGS: none (first round: review the whole change).'
   }
-  if (!ids.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
-  const list = ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)
+  if (!ids.length && !cleanupSent.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
+  // The cleanup pass's ids are minor, not tracked: A's `closed` verdict is what closes one.
+  const list = [...ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`), ...cleanupSent.map(id => `- ${id} [cleanup] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)]
+  const cleanupLine = cleanupSent.length ? '\nIds marked [cleanup] close only with your explicit closed verdict: one you skip stays open and is not asked again.' : ''
   if (skipped.length) {
     const who = mineIds.length > ids.length ? 'for each of these ids and for each id of the CHALLENGE below' : 'for each of these ids only'
-    return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, ${who}; an id you skip again stalls the loop):\n${list.join('\n')}`
+    return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, ${who}; an id you skip again stalls the loop):\n${list.join('\n')}${cleanupLine}`
   }
-  return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}`
+  return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}${cleanupLine}`
 }
 const challengeBlock = () => {
   const list = Object.keys(challenged).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
@@ -782,7 +792,7 @@ while (true) {
   const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
     : final ? everyone.filter(r => r.key === 'A')
     : round === 1 ? everyone
-    : deltaReviewers(everyone, cleanupSent.length ? ['A', ...missing] : [...finders, ...missing])   // the cleanup delta: A reads it beside the watcher, only a whole reader closes an id
+    : deltaReviewers(everyone, cleanupSent.length ? ['A', ...missing] : [...finders, ...missing])   // the cleanup delta: A reads it beside the watcher; only A's explicit closed verdict closes an id
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
   const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
@@ -837,11 +847,12 @@ while (true) {
     return questionStall(round, routed.pending, `the reviewers left ${routed.pending.length} question(s) for the owner: ${routed.pending.map(q => q.text).join(' | ')}`,
       answerResume(round, ASK_EACH, ' The answers go to the fixer and to the later reviewers.'))
   }
-  // An id whose file is still unread waits for the round that reads it.
+  // An id whose file is still unread waits for the round that reads it; one closes only on A's explicit `closed` (the watcher can keep it open, never close it).
   const cleanupWait = []
+  const closedByA = id => alive.some(a => a.key === 'A' && (a.previous ?? []).some(v => v.id === id && v.status === 'closed'))
   for (const id of cleanupSent) {
     if (isDirty(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
-    if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
+    if (merged.found.some(g => sameFinding(g, known[id], repoRoot)) || merged.verdicts[id] !== 'closed' || !closedByA(id)) continue
     const at = minor.findIndex(m => m.id === id)   // splice(-1, 1) would drop the last entry
     if (at >= 0) minor.splice(at, 1)
     cleaned.push(known[id])
@@ -850,7 +861,17 @@ while (true) {
   const readers = alive.map(a => a.key)
   // Only a stronger repeat (CONFIRMED, or raised by someone besides A) turns a note into a fresh blocker; a PLAUSIBLE repeat from A stays absorbed.
   const blocks = f => f.category !== 'scope' || f.confidence === 'CONFIRMED' || findersOf(f, alive, repoRoot).join() !== 'A'
-  const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot, softIds, blocks })
+  // A repeat off the note's own lines, in a file the last fix changed, is the fix's new hunk, not the note.
+  const apart = (f, note) => isDirty(f.path, lastFix?.files ?? [], repoRoot) && Number.isFinite(f.line) && Number.isFinite(note.line) && Math.abs(f.line - note.line) > NOTE_WINDOW
+  const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot, softIds, blocks, apart })
+  const dropNote = id => {
+    softIds.delete(id)
+    delete known[id]   // a dropped note must not match, and so absorb, a later blocking repeat
+    const at = minor.findIndex(m => m.id === id)
+    if (at >= 0) minor.splice(at, 1)
+  }
+  // A note seen again as a blocking finding is now that finding: it leaves the notes, so the closing table lists the defect once.
+  deduped.superseded.forEach(dropNote)
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
   found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot) })
   const resolution = resolutions.find(r => Number(r.round) === round)

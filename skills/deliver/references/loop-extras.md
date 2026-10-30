@@ -19,7 +19,7 @@ final read covers every file); only a file still unread after it gets the rerun 
 
 Runs only with `cleanup: true` (the owner asks for it); by default the P3s stay in `minor` for the closing table. A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the
 change does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (the
-watcher, Haiku at low, and reviewer A: only A reading a file can close its cleanup ids); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
+watcher, Haiku at low, and reviewer A: a cleanup id closes only on A's explicit `closed` verdict, silence or the watcher never close one); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
 review has read it; `minor` keeps the rest, and `outOfScope` the P3s outside the perimeter: all for the closing table.
 
 ## Scope check, exit 1

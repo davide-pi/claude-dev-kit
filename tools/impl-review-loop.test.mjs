@@ -314,7 +314,12 @@ test('dedupeFound: a note (soft id) seen again as a blocking finding is fresh; s
   const known = { F2: f('F2', { line: 8, priority: 'P2', title: 'unrequested rename' }) };
   const seen = (blocks) => dedupeFound({ found: [f('y', { line: 8, priority: 'P2', title: 'unrequested rename' })], known, softIds: new Set(['F2']), blocks: () => blocks, root: ROOT });
   assert.equal(seen(true).found.length, 1);
+  assert.deepEqual(seen(true).superseded, ['F2']);                                      // the note is replaced by the finding
   assert.deepEqual(seen(false).found, []);
+  assert.deepEqual(seen(false).superseded, []);
+  const apart = dedupeFound({ found: [f('y', { line: 8, priority: 'P2', title: 'unrequested rename' })], known, softIds: new Set(['F2']), apart: () => true, root: ROOT });
+  assert.equal(apart.found.length, 1);                                                  // a new hunk off the note's lines is fresh ...
+  assert.deepEqual(apart.superseded, []);                                               // ... and the note stays: it is another defect
 });
 
 test('dedupeFound: a recorded minor finding seen again is dropped, a MORE severe one on it is fresh', () => {

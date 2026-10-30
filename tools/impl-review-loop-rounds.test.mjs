@@ -482,6 +482,17 @@ test('script: questions a cleanup fixer returns anyway never stall the run: they
   assert.ok(out.outOfScope.some(o => /Rename the helper\?/.test(o.text ?? '')));
 });
 
+test('script (#P42): a soft note that comes back as a blocking finding leaves the notes: the closing table lists the defect once', async () => {
+  const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
+  const scope = (extra = {}) => finding({ category: 'scope', title: 'unrequested rename of a helper', line: 300, ...extra });
+  const other = finding({ line: 300, title: 'a second defect elsewhere' });
+  const t = (tree) => impl({ snapshot: { tree, files: ['src/Orders/OrdersQuery.cs'], churn: 10 } });
+  // R1: A alone, PLAUSIBLE: a note beside a fixed P2 (F1); the final read raises the same hunk CONFIRMED: F3, fixed.
+  const { out } = await run({ ...ARGS, size: 'M' }, [review([], [other, scope({ confidence: 'PLAUSIBLE' })]), review([]), review(closed('F1')), review(closed('F1', 'F3'))], [impl(), t('t2'), t('t3')], { finals: [review(closed('F1'), [scope({ confidence: 'CONFIRMED' })])] });
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.minor, []);
+});
+
 test('script: the reviewer prompt names filesReviewed explicitly', async () => {
   const { calls } = await run(ARGS, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'reviewer A · round 1 · code').prompt, /under filesReviewed list every file you actually read/);
