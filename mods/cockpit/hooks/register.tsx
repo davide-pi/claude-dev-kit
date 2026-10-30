@@ -226,7 +226,6 @@ export const register: Register = on => {
       const now = await $.clock.now()
       await patch($, s => ({
         ...s,
-        ctx: { ...s.ctx, startTokens: s.ctx.tokens ?? 0 },
         cost: { ...s.cost, startUsd: s.cost.usd ?? 0 },
         claudeState: { kind: 'working' },
         workflowRun: endRun(s.workflowRun, now),
