@@ -285,38 +285,51 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
   return out
 }
 
-/** `hex` (`#rrggbb`) made brighter by `k`, 0 to 1, in its own hue: the channels scale together until the strongest one reaches 255 (at `k` 1). */
-export function brighten(hex: string, k: number): string {
-  const n = parseInt(hex.slice(1), 16)
-  const max = Math.max(n >> 16, (n >> 8) & 255, n & 255)
-  if (max === 0) return hex
-  const factor = 1 + k * (255 / max - 1)
-  const channel = (shift: number) => Math.min(255, Math.round(((n >> shift) & 255) * factor)).toString(16).padStart(2, '0')
+/** `hex` (`#rrggbb`) moved toward `to` by `k`, 0 to 1: at 0 it is itself, at 1 it is `to`. */
+export function mix(hex: string, to: string, k: number): string {
+  const a = parseInt(hex.slice(1), 16)
+  const b = parseInt(to.slice(1), 16)
+  const channel = (shift: number) => {
+    const from = (a >> shift) & 255
+    return Math.round(from + k * (((b >> shift) & 255) - from)).toString(16).padStart(2, '0')
+  }
   return `#${channel(16)}${channel(8)}${channel(0)}`
 }
 
+/** `hex` made brighter by `k`, 0 to 1, toward white: a colour whose strongest channel is already at 255 (the amber, the yellow) still lights up. */
+export const brighten = (hex: string, k: number): string => mix(hex, '#ffffff', k)
+
 /** How much the glow brightens its cells, from its centre out to both sides. */
-const GLOW = [0.12, 0.3, 0.5, 0.3, 0.12]
-/** Steps the glow rests once its tail has left the fill's head, before it starts again from the left. */
+const GLOW = [0.15, 0.35, 0.6, 0.35, 0.15]
+/** Steps the glow rests once its tail has left the bar's end, before it starts again from the left. */
 const GLOW_REST = 6
 /** How much a pulse brightens the whole fill. */
-const PULSE = 0.7
+const PULSE = 0.45
 
 /** True for a run the glow and the pulse may light: a filled part, not the empty track or the pace gap. */
 const isLit = (run: Span | undefined): run is Span & { c: string } => run?.c !== undefined && run.c !== COLORS.empty && run.c !== COLORS.gap
 
-/** `cells` (a `barCells` bar) with a soft glow on the first part's run at step `phase`: it flows a cell a step from the left toward the fill's head, then rests; the same hue, brighter. */
+/** `cells` (a `barCells` bar) with a glow at step `phase`, in the first part's hue: it flows a cell a step from the left to the bar's end, then rests.
+ * On the fill it brightens toward white; on the empty track it tints the cells with the fill's hue, so a short fill still shows the flow; a pace gap stays as it is. The text never changes. */
 export function withGlow(cells: Span[], phase: number): Span[] {
-  const [run, ...rest] = cells
+  const [run] = cells
   if (phase < 0 || !isLit(run)) return cells
-  const n = run.t.length
+  const chars = cells.flatMap(c => [...c.t].map(t => ({ ...c, t })))
+  const n = chars.length
   const half = (GLOW.length - 1) / 2
   const centre = (phase % (n + GLOW.length + GLOW_REST)) - half
-  const from = Math.max(0, centre - half)
-  const to = Math.min(n - 1, centre + half)
-  if (from > to) return cells
-  const lit = Array.from({ length: to - from + 1 }, (_, i) => ({ t: '▰', c: brighten(run.c, GLOW[from + i - (centre - half)]!) }))
-  return [...(from > 0 ? [{ ...run, t: run.t.slice(0, from) }] : []), ...lit, ...(to + 1 < n ? [{ ...run, t: run.t.slice(to + 1) }] : []), ...rest]
+  const lit = chars.map((cell, i) => {
+    const k = Math.abs(i - centre) <= half ? GLOW[i - centre + half]! : 0
+    if (k === 0) return cell
+    return { ...cell, c: cell.c === COLORS.empty ? mix(COLORS.empty, run.c, k) : isLit(cell) ? brighten(cell.c, k) : cell.c }
+  })
+  // adjacent cells of one style join again into one span
+  return lit.reduce<Span[]>((out, cell) => {
+    const last = out[out.length - 1]
+    if (last && last.c === cell.c && last.dim === cell.dim && last.bold === cell.bold && last.bg === cell.bg) out[out.length - 1] = { ...last, t: last.t + cell.t }
+    else out.push(cell)
+    return out
+  }, [])
 }
 
 /** `cells` with the first part's whole run brighter while `isOn`: the pulse of a bar whose colour changed. */

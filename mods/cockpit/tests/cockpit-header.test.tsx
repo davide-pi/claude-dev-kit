@@ -173,11 +173,11 @@ test('deltas count from the turn start', async ($, on) => {
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
   expect(await text(/^\$5\.20$/)).toBe('$5.20')
-  // the growth and the round's cost are on the row under the credits, not in the CTX readout nor beside the session cost
+  // the round's cost is on the row under the credits, not beside the session cost; the token growth is shown nowhere
   const rows = rowTexts(await ui.drawn())
   expect(rows.find(r => /^CTX /.test(r))).toMatch(/^CTX [▰▱]+ {2}26% {3}260K\/1M/)
   expect(rows.find(r => /^CTX /.test(r))).not.toContain('+12K')
-  expect(rows.find(r => /^turn /.test(r))).toMatch(/^turn +\+12K +\$\+0\.38 · pace 7d/)
+  expect(rows.find(r => /^turn /.test(r))).toMatch(/^turn +\$\+0\.38 · pace 7d/)
   await ui.unmount()
 })
 
@@ -364,7 +364,7 @@ test('header: the last round cost is on the trend row, the session cost alone on
   const header = headerOf((await paneRows($)).rows)
   expect(header[0]).toMatch(/\$5\.20$/)
   expect(header[0]).not.toContain('0.38')
-  expect(header.find(r => /^turn /.test(r))).toMatch(/^turn +\+12K +\$\+0\.38 · pace 7d/)
+  expect(header.find(r => /^turn /.test(r))).toMatch(/^turn +\$\+0\.38 · pace 7d/)
 })
 
 test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
@@ -668,7 +668,7 @@ test('header: the CTX readout joins the cache hit with a dot, the cells before i
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const trend = rowTexts(await ui.drawn()).find(r => /^turn /.test(r)) ?? ''
-  expect(trend.match(/\u{F01E5}/gu)).toHaveLength(2) // no growth, no cost delta yet
+  expect(trend.match(/\u{F01E5}/gu)).toHaveLength(1) // no cost delta yet
   await ui.unmount()
   await $.turn.complete({
     answer: '',
@@ -700,7 +700,7 @@ test('header: the trend row keeps its `·` column when a value is a duck (one ce
   const valuesUi = await mountPane($, 58)
   const values = rowTexts(await valuesUi.drawn()).find(r => /^turn /.test(r)) ?? ''
   await valuesUi.unmount()
-  expect(values).toMatch(/^turn +\+12K +\$\+0\.38 ·/)
+  expect(values).toMatch(/^turn +\$\+0\.38 ·/)
   expect(columnOf(duck)).toBe(columnOf(values))
 })
 
