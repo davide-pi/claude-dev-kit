@@ -44,7 +44,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes besides `logic` → L. An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
 | `mechanical` | `true` for an S batch with no judgment in it (rename, move, split, config, generated, label updates) the tests fully cover: implementer on `haiku` at `low`, reviewer at `low`. Needs `size: 'S'` (a missing size is M) and never goes with `inline`; a risk axis that lifts the size drops it |
 | `implementerEffort` | `high` only when the brief asks; default `medium` (`low` with `mechanical`) |
-| `implementerModel` | only to override; default: the agent's own model (`haiku` with `mechanical`). Without it a review fix of 1-2 findings, none P1 or a verify one, runs on `haiku` at `low` until the verify first fails; a finding still open after it goes to the default model. The delta watcher also runs on `haiku` at `low` |
+| `implementerModel` | only to override, on the implementer and every fix run; default: the agent's own model (`haiku` with `mechanical`). The delta watcher also runs on `haiku` at `low` |
 | `cleanup` | `true` only when the owner asks for the P3 cleanup pass (M, L); default: the P3s go to the closing table |
 
 Who reads which round, the final full read and the cleanup pass: `references/loop-extras.md`.

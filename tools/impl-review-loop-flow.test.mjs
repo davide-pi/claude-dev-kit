@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, FAIL, defect, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './impl-review-loop.harness.mjs';
 
 // ── delivery flow "two colleagues": P-run, P-size, P-weight, W1-W15 ──────────────────────────────────────────
 const closedIds = (...ids) => ids.map(id => ({ id, status: 'closed' }));
@@ -348,16 +348,15 @@ test('script: after a resumed reviewer question the cleanup runs, and a question
   assert.ok(out.outOfScope.some(o => /Keep the public name?/.test(o.text ?? '')));
 });
 
-// ── implementerModel, cleanup only on request, final-read churn floor ──────────────────────────────────
-test('script: implementerModel sends model on the implementer and the fixer; absent or unknown sends none on the implementer', async () => {
-  const reviews = () => [review([], [finding()]), review(closedIds('F1'))];
+// ── implementerModel, cleanup only on request, final-read tiers ──────────────────────────────────
+test('script: implementerModel sends model on the implementer and the fixer; absent or unknown sends none on either', async () => {
+  const reviews = () => [review([], [finding({ fix: 'use a join' })]), review(closedIds('F1'))];
   const impls = ['implement the change', 'fix round 1 findings'];
   const haiku = await run({ ...ARGS, implementerModel: 'haiku' }, reviews());
   for (const label of impls) assert.equal(haiku.calls.find(c => c.opts.label === label).opts.model, 'haiku', label);
   for (const args of [ARGS, { ...ARGS, implementerModel: 'gpt' }]) {
     const none = await run(args, reviews());
-    assert.equal('model' in none.calls.find(c => c.opts.label === impls[0]).opts, false);
-    assert.equal(none.calls.find(c => c.opts.label === impls[1]).opts.model, 'haiku');   // the pilot: one P2 goes to a Haiku fixer
+    for (const label of impls) assert.equal('model' in none.calls.find(c => c.opts.label === label).opts, false, label);
   }
 });
 
@@ -386,7 +385,7 @@ test('script: without cleanup: true the P3s stay in minor and no cleanup pass ru
   assert.equal(calls.some(c => c.opts.label?.startsWith('cleanup of round')), false);
 });
 
-test('script (#42): a review fix past 30 lines of churn gets a final read by reviewer A alone, whose prompt scopes the whole change; S never gets one', async () => {
+test('script (#42): any review fix at M/L gets a final read by reviewer A alone, whose prompt scopes the whole change; S never gets one', async () => {
   const hasFinal = (r) => reviewerLabels(r.calls).some(l => /final read/.test(l));
   const m = await run(ARGS_M, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 31) })]);
   assert.equal(m.out.status, 'OK');
@@ -402,47 +401,26 @@ test('script (#42): a review fix past 30 lines of churn gets a final read by rev
   assert.equal(hasFinal(noFix), false);
 });
 
-test('script: the final read is skipped when the summed churn of the review fixes is at most 30, owed when a fix has no churn number', async () => {
-  const hasFinal = (r) => reviewerLabels(r.calls).some(l => /final read/.test(l));
+test('script: the final read always follows a review fix at M/L, on a model and effort tiered by the summed churn; no churn number is the top tier', async () => {
   const reviews = () => [review([], [finding()]), review([]), review(closedIds('F1'))];
-  const small = await run(ARGS_M, reviews(), [impl(), impl({ snapshot: T2('t2', 30) })]);
-  assert.equal(small.out.status, 'OK');
-  assert.equal(hasFinal(small), false);
+  const finalOf = (r) => r.calls.find(c => /final read/.test(c.opts.label ?? '')).opts;
+  const tier = async (churn) => { const o = finalOf(await run(ARGS_M, reviews(), [impl(), impl({ snapshot: T2('t2', churn) })])); return [o.model, o.effort]; };
+  assert.deepEqual(await tier(30), ['sonnet', 'medium']);
+  assert.deepEqual(await tier(31), ['sonnet', 'high']);
+  assert.deepEqual(await tier(50), ['sonnet', 'high']);
+  assert.deepEqual(await tier(51), ['opus', 'medium']);
   const missing = await run(ARGS_M, reviews(), [impl(), impl({ snapshot: null })]);
-  assert.equal(hasFinal(missing), true);
+  assert.deepEqual([finalOf(missing).model, finalOf(missing).effort], ['opus', 'medium']);
+  assert.match(missing.calls.find(c => /final read/.test(c.opts.label ?? '')).prompt, /Effort: medium/);
   assert.deepEqual(reviewerLabels(missing.calls).filter(l => /final read/.test(l)), ['reviewer A · round 3 · code, final read']);
   const summed = await run(ARGS_M, [review([], [finding()]), review([]), review(closedIds('F1'), [finding({ line: 300, title: 'a second defect elsewhere' })]), review(closedIds('F1', 'F2'))], [impl(), impl({ snapshot: T2('t2', 20) }), impl({ snapshot: T2('t3', 20) })]);
-  assert.equal(hasFinal(summed), true);
-});
-
-test('script: Haiku fixer pilot: 1-2 P2 findings go to haiku at low; a P1, a verify failure, an override or a third finding keep the default', async () => {
-  const fixOf = (r) => r.calls.find(c => c.opts.label === 'fix round 1 findings').opts;
-  const two = [defect(1), defect(2)];
-  const pilot = await run(ARGS_M, [review([], two), review([]), review(closedIds('F1', 'F2'))]);
-  assert.deepEqual([fixOf(pilot).model, fixOf(pilot).effort], ['haiku', 'low']);
-  assert.equal(pilot.out.roundLog[0].fixModel, 'haiku');
-  const p1 = await run(ARGS_M, [review([], [finding({ priority: 'P1' })]), review([]), review(closedIds('F1'))]);
-  assert.deepEqual(['model' in fixOf(p1), fixOf(p1).effort], [false, 'medium']);
-  assert.equal(p1.out.roundLog[0].fixModel, 'default');
-  const three = [...two, defect(3)];
-  const many = await run(ARGS_M, [review([], three), review([]), review(closedIds('F1', 'F2', 'F3'))]);
-  assert.equal('model' in fixOf(many), false);
-  const pinned = await run({ ...ARGS_M, implementerModel: 'sonnet' }, [review([], [finding()]), review([]), review(closedIds('F1'))]);
-  assert.equal(fixOf(pinned).model, 'sonnet');
-  const red = await run({ ...ARGS_M, verify: 'node --test' }, [review([], [finding()]), review([]), review(closedIds('F1'))], [impl({ verify: FAIL }), impl(), impl()]);
-  assert.equal(red.out.roundLog[0].fixModel, 'default');   // V1 rides with F1
-  const late = await run({ ...ARGS_M, verify: 'node --test' }, [review([], [finding()]), review([]), review(closedIds('F1'), [finding({ line: 300, title: 'a second defect elsewhere' })]), review(closedIds('F1')), review(closedIds('F1', 'F2'))], [impl({ verify: FAIL }), impl(), impl()]);
-  const lateFix = late.calls.find(c => c.opts.label === 'fix round 2 findings');   // one P2 alone, but the verify failed earlier in the run
-  assert.equal('model' in lateFix.opts, false);
-  assert.equal(late.out.roundLog[1].fixModel, 'default');
-});
-
-test('script: a finding still open after a Haiku fix is fixed by the default model', async () => {
-  const { out, calls } = await run({ ...ARGS, resolutions: [{ round: 2, guidance: 'use a join' }] }, [review([], [finding()]), review([{ id: 'F1', status: 'open' }]), review(closedIds('F1'))]);
-  const fixes = calls.filter(c => /^fix round/.test(c.opts.label ?? ''));
-  assert.equal(out.status, 'OK');
-  assert.deepEqual(fixes.map(c => c.opts.model), ['haiku', undefined]);
-  assert.deepEqual(out.roundLog.map(r => r.fixModel), ['haiku', 'default', undefined]);
+  assert.equal(finalOf(summed).model, 'sonnet');   // 20 + 20 = 40
+  assert.equal(finalOf(summed).effort, 'high');
+  const hasFinal = (r) => reviewerLabels(r.calls).some(l => /final read/.test(l));
+  const s = await run(ARGS, [review([], [finding()]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 99) })]);
+  assert.equal(hasFinal(s), false);
+  const cleanOnly = await run(CLEAN, [review([], [nit(1)]), review([]), review([])], [impl(), impl({ snapshot: T2('t2', 99) })]);
+  assert.equal(hasFinal(cleanOnly), false);
 });
 
 test('script: the implementer and fixer prompts say the snapshot files are the whole change since the start', async () => {
