@@ -236,8 +236,9 @@ export type CockpitSnapshot = {
   isSubagentModelForced: boolean
   /** Context window of the main loop. */
   ctx: { tokens?: number; window?: number; percent?: number }
-  /** Session cost in USD; `startUsd` is the total when the last turn began. */
-  cost: { usd?: number; startUsd?: number }
+  /** Session cost in USD; `startUsd` is the total when the last turn began, `lastUsd` the cost of the last main turn that ended,
+   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet. */
+  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number }
   rateLimits: CockpitRateLimit[]
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number

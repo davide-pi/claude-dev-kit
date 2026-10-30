@@ -236,7 +236,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // Under the credits: what the current turn added to the cost, then the week's pace (the credit left against an even burn,
   // + is ahead); all dim but the pace, each in its own cells and the row always drawn, so neither the readout nor the tabs below move
-  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
+  // until the running turn's cost is measured, the last ended turn's stands in: the duck only before the first one
+  const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd)) || fmtCostDelta(s.cost.lastUsd)
   const pace = sevenDay?.pace
   const trendRow = line(ui, [
     dim(`${S.turnCost} `),

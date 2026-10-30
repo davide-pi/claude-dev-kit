@@ -388,6 +388,28 @@ test('header: the last round cost is on the trend row, the session cost alone on
   expect(header.find(r => /^turn /.test(r))).toMatch(/^turn +\$\+0\.38 · pace 7d/)
 })
 
+for (const order of ['end, measure', 'measure, end', 'end, next start, measure'] as const) {
+  test(`header: the trend row keeps the last turn's cost while the next one runs (${order})`, async ($, on) => {
+    world(on)
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('session.measure', (_, e) => ({ changed: e.changed }))
+    on('turn.complete', () => ({ text: '' }))
+    const measure = (usd: number) => $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd }, changed: ['context', 'cost'] })
+    const end = (turnId: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+    const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    if (order === 'measure, end') await measure(5.2)
+    await end('t1')
+    if (order === 'end, measure') await measure(5.2)
+    await $.turn.start({ text: 'next', turnId: 't2' })
+    if (order === 'end, next start, measure') await measure(5.2)
+    expect(await trend()).toMatch(/^turn +\$\+0\.38 /)
+    await measure(5.5)
+    expect(await trend()).toMatch(/^turn +\$\+0\.30 /)
+  })
+}
+
 test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
