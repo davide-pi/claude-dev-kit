@@ -59,6 +59,14 @@ export function abbrevTokens(n: number | undefined, isUpper = false): string {
   return String(Math.round(n))
 }
 
+/** `abbrevTokens` with one fixed decimal, for the columns that must not shift: 1234 -> 1.2k, 248000 -> 248.0k, 1e6 -> 1.0M. */
+export function abbrevTokensFixed(n: number | undefined): string {
+  if (n === undefined || !Number.isFinite(n) || n < 0) return ''
+  if (n >= 1e6) return `${(n / 1e6).toFixed(1)}M`
+  if (n >= 1000) return `${(n / 1000).toFixed(1)}k`
+  return String(Math.round(n))
+}
+
 /** A time span in 6 cells, right-aligned: `   45m` under an hour, ` 2h14m` / `13h45m` under a day, ` 3d06h` beyond (minutes and hours in two digits). */
 function fixedSpan(ms: number): string {
   const totalMin = Math.floor(ms / 60000)
@@ -82,12 +90,12 @@ export function clockTime(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Elapsed time: `41s`, `2m14s`, `1h02m`. */
+/** Elapsed time in one fixed shape of 6 cells: `00m41s`, `02m14s`, `01h02m`. */
 export function duration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
-  if (s < 60) return `${s}s`
-  if (s < 3600) return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, '0')}s`
-  return `${Math.floor(s / 3600)}h${String(Math.floor((s % 3600) / 60)).padStart(2, '0')}m`
+  const two = (n: number) => String(n).padStart(2, '0')
+  if (s < 3600) return `${two(Math.floor(s / 60))}m${two(s % 60)}s`
+  return `${two(Math.floor(s / 3600))}h${two(Math.floor((s % 3600) / 60))}m`
 }
 
 /**
@@ -280,7 +288,7 @@ export function gridWidths(total: number, diffsLen: number): { folder: number; b
 export type BarPart = { pct: number; color: string }
 
 /** Cells of a `width`-cell bar: each part gets round(pct) of the width, the rest is empty. */
-export function barCells(width: number, parts: readonly BarPart[]): Span[] {
+export function barCells(width: number, parts: readonly BarPart[], markPct?: number): Span[] {
   const out: Span[] = []
   let used = 0
   for (const p of parts) {
@@ -289,7 +297,21 @@ export function barCells(width: number, parts: readonly BarPart[]): Span[] {
     used += n
   }
   if (used < width) out.push({ t: '▱'.repeat(width - used), c: COLORS.empty })
-  return out
+  return markPct === undefined ? out : withMark(out, markPct)
+}
+
+/** The autocompact threshold's tick on a bar: the cell at `markPct` of the width becomes an amber `┃`; none outside 0-100. */
+function withMark(cells: Span[], markPct: number): Span[] {
+  const chars = cells.flatMap(c => [...c.t].map(t => ({ ...c, t })))
+  if (!(markPct > 0 && markPct < 100) || chars.length === 0) return cells
+  const at = Math.min(chars.length - 1, Math.round((markPct / 100) * chars.length))
+  chars[at] = { t: '┃', c: COLORS.amber }
+  return chars.reduce<Span[]>((out, cell) => {
+    const last = out[out.length - 1]
+    if (last && last.c === cell.c && last.t.at(-1) === cell.t) out[out.length - 1] = { ...last, t: last.t + cell.t }
+    else out.push(cell)
+    return out
+  }, [])
 }
 
 /** `hex` (`#rrggbb`) moved toward `to` by `k`, 0 to 1: at 0 it is itself, at 1 it is `to`. */

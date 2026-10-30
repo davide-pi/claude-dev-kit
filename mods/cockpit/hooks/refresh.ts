@@ -1,7 +1,7 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitAgent, CockpitHistoryEntry } from '../types'
+import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../types'
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
 import { withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
@@ -105,6 +105,25 @@ export async function refreshLastRates($: EngineInterface): Promise<void> {
   }
 }
 
+/** Below a cent a turn's cost reads as not yet measured. */
+const CENT = 0.005
+
+/** `cost` once a main turn ended: its cost where measured, else the turn waits for the next measure to settle it. */
+export function endTurnCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cost'] {
+  const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
+  return d !== undefined && d >= CENT ? { ...cost, lastUsd: d, pendingUsd: undefined } : { ...cost, pendingUsd: cost.startUsd }
+}
+
+/**
+ * `cost` with a measured `usd`: an ended turn still waiting gets its cost, and the turn running since counts from this reading,
+ * whatever order the engine sends the turn's end, the next turn's start and the measure in.
+ */
+export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefined): CockpitSnapshot['cost'] {
+  const pending = cost.pendingUsd
+  if (pending === undefined || usd === undefined || usd - pending < CENT) return { ...cost, usd }
+  return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined }
+}
+
 export async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
@@ -113,7 +132,7 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
       ...withContextReading(s, u.context.tokens),
-      cost: { ...s.cost, usd: u.cost?.usd },
+      cost: measuredCost(s.cost, u.cost?.usd),
       rateLimits: u.rateLimits,
     }))
   } catch {

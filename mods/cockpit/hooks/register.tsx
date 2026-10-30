@@ -31,7 +31,9 @@ import {
   toolArgFull,
 } from './insights'
 import {
+  endTurnCost,
   fastTick,
+  measuredCost,
   mediumTick,
   refreshAlm,
   refreshAutoCompact,
@@ -211,7 +213,7 @@ export const register: Register = on => {
       // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
       lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
       ...withContextReading(s, e.context.tokens),
-      cost: { ...s.cost, usd: e.cost?.usd },
+      cost: measuredCost(s.cost, e.cost?.usd),
       rateLimits: e.rateLimits,
     }))
     return next(e)
@@ -514,6 +516,7 @@ export const register: Register = on => {
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
+          cost: endTurnCost(s.cost),
         }
       })
       await setClaudeState($, { kind: 'idle' })

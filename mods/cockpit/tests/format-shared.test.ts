@@ -4,6 +4,7 @@ import {
   COLORS,
   ICONS,
   abbrevTokens,
+  abbrevTokensFixed,
   barCells,
   cacheColor,
   costCell,
@@ -65,10 +66,18 @@ test('countdown is always 6 cells, right-aligned: minutes, hours and minutes, da
   for (const min of [1, 59, 60, 61, 1439, 1440, 1441, 7 * 1440 - 1]) expect([...countdown(NOW + min * 60000, NOW)]).toHaveLength(6)
 })
 
+test('abbrevTokensFixed keeps one decimal on k and M, whole numbers under a thousand', () => {
+  expect(abbrevTokensFixed(850)).toBe('850')
+  expect(abbrevTokensFixed(1234)).toBe('1.2k')
+  expect(abbrevTokensFixed(248_000)).toBe('248.0k')
+  expect(abbrevTokensFixed(1_000_000)).toBe('1.0M')
+  expect(abbrevTokensFixed(undefined)).toBe('')
+})
+
 test('duration reads seconds, minutes, hours', () => {
-  expect(duration(41_000)).toBe('41s')
-  expect(duration(134_000)).toBe('2m14s')
-  expect(duration(3_720_000)).toBe('1h02m')
+  expect(duration(41_000)).toBe('00m41s')
+  expect(duration(134_000)).toBe('02m14s')
+  expect(duration(3_720_000)).toBe('01h02m')
 })
 
 test('rateColor projects the end-of-window usage', () => {
@@ -140,6 +149,16 @@ test('barCells fills the width exactly, gap after fill', () => {
     [COLORS.empty, 5],
   ])
   expect(spanText(barCells(4, []))).toBe('\u25b1\u25b1\u25b1\u25b1')
+})
+
+test('barCells marks the autocompact threshold with one amber cell, on the fill or the track; none outside 0-100', () => {
+  const cells = barCells(10, [{ pct: 20, color: 'a' }], 50)
+  expect(spanWidth(cells)).toBe(10)
+  expect(spanText(cells)).toBe('\u25b0\u25b0\u25b1\u25b1\u25b1\u2503\u25b1\u25b1\u25b1\u25b1')
+  expect(cells.find(c => c.t === '\u2503')?.c).toBe(COLORS.amber)
+  expect(spanText(barCells(10, [{ pct: 80, color: 'a' }], 15))).toBe('\u25b0\u25b0\u2503\u25b0\u25b0\u25b0\u25b0\u25b0\u25b1\u25b1')
+  expect(barCells(10, [{ pct: 20, color: 'a' }], 0)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
+  expect(barCells(10, [{ pct: 20, color: 'a' }], 100)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
 })
 
 test('truncateSpans cuts to the width with an unstyled ellipsis and leaves a fitting line alone', () => {

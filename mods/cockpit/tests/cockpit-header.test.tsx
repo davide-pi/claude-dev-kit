@@ -98,6 +98,27 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   await ui.unmount()
 })
 
+test('CTX bar: a tick where the engine compacts, on both surfaces', async ($, on) => {
+  world(on, { autoCompactAt: 150_000 })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  for (const surface of ['terminal', 'desktop'] as const) {
+    const ui = await $.ui.mount({ ...PANE, surface })
+    const bar = rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))?.match(/^CTX ([▰▱┃]+)/)?.[1] ?? ''
+    // 150k of the 1M window: the tick at 15% of the bar
+    expect([...bar].filter(c => c === '┃')).toHaveLength(1)
+    expect([...bar].indexOf('┃')).toBe(Math.min(bar.length - 1, Math.round(0.15 * bar.length)))
+    await ui.unmount()
+  }
+})
+
+test('CTX bar: no tick when the engine reports no autocompact threshold', async ($, on) => {
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).not.toContain('┃')
+  await ui.unmount()
+})
+
 test('a rule closes the header and the tab bar, and sets the SUBAGENTS title (after an empty row) apart from them', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -366,6 +387,46 @@ test('header: the last round cost is on the trend row, the session cost alone on
   expect(header[0]).not.toContain('0.38')
   expect(header.find(r => /^turn /.test(r))).toMatch(/^turn +\$\+0\.38 · pace 7d/)
 })
+
+for (const order of ['end, measure', 'measure, end', 'end, next start, measure'] as const) {
+  test(`header: the trend row keeps the last turn's cost while the next one runs (${order})`, async ($, on) => {
+    world(on)
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('session.measure', (_, e) => ({ changed: e.changed }))
+    on('turn.complete', () => ({ text: '' }))
+    const measure = (usd: number) => $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd }, changed: ['context', 'cost'] })
+    const end = (turnId: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+    const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    if (order === 'measure, end') await measure(5.2)
+    await end('t1')
+    if (order === 'end, measure') await measure(5.2)
+    await $.turn.start({ text: 'next', turnId: 't2' })
+    if (order === 'end, next start, measure') await measure(5.2)
+    expect(await trend()).toMatch(/^turn +\$\+0\.38 /)
+    await measure(5.5)
+    expect(await trend()).toMatch(/^turn +\$\+0\.30 /)
+  })
+}
+
+for (const order of ['measure, end', 'end only'] as const) {
+  test(`header: a new session (/clear) does not show the previous session's turn cost (${order})`, async ($, on) => {
+    let id = 's-1'
+    world(on, { sessionId: () => id })
+    on('turn.start', (_, e) => ({ turnId: e.turnId }))
+    on('session.measure', (_, e) => ({ changed: e.changed }))
+    on('turn.complete', () => ({ text: '' }))
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    await $.turn.start({ text: 'go', turnId: 't1' })
+    if (order === 'measure, end') await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
+    await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+    id = 's-2'
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const trend = headerOf((await paneRows($)).rows).find(r => /^turn /.test(r)) ?? ''
+    expect(trend).not.toMatch(/\$\+\d/)
+  })
+}
 
 test('header: the folder icon of a folder that is not a repository is U+F024B', async ($, on) => {
   world(on, { notRepo: true })

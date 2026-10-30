@@ -51,8 +51,8 @@ test('Subagents: a finished agent leaves the list after 2 minutes for HISTORY, c
   expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
   const keys = async () => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('history:'))
   expect(await keys()).toEqual(['history:a2', 'history:a1'])
-  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^󰅖 two +son 5\.5 +\$ +0\.00 +5s$/)
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^󰄬 one +son 5\.5 +\$ +0\.00 +0s$/)
+  expect((await ui.find({ key: 'history:a2' }))?.text).toMatch(/^󰅖 two +son 5\.5 +\$ +0\.00 +00m05s$/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/^󰄬 one +son 5\.5 +\$ +0\.00 +00m00s$/)
   expect(await ui.find({ key: 'history:more' })).toBeUndefined() // two rows: nothing to open
   await ui.unmount()
 
@@ -113,7 +113,7 @@ test('HISTORY survives a reload: the session id reads its history from its state
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   let ui = await mountPane($)
   expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
-  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^󰄬 implementer +son 5\.5 +\d+% +1m00s$/)
+  expect((await ui.find({ key: 'history:a9' }))?.text).toMatch(/^󰄬 implementer +son 5\.5 +\d+% +01m00s$/)
   expect((await ui.find({ key: 'history:a8' }))?.text).toMatch(/^󰅖 reviewer/)
   await ui.unmount()
 
@@ -247,7 +247,7 @@ test('Subagents: a row ends with the agent\'s share of the session tokens before
     await ui.press({ key: 'tab:agents' })
     const row = rowTexts(await ui.drawn()).find(r => /^󱎖 /.test(r)) ?? ''
     expect(textCells(row)).toBeLessThanOrEqual(width)
-    expect(row).toMatch(/ +100% +\$ *(?:<0\.01|\d+\.\d\d) +0s$/)
+    expect(row).toMatch(/ +100% +\$ *(?:<0\.01|\d+\.\d\d) +00m00s$/)
     expect(row).not.toMatch(/1\.7k/) // the total tokens are in the expanded details
     await ui.unmount()
   }
@@ -381,7 +381,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await ui.press({ key: 'tab:agents' })
   const rows = async () => rowTexts(await ui.drawn())
   const facts = async () => {
-    const m = /(\d+%) +\$ *(?:<0\.01|\d+\.\d\d) +(\d+s)$/.exec((await rows()).find(r => /^[󱎖󰄬] code-reviewer/u.test(r)) ?? '')
+    const m = /(\d+%) +\$ *(?:<0\.01|\d+\.\d\d) +(\d\dm\d\ds)$/.exec((await rows()).find(r => /^[󱎖󰄬] code-reviewer/u.test(r)) ?? '')
     return m && `${m[1]} ${m[2]}`
   }
   const counters = /^ +in 1k {2}out 200 {2}cr 8k {2}cw 500$/
@@ -392,7 +392,7 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await step('a1')
   let now = await rows()
   // collapsed: one row, the model a word, the effort an icon, their share of the session and the time; nothing else of the agent
-  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^󱎖 code-reviewer +son 5\.5 +\u{F12A3} +100% +\$ *(?:<0\.01|\d+\.\d\d) +0s$/u)
+  expect(now.find(r => /code-reviewer/.test(r))).toMatch(/^󱎖 code-reviewer +son 5\.5 +\u{F12A3} +100% +\$ *(?:<0\.01|\d+\.\d\d) +00m00s$/u)
   expect(now.some(r => counters.test(r) || /^ +go$/.test(r))).toBe(false)
   // a press expands it: what it was asked and the four counters; the next press collapses it
   await ui.press({ key: 'agent:a1' })
@@ -403,16 +403,16 @@ test('Subagenti: an agent block shows state, type, description, model, effort, s
   await ui.press({ key: 'agent:a1' })
   expect((await rows()).some(r => counters.test(r))).toBe(false)
   await ui.press({ key: 'agent:a1' })
-  expect(await facts()).toBe('100% 0s')
+  expect(await facts()).toBe('100% 00m00s')
 
   // the main loop's step counts in the session: the agent is half of it
   await step()
-  expect(await facts()).toBe('50% 0s')
+  expect(await facts()).toBe('50% 00m00s')
 
   // the elapsed time moves with the fast tier
   await clock.advance(2000)
   await settleAll()
-  expect(await facts()).toBe('50% 2s')
+  expect(await facts()).toBe('50% 00m02s')
 
   // the tool in flight, then the last one
   const call = $.tool.call({ tool: 'Read', file_path: '/a', agentId: 'a1' })
@@ -492,19 +492,19 @@ test('Subagenti: the elapsed time is refreshed by the fast tier only while this 
   await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
   await spawnAgent($, 'code-reviewer')
   const ui = await mountPane($)
-  const elapsed = async () => /(\d+s)$/.exec((await ui.find({ key: 'agent:a1' }))?.text ?? '')?.[1]
+  const elapsed = async () => /(\d\dm\d\ds)$/.exec((await ui.find({ key: 'agent:a1' }))?.text ?? '')?.[1]
   await ui.press({ key: 'tab:agents' })
   await clock.advance(4000)
   await settleAll()
-  expect(await elapsed()).toBe('4s')
+  expect(await elapsed()).toBe('00m04s')
   await ui.press({ key: 'tab:notes' })
   await clock.advance(4000) // Notes has no clock: the agent's time stands where it was
   await settleAll()
   await ui.press({ key: 'tab:agents' })
-  expect(await elapsed()).toBe('4s')
+  expect(await elapsed()).toBe('00m04s')
   await clock.advance(2000)
   await settleAll()
-  expect(await elapsed()).toBe('10s')
+  expect(await elapsed()).toBe('00m10s')
   await ui.unmount()
 })
 

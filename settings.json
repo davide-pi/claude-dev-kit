@@ -16,7 +16,8 @@
     "CLAUDE_WORKSPACE_ROOTS": "",
     "CLAUDE_WORKSPACE_NESTED": "",
     "CLAUDE_WORKTREE_ROOT": "",
-    "CLAUDE_DONE_CLAIM": "1"
+    "CLAUDE_DONE_CLAIM": "1",
+    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "150k"
   },
   "bashOutputMaxChars": 15000,
   "attribution": {
@@ -670,7 +671,7 @@
       "$defaults"
     ]
   },
-  "model": "opus[1m]",
+  "model": "opus",
   "fallbackModel": ["sonnet", "haiku"],
   "hooks": {
     "PreToolUse": [
