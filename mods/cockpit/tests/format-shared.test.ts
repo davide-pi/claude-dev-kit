@@ -6,6 +6,7 @@ import {
   abbrevTokens,
   barCells,
   cacheColor,
+  costCell,
   countdown,
   displayModel,
   duration,
@@ -86,6 +87,16 @@ test('fmtCost and the turn delta', () => {
   expect(fmtCost(undefined)).toBe('$0.00')
   expect(fmtCostDelta(0.38)).toBe('+0.38')
   expect(fmtCostDelta(0.001)).toBe('')
+})
+
+test('costCell: one width, `$` first and two decimals, so `$` and the point line up in a column', () => {
+  expect(costCell(0.382, 7)).toBe('$  0.38')
+  expect(costCell(12.4, 7)).toBe('$ 12.40')
+  expect(costCell(123.456, 7)).toBe('$123.46')
+  expect(costCell(0, 7)).toBe('$  0.00')
+  expect(costCell(0.003, 7)).toBe('$ <0.01')
+  expect(costCell(Number.NaN, 7)).toBe('$  0.00')
+  for (const usd of [0, 0.003, 0.0123, 0.5, 9.99, 42, 999.99]) expect(costCell(usd, 7)).toHaveLength(7)
 })
 
 test('model names, from an id or from a display name', () => {

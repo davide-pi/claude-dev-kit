@@ -31,7 +31,7 @@ test('Context: no TOP AGENTS block and no cost buttons, whatever the agents did'
   await endedAgents($, on)
   const ui = await mountPane($, 58)
   await ui.press({ key: 'tab:context' })
-  expect(rowTexts(await ui.drawn()).some(r => /TOP AGENTS|^reviewer .*\$\d/.test(r))).toBe(false)
+  expect(rowTexts(await ui.drawn()).some(r => /TOP AGENTS|^reviewer .*\$ *[<\d]/.test(r))).toBe(false)
   expect((await ui.findAll({ type: 'Button' })).some(b => /^cost/.test(b.key ?? ''))).toBe(false)
   await ui.unmount()
 })
@@ -41,11 +41,12 @@ test('Agents: every live row carries the agent\'s cost in a fixed cell before it
   for (const width of [40, 58]) {
     const ui = await mountPane($, width)
     await ui.press({ key: 'tab:agents' })
-    const rows = rowTexts(await ui.drawn()).filter(r => /\$\d+\.\d+ +\d+s$/.test(r))
+    const rows = rowTexts(await ui.drawn()).filter(r => /\$ *(?:<0\.01|\d+\.\d\d) +\d+s$/.test(r))
     expect(rows.length).toBeGreaterThanOrEqual(2)
     for (const r of rows) expect(textCells(r)).toBeLessThanOrEqual(width)
-    // the cell ends at the same column in every row
+    // the cell ends at the same column in every row, and its `$` starts at the same column
     expect(new Set(rows.map(r => textCells(r.slice(0, r.search(/ +\d+s$/)))))).toHaveProperty('size', 1)
+    expect(new Set(rows.map(r => textCells(r.slice(0, r.lastIndexOf('$')))))).toHaveProperty('size', 1)
     await ui.unmount()
   }
 })
@@ -55,7 +56,7 @@ test('HISTORY: a row shows the cost the entry kept', async ($, on) => {
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   await ui.press({ key: 'tab:agents' })
-  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/\$1\.50/)
+  expect((await ui.find({ key: 'history:a1' }))?.text).toMatch(/\$ {2}1\.50/)
   await ui.unmount()
 })
 

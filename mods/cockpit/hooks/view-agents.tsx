@@ -1,6 +1,6 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
+import { COLORS, abbrevTokens, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -84,7 +84,7 @@ const MODEL_W = 9
 const MIN_NAME_W = 6
 const SHARE_W = 4
 const TIME_W = 6
-/** The widest cost `fmtCost` writes in a row. */
+/** The cost cell `costCell` writes: `$` and up to `999.99`. */
 const COST_W = 7
 // icon, gap, name, then gap + model, gap + effort, gap + share of the session's tokens, gap + cost, gap + time
 const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + COST_W + 1 + TIME_W
@@ -112,7 +112,7 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
       sp(' '),
       sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
       sp(' '),
-      dim(padStart(usd === undefined ? '' : fmtCost(usd), COST_W)),
+      dim(usd === undefined ? ' '.repeat(COST_W) : costCell(usd, COST_W)),
       sp(' '),
       sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
     ],

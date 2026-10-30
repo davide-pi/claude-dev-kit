@@ -22,7 +22,9 @@ change to `mods/cockpit/` keeps, and the options already tried and dropped.
    from `~/.claude/cockpit.json`, which the install never touches.
 7. **An alert fires once per episode.** It is raised again only after its cause has cleared, and nothing a
    session was resumed with counts as news.
-8. **Files under 600 lines.** Split along a seam that already exists, as pure moves with the same test count.
+8. **Table columns have one width and one format.** A number column pads every row to the same cells and writes
+   the same precision, so units, `$` and decimal points line up: a cost is `costCell` (`$  0.38`).
+9. **Files under 600 lines.** Split along a seam that already exists, as pure moves with the same test count.
 
 ## Engine facts the code depends on
 
