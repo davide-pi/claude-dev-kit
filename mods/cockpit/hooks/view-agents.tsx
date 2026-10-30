@@ -1,6 +1,6 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, abbrevTokens, duration, fmtCost, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
+import { COLORS, FAMILY_SHORT, abbrevTokens, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
 import type { ModelFamily, Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -79,17 +79,17 @@ export function orderAgents(list: readonly CockpitAgent[]): { agent: CockpitAgen
 export const agentIcon = (a: CockpitAgent): Span =>
   a.status === 'running' ? sp('󱎖', COLORS.blue) : a.isInterrupted ? sp('󰓛', COLORS.dim) : a.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green)
 
-const MODEL_W = 9
+const MODEL_W = 7
 /** A name is worth this many cells before a row gives up the model column. */
 const MIN_NAME_W = 6
 const SHARE_W = 4
 const TIME_W = 6
-/** The widest cost `fmtCost` writes in a row. */
+/** The cost cell `costCell` writes: `$` and up to `999.99`. */
 const COST_W = 7
 // icon, gap, name, then gap + model, gap + effort, gap + share of the session's tokens, gap + cost, gap + time
 const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + COST_W + 1 + TIME_W
 
-/** The model with its version (`son 5.5`, `opus 5.5`); a name this build does not know is cut to the column. */
+/** The model with its version (`son 5.5`, `opu 5.5`); a name this build does not know is cut to the column. */
 const rowModel = (model: string | undefined): string => (model ? truncEnd(shortModel(model), MODEL_W) : '—')
 
 /** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, their share of the session's `total` (blank when unknown), its cost `usd` (blank when unknown), time. */
@@ -112,7 +112,7 @@ export function agentRow(a: CockpitAgent, depth: number, now: number, width: num
       sp(' '),
       sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
       sp(' '),
-      dim(padStart(usd === undefined ? '' : fmtCost(usd), COST_W)),
+      dim(usd === undefined ? ' '.repeat(COST_W) : costCell(usd, COST_W)),
       sp(' '),
       sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
     ],
@@ -168,16 +168,17 @@ function wrapped(indent: string, label: readonly Span[], text: string, style: (t
 }
 
 /** Cheapest first (pricing.ts). */
-const COUNT_ORDER: { family: ModelFamily; label: string; color: string }[] = [
-  { family: 'haiku', label: 'haiku', color: COLORS.green },
-  { family: 'sonnet', label: 'son', color: COLORS.blue },
-  { family: 'opus', label: 'opus', color: COLORS.amber },
-  { family: 'fable', label: 'fable', color: COLORS.lavender },
+const COUNT_ORDER: { family: ModelFamily; color: string }[] = [
+  { family: 'haiku', color: COLORS.green },
+  { family: 'sonnet', color: COLORS.blue },
+  { family: 'opus', color: COLORS.amber },
+  { family: 'fable', color: COLORS.lavender },
 ]
 
 export function modelCounts(list: readonly CockpitAgent[]): Span[] {
   const out: Span[] = []
-  for (const { family, label, color } of COUNT_ORDER) {
+  for (const { family, color } of COUNT_ORDER) {
+    const label = FAMILY_SHORT[family]
     const n = list.filter(a => modelFamily(a.model) === family).length
     if (out.length) out.push(sp(' '))
     out.push(n > 0 ? sp(`${label} ×${n}`, color) : dim(`${label} ×0`))

@@ -138,16 +138,17 @@ function workflowBlock(k: Kit): Block {
   return [gap(), line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))]
 }
 
-/** The first `shown` rows, then a button that opens the rest (`󰍟 +K`) and folds them again (`󰍝 −K`); no button when every row fits. */
+/** The first `shown` rows, then a button that opens the rest (`󰍟 +K`) and folds them again (`󰍝 −K`), which open below it so the button stays where it was pressed; no button when every row fits. */
 function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {
   const { Button, Text } = k.ui
   const hidden = rows.length - shown
   if (hidden <= 0) return rows
   return [
-    isOpen ? rows : rows.slice(0, shown),
+    rows.slice(0, shown),
     <Button key={`${key}:more`} plain onPress={onToggle}>
       <Text color={COLORS.title}>{isOpen ? t().lessRows(hidden) : t().moreRows(hidden)}</Text>
     </Button>,
+    isOpen ? rows.slice(shown) : [],
   ]
 }
 

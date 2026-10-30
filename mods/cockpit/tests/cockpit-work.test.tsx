@@ -54,7 +54,8 @@ test('IN PROGRESS: 5 outside files are named, `󰍟 +n` opens the rest and `󰍝
   await ui.press({ key: 'outside:more' })
   await settleAll()
   rows = rowTexts(await ui.drawn())
-  expect(rows.slice(i + 1, i + 8)).toEqual(changed.map(f => `  ${f}`))
+  // the button stays where it was pressed, the rest opens under it
+  expect(rows.slice(i + 1, i + 9)).toEqual([...changed.slice(0, 5).map(f => `  ${f}`), '󰍝 −2', ...changed.slice(5).map(f => `  ${f}`)])
   expect((await ui.find({ key: 'outside:more' }))?.text).toBe('󰍝 −2')
   await ui.press({ key: 'outside:more' })
   await settleAll()

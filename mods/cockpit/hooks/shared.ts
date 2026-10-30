@@ -131,6 +131,12 @@ export function fmtCost(usd: number | undefined): string {
   return `$${usd < 0.01 ? usd.toFixed(4) : usd < 1 ? usd.toFixed(3) : usd.toFixed(2)}`
 }
 
+/** A cost in a table cell of `w` cells: `$` first, the amount right-aligned with two decimals (`$  0.38`, `$ 12.40`), so `$` and the point line up row after row; `<0.01` below a cent. */
+export function costCell(usd: number, w: number): string {
+  const amount = Number.isFinite(usd) && usd > 0 && usd < 0.005 ? '<0.01' : (Number.isFinite(usd) ? Math.max(0, usd) : 0).toFixed(2)
+  return `$${amount.padStart(w - 1)}`
+}
+
 /** The last turn's cost, `+0.38`; empty below a cent. */
 export const fmtCostDelta = (d: number | undefined): string =>
   d !== undefined && d >= 0.005 ? `+${d.toFixed(2)}` : ''
@@ -149,9 +155,10 @@ function modelVersion(model: string): string {
   return m[2] === undefined ? (m[1] ?? '') : `${m[1]}.${m[2]}`
 }
 
-const FAMILY_SHORT: Record<ModelFamily, string> = { opus: 'opus', sonnet: 'son', haiku: 'haiku', fable: 'fable' }
+/** Three letters each, so the version after them lines up in a column. */
+export const FAMILY_SHORT: Record<ModelFamily, string> = { opus: 'opu', sonnet: 'son', haiku: 'hai', fable: 'fab' }
 
-/** `son 5.5`, `opus 5.5`: the agent rows and counts. Unknown names pass through. */
+/** `son 5.5`, `opu 5.5`: the agent rows and counts. Unknown names pass through. */
 export function shortModel(model: string | undefined): string {
   if (!model) return ''
   const family = modelFamily(model)
