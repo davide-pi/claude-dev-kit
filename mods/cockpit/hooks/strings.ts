@@ -36,7 +36,7 @@ const EN = {
   // Header
   contextDetailsTitle: 'CONTEXT DETAILS',
   noRateData: 'no rate-limit data',
-  turnGrowth: 'turn',
+  turnCost: 'turn',
   weekPace: 'pace 7d',
   contextAt: (pct: number) => `󰀦 context at ${pct}%`,
   /** The Claude state's word; a running tool shows its own name instead. */
@@ -143,7 +143,7 @@ const IT: Strings = {
 
   contextDetailsTitle: 'DETTAGLI CONTESTO',
   noRateData: 'nessun dato sui limiti',
-  turnGrowth: 'turno',
+  turnCost: 'turno',
   weekPace: 'ritmo 7d',
   contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },

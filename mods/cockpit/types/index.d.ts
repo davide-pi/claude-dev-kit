@@ -234,8 +234,8 @@ export type CockpitSnapshot = {
   effort?: string | number
   /** True when CLAUDE_CODE_SUBAGENT_MODEL forces the subagents' model. */
   isSubagentModelForced: boolean
-  /** Context window of the main loop; `startTokens` is the fill when the last turn began. */
-  ctx: { tokens?: number; window?: number; percent?: number; startTokens?: number }
+  /** Context window of the main loop. */
+  ctx: { tokens?: number; window?: number; percent?: number }
   /** Session cost in USD; `startUsd` is the total when the last turn began. */
   cost: { usd?: number; startUsd?: number }
   rateLimits: CockpitRateLimit[]

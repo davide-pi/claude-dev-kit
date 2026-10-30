@@ -236,7 +236,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
   const pace = sevenDay?.pace
   const trendRow = line(ui, [
-    dim(`${S.turnGrowth} `),
+    dim(`${S.turnCost} `),
     // padded by cells: NOT_YET is one cell but two UTF-16 units
     dim(padStart(costDelta ? `$${costDelta}` : NOT_YET, COST_DELTA_CELLS + 1)),
     windowSep,
