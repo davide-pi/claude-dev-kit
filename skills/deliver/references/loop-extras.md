@@ -10,7 +10,7 @@ low; at S that reviewer is the panel's own Sonnet, at high). The first round tha
 pass does not count; never at S) is a final full read, always: reviewer A alone, once, on the WHOLE change since the start head (the
 scope of round 1), every live finding id asked again. Its model and effort follow the summed review-fix churn: up to 30 lines Sonnet at medium, 31-50 Sonnet at high, over 50 (or a fix with no churn number) Opus at medium. Its findings loop back to fix and delta review.
 
-Coverage: when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
+Coverage: the watcher never counts as a whole reviewer (a Haiku read certifies no file and is never given the never-reviewed list); when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
 final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall). With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
 
 ## The cleanup pass before OK (M, L)

@@ -228,7 +228,7 @@ test('script: a reviewer that threw in round 1 is not asked in a delta round: th
   assert.doesNotMatch(r['reviewer A · round 1 · code'], /never been reviewed/);
   assert.equal(r['reviewer A · round 2 · code'], undefined);
   assert.match(r['reviewer S · round 2 · check the fixes'], /Review the changes since/);
-  assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
+  assert.doesNotMatch(r['reviewer S · round 2 · check the fixes'], /never been reviewed/);   // the watcher never certifies coverage: it is not given the list
   assert.match(r['reviewer B · round 2 · second opinion'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
 });
 
@@ -237,13 +237,16 @@ test('script: a whole reviewer that answers after a fix is asked for ALL the fil
   const f9 = 'src/Orders/F9.cs';
   const { out, calls } = await run(manyArgs(), [
     boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
-    boom,                                                                              // R2: B throws; S answers alone
+    boom,                                                                              // R2: B throws; S answers alone and certifies nothing
+    review([]), review([]),                                                            // the coverage rerun: A and B read everything
   ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
-  const prompt = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
-  assert.match(prompt, /Review the changes since/);
+  const s = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
+  assert.match(s, /Review the changes since/);
+  assert.doesNotMatch(s, /never been reviewed/);
+  const prompt = calls.find(c => c.opts.label.startsWith('reviewer A · round 3')).prompt;
   const full = prompt.match(/review them IN FULL, as changed since the start, not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
-  assert.deepEqual(full, MANY.filter(x => x !== f9));                                  // 13 files: no cut at 8
+  assert.deepEqual(full, [...MANY.filter(x => x !== f9), f9]);                                  // 13 files: no cut at 8
   assert.deepEqual(out.gaps.filter(g => /reviewer B returned nothing/.test(g)).length, 1);
 });
 

@@ -83,6 +83,12 @@ test('script: a fixer whose verify still fails with a V in its toFix is a STALL 
   assert.match(out.resume, /guidance/);
 });
 
+test('script: a review fix that stalls on verify still records its churn (the roundLog, hence the final-read tier of a resume)', async () => {
+  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
+  assert.equal(out.stall.why, 'verify-failed');
+  assert.equal(out.roundLog[0].churn, 40);
+});
+
 test('script: a guided resume after verify-failed runs the fixer again, and a pass closes V1', async () => {
   const first = [impl({ verify: FAIL }), impl({ verify: FAIL })];
   const stalled = await run({ ...ARGS, verify: 'node --test' }, [review([])], first);

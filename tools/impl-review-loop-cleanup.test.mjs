@@ -183,15 +183,14 @@ test('script: a DONE decision that goes on to a cleanup restarts the open counts
   assert.equal(calls.filter(c => c.opts.label === 'cleanup of round 3 minor findings').length, 1);
 });
 
-test('script: a cleanup id whose file the delta review did not read stays pending until the round that reads it (F4)', async () => {
-  const { out } = await run(CLEAN, [
+test('script: the cleanup delta is read by the watcher alone: it owes no coverage rerun, whatever files the watcher lists (F4)', async () => {
+  const { out, calls } = await run(CLEAN, [
     review([], [nit(1), nit(2)]),                                                       // R1: two nits -> cleanup
     review([]),                                                                         // R1: B
-    review([], [{ ...nit(1), line: 42 }]),                                              // R3: the rerun (reviewer A) reads the file and still finds F1's nit
-  ], [], { watcher: review([], [], []) });                                             // R2: the delta review (S) lists no file: unread, a coverage rerun follows
+  ], [], { watcher: review([], [], []) });                                             // R2: the delta review (S) lists no file
   assert.equal(out.status, 'OK');
-  assert.deepEqual(out.cleaned.map(x => x.id), ['F2']);
-  assert.deepEqual(out.minor.map(x => x.id), ['F1']);
+  assert.deepEqual(calls.filter(c => c.opts.label?.startsWith('reviewer')).map(c => c.opts.label), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer S · round 2 · check the fixes']);
+  assert.deepEqual(out.cleaned.map(x => x.id), ['F1', 'F2']);
 });
 
 test('script: the first run\'s openQuestions are added only when not already in notes (F6)', async () => {

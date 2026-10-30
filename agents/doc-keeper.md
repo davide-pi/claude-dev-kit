@@ -4,7 +4,7 @@ description: >-
   Use when a change moved something the repository's docs tree describes, or its docs need
   auditing against the source. Writes only inside that tree.
 tools: Read, Grep, Glob, Write, Edit, Bash
-model: sonnet
+model: haiku
 effort: medium
 memory: project
 maxTurns: 40

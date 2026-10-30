@@ -24,7 +24,7 @@ test('deltaReviewers (W6): the reviewers that raised the open findings plus the 
   assert.deepEqual(keys(deltaReviewers(M, ['A'])), ['A', 'S']);
   assert.deepEqual(keys(deltaReviewers(M, [])), ['S']);
   const watcher = deltaReviewers(M, [])[0];
-  assert.deepEqual([watcher.agentType, watcher.model, watcher.effort, watcher.whole], ['code-reviewer', 'haiku', 'low', true]);
+  assert.deepEqual([watcher.agentType, watcher.model, watcher.effort, watcher.whole], ['code-reviewer', 'haiku', 'low', false]);   // the watcher never certifies coverage
   assert.deepEqual(keys(deltaReviewers(reviewersFor('S'), [])), ['A']);
   const L = reviewersFor('L', ['security']);
   assert.deepEqual(keys(deltaReviewers(L, ['B'])), ['B', 'S']);
@@ -108,7 +108,7 @@ test('script (#44): a file still unread after the final read gets the coverage r
   assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read', 'reviewer A · round 4 · code', 'reviewer B · round 4 · second opinion']);
 });
 
-test('script (#42): at M and L the final read runs after a review fix past 30 lines of churn, whoever read the fix delta; S never gets one', async () => {
+test('script (#42): at M and L the final read runs after a review fix, whoever read the fix delta; S never gets one', async () => {
   const m = await run(ARGS_M, [review([], [finding()]), review([], [finding()]), review(closedIds('F1')), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);          // M: A and B both found it, R2 = A + B + the watcher
   assert.equal(m.out.status, 'OK');
   assert.deepEqual(reviewerLabels(m.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read']);
@@ -135,6 +135,18 @@ test('script (W6): L delta round = the reviewer that raised the finding + the wa
   const { out, calls } = await run({ ...ARGS, size: 'L', touches: ['security'] }, [review([]), review([], [finding()]), review([]), review(closedIds('F1'))], [impl(), impl({ snapshot: T2('t2', 40) })]);
   assert.equal(out.status, 'OK');
   assert.deepEqual(reviewerLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer security · round 1', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes', 'reviewer A · round 3 · code, final read']);
+});
+
+test('script (#P24): a watcher that returns nothing is not "missing": its next prompt is the delta, not the whole change', async () => {
+  const { out, calls } = await run({ ...ARGS_M, touches: ['security'] }, [review([], [finding()]), review([]), review([]), review(closedIds('F1')), review(closedIds('F1', 'F2'))], [impl(), impl({ snapshot: T2('t2', 40) }), impl()], {
+    watcher: [null, review(closedIds('F1', 'F2'))],
+    finals: [review(closedIds('F1'), [finding({ line: 300, title: 'a defect only the final read sees' })])],
+  });
+  assert.equal(out.status, 'OK');
+  const s = calls.filter(c => c.opts.label.startsWith('reviewer S'));
+  assert.equal(s.length, 2);
+  assert.match(s[1].prompt, /Review the changes since/);
+  assert.doesNotMatch(s[1].prompt, /Review the change made since the start/);
 });
 
 test('script (W6): the final read runs once: a fix after it is judged by the delta rounds only', async () => {
