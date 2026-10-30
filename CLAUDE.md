@@ -28,12 +28,12 @@ each, then stop.
 | # | Proposal | Reason | Risk |
 | --- | --- | --- | --- |
 
-Number rows `#P1`, `#P2`; stable all conversation. Risk: **high** behaviour, data, contract; **medium** local
+Rows `#P1`, `#P2`, stable all conversation. Risk: **high** behaviour, data, contract; **medium** local
 logic, testable; **low** cosmetic.
 
 ## Language
 - Chat: `language` setting (unset: English), agent reports too.
-- Commit, pr, prComment, items, wiki: each per the `Lang:` line (none: en).
+- Commit, pr, prComment, items, wiki: each per `Lang:` (none: en).
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
@@ -45,5 +45,5 @@ isn't proof). A main-session edit reply opens with a `**Verification**` line, pl
 `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
-## Search, no prompts
-A command starts with the program: `grep -rn x <abs-path>`, `git -C <path> log`; `cd X && ...` always prompts.
+## Tools, no prompts
+Program first (`git -C <path> log`; `cd X && ...` prompts). Batch independent tool calls; read a file once, not after an edit.

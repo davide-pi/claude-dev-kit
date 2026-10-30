@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { f, ROOT, snapshot, run, ARGS, ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
+import { f, ROOT, snapshot, run, ARGS, ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, reviewCalls, riskAxes, sizeSignal, isReview, reviewLabels } from './impl-review-loop.harness.mjs';
 
 // ── reviewer budget, an agent that throws ─────────────────────────────────
 test('reviewersFor: S one Sonnet at high, M Sonnet and Sonnet at high, L Sonnet and Opus at high; specialists at M and L only when touched', () => {
@@ -20,7 +20,10 @@ test('reviewersFor: S one Sonnet at high, M Sonnet and Sonnet at high, L Sonnet 
   assert.deepEqual(spec('M', []), [A, 'B:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(spec('L', []), [A, 'B:code-reviewer:opus:high:whole']);
   assert.deepEqual(spec('S', ['security', 'performance']), [A]);
-  assert.deepEqual(spec('M', ['security']), [A, 'B:code-reviewer:sonnet:high:whole', 'security:review-security:sonnet:high']);
+  assert.deepEqual(spec('M', ['security']), [A, 'B:code-reviewer:opus:high:whole', 'security:review-security:sonnet:high']);
+  assert.equal(reviewersFor('M', ['data'])[1].model, 'opus');
+  for (const axis of ['logic', 'performance', 'money', 'concurrency', 'contract']) assert.equal(reviewersFor('M', [axis])[1].model, 'sonnet', axis);
+  assert.equal(reviewersFor('M', ['security'], true)[1].model, 'opus');
   assert.deepEqual(spec('L', ['performance', 'security']).slice(2), ['security:review-security:sonnet:high', 'performance:review-performance:sonnet:medium']);
   assert.deepEqual(spec('M', undefined), [A, 'B:code-reviewer:sonnet:high:whole']);
   assert.deepEqual(reviewersFor('S', [], true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
@@ -141,10 +144,30 @@ test('coverageAction: nothing unread is ok, the first time unread is a rerun, af
   assert.equal(coverageAction({}), 'ok');
 });
 
-test('coverageOwners: every whole reviewer when something is unread, never a specialist; nobody when nothing is', () => {
-  const rs = [{ key: 'A', whole: true }, { key: 'B', whole: true }, { key: 'security' }];
-  assert.deepEqual(coverageOwners(['a'], rs), ['A', 'B']);
-  assert.deepEqual(coverageOwners([], rs), []);
+test('coverageOwners: A alone, B only with a data/money/concurrency/contract/security axis, never a specialist or the watcher; nobody when nothing is unread', () => {
+  const rs = [{ key: 'A', whole: true }, { key: 'B', whole: true }, { key: 'security' }, { key: 'S', whole: false }];
+  assert.deepEqual(coverageOwners(['a'], rs), ['A']);
+  assert.deepEqual(coverageOwners(['a'], rs, ['logic', 'performance']), ['A']);
+  for (const axis of ['data', 'money', 'concurrency', 'contract', 'security']) assert.deepEqual(coverageOwners(['a'], rs, ['logic', axis]), ['A', 'B'], axis);
+  assert.deepEqual(coverageOwners([], rs, ['data']), []);
+});
+
+test('reviewCalls: 35 up to 10 files, 2 more per file above, capped at 60', () => {
+  assert.deepEqual([0, 10, 11, 15, 30, 40].map(reviewCalls), [35, 35, 37, 45, 60, 60]);
+});
+
+test('script: the reviewer budget follows the expected file count; the writer budget stays 80', async () => {
+  const small = await run(ARGS_M, [review([]), review([])]);
+  assert.match(small.calls.find(c => isReview(c.opts.label, 1)).prompt, /at most 35 tool calls/);
+  const { calls } = await run(manyArgs(), [review([]), review([])], [manyImpl]);
+  calls.filter(c => isReview(c.opts.label, 1)).forEach(c => assert.match(c.prompt, /at most 43 tool calls/));
+  const fixed = await run({ ...ARGS, size: 'S' }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
+  assert.match(fixed.calls.find(c => c.opts.label === 'fix round 1 findings').prompt, /at most 80 tool calls/);
+});
+
+test('script: M with a security or data risk runs B on opus even when the change is not wide', async () => {
+  const { calls } = await run({ ...ARGS_M, risk: ['data'] }, [review([]), review([])]);
+  assert.equal(calls.find(c => c.opts.label === 'reviewer B · round 1 · second opinion').opts.model, 'opus');
 });
 
 test('script: a reviewer that throws is a gap; a whole reviewer covers it; otherwise one rerun of the whole reviewers, then a resumable STALL "gap" naming the files; all throwing is a STALL', async () => {
@@ -160,7 +183,7 @@ test('script: a reviewer that throws is a gap; a whole reviewer covers it; other
   assert.match(uncovered.out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
   assert.doesNotMatch(uncovered.out.stall.reason, /F8\.cs/);
   assert.match(uncovered.out.resume, /resumeFromRunId/);
-  assert.deepEqual(reviewLabels(uncovered.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion']);
+  assert.deepEqual(reviewLabels(uncovered.calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code']);
   assert.equal(uncovered.out.rounds, 2);
   assert.match(uncovered.out.gaps.join('\n'), /round 1: src\/Orders\/F0\.cs .*not read/);            // one gap entry per unread file
   assert.equal(uncovered.out.gaps.filter(g => /not read/.test(g)).length, 8);
@@ -173,18 +196,18 @@ test('script: a reviewer that throws is a gap; a whole reviewer covers it; other
 test('script: a reviewer that leaves files out of filesReviewed is rerun with ALL those files in full, and then the loop ends OK', async () => {
   const { out, calls } = await run(manyArgs(), [
     review([], [], MANY.slice(0, 4)), review([], [], []),                                          // R1: A omits F4..F13, B lists nothing
-    review([]), review([]),                                                                        // R2: both whole reviewers again, now reading everything
+    review([]),                                                                                    // R2: the coverage rerun goes to A alone, now reading everything
   ], [manyImpl]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);
-  assert.deepEqual(reviewLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion']);
-  assert.deepEqual(out.roundLog.map(r => r.reviewers), [2, 2]);
+  assert.deepEqual(reviewLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code']);
+  assert.deepEqual(out.roundLog.map(r => r.reviewers), [2, 1]);
   const full = calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt.match(/not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
   assert.deepEqual(full, MANY.slice(4));                                                           // 10 files: no cut at 8
   assert.deepEqual(out.gaps.filter(g => /not read/.test(g)).length, 10);
 });
 
-test('script: size L with a specialist: A throws, B and the specialist leave files unread, one rerun of A and B, then a STALL "gap" naming the unread files, never OK', async () => {
+test('script: size L with a specialist: A throws, B and the specialist leave files unread, one rerun of A and B (the security axis), then a STALL "gap" naming the unread files, never OK', async () => {
   const boom = new Error('max turns');
   const { out, calls } = await run(manyArgs({ touches: ['security'] }), [boom, review([], [], MANY.slice(8)), review([]), boom, boom], [manyImpl]);
   assert.equal(out.status, 'STALL');
@@ -228,7 +251,7 @@ test('script: a reviewer that threw in round 1 is not asked in a delta round: th
   assert.doesNotMatch(r['reviewer A · round 1 · code'], /never been reviewed/);
   assert.equal(r['reviewer A · round 2 · code'], undefined);
   assert.match(r['reviewer S · round 2 · check the fixes'], /Review the changes since/);
-  assert.match(r['reviewer S · round 2 · check the fixes'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
+  assert.doesNotMatch(r['reviewer S · round 2 · check the fixes'], /never been reviewed/);   // the watcher never certifies coverage: it is not given the list
   assert.match(r['reviewer B · round 2 · second opinion'], /never been reviewed: review them IN FULL.*F0\.cs.*F13\.cs/s);
 });
 
@@ -237,13 +260,16 @@ test('script: a whole reviewer that answers after a fix is asked for ALL the fil
   const f9 = 'src/Orders/F9.cs';
   const { out, calls } = await run(manyArgs(), [
     boom, review([], [finding({ path: f9 })], [f9]),                                   // R1: A throws, B has a P2 and read only F9
-    boom,                                                                              // R2: B throws; S answers alone
+    boom,                                                                              // R2: B throws; S answers alone and certifies nothing
+    review([]), review([]),                                                            // the coverage rerun: A and B read everything
   ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: review([{ id: 'F1', status: 'closed' }]) });
   assert.equal(out.status, 'OK');
-  const prompt = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
-  assert.match(prompt, /Review the changes since/);
+  const s = calls.find(c => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
+  assert.match(s, /Review the changes since/);
+  assert.doesNotMatch(s, /never been reviewed/);
+  const prompt = calls.find(c => c.opts.label.startsWith('reviewer A · round 3')).prompt;
   const full = prompt.match(/review them IN FULL, as changed since the start, not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
-  assert.deepEqual(full, MANY.filter(x => x !== f9));                                  // 13 files: no cut at 8
+  assert.deepEqual(full, [...MANY.filter(x => x !== f9), f9]);                                  // 13 files: no cut at 8
   assert.deepEqual(out.gaps.filter(g => /reviewer B returned nothing/.test(g)).length, 1);
 });
 
@@ -254,7 +280,7 @@ test('script: a reviewer that threw in round 1 and a rerun that reads only part 
     boom, review([], [finding({ path: f9 })], [f9]),
     review([{ id: 'F1', status: 'closed' }], [], [f9]),                                // R2: B answers still reading only F9, S returns nothing (watcher: null)
     boom, boom,                                                                        // R4: the coverage rerun of A and B throws again
-  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: null, finals: [boom, review([{ id: 'F1', status: 'closed' }], [], [f9])] });   // R3: the final read, A throws and B reads only F9
+  ], [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }], { watcher: null, finals: [review([{ id: 'F1', status: 'closed' }], [], [f9])] });   // R3: the final read is A alone and reads only F9
   assert.equal(out.status, 'STALL');
   assert.match(out.stall.reason, /no reviewer read these files.*F0\.cs.*F7\.cs/);
 });
