@@ -41,11 +41,11 @@ test('Agents: every live row carries the agent\'s cost in a fixed cell before it
   for (const width of [40, 58]) {
     const ui = await mountPane($, width)
     await ui.press({ key: 'tab:agents' })
-    const rows = rowTexts(await ui.drawn()).filter(r => /\$ *(?:<0\.01|\d+\.\d\d) +\d+s$/.test(r))
+    const rows = rowTexts(await ui.drawn()).filter(r => /\$ *(?:<0\.01|\d+\.\d\d) +\d\dm\d\ds$/.test(r))
     expect(rows.length).toBeGreaterThanOrEqual(2)
     for (const r of rows) expect(textCells(r)).toBeLessThanOrEqual(width)
     // the cell ends at the same column in every row, and its `$` starts at the same column
-    expect(new Set(rows.map(r => textCells(r.slice(0, r.search(/ +\d+s$/)))))).toHaveProperty('size', 1)
+    expect(new Set(rows.map(r => textCells(r.slice(0, r.search(/ +\d\dm\d\ds$/)))))).toHaveProperty('size', 1)
     expect(new Set(rows.map(r => textCells(r.slice(0, r.lastIndexOf('$')))))).toHaveProperty('size', 1)
     await ui.unmount()
   }

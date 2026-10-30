@@ -28,7 +28,7 @@ test('Subagents: every row is one line cut to the width, at 40, 58 and 80 column
     expect(row).toHaveLength(1)
     expect(textCells(row[0] ?? '')).toBe(width)
     // no usage read yet: the cost cell stays blank, never a made-up $0.00
-    expect(row[0]).toMatch(/^󱎖 a-co[^ ]*… [^$]* +2m00s$/)
+    expect(row[0]).toMatch(/^󱎖 a-co[^ ]*… [^$]* +02m00s$/)
     expect(collapsed.some(r => /Review the orders|last tool|󰀦/.test(r))).toBe(false)
 
     // expanded: every row of the block is one line, none wider than the pane
@@ -82,7 +82,7 @@ test('Subagents: the history rows are one row each, the name cut by display widt
     const row = rows.find(r => re.test(r)) ?? ''
     expect(textCells(row)).toBe(38)
     expect(row).toMatch(/…/)
-    expect(row).toMatch(/ +\d+% +30s$/)
+    expect(row).toMatch(/ +\d+% +00m30s$/)
   }
   await ui.unmount()
 })

@@ -1,9 +1,9 @@
-import { COLORS, abbrevTokens, padCells, truncEnd } from './shared'
+import { COLORS, abbrevTokensFixed, padCells, truncEnd } from './shared'
 import type { Span } from './shared'
 import { CALL_TOOL_W, dim, padStart, sp } from './view-base'
 
-/** Cells of a largest result's tokens (`+38k`). */
-const GREW_TOKENS_W = 6
+/** Cells of a largest result's tokens (`+38.0k`). */
+const GREW_TOKENS_W = 7
 
 /** One of the largest results: the tool, its short argument cut to fit, and the result's estimated tokens. */
 export function bigResultSpans(r: { tool: string; arg?: string; tokens: number }, width: number): Span[] {
@@ -13,6 +13,6 @@ export function bigResultSpans(r: { tool: string; arg?: string; tokens: number }
     sp(' '),
     dim(padCells(truncEnd(r.arg ?? '', argW), argW)),
     sp(' '),
-    sp(padStart(`+${abbrevTokens(r.tokens)}`, GREW_TOKENS_W), COLORS.yellow),
+    sp(padStart(`+${abbrevTokensFixed(r.tokens)}`, GREW_TOKENS_W), COLORS.yellow),
   ]
 }

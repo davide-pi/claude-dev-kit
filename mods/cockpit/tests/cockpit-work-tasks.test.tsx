@@ -40,7 +40,7 @@ test('the task list comes from TodoWrite: title, counts, bar, rows by state and 
   expect(rows[i + 1]).toBe(' ')
   expect(rows[i + 2]).toMatch(/^[▰▱]{48}$/)
   // in progress first, with its elapsed time; then pending; then the completed row
-  expect(rows[i + 3]).toMatch(/^󱎖 Working on it +2m00s$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 Working on it +02m00s$/)
   expect(rows[i + 4]).toMatch(/^󰄰 Pending one +$/)
   expect(rows[i + 5]).toBe('󰄬 2 done')
 })
@@ -147,7 +147,7 @@ test('long subjects are cut with … and more than 6 open tasks end in … +N', 
   for (let n = 1; n <= 7; n++) todos.push(todo(`Pending ${n}`, 'pending'))
   await $.tool.call({ tool: 'TodoWrite', todos })
   const { rows, i } = await taskRows($, 40)
-  expect(rows[i + 3]).toMatch(/^󱎖 A very long subject.*… +0s$/)
+  expect(rows[i + 3]).toMatch(/^󱎖 A very long subject.*… +00m00s$/)
   expect([...(rows[i + 3] ?? '')].length).toBe(38)
   expect(rows.slice(i + 3, i + 9).filter(r => /^[󱎖󰄰]/u.test(r)).length).toBe(6)
   expect(rows[i + 9]).toBe('󰍟 +2')
