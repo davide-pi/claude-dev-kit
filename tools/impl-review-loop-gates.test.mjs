@@ -48,7 +48,7 @@ test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → 
 test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
   const { out, calls } = await run({ ...ARGS_M, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 3);                                                    // R3 is the final full read after the V1 fix
+  assert.equal(out.rounds, 3);                                                    // the V1 fix is a review fix: round 3 is the final read
   assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
   const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
   assert.match(fix, /- V1 \[P1\] \(verify\) - .*node --test.*# fail 2/);
@@ -81,6 +81,12 @@ test('script: a fixer whose verify still fails with a V in its toFix is a STALL 
   assert.equal(out.evidence, 'still red');
   assert.equal(out.notVerified, 'the db part');
   assert.match(out.resume, /guidance/);
+});
+
+test('script: a review fix that stalls on verify still records its churn (the roundLog, hence the final-read tier of a resume)', async () => {
+  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
+  assert.equal(out.stall.why, 'verify-failed');
+  assert.equal(out.roundLog[0].churn, 40);
 });
 
 test('script: a guided resume after verify-failed runs the fixer again, and a pass closes V1', async () => {

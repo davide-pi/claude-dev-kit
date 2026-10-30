@@ -5,19 +5,21 @@ reads which round.
 
 ## Who reads which round
 
-Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus one Sonnet at
-medium (at S that Sonnet is the panel's own, at high). The first round that would end `OK` after a review fix ran (the cleanup
-pass does not count; never at S) is a final full read: the whole panel, once, on the WHOLE change since the start head (the
-scope of round 1), every live finding id asked again. Any size of fix triggers it. Its findings loop back to fix and delta review.
+Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus the watcher (Haiku at
+low; at S that reviewer is the panel's own Sonnet, at high). The first round that would end `OK` after a review fix ran (the cleanup
+pass does not count; never at S) is a final full read, always: reviewer A alone, once, on the WHOLE change since the start head (the
+scope of round 1), every live finding id asked again. Its model and effort follow the summed review-fix churn: up to 30 lines Sonnet at medium, 31-50 Sonnet at high, over 50 (or a fix with no churn number) Opus at medium; when B ran on Opus in the panel, Opus at medium regardless of churn. Its findings loop back to fix and delta review.
 
-Coverage: when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
-final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall). With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
+A `scope` finding raised by A alone and not CONFIRMED (M, L), in a round B also answered, blocks nothing and is never fixed: it stays in `minor`; in a round without B (a delta A reads alone, the final read) it blocks as usual.
+
+Coverage: the watcher never counts as a whole reviewer (a Haiku read certifies no file and is never given the never-reviewed list); when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
+final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall); the rerun goes to A, and B joins it only with a data, money, concurrency, contract or security risk axis. With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
 
 ## The cleanup pass before OK (M, L)
 
 Runs only with `cleanup: true` (the owner asks for it); by default the P3s stay in `minor` for the closing table. A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the
-change does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (one
-Sonnet at medium); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
+change does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (the
+watcher, Haiku at low, and reviewer A: a cleanup id closes only on A's explicit `closed` verdict, silence or the watcher never close one); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
 review has read it; `minor` keeps the rest, and `outOfScope` the P3s outside the perimeter: all for the closing table.
 
 ## Scope check, exit 1

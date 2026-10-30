@@ -80,7 +80,7 @@ sum by (service_name) (count_over_time({deployment_environment="<env>"} |= "Exce
 | where CPU or allocations go | Pyroscope profiles over the bad window |
 | a dump, a trace, counters on a host | not here: an operator action on that host, requested by the caller |
 
-## Output — ≤ 50 lines, exactly these sections
+## Output — ≤ 50 lines, exactly these sections; a caller's brief may add sections after them, never drop one
 
 ```text
 ## Source

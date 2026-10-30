@@ -10,11 +10,13 @@ Spawn a wave in **one message**.
 
 | Job | Agent |
 | --- | --- |
-| code for a decided scope (tests included: the brief names `dotnet-testing`) | `implementer`: effort `medium` by default, the brief says `high` for a delicate change |
+| code for a decided scope (tests included: the brief names `dotnet-testing`) | `implementer` inside `impl-review-loop` (`deliver`), never launched by hand: effort `medium` by default, the brief says `high` for a delicate change |
 | multi-lens review | `/code-review` (a PR too) — never a hand-rolled review fan-out |
 | locate code, trace a flow | `investigator` |
-| wide read-only search | `Explore` |
+| wide read-only search | `Explore` (Haiku, its model never overridden) |
+| read-only audit or opinion | `analyst` or `Explore`; `Plan` with `model: sonnet`, opus only for the L challenger (deliver `loop.md`) |
 | SQL, logs | `/db`, `/logs` (their forks run `db-analyst`, `ops-analyst`) |
+| any other job | a fork only when the parent context is needed, else a fresh agent with a brief |
 
 ## The brief — what an agent cannot infer
 

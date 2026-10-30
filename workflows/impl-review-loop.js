@@ -43,6 +43,7 @@ const parseDirty = entry => String(entry ?? '').replace(/^[ MADRCUT?!]{2} /, '')
 
 // A reworded title must also sit within LINE_WINDOW lines, an identical one within 3x (two defects of one file can share a title).
 const LINE_WINDOW = 10
+const NOTE_WINDOW = 2   // a repeat of a soft note this close to it is the note itself
 const STOPWORDS = new Set(['non', 'per', 'con', 'del', 'della', 'dei', 'delle', 'nel', 'nella', 'che', 'una', 'uno', 'gli', 'dal', 'alla', 'sul',
   'manca', 'mancano', 'senza', 'the', 'not', 'and', 'for', 'with', 'without', 'missing', 'does', 'from', 'when', 'that', 'this', 'are', 'but'])
 const words = t => new Set(String(t ?? '').toLowerCase().split(/[^\p{L}\p{N}]+/u).filter(w => w.length >= 3 && !STOPWORDS.has(w)))
@@ -66,9 +67,12 @@ const WIDE_FILES = 10   // past either, the change is wide: M's second reviewer 
 const WIDE_LINES = 600
 
 // A mechanical S (rename, move, config, generated, covered by tests) needs no reasoning depth: the reviewer runs at low.
+// At M, B also runs on opus when the change is not wide but its risk includes security or data, mechanical or not.
+const OPUS_AXES = ['security', 'data']
 const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
   const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', size === 'L' || (wide && !mechanical) ? 'opus' : 'sonnet', 'high')]
+  const bOpus = size === 'L' || (wide && !mechanical) || (size === 'M' && touches.some(x => OPUS_AXES.includes(x)))
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', bOpus ? 'opus' : 'sonnet', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -79,6 +83,8 @@ const SIZES = ['S', 'M', 'L']
 const RISKS = ['logic', 'data', 'money', 'concurrency', 'contract', 'security', 'performance']
 const FLOOR_M = ['data', 'money', 'concurrency', 'contract', 'security']
 const riskAxes = (risk, touches) => [...new Set([...(Array.isArray(risk) ? risk : []), ...(Array.isArray(touches) ? touches : [])].filter(x => RISKS.includes(x)))]
+// A reviewer's tool calls: 35, plus 2 for each expected file above WIDE_FILES, capped at 60.
+const reviewCalls = count => Math.min(60, 35 + 2 * Math.max(0, count - WIDE_FILES))
 const sizeFor = (given, axes = []) => {
   const floor = axes.filter(x => x !== 'logic').length >= 3 ? 'L' : axes.some(x => FLOOR_M.includes(x)) ? 'M' : 'S'
   return SIZES[Math.max(SIZES.indexOf(given), SIZES.indexOf(floor))]
@@ -131,7 +137,13 @@ const unreviewedFiles = (answers, reviewers, pending = [], root = '', changed = 
 
 const coverageAction = ({ unread = [], retried = false } = {}) => (!unread.length ? 'ok' : retried ? 'stall' : 'rerun')
 
-const coverageOwners = (unread, reviewers) => (unread.length ? reviewers.filter(r => r.whole).map(r => r.key) : [])
+// The rerun goes to A; B joins it only for a risk axis other than logic and performance. Never the watcher.
+const coverageOwners = (unread, reviewers, axes = []) => (unread.length ? reviewers.filter(r => r.whole && (r.key === 'A' || (r.key === 'B' && axes.some(x => FLOOR_M.includes(x))))).map(r => r.key) : [])
+
+// At M and L a scope finding raised by A alone and not CONFIRMED stays a note: it blocks nothing and is never sent to a fix.
+// Only in a round B answered too: without B "no other reviewer found it" is not established.
+const isSoftScope = (f, finders, size, readers) => size !== 'S' && readers.includes('B') && f.category === 'scope' && f.confidence !== 'CONFIRMED' && (finders ?? []).join() === 'A'
+const softScope = (found, raisedBy, size, readers = []) => found.filter(f => isSoftScope(f, raisedBy[f.id], size, readers)).map(f => f.id)
 
 const findingHistory = roundLog => {
   const byId = new Map()
@@ -206,7 +218,10 @@ const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) =>
   return { pending, answered }
 }
 
-const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'sonnet', effort: 'medium', whole: true }
+const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'haiku', effort: 'low', whole: false }   // a Haiku read never certifies coverage
+// The final read (reviewer A alone) always follows a review fix at M/L; its model and effort grow with the summed review-fix churn (no churn number counts as the top tier).
+const FINAL_READ_SONNET_MEDIUM_MAX = 30
+const FINAL_READ_SONNET_HIGH_MAX = 50
 const deltaReviewers = (everyone, finders = []) => {
   const has = new Set(everyone.map(r => r.key))
   const wanted = new Set(finders.filter(k => has.has(k)))
@@ -297,21 +312,29 @@ const rejectionLedger = ({ rejected = [], counts = {} } = {}) => {
   return { counts: next, challenge, notReproduced }
 }
 
-const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '' } = {}) => {
+// A note (softIds) seen again is new, not absorbed, when `blocks(f)` says it blocks now (the note is then superseded: `superseded`)
+// or `apart(f, note)` says it is a new hunk off the note's own lines (the note stays: it is another defect).
+const dedupeFound = ({ found = [], known = {}, tracked = {}, verdicts = {}, root = '', softIds = new Set(), blocks = () => false, apart = () => false } = {}) => {
   const next = { ...verdicts }
   const fresh = []
   const rematched = []
+  const superseded = []
   for (const f of found) {
-    const hits = Object.entries(known).filter(([, k]) => sameFinding(f, k, root) && rank(f) >= rank(k))
+    const matches = Object.entries(known).filter(([, k]) => sameFinding(f, k, root) && rank(f) >= rank(k))
+    const hits = matches.filter(([id, k]) => !(softIds.has(id) && (blocks(f) || apart(f, k))))
     const hit = hits.find(([id]) => tracked[id]) ?? hits[0]
-    if (!hit) { fresh.push(f); continue }
+    if (!hit) {
+      fresh.push(f)
+      for (const [id, k] of matches) if (softIds.has(id) && blocks(f) && !apart(f, k) && !superseded.includes(id)) superseded.push(id)
+      continue
+    }
     const [id] = hit
     if (tracked[id]) { next[id] = 'open'; rematched.push(id) }
   }
-  return { found: fresh, verdicts: next, rematched }
+  return { found: fresh, verdicts: next, rematched, superseded }
 }
 
-const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', touched = [], resolution, silent = {}, challenged = [], rejections = {}, notReproduced = [] } = {}) => {
+const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirty = [], root = '', touched = [], resolution, silent = {}, challenged = [], rejections = {}, notReproduced = [], soft = [] } = {}) => {
   const accept = new Set(resolution?.accept ?? [])
   const guided = !!resolution?.guidance || resolution?.retry === true
   const next = {}
@@ -352,7 +375,7 @@ const decideRound = ({ tracked = {}, verdicts = {}, found = [], files = [], dirt
   const minor = []
   const outOfScope = []
   const fresh = []
-  const kinds = found.map(f => classify(f, files, { dirty, root, touched }))
+  const kinds = found.map(f => (soft.includes(f.id) ? 'minor' : classify(f, files, { dirty, root, touched })))
   const revertFiles = new Set(found.filter((f, i) => kinds[i] === 'blocking' && f.category === 'scope' && !accept.has(f.id)).map(f => rel(f.path, root)))
   for (const [i, f] of found.entries()) {
     const kind = kinds[i] === 'widen' && revertFiles.has(rel(f.path, root)) ? 'blocking' : kinds[i]
@@ -504,6 +527,7 @@ const REVIEW = obj(['previous', 'found', 'checked', 'filesReviewed'], {
 
 const known = {}
 const raisedBy = {}
+const softIds = new Set()
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = [], minor = [], cleaned = [], gaps = [], notes = [], noticed = [], proposals = [], defaults = [], rounds = [], failures = {}
 let tracked = {}, nextId = 1, round = 0, nextV = 1, verifyOpen = [], lastReport = null
@@ -511,8 +535,9 @@ let lastFix = null, lastTree = '', lastDelta = '', lastDeltaBase = ''
 let rejectionCounts = {}, challenged = {}, skipped = [], silent = {}
 let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = false, cleanupSent = []
 let fixChurns = [], openCounts = [], afterFix = false
+let churnMissing = false   // a review fix with no churn number takes the final read to the top tier
 let nextRound = { only: null, coverage: false, final: false }
-let finalReading = false, finalReadDone = false
+let finalReading = false, finalReadDone = false, finalTier = null
 let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
 let reviewFixed = false, bigFiles = []   // reviewFixed: a review fix ran (a cleanup pass is none)
 
@@ -706,18 +731,20 @@ const anchor = id => `${known[id].path}${known[id].line ? `:${known[id].line}` :
 const previousBlock = () => {
   const mineIds = everyId()
   const ids = mineIds.filter(id => !challenged[id])
-  if (!mineIds.length) {
+  if (!mineIds.length && !cleanupSent.length) {
     return Object.keys(tracked).length
       ? 'PREVIOUS FINDINGS: none to judge (the earlier ones are closed or accepted and the last fix did not touch them: give no verdict).'
       : 'PREVIOUS FINDINGS: none (first round: review the whole change).'
   }
-  if (!ids.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
-  const list = ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)
+  if (!ids.length && !cleanupSent.length) return 'PREVIOUS FINDINGS: none besides the CHALLENGE below (give a verdict for those ids only).'
+  // The cleanup pass's ids are minor, not tracked: A's `closed` verdict is what closes one.
+  const list = [...ids.map(id => `- ${id} [${tracked[id].status}] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`), ...cleanupSent.map(id => `- ${id} [cleanup] ${anchor(id)} - ${known[id].title}: ${known[id].failure}`)]
+  const cleanupLine = cleanupSent.length ? '\nIds marked [cleanup] close only with your explicit closed verdict: one you skip stays open and is not asked again.' : ''
   if (skipped.length) {
     const who = mineIds.length > ids.length ? 'for each of these ids and for each id of the CHALLENGE below' : 'for each of these ids only'
-    return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, ${who}; an id you skip again stalls the loop):\n${list.join('\n')}`
+    return `PREVIOUS FINDINGS you skipped last round (give a verdict, closed or open, ${who}; an id you skip again stalls the loop):\n${list.join('\n')}${cleanupLine}`
   }
-  return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}`
+  return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}${cleanupLine}`
 }
 const challengeBlock = () => {
   const list = Object.keys(challenged).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
@@ -763,8 +790,9 @@ while (true) {
   finalReading = final
   const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => raisedBy[id] ?? []))]
   const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
-    : round === 1 || final ? everyone
-    : deltaReviewers(everyone, cleanupSent.length ? [...missing] : [...finders, ...missing])
+    : final ? everyone.filter(r => r.key === 'A')
+    : round === 1 ? everyone
+    : deltaReviewers(everyone, cleanupSent.length ? ['A', ...missing] : [...finders, ...missing])   // the cleanup delta: A reads it beside the watcher; only A's explicit closed verdict closes an id
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
   const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
@@ -782,26 +810,27 @@ while (true) {
     verifyText(),
     reviewPerimeter,
     dirtyText,
-    'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
+    'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2; CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
-    `Effort: ${r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
+    `Effort: ${final ? finalTier.effort : r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(),
     challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
-    budgetText(35),
-  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
+    budgetText(reviewCalls(expected.length)),
+  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: final ? finalTier.model : r.model, effort: final ? finalTier.effort : r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
   alive.forEach(takeDefaults)
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
-  const owedNow = round === 1 || final ? expected : only ? [] : (lastFix?.files ?? [])
+  // A round with no whole reviewer owes no coverage: those files were read by a whole reviewer before.
+  const owedNow = round === 1 || final ? expected : only || !reviewers.some(r => r.whole) ? [] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
   unread = unreviewedFiles(answers, reviewers, unread, repoRoot, owedNow)
   unread.filter(f => !wasUnread.has(rel(f, repoRoot))).forEach(f => gaps.push(`round ${round}: ${f} was not read by its reviewer (not in filesReviewed)`))
   if (!unread.length) coverageRetried = false
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (r.whole) return
+    if (r.whole || r.key === WATCHER.key) return
     if (a) missing.delete(r.key)
     else missing.add(r.key)
   })
@@ -818,24 +847,40 @@ while (true) {
     return questionStall(round, routed.pending, `the reviewers left ${routed.pending.length} question(s) for the owner: ${routed.pending.map(q => q.text).join(' | ')}`,
       answerResume(round, ASK_EACH, ' The answers go to the fixer and to the later reviewers.'))
   }
-  // An id whose file is still unread waits for the round that reads it.
+  // An id whose file is still unread waits for the round that reads it; one closes only on A's explicit `closed` (the watcher can keep it open, never close it).
   const cleanupWait = []
+  const closedByA = id => alive.some(a => a.key === 'A' && (a.previous ?? []).some(v => v.id === id && v.status === 'closed'))
   for (const id of cleanupSent) {
     if (isDirty(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
-    if (merged.found.some(g => sameFinding(g, known[id], repoRoot))) continue
+    if (merged.found.some(g => sameFinding(g, known[id], repoRoot)) || merged.verdicts[id] !== 'closed' || !closedByA(id)) continue
     const at = minor.findIndex(m => m.id === id)   // splice(-1, 1) would drop the last entry
     if (at >= 0) minor.splice(at, 1)
     cleaned.push(known[id])
   }
   cleanupSent = cleanupWait
-  const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot })
+  const readers = alive.map(a => a.key)
+  // Only a stronger repeat (CONFIRMED, or raised by someone besides A) turns a note into a fresh blocker; a PLAUSIBLE repeat from A stays absorbed.
+  const blocks = f => f.category !== 'scope' || f.confidence === 'CONFIRMED' || findersOf(f, alive, repoRoot).join() !== 'A'
+  // A repeat off the note's own lines, in a file the last fix changed, is the fix's new hunk, not the note.
+  const apart = (f, note) => isDirty(f.path, lastFix?.files ?? [], repoRoot) && Number.isFinite(f.line) && Number.isFinite(note.line) && Math.abs(f.line - note.line) > NOTE_WINDOW
+  const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot, softIds, blocks, apart })
+  const dropNote = id => {
+    softIds.delete(id)
+    delete known[id]   // a dropped note must not match, and so absorb, a later blocking repeat
+    const at = minor.findIndex(m => m.id === id)
+    if (at >= 0) minor.splice(at, 1)
+  }
+  // A note seen again as a blocking finding is now that finding: it leaves the notes, so the closing table lists the defect once.
+  deduped.superseded.forEach(dropNote)
   const found = deduped.found.map(f => ({ ...f, id: `F${nextId++}` }))
   found.forEach(f => { known[f.id] = f; raisedBy[f.id] = findersOf(f, alive, repoRoot) })
   const resolution = resolutions.find(r => Number(r.round) === round)
   const roundFiles = widenedFiles(files, resolutions, round)
   const asked = challenged   // the challenges this decision judges; `challenged` below keeps only the unanswered ones
+  const soft = softScope(found, raisedBy, size, readers)
+  soft.forEach(id => softIds.add(id))
   const decision = decideRound({
-    tracked, verdicts: deduped.verdicts, found, files: roundFiles, dirty, root: repoRoot, touched: [...changed], resolution, silent,
+    tracked, verdicts: deduped.verdicts, found, soft, files: roundFiles, dirty, root: repoRoot, touched: [...changed], resolution, silent,
     challenged: Object.keys(asked), rejections: rejectionCounts, notReproduced: Object.keys(asked).filter(id => asked[id].notReproduced),
   })
   tracked = decision.tracked
@@ -866,8 +911,10 @@ while (true) {
       const keys = [...missing]
       return stallAgain(round, `the specialist reviewer(s) ${keys.join(', ')} returned nothing: their area was never reviewed`, { why: 'gap', reviewers: keys })
     }
-    // The final read is the whole panel on the whole change: it covers every file, so it goes before the coverage rerun.
+    // The final read is reviewer A alone on the whole change, after any review fix at M/L: it covers every file, so it goes before the coverage rerun.
     if (!finalReadDone && reviewFixed && size !== 'S') {
+      const churn = fixChurns.reduce((a, b) => a + b, 0)
+      finalTier = everyone.some(r => r.key === 'B' && r.model === 'opus') ? { model: 'opus', effort: 'medium' } : churnMissing || churn > FINAL_READ_SONNET_HIGH_MAX ? { model: 'opus', effort: 'medium' } : { model: 'sonnet', effort: churn > FINAL_READ_SONNET_MEDIUM_MAX ? 'high' : 'medium' }
       finalReadDone = true
       nextRound = { only: null, coverage: false, final: true }
       openCounts = []
@@ -876,7 +923,7 @@ while (true) {
     const cover = coverageAction({ unread, retried: coverageRetried })
     if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
     if (cover === 'rerun') {
-      nextRound = { only: coverageOwners(unread, everyone), coverage: true }
+      nextRound = { only: coverageOwners(unread, everyone, risk), coverage: true }
       coverageRetried = true
       openCounts = []
       continue
@@ -951,13 +998,13 @@ while (true) {
   lastFix = fixed
   if (!cleaning) reviewFixed = true
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
-  if (fixStall) return verifyStall(round, fixStall)
   if (!cleaning) {
     afterFix = true
     const churn = fixed.snapshot?.churn
     if (Number.isFinite(churn)) {
       fixChurns.push(churn)
       rounds[rounds.length - 1].churn = churn
-    }
+    } else churnMissing = true
   }
+  if (fixStall) return verifyStall(round, fixStall)
 }
