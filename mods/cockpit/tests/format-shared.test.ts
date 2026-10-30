@@ -14,6 +14,7 @@ import {
   fmtCostDelta,
   gridWidths,
   brighten,
+  mix,
   pathToFileUri,
   pctCell,
   rateColor,
@@ -209,28 +210,31 @@ test('sameSnapshot: equal data under other objects is the same, a changed field 
   expect(serialised).toBe(2)
 })
 
-test('brighten raises a colour toward its brightest in the same hue: 0 keeps it, 1 puts the strongest channel at 255', () => {
+test('brighten moves a colour toward white: 0 keeps it, 1 is white, and a channel already at 255 still lights up', () => {
   expect(brighten('#204060', 0)).toBe('#204060')
-  expect(brighten('#204060', 1)).toBe('#55aaff')
-  expect(brighten('#000000', 0.5)).toBe('#000000')
+  expect(brighten('#204060', 1)).toBe('#ffffff')
+  expect(brighten('#ffcf8a', 0.5)).toBe('#ffe7c5')
+  expect(mix('#000000', '#204060', 0.5)).toBe('#102030')
 })
 
-test('withGlow lights the fill with a soft 5-cell profile moving right, then rests past the head; the text never changes', () => {
+test('withGlow flows a 5-cell profile along the whole bar, brighter on the fill and tinted on the track, then rests past the end; the text never changes', () => {
   const bar = barCells(10, [{ pct: 50, color: '#204060' }])
   const colors = (cells: Span[]) => cells.flatMap(c => [...c.t].map(() => c.c))
+  const GLOW = [0.15, 0.35, 0.6, 0.35, 0.15]
   expect(withGlow(bar, -1)).toBe(bar)
   for (const step of [0, 2, 4, 5, 8, 9, 14]) {
     expect(spanText(withGlow(bar, step))).toBe(spanText(bar))
     expect(spanWidth(withGlow(bar, step))).toBe(10)
   }
   // the head of the profile enters from the left: at step 2 its centre is on the first cell
-  expect(colors(withGlow(bar, 2)).slice(0, 4)).toEqual([brighten('#204060', 0.5), brighten('#204060', 0.3), brighten('#204060', 0.12), '#204060'])
-  // in the middle the profile is symmetric
-  expect(colors(withGlow(bar, 4)).slice(0, 5)).toEqual([0.12, 0.3, 0.5, 0.3, 0.12].map(k => brighten('#204060', k)))
-  // the empty part is never lit; past the fill's head the glow rests, then starts again after the cycle (5 + 5 + 6 steps)
-  expect(colors(withGlow(bar, 4)).slice(5)).toEqual(Array(5).fill(COLORS.empty))
-  expect(withGlow(bar, 15)).toEqual(bar)
-  expect(withGlow(bar, 16)).toEqual(withGlow(bar, 0))
+  expect(colors(withGlow(bar, 2)).slice(0, 4)).toEqual([brighten('#204060', 0.6), brighten('#204060', 0.35), brighten('#204060', 0.15), '#204060'])
+  // in the middle of the fill the profile is symmetric
+  expect(colors(withGlow(bar, 4)).slice(0, 5)).toEqual(GLOW.map(k => brighten('#204060', k)))
+  // on the empty track the cells take the fill's hue, so a short fill still shows the flow
+  expect(colors(withGlow(bar, 9)).slice(5)).toEqual(GLOW.map(k => mix(COLORS.empty, '#204060', k)))
+  // past the bar's end the glow rests, then starts again after the cycle (10 + 5 + 6 steps)
+  expect(withGlow(bar, 20)).toEqual(bar)
+  expect(withGlow(bar, 21)).toEqual(withGlow(bar, 0))
   expect(withGlow(barCells(10, []), 3)).toEqual(barCells(10, []))
 })
 
@@ -239,5 +243,5 @@ test('withPulse brightens the fill while on and leaves the text and width alone'
   expect(withPulse(bar, false)).toEqual(bar)
   expect(spanText(withPulse(bar, true))).toBe(spanText(bar))
   expect(spanWidth(withPulse(bar, true))).toBe(10)
-  expect(withPulse(bar, true)[0]?.c).toBe(brighten('#204060', 0.7))
+  expect(withPulse(bar, true)[0]?.c).toBe(brighten('#204060', 0.45))
 })

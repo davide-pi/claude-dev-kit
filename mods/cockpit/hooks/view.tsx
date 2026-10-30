@@ -5,7 +5,6 @@ import { claudeStateSpans } from './agents'
 import { TABS, isWorking } from './session'
 import {
   COLORS,
-  abbrevTokens,
   barCells,
   baseName,
   cacheColor,
@@ -29,7 +28,7 @@ import { t } from './strings'
 import { visibleAgents } from './view-agents'
 import { BUTTON_GAP, buttonRowWidth, delta, dim, line, padStart, sp } from './view-base'
 import type { Ui } from './view-base'
-import { TOKENS_CELLS, contextText, headerEffort, rateRow, rateText } from './view-header'
+import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit, tabBlocks } from './view-tabs'
 import type { Block, Node, PaneActions } from './view-tabs'
@@ -232,16 +231,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         ]
       : windows.map(windowRow)
 
-  // Under the credits: what the current turn added to the context and to the cost, then the week's pace (the credit left against an even burn,
+  // Under the credits: what the current turn added to the cost, then the week's pace (the credit left against an even burn,
   // + is ahead); all dim but the pace, each in its own cells and the row always drawn, so neither the readout nor the tabs below move
-  const grown = s.ctx.percent === undefined ? undefined : delta(s.ctx.tokens, s.ctx.startTokens)
   const costDelta = fmtCostDelta(delta(s.cost.usd, s.cost.startUsd))
   const pace = sevenDay?.pace
   const trendRow = line(ui, [
     dim(`${S.turnGrowth} `),
     // padded by cells: NOT_YET is one cell but two UTF-16 units
-    dim(padStart(grown !== undefined && grown > 0 ? `+${abbrevTokens(grown, true)}` : NOT_YET, TOKENS_CELLS + 1)),
-    dim(padStart(costDelta ? `$${costDelta}` : NOT_YET, COST_DELTA_CELLS + 2)),
+    dim(padStart(costDelta ? `$${costDelta}` : NOT_YET, COST_DELTA_CELLS + 1)),
     windowSep,
     dim(`${S.weekPace} `),
     ...(pace ? [sp(padStart(signedPct(pace.delta), 5), pace.delta < 0 ? COLORS.red : COLORS.green)] : []),
