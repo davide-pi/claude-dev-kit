@@ -67,7 +67,7 @@ test('a shell write that ships or installs arms the turn like an edit; a read-on
   for (const command of ['git -C "C:/a b" push', 'pwsh -c "git commit -m x"', 'gh -R o/r pr create', 'gh --repo=o/r pr merge 3']) {
     assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
   }
-  for (const command of ['git status', 'git log --oneline -3', 'gh pr view 5', 'git merge-base main HEAD', 'git commit-tree abc', 'echo "git push"', 'grep -rn Copy-Item hooks']) {
+  for (const command of ['git status', 'git log --oneline -3', 'gh pr view 5', 'git merge-base main HEAD', 'git commit-tree abc', 'echo "git push"', 'grep -rn Copy-Item hooks', "cat > f <<'EOF'\ngit push\nEOF"]) {
     assert.equal(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, '', command);
   }
   // a failed write changed nothing: it does not arm the turn

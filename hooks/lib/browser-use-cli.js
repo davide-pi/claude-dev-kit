@@ -15,28 +15,7 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { expandSegments, stripWrappers, baseName } = require('./shell-parse');
-
-const HEREDOC = /(?<!<)<<(?!<)-?\s*['"]?([A-Za-z_][\w-]*)['"]?/;   // `<<<` is a here-string of one word, no body
-const HERE_STRING_OPEN = /@['"]\s*$/;
-const HERE_STRING_CLOSE = /^['"]@/;
-
-/** The command without heredoc and here-string bodies: the line that opens one is kept, its body and closer dropped. */
-function withoutBodies(command) {
-  const kept = [];
-  let close = null;
-  for (const line of command.split(/\r?\n/)) {
-    if (close) {
-      if (close(line)) close = null;
-      continue;
-    }
-    kept.push(line);
-    const heredoc = HEREDOC.exec(line);
-    if (heredoc) close = (l) => l.trim() === heredoc[1];
-    else if (HERE_STRING_OPEN.test(line)) close = (l) => HERE_STRING_CLOSE.test(l);
-  }
-  return kept.join('\n');
-}
+const { expandSegments, stripWrappers, baseName, withoutBodies } = require('./shell-parse');
 
 /** True when a `browser-use` program sits in a PATH directory or in `~/.local/bin`. */
 const extensions = (pathExt) => ['', ...String(pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), '.ps1'];

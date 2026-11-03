@@ -75,7 +75,7 @@ const { findGitDir, currentBranch, readRef, commonDir } = require('./lib/git-dir
 const { contextTokens, LARGE_CONTEXT } = require('./lib/context-size');
 const { tailEntries, blocks, entryText, isNotification, isPeerMessage, isPrompt } = require('./lib/session-turn');
 const { READ_ONLY_AGENTS } = require('./lib/read-only-agents');
-const { expandSegments, stripWrappers, baseName } = require('./lib/shell-parse');
+const { expandSegments, stripWrappers, baseName, withoutBodies } = require('./lib/shell-parse');
 const { parseGitCall } = require('./lib/default-branch');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
@@ -89,7 +89,7 @@ const COPY_ITEM = new Set(['copy-item', 'cpi']);
 
 /** True when a command of the line (wrappers skipped, read token by token) is a commit, push, merge, PR create or merge, or a Copy-Item. */
 function isShellWrite(command) {
-  return expandSegments(command).some((tokens) => {
+  return expandSegments(withoutBodies(command)).some((tokens) => {
     const t = stripWrappers(tokens);
     const name = t.length ? baseName(t[0]) : '';
     if (name === 'git') return GIT_WRITES.has(parseGitCall(t)?.subcommand);
