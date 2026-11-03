@@ -396,6 +396,7 @@ try {
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
+        + 'The deciding cell holds copied output only: move any comment or count ("su tutti e 6", "6 files") to the command cell. '
         + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the state of that row.',
     }));
     process.exit(0);
