@@ -43,5 +43,3 @@ export const buttonRowWidth = (labels: readonly string[]): number =>
 export const pad = (s: string, n: number) => s + ' '.repeat(Math.max(0, n - [...s].length))
 export const padStart = (s: string, n: number) => ' '.repeat(Math.max(0, n - [...s].length)) + s
 
-export const delta = (now: number | undefined, start: number | undefined): number | undefined =>
-  now !== undefined && start !== undefined ? now - start : undefined
