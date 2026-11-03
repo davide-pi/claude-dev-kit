@@ -220,6 +220,8 @@ export const register: Register = on => {
         ...withContextReading(s, e.context.tokens),
         cost: measuredCost(s.cost, e.cost?.usd),
         rateLimits: e.rateLimits,
+        // the old threshold is the old window's: a failed read draws none rather than a wrong one
+        ...(isNewWindow && { autoCompactAt: undefined }),
       }
     })
     if (isNewWindow) await refreshAutoCompact($)

@@ -138,6 +138,25 @@ test('CTX bar: a /model that changes the window reads the threshold again', asyn
   await ui.unmount()
 })
 
+test('CTX bar: a /model whose threshold read fails draws no threshold of the old window', async ($, on) => {
+  let isFailing = false
+  world(on, {
+    autoCompactAt: 150_000,
+    get breakdown() {
+      if (isFailing) throw new Error('usage read failed')
+      return undefined
+    },
+  })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 100_000, percent: 10 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  isFailing = true
+  await $.session.measure({ context: { window: 200_000, tokens: 100_000, percent: 50 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ctxBar(ui)).colors).not.toContain(COLORS.amber)
+  await ui.unmount()
+})
+
 test('CTX bar: no tick when the engine reports no autocompact threshold', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
