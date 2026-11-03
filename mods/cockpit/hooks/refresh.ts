@@ -125,11 +125,13 @@ export function startedCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cos
 /**
  * `cost` with a measured `usd`: an ended turn still waiting gets its cost, and the turn running since counts from this reading,
  * whatever order the engine sends the turn's end, the next turn's start and the measure in. The first measure after the end
- * settles it: a turn under a cent there leaves the last cost as it was, and a later measure belongs to the next turn.
+ * settles it: a turn under a cent there leaves the last cost as it was, and a later measure belongs to the next turn. Only a
+ * measure that carries the cost (`isCost`) settles it: a rate-limit point that moves first leaves the turn waiting.
+ * A turn that never gets a measure of its own cannot be told apart: the next turn's first measure is counted in it.
  */
-export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefined): CockpitSnapshot['cost'] {
+export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefined, isCost = true): CockpitSnapshot['cost'] {
   const pending = cost.pendingUsd
-  if (pending === undefined || usd === undefined) return { ...cost, usd }
+  if (pending === undefined || usd === undefined || !isCost) return { ...cost, usd }
   if (usd - pending < CENT) return { ...cost, usd, pendingUsd: undefined }
   return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined }
 }

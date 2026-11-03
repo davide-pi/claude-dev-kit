@@ -218,13 +218,14 @@ export const register: Register = on => {
         // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
         lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
         ...withContextReading(s, e.context.tokens),
-        cost: measuredCost(s.cost, e.cost?.usd),
+        cost: measuredCost(s.cost, e.cost?.usd, e.changed.includes('cost')),
         rateLimits: e.rateLimits,
         // the old threshold is the old window's: a failed read draws none rather than a wrong one
         ...(isNewWindow && { autoCompactAt: undefined }),
       }
     })
-    if (isNewWindow) await refreshAutoCompact($)
+    // the measure is not held for the read
+    if (isNewWindow) void refreshAutoCompact($)
     return next(e)
   })
 

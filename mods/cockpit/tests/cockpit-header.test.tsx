@@ -497,6 +497,29 @@ test("header: a measure that arrives after the turn ended counts in the last tur
   expect(await trend()).toMatch(/^turn +\$\+0\.38 /)
 })
 
+test("header: a measure without the cost does not settle the ended turn's cost", async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  const measure = (usd: number, changed: ('context' | 'cost' | 'rateLimits')[]) =>
+    $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd }, changed })
+  const end = (turnId: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+  const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await measure(5.2, ['context', 'cost'])
+  await end('t1')
+  await $.turn.start({ text: 'two', turnId: 't2' })
+  await end('t2')
+  // a rate-limit point moves before t2's cost arrives, after t3 started
+  await measure(5.2, ['rateLimits'])
+  await $.turn.start({ text: 'three', turnId: 't3' })
+  await measure(5.5, ['cost'])
+  await measure(5.6, ['cost'])
+  expect(await trend()).toMatch(/^turn +\$\+0\.10 /)
+})
+
 for (const order of ['measure, end', 'end only'] as const) {
   test(`header: a new session (/clear) does not show the previous session's turn cost (${order})`, async ($, on) => {
     let id = 's-1'
