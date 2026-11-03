@@ -44,6 +44,7 @@ import {
   refreshUsage,
   refreshWorklog,
   slowTick,
+  startedCost,
 } from './refresh'
 import { diffActions, paneActions } from './pane-actions'
 import { usdOf } from './pricing'
@@ -207,15 +208,23 @@ export const register: Register = on => {
   })
 
   on('session.measure', async ($, e, next) => {
-    await patch($, s => ({
-      ...s,
-      ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
-      // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
-      lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
-      ...withContextReading(s, e.context.tokens),
-      cost: measuredCost(s.cost, e.cost?.usd),
-      rateLimits: e.rateLimits,
-    }))
+    // another window (a /model) moves where the engine compacts
+    let isNewWindow = false
+    await patch($, s => {
+      isNewWindow = s.ctx.window !== undefined && e.context.window !== undefined && s.ctx.window !== e.context.window
+      return {
+        ...s,
+        ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
+        // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
+        lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
+        ...withContextReading(s, e.context.tokens),
+        cost: measuredCost(s.cost, e.cost?.usd),
+        rateLimits: e.rateLimits,
+        // the old threshold is the old window's: a failed read draws none rather than a wrong one
+        ...(isNewWindow && { autoCompactAt: undefined }),
+      }
+    })
+    if (isNewWindow) await refreshAutoCompact($)
     return next(e)
   })
 
@@ -228,7 +237,7 @@ export const register: Register = on => {
       const now = await $.clock.now()
       await patch($, s => ({
         ...s,
-        cost: { ...s.cost, startUsd: s.cost.usd ?? 0 },
+        cost: startedCost(s.cost),
         claudeState: { kind: 'working' },
         workflowRun: endRun(s.workflowRun, now),
       }))

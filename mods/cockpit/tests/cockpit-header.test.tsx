@@ -20,7 +20,7 @@ import {
   updateTask,
 } from './cockpit-fixtures'
 import { NOW, PANE, flagOf, iso, rowTexts, world } from './cockpit-world'
-import { textCells } from '../hooks/shared'
+import { COLORS, textCells } from '../hooks/shared'
 import type { World } from './cockpit-world'
 
 /** The left margin of the drawn root: the column its content starts at. */
@@ -98,24 +98,70 @@ test('the cost is shown at zero and the context reads 0% 0/1M before the first r
   await ui.unmount()
 })
 
-test('CTX bar: a tick where the engine compacts, on both surfaces', async ($, on) => {
+/** The CTX bar's cells and the color of each, on the drawn pane. */
+async function ctxBar(ui: { drawn: (q?: { in: string }) => Promise<unknown> }): Promise<{ bar: string[]; colors: string[] }> {
+  const leaves = (el: unknown): { t: string; c: string }[] => {
+    const o = el as { props?: { color?: string }; children?: unknown[] } | null
+    const [only] = o?.children ?? []
+    return typeof only === 'string' ? [...only].map(t => ({ t, c: o?.props?.color ?? '' })) : (o?.children ?? []).flatMap(leaves)
+  }
+  const cells = leaves(await ui.drawn({ in: 'ctxbar' })).filter(c => /[▰▱]/.test(c.t))
+  return { bar: cells.map(c => c.t), colors: cells.map(c => c.c) }
+}
+
+test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on both surfaces', async ($, on) => {
   world(on, { autoCompactAt: 150_000 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
-    const bar = rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))?.match(/^CTX ([▰▱┃]+)/)?.[1] ?? ''
-    // 150k of the 1M window: the tick at 15% of the bar
-    expect([...bar].filter(c => c === '┃')).toHaveLength(1)
-    expect([...bar].indexOf('┃')).toBe(Math.min(bar.length - 1, Math.round(0.15 * bar.length)))
+    const { bar, colors } = await ctxBar(ui)
+    // 150k of the 1M window: the amber cell at 15% of the bar, still a bar cell
+    expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).not.toContain('┃')
+    expect(colors.filter(c => c === COLORS.amber)).toHaveLength(1)
+    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(0.15 * bar.length)))
     await ui.unmount()
   }
+})
+
+test('CTX bar: a /model that changes the window reads the threshold again', async ($, on) => {
+  const options = { autoCompactAt: 150_000 }
+  world(on, options)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 100_000, percent: 10 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  // the new model's window is 200k, and the engine compacts at 160k of it
+  options.autoCompactAt = 160_000
+  await $.session.measure({ context: { window: 200_000, tokens: 100_000, percent: 50 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const { bar, colors } = await ctxBar(ui)
+  expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(0.8 * bar.length)))
+  await ui.unmount()
+})
+
+test('CTX bar: a /model whose threshold read fails draws no threshold of the old window', async ($, on) => {
+  let isFailing = false
+  world(on, {
+    autoCompactAt: 150_000,
+    get breakdown() {
+      if (isFailing) throw new Error('usage read failed')
+      return undefined
+    },
+  })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 100_000, percent: 10 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  isFailing = true
+  await $.session.measure({ context: { window: 200_000, tokens: 100_000, percent: 50 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  expect((await ctxBar(ui)).colors).not.toContain(COLORS.amber)
+  await ui.unmount()
 })
 
 test('CTX bar: no tick when the engine reports no autocompact threshold', async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).not.toContain('┃')
+  expect((await ctxBar(ui)).colors).not.toContain(COLORS.amber)
   await ui.unmount()
 })
 
@@ -409,6 +455,47 @@ for (const order of ['end, measure', 'measure, end', 'end, next start, measure']
     expect(await trend()).toMatch(/^turn +\$\+0\.30 /)
   })
 }
+
+test('header: a turn under a cent does not split the next turn on a mid-turn measure', async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  const measure = (usd: number, changed: ('context' | 'cost' | 'rateLimits')[] = ['context', 'cost']) =>
+    $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd }, changed })
+  const end = (turnId: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+  const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await measure(5.2)
+  await end('t1')
+  // t2 costs a tenth of a cent: its measure arrives after its end
+  await $.turn.start({ text: 'tiny', turnId: 't2' })
+  await end('t2')
+  await measure(5.201)
+  await $.turn.start({ text: 'next', turnId: 't3' })
+  // a rate-limit point moves while t3 runs: the turn keeps counting from its start
+  await measure(5.3, ['rateLimits'])
+  await measure(5.5)
+  expect(await trend()).toMatch(/^turn +\$\+0\.30 /)
+})
+
+test("header: a measure that arrives after the turn ended counts in the last turn's cost", async ($, on) => {
+  world(on)
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  const measure = (usd: number) => $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd }, changed: ['context', 'cost'] })
+  const end = (turnId: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' })
+  const trend = async () => headerOf((await paneRows($)).rows).find(r => /^turn /.test(r))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await measure(5.0)
+  await end('t1')
+  await measure(5.2)
+  await $.turn.start({ text: 'next', turnId: 't2' })
+  expect(await trend()).toMatch(/^turn +\$\+0\.38 /)
+})
 
 for (const order of ['measure, end', 'end only'] as const) {
   test(`header: a new session (/clear) does not show the previous session's turn cost (${order})`, async ($, on) => {

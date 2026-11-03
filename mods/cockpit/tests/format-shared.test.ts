@@ -78,6 +78,9 @@ test('duration reads seconds, minutes, hours', () => {
   expect(duration(41_000)).toBe('00m41s')
   expect(duration(134_000)).toBe('02m14s')
   expect(duration(3_720_000)).toBe('01h02m')
+  // past 99 hours the days keep the six cells
+  expect(duration(99 * 3_600_000 + 59 * 60_000)).toBe('99h59m')
+  expect(duration(100 * 3_600_000)).toBe(' 4d04h')
 })
 
 test('rateColor projects the end-of-window usage', () => {
@@ -151,12 +154,11 @@ test('barCells fills the width exactly, gap after fill', () => {
   expect(spanText(barCells(4, []))).toBe('\u25b1\u25b1\u25b1\u25b1')
 })
 
-test('barCells marks the autocompact threshold with one amber cell, on the fill or the track; none outside 0-100', () => {
+test('barCells marks the autocompact threshold by turning one cell amber, its glyph kept, on the fill or the track; none outside 0-100', () => {
   const cells = barCells(10, [{ pct: 20, color: 'a' }], 50)
   expect(spanWidth(cells)).toBe(10)
-  expect(spanText(cells)).toBe('\u25b0\u25b0\u25b1\u25b1\u25b1\u2503\u25b1\u25b1\u25b1\u25b1')
-  expect(cells.find(c => c.t === '\u2503')?.c).toBe(COLORS.amber)
-  expect(spanText(barCells(10, [{ pct: 80, color: 'a' }], 15))).toBe('\u25b0\u25b0\u2503\u25b0\u25b0\u25b0\u25b0\u25b0\u25b1\u25b1')
+  expect(cells).toEqual([{ t: '\u25b0\u25b0', c: 'a' }, { t: '\u25b1\u25b1\u25b1', c: COLORS.empty }, { t: '\u25b1', c: COLORS.amber }, { t: '\u25b1\u25b1\u25b1\u25b1', c: COLORS.empty }])
+  expect(barCells(10, [{ pct: 80, color: 'a' }], 15)).toEqual([{ t: '\u25b0\u25b0', c: 'a' }, { t: '\u25b0', c: COLORS.amber }, { t: '\u25b0\u25b0\u25b0\u25b0\u25b0', c: 'a' }, { t: '\u25b1\u25b1', c: COLORS.empty }])
   expect(barCells(10, [{ pct: 20, color: 'a' }], 0)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
   expect(barCells(10, [{ pct: 20, color: 'a' }], 100)).toEqual(barCells(10, [{ pct: 20, color: 'a' }]))
 })

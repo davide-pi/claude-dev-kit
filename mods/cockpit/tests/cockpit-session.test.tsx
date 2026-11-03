@@ -190,6 +190,21 @@ test('the state file follows the last turn cost and the agent counts, at most on
   expect(log.length).toBe(afterFlush)
 })
 
+test("the state file's last turn cost is the ended turn's while the next one has not been measured", async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  on('turn.start', (_, e) => ({ turnId: e.turnId }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
+  await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
+  await $.turn.start({ text: 'next', turnId: 't2' })
+  await clock.advance(3000)
+  expect(flagOf(writes)).toMatchObject({ lastTurnUsd: 0.38 })
+})
+
 test('the selected tab is written in the state file', async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
