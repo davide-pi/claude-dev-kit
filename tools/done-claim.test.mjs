@@ -64,7 +64,7 @@ test('a shell write that ships or installs arms the turn like an edit; a read-on
   for (const command of ['git commit -m x', 'git -C C:/repo push -u origin b', 'gh pr merge 5 --squash', 'gh pr create --base main', 'Copy-Item a b -Force']) {
     assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
   }
-  for (const command of ['git -C "C:/a b" push', 'pwsh -c "git commit -m x"']) {
+  for (const command of ['git -C "C:/a b" push', 'pwsh -c "git commit -m x"', 'gh -R o/r pr create', 'gh --repo=o/r pr merge 3']) {
     assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
   }
   for (const command of ['git status', 'git log --oneline -3', 'gh pr view 5', 'git merge-base main HEAD', 'git commit-tree abc', 'echo "git push"', 'grep -rn Copy-Item hooks']) {

@@ -17,7 +17,7 @@ const os = require('os');
 const path = require('path');
 const { expandSegments, stripWrappers, baseName } = require('./shell-parse');
 
-const HEREDOC = /<<-?\s*['"]?([A-Za-z_]\w*)['"]?/;
+const HEREDOC = /(?<!<)<<(?!<)-?\s*['"]?([A-Za-z_][\w-]*)['"]?/;   // `<<<` is a here-string of one word, no body
 const HERE_STRING_OPEN = /@['"]\s*$/;
 const HERE_STRING_CLOSE = /^['"]@/;
 
@@ -39,21 +39,28 @@ function withoutBodies(command) {
 }
 
 /** True when a `browser-use` program sits in a PATH directory or in `~/.local/bin`. */
+const extensions = (pathExt) => ['', ...String(pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), '.ps1'];
+
 function installed(pathEnv, pathExt, home) {
   const dirs = String(pathEnv ?? '').split(path.delimiter).map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean);
   if (home) dirs.push(path.join(home, '.local', 'bin'));
-  const exts = ['', ...String(pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), '.ps1'];
-  return dirs.some((dir) => exts.some((ext) => fs.existsSync(path.join(dir, `browser-use${ext}`))));
+  return dirs.some((dir) => extensions(pathExt).some((ext) => fs.existsSync(path.join(dir, `browser-use${ext}`))));
 }
 
 /** `{ reason }` when a command of the line runs `browser-use` and the CLI is not installed, else null. */
 function checkBrowserUseCli(command, pathEnv = process.env.PATH, pathExt = process.env.PATHEXT, home = os.homedir()) {
   if (!/browser-use/i.test(command)) return null;
-  const runs = expandSegments(withoutBodies(command)).some((tokens) => {
+  const missing = expandSegments(withoutBodies(command)).some((tokens) => {
+    if (tokens[0] === 'command' && /^-[vV]$/.test(tokens[1] ?? '')) return false;   // a probe for the CLI, not a run
     const [first] = stripWrappers(tokens);
-    return first !== undefined && baseName(first) === 'browser-use';
+    if (first === undefined || baseName(first) !== 'browser-use') return false;
+    if (/[\\/]/.test(first)) {   // an explicit path: it runs when the file is there
+      const file = first.replace(/^~(?=[\\/])/, home ?? '~');
+      return !extensions(pathExt).some((ext) => fs.existsSync(file + ext) || fs.existsSync(file.replace(/\.[^.\\/]+$/, '') + ext));
+    }
+    return !installed(pathEnv, pathExt, home);
   });
-  if (!runs || installed(pathEnv, pathExt, home)) return null;
+  if (!missing) return null;
   return { reason: "The browser-use CLI is not on the PATH nor in ~/.local/bin: the command would end in exit 127. browser-use is an MCP plugin: use its tools `mcp__plugin_browser-use_browser-use__browser_exec` and `mcp__plugin_browser-use_browser-use__browser_screenshot` (load them with ToolSearch if deferred)." };
 }
 

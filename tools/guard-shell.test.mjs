@@ -967,9 +967,13 @@ test('browser-use is left alone when the CLI is installed or only mentioned', ()
   writeFileSync(join(none, '.local', 'bin', 'browser-use'), '');
   assert.equal(checkBrowserUseCli('browser-use run', '', '', none), null);   // only in ~/.local/bin
   const home = mkdtempSync(join(tmpdir(), 'guard-bu-'));
-  for (const command of ['echo browser-use', 'grep -rn browser-use skills', 'git log --grep browser-use', "cat <<'EOF' > f\nbrowser-use run\nEOF", "$s = @'\nbrowser-use run\n'@"]) {
+  for (const command of ['echo browser-use', 'grep -rn browser-use skills', 'git log --grep browser-use', "cat <<'EOF' > f\nbrowser-use run\nEOF", "$s = @'\nbrowser-use run\n'@", 'command -v browser-use']) {
     assert.equal(checkBrowserUseCli(command, '', '', home), null, command);
   }
+  // an explicit path that exists runs; `<<<` opens no body, so the next line still counts
+  assert.equal(checkBrowserUseCli(`${join(bin, 'browser-use.exe')} run`, '', '.EXE', home), null);
+  assert.equal(checkBrowserUseCli(`${join(bin, 'browser-use')} run`, '', '.EXE', home), null);
+  assert.ok(checkBrowserUseCli('cat <<< "hi"\nbrowser-use run', '', '', home));
   for (const d of [bin, none, home]) rmSync(d, { recursive: true, force: true });
 });
 

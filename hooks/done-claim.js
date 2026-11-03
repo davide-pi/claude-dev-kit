@@ -93,7 +93,11 @@ function isShellWrite(command) {
     const t = stripWrappers(tokens);
     const name = t.length ? baseName(t[0]) : '';
     if (name === 'git') return GIT_WRITES.has(parseGitCall(t)?.subcommand);
-    if (name === 'gh') return t[1] === 'pr' && (t[2] === 'create' || t[2] === 'merge');
+    if (name === 'gh') {
+      const a = t.slice(1);
+      while (a.length && /^-/.test(a[0])) a.splice(0, /^(?:-R|--repo)$/.test(a[0]) ? 2 : 1);   // global options: `-R o/r`, `--repo=o/r`
+      return a[0] === 'pr' && (a[1] === 'create' || a[1] === 'merge');
+    }
     return COPY_ITEM.has(name);
   });
 }
