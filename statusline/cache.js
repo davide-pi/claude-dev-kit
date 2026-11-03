@@ -165,7 +165,7 @@ function reconcileCached() {
 
 // Fallback for model and effort when the payload doesn't carry them (cold start,
 // or a truncated payload): the configured default from settings.json. It is a
-// guess, not a reading — settings.json stores an alias ("opus[1m]") rather than a
+// guess, not a reading — settings.json stores an alias ("opus") rather than a
 // display name, and knows nothing of a mid-session /model switch — so a value
 // sourced from it is marked with the same dim "~" as a stale rate limit.
 const SETTINGS = path.join(CONFIG_DIR, "settings.json");

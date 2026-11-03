@@ -90,11 +90,12 @@ export function clockTime(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
-/** Elapsed time in one fixed shape of 6 cells: `00m41s`, `02m14s`, `01h02m`. */
+/** Elapsed time in one fixed shape of 6 cells: `00m41s`, `02m14s`, `01h02m`; from 100 hours the days, ` 4d04h`. */
 export function duration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
   const two = (n: number) => String(n).padStart(2, '0')
   if (s < 3600) return `${two(Math.floor(s / 60))}m${two(s % 60)}s`
+  if (s >= 100 * 3600) return fixedSpan(ms)
   return `${two(Math.floor(s / 3600))}h${two(Math.floor((s % 3600) / 60))}m`
 }
 
@@ -145,9 +146,18 @@ export function costCell(usd: number, w: number): string {
   return `$${amount.padStart(w - 1)}`
 }
 
+/** Below a cent a turn's cost reads as not yet measured. */
+export const CENT = 0.005
+
+/** The turn cost to show: the running turn's once it reaches a cent, else the last ended turn's. */
+export function shownTurnUsd(cost: { usd?: number; startUsd?: number; lastUsd?: number }): number | undefined {
+  const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
+  return d !== undefined && d >= CENT ? d : cost.lastUsd
+}
+
 /** The last turn's cost, `+0.38`; empty below a cent. */
 export const fmtCostDelta = (d: number | undefined): string =>
-  d !== undefined && d >= 0.005 ? `+${d.toFixed(2)}` : ''
+  d !== undefined && d >= CENT ? `+${d.toFixed(2)}` : ''
 
 export type ModelFamily = 'opus' | 'sonnet' | 'haiku' | 'fable'
 
@@ -300,12 +310,12 @@ export function barCells(width: number, parts: readonly BarPart[], markPct?: num
   return markPct === undefined ? out : withMark(out, markPct)
 }
 
-/** The autocompact threshold's tick on a bar: the cell at `markPct` of the width becomes an amber `┃`; none outside 0-100. */
+/** The autocompact threshold on a bar: the cell at `markPct` of the width turns amber, its glyph kept; none outside 0-100. */
 function withMark(cells: Span[], markPct: number): Span[] {
   const chars = cells.flatMap(c => [...c.t].map(t => ({ ...c, t })))
   if (!(markPct > 0 && markPct < 100) || chars.length === 0) return cells
   const at = Math.min(chars.length - 1, Math.round((markPct / 100) * chars.length))
-  chars[at] = { t: '┃', c: COLORS.amber }
+  chars[at] = { ...chars[at], c: COLORS.amber }
   return chars.reduce<Span[]>((out, cell) => {
     const last = out[out.length - 1]
     if (last && last.c === cell.c && last.t.at(-1) === cell.t) out[out.length - 1] = { ...last, t: last.t + cell.t }

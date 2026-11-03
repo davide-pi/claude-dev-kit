@@ -9,6 +9,7 @@ import { parseRateCache, resolveAlm, tabNeeds, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
 import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
+import { CENT } from './shared'
 import { configDir, patch } from './store'
 import { autoOpenOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
@@ -105,9 +106,6 @@ export async function refreshLastRates($: EngineInterface): Promise<void> {
   }
 }
 
-/** Below a cent a turn's cost reads as not yet measured. */
-const CENT = 0.005
-
 /** `cost` once a main turn ended: its cost where measured, else the turn waits for the next measure to settle it. */
 export function endTurnCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cost'] {
   const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
@@ -115,12 +113,24 @@ export function endTurnCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cos
 }
 
 /**
+ * `cost` once a main turn starts: it counts from the last reading, and an ended turn measured after its end takes its whole cost
+ * (one still waiting for its measure is settled by `measuredCost`).
+ */
+export function startedCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cost'] {
+  const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
+  const lastUsd = cost.pendingUsd === undefined && d !== undefined && d >= CENT ? d : cost.lastUsd
+  return { ...cost, startUsd: cost.usd ?? 0, lastUsd }
+}
+
+/**
  * `cost` with a measured `usd`: an ended turn still waiting gets its cost, and the turn running since counts from this reading,
- * whatever order the engine sends the turn's end, the next turn's start and the measure in.
+ * whatever order the engine sends the turn's end, the next turn's start and the measure in. The first measure after the end
+ * settles it: a turn under a cent there leaves the last cost as it was, and a later measure belongs to the next turn.
  */
 export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefined): CockpitSnapshot['cost'] {
   const pending = cost.pendingUsd
-  if (pending === undefined || usd === undefined || usd - pending < CENT) return { ...cost, usd }
+  if (pending === undefined || usd === undefined) return { ...cost, usd }
+  if (usd - pending < CENT) return { ...cost, usd, pendingUsd: undefined }
   return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined }
 }
 
@@ -141,7 +151,7 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
 }
 
 /**
- * Reads the auto-compaction threshold once per session start: a `summary` breakdown estimates locally, it asks the model for
+ * Reads the auto-compaction threshold at the session start and when a measure changes the window (a /model): a `summary` breakdown estimates locally, it asks the model for
  * nothing. Off, or a failed read, leaves it absent (the header then draws no forecast).
  */
 export async function refreshAutoCompact($: EngineInterface): Promise<void> {

@@ -6,6 +6,7 @@ import { historyTokens, parseHistory } from './agents'
 import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
 import { openContext } from './refresh-context'
 import { parseNotes, savedTab } from './session'
+import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
 import { agentCounts, taskCounts } from './view-agents'
@@ -64,11 +65,11 @@ export async function writeState($: EngineInterface, isForced = false, isHeartbe
     const s = await read($, snapshot)
     // The snapshot belongs to another session (or none yet): its history is not this id's to write.
     if (s.sessionId !== id) return
-    const { usd, startUsd } = s.cost
+    const turnUsd = shownTurnUsd(s.cost)
     const counts = taskCounts(s)
     const content = {
       open: isOpen,
-      lastTurnUsd: usd !== undefined && startUsd !== undefined ? Math.round((usd - startUsd) * 100) / 100 : null,
+      lastTurnUsd: turnUsd !== undefined ? Math.round(turnUsd * 100) / 100 : null,
       agents: agentCounts(s),
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
