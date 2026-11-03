@@ -123,6 +123,23 @@ test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, o
   }
 })
 
+// The engine reports its effective window less 13k (954k of a 967k window) whatever the percent says; the window setting is already in it.
+for (const { pct, at } of [
+  { pct: '20', at: 193_400 },
+  { pct: '100', at: 954_000 },
+  { pct: 'abc', at: 954_000 },
+  { pct: '0', at: 954_000 },
+]) {
+  test(`CTX bar: percent override ${pct} puts the tick where the engine compacts, never past the reported threshold`, async ($, on) => {
+    world(on, { autoCompactAt: 954_000, env: { CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: pct } })
+    await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+    const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+    const { bar, colors } = await ctxBar(ui)
+    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round((at / 1_000_000) * bar.length)))
+    await ui.unmount()
+  })
+}
+
 test('CTX bar: a /model that changes the window reads the threshold again', async ($, on) => {
   const options = { autoCompactAt: 150_000 }
   world(on, options)

@@ -152,6 +152,19 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
   }
 }
 
+// The engine's reported threshold is its effective window (the window setting already applied) less this buffer.
+const COMPACT_BUFFER = 13_000
+
+/**
+ * Where the engine compacts under `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`: the reported threshold leaves the percent out, the engine takes
+ * that percent of the effective window, never past the reported one. A missing or invalid percent leaves the reported threshold.
+ */
+export function withPctOverride(reported: number, pct: string | undefined): number {
+  const p = pct === undefined ? NaN : parseFloat(pct)
+  if (!(p > 0 && p <= 100)) return reported
+  return Math.min(Math.floor((reported + COMPACT_BUFFER) * (p / 100)), reported)
+}
+
 /**
  * Reads the auto-compaction threshold at the session start and when a measure changes the window (a /model): a `summary` breakdown estimates locally, it asks the model for
  * nothing. Off, or a failed read, leaves it absent (the header then draws no forecast).
@@ -159,7 +172,8 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
 export async function refreshAutoCompact($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage({ breakdown: 'summary' })
-    const autoCompactAt = u.context.breakdown?.autoCompactThreshold
+    const reported = u.context.breakdown?.autoCompactThreshold
+    const autoCompactAt = reported === undefined ? undefined : withPctOverride(reported, await $.env.get('CLAUDE_AUTOCOMPACT_PCT_OVERRIDE'))
     await patch($, s => ({ ...s, autoCompactAt }))
   } catch {
     // not measured: no forecast
