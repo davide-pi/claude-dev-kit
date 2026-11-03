@@ -224,9 +224,10 @@ export const register: Register = on => {
         ...(isNewWindow && { autoCompactAt: undefined }),
       }
     })
-    // the measure is not held for the read
-    if (isNewWindow) void refreshAutoCompact($)
-    return next(e)
+    // the measure goes on before the read, and two window changes still read in order
+    const out = await next(e)
+    if (isNewWindow) await refreshAutoCompact($)
+    return out
   })
 
   on('turn.start', async ($, e, next) => {

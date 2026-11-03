@@ -512,7 +512,7 @@ test("header: a measure without the cost does not settle the ended turn's cost",
   await end('t1')
   await $.turn.start({ text: 'two', turnId: 't2' })
   await end('t2')
-  // a rate-limit point moves before t2's cost arrives, after t3 started
+  // a rate-limit point moves before t2's cost arrives and before t3 starts
   await measure(5.2, ['rateLimits'])
   await $.turn.start({ text: 'three', turnId: 't3' })
   await measure(5.5, ['cost'])
