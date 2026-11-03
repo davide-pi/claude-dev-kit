@@ -17,7 +17,7 @@
     "CLAUDE_WORKSPACE_NESTED": "",
     "CLAUDE_WORKTREE_ROOT": "",
     "CLAUDE_DONE_CLAIM": "1",
-    "CLAUDE_CODE_AUTO_COMPACT_WINDOW": "150k"
+    "CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "20"
   },
   "bashOutputMaxChars": 15000,
   "attribution": {
