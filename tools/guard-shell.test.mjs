@@ -943,3 +943,44 @@ test('a read-only agent may still read git; an editing agent or the main session
   }
   rmSync(cwd, { recursive: true, force: true });
 });
+
+// /retro 2026-11-03: `browser-use <<'PY' … PY` from Bash ended in exit 127 twice; the plugin is reached through its MCP tools.
+const { checkBrowserUseCli } = createRequire(import.meta.url)('../hooks/lib/browser-use-cli.js');
+
+test('browser-use run from a shell without the CLI on the PATH is denied, naming the MCP tools', () => {
+  const empty = mkdtempSync(join(tmpdir(), 'guard-bu-'));
+  for (const command of ["browser-use <<'PY'\nprint(list_tabs())\nPY", 'cd x && browser-use run', 'bash -c "browser-use run"', 'C:/tools/browser-use.exe run']) {
+    const r = checkBrowserUseCli(command, empty, '', empty);
+    assert.ok(r, command);
+    assert.match(r.reason, /mcp__plugin_browser-use_browser-use__browser_exec/);
+  }
+  rmSync(empty, { recursive: true, force: true });
+});
+
+test('browser-use is left alone when the CLI is installed or only mentioned', () => {
+  const bin = mkdtempSync(join(tmpdir(), 'guard-bu-'));
+  const none = mkdtempSync(join(tmpdir(), 'guard-bu-'));
+  writeFileSync(join(bin, 'browser-use.exe'), '');
+  assert.equal(checkBrowserUseCli("browser-use <<'PY'\nPY", bin, '.EXE', none), null);   // on the PATH, by PATHEXT
+  assert.equal(checkBrowserUseCli("browser-use <<'PY'\nPY", `"${bin}"`, '.EXE', none), null);   // a quoted PATH entry
+  mkdirSync(join(none, '.local', 'bin'), { recursive: true });
+  writeFileSync(join(none, '.local', 'bin', 'browser-use'), '');
+  assert.equal(checkBrowserUseCli('browser-use run', '', '', none), null);   // only in ~/.local/bin
+  const home = mkdtempSync(join(tmpdir(), 'guard-bu-'));
+  for (const command of ['echo browser-use', 'grep -rn browser-use skills', 'git log --grep browser-use', "cat <<'EOF' > f\nbrowser-use run\nEOF", "$s = @'\nbrowser-use run\n'@"]) {
+    assert.equal(checkBrowserUseCli(command, '', '', home), null, command);
+  }
+  for (const d of [bin, none, home]) rmSync(d, { recursive: true, force: true });
+});
+
+test('the shell guard denies browser-use through evaluate when the CLI is missing', () => {
+  const saved = { PATH: process.env.PATH, HOME: process.env.HOME, USERPROFILE: process.env.USERPROFILE };
+  const empty = mkdtempSync(join(tmpdir(), 'guard-bu-'));
+  Object.assign(process.env, { PATH: empty, HOME: empty, USERPROFILE: empty });
+  try {
+    assert.equal(evaluate({ tool_name: 'Bash', tool_input: { command: "browser-use <<'PY'\nPY" }, cwd: onFeature })?.decision, 'deny');
+  } finally {
+    for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
+    rmSync(empty, { recursive: true, force: true });
+  }
+});

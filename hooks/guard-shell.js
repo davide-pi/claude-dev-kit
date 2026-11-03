@@ -15,6 +15,8 @@
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
  *   - lib/guard.js          — a DENY too: a read-only agent (`agent_type` in `lib/read-only-agents.js`) running a
  *                             git write (checkout, switch, reset, stash, rebase, commit, push); no `agent_type`, no deny;
+ *   - lib/browser-use-cli.js — a DENY too: `browser-use` run from a shell while no such CLI is on the PATH;
+ *                             the plugin is reached through its MCP tools;
  *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
  *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /

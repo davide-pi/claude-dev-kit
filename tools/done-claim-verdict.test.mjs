@@ -164,8 +164,8 @@ test('an Agent or Task hand-back (notification or cross-session message) carries
   assert.equal(stop([prompt('x'), tool('Read'), result(), say(claim)]).reason, '');
 });
 
-test('a delegate counts as an edit for ordering: a shell command after it excuses a claim without a table, before it does not', () => {
-  assert.equal(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, '');
+test('a delegate counts as an edit for ordering: a claim without a table is blocked whether a shell command ran after it or before', () => {
+  assert.match(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, /"Fatto"/);
   assert.match(stop([prompt('x'), tool('Bash'), result(), tool('Workflow'), result(), say('Fatto.')]).reason, /"Fatto"/);
 });
 
