@@ -11,10 +11,25 @@ choice a reviewer would otherwise ask into a `decisions` line before launch, so 
 a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
 
 **The challenger** (when it runs: `SKILL.md` step 2), after the owner's ok and before the loop: one `Plan` agent,
-`model: sonnet` at M, `model: opus` at L (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
-criteria, the perimeter. Output, at most 10 lines: a verdict `tenere` | `cambiare` | `scartare`, why, and the
-alternative if any. Read-only, it never asks the user. Show it to the owner only when the verdict is `cambiare` or
-`scartare`; `tenere` goes on silently.
+`model: sonnet` at M, `model: opus` at L (it replaces `grill-me`, which runs only when the owner asks). Read-only, it
+never asks the user; budget ~12 tool calls over both messages. One agent, two messages, so it cannot anchor on ours:
+
+1. **Blind** (the spawn): the request verbatim, the perimeter and the owner's `decisions`, nothing of our approach. It
+   reads the code they touch and answers, in 3 lines, how it would do it, then stops.
+2. **Attack** (`SendMessage` to the same agent; if it cannot be resumed, a second spawn given its 3 blind lines): our
+   approach and criteria. It attacks from every angle, each one a row or "none": the premise (the request read wrong,
+   the cause elsewhere); a simpler way, or code that already does it; a pre-mortem ("two weeks on it failed: why?");
+   the blast radius and the way back; a criterion no test can prove, or one without its error path.
+3. **Output**, at most 15 lines: `blind way: equivalent | simpler (why, file:line) | worse`; then one row per objection,
+   the heaviest first, `# | Weight | Objection | Evidence | Fix`, weight `blocking` | `minor`, evidence a `file:line`
+   it read or the request's words (it drops an objection with neither); then a verdict, a proposal the owner decides:
+   `scartare` (redo the analysis) only on a `blocking` premise row, or a blind way that is `simpler` and meets all our
+   criteria; `cambiare` (amend the plan) on any other `blocking` row; else `tenere`. A fix that changes an approved
+   criterion or the perimeter is `blocking`, never `minor`.
+
+`cambiare` or `scartare` → shown to the owner with the rows, as a decision. `tenere` → goes on; each `minor` fix taken
+becomes a `decisions` line marked `challenger:` (ours, not the owner's) and a line of the message that launches the
+loop (`challenger: <fix>`): never silent.
 
 ## The start point (before the first edit of the change, yours or the implementer's)
 
