@@ -110,6 +110,7 @@ test('one unproven row blocks even when the other rows are proven, and even afte
   const shell = [prompt('x'), tool('Edit'), result(), tool('Bash'), result('Passed: 48, Failed: 0'), say(two)];
   const { reason, dir } = stop(shell);
   assert.match(reason, /3 passed/);
+  assert.match(reason, /move any comment or count .* to the command cell/);   // the commonest cause, named in the reason
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(JSON.parse(log[0]).rule, 'unproven-row');
   assert.equal(stop([...shell.slice(0, 4), result('Passed: 48, Failed: 0\n3 passed'), say(two)]).reason, '');
@@ -164,8 +165,8 @@ test('an Agent or Task hand-back (notification or cross-session message) carries
   assert.equal(stop([prompt('x'), tool('Read'), result(), say(claim)]).reason, '');
 });
 
-test('a delegate counts as an edit for ordering: a shell command after it excuses a claim without a table, before it does not', () => {
-  assert.equal(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, '');
+test('a delegate counts as an edit for ordering: a claim without a table is blocked whether a shell command ran after it or before', () => {
+  assert.match(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, /"Fatto"/);
   assert.match(stop([prompt('x'), tool('Bash'), result(), tool('Workflow'), result(), say('Fatto.')]).reason, /"Fatto"/);
 });
 

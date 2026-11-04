@@ -1,20 +1,6 @@
 # Loop — launching `impl-review-loop`, and what to do with its answer
 
-## Before the loop: the doubts pass (M and L)
-
-Between the analysis and the loop, list what the request leaves implicit: requirements, edge cases (empty, first run,
-concurrent, failing dependency), ambiguities. Only a doubt whose answer changes behaviour is a question to the user,
-batched in one message, each with a recommendation; the brief states the rest as a decision. The pass also turns every
-choice a reviewer would otherwise ask into a `decisions` line before launch, so the run does not stop on a `question`. S has no pass.
-
-**Criteria** (M, L) cover the error path wherever the change has one: a rejection, an empty result, back to the form,
-a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
-
-**The challenger** (when it runs: `SKILL.md` step 2), after the owner's ok and before the loop: one `Plan` agent,
-`model: sonnet` at M, `model: opus` at L (it replaces `grill-me`, which runs only when the owner asks). Input: the request, the approach, the
-criteria, the perimeter. Output, at most 10 lines: a verdict `tenere` | `cambiare` | `scartare`, why, and the
-alternative if any. Read-only, it never asks the user. Show it to the owner only when the verdict is `cambiare` or
-`scartare`; `tenere` goes on silently.
+Before the loop (M, L): facts first, doubts pass, criteria and challenger: `references/analysis.md`.
 
 ## The start point (before the first edit of the change, yours or the implementer's)
 
@@ -64,6 +50,8 @@ red (the bug scenario's repro test) is fine: note it. A fixer meeting an environ
 A run has a large fixed cost whatever its size: launch once per coherent request. One implementer works through the plan tasks in order, testing after each; the
 reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
 for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
+Tasks on the same files stay with one implementer, in order: a second agent pays the fixed context again and re-reads
+the same files. Parallel runs only for areas that share no file and no test, each in its own worktree (`branch-flow`).
 The implementer stops itself at its turn budget (its agent definition), reporting what's left; a fresh one continues from its edits with a
 clean context, up to four times (`stall.why: incomplete` after that: split the plan). It runs only the tests the change touches while it
 works, and `verify` once at the end.
@@ -124,7 +112,9 @@ proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding an
 ## The verdict
 
 The verdict is the standing evidence table, emitted as a bold title line (`**Verification**`, chat `it`: `Verifica`) and a plain table, never quoted nor inside a code fence; `done-claim`
-accepts it when the third cell looks like output (a digit, ok, verde, green, passed, failed, exit, succeeded). S gets two or three lines. Then:
+proves a `fatto` / `failed` row only when its deciding line is found in what the turn's tools printed. So that cell holds
+output only, copied (`# pass 760`, or `` `True` / `True` `` for several), never a comment: counts and remarks ("6 files",
+"all equal") go in the command cell. S gets two or three lines. Then:
 
 Review: round 2, 0 open P1/P2. Gaps: <gaps, or none>. Residual risks: <list, or none>. Defaults chosen: <defaults, or none>. Local test: proposal <who/what>.
 Chat `it`: `giro`, `P1/P2 aperti`, `Gap`, `nessuno`, `Rischi residui`, `Default scelti`, `Test locale: proposta`.

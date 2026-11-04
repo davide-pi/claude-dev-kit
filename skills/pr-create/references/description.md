@@ -94,6 +94,11 @@ really is all of them, they are still listed by name.
 gh pr create --base $base --title '<title>' --body-file $bodyFile      # + --draft when SKILL.md §5 says draft
 gh pr view --json url --jq .url
 gh issue view <n> --json title,body                                      # the linked issue's text
+# no issue yet (SKILL.md §2): open with --draft, then after the pick
+gh pr view <pr> --json body --jq .body > $bodyFile                        # a new temp file: the first one is gone
+# add the Fixes #<n> line last before the trailer, then
+gh pr edit <pr> --body-file $bodyFile                                     # replaces the whole body
+gh pr ready <pr>                                                          # only when SKILL.md §5 says ready
 ```
 
 Link: `Fixes #<n>` / `Closes #<n>`, `Refs #<n>` when it does not close; the line goes last before the
@@ -114,10 +119,10 @@ unless the commit convention already asks for a co-author trailer.
 
 ## No parent item
 
-Ask once, answerable with one pick: numbered options from the likely candidates — an `AB#` in the
+The PR is already open as a draft and its URL reported (`SKILL.md` §2). Ask once, answerable with one pick: numbered options from the likely candidates — an `AB#` in the
 branch or commits, recent items assigned to the owner (`az boards query`, `@Me`, changed lately, never
 a Task) — plus "create one" (`user-story-standard` text, then `azdo-cli` after the owner's ok).
 
 ## Draft PRs
 
-Say in the body what the draft is still waiting for.
+Say in the body what the draft is still waiting for (the parent item, when none is linked yet).

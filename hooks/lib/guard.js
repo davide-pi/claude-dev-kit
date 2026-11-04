@@ -24,6 +24,7 @@ const { checkDestructive } = require('./destructive');
 const { checkSqlTarget } = require('./sql-target');
 const { checkAlmContract } = require('./alm-contract');
 const { checkSecretRead } = require('./secret-read');
+const { checkBrowserUseCli } = require('./browser-use-cli');
 const { checkDockerCp } = require('./docker-cp');
 const { checkScriptArgs } = require('./script-args');
 const { checkSelfWrite } = require('./self-protect');
@@ -68,7 +69,8 @@ function evaluate(payload) {
 
   const target = safely('sql-target', () => checkSqlTarget(command))
     ?? safely('secret-read', () => checkSecretRead(command))
-    ?? safely('read-only-agent', () => checkReadOnlyAgent(command, payload.agent_type));
+    ?? safely('read-only-agent', () => checkReadOnlyAgent(command, payload.agent_type))
+    ?? safely('browser-use-cli', () => checkBrowserUseCli(command));
   if (target) return { decision: 'deny', reason: target.reason };
 
   const reasons = [
