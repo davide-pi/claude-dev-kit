@@ -58,7 +58,7 @@ widening it is an edit to this file first, with the user's yes. `plan-work`'s pl
 **Docs only** (README, `docs/`, code comments; never a skill, agent, rule or hook): no perimeter, no loop.
 Edit inline, then one `code-reviewer` (Haiku, effort `low`) on the diff; fix its P1/P2 inline, run the project's doc or lint check (this kit: `node tools/validate.mjs`).
 
-`implementer` args: `references/loop.md`; its brief: `file:line` + the change. Before the loop: the section of the chosen scenario in `references/scenarios.md` (read only that one); criteria, doubts pass and challenger: `references/analysis.md`.
+`implementer` args: `references/loop.md`; its brief: `file:line` + the change + the challenger's `read:`. Before the loop: the section of the chosen scenario in `references/scenarios.md` (that one only); criteria, doubts pass and challenger: `references/analysis.md`.
 
 ### 3. Who asks the user
 

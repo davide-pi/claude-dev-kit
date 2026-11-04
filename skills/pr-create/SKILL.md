@@ -35,7 +35,7 @@ GitHub the issue — **never a Task**.
 | collect | candidate ids from the branch name, commit messages, the session's work |
 | resolve | read each id's **type**; a Task → its parent; de-duplicate; link all that remain |
 | none left | **open first, then ask**: create the PR as a draft without `--work-items` and report its URL; then ask once, one pick from numbered candidates (`references/description.md` § No parent item); never create an item unasked |
-| after the pick | `az repos pr work-item add --id <pr> --work-items <id>`, then `az repos pr update --id <pr> --draft false` only when §5 says ready |
+| after the pick | `az repos pr work-item add --id <pr> --work-items <id>`, then `az repos pr update --id <pr> --draft false` only when §5 says ready · github.com → `references/description.md` § GitHub |
 | parents under different Features | link them all and say so: the branch may be doing two things |
 | link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · remote is github.com → `references/description.md` § GitHub |
 
