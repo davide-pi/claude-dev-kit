@@ -228,6 +228,15 @@ test('a proven verdict table is sent back once while the perimeter is still acti
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
 });
 
+test('a progress report mid-run (a row still running) is not the closing verdict: the open perimeter does not send it back', () => {
+  const repo = repoWithPerimeter('active');
+  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `impl-review-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
+    assert.equal(stop(edited(verdict(row('Passed: 48'), open), 'Passed: 48'), { extra: { cwd: repo } }).reason, '', open);
+  }
+  // an honest gap that is not "still running" leaves the check on
+  assert.match(stop(edited(verdict(row('Passed: 48'), row('—', 'non verificato: serve staging', 'e2e')), 'Passed: 48'), { extra: { cwd: repo } }).reason, /Close the perimeter/);
+});
+
 test('the perimeter is read off the disk, no git process: found from a subdirectory with git off the PATH', () => {
   const repo = repoWithPerimeter('active');
   mkdirSync(join(repo, 'src'));
