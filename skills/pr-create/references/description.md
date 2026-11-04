@@ -114,10 +114,10 @@ unless the commit convention already asks for a co-author trailer.
 
 ## No parent item
 
-Ask once, answerable with one pick: numbered options from the likely candidates — an `AB#` in the
+The PR is already open as a draft and its URL reported (`SKILL.md` §2). Ask once, answerable with one pick: numbered options from the likely candidates — an `AB#` in the
 branch or commits, recent items assigned to the owner (`az boards query`, `@Me`, changed lately, never
 a Task) — plus "create one" (`user-story-standard` text, then `azdo-cli` after the owner's ok).
 
 ## Draft PRs
 
-Say in the body what the draft is still waiting for.
+Say in the body what the draft is still waiting for (the parent item, when none is linked yet).

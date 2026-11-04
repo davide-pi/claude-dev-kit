@@ -82,6 +82,13 @@ test('a shell command that ran BEFORE the last edit proves nothing about it → 
 test('"passa" is not a claim: "passa per il controller" is just a sentence', () => {
   assert.equal(stop(edited('La richiesta passa per il controller e poi per il servizio.')).reason, '');
   assert.match(stop(edited('I test passano.')).reason, /"passano"/);
+  assert.match(stop(edited('Ora i test passano tutti.')).reason, /"passano"/);
+  for (const text of ['I campi passano nel brief del challenger.', 'I valori passano al servizio.', 'Le righe passano per il parser.', 'I token passano attraverso il proxy.']) {
+    assert.equal(stop(edited(text)).reason, '', text);
+  }
+  for (const text of ['I test passano in locale.', 'I test passano in CI.', 'I test passano al 100%.', 'I test passano al primo colpo.', 'I test passano come previsto.', 'Ora passano subito.', 'I test passano per ora.']) {
+    assert.match(stop(edited(text)).reason, /"passano"/, text);
+  }
 });
 
 test('"fatto" as a participle mid-sentence is not a claim; as an opening it is', () => {

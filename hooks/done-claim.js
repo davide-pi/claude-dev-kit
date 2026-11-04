@@ -112,7 +112,7 @@ const EXIT_ZERO = /^exit(?: code)? 0$/;
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
 // ("il merge fatto da te", "**fatto** da te"); the other words claim wherever they stand. English `works`
 // is no claim before a qualifier ("it works for X", "works with Y"); `passes` claims only at a clause end or before "now" ("passes the token to X" is prose), `verified` not after "be".
-const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
+const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano(?!\s+(?:nel\w*|nell'|nei|negli|all[aeo']?|ai|agli|alle|al\s+(?!\d|prim)|per\s+(?:il|la|lo|i|le|gli|l')|attraverso|dal\w*|dai|dagli)\b)|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
 const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|(?:not|n't)\s+(?:\w+\s+){0,2}(?:verified|tested|run)\b|to be (?:verified|tested)|no longer\s+(?:works|passes)|\bun(?:verified|tested)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Detail**` (chat `it`: `Dettaglio`) block: the quoted lines that follow it are depth for the reader, not output. */

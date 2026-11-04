@@ -8,7 +8,7 @@ description: >-
 # pr-create — turn a pushed branch into a reviewable PR
 
 **Contract.** An open PR with title, body, `Release:` block and the parent work item linked ·
-never merges, never opens a PR with no parent item · title and body in the pr language, identifiers verbatim; the labels are English, at pr language `it` exactly
+never merges, never takes a PR out of draft with no parent item · title and body in the pr language, identifiers verbatim; the labels are English, at pr language `it` exactly
 `Release:`=`Rilascio:`, `no components`=`nessun componente`, `Merge risk:`=`Rischio merge:`, `reversible`/`irreversible`=`reversibile`/`irreversibile`,
 `impact:`=`impatto:`, `Verification:`=`Verifica:`, `Before`/`After`=`Prima`/`Dopo`, `Notes for the reviewer:`=`Note per il reviewer:`, `unresolved`=`non risolto`.
 
@@ -25,7 +25,7 @@ Platform from the remote (`github.com` → `gh`; `dev.azure.com`, `*.visualstudi
 Target = the default branch read from `refs/remotes/origin/HEAD`, another only when the user names
 it. An open PR already exists on this branch → push to it, never create a second.
 
-### 2. The parent item — a precondition, not a step
+### 2. The parent item — linked before the PR leaves draft
 
 The PR links at least one **parent backlog item** — User Story or PBI, Bug, Impediment, TECH; on
 GitHub the issue — **never a Task**.
@@ -34,11 +34,12 @@ GitHub the issue — **never a Task**.
 | --- | --- |
 | collect | candidate ids from the branch name, commit messages, the session's work |
 | resolve | read each id's **type**; a Task → its parent; de-duplicate; link all that remain |
-| none left | **stop and ask once**, one pick from numbered candidates (`references/description.md` § No parent item); never create an item unasked |
+| none left | **open first, then ask**: create the PR as a draft without `--work-items` and report its URL; then ask once, one pick from numbered candidates (`references/description.md` § No parent item); never create an item unasked |
+| after the pick | `az repos pr work-item add --id <pr> --work-items <id>`, then `az repos pr update --id <pr> --draft false` only when §5 says ready |
 | parents under different Features | link them all and say so: the branch may be doing two things |
 | link | Azure DevOps: `--work-items` on the create (a real link drives policy and state; a URL in the body drives nothing) · remote is github.com → `references/description.md` § GitHub |
 
-The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking `--work-items` or the squash flags.
+The shell guard's `alm-contract.js` check asks on an `az repos pr create` lacking the squash flags, or `--work-items` on a create that is not `--draft true`.
 
 ### 3. Title and body — in the pr language, derived from the diff
 
@@ -84,6 +85,7 @@ $draft = '<true|false: decided in §5>'
 az repos pr create --org $org -p $proj --repository <repo> --source-branch (git branch --show-current) `
   --target-branch $base --title '<title>' --description (Get-Content $bodyFile -Encoding utf8) `
   --work-items <id> --squash true --delete-source-branch true --draft $draft
+# no parent item yet (§2): drop --work-items, --draft true
 ```
 
 Merge intent goes on the **create** (squash + delete source branch): it reaches auto-complete and

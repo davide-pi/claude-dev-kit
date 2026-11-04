@@ -1,35 +1,6 @@
 # Loop — launching `impl-review-loop`, and what to do with its answer
 
-## Before the loop: the doubts pass (M and L)
-
-Between the analysis and the loop, list what the request leaves implicit: requirements, edge cases (empty, first run,
-concurrent, failing dependency), ambiguities. Only a doubt whose answer changes behaviour is a question to the user,
-batched in one message, each with a recommendation; the brief states the rest as a decision. The pass also turns every
-choice a reviewer would otherwise ask into a `decisions` line before launch, so the run does not stop on a `question`. S has no pass.
-
-**Criteria** (M, L) cover the error path wherever the change has one: a rejection, an empty result, back to the form,
-a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
-
-**The challenger** (when it runs: `SKILL.md` step 2), after the owner's ok and before the loop: one `Plan` agent,
-`model: sonnet` at M, `model: opus` at L (it replaces `grill-me`, which runs only when the owner asks). Read-only, it
-never asks the user; budget ~12 tool calls over both messages. One agent, two messages, so it cannot anchor on ours:
-
-1. **Blind** (the spawn): the request verbatim, the perimeter and the owner's `decisions`, nothing of our approach. It
-   reads the code they touch and answers, in 3 lines, how it would do it, then stops.
-2. **Attack** (`SendMessage` to the same agent; if it cannot be resumed, a second spawn given its 3 blind lines): our
-   approach and criteria. It attacks from every angle, each one a row or "none": the premise (the request read wrong,
-   the cause elsewhere); a simpler way, or code that already does it; a pre-mortem ("two weeks on it failed: why?");
-   the blast radius and the way back; a criterion no test can prove, or one without its error path.
-3. **Output**, at most 15 lines: `blind way: equivalent | simpler (why, file:line) | worse`; then one row per objection,
-   the heaviest first, `# | Weight | Objection | Evidence | Fix`, weight `blocking` | `minor`, evidence a `file:line`
-   it read or the request's words (it drops an objection with neither); then a verdict, a proposal the owner decides:
-   `scartare` (redo the analysis) only on a `blocking` premise row, or a blind way that is `simpler` and meets all our
-   criteria; `cambiare` (amend the plan) on any other `blocking` row; else `tenere`. A fix that changes an approved
-   criterion or the perimeter is `blocking`, never `minor`.
-
-`cambiare` or `scartare` → shown to the owner with the rows, as a decision. `tenere` → goes on; each `minor` fix taken
-becomes a `decisions` line marked `challenger:` (ours, not the owner's) and a line of the message that launches the
-loop (`challenger: <fix>`): never silent.
+Before the loop (M, L): facts first, doubts pass, criteria and challenger: `references/analysis.md`.
 
 ## The start point (before the first edit of the change, yours or the implementer's)
 
@@ -79,6 +50,8 @@ red (the bug scenario's repro test) is fine: note it. A fixer meeting an environ
 A run has a large fixed cost whatever its size: launch once per coherent request. One implementer works through the plan tasks in order, testing after each; the
 reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
 for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
+Tasks on the same files stay with one implementer, in order: a second agent pays the fixed context again and re-reads
+the same files. Parallel runs only for areas that share no file and no test, each in its own worktree (`branch-flow`).
 The implementer stops itself at its turn budget (its agent definition), reporting what's left; a fresh one continues from its edits with a
 clean context, up to four times (`stall.why: incomplete` after that: split the plan). It runs only the tests the change touches while it
 works, and `verify` once at the end.
