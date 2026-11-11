@@ -18,43 +18,51 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 ## Args
 
 `Workflow` with `name: impl-review-loop` and
-`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview }`
+`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, plan, unit, testSkill, stuckMinutes, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview }`
 
 | Arg | Rule |
 | --- | --- |
-| `request` | the owner's messages for this change, verbatim, beside `brief`: the round-1 reviewers and the final full read judge the change against both; a brief that departs from it comes back as a reviewer `question`, never a fix |
+| `request` | the owner's messages for this change, verbatim, beside `brief`: the readers judge the change against both; a brief that departs from it comes back as a reviewer `question`, never a fix |
+| `plan` | `{ tasks: [{ id, title, files, dependsOn, tdd, criteria }] }` (`references/analysis.md`). Absent: one block holding one task named after the brief. A cycle or an unknown id refuses the plan |
+| `unit` | the unit-test command; without it no block is test-first. A `"` in it or in `verify` is refused: no inline gate command |
+| `testSkill` | the test skill the test-first call reads (`dotnet-testing`) |
+| `stuckMinutes` | default 5, passed to the gate; 0 turns the stuck check off for a command known to be quiet |
 | `decisions` | the owner's decisions that touch the perimeter, one line each, in their words: every agent gets them; an edit that contradicts one is a `question` |
 | `preview` | M, L with an owner-visible output: what to show (page, endpoint, report). The run stops after the implementer with a `question` stall; show a screenshot or sample and ask: "ok" goes on, anything else is a direction for one more implementer pass. The verdict carries a final screenshot of the same surface |
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
-| `size` | `S`, `M` or `L` from the triage (panel: `SKILL.md` step 2). The file count never changes it, and every reviewer reads the whole change at any file count (reviewer B of M runs on opus past 10 changed files or 600 changed lines, never mechanical, and with a security or data risk; S and L unchanged; never a split); more files than the size implies (S: 2+, M: 7+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
-| `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. They raise the size floor, never lower it: data, money, concurrency, contract or security → at least M; three or more axes besides `logic` → L. An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
+| `size` | `S` from the triage, or omit. M and L are computed from the blocks (no plan: one block, M); a passed `M` or `L` that disagrees is one `gaps` line. The file count never changes it, and every reader reads the whole change (never a split); more files than S implies (2+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |
+| `risk` | the axes the change touches, from `logic`, `data`, `money`, `concurrency`, `contract`, `security`, `performance`. Data, money, concurrency, contract or security lift S to M; reader B runs on Opus with `security` or `data`, and with three or more axes besides `logic` (never a bigger size). An axis is one the change alters: a guard that keeps something unchanged ("the numbers stay identical") is a test, not an axis. `security` and `performance` also add their specialist at M and L |
 | `mechanical` | `true` for an S batch with no judgment in it (rename, move, split, config, generated, label updates) the tests fully cover: implementer on `haiku` at `low`, reviewer at `low`. Needs `size: 'S'` (a missing size is M) and never goes with `inline`; a risk axis that lifts the size drops it |
 | `implementerEffort` | `high` only when the brief asks; default `medium` (`low` with `mechanical`) |
-| `implementerModel` | only to override, on the implementer and every fix run; default: the agent's own model (`haiku` with `mechanical`). The delta watcher also runs on `haiku` at `low` |
+| `implementerModel` | only to override, on the implementer and every fix run; default: the agent's own model (`haiku` with `mechanical`) |
 | `cleanup` | `true` only when the owner asks for the P3 cleanup pass (M, L); default: the P3s go to the closing table |
 
-Who reads which round, the final full read and the cleanup pass: `references/loop-extras.md`.
+Who reads what, and the cleanup pass: `references/loop-extras.md`. Phases: Implement, Block review, Final verification, Fix.
 
 **Size S**: above ~120k of context (the statusline shows it) launch without `inline` and the implementer makes it; else edit inline, then launch with `inline: true, changed: [the files you edited]`; a mechanical batch is never
-edited inline: launch with `mechanical: true` and the implementer makes it. Inline, no implementer runs first; a finding is fixed by `implementer` inside the loop. S has no final full read, no cleanup pass, no preview
+edited inline: launch with `mechanical: true` and the implementer makes it. Inline, no implementer runs first; a finding is fixed by `implementer` inside the loop. S has no block review, no cleanup pass, no preview
 stop, no proof check.
 
 ## Verify pre-check
 
-Before the launch, run `verify` once on the start tree. An environment failure (command, tool or config not found, restore or
-build infrastructure error) → stop: fix the command or ask the user; never launch with a verify that cannot run. An expected
-red (the bug scenario's repro test) is fine: note it. A fixer meeting an environment failure of the verify changes no code for it.
+Before the launch, run `verify` once on the start tree, through the gate with `--force`:
+```powershell
+node ~/.claude/scripts/gate.mjs --root <repoRoot> --head <start.head> --test "<verify>" --force
+```
+Exit 2 or an environment failure (command, tool or config not found, restore or build infrastructure error) → stop:
+fix the command or ask the user; never launch with a verify that cannot run. An expected red (the bug scenario's repro
+test) is fine: note it. The suite must print a line per test: the stuck check kills a quiet command. A fixer meeting an
+environment failure of the verify changes no code for it.
 
-## One run per coherent request (P-run)
+## One run per coherent request
 
-A run has a large fixed cost whatever its size: launch once per coherent request. One implementer works through the plan tasks in order, testing after each; the
-reviewers read the whole diff once. Split into sequential runs (phases) past 3-4 plan tasks or ~600 changed lines expected, or
-for areas that share nothing (other reviewers, other verify): same worktree, `/commit` between them, each with its own `start`.
-Tasks on the same files stay with one implementer, in order: a second agent pays the fixed context again and re-reads
-the same files. Parallel runs only for areas that share no file and no test, each in its own worktree (`branch-flow`).
-The implementer stops itself at its turn budget (its agent definition), reporting what's left; a fresh one continues from its edits with a
-clean context, up to four times (`stall.why: incomplete` after that: split the plan). It runs only the tests the change touches while it
-works, and `verify` once at the end.
+A run has a large fixed cost whatever its size: launch once per coherent request, the whole plan in `plan`. The loop
+cuts it into blocks of up to 4 tasks, as even as possible (5 → 3+2), in dependency order; per block one implementer
+(two with `tdd` tasks: the tests and the `--red` gate first, then the code), the gate, then reader A. Tasks on the same files
+stay in one block: a second agent pays the fixed context again. Parallel runs only for areas that share no file and no
+test, each in its own worktree (`branch-flow`). Each implementer call has a turn budget (`min(35, 10 + 6 × tasks)`)
+and runs the gate before it reports; a fresh one continues from its edits, up to four times (`stall.why: incomplete`
+after that: split the plan). A `"` in `verify` or `unit` runs the gate by hand, not inline.
 
 ## Weight, criteria, proof
 
@@ -68,21 +76,42 @@ code, after the review: a fix can change what a proof proved. Proof check (M, L,
 assertion lines of each criterion's test (and the hunks behind `defaults` and any ledger contradiction); a proof that
 cannot fail on the old code is `not verified`. The verdict ends with "Local test: proposal <who/what>" (chat `it`: "Test locale: proposta <chi/cosa>"); the owner decides.
 
-## After OK: the mechanical scope check
+## After OK: the final gate, then the sweep
 
-The loop's `OK` is the reviewers' verdict; this step checks the files. In the repo root, with the start point:
+The loop's `OK` is the readers' verdict; this step runs the tests and checks the files, in the repo root:
 
 ```powershell
-node ~/.claude/hooks/scope-guard.js --check <start.head> --dirty 'a.cs,b.cs'   # --dirty only when start.dirty is not empty
+node ~/.claude/scripts/gate.mjs --root <repoRoot> --head <start.head> --test "<verify>" --dirty 'a.cs,b.cs'   # --dirty only when start.dirty is not empty
 ```
 
-`snapshot.ps1` is the script every implementer and fixer run ends with; never run it yourself.
+`snapshot.ps1` is the script every implementer and fixer run ends with; never run it yourself. The last stdout line is
+one JSON object; `gate` says:
 
-| Exit | Meaning |
+| `gate` | Meaning |
 | --- | --- |
-| 0 | every changed file is inside the perimeter: go on to the matrix |
-| 1 | the files printed are outside: `references/loop-extras.md` |
-| 2 | usage error, git failure, or no active perimeter: nothing was checked, never read it as clean. Write the perimeter file and run again |
+| `green` | tests passed, nothing outside the perimeter: go on to the matrix |
+| `skipped: tree unchanged` | the last green stands for this tree, command and scope check: same as `green` |
+| `red`, `red: timeout` | the tests failed, or stalled twice: relaunch with the gate line as the brief (`references/stall.md`) |
+| `red: scope` | `outside` lists the files: `references/loop-extras.md` |
+| exit 2 | not checked (bad arguments, no repository, no active perimeter): never read it as clean. Write the perimeter file and run again |
+| exit 3, `running` | output still growing: run it again with `--root <repoRoot> --wait` |
+
+After the final gate, close what the run left behind (a rule decides, no model):
+
+```powershell
+node ~/.claude/scripts/sweep.mjs --root <repoRoot> --since <ISO time of the launch> --close
+```
+
+It closes only the process trees the gate recorded (pid and start time both match) and lists the other processes that
+started during the run and name the work folder in their path or command line. Show that list to the owner and close
+nothing on it. A process that doesn't name the folder is out of its reach.
+
+## The result
+
+`status` (`OK` or `STALL`) and the findings as before, plus `blocks: [{ id, tasks, gate, readerA: { raised, fixed,
+carried } }]`, `carried: [{ block, id, priority, title, file, why }]`, `defaultsApplied: [{ block, question,
+default }]` and `gaps`; a line such as `block <id>: red not proven` means the red proof of a test-first block failed
+twice and its code went ahead. Put `defaultsApplied` in the verdict beside `defaults`.
 
 ## The findings log and the defaults
 
@@ -102,7 +131,7 @@ quote). The line is appended to `$(git rev-parse --git-dir)/deliver/findings.jso
 A bare `-Close` needs a run already logged since `opened:`; a change that never ran the loop closes with `-NoFindings`;
 else exit 2 and the perimeter stays active (`done-claim` also sends back a verdict written while it is). Log once per
 run, on an `OK` or a `STALL` the owner gives up on: never on a resume (the resumed run's last result holds its
-findings). Before a relaunch WITHOUT `resumeFromRunId` (a red test after `OK`, scope-guard exit 1: a new run with empty
+findings). Before a relaunch WITHOUT `resumeFromRunId` (a red test after `OK`, gate `red: scope`: a new run with empty
 state) `-LogRun` the previous run; the perimeter stays active. The last run of the change closes it. `/retro`: `references/loop-extras.md`.
 
 `defaults` ([{ choice, alternative, path }]) go in the verdict under "Defaults chosen" (chat `it`: "Default scelti"); read the hunks behind them in the

@@ -8,10 +8,11 @@ The implementer, the fixer and the reviewers may return `questions: [{ text, def
 owner would see (never an internal one); a reviewer's are a brief that departs from `request`, an edit that contradicts
 a `decisions` line, a hunk the owner asked for that would be reverted as `scope`. Any question stops the run before the
 fix or the review: `status: STALL`, `stall.why: "question"`, `stall.questions`, `stall.round` (0 for the implementer or
-the preview, else the round of the fix or of the review). Ask every question in one message, each with its default as
-the recommendation. When the user said not to be asked, apply every default and list each in the closing table as an
-open decision: that covers `questions` only, never `accept` of a P1/P2 (the owner's alone) nor a scope revert of a hunk
-the owner asked for. Relaunch with the `answers` entry of the STALL section below; the implementer or fixer runs once
+the preview, else the round of the fix or of the review). A question carries `reversible` and `axis`: reversible with a default, off the data, contract, money and security
+axes, it never stalls: the run applies the default and reports it in `defaultsApplied`, which the verdict names. Only a
+`stop` question reaches you. Ask every question in one message, each with its default as the recommendation. When the
+user said not to be asked, apply every default and list each in the closing table as an open decision: that covers
+`questions` only, never `accept` of a P1/P2 (the owner's alone) nor a scope revert of a hunk the owner asked for. Relaunch with the `answers` entry of the STALL section below; the implementer or fixer runs once
 more with the answers as guidance (a reviewer's answer also reaches the later reviewers). Questions it asks again come
 back in `outOfScope` as open decisions (`source: "implementer"`), not as a second stall.
 
@@ -37,7 +38,10 @@ round restarts its count, `retry` does not.
 | `not-converging` | after each of the last 3 fix rounds the open P1/P2 count (plus the open `V` finding) did not drop below its lowest of the rounds before: every fix closes one and the reviewers open another. Same answers as `churn` |
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, `accept` is not offered |
 | `green-to-red` | the verify passed, then a fix broke it: same as `verify-failed` |
-| `verify-not-run` | `verify` was given and the run did not execute it: same as `verify-failed` |
+| `verify-not-run` | `verify` was given and the implementer returned no parsable gate line: same as `verify-failed` |
+| `gate-red` | a block's gate stayed red after its one fix call (`stall.findings` holds the gate line): same as `verify-failed` |
+| `gate-timeout` | the gate said `red: timeout`: the run stalled twice on the test named in the line. Never green, never retried by the loop: `guidance` (fix or split the test, or a quieter command with `stuckMinutes: 0`) or relaunch without `verify` |
+| `gate-running` | the gate still said `running` when the agent reported: run `gate.mjs --root <repoRoot> --wait` yourself, then resume with `retry: true` or relaunch with its line as the brief |
 | `still-open` | a finding is still open after its fix: `accept`, `guidance` with a direction, or `retry` |
 | `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same as `still-open` |
 | `no-verdict` | two rounds in a row without a reviewer verdict on the same id (one round is not a stall: only that id is asked again, and listed under `gaps`): same as `still-open` |
@@ -56,7 +60,7 @@ to the closing table as proposals.
 
 ## A red test after OK
 
-The loop returned `OK`, then a matrix test fails. There is no stall to resume, and a re-`start` taken now would count the
+The loop returned `OK`, then the final gate or a matrix test is red. There is no stall to resume, and a re-`start` taken now would count the
 change's own edits as the user's dirty files. Log the previous run first with `perimeter.ps1 -LogRun` (`references/loop.md`, the findings log), then relaunch WITHOUT `resumeFromRunId`, not inline (size S too: `inline` stays
 false), with the original `start` (head and dirty from before the first edit), `dirtyConfirmed: true`, and `brief` = the
 failing output, then one line per finding already accepted (id, `path`, title): ids restart at `F1`, so the brief is the
