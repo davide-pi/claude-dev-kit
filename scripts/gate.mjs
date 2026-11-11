@@ -93,6 +93,13 @@ function pidAlive(pid) {
 /** The supervisor writes its pid right after it starts; until then a recent run counts as alive. */
 const supervisorAlive = (run) => (run.pid ? pidAlive(run.pid) : Date.now() - run.startedAt < 30000);
 
+/** Notes a process the gate started in `gate.json` as `{ pid, started }` (the last 50), for `sweep.mjs` to match by pid and start time. */
+function recordProcess(dir, pid) {
+  const state = readState(dir);
+  state.procs = [...(state.procs ?? []), { pid, started: new Date().toISOString() }].slice(-50);
+  writeState(dir, state);
+}
+
 /** Runs the command once; resolves `{ code }` when it exits, `{ stalled: true }` after the stuck check killed it. */
 function runOnce(command, root, logPath, stuckMs) {
   return new Promise((done) => {
@@ -108,6 +115,7 @@ function runOnce(command, root, logPath, stuckMs) {
       done(value);
     };
     const child = spawn(command, { shell: true, cwd: root, stdio: ['ignore', fd, fd], detached: !WIN, windowsHide: true });
+    if (child.pid) recordProcess(dirname(logPath), child.pid);
     child.on('exit', (code) => finish({ code: code ?? 1 }));
     child.on('error', () => finish({ code: 1 }));
     if (stuckMs > 0) {

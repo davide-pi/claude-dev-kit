@@ -768,6 +768,27 @@ test('given gate.mjs off Windows with sh quoting that hides a semicolon, when th
   assert.equal(result.decision, 'ask');
 });
 
+const SWEEP = 'node ~/.claude/scripts/sweep.mjs';
+
+test('given sweep.mjs called with code in its arguments, when the guard reads it, then it asks and names sweep.mjs', () => {
+  // Given
+  const risky = [`${SWEEP} --root $(whoami) --since 2026-01-01T00:00:00Z`, `${SWEEP} --root (calc) --close`, `${SWEEP} --root "$env:TEMP" --close`];
+  const plain = [`${SWEEP} --root . --since 2026-01-01T00:00:00Z --close`, `${SWEEP} --root 'C:\\wt\\repo' --since 2026-01-01T00:00:00Z`];
+
+  for (const tool of BOTH) {
+    // When
+    const asked = risky.map((command) => runTool(tool, command));
+    const approved = plain.map((command) => runTool(tool, command));
+
+    // Then
+    for (const result of asked) {
+      assert.equal(result.decision, 'ask', tool);
+      assert.match(result.reason, /arguments of sweep\.mjs.*Confirm\?$/, tool);
+    }
+    for (const result of approved) assert.equal(result.decision, 'approve', tool);
+  }
+});
+
 test('settings.json allows the scope-guard --check call in both shells, and only that call', () => {
   const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
   for (const shell of ['Bash', 'PowerShell']) assert.ok(allow.includes(`${shell}(node ~/.claude/hooks/scope-guard.js --check *)`), shell);

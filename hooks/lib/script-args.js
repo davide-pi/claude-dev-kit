@@ -1,6 +1,6 @@
 /**
  * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`,
- * `node ~/.claude/scripts/gate.mjs` and `node ~/.claude/hooks/scope-guard.js --check`).
+ * `node ~/.claude/scripts/gate.mjs`, `node ~/.claude/scripts/sweep.mjs` and `node ~/.claude/hooks/scope-guard.js --check`).
  *
  * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter, snapshot, gate and
  * scope-guard calls) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
@@ -34,7 +34,7 @@
 
 const { splitSegments } = require('./shell-parse');
 
-const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
+const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate|sweep)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** The gate runs `--test` / `--unit` through a shell: only a known test runner passes, with no shell operator. */
 const TEST_RUNNER = /^(?:dotnet\s+test|node\s+--test|npx\s+vitest|vitest|npx\s+jest|jest|npm\s+test|npm\s+run\s+test|pnpm\s+test|pnpm\s+run\s+test|yarn\s+test)(?=\s|$)/;
 const TEST_COMMAND_DANGER = /[&|<>^%$`()\r\n]/;
@@ -95,11 +95,11 @@ function tokenize(text) {
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
 function checkScriptArgs(command) {
-  if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|gate\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
+  if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|(?:gate|sweep)\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
-    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? 'gate.mjs' : 'scope-guard.js';
+    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? `${match[3].toLowerCase()}.mjs` : 'scope-guard.js';
     let tail = segment.trim().slice(match[0].length);
     if (match[1]) { // the script path was itself quoted: the next character closes it
       if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;

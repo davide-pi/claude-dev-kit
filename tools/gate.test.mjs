@@ -412,6 +412,21 @@ test('given a unit command with a failing test, when the gate proves it with --r
   assert.deepEqual(Object.keys(stateOf(r).proof.files), ['t.test.mjs']);
 });
 
+test('given a green run, when the gate has started its command, then gate.json records the process as pid and start time', () => {
+  // Given
+  const r = repo();
+  const before = Date.now();
+
+  // When
+  run(r, OK);
+
+  // Then
+  const procs = stateOf(r).procs;
+  assert.equal(procs.length, 1);
+  assert.ok(Number.isInteger(procs[0].pid) && procs[0].pid > 0);
+  assert.ok(Date.parse(procs[0].started) >= before - 1000);
+});
+
 test('given a unit command whose only test file fails to load, when the gate runs with --red, then it reports red, not red-proven', () => {
   // Given
   const r = repo();
