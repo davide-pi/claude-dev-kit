@@ -267,6 +267,8 @@ export type CockpitSnapshot = {
   agentsOpen?: string[]
   /** The lists shown in full and the rows expanded: `attention`, `inProgress`, `done`, `worklog:days`. */
   openKeys?: string[]
+  /** The state a person gave to a group of FATTO, by its key: it holds when the group stops being the newest. Absent: the newest is open, the others closed. */
+  groupsOpen?: Record<string, boolean>
   /** True once the pane's language was read (a session start or the first drawing); not kept in any file. */
   isLangRead?: boolean
   /** The repo's default branch, as `origin/HEAD` names it: no pull request is looked for on it. Absent when `origin/HEAD` is not set. */

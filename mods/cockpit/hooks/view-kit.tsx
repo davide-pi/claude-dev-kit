@@ -33,6 +33,8 @@ export type PaneActions = {
   toggleSignal: (id: string) => void
   /** Shows a cut list in full or folds it again (`attention`, `inProgress`, `done`), or opens the late worklog days (`worklog:days`). */
   toggleOpen: (key: string) => void
+  /** Gives a FATTO group an explicit state, kept when it is no longer the newest. */
+  setGroupOpen: (key: string, isOpen: boolean) => void
 }
 
 export type Node = RenderElement | false | undefined

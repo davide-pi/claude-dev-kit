@@ -329,29 +329,44 @@ test('done: hidden without a log or a finished agent', async ($, on) => {
   expect((await draw($, on, snap(), doneBlocks)).rows).toEqual([])
 })
 
-test('done: given events after the newest round, when drawn, then they are the open group, and its lines past the fifth sit behind the toggle', async ($, on) => {
+/** The summary row an open group starts with. */
+const summary = (text: string) => `├ ${text}`
+
+test('done: given events after the newest round, when drawn, then they are the open group: the header, a summary row, and its whole subtree', async ($, on) => {
   // Given
-  const calls: string[] = []
   const s = snap({ sessionLog: [...LOG], history: HISTORY })
   // When
-  const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  const { rows } = await draw($, on, s, doneBlocks)
   // Then
   expect(rows).toEqual([
     titled('DONE'),
-    // the summary does not fit: cut to the width with an ellipsis
-    `▾ current round  1 agent · 1 commit · 1 test · 1 PR · 1 compaction`.slice(0, WIDTH - 1) + '…',
+    '▾ current round',
+    summary('1 agent · 1 commit · 1 test · 1 PR · 1 compaction'),
     child(NOW - 10_000, '󰄬', 'agent reviewer', costCell(0.5, 7)),
     child(NOW - 20_000, '◆', 'PR #12 Fix x'),
     child(NOW - 30_000, '◇', 'compacted 180k → 40k'),
     child(NOW - 40_000, '󰅖', 'tests failed: npm test'),
-    '󰍟 +2',
+    child(NOW - 50_000, '●', 'commit abc1234', undefined, true),
+    // a round with nothing in it is a plain row
+    `▸ ${clockTime(NOW - 60_000)} round 1 02m14s  ${costCell(0.38, 7)}`,
   ])
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +2')
+})
+
+test('done: given seven groups, when drawn, then the newest five show and the toggle opens the other two', async ($, on) => {
+  // Given
+  const calls: string[] = []
+  const log = [1, 2, 3, 4, 5, 6, 7].flatMap(n => [{ at: NOW - n * 20_000 - 10_000, kind: 'commit', key: `c${n}`, text: `c${n}` } as const, { at: NOW - n * 20_000, kind: 'round' } as const]).reverse()
+  const s = snap({ sessionLog: log })
+  // When
+  const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  // Then: the open newest group counts as one, however many rows it has
+  expect(rows.filter(r => /^[▾▸] /.test(r))).toHaveLength(5)
+  expect(rows.at(-1)).toBe('󰍟 +2')
   await ui.press({ key: 'done:more' })
   expect(calls).toEqual(['toggleOpen:done'])
   const open = await draw($, on, { ...s, openKeys: ['done'] }, doneBlocks)
-  // the opened rows come below the toggle, which stays where it was pressed; a round with nothing in it is a plain row
-  expect(open.rows.slice(-3)).toEqual(['󰍝 −2', child(NOW - 50_000, '●', 'commit abc1234', undefined, true), `▸ ${clockTime(NOW - 60_000)} round 1 02m14s  ${costCell(0.38, 7)}`])
+  expect(open.rows.filter(r => /^[▾▸] /.test(r))).toHaveLength(7)
+  expect(open.rows.filter(r => r.startsWith('󰍝'))).toEqual(['󰍝 −2'])
 })
 
 const ROUNDS = [
@@ -363,7 +378,7 @@ const ROUNDS = [
 const ROUND_HISTORY = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 300_000, endedAt: NOW - 210_000, tokens: 0, isFailed: false, usd: 0.21 }]
 const header = (at: number, arrow: string, rest: string) => `${arrow} ${clockTime(at)} ${rest}`
 
-test('done: given rounds, when drawn, then only the newest is open and each header toggles under its own key', async ($, on) => {
+test('done: given rounds, when drawn, then only the newest is open and each header toggles under its own key, to the opposite state', async ($, on) => {
   // Given
   const calls: string[] = []
   const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
@@ -372,28 +387,60 @@ test('done: given rounds, when drawn, then only the newest is open and each head
   // Then
   expect(rows).toEqual([
     titled('DONE'),
-    header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)}  1 test`),
+    header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)}`),
+    summary('1 test'),
     child(NOW - 110_000, '󰄬', 'tests passed: npm test', undefined, true),
-    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}  1 agent · 1 commit`),
+    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}`),
   ])
   await ui.press({ key: `done:${NOW - 200_000}` })
-  expect(calls).toEqual([`toggleOpen:done:${NOW - 200_000}`])
+  await ui.press({ key: `done:${NOW - 100_000}` })
+  expect(calls).toEqual([`setGroupOpen:done:${NOW - 200_000},true`, `setGroupOpen:done:${NOW - 100_000},false`])
 })
 
-test('done: given an older group in openKeys, when drawn, then it stays open under the newest; and the newest can be closed', async ($, on) => {
+test('done: given a state a person gave, when drawn, then an older group stays open under the newest, and the newest can be closed', async ($, on) => {
   // Given
   const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
   // When
-  const older = await draw($, on, { ...s, openKeys: [`done:${NOW - 200_000}`] }, doneBlocks)
-  const closed = await draw($, on, { ...s, openKeys: [`done:${NOW - 100_000}`] }, doneBlocks)
+  const older = await draw($, on, { ...s, groupsOpen: { [`done:${NOW - 200_000}`]: true } }, doneBlocks)
+  const closed = await draw($, on, { ...s, groupsOpen: { [`done:${NOW - 100_000}`]: false } }, doneBlocks)
   // Then
-  expect(older.rows.slice(3)).toEqual([
-    header(NOW - 200_000, '▾', `round 1 01m00s  ${costCell(0.44, 7)}  1 agent · 1 commit`),
+  expect(older.rows.slice(4)).toEqual([
+    header(NOW - 200_000, '▾', `round 1 01m00s  ${costCell(0.44, 7)}`),
+    summary('1 agent · 1 commit'),
     child(NOW - 210_000, '󰄬', 'agent reviewer', costCell(0.21, 7)),
     child(NOW - 220_000, '●', 'commit abc1234', undefined, true),
   ])
-  expect(closed.rows[1]).toBe(header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}  1 test`))
+  expect(closed.rows[1]).toBe(header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}`))
   expect(closed.rows).toHaveLength(3)
+})
+
+test('done: given the newest group closed by a person, when a newer round arrives, then the old group stays closed and the new one is open', async ($, on) => {
+  // Given
+  const groupsOpen = { [`done:${NOW - 100_000}`]: false }
+  const newer = [...ROUNDS, { at: NOW - 40_000, kind: 'commit', key: 'def5678', text: 'def5678' } as const, { at: NOW - 30_000, kind: 'round', ms: 10_000 } as const]
+  // When
+  const { rows } = await draw($, on, snap({ sessionLog: newer, history: ROUND_HISTORY, groupsOpen }), doneBlocks)
+  // Then
+  expect(rows).toEqual([
+    titled('DONE'),
+    header(NOW - 30_000, '▾', 'round 3 00m10s'),
+    summary('1 commit'),
+    child(NOW - 40_000, '●', 'commit def5678', undefined, true),
+    header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}`),
+    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}`),
+  ])
+})
+
+test('done: given the session total, when drawn, then each header shows its cost share in percent; none without a total or a cost', async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, groupsOpen: { [`done:${NOW - 200_000}`]: false } })
+  // When
+  const withTotal = await draw($, on, { ...s, cost: { usd: 4 } }, doneBlocks)
+  const noCost = await draw($, on, { ...s, cost: { usd: 4 }, sessionLog: [{ at: NOW - 50_000, kind: 'round' }, { at: NOW - 60_000, kind: 'commit', key: 'abc1234', text: 'abc1234' }] }, doneBlocks)
+  // Then
+  expect(withTotal.rows[1]).toBe(header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)} 28%`))
+  expect(withTotal.rows.at(-1)).toBe(header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)} 11%`))
+  expect(noCost.rows[1]).not.toContain('%')
 })
 
 test('done: given rounds with no events, when drawn, then they are one row that does not toggle; a round without a cost prints none', async ($, on) => {
@@ -404,7 +451,8 @@ test('done: given rounds with no events, when drawn, then they are one row that 
   // Then
   expect(rows).toEqual([
     titled('DONE'),
-    header(NOW - 90_000, '▾', 'round 4 00m05s  1 commit'),
+    header(NOW - 90_000, '▾', 'round 4 00m05s'),
+    summary('1 commit'),
     child(NOW - 100_000, '●', 'commit abc1234', undefined, true),
     header(NOW - 200_000, '▸', `3 chat-only rounds  ${costCell(0.31, 7)}`),
   ])
@@ -418,7 +466,7 @@ test('done: given an agent just finished and still listed in the agents, when dr
   const alone = await draw($, on, snap({ agents: [fresh] }), doneBlocks)
   const twice = await draw($, on, snap({ agents: [fresh], history: [{ id: 'a9', type: 'implementer', startedAt: NOW - 62_000, endedAt: NOW - 5_000, tokens: 0, isFailed: false }] }), doneBlocks)
   // Then
-  expect(alone.rows).toEqual([titled('DONE'), '▾ current round  1 agent', child(NOW - 5_000, '󰄬', 'agent implementer', undefined, true)])
+  expect(alone.rows).toEqual([titled('DONE'), '▾ current round', summary('1 agent'), child(NOW - 5_000, '󰄬', 'agent implementer', undefined, true)])
   expect(twice.rows).toEqual(alone.rows)
 })
 
@@ -431,11 +479,14 @@ test('page: the section titles and the empty row in Italian', async ($, on) => {
     const trend = await draw($, on, snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6 }) }), andamentoBlocks)
     expect(trend.rows.slice(0, 4)).toEqual([titled('ANDAMENTO'), cols('$/prompt', 'ultimo turno', 'subagenti', 'compattazione'), cols('$2.00 →', '—', '0%', '—'), cols('', '', 'della spesa')])
     expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
-    const done = await draw($, on, snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, openKeys: [`done:${NOW - 200_000}`] }), doneBlocks)
+    const done = await draw($, on, snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, groupsOpen: { [`done:${NOW - 200_000}`]: true } }), doneBlocks)
     expect(done.rows[0]).toBe(titled('FATTO'))
-    expect(done.rows[1]).toBe(header(NOW - 100_000, '▾', `giro 2 03m00s  ${costCell(1.12, 7)}  1 test`))
-    expect(done.rows[3]).toBe(header(NOW - 200_000, '▾', `giro 1 01m00s  ${costCell(0.44, 7)}  1 agente · 1 commit`))
-    expect((await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows[1]).toBe('▾ giro in corso  1 commit · 1 test · 1 PR · 1 compattazione')
+    expect(done.rows[1]).toBe(header(NOW - 100_000, '▾', `giro 2 03m00s  ${costCell(1.12, 7)}`))
+    expect(done.rows[2]).toBe(summary('1 test'))
+    expect(done.rows[4]).toBe(header(NOW - 200_000, '▾', `giro 1 01m00s  ${costCell(0.44, 7)}`))
+    expect(done.rows[5]).toBe(summary('1 agente · 1 commit'))
+    const current = (await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows
+    expect(current.slice(1, 3)).toEqual(['▾ giro in corso', summary('1 commit · 1 test · 1 PR · 1 compattazione')])
     const idle = [{ at: 1, kind: 'round' }, { at: 2, kind: 'round' }] as const
     expect((await draw($, on, snap({ sessionLog: [...idle] }), doneBlocks)).rows[1]).toContain('2 giri di sola conversazione')
   } finally {

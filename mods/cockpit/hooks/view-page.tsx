@@ -21,7 +21,7 @@ import type { Block, Kit } from './view-kit'
 const MAX_ROWS = 5
 /** ATTENZIONE also stops at this many drawn lines: a closed notification takes two (what, then what to do), so four of them fill it. */
 const ATTENTION_LINES = 8
-/** FATTO shows this many lines; the rest sits behind its toggle. */
+/** FATTO shows this many groups (an open one with its whole subtree); the rest sits behind its toggle. */
 const DONE_ROWS = 5
 /** Cells the caption of a bar takes, so the bar and its legend line up. */
 const CAPTION_W = 9
@@ -214,14 +214,20 @@ function logEntry(e: CockpitLogEntry): DoneEntry | undefined {
   }
 }
 
-/** The header of a group: toggle arrow, time, round (or the open round, or the run of chat-only rounds), length, cost, and what it holds by kind. */
-function doneHeader(g: DoneGroup<DoneEntry>, isOpen: boolean, width: number): { arrow: Span; rest: Span[] } {
+/** What a group holds by kind (`2 agents · 1 commit`); empty when it holds nothing. */
+const doneSummary = (g: DoneGroup<DoneEntry>): string =>
+  (['agent', 'commit', 'test', 'pr', 'compact'] as const)
+    .flatMap(kind => {
+      const n = g.events.filter(e => e.kind === kind).length
+      return n > 0 ? [t().page.events.summary[kind](n)] : []
+    })
+    .join(' · ')
+
+/** The header of a group: toggle arrow, time, round (or the open round, or the run of chat-only rounds), length, cost and its share of the session's. */
+function doneHeader(g: DoneGroup<DoneEntry>, isOpen: boolean, width: number, sessionUsd: number | undefined): { arrow: Span; rest: Span[] } {
   const E = t().page.events
   const label = g.isCurrent ? E.current : g.chatOnly !== undefined ? E.chatOnly(g.chatOnly) : E.round(g.round ?? 0)
-  const counts = (['agent', 'commit', 'test', 'pr', 'compact'] as const).flatMap(kind => {
-    const n = g.events.filter(e => e.kind === kind).length
-    return n > 0 ? [E.summary[kind](n)] : []
-  })
+  const share = g.usd !== undefined && sessionUsd !== undefined && sessionUsd > 0 ? `${Math.round((g.usd / sessionUsd) * 100)}%` : undefined
   const arrow = sp(isOpen ? '▾ ' : '▸ ')
   const rest = truncateSpans(
     [
@@ -229,7 +235,7 @@ function doneHeader(g: DoneGroup<DoneEntry>, isOpen: boolean, width: number): { 
       sp(label),
       ...(g.ms === undefined ? [] : [sp(' '), dim(duration(g.ms))]),
       ...(g.usd === undefined ? [] : [sp('  '), dim(costCell(g.usd, COST_W))]),
-      ...(counts.length === 0 ? [] : [sp('  '), dim(counts.join(' · '))]),
+      ...(share === undefined ? [] : [sp(' '), dim(share)]),
     ],
     width - 2,
   )
@@ -237,8 +243,9 @@ function doneHeader(g: DoneGroup<DoneEntry>, isOpen: boolean, width: number): { 
 }
 
 /**
- * The session log and the agents that finished, by main round, newest first: each round a toggle row (time, number, length, cost, what it holds)
- * over its events (time, icon, text, cost) in a tree; the newest group is open. The rows count as lines: the first five, the rest behind the toggle.
+ * The session log and the agents that finished, by main round, newest first: each round a toggle row (time, number, length, cost, its share of the
+ * session's) over a summary of what it holds and its events (time, icon, text, cost) in a tree. The newest group is open until a person gives it a
+ * state, which stays. The groups count, not their lines: the newest five, the rest behind the toggle.
  */
 export function doneBlocks(k: Kit): Block[] {
   const { ui, s, width, title, actions } = k
@@ -254,13 +261,13 @@ export function doneBlocks(k: Kit): Block[] {
   const groups = groupDone(entries, s.sessionLog ?? [])
   if (groups.length === 0) return []
 
-  const rows: Block[] = groups.flatMap((g, gi): Block[] => {
-    // the newest group is open unless its key is in openKeys; an older one is closed unless it is
-    const isOpen = g.events.length > 0 && (gi === 0) !== (s.openKeys?.includes(g.key) === true)
-    const { arrow, rest } = doneHeader(g, isOpen, width)
+  const rows: Block[] = groups.map((g, gi): Block => {
+    // a state a person gave holds; else the newest group is open
+    const isOpen = g.events.length > 0 && (s.groupsOpen?.[g.key] ?? gi === 0)
+    const { arrow, rest } = doneHeader(g, isOpen, width, s.cost.usd)
     // the newest group's header fades from its highlight as it appears; the arrow stays a button beside the animated cells
     const isNewest = gi === 0 && ui.Client !== undefined && isFading(g.at, s.now)
-    const toggle = () => actions.toggleOpen(g.key)
+    const toggle = () => actions.setGroupOpen(g.key, !isOpen)
     let header: Block
     if (g.events.length === 0) header = [line(ui, [arrow, ...rest])]
     else if (isNewest) {
@@ -280,9 +287,9 @@ export function doneBlocks(k: Kit): Block[] {
       ]
     }
     const children = isOpen
-      ? g.events.map((e, i): Block => [
+      ? [[line(ui, [sp('├ ', COLORS.rule), dim(doneSummary(g))])], ...g.events.map((e, i): Block => [
           line(ui, [sp(i === g.events.length - 1 ? '└ ' : '├ ', COLORS.rule), ...pairRow([dim(clockTime(e.at)), sp(' '), e.icon, sp(' '), sp(e.text)], e.usd === undefined ? [] : [dim(costCell(e.usd, COST_W))], width - 2)]),
-        ])
+        ])]
       : []
     return [header, ...children]
   })

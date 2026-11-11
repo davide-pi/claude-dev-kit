@@ -66,7 +66,7 @@ test('agents: one the engine lists as killed or failed ends with 󰅖, one it no
   await ui.unmount()
 })
 
-test('agents: DONE shows its first 5 lines (the open group header and 4 agents) and a `󰍟 +K` button opens the rest, `󰍝 −K` folds them again', async ($, on) => {
+test('agents: DONE shows an open group with every agent it holds, and no `󰍟 +K` button while there are no more than 5 groups', async ($, on) => {
   const clock = world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -76,13 +76,8 @@ test('agents: DONE shows its first 5 lines (the open group header and 4 agents) 
   await openCockpit($)
   await clock.advance(135_000)
   const ui = await mountPane($)
-  expect(await doneAgents(ui)).toHaveLength(4)
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +21')
-  await ui.press({ key: 'done:more' })
   expect(await doneAgents(ui)).toHaveLength(25)
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍝 −21')
-  await ui.press({ key: 'done:more' })
-  expect(await doneAgents(ui)).toHaveLength(4)
+  expect(await ui.find({ key: 'done:more' })).toBeUndefined()
   await ui.unmount()
 })
 
