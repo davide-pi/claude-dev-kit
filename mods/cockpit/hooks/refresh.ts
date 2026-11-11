@@ -230,10 +230,14 @@ export async function fastTick($: EngineInterface): Promise<void> {
   if (isOpen) await tickClock($)
 }
 
-/** Medium tier (10 s): git while the pane is open: the header shows it. */
+/**
+ * Medium tier (10 s): git and the context while the pane is open: the header shows them. The plain `usage()` costs nothing, and
+ * it is what draws a compaction live, since the harness can skip this mod's `session.compact` hook.
+ */
 export async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
+  await refreshUsage($)
   await refreshGit($)
 }
 

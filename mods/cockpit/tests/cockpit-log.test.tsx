@@ -98,6 +98,19 @@ test('sessionLog: a drop in the context readings is one compaction entry, its af
   expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 100_000 }])
 })
 
+test('given an open pane whose session.compact hook the harness skips, when the medium tick passes after a compaction, then the engine reading shows the drop as one compaction entry', async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, isAutoOpen: true })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 900_000, percent: 90 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  // When: no session.compact reaches the mod; the world's `$.session.usage()` answers 248K
+  await clock.advance(10_000)
+  // Then
+  expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 900_000, after: 248_000 }])
+})
+
 const USAGE = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
 
 test('agentSpend: a finished agent adds its cost to its type; a turn that ends again adds only the change (the sum of the agents\' events); the accumulator is saved with the session', async ($, on) => {
