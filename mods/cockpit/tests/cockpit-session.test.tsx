@@ -416,11 +416,11 @@ test('last known: before the first live reading the credits come from the status
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
   const text = async (re: RegExp) => rowTexts(await ui.drawn()).find(r => re.test(r))
-  expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% ↻ +1h00m · /)
+  expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% ↻ 1h00m · /)
   expect(await text(/7d [▰▱]+ ~80%/)).toMatch(/ · 7d [▰▱]+ ~80% /)
   await measureWith($, 25, [{ kind: 'five_hour', percentUsed: 30, resetsAt: iso(3600_000) }])
   await settleAll()
-  expect(await text(/5h [▰▱]+ {2}70%/)).toBeDefined()
+  expect(await text(/5h [▰▱]+ 70%/)).toBeDefined()
   expect(await text(/5h [▰▱]+ ~60%/)).toBeUndefined()
   expect(await text(/7d [▰▱]+ ~80%/)).toMatch(/ · 7d [▰▱]+ ~80% /) // the live reading carries no 7d window: the cache's one stays, with its ~
   await ui.unmount()
@@ -435,7 +435,7 @@ test('last known: each window is drawn from the engine when it has that kind, el
   await measureWith($, 25, [{ kind: 'seven_day', percentUsed: 10, resetsAt: iso(86_400_000) }])
   await settleAll()
   expect(await text(/5h [▰▱]+ ~60%/)).toMatch(/^5h [▰▱]+ ~60% .* · 7d /) // only the 7d is live: the 5h row does not vanish
-  expect(await text(/7d [▰▱]+ {2}90%/)).toBeDefined()
+  expect(await text(/7d [▰▱]+ 90%/)).toBeDefined()
   expect(await text(/7d [▰▱]+ ~80%/)).toBeUndefined()
   await ui.unmount()
 })
@@ -444,7 +444,7 @@ test('last known: a cache window that is over reads 100 % left with no countdown
   world(on, { rateLimits: [], files: { [RL_FILE]: JSON.stringify({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 60 } }) } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [▰▱]+ ~100% {9}$/) // the countdown's cells stay, blank
+  expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [▰▱]+ ~100%$/) // no countdown: nothing after the percent
   await ui.unmount()
 })
 

@@ -3,7 +3,7 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { emptyInsights } from '../hooks/insights'
-import { clockTime, costCell } from '../hooks/shared'
+import { COLORS, clockTime, costCell } from '../hooks/shared'
 import { INITIAL } from '../hooks/state'
 import { setLang } from '../hooks/strings'
 import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks } from '../hooks/view-page'
@@ -11,6 +11,7 @@ import { paneView } from '../hooks/view'
 import { makeKit } from '../hooks/view-kit'
 import type { Block, Kit, PaneActions } from '../hooks/view-kit'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
+import { colorOf, keysInOrder } from './cockpit-fixtures'
 import { NOW, rowTexts } from './cockpit-world'
 
 const WIDTH = 60
@@ -28,6 +29,18 @@ const insights = (over: object = {}) => ({ ...emptyInsights(), ...over })
 
 /** The keys of the drawn Buttons that match `re`. */
 const keysOf = async (ui: Awaited<ReturnType<Engine['ui']['mount']>>, re: RegExp) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => re.test(k))
+
+/** Whether the first leaf Text whose content matches `re` is bold. */
+const boldOf = (root: unknown, re: RegExp): boolean | undefined => {
+  const o = root as { props?: { weight?: string }; children?: unknown[] } | null
+  const [only] = o?.children ?? []
+  if (typeof only === 'string' && re.test(only)) return o?.props?.weight === 'bold'
+  for (const c of o?.children ?? []) {
+    const found = boldOf(c, re)
+    if (found !== undefined) return found
+  }
+  return undefined
+}
 
 const flat = (b: readonly unknown[]): unknown[] => b.flatMap(x => (Array.isArray(x) ? flat(x) : [x]))
 
@@ -62,44 +75,62 @@ async function draw($: Engine, on: On, s: CockpitSnapshot, build: (k: Kit) => Bl
 const SINCE = NOW - 120_000
 const WAITING = { kind: 'waiting', since: SINCE } as const
 
+/** A section's title row: the title, a space, a rule to the width. */
+const titled = (label: string) => `${label} ${'─'.repeat(WIDTH - [...label].length - 1)}`
+
 // ── ATTENZIONE ──
 
 test('attention: nothing to do is one row, never an empty section', async ($, on) => {
   const { rows } = await draw($, on, snap(), attentionBlocks)
-  expect(rows).toEqual(['', 'ATTENTION', '✓ nothing to do'])
+  expect(rows).toEqual([titled('ATTENTION'), '✓ nothing to do'])
 })
 
-test('attention: blocking first, then cost, then the rest; each row says what and what to do', async ($, on) => {
+test('attention: blocking first, then cost, then the rest; each row has its severity icon, what, and what to do dim under it', async ($, on) => {
   const s = snap({ agents: [agent('a1', 'Explore', { model: 'claude-opus-5-5' })], insights: insights({ failedCmds: { 'npm test': 3 } }), claudeState: WAITING })
   const { rows } = await draw($, on, s, attentionBlocks)
   expect(rows).toEqual([
-    '',
-    'ATTENTION',
-    '! permission waiting for 120s',
-    '  → answer the request in the terminal',
-    '󰍟 Opus on a read-only agent (Explore)',
-    '  → set model sonnet or haiku for this agent type',
-    '󰍟 command failed 3 times: npm test',
-    '  → read the error and fix the cause instead of rerunning',
+    titled('ATTENTION'),
+    '\u{F033E} permission waiting for 120s',
+    '  answer the request in the terminal',
+    '\u{F0114} Opus on a read-only agent (Explore)',
+    '  set model sonnet or haiku for this agent type',
+    '\u{F018D} command failed 3 times: npm test',
+    '  read the error and fix the cause instead of rerunning',
   ])
+})
+
+test('attention: the icon takes the colour of its severity (block red, warn orange, info yellow) and a blocking title is bold', async ($, on) => {
+  const s = snap({ agents: [agent('a1', 'Explore', { model: 'claude-opus-5-5' })], insights: insights({ failedCmds: { 'npm test': 3 } }), claudeState: WAITING })
+  const { ui } = await draw($, on, s, attentionBlocks)
+  const root = await ui.drawn()
+  expect(colorOf(root, /^\u{F033E}/u)).toBe(COLORS.red)
+  expect(colorOf(root, /^\u{F018D}/u)).toBe(COLORS.orange)
+  expect(colorOf(root, /^\u{F0114}/u)).toBe(COLORS.yellow)
+  expect(boldOf(root, /^permission waiting/)).toBe(true)
+  expect(boldOf(root, /^command failed/)).toBe(false)
 })
 
 test('attention: a pressed row says why and what to do; the press toggles that signal', async ($, on) => {
   const calls: string[] = []
   const id = `permissionWait:${SINCE}`
   const { rows, ui } = await draw($, on, snap({ claudeState: WAITING, signalOpen: id }), attentionBlocks, calls)
-  expect(rows).toEqual(['', 'ATTENTION', '! permission waiting for 120s', '  why: the work is stopped until you answer', '  what to do: answer the request in the terminal'])
+  expect(rows).toEqual([titled('ATTENTION'), '\u{F033E} permission waiting for 120s', '  why: the work is stopped until you answer', '  what to do: answer the request in the terminal'])
   await ui.press({ key: `signal:${id}` })
   expect(calls).toEqual([`toggleSignal:${id}`])
 })
 
-test('attention: the worklog behind is a row with log hours; up to date it is no row', async ($, on) => {
+test('attention: the worklog behind is a row with its icon and log hours on the right; up to date it is no row', async ($, on) => {
   const calls: string[] = []
   const behind = snap({ sessionId: 's-1', worklog: { pending: ['2026-10-20'], underTarget: [] } })
   const { rows, ui } = await draw($, on, behind, attentionBlocks, calls)
-  expect(rows.slice(0, 2)).toEqual(['', 'ATTENTION'])
+  expect(rows[0]).toBe(titled('ATTENTION'))
   expect(rows).not.toContain('✓ nothing to do')
-  expect((await ui.find({ key: 'worklog:days' }))?.text).toBe('▸ worklog · 1 day behind')
+  expect((await ui.find({ key: 'worklog:days' }))?.text).toBe('\u{F00F0} 1 day without logged hours')
+  expect(colorOf(await ui.drawn(), /^\u{F00F0}/u)).toBe(COLORS.yellow)
+  // the toggle and the button share one row, the button pushed to the right
+  const row = ((await ui.drawn()) as { children: unknown[] }).children[1] as { props?: { justifyContent?: string } }
+  expect(keysInOrder(row)).toEqual(['worklog:days', 'attention:worklog'])
+  expect(row.props?.justifyContent).toBe('space-between')
   expect((await ui.find({ key: 'attention:worklog' }))?.text).toBe('log hours')
   await ui.press({ key: 'attention:worklog' })
   expect(calls).toEqual(['ask:worklog'])
@@ -150,50 +181,74 @@ test('page: with eight notifications at 40 rows the footer buttons are still dra
 
 const BAR = 51
 const bar = (n: number) => '▰'.repeat(n)
+/** The four columns of the figures rows: floor(WIDTH / 4) cells each. */
+const COL = WIDTH / 4
+const cols = (...cells: string[]) => cells.map(c => c.padEnd(COL)).join('').trimEnd()
 
 test('andamento: hidden before the first round', async ($, on) => {
   expect((await draw($, on, snap(), andamentoBlocks)).rows).toEqual([])
   expect((await draw($, on, snap({ insights: insights() }), andamentoBlocks)).rows).toEqual([])
 })
 
-test('andamento: main loop only: $/prompt flat, the spend bar is all main, the context bar by tool', async ($, on) => {
+test('andamento: main loop only: four columns with — for what is missing, the spend bar is all main, the context bar by tool', async ($, on) => {
   const s = snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 30_000, Edit: 10_000 } }) })
   const { rows } = await draw($, on, s, andamentoBlocks)
   expect(rows).toEqual([
-    '',
-    'TREND',
-    '$2.00/prompt →',
-    'agents 0%',
+    titled('TREND'),
+    cols('$/prompt', 'last turn', 'subagents', 'compaction'),
+    cols('$2.00 →', '—', '0%', '—'),
+    cols('', '', 'of spend', ''),
     `spend    ${bar(BAR)}`,
-    '         ■ main 100%',
+    '▰ main 100%',
     `context  ${bar(31 + 15 + 5)}`,
-    '         ■ Read 60%  ■ Bash 30%  ■ Edit 10%',
+    '▰ Read 60%  ▰ Bash 30%  ▰ Edit 10%',
   ])
 })
 
-test('andamento: main and two agent types over the target: arrow up, agents share, turns to compact, top three tools and other', async ($, on) => {
-  const s = snap({
-    cost: { usd: 10 },
+const AGENTS_SNAP = () =>
+  snap({
+    cost: { usd: 10, lastUsd: 0.44 },
     agentSpend: { implementer: 3, reviewer: 1 },
     costTarget: 1.5,
     ctx: { tokens: 120_000 },
     ctxSamples: [100_000, 110_000, 120_000],
     autoCompactAt: 150_000,
+    sessionLog: [{ at: NOW - 90_000, kind: 'round', usd: 0.2, ms: 134_000 }, { at: NOW - 30_000, kind: 'round', usd: 0.44, ms: 61_000 }],
     insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 20_000, Edit: 10_000, Grep: 6_000, Glob: 4_000 } }),
   })
-  const { rows } = await draw($, on, s, andamentoBlocks)
+
+test('andamento: main and two agent types over the target: arrow up, its max, last turn and its time, agents share, turns to compact and where, top three tools and other', async ($, on) => {
+  const { rows } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
   expect(rows).toEqual([
-    '',
-    'TREND',
-    '$2.00/prompt ↑ target $1.50',
-    'agents 40% · compact in ~3 turns',
+    titled('TREND'),
+    cols('$/prompt', 'last turn', 'subagents', 'compaction'),
+    cols('$2.00 ↑', '$0.44', '40%', '~3 turns'),
+    cols('max $1.50', '01m01s', 'of spend', 'at 150K'),
     `spend    ${bar(BAR)}`,
-    '         ■ main 60%  ■ implementer 30%  ■ reviewer 10%',
+    '▰ main 60%  ▰ implementer 30%  ▰ reviewer 10%',
     `context  ${bar(BAR)}`,
-    '         ■ Read 60%  ■ Bash 20%  ■ Edit 10%  ■ other 10%',
+    '▰ Read 60%  ▰ Bash 20%  ▰ Edit 10%  ▰ other 10%',
   ])
-  const down = await draw($, on, { ...s, costTarget: 3 }, andamentoBlocks)
-  expect(down.rows[2]).toBe('$2.00/prompt ↓ target $3.00')
+  const down = await draw($, on, { ...AGENTS_SNAP(), costTarget: 3 }, andamentoBlocks)
+  expect(down.rows[2]).toBe(cols('$2.00 ↓', '$0.44', '40%', '~3 turns'))
+})
+
+test('andamento: the figures take their colours, the legend glyph the colour of its part and the label the text colour', async ($, on) => {
+  const { ui } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
+  const root = await ui.drawn()
+  expect(colorOf(root, /^\$2\.00$/)).toBe(COLORS.red)
+  expect(colorOf(root, /^↑$/)).toBe(COLORS.red)
+  expect(colorOf(root, /^\$0\.44$/)).toBe(COLORS.text)
+  expect(colorOf(root, /^40%$/)).toBe(COLORS.lavender)
+  expect(colorOf(root, /^~3 turns$/)).toBe(COLORS.yellow) // 120K of 150K: a compact is due
+  expect(colorOf(root, /^▰ $/)).toBe(COLORS.blue)
+  expect(colorOf(root, /^main 60%$/)).toBeUndefined()
+})
+
+test('andamento: with no target and no autocompact threshold the max and the compaction caption are blank', async ($, on) => {
+  const s = { ...AGENTS_SNAP(), autoCompactAt: undefined, costTarget: undefined }
+  const { rows } = await draw($, on, s, andamentoBlocks)
+  expect(rows[3]).toBe(cols('', '01m01s', 'of spend'))
 })
 
 // ── IN CORSO ──
@@ -216,9 +271,9 @@ test('in progress: tasks, the perimeter with its files outside, the running agen
     agents: [agent('a1', 'implementer'), agent('a2', 'reviewer', { status: 'done', endedAt: NOW - 1000 })],
   })
   const { rows, ui } = await draw($, on, s, inProgressBlocks, calls)
-  expect(rows.slice(0, 4)).toEqual(['', 'IN PROGRESS', '󱎖 tasks 1/2 · Write the page', '󰀦 1 file outside the perimeter'])
-  expect(rows[4]).toMatch(/^󱎖 implementer/)
-  expect(rows).toHaveLength(5)
+  expect(rows.slice(0, 3)).toEqual([titled('IN PROGRESS'), '󱎖 tasks 1/2 · Write the page', '󰀦 1 file outside the perimeter'])
+  expect(rows[3]).toMatch(/^󱎖 implementer/)
+  expect(rows).toHaveLength(4)
   await ui.press({ key: 'agent:a1' })
   expect(calls).toEqual(['toggleAgent:a1'])
   const open = await draw($, on, { ...s, agentsOpen: ['a1'] }, inProgressBlocks)
@@ -233,7 +288,7 @@ test('in progress: a perimeter with nothing outside reads as kept; the workflow 
     workflowRun: { runId: 'wf_1', name: 'review', phase: 'x', round: 1, agents: [{ id: 'a9', isDone: false }] },
   })
   const { rows } = await draw($, on, s, inProgressBlocks)
-  expect(rows).toEqual(['', 'IN PROGRESS', '󰄰 tasks 0/1', '󰄬 deliver perimeter · 1 entry', 'workflow review · x · round 1 · 0/1 · $0.00'])
+  expect(rows).toEqual([titled('IN PROGRESS'), '󰄰 tasks 0/1', '󰄬 deliver perimeter · 1 entry', 'workflow review · x · round 1 · 0/1 · $0.00'])
 })
 
 test('in progress: at most five rows, the rest behind the toggle', async ($, on) => {
@@ -273,8 +328,7 @@ test('done: the newest five of the log and the finished agents by time, the rest
   const s = snap({ sessionLog: [...LOG], history: HISTORY })
   const { rows, ui } = await draw($, on, s, doneBlocks, calls)
   expect(rows).toEqual([
-    '',
-    'DONE',
+    titled('DONE'),
     fullRow(NOW - 10_000, '󰄬', 'agent reviewer', costCell(0.5, 7)),
     fullRow(NOW - 20_000, '◆', 'PR #12 Fix x'),
     fullRow(NOW - 30_000, '◇', 'compacted 180k → 40k'),
@@ -293,7 +347,7 @@ test('done: the newest five of the log and the finished agents by time, the rest
 test('done: an agent just finished, still listed in the agents, shows at once and once', async ($, on) => {
   const fresh = agent('a9', 'implementer', { status: 'done', endedAt: NOW - 5_000 })
   const alone = await draw($, on, snap({ agents: [fresh] }), doneBlocks)
-  expect(alone.rows).toEqual(['', 'DONE', fullRow(NOW - 5_000, '󰄬', 'agent implementer')])
+  expect(alone.rows).toEqual([titled('DONE'), fullRow(NOW - 5_000, '󰄬', 'agent implementer')])
   const twice = await draw($, on, snap({ agents: [fresh], history: [{ id: 'a9', type: 'implementer', startedAt: NOW - 62_000, endedAt: NOW - 5_000, tokens: 0, isFailed: false }] }), doneBlocks)
   expect(twice.rows).toEqual(alone.rows)
 })
@@ -303,11 +357,11 @@ test('done: an agent just finished, still listed in the agents, shows at once an
 test('page: the section titles and the empty row in Italian', async ($, on) => {
   try {
     setLang('it')
-    expect((await draw($, on, snap(), attentionBlocks)).rows).toEqual(['', 'ATTENZIONE', '✓ niente da fare'])
+    expect((await draw($, on, snap(), attentionBlocks)).rows).toEqual([titled('ATTENZIONE'), '✓ niente da fare'])
     const trend = await draw($, on, snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6 }) }), andamentoBlocks)
-    expect(trend.rows.slice(0, 4)).toEqual(['', 'ANDAMENTO', '$2.00/prompt →', 'agenti 0%'])
-    expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[1]).toBe('IN CORSO')
-    expect((await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows[1]).toBe('FATTO')
+    expect(trend.rows.slice(0, 4)).toEqual([titled('ANDAMENTO'), cols('$/prompt', 'ultimo turno', 'subagenti', 'compattazione'), cols('$2.00 →', '—', '0%', '—'), cols('', '', 'della spesa')])
+    expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
+    expect((await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows[0]).toBe(titled('FATTO'))
   } finally {
     setLang('en')
   }

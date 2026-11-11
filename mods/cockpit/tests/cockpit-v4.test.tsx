@@ -37,14 +37,15 @@ test('Notifications: a command that failed twice is one row (what) with what to 
   expect(flagOf(writes)).not.toHaveProperty('signals')
 
   let rows = rowTexts(await ui.drawn())
-  expect(rows.some(r => /^ATTENTION$/.test(r))).toBe(true)
-  const at = rows.findIndex(r => /^󰍟 .*npm test/.test(r))
+  expect(rows.some(r => /^ATTENTION ─+$/.test(r))).toBe(true)
+  const at = rows.findIndex(r => /^\u{F018D} .*npm test/u.test(r))
   expect(at).toBeGreaterThan(0)
-  expect(rows[at + 1]).toMatch(/^ +→ /) // what to do, under the closed row
+  expect(rows[at + 1]).toMatch(/^ {2}\S/) // what to do, dim under the closed row, indented, with no arrow
+  expect(rows[at + 1]).not.toMatch(/→/)
   expect(rows.some(r => /^ +why: /.test(r))).toBe(false)
   await ui.press({ key: 'signal:failedCommand:npm test' })
   rows = rowTexts(await ui.drawn())
-  expect(rows[at]).toMatch(/^󰍝 /)
+  expect(rows[at]).toMatch(/^\u{F018D} /u)
   expect(rows[at + 1]).toMatch(/^ +why: /)
   expect(rows.slice(at + 2, at + 4).some(r => /^ +what to do: /.test(r))).toBe(true) // the why may wrap onto a second row
   expect(rows[at]?.trimEnd().endsWith(` ${clockTime(NOW)}`)).toBe(true) // the time it arrived, on the right
@@ -64,13 +65,13 @@ test('Notifications: a title too long for the row is cut closed, and open it wra
   const time = clockTime(NOW + 60_000) // the second failure is what makes it hold
 
   let rows = rowTexts(await ui.drawn())
-  const at = rows.findIndex(r => /^󰍟 command failed/.test(r))
+  const at = rows.findIndex(r => /^\u{F018D} command failed/u.test(r))
   expect(at).toBeGreaterThan(0)
   expect(rows[at]).toMatch(new RegExp(`… +${time}$`))
 
   await ui.press({ key: `signal:failedCommand:${cmd}` })
   rows = rowTexts(await ui.drawn())
-  expect(rows[at]).toMatch(new RegExp(`^󰍝 command .* ${time}$`))
+  expect(rows[at]).toMatch(new RegExp(`^\u{F018D} command .* ${time}$`, 'u'))
   const end = rows.findIndex((r, i) => i > at && r.trim() === '')
   const below = rows.slice(at + 1, end < 0 ? undefined : end).map(r => r.trim())
   expect(rows.slice(at, at + below.length + 1).some(r => r.includes('…'))).toBe(false)
@@ -107,7 +108,7 @@ test('Notifications: a permission ask unanswered over 60 seconds is a notificati
   await askPerson($, 'c1')
   await clock.advance(91_000)
   await settleAll()
-  expect((await paneRows($, 58)).rows.some(r => /^! permission waiting/.test(r))).toBe(true)
+  expect((await paneRows($, 58)).rows.some(r => /^\u{F033E} permission waiting/u.test(r))).toBe(true)
   release('rm x')
   await call
   await settleAll()
@@ -131,7 +132,7 @@ test('IN PROGRESS: the workflow run is one row with its name, phase and agents d
   const { rows } = await paneRows($, 58)
   const run = rows.findIndex(r => /^workflow release-notes · .* · 0\/0 · \$0\.00/.test(r))
   expect(run).toBeGreaterThan(-1)
-  expect(rows.findIndex(r => /^IN PROGRESS$/.test(r))).toBeLessThan(run)
+  expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)
   release('rm x')
   await call
 })

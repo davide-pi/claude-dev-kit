@@ -283,7 +283,7 @@ test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: 
     // the section: from its title to the first empty row or rule
     const body = async () => {
       const rows = rowTexts(await ui.drawn())
-      const rest = rows.slice(rows.findIndex(r => r === 'IN PROGRESS') + 1)
+      const rest = rows.slice(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r)) + 1)
       const end = rest.findIndex(r => r.trim() === '' || /^─+$/.test(r))
       return end < 0 ? rest : rest.slice(0, end)
     }

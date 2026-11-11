@@ -12,7 +12,7 @@ test('English is the default: the footer and the titles', async ($, on) => {
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
   expect([await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['compact', 'retrospective', 'log hours'])
-  expect(rowTexts(await ui.drawn()).some(r => r === 'ATTENTION')).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /^ATTENTION ─+$/.test(r))).toBe(true)
   await ui.unmount()
 })
 
@@ -34,7 +34,7 @@ test('both languages draw the page, with every label of the bundles in both and 
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
       const ui = await mountPane($, 58)
       const rows = rowTexts(await ui.drawn())
-      for (const title of titles) expect(rows, lang).toContain(title)
+      for (const title of titles) expect(rows.some(r => r.startsWith(`${title} ─`)), `${lang} ${title}`).toBe(true)
       // an undefined or raw key would show as "undefined" or a dotted path
       expect(rows.join(' '), lang).not.toMatch(/undefined|\[object|\bbuttons\.|\bsignalText\./)
       await ui.unmount()
@@ -47,7 +47,7 @@ test('both languages draw the page, with every label of the bundles in both and 
 test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {
   const options: World = { files: IT_FILE }
   world(on, options)
-  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^ATTENZIONE$/.test(r)) ? 'it' : 'en')
+  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^ATTENZIONE ─+$/.test(r)) ? 'it' : 'en')
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const italian = 'it'
   const english = 'en'
@@ -83,7 +83,7 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
-    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^ATTENZIONE$/.test(r))
+    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^ATTENZIONE ─+$/.test(r))
     expect(await isItalian()).toBe(true)
     // read once: a change of the file is for the next session start
     options.files = {}

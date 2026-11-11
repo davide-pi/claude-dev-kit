@@ -47,6 +47,28 @@ export type SignalKind =
 /** One thing that looks wrong: its kind, a key that tells two of a kind apart, and the number or name the text names. */
 export type Signal = { kind: SignalKind; key: string; label?: string; n?: number }
 
+/** How much a notification asks of the person: `block` stops the work, `warn` costs money or risks it, `info` is a hint. */
+export type SignalSeverity = 'block' | 'warn' | 'info'
+
+export function signalSeverity(sig: Signal): SignalSeverity {
+  switch (sig.kind) {
+    case 'permissionWait':
+      return 'block'
+    case 'workflow':
+      return sig.label === 'stall' ? 'block' : 'warn'
+    case 'failedCommand':
+    case 'ctxGrowth':
+    case 'heavyAgent':
+    case 'doneClaims':
+      return 'warn'
+    case 'reread':
+    case 'bigResult':
+    case 'opusReadOnly':
+    case 'coldAfterIdle':
+      return 'info'
+  }
+}
+
 /** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
 export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
 

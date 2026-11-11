@@ -14,6 +14,7 @@ import {
   detectRereads,
   detectWorkflow,
   isStalled,
+  signalSeverity,
   signalsOf,
 } from '../hooks/signals'
 import { emptyInsights } from '../hooks/insights'
@@ -158,4 +159,11 @@ test('signalsOf: every detector from the snapshot alone; a quiet snapshot has no
   }
   expect(signalsOf(s).map(x => x.kind)).toEqual(['heavyAgent', 'opusReadOnly', 'reread', 'failedCommand', 'ctxGrowth', 'permissionWait'])
   expect(Object.keys(THRESHOLDS)).toEqual(expect.arrayContaining(['subagentTokens', 'resultChars', 'rereads', 'failedCommands', 'coldCachePct', 'idleGapMs', 'ctxGrowth', 'doneClaims', 'workflowRound', 'permissionWaitMs']))
+})
+
+test('signalSeverity: a permission wait and a workflow stall block; failed command, context growth, heavy agent, workflow round and done claims warn; the rest is info', () => {
+  const sev = (kind: Parameters<typeof signalSeverity>[0]['kind'], label?: string) => signalSeverity({ kind, key: 'k', ...(label === undefined ? {} : { label }) })
+  expect([sev('permissionWait'), sev('workflow', 'stall')]).toEqual(['block', 'block'])
+  expect([sev('failedCommand'), sev('ctxGrowth'), sev('heavyAgent'), sev('workflow', 'round'), sev('doneClaims')]).toEqual(['warn', 'warn', 'warn', 'warn', 'warn'])
+  expect([sev('reread'), sev('bigResult'), sev('opusReadOnly'), sev('coldAfterIdle')]).toEqual(['info', 'info', 'info', 'info'])
 })

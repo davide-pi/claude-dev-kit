@@ -5,8 +5,8 @@ import { sessionTokens } from './agents'
 import { worklogLabel } from './session'
 import { COLORS, clockTime, fmtCost, spanWidth, splitCells, textCells, truncateSpans, wrapCells } from './shared'
 import type { Span } from './shared'
-import { agentCosts, signalId } from './signals'
-import type { Signal } from './signals'
+import { agentCosts, signalId, signalSeverity } from './signals'
+import type { Signal, SignalSeverity } from './signals'
 import { t } from './strings'
 import { agentRow, agentWarning, pairRow, subagentDetails } from './view-agents'
 import { dim, line, sp, spanNodes } from './view-base'
@@ -44,24 +44,19 @@ export type Kit = {
   actions: PaneActions
   /** An empty row. */
   gap: () => RenderElement
-  /** A section's title, its right side under it when the two do not fit one row. */
-  title: (label: string, right?: Span[]) => RenderElement
+  /** A section's title: the label, a space, a rule to the end of the row. */
+  title: (label: string) => RenderElement
 }
 
 export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: PaneActions): Kit {
-  const { Box, Text } = ui
+  const { Text } = ui
   return {
     ui,
     s,
     width,
     actions,
     gap: () => <Text> </Text>,
-    title: (label, right = []) => (
-      <Box justifyContent="space-between" flexDirection={textCells(label) + 1 + spanWidth(right) <= width ? 'row' : 'column'}>
-        {line(ui, [sp(label, COLORS.title)])}
-        {line(ui, right)}
-      </Box>
-    ),
+    title: label => line(ui, [sp(label, COLORS.title, true), sp(' '), sp('─'.repeat(Math.max(0, width - textCells(label) - 1)), COLORS.rule)]),
   }
 }
 
@@ -147,11 +142,39 @@ export function signalText(sig: Signal): { what: string; why: string; todo: stri
   }
 }
 
+const SEVERITY_COLORS: Record<SignalSeverity, string> = { block: COLORS.red, warn: COLORS.orange, info: COLORS.yellow }
+
+/** A notification's icon: one per kind, a workflow's by whether it stalled or ran past its rounds. */
+function signalIcon(sig: Signal): string {
+  switch (sig.kind) {
+    case 'permissionWait':
+      return '\u{F033E}'
+    case 'workflow':
+      return sig.label === 'stall' ? '\u{F03E5}' : '\u{F04E6}'
+    case 'failedCommand':
+      return '\u{F018D}'
+    case 'ctxGrowth':
+      return '\u{F0535}'
+    case 'heavyAgent':
+      return '\u{F06A9}'
+    case 'doneClaims':
+      return '\u{F0028}'
+    case 'reread':
+      return '\u{F0450}'
+    case 'bigResult':
+      return '\u{F03D6}'
+    case 'opusReadOnly':
+      return '\u{F0114}'
+    case 'coldAfterIdle':
+      return '\u{F0717}'
+  }
+}
+
 /**
- * A notification's row: what, the time it arrived on the right; pressed, the row also tells why and what to do. A blocking one starts with a red `!`,
- * and a closed row carries what to do under it.
+ * A notification's row: its icon in the colour of its severity, what (bold when it blocks), the time it arrived on the right; pressed, the row also tells why
+ * and what to do. A closed row carries what to do dim under it.
  */
-export function signalRow(k: Kit, sig: Signal, page: { isBlocking: boolean }): Block {
+export function signalRow(k: Kit, sig: Signal): Block {
   const { ui, s, width, actions } = k
   const { Button, Text } = ui
   const S = t()
@@ -160,22 +183,26 @@ export function signalRow(k: Kit, sig: Signal, page: { isBlocking: boolean }): B
   const text = signalText(sig)
   const id = signalId(sig)
   const isOpen = s.signalOpen === id
-  const style = (t: string) => (page.isBlocking ? sp(t, COLORS.red, true) : sp(t, COLORS.yellow, true))
+  const severity = signalSeverity(sig)
+  const style = (t: string) => sp(t, undefined, severity === 'block')
+  const icon = `${signalIcon(sig)} `
   // The time it arrived on the right; open, the row holds what fits of the title and the rest goes under it
   const at = s.signalsAt?.[id]
   const time = at === undefined ? [] : [dim(clockTime(at))]
-  const mark = page.isBlocking ? '!' : isOpen ? '󰍝' : '󰍟'
-  const [head, rest] = isOpen ? splitCells(`${mark} ${text.what}`, width - spanWidth(time) - 1) : [`${mark} ${text.what}`, '']
+  const [head, rest] = isOpen ? splitCells(text.what, width - textCells(icon) - spanWidth(time) - 1) : [text.what, '']
   return [
     <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
-      <Text wrap="truncate">{spanNodes(ui, pairRow([style(head)], time, width))}</Text>
+      <Text wrap="truncate">{spanNodes(ui, pairRow([sp(icon, SEVERITY_COLORS[severity]), style(head)], time, width))}</Text>
     </Button>,
     isOpen && wrapped(rest, style),
     isOpen && wrapped(`${S.signalFields.why}${text.why}`, dim),
     isOpen && wrapped(`${S.signalFields.todo}${text.todo}`, dim),
-    !isOpen && line(ui, truncateSpans([dim(`  → ${text.todo}`)], width)),
+    !isOpen && line(ui, truncateSpans([dim(`  ${text.todo}`)], width)),
   ]
 }
+
+/** The late worklog days' icon: nf-md-calendar_clock */
+const WORKLOG_ICON = '\u{F00F0}'
 
 /** The worklog days behind: the toggle button (`label` of their count) and the list it opens; undefined when up to date. */
 export function worklogBehindRows(k: Kit, label: (n: number) => string): { toggle: Block[number]; days: Block[number] } | undefined {
@@ -189,7 +216,7 @@ export function worklogBehindRows(k: Kit, label: (n: number) => string): { toggl
   return {
     toggle: (
       <Button key="worklog:days" plain onPress={() => actions.toggleOpen('worklog:days')}>
-        <Text color={COLORS.yellow}>{`${isDaysOpen ? '▾' : '▸'} ${label(lateDays.size)}`}</Text>
+        <Text wrap="truncate" color={COLORS.yellow}>{`${WORKLOG_ICON} ${label(lateDays.size)}`}</Text>
       </Button>
     ),
     days: isDaysOpen && daysRows.flatMap(text => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [sp(`  ${l}`, COLORS.yellow)]))),

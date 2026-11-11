@@ -1,7 +1,7 @@
 import type { CockpitSnapshot } from '../types'
 import { ctxScale } from './context'
 import { parseReset, weeklyPace } from './session'
-import { abbrevTokens, countdown, ctxColor, effortGlyph, pctCell, rateColor } from './shared'
+import { COLORS, abbrevTokens, countdown, effortGlyph, pctCell, rateColor, signedPct } from './shared'
 import type { Span } from './shared'
 import { dim, sp } from './view-base'
 
@@ -9,8 +9,6 @@ const FIVE_HOURS = 18000
 const SEVEN_DAYS = 604800
 // The widest token count `abbrevTokens` writes (`248.5K`): the readout keeps its cells whatever the count, so the bar beside it never moves.
 export const TOKENS_CELLS = 6
-// The cells of ` ↻ ` and the countdown: kept, blank, once the reset has passed.
-const RESET_CELLS = 9
 // The widest window `abbrevTokens` writes, with its slash (`/200K`).
 const WINDOW_CELLS = 5
 
@@ -63,13 +61,19 @@ export function contextText(s: CockpitSnapshot): Span[] {
   const pct = scale.limit === undefined ? (percent ?? 0) : Math.round(scale.pct)
   // rounded to the thousand: `/232K` keeps the window's cells (`/231.6K` would not)
   const length = scale.limit === undefined ? window : Math.round(scale.limit / 1000) * 1000
-  const out: Span[] = [...pctSpans(pct, ctxColor(scale.pct), isStale), sp(` ${abbrevTokens(tokens ?? 0, true).padStart(TOKENS_CELLS)}`)]
+  const out: Span[] = [...pctSpans(pct, scale.color, isStale), sp(` ${abbrevTokens(tokens ?? 0, true).padStart(TOKENS_CELLS)}`)]
   // the length keeps its cells too: unmeasured or switched (`/1M`, `/200K`), the bar keeps its length
   out.push(dim((length ? `/${abbrevTokens(length, true)}` : '').padEnd(WINDOW_CELLS)))
   return out
 }
 
+/** A credit window's readout, one space between its parts: the percent left, the reset, and for the 7d window the pace (the credit left against an even burn, + is ahead). */
 export function rateText(r: RateRow, now: number): Span[] {
-  const cd = countdown(r.resetMs, now)
-  return [...pctSpans(r.rem, r.color, r.isStale), ...(cd ? [dim(' ↻ '), sp(cd)] : [sp(' '.repeat(RESET_CELLS))])]
+  const cd = countdown(r.resetMs, now).trim()
+  return [
+    ...(r.isStale ? [dim('~')] : []),
+    sp(`${r.rem}%`, r.color, true),
+    ...(cd ? [dim(' ↻ '), sp(cd)] : []),
+    ...(r.pace ? [sp(' '), sp(signedPct(r.pace.delta), r.pace.delta < 0 ? COLORS.red : COLORS.green)] : []),
+  ]
 }

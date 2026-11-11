@@ -2,6 +2,8 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { COLORS } from '../hooks/shared'
+import { colorOf } from './cockpit-fixtures'
 import { PANE, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
@@ -44,4 +46,31 @@ test('CTX readout: the warning prints the scaled percent, and the scale decides 
 test('CTX readout: it keeps its cells, so the row is as wide with a threshold as without', async ($, on) => {
   const { row } = await ctxRows($, on, 151_000, { autoCompactAt: 193_000 })
   expect([...row].length).toBe(48)
+})
+
+/** The colour of the CTX readout's percent after a measure of `tokens`. */
+async function ctxColourOf($: Engine, on: On, tokens: number, options: World = {}) {
+  world(on, options)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens, percent: Math.round(tokens / 10_000) }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const color = colorOf(await ui.drawn(), /^ *\d+%$/) // the first percent drawn is the CTX readout's
+  await ui.unmount()
+  return color
+}
+
+for (const [tokens, color, name] of [
+  [90_000, COLORS.green, 'green under 50%'],
+  [100_000, COLORS.orange, 'orange from 50%'],
+  [150_000, COLORS.orange, 'orange under 80%'],
+  [160_000, COLORS.red, 'red from 80%'],
+] as const) {
+  test(`CTX colour: given a threshold of 200K, ${tokens / 1000}K reads ${name} of it`, async ($, on) => {
+    expect(await ctxColourOf($, on, tokens, { autoCompactAt: 200_000 })).toBe(color)
+  })
+}
+
+test('CTX colour: without a threshold it keeps the window\'s own colouring', async ($, on) => {
+  expect(await ctxColourOf($, on, 600_000)).toBe(COLORS.yellow) // 60% of 1M
 })

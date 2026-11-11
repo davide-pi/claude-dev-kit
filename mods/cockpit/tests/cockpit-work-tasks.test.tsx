@@ -19,7 +19,7 @@ test('the task list comes from TodoWrite: IN PROGRESS counts them and names the 
     todos: [todo('Done one', 'completed'), todo('Pending one', 'pending'), todo('Working on it', 'in_progress'), todo('Done two', 'completed')],
   })
   const rows = await pageRows($)
-  expect(rows).toContain('IN PROGRESS')
+  expect(rows.some(r => /^IN PROGRESS ─+$/.test(r))).toBe(true)
   expect(await tasksRow($)).toBe('󱎖 tasks 2/4 · Working on it')
 })
 
@@ -79,7 +79,7 @@ test('no tasks: no IN PROGRESS section, and the state file says tasks:null', asy
   world(on, { writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(await tasksRow($)).toBeUndefined()
-  expect((await pageRows($)).includes('IN PROGRESS')).toBe(false)
+  expect((await pageRows($)).some(r => /^IN PROGRESS/.test(r))).toBe(false)
   expect((flagOf(writes) as { tasks: unknown }).tasks).toBeNull()
 })
 
@@ -110,13 +110,13 @@ test('ATTENTION: a worklog behind is a row saying how many days, and `worklog:da
   world(on, { hasWorklog: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
-  expect(rowTexts(await ui.drawn()).some(r => /^▸ worklog · 1 day behind/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /^\u{F00F0} 1 day without logged hours/u.test(r))).toBe(true)
   expect(rowTexts(await ui.drawn()).some(r => /to log/.test(r))).toBe(false)
   await ui.press({ key: 'worklog:days' })
-  expect(rowTexts(await ui.drawn()).some(r => /^▾ worklog · 1 day behind/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /^\u{F00F0} 1 day without logged hours/u.test(r))).toBe(true)
   expect(rowTexts(await ui.drawn()).some(r => /to log/.test(r))).toBe(true)
   await ui.press({ key: 'worklog:days' })
-  expect(rowTexts(await ui.drawn()).some(r => /^▸ worklog · 1 day behind/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /^\u{F00F0} 1 day without logged hours/u.test(r))).toBe(true)
   await ui.unmount()
 })
 
@@ -126,10 +126,10 @@ test('IN PROGRESS: the deliver perimeter is a row of the section, and no tab bar
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'TodoWrite', todos: [todo('Working on it', 'in_progress')] })
   const rows = await pageRows($)
-  const main = rows.findIndex(r => r === 'IN PROGRESS')
+  const main = rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))
   expect(main).toBeGreaterThan(0)
   expect(rows[main - 1]).toBe('')
-  expect(rows[main - 2]).toMatch(/^─+$/)
+  expect(rows[main - 2]).not.toMatch(/^─+$/) // sections are told apart by an empty row, not a rule
   expect(rows.slice(main).some(r => /deliver perimeter/.test(r) || /outside the perimeter/.test(r))).toBe(true)
 })
 

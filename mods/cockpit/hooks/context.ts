@@ -1,5 +1,5 @@
 import type { CockpitSnapshot, CockpitTask } from '../types'
-import { isCount, isRecord, truncEnd } from './shared'
+import { COLORS, ctxColor, isCount, isRecord, truncEnd } from './shared'
 
 // ── Context growth and the autocompact forecast ──
 
@@ -40,16 +40,23 @@ export const recordRound = (rounds: readonly number[] | undefined, tokens: numbe
 /** The CTX bar is full at this multiple of the autocompact threshold, so the threshold's tick sits at 1/1.2 of the bar. */
 const CTX_SCALE = 1.2
 
+/** The share of the autocompact threshold from which the CTX fill turns orange, then red. */
+const CTX_ORANGE_PCT = 50
+const CTX_RED_PCT = 80
+
 /**
  * The CTX bar's fill and the tick of the autocompact threshold. Where the engine reports `autoCompactAt` the bar is `1.2 × autoCompactAt` tokens long
  * (`pct` is the context over that, capped at 100, `markPct` the threshold's place, `limit` the bar's length in tokens); without one it is the window's own percent, no tick.
+ * `color` is the fill's: by the share of the threshold reached (under 50% green, under 80% orange, else red), or by the window's own percent without one.
  */
-export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompactAt'>): { pct: number; markPct?: number; limit?: number } {
+export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompactAt'>): { pct: number; color: string; markPct?: number; limit?: number } {
   // Until the engine measures the window (a resumed session) the last state's reading stands in.
   const { tokens, percent } = s.ctx.percent === undefined && s.lastCtx ? s.lastCtx : s.ctx
-  if (s.autoCompactAt === undefined || s.autoCompactAt <= 0) return { pct: percent ?? 0 }
+  if (s.autoCompactAt === undefined || s.autoCompactAt <= 0) return { pct: percent ?? 0, color: ctxColor(percent ?? 0) }
   const limit = CTX_SCALE * s.autoCompactAt
-  return { pct: Math.min(100, ((tokens ?? 0) / limit) * 100), markPct: 100 / CTX_SCALE, limit }
+  const share = ((tokens ?? 0) / s.autoCompactAt) * 100
+  const color = share < CTX_ORANGE_PCT ? COLORS.green : share < CTX_RED_PCT ? COLORS.orange : COLORS.red
+  return { pct: Math.min(100, ((tokens ?? 0) / limit) * 100), color, markPct: 100 / CTX_SCALE, limit }
 }
 
 /** The context a data file keeps (`tokens`, `window`, `percent`); none when any of the three is not a count. */

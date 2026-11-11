@@ -9,15 +9,11 @@ import {
   barCells,
   baseName,
   cacheColor,
-  ctxColor,
   displayModel,
   fmtCost,
-  fmtCostDelta,
   gridWidths,
   pathToFileUri,
   pctCell,
-  shownTurnUsd,
-  signedPct,
   spanWidth,
   truncMiddle,
   truncateSpans,
@@ -25,7 +21,7 @@ import {
 } from './shared'
 import type { BarPart, Span } from './shared'
 import { t } from './strings'
-import { BUTTON_GAP, buttonRowWidth, dim, line, padStart, sp } from './view-base'
+import { BUTTON_GAP, buttonRowWidth, dim, line, sp } from './view-base'
 import type { Ui } from './view-base'
 import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
@@ -38,10 +34,6 @@ export type { PaneActions } from './view-kit'
 
 /** The context fill from which the header warns. */
 const CTX_WARN_PCT = 80
-// The cells of a round's cost delta (`$+12.34`) on the trend row, beside the context growth.
-const COST_DELTA_CELLS = 7
-// Stands in a trend cell whose turn value is not computed yet: nf-md-duck
-const NOT_YET = '\u{F01E5}'
 // The shortest bar a budget cell draws: below it the credit windows go one row each.
 const BUDGET_BAR_MIN = 4
 
@@ -99,7 +91,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     </Box>
   )
 
-  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn); the round's delta is on the trend row
+  // Header line 1: model + effort + the Claude state | session cost (always: `$0.00` before the first turn)
   const costSpans: Span[] = [sp(fmtCost(s.cost.usd), COLORS.yellow, true)]
   const modelSpans = truncateSpans(
     [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
@@ -125,7 +117,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const scale = ctxScale(s)
   const cacheShown: Span[] = [dim('· '), dim(S.cache), sp(pctCell(s.cacheShare ?? 0), cacheColor(s.cacheShare ?? 0))]
   const cacheSpans: Span[] = s.cacheShare === undefined ? [sp(' '.repeat(spanWidth(cacheShown)))] : cacheShown
-  const ctxParts = [{ pct: scale.pct, color: ctxColor(scale.pct) }]
+  const ctxParts = [{ pct: scale.pct, color: scale.color }]
   const ctxText = [...contextText(s), ...cacheSpans]
   // The bar is a surface module where the surface has one: its glow and pulse move on that region's own clock, never redrawing the pane; a surface without one draws it static
   const budgetRow = (key: string, label: string, cells: number, parts: BarPart[], text: Span[], isFlowing: boolean, tone?: string, markPct?: number): RenderElement => {
@@ -143,53 +135,44 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   // triggered on the scaled percent, which it prints too
   const ctxWarning = s.ctx.percent !== undefined && scale.pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(scale.limit === undefined ? s.ctx.percent : scale.pct)), COLORS.red)])
 
-  // Credits row: the 5h and 7d windows side by side, half the row each, or one row each when a half cannot hold its readout and a short bar;
-  // the week's pace shows as the gap segment of the 7d bar
-  const sevenDay = rateRow(s, 'seven_day')
+  // Credits row: the 5h and 7d windows side by side, the bars sharing what their readouts leave of the row, or one row each when a bar would be too short;
+  // the week's pace shows as the gap segment of the 7d bar and, ending the 7d readout, as its figure
   const windows = [
     { label: '5h', r: rateRow(s, 'five_hour') },
-    { label: '7d', r: sevenDay },
-  ].filter((w): w is { label: string; r: RateRow } => w.r !== undefined)
+    { label: '7d', r: rateRow(s, 'seven_day') },
+  ]
+    .filter((w): w is { label: string; r: RateRow } => w.r !== undefined)
+    .map(w => ({ ...w, text: rateText(w.r, s.now) }))
   const windowSep = dim(' · ')
-  const halfCells = Math.floor((width - spanWidth([windowSep])) / 2)
-  const sideBySide = windows.length > 1 && windows.every(({ label, r }) => spanWidth([dim(`${label} `), ...rateText(r, s.now)]) + 1 + BUDGET_BAR_MIN <= halfCells)
+  // the cells a window takes besides its bar: its label, the space before and its readout
+  const fixedCells = windows.map(({ label, text }) => spanWidth([dim(`${label} `), ...text]) + 1)
+  const barCellsLeft = width - spanWidth([windowSep]) - fixedCells.reduce((n, c) => n + c, 0)
+  const sideBySide = windows.length > 1 && Math.floor(barCellsLeft / 2) >= BUDGET_BAR_MIN
+  // the cells of window `i` in the row: the first bar takes the half, the second what is left
+  const cellsOf = (i: number): number => (sideBySide ? (fixedCells[i] ?? 0) + (i === 0 ? Math.floor(barCellsLeft / 2) : barCellsLeft - Math.floor(barCellsLeft / 2)) : width)
   const windowParts = (r: RateRow): BarPart[] => {
     const gapPct = r.pace && r.pace.delta < 0 ? -r.pace.delta : 0
     return [{ pct: r.rem, color: r.color }, ...(gapPct ? [{ pct: gapPct, color: COLORS.gap }] : [])]
   }
   // A window's bar pulses when its colour changes; the last known reading (resumed session) has no tone, so the first live one never pulses
-  const windowRow = ({ label, r }: { label: string; r: RateRow }): RenderElement =>
+  const windowRow = ({ label, r, text }: { label: string; r: RateRow; text: Span[] }, i: number): RenderElement =>
     // no tone for a window whose reset has passed: its colour then changes with the clock alone, not with a new reading
-    budgetRow(`bar:${label}`, label, sideBySide ? halfCells : width, windowParts(r), rateText(r, s.now), false, r.isStale || (r.resetMs !== undefined && r.resetMs <= s.now) ? undefined : r.color)
+    budgetRow(`bar:${label}`, label, cellsOf(i), windowParts(r), text, false, r.isStale || (r.resetMs !== undefined && r.resetMs <= s.now) ? undefined : r.color)
   const creditsRows = windows.length === 0
     ? [line(ui, [dim(S.noRateData)])]
     : sideBySide
       ? [
           ui.Client ? (
             <Box>
-              {windowRow(windows[0]!)}
+              {windowRow(windows[0]!, 0)}
               {line(ui, [windowSep])}
-              {windowRow(windows[1]!)}
+              {windowRow(windows[1]!, 1)}
             </Box>
           ) : (
-            line(ui, windows.flatMap(({ label, r }, i) => [...(i > 0 ? [windowSep] : []), ...budget(label, halfCells, windowParts(r), rateText(r, s.now))]))
+            line(ui, windows.flatMap(({ label, r, text }, i) => [...(i > 0 ? [windowSep] : []), ...budget(label, cellsOf(i), windowParts(r), text)]))
           ),
         ]
       : windows.map(windowRow)
-
-  // Under the credits: what the current turn added to the cost, then the week's pace (the credit left against an even burn,
-  // + is ahead); all dim but the pace, each in its own cells and the row always drawn, so neither the readout nor the sections below move
-  // until the running turn's cost is measured, the last ended turn's stands in: the duck only before the first one
-  const costDelta = fmtCostDelta(shownTurnUsd(s.cost))
-  const pace = sevenDay?.pace
-  const trendRow = line(ui, [
-    dim(`${S.turnCost} `),
-    // padded by cells: NOT_YET is one cell but two UTF-16 units
-    dim(padStart(costDelta ? `$${costDelta}` : NOT_YET, COST_DELTA_CELLS + 1)),
-    windowSep,
-    dim(`${S.weekPace} `),
-    ...(pace ? [sp(padStart(signedPct(pace.delta), 5), pace.delta < 0 ? COLORS.red : COLORS.green)] : []),
-  ])
 
   // The footer, the last rows of the page: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
@@ -245,11 +228,11 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     )
 
   // The header, above the page: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
-  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows, trendRow]
+  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows]
 
-  // The sections in their order, told apart by a rule; an empty one is not built (ATTENZIONE says there is nothing to do).
+  // The sections in their order, told apart by an empty row; an empty one is not built (ATTENZIONE says there is nothing to do).
   const sections = [attentionBlocks, andamentoBlocks, inProgressBlocks, doneBlocks].flatMap(build => build(kit))
-  const body: Block = sections.flatMap((b, i) => [...(i > 0 ? [rule] : []), ...b.flat()])
+  const body: Block = sections.flatMap((b, i) => [...(i > 0 ? [kit.gap()] : []), ...b.flat()])
 
   return (
     <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>

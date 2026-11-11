@@ -29,8 +29,6 @@ const EN = {
 
   // Header
   noRateData: 'no rate-limit data',
-  turnCost: 'turn',
-  weekPace: 'pace 7d',
   contextAt: (pct: number) => `󰀦 context at ${pct}%`,
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
@@ -69,7 +67,7 @@ const EN = {
     pending: 'to log',
     underTarget: 'under target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}d ${what} (${dates})`,
-    behind: (n: number) => `${n} ${plural(n, 'day', 'days')} behind`,
+    withoutHours: (n: number) => `${n} ${plural(n, 'day', 'days')} without logged hours`,
   },
 
   // The single page: its four sections
@@ -79,10 +77,14 @@ const EN = {
     inProgress: 'IN PROGRESS',
     done: 'DONE',
     nothingToDo: 'nothing to do',
-    perPrompt: '/prompt',
-    target: (cost: string) => `target ${cost}`,
-    agents: (pct: number) => `agents ${pct}%`,
-    turnsLeft: (n: number) => `compact in ~${n} ${plural(n, 'turn', 'turns')}`,
+    perPrompt: '$/prompt',
+    lastTurn: 'last turn',
+    subagents: 'subagents',
+    compaction: 'compaction',
+    max: (cost: string) => `max ${cost}`,
+    ofSpend: 'of spend',
+    turnsLeft: (n: number) => `~${n} ${plural(n, 'turn', 'turns')}`,
+    compactAt: (tokens: string) => `at ${tokens}`,
     spend: 'spend',
     context: 'context',
     main: 'main',
@@ -116,8 +118,6 @@ const IT: Strings = {
   confirmRetro: 'quale retrospettiva? invia /retro',
 
   noRateData: 'nessun dato sui limiti',
-  turnCost: 'turno',
-  weekPace: 'ritmo 7d',
   contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
@@ -150,7 +150,7 @@ const IT: Strings = {
     pending: 'da registrare',
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
-    behind: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} indietro`,
+    withoutHours: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} senza ore segnate`,
   },
 
   page: {
@@ -159,10 +159,14 @@ const IT: Strings = {
     inProgress: 'IN CORSO',
     done: 'FATTO',
     nothingToDo: 'niente da fare',
-    perPrompt: '/prompt',
-    target: (cost: string) => `obiettivo ${cost}`,
-    agents: (pct: number) => `agenti ${pct}%`,
-    turnsLeft: (n: number) => `compattazione tra ~${n} ${plural(n, 'giro', 'giri')}`,
+    perPrompt: '$/prompt',
+    lastTurn: 'ultimo turno',
+    subagents: 'subagenti',
+    compaction: 'compattazione',
+    max: (cost: string) => `max ${cost}`,
+    ofSpend: 'della spesa',
+    turnsLeft: (n: number) => `~${n} ${plural(n, 'giro', 'giri')}`,
+    compactAt: (tokens: string) => `a ${tokens}`,
     spend: 'spesa',
     context: 'contesto',
     main: 'principale',

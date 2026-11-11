@@ -2,9 +2,9 @@ import type { CockpitHistoryEntry, CockpitLogEntry } from '../types'
 import { addHistory, toHistory } from './agents'
 import { andamento, spendSplit } from './andamento'
 import { openTasks } from './context'
-import { COLORS, abbrevTokens, barCells, clockTime, costCell, duration, fmtCost, padCells, truncateSpans } from './shared'
+import { CENT, COLORS, abbrevTokens, barCells, clockTime, costCell, duration, fmtCost, padCells, shownTurnUsd, spanWidth, truncateSpans } from './shared'
 import type { Span } from './shared'
-import { signalsOf } from './signals'
+import { signalSeverity, signalsOf } from './signals'
 import type { Signal, SignalKind } from './signals'
 import { t } from './strings'
 import { agentIcon, orderAgents, pairRow, taskCounts, visibleAgents } from './view-agents'
@@ -25,12 +25,14 @@ const CAPTION_W = 9
 /** A bar's parts beyond this many tools join "other". */
 const TOP_TOOLS = 3
 const COST_W = 7
+/** The columns of ANDAMENTO's figures. */
+const COLUMNS = 4
+const MISSING = '—'
 
 /** The notifications that cost money; every other kind that is not blocking comes after them. */
 const COST_KINDS: readonly SignalKind[] = ['heavyAgent', 'opusReadOnly', 'bigResult', 'reread', 'coldAfterIdle', 'ctxGrowth']
 
-const isBlocking = (sig: Signal): boolean => sig.kind === 'permissionWait' || (sig.kind === 'workflow' && sig.label === 'stall')
-const rankOf = (sig: Signal): number => (isBlocking(sig) ? 0 : COST_KINDS.includes(sig.kind) ? 1 : 2)
+const rankOf = (sig: Signal): number => (signalSeverity(sig) === 'block' ? 0 : COST_KINDS.includes(sig.kind) ? 1 : 2)
 
 // ── ATTENZIONE ──
 
@@ -48,23 +50,26 @@ function rowsWithin(lines: readonly number[], maxRows: number, maxLines: number)
 
 /** The live notifications, blocking first then cost then the rest, and the worklog behind; "nothing to do" when there is neither. */
 export function attentionBlocks(k: Kit): Block[] {
-  const { ui, s, gap, title, actions } = k
+  const { ui, s, title, actions } = k
   const { Box, Button } = ui
   const S = t()
   const signals = [...signalsOf(s)].sort((a, b) => rankOf(a) - rankOf(b))
-  const rows: Block[] = signals.map(sig => signalRow(k, sig, { isBlocking: isBlocking(sig) }))
+  const rows: Block[] = signals.map(sig => signalRow(k, sig))
   const lines: number[] = rows.map(() => 2)
 
-  const late = worklogBehindRows(k, n => `worklog · ${S.worklog.behind(n)}`)
+  const late = worklogBehindRows(k, n => S.worklog.withoutHours(n))
   if (late !== undefined) {
     const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
+    // the toggle on the left, the button right-aligned on the same row
     rows.push([
-      <Box columnGap={BUTTON_GAP}>
+      <Box justifyContent="space-between" columnGap={BUTTON_GAP}>
         {late.toggle}
         {hasLog && (
-          <Button key="attention:worklog" onPress={() => actions.ask('worklog')}>
-            {S.buttons.logHours}
-          </Button>
+          <Box flexShrink={0}>
+            <Button key="attention:worklog" onPress={() => actions.ask('worklog')}>
+              {S.buttons.logHours}
+            </Button>
+          </Box>
         )}
       </Box>,
       late.days,
@@ -72,8 +77,8 @@ export function attentionBlocks(k: Kit): Block[] {
     lines.push(1)
   }
 
-  if (rows.length === 0) return [[gap(), title(S.page.attention), line(ui, [sp('✓ ', COLORS.green), dim(S.page.nothingToDo)])]]
-  return [[gap(), title(S.page.attention), collapsible(k, 'attention', rows, rowsWithin(lines, MAX_ROWS, ATTENTION_LINES), s.openKeys?.includes('attention') === true, () => actions.toggleOpen('attention'))]]
+  if (rows.length === 0) return [[title(S.page.attention), line(ui, [sp('✓ ', COLORS.green), dim(S.page.nothingToDo)])]]
+  return [[title(S.page.attention), collapsible(k, 'attention', rows, rowsWithin(lines, MAX_ROWS, ATTENTION_LINES), s.openKeys?.includes('attention') === true, () => actions.toggleOpen('attention'))]]
 }
 
 // ── ANDAMENTO ──
@@ -82,14 +87,14 @@ const PALETTE = [COLORS.blue, COLORS.green, COLORS.amber, COLORS.lavender, COLOR
 
 type BarPart = { label: string; pct: number; isOther?: boolean }
 
-/** A bar under its caption and the legend under it, each part's colour and share. */
+/** A bar behind its dim caption and the legend under it, from the first column: each part's glyph in its colour, its label and share in the text colour. */
 function barRows(k: Kit, caption: string, parts: readonly BarPart[]): Block {
   const { ui, width } = k
   const colors = parts.map((p, i) => (p.isOther ? COLORS.gray : (PALETTE[i % PALETTE.length] ?? COLORS.blue)))
-  const legend: Span[] = parts.flatMap((p, i) => [...(i > 0 ? [sp('  ')] : []), sp('■ ', colors[i]), dim(`${p.label} ${Math.round(p.pct)}%`)])
+  const legend: Span[] = parts.flatMap((p, i) => [...(i > 0 ? [sp('  ')] : []), sp('▰ ', colors[i]), sp(`${p.label} ${Math.round(p.pct)}%`)])
   return [
     line(ui, [dim(padCells(caption, CAPTION_W)), ...barCells(Math.max(1, width - CAPTION_W), parts.map((p, i) => ({ pct: p.pct, color: colors[i] ?? COLORS.blue })))]),
-    line(ui, truncateSpans([sp(' '.repeat(CAPTION_W)), ...legend], width)),
+    line(ui, truncateSpans(legend, width)),
   ]
 }
 
@@ -102,34 +107,54 @@ function toolParts(byTool: Record<string, number> | undefined, other: string): B
   return [...tools.slice(0, TOP_TOOLS).map(([label, tokens]) => ({ label, pct: (100 * tokens) / total })), ...(rest > 0 ? [{ label: other, pct: (100 * rest) / total, isOther: true }] : [])]
 }
 
-/** $/prompt with its arrow and target, the subagents' share, the turns to autocompact, then the spend bar and the context bar; hidden before the first round. */
+/** A column of the figures: its dim label, its bold value (`—` where there is none) and its dim caption. */
+type Column = { label: string; value?: Span[]; caption?: string }
+
+/** The figures rows: the columns side by side, floor(width / 4) cells each, a cell cut to leave a space before the next. */
+function figureRows(k: Kit, columns: readonly Column[]): Block {
+  const { ui, width } = k
+  const cells = Math.floor(width / COLUMNS)
+  const row = (pick: (c: Column) => Span[]) =>
+    line(ui, columns.flatMap(c => {
+      const cut = truncateSpans(pick(c), cells - 1)
+      return [...cut, sp(' '.repeat(cells - spanWidth(cut)))]
+    }))
+  return [row(c => [dim(c.label)]), row(c => c.value ?? [dim(MISSING)]), row(c => (c.caption ? [dim(c.caption)] : []))]
+}
+
+/** The last main round's duration: the newest round of the session log; none before one ended. */
+const lastRoundMs = (s: Kit['s']): number | undefined =>
+  (s.sessionLog ?? []).reduce<CockpitLogEntry | undefined>((n, e) => (e.kind === 'round' && e.ms !== undefined && (n === undefined || e.at > n.at) ? e : n), undefined)?.ms
+
+/** Four columns of figures ($/prompt with its trend, the last turn, the subagents' share, the turns to autocompact), then the spend bar and the context bar; hidden before the first round. */
 export function andamentoBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title } = k
+  const { ui, s, title } = k
   const S = t()
   if (s.insights === undefined || s.insights.rounds <= 0) return []
   const a = andamento(s)
   const trendColor = a.trend === 'up' ? COLORS.red : a.trend === 'down' ? COLORS.green : undefined
   const arrow = a.trend === 'up' ? sp('↑', COLORS.red) : a.trend === 'down' ? sp('↓', COLORS.green) : dim('→')
-  const figures: Block = [
-    line(ui, truncateSpans([sp(fmtCost(a.perPrompt), trendColor, true), dim(S.page.perPrompt), sp(' '), arrow, ...(a.target === undefined ? [] : [dim(` ${S.page.target(fmtCost(a.target))}`)])], width)),
-  ]
-  const facts: Span[][] = [
-    ...(a.agentPct === undefined ? [] : [[sp(S.page.agents(Math.round(a.agentPct)))]]),
-    ...(a.turnsLeft === undefined ? [] : [[sp(S.page.turnsLeft(a.turnsLeft), a.isCompactDue ? COLORS.yellow : undefined)]]),
-  ]
-  if (facts.length > 0) figures.push(line(ui, truncateSpans(facts.flatMap((f, i) => (i > 0 ? [dim(' · '), ...f] : f)), width)))
+  // the running turn's cost once it reaches a cent, else the last ended turn's
+  const turnUsd = shownTurnUsd(s.cost)
+  const roundMs = lastRoundMs(s)
+  const figures = figureRows(k, [
+    { label: S.page.perPrompt, value: a.perPrompt === undefined ? undefined : [sp(fmtCost(a.perPrompt), trendColor, true), sp(' '), arrow], caption: a.target === undefined ? undefined : S.page.max(fmtCost(a.target)) },
+    { label: S.page.lastTurn, value: turnUsd === undefined || turnUsd < CENT ? undefined : [sp(`$${turnUsd.toFixed(2)}`, COLORS.text, true)], caption: roundMs === undefined ? undefined : duration(roundMs) },
+    { label: S.page.subagents, value: a.agentPct === undefined ? undefined : [sp(`${Math.round(a.agentPct)}%`, COLORS.lavender, true)], caption: a.agentPct === undefined ? undefined : S.page.ofSpend },
+    { label: S.page.compaction, value: a.turnsLeft === undefined ? undefined : [sp(S.page.turnsLeft(a.turnsLeft), a.isCompactDue ? COLORS.yellow : COLORS.text, true)], caption: s.autoCompactAt === undefined ? undefined : S.page.compactAt(abbrevTokens(s.autoCompactAt, true)) },
+  ])
 
   const label = (p: { label: string }) => (p.label === 'main' ? S.page.main : p.label === 'other' ? S.page.other : p.label)
   const spend = spendSplit(s).map((p): BarPart => ({ label: label(p), pct: p.pct, isOther: p.label === 'other' }))
   const context = toolParts(s.insights.byTool, S.page.other)
-  return [[gap(), title(S.page.trend), figures, spend.length > 0 && barRows(k, S.page.spend, spend), context.length > 0 && barRows(k, S.page.context, context)]]
+  return [[title(S.page.trend), figures, spend.length > 0 && barRows(k, S.page.spend, spend), context.length > 0 && barRows(k, S.page.context, context)]]
 }
 
 // ── IN CORSO ──
 
 /** The deliver tasks and their perimeter, the workflow run and the running agents; hidden when nothing runs and no task is open. */
 export function inProgressBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title, actions } = k
+  const { ui, s, width, title, actions } = k
   const S = t()
   const running = visibleAgents(s).filter(a => a.status === 'running')
   const run = workflowLine(k)
@@ -151,7 +176,7 @@ export function inProgressBlocks(k: Kit): Block[] {
   const agentBlock = makeAgentBlock(k)
   rows.push(...orderAgents(running).map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth)))
 
-  return [[gap(), title(S.page.inProgress), collapsible(k, 'inProgress', rows, MAX_ROWS, s.openKeys?.includes('inProgress') === true, () => actions.toggleOpen('inProgress'))]]
+  return [[title(S.page.inProgress), collapsible(k, 'inProgress', rows, MAX_ROWS, s.openKeys?.includes('inProgress') === true, () => actions.toggleOpen('inProgress'))]]
 }
 
 // ── FATTO ──
@@ -176,7 +201,7 @@ function logEntry(e: CockpitLogEntry): DoneEntry {
 
 /** The session log and the agents that finished, newest first: time, icon, text, cost; the newest five, the rest behind the toggle. */
 export function doneBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title, actions } = k
+  const { ui, s, width, title, actions } = k
   const S = t()
   // An agent that just finished stays in s.agents for a while before it moves to the history: both feed FATTO, once per id.
   const ended = visibleAgents(s).filter(a => a.status === 'done').map(toHistory).filter((h): h is CockpitHistoryEntry => h !== undefined)
@@ -187,5 +212,5 @@ export function doneBlocks(k: Kit): Block[] {
   ].sort((a, b) => b.at - a.at)
   if (entries.length === 0) return []
   const rows = entries.map((e): Block => [line(ui, pairRow([dim(clockTime(e.at)), sp(' '), e.icon, sp(' '), sp(e.text)], e.usd === undefined ? [] : [dim(costCell(e.usd, COST_W))], width))])
-  return [[gap(), title(S.page.done), collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
+  return [[title(S.page.done), collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
 }
