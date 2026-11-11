@@ -117,8 +117,10 @@ function run(cwd, configDir = temp('brief-cfg-'), raw, spawnCwd = temp('brief-no
 const REFLOG = (message) =>
   `${'0'.repeat(40)} ${SHA} Dev <dev@example.com> ${WHEN} +0000\t${message}\n`;
 
-test('the brief names the branch, the last commit, the upstream and the work item', () => {
+test('given a repository with a commit object, when a session starts, then the brief names the branch, the last commit, the upstream and the work item', () => {
+  // Given / When
   const lines = run(repo({ object: 'Add the order list projection' }));
+  // Then
   assert.equal(lines.length, 4);
   assert.match(lines[0], /^branch feature\/4211-orders/);
   assert.match(lines[1], /^last a1b2c3d Add the order list projection \(1h ago\)$/);
@@ -149,51 +151,66 @@ test('given no hook log, when a session starts, then the brief has no hook-log l
   assert.ok(!lines.some((l) => l.startsWith('hook log:')), lines.join(' | '));
 });
 
-test('a PR left in the cache by an older version is ignored: there is no PR line', () => {
+test('given a PR left in the cache by an older version, when a session starts, then it is ignored and there is no PR line', () => {
+  // Given
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });
   writeFileSync(join(cfg, '.session-brief-cache.json'), JSON.stringify({
     [join(root, '.git')]: { at: 0, lines: [], pr: { number: 128, title: 'Add the order list' } },
   }));
+  // When
   const lines = run(root, cfg);
+  // Then
   assert.equal(lines.length, 4);
   assert.ok(!lines.some((l) => l.includes('open PR')), lines.join(' | '));
 });
 
-test('the last commit falls back to the reflog once the object is packed away', () => {
+test('given a commit object packed away, when a session starts, then the last commit falls back to the reflog', () => {
+  // Given / When
   const lines = run(repo({ reflog: REFLOG('commit: Split the order query') }));
+  // Then
   assert.match(lines[1], /^last a1b2c3d Split the order query \(1h ago\)$/);
 });
 
-test('a reflog entry that is not a commit is not reported as one', () => {
+test('given a reflog entry that is not a commit, when a session starts, then it is not reported as the last commit', () => {
+  // Given / When
   // `checkout: moving from main to feature/x` says nothing about what was committed.
   const lines = run(repo({ reflog: REFLOG('checkout: moving from main to feature/4211-orders') }));
+  // Then
   assert.ok(!lines.some((l) => l.startsWith('last ')), lines.join(' | '));
 });
 
-test('a branch with no upstream says so, instead of implying it is in step', () => {
+test('given a branch with no upstream, when a session starts, then the brief says so instead of implying it is in step', () => {
+  // Given / When
   const lines = run(repo({ upstream: null, object: 'Start the spike' }));
+  // Then
   assert.ok(lines.includes('no upstream configured — a push needs an explicit remote and branch'), lines.join(' | '));
 });
 
-test('a detached HEAD is reported as one', () => {
+test('given a detached HEAD, when a session starts, then the brief reports it as detached and has no work item', () => {
+  // Given / When
   const lines = run(repo({ branch: null, object: 'Bisect point' }));
+  // Then
   assert.match(lines[0], /^detached HEAD at a1b2c3d$/);
   assert.ok(!lines.some((l) => l.includes('work item')), 'no branch name, no work item');
 });
 
-test('a branch name with no id carries no work-item line', () => {
+test('given a branch name with no id, when a session starts, then the brief carries no work-item line', () => {
+  // Given / When
   const lines = run(repo({ branch: 'feature/order-list', object: 'Add the order list' }));
+  // Then
   assert.ok(!lines.some((l) => l.includes('work item')), lines.join(' | '));
 });
 
-test('the work-item id is read from every branch shape the convention allows', () => {
+test('given every branch shape the convention allows, when a session starts, then the work-item id is read from each', () => {
+  // Given
   const shapes = [
     ['feature/4211-order-list', '4211'],
     ['fix/4211', '4211'],
     ['feature/AB#4211-orders', '4211'],
     ['feature/4211_orders', '4211'],
   ];
+  // When / Then
   for (const [branch, id] of shapes) {
     const lines = run(repo({ branch }));
     assert.ok(
@@ -203,10 +220,13 @@ test('the work-item id is read from every branch shape the convention allows', (
   }
 });
 
-test('a second session inside the TTL is served from the cache', () => {
+test('given a first session already cached, when a second starts inside the TTL after the branch moved, then it is served from the cache', () => {
+  // Given
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });
+  // When
   const first = run(root, cfg);
+  // Then
   assert.ok(existsSync(join(cfg, '.session-brief-cache.json')), 'the snapshot is persisted');
 
   // Move the repository to another branch. A recomputed brief would follow; a cached one must not.
@@ -214,33 +234,41 @@ test('a second session inside the TTL is served from the cache', () => {
   assert.deepEqual(run(root, cfg), first, 'inside the TTL the brief is the cached snapshot');
 });
 
-test('outside a repository the hook prints nothing at all', () => {
+test('given a directory outside a repository, when a session starts, then the hook prints nothing at all', () => {
+  // Given / When / Then
   assert.deepEqual(run(temp('brief-plain-')), []);
 });
 
-test('a fact that cannot be determined is left out, never guessed', () => {
+test('given a repository with nothing but HEAD, when a session starts, then every undeterminable fact is left out, never guessed', () => {
+  // Given
   // Nothing but HEAD: no ref, no config, no reflog, no object.
   const root = temp('brief-bare-');
   mkdirSync(join(root, '.git'), { recursive: true });
   writeFileSync(join(root, '.git', 'HEAD'), 'ref: refs/heads/feature/x\n');
+  // When
   const lines = run(root);
+  // Then
   assert.deepEqual(lines, [
     'branch feature/x',
     'no upstream configured — a push needs an explicit remote and branch',
   ]);
 });
 
-test('anything unusable prints nothing rather than an error', () => {
+test('given unusable input, when the hook runs, then it prints nothing rather than an error', () => {
+  // Given
   const cfg = temp('brief-cfg-');
+  // When / Then
   for (const raw of ['', 'not json at all', '{}', JSON.stringify({ cwd: '' })]) {
     assert.deepEqual(run(null, cfg, raw), [], JSON.stringify(raw));
   }
   assert.deepEqual(run(null, cfg, JSON.stringify({ cwd: join(tmpdir(), 'does-not-exist-brief') })), []);
 });
 
-test('a payload with no cwd falls back to the process working directory', () => {
+test('given a payload with no cwd, when the hook runs, then it falls back to the process working directory', () => {
+  // Given
   // Claude Code always sends `cwd`; the fallback is what keeps the hook useful if it ever does not.
   const root = repo({ object: 'Add the order list projection' });
+  // When / Then
   assert.match(run(null, temp('brief-cfg-'), '{}', root)[0], /^branch feature\/4211-orders/);
 });
 
@@ -256,19 +284,24 @@ const finding = (category, path = 'src/a.cs', priority = 'P2', closed = true) =>
 const runLine = (...findings) => ({ at: '2026-10-20T10:00:00Z', run: 'r', size: 'M', rounds: 3, minutes: 12, findings });
 const nudgeOf = (lines) => lines.filter((l) => l.startsWith('findings log'));
 
-test('a P1/P2 category that recurs 3+ times since the last retro adds one line, even beside four lines of brief', () => {
+test('given a P1/P2 category recurring 3+ times since the last retro, when a session starts, then one line is added even beside four lines of brief', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression')), runLine(finding('regression'), finding('regression'), finding('correctness'))]);
+  // When
   const lines = run(root);
+  // Then
   assert.equal(lines.length, 5);
   assert.equal(nudgeOf(lines).length, 1);
   assert.match(nudgeOf(lines)[0], /regression.*5 times.*\/retro current findings/);
   assert.ok(!nudgeOf(lines)[0].includes('correctness'));
 });
 
-test('the retro lines come at startup only: a resume, clear or compact re-fire keeps the brief without them', () => {
+test('given retro nudges pending, when a session fires on resume, clear or compact, then the brief comes without them and only startup carries them', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(finding('regression'), finding('regression'), finding('regression')), runLine(finding('regression'), finding('regression')), runLine()]);
+  // When / Then
   assert.equal(nudgeOf(run(root)).length, 1, 'startup');
   for (const source of ['resume', 'clear', 'compact']) {
     const lines = run(root, undefined, JSON.stringify({ hook_event_name: 'SessionStart', source, cwd: root }));
@@ -278,10 +311,12 @@ test('the retro lines come at startup only: a resume, clear or compact re-fire k
   assert.equal(nudgeOf(run(root, undefined, JSON.stringify({ hook_event_name: 'SessionStart', cwd: root }))).length, 1, 'no source: as startup');
 });
 
-test('P3 findings do not count toward a recurring category; the most frequent title is named', () => {
+test('given P3 findings and a recurring category, when a session starts, then P3 does not count and the most frequent title is named', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   const titled = (title, priority = 'P2') => ({ ...finding('regression', 'src/a.cs', priority), title });
   findingsLog(root, [runLine(titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'), titled('x', 'P3'))]);
+  // When / Then
   assert.equal(nudgeOf(run(root)).length, 0);
   findingsLog(root, [runLine(titled('null path not guarded'), titled('null path not guarded'), titled('other'), titled('x', 'P3'))]);
   const lines = nudgeOf(run(root));
@@ -291,28 +326,34 @@ test('P3 findings do not count toward a recurring category; the most frequent ti
   assert.doesNotMatch(nudgeOf(run(root))[0], /most often/);
 });
 
-test('two findings of a category are no nudge; neither is a missing, empty or unreadable log', () => {
+test('given two findings of a category or a missing, empty or unreadable log, when a session starts, then there is no nudge', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(finding('regression'), finding('regression'))]);
+  // When / Then
   assert.equal(nudgeOf(run(root)).length, 0);
   assert.equal(run(repo({ object: 'x' })).length, 4);                          // no log at all
   findingsLog(root, ['', 'not json', '{"findings": 3}', JSON.stringify(runLine(finding('regression')))]);
   assert.equal(nudgeOf(run(root)).length, 0);
 });
 
-test('a retro marker line restarts the count: only what came after it counts', () => {
+test('given a retro marker line in the log, when a session starts, then the count restarts and only what came after it counts', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   const five = runLine(...Array.from({ length: 5 }, () => finding('regression')));
   findingsLog(root, [five, { retro: '2026-10-21T09:00:00Z' }, runLine(finding('regression'), finding('regression'))]);
+  // When / Then
   assert.equal(nudgeOf(run(root)).length, 0);
   findingsLog(root, [five, { retro: '2026-10-21T09:00:00Z' }, five]);
   assert.equal(nudgeOf(run(root)).length, 1);
 });
 
-test('a file with 3 open P3 findings adds the line; closed ones and other priorities do not count', () => {
+test('given a file with 3 open P3 findings, when a session starts, then the line is added and closed ones and other priorities do not count', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   const p3 = (path, closed = false) => finding('clean-code', path, 'P3', closed);
   findingsLog(root, [runLine(p3('src/a.cs'), p3('src/a.cs'), p3('src/a.cs', true), finding('clean-code', 'src/a.cs', 'P2', false))]);
+  // When / Then
   assert.equal(nudgeOf(run(root)).length, 0);
   findingsLog(root, [runLine(p3('src/a.cs'), p3('src/a.cs')), runLine(p3('src/a.cs'), p3('src/b.cs'))]);
   const lines = run(root);
@@ -321,12 +362,15 @@ test('a file with 3 open P3 findings adds the line; closed ones and other priori
   assert.ok(!nudgeOf(lines)[0].includes('src/b.cs'));
 });
 
-test('the nudge is still there when the brief itself is served from the cache', () => {
+test('given a nudge-worthy log and a cached brief, when a second session starts, then the nudge is still there', () => {
+  // Given
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(...Array.from({ length: 5 }, () => finding('regression')))]);
+  // When
   const first = run(root, cfg);
   const second = run(root, cfg);
+  // Then
   assert.deepEqual(second, first);
   assert.equal(nudgeOf(second).length, 1);
 });
@@ -335,8 +379,10 @@ test('the nudge is still there when the brief itself is served from the cache', 
 
 const runsOf = (lines) => lines.filter((l) => l.startsWith('`/retro`'));
 
-test('3 runs since the last retro add the /retro line; 0 or 2 add nothing', () => {
+test('given runs since the last retro, when a session starts, then 3 add the /retro line and 0 or 2 add nothing', () => {
+  // Given
   const root = repo({ branch: 'feature/order-list', object: 'x' });   // no work-item line: room for one more
+  // When / Then
   assert.equal(runsOf(run(root)).length, 0);
   findingsLog(root, [runLine(), runLine()]);
   assert.equal(runsOf(run(root)).length, 0);
@@ -344,26 +390,34 @@ test('3 runs since the last retro add the /retro line; 0 or 2 add nothing', () =
   assert.deepEqual(runsOf(run(root)), ["`/retro`: 3 new runs since the last flow review."]);
 });
 
-test('a retro marker resets the run count and malformed lines are not runs', () => {
+test('given a retro marker and malformed log lines, when a session starts, then the run count resets and malformed lines are not runs', () => {
+  // Given
   const root = repo({ branch: 'feature/order-list', object: 'x' });
   findingsLog(root, [runLine(), runLine(), runLine(), { retro: '2026-10-21' }, runLine(), 'not json', '{"other": 1}', '[1]', runLine()]);
+  // When / Then
   assert.equal(runsOf(run(root)).length, 0);
   findingsLog(root, [runLine(), { retro: '2026-10-21' }, runLine(), runLine(), 'not json', runLine(), runLine()]);
   assert.match(runsOf(run(root))[0], /: 4 new runs/);
 });
 
-test('the run line is never dropped: it follows a full four-line brief', () => {
+test('given 3 runs and a full four-line brief, when a session starts, then the run line is not dropped and follows the brief', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(), runLine(), runLine()]);
+  // When
   const lines = run(root);
+  // Then
   assert.equal(lines.length, 5);
   assert.equal(runsOf(lines).length, 1);
 });
 
-test('beside a findings-log line the count is appended to that line, not a line of its own', () => {
+test('given a findings-log line and 3 runs, when a session starts, then the run count is appended to that line, not a line of its own', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   findingsLog(root, [runLine(...Array.from({ length: 5 }, () => finding('regression'))), runLine(), runLine()]);
+  // When
   const lines = run(root);
+  // Then
   assert.equal(lines.length, 5);
   assert.equal(runsOf(lines).length, 0);
   assert.match(nudgeOf(lines)[0], /; \/retro: 3 new runs$/);
@@ -379,19 +433,24 @@ function handoff(config, over = {}) {
 }
 const clear = (cwd) => JSON.stringify({ hook_event_name: 'SessionStart', source: 'clear', cwd });
 
-test('after /clear the hand-off of the closed task is added to the brief and consumed', () => {
+test('given a hand-off of the closed task, when a session starts after /clear, then it is added to the brief and consumed', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
   const cfg = temp('brief-cfg-');
   const file = handoff(cfg, { cwd: root });
+  // When
   const lines = run(root, cfg, clear(root));
+  // Then
   assert.equal(lines.length, 6);
   assert.equal(lines[4], 'Previous task closed: branch feature/4211-orders, head a1b2c3d');
   assert.equal(lines[5], '- unit | fatto');
   assert.ok(!existsSync(file), 'deleted once read');
 });
 
-test('a hand-off for another cwd, a stale one, or on a non-clear start is ignored', () => {
+test('given a hand-off for another cwd, a stale one, or a non-clear start, when a session starts, then it is ignored', () => {
+  // Given
   const root = repo({ object: 'Add the order list projection' });
+  // When / Then
   for (const [over, payload] of [
     [{ cwd: join(root, 'elsewhere') }, clear(root)],
     [{ cwd: root, at: Date.now() - 3 * 3600_000 }, clear(root)],
