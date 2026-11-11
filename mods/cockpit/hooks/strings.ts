@@ -107,6 +107,32 @@ const EN = {
   prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   workItemsTitle: 'work item',
 
+  // The single page: its four sections
+  page: {
+    attention: 'ATTENTION',
+    trend: 'TREND',
+    inProgress: 'IN PROGRESS',
+    done: 'DONE',
+    nothingToDo: 'nothing to do',
+    perPrompt: '/prompt',
+    target: (cost: string) => `target ${cost}`,
+    agents: (pct: number) => `agents ${pct}%`,
+    turnsLeft: (n: number) => `compact in ~${n} ${plural(n, 'turn', 'turns')}`,
+    spend: 'spend',
+    context: 'context',
+    main: 'main',
+    other: 'other',
+    tasks: (done: number, total: number) => `tasks ${done}/${total}`,
+    events: {
+      round: (duration: string) => `turn ${duration}`,
+      commit: (hash: string) => `commit${hash === '' ? '' : ` ${hash}`}`,
+      test: (cmd: string, isFailed: boolean) => `tests ${isFailed ? 'failed' : 'passed'}: ${cmd}`,
+      compact: (before: string, after: string) => `compacted ${before}${after === '' ? '' : ` → ${after}`}`,
+      pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
+      agent: (type: string) => `agent ${type}`,
+    },
+  },
+
   // Context growth
   grewTitle: 'WHAT GREW THE CONTEXT',
 
@@ -212,6 +238,31 @@ const IT: Strings = {
   wiTitle: (n: number) => `WI · ${n}`,
   prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
   workItemsTitle: 'work item',
+
+  page: {
+    attention: 'ATTENZIONE',
+    trend: 'ANDAMENTO',
+    inProgress: 'IN CORSO',
+    done: 'FATTO',
+    nothingToDo: 'niente da fare',
+    perPrompt: '/prompt',
+    target: (cost: string) => `obiettivo ${cost}`,
+    agents: (pct: number) => `agenti ${pct}%`,
+    turnsLeft: (n: number) => `compattazione tra ~${n} ${plural(n, 'giro', 'giri')}`,
+    spend: 'spesa',
+    context: 'contesto',
+    main: 'principale',
+    other: 'altro',
+    tasks: (done: number, total: number) => `task ${done}/${total}`,
+    events: {
+      round: (duration: string) => `giro ${duration}`,
+      commit: (hash: string) => `commit${hash === '' ? '' : ` ${hash}`}`,
+      test: (cmd: string, isFailed: boolean) => `test ${isFailed ? 'falliti' : 'passati'}: ${cmd}`,
+      compact: (before: string, after: string) => `compattato ${before}${after === '' ? '' : ` → ${after}`}`,
+      pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
+      agent: (type: string) => `agente ${type}`,
+    },
+  },
 
   grewTitle: 'COSA HA GONFIATO IL CONTESTO',
 

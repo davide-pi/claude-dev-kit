@@ -128,18 +128,23 @@ function noteRows(text: string, cells: number): number {
 // ── Agents: the workflow run in one row, every agent listed, the history behind a toggle ──
 
 /** The workflow run in flight in one row: name, phase, round, finished agents out of all and what they cost so far (its agents' cost). */
-function workflowBlock(k: Kit): Block {
-  const { s, width, gap, ui } = k
+export function workflowLine(k: Kit): RenderElement | undefined {
+  const { s, width, ui } = k
   const run = activeRun(s.workflowRun)
-  if (!run) return []
+  if (!run) return undefined
   const ids = new Set(run.agents.map(a => a.id))
   const usd = agentCosts(s.agents, s.events).filter(a => ids.has(a.id)).reduce((sum, a) => sum + (a.usd ?? 0), 0)
   const done = run.agents.filter(a => a.isDone).length
-  return [gap(), line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))]
+  return line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))
+}
+
+function workflowBlock(k: Kit): Block {
+  const row = workflowLine(k)
+  return row === undefined ? [] : [k.gap(), row]
 }
 
 /** The first `shown` rows, then a button that opens the rest (`󰍟 +K`) and folds them again (`󰍝 −K`), which open below it so the button stays where it was pressed; no button when every row fits. */
-function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {
+export function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {
   const { Button, Text } = k.ui
   const hidden = rows.length - shown
   if (hidden <= 0) return rows
@@ -152,18 +157,16 @@ function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: 
   ]
 }
 
-export function agentsBlocks(k: Kit): Block[] {
+/**
+ * Every agent is one row (state, name, model when it fits, effort, share, time); pressing it expands what else there is to know. Live and history alike.
+ * `usd` of the returned builder: what a history entry kept of its cost; it outlives the events, which the resumed session no longer holds.
+ */
+export function makeAgentBlock(k: Kit): (key: string, agent: CockpitAgent, depth: number, usd?: number) => Block {
   const { ui, s, width, gap, actions } = k
   const { Button, Text } = ui
-  const S = t()
-  const agents = visibleAgents(s)
-  const running = agents.filter(a => a.status === 'running')
-
-  // Every agent is one row (state, name, model when it fits, effort, share, time); pressing it expands what else there is to know. Live and history alike.
   const sessionTotal = sessionTokens(s)
   const usdById = new Map(agentCosts(s.agents, s.events).map(a => [a.id, a.usd]))
-  // `usd`: what a history entry kept of its cost; it outlives the events, which the resumed session no longer holds
-  const agentBlock = (key: string, agent: CockpitAgent, depth: number, usd?: number): Block => {
+  return (key, agent, depth, usd) => {
     const indent = '  '.repeat(depth + 1)
     const isOpen = s.agentsOpen?.includes(agent.id) === true
     const warn = agentWarning(agent, s.isSubagentModelForced)
@@ -178,6 +181,14 @@ export function agentsBlocks(k: Kit): Block[] {
       ],
     ]
   }
+}
+
+export function agentsBlocks(k: Kit): Block[] {
+  const { ui, s, width, gap, actions } = k
+  const S = t()
+  const agents = visibleAgents(s)
+  const running = agents.filter(a => a.status === 'running')
+  const agentBlock = makeAgentBlock(k)
   const rows = orderAgents(agents)
   const agentRows = rows.map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth))
   // HISTORY: the agents that left the list, newest first; the newest few, the rest behind a toggle
@@ -236,60 +247,76 @@ export function signalText(sig: Signal): { what: string; why: string; todo: stri
   }
 }
 
+/**
+ * A notification's row: what, the time it arrived on the right; pressed, the row also tells why and what to do. `page` is the single page's variant:
+ * a blocking one starts with a red `!`, and a closed row carries what to do under it.
+ */
+export function signalRow(k: Kit, sig: Signal, page?: { isBlocking: boolean }): Block {
+  const { ui, s, width, actions } = k
+  const { Button, Text } = ui
+  const S = t()
+  // An open notification's text wraps under its row, indented, instead of being cut
+  const wrapped = (text: string, style: (t: string) => Span) => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [style(`  ${l}`)]))
+  const text = signalText(sig)
+  const id = signalId(sig)
+  const isOpen = s.signalOpen === id
+  const style = (t: string) => (page?.isBlocking ? sp(t, COLORS.red, true) : sp(t, COLORS.yellow, true))
+  // The time it arrived on the right; open, the row holds what fits of the title and the rest goes under it
+  const at = s.signalsAt?.[id]
+  const time = at === undefined ? [] : [dim(clockTime(at))]
+  const mark = page?.isBlocking ? '!' : isOpen ? '󰍝' : '󰍟'
+  const [head, rest] = isOpen ? splitCells(`${mark} ${text.what}`, width - spanWidth(time) - 1) : [`${mark} ${text.what}`, '']
+  return [
+    <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
+      <Text wrap="truncate">{spanNodes(ui, pairRow([style(head)], time, width))}</Text>
+    </Button>,
+    isOpen && wrapped(rest, style),
+    isOpen && wrapped(`${S.signalFields.why}${text.why}`, dim),
+    isOpen && wrapped(`${S.signalFields.todo}${text.todo}`, dim),
+    page !== undefined && !isOpen && line(ui, truncateSpans([dim(`  → ${text.todo}`)], width)),
+  ]
+}
+
+/** The worklog days behind: the toggle button (`label` of their count) and the list it opens; undefined when up to date. */
+export function worklogDays(k: Kit, label: (n: number) => string): { toggle: Block[number]; days: Block[number] } | undefined {
+  const { ui, s, width, actions } = k
+  const { Button, Text } = ui
+  const wl = s.worklog
+  const lateDays = new Set([...wl.pending, ...wl.underTarget])
+  if (lateDays.size === 0) return undefined
+  const isDaysOpen = s.openKeys?.includes('worklog:days') === true
+  const daysRows = [...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []), ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : [])]
+  return {
+    toggle: (
+      <Button key="worklog:days" plain onPress={() => actions.toggleOpen('worklog:days')}>
+        <Text color={COLORS.yellow}>{`${isDaysOpen ? '▾' : '▸'} ${label(lateDays.size)}`}</Text>
+      </Button>
+    ),
+    days: isDaysOpen && daysRows.flatMap(text => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [sp(`  ${l}`, COLORS.yellow)]))),
+  }
+}
+
 /** One row per active notification (what); the pressed one also tells why and what to do. */
 export function signalsBlocks(k: Kit): Block[] {
-  const { ui, s, width, gap, title, actions } = k
-  const { Button, Text } = ui
+  const { ui, s, gap, title, actions } = k
   const S = t()
   const signals = signalsOf(s)
   // The worklog: up to date, or the days behind (a press lists which)
-  const wl = s.worklog
-  const lateDays = new Set([...wl.pending, ...wl.underTarget])
-  const isDaysOpen = s.openKeys?.includes('worklog:days') === true
-  const daysRows = [...(wl.pending.length ? [worklogLabel('pending', wl.pending)] : []), ...(wl.underTarget.length ? [worklogLabel('underTarget', wl.underTarget)] : [])]
+  const late = worklogDays(k, S.worklog.behind)
   const worklogBlock: Block = [
     gap(),
     title(S.worklog.title),
     gap(),
-    lateDays.size === 0 ? (
-      line(ui, [sp('󰄬 ', COLORS.green), dim(S.worklog.upToDate)])
-    ) : (
-      [
-        <Button key="worklog:days" plain onPress={() => actions.toggleOpen('worklog:days')}>
-          <Text color={COLORS.yellow}>{`${isDaysOpen ? '▾' : '▸'} ${S.worklog.behind(lateDays.size)}`}</Text>
-        </Button>,
-        isDaysOpen && daysRows.flatMap(text => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [sp(`  ${l}`, COLORS.yellow)]))),
-      ]
-    ),
+    late === undefined ? line(ui, [sp('󰄬 ', COLORS.green), dim(S.worklog.upToDate)]) : [late.toggle, late.days],
   ]
   if (signals.length === 0) return [worklogBlock, [gap(), line(ui, [dim(S.noSignals)])]]
-  const idOf = signalId
-  // An open notification's text wraps under its row, indented, instead of being cut
-  const wrapped = (text: string, style: (t: string) => Span) => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [style(`  ${l}`)]))
-  const yellow = (t: string) => sp(t, COLORS.yellow, true)
   return [
     worklogBlock,
     [
       gap(),
       title(S.signalsTitle(signals.length)),
       gap(),
-      collapsible(k, 'signals', signals.map((sig): Block => {
-        const text = signalText(sig)
-        const id = idOf(sig)
-        const isOpen = s.signalOpen === id
-        // The time it arrived on the right; open, the row holds what fits of the title and the rest goes under it
-        const at = s.signalsAt?.[id]
-        const time = at === undefined ? [] : [dim(clockTime(at))]
-        const [head, rest] = isOpen ? splitCells(`󰍝 ${text.what}`, width - spanWidth(time) - 1) : [`󰍟 ${text.what}`, '']
-        return [
-          <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
-            <Text wrap="truncate">{spanNodes(ui, pairRow([yellow(head)], time, width))}</Text>
-          </Button>,
-          isOpen && wrapped(rest, yellow),
-          isOpen && wrapped(`${S.signalFields.why}${text.why}`, dim),
-          isOpen && wrapped(`${S.signalFields.todo}${text.todo}`, dim),
-        ]
-      }), MAX_SIGNAL_ROWS, s.openKeys?.includes('signals:more') === true, () => actions.toggleOpen('signals:more')),
+      collapsible(k, 'signals', signals.map(sig => signalRow(k, sig)), MAX_SIGNAL_ROWS, s.openKeys?.includes('signals:more') === true, () => actions.toggleOpen('signals:more')),
     ],
   ]
 }
