@@ -344,7 +344,7 @@ test('script: a snapshot without a tree is no snapshot: the declared files are u
 });
 
 test('script: a scope-revert proposal exists only once the fixer has reported: a STALL round before any revert records none; a rejected revert records none', async () => {
-  const hunk = () => finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = () => finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const both = ['src/Orders/OrdersQuery.cs', HELPER];
   const touched = impl({ files: both, snapshot: { tree: 't1', files: both, churn: 3 } });
   const stalled = await run(ARGS, [review([], [hunk(), finding({ path: HELPER, line: 3, title: 'helper drops the tenant filter' })])], [touched]);
@@ -386,7 +386,7 @@ test('script: rejected[].kind decides a "not reproduced" stall; the reason text 
 test('script: a P2 on a file that also has a scope finding goes to the fixer with the revert; next round the reviewers judge it as a previous finding', async () => {
   const both = ['src/Orders/OrdersQuery.cs', HELPER];
   const touched = impl({ files: both, snapshot: { tree: 't1', files: both, churn: 3 } });
-  const hunk = finding({ path: HELPER, category: 'scope', priority: 'P3', line: 4, title: 'extra logging added to the helper' });
+  const hunk = finding({ path: HELPER, category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 4, title: 'extra logging added to the helper' });
   const p2 = (extra = {}) => finding({ path: HELPER, line: 30, title: 'helper drops the tenant filter', ...extra });
   const { out, calls } = await run(ARGS, [review([], [hunk, p2()]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [touched, impl()]);
   assert.equal(out.status, 'OK');
@@ -447,7 +447,7 @@ test('script: a churn stall is accepted on its own round: the reviewers already 
 });
 
 test('script: a scope finding the fixer rejected, the reviewer kept and the fixer then reverted is proposed once; guided after a stall it is still one proposal', async () => {
-  const hunk = () => finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = () => finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const wrong = impl({ rejected: [{ id: 'F1', kind: 'wrong', reason: 'the brief requires this logging' }] });
   const kept = await run(ARGS, [review([], [hunk()]), review([{ id: 'F1', status: 'open', note: 'the brief does not mention logging' }]), review([{ id: 'F1', status: 'closed' }])], [impl(), wrong, impl()]);
   assert.equal(kept.out.status, 'OK');
@@ -521,7 +521,7 @@ test('given an M run with no risk axis, when the final verification starts, then
   const { calls } = await run(args, [review([])]);
   // Then
   const readers = finals(calls);
-  assert.deepEqual(readers.map(c => c.opts.label), ['reviewer B · round 1 · second opinion']);
+  assert.deepEqual(readers.map(c => c.opts.label), ['reviewer B · round 1 · whole diff']);
   assert.deepEqual([readers[0].opts.model, readers[0].opts.effort], ['sonnet', 'high']);
 });
 
@@ -576,9 +576,9 @@ test('given a finding the implementer rejects and its raiser keeps, when the rou
 
 test('given a carried finding, when the final readers judge it closed, then the run is OK and the finding is not open', async () => {
   // Given
-  const bid = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
   const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
-  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9 })]);
+  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
   // When
   const { out, calls } = await run(bid, [raised, review(closed('A1.1'))], [green()]);
   // Then
@@ -589,8 +589,8 @@ test('given a carried finding, when the final readers judge it closed, then the 
 
 test('given a carried finding outside the perimeter, when the final readers keep it open, then the loop stalls on it', async () => {
   // Given
-  const bid = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
-  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9 })]);
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
   // When
   const { out } = await run(bid, [raised, review([{ id: 'A1.1', status: 'open' }])], [impl({ gate: gate('green', { tree: 'tr1' }) })]);
   // Then
@@ -600,7 +600,7 @@ test('given a carried finding outside the perimeter, when the final readers keep
 
 test('given a review fix under the gate, when its report is read, then the fix prompt carries the gate lines and the verify comes from the gate', async () => {
   // Given
-  const bid = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
   const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
   const claimsRed = green({ verify: FAIL, gate: gate('green', { tree: 'tr2' }) });
   // When

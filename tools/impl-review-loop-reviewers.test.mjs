@@ -176,7 +176,7 @@ test('script: the reviewer budget follows the expected file count; the writer bu
 
 test('script: M with a security or data risk runs B on opus even when the change is not wide', async () => {
   const { calls } = await run({ ...ARGS_M, risk: ['data'] }, [review([]), review([])]);
-  assert.equal(calls.find(c => c.opts.label === 'reviewer B · round 1 · second opinion').opts.model, 'opus');
+  assert.equal(calls.find(c => c.opts.label === 'reviewer B · round 1 · whole diff').opts.model, 'opus');
 });
 
 test('given an L run where reader A throws and B reads every file, when round 1 ends, then the run is OK with a gap entry and no rerun', async () => {
@@ -206,7 +206,7 @@ test('given A throws and B leaves F0..F7 unread, when the coverage rerun of A th
   assert.deepEqual(reviewLabels(calls), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion', 'reviewer A · round 2 · code']);
   assert.equal(out.rounds, 2);
   assert.match(out.gaps.join('\n'), /round 1: src\/Orders\/F0\.cs .*not read/);            // one gap entry per unread file
-  assert.equal(out.gaps.filter(g => /not read/.test(g)).length, 8);
+  assert.equal(out.gaps.filter(g => / was not read by its reviewer/.test(g)).length, 8);
 });
 
 test('given the only reviewer throws, when round 1 ends, then the loop stalls with "no reviewer answered" and a resume', async () => {
@@ -232,7 +232,7 @@ test('given A lists only F0..F3 and B lists nothing, when round 1 ends, then A a
   assert.deepEqual(out.roundLog.map(r => r.reviewers), [2, 1]);
   const full = calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt.match(/not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
   assert.deepEqual(full, MANY.slice(4));                                                           // 10 files: no cut at 8
-  assert.equal(out.gaps.filter(g => /not read/.test(g)).length, 10);
+  assert.equal(out.gaps.filter(g => / was not read by its reviewer/.test(g)).length, 10);
 });
 
 test('given an L run with a security axis where A throws and B and the specialist leave files unread, when the rerun of A and B throws, then the loop stalls with "gap" naming the unread files', async () => {
@@ -261,7 +261,7 @@ test('given a specialist that returns nothing in round 1, when the round has no 
   assert.equal(out.stall.why, 'gap');
   assert.match(out.stall.reason, /security/);
   assert.deepEqual(out.stall.reviewers, ['security']);
-  assert.deepEqual(reviewLabels(calls), ['reviewer B · round 1 · second opinion', 'reviewer security · round 1']);
+  assert.deepEqual(reviewLabels(calls), ['reviewer B · round 1 · whole diff', 'reviewer security · round 1']);
 });
 
 test('given a specialist that threw in round 1 and a fix round that closes every finding, when the verifier answers, then the loop stalls with "gap" naming it: only the verifier reads round 2', async () => {
@@ -312,8 +312,8 @@ test('given an M run where B raised a P2 reading only F9, when the fix is verifi
   const { out, calls } = await run(manyArgs({ size: 'M' }), queue, impls);
   // Then
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewLabels(calls, 3), ['reviewer B · round 3 · second opinion']);
-  const prompt = calls.find(c => c.opts.label === 'reviewer B · round 3 · second opinion').prompt;
+  assert.deepEqual(reviewLabels(calls, 3), ['reviewer B · round 3 · whole diff']);
+  const prompt = calls.find(c => c.opts.label === 'reviewer B · round 3 · whole diff').prompt;
   const full = prompt.match(/review them IN FULL, as changed since the start, not just the delta: (.*?)\.(?:\n|$)/)[1].split(', ');
   assert.deepEqual(full, MANY.filter(x => x !== f9));                                  // 13 files: no cut at 8
 });
@@ -499,7 +499,7 @@ import { gate } from './impl-review-loop.harness.mjs';
 
 const readerA = (calls) => calls.filter(c => /^block \d+ · reader A$/.test(c.opts.label ?? ''));
 const implLabels = (calls) => calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label);
-const BLOCK = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+const BLOCK = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
 const greenImpl = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
 
 test('given a block whose gate is green, when it ends, then reader A reads that block\'s delta on sonnet at high', async () => {
@@ -551,7 +551,7 @@ test('given a format-only file, when reader A is briefed, then the brief says no
 // ── review round: carried findings reach the result, P3 is kept, a red gate after reader A's fix stalls ───
 test('given reader A findings that stay open, when the loop ends, then the result lists each as carried with its reason', async () => {
   // Given
-  const raised = review([], [finding({ title: 'carried-title-xyz' }), finding({ title: 'elsewhere-title', path: 'src/Other/Helper.cs', line: 9 })]);
+  const raised = review([], [finding({ title: 'carried-title-xyz' }), finding({ title: 'elsewhere-title', path: 'src/Other/Helper.cs', line: 9, causedByChange: true })]);
   const rejects = greenImpl({ rejected: [{ id: 'A1.1', reason: 'it is not a defect', kind: 'wrong' }] });
   // When
   const { out } = await run(BLOCK, [raised, review([])], [greenImpl(), rejects]);

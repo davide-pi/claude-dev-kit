@@ -74,8 +74,8 @@ test('given an owner request, when the final readers and the verifier run, then 
   const { calls } = await run({ ...ARGS_M, request, touches: ['security'] }, queue, [impl(), impl({ snapshot: T2('t2', 40) })]);
   // Then
   const has = (label) => calls.find(c => c.opts.label === label).prompt.includes(request);
-  const final = calls.find(c => c.opts.label === 'reviewer B · round 1 · second opinion').prompt;
-  assert.equal(has('reviewer B · round 1 · second opinion'), true);
+  const final = calls.find(c => c.opts.label === 'reviewer B · round 1 · whole diff').prompt;
+  assert.equal(has('reviewer B · round 1 · whole diff'), true);
   assert.equal(has('reviewer security · round 1'), true);
   assert.equal(has('reviewer V · round 2 · verify the fixes'), false);
   assert.equal(has('implement the change'), false);
@@ -151,7 +151,7 @@ test('given a preview arg and an M change, when the loop runs, then it stops aft
   // Given
   const preview = 'the order list page /orders';
   const one = () => [review([])];   // M: the final reader is B alone
-  const B = ['reviewer B · round 1 · second opinion'];
+  const B = ['reviewer B · round 1 · whole diff'];
   const withAnswer = (answer, text) => run({ ...ARGS_M, preview, resolutions: [{ round: 0, answers: [{ text, answer }] }] }, one());
   // When
   const first = await run({ ...ARGS_M, preview }, one());
@@ -355,22 +355,28 @@ test('given size L, when A and B both raise the same PLAUSIBLE scope finding, th
   assert.deepEqual(fixRounds(r), ['fix round 1 findings']);
 });
 
-test('given size S, when A alone raises a PLAUSIBLE scope finding, then it blocks: no second reader established that nobody else found it', async () => {
+test('given size S, when A alone raises a PLAUSIBLE scope finding, then it is a note: the sole final reader has no second opinion to wait for, so it blocks only when CONFIRMED', async () => {
   // Given
-  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review(closedIds('F1'))];
+  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })])];
   // When
-  const r = await run(ARGS, queue, [impl(), impl({ snapshot: T2('t2', 10) })]);
+  const r = await run(ARGS, queue, [impl()]);
   // Then
-  assert.deepEqual(fixRounds(r), ['fix round 1 findings']);
+  assert.equal(r.out.status, 'OK');
+  assert.deepEqual(fixRounds(r), []);
+  assert.deepEqual(r.out.minor.map(m => m.title), ['unrequested rename of a helper']);
 });
 
-test('given size M, when B, the only final reader, raises a PLAUSIBLE scope finding, then it blocks and is fixed', async () => {
+test('given size M, when B, the only final reader, raises a PLAUSIBLE scope finding, then it is a note and a CONFIRMED one blocks and is fixed', async () => {
   // Given
-  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review(closedIds('F1'))];
+  const plausible = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })])];
+  const confirmed = [review([], [scopeAt({ confidence: 'CONFIRMED' })]), review(closedIds('F1'))];
   // When
-  const r = await run(ARGS_M, queue, [impl(), impl({ snapshot: T2('t2', 10) })]);
+  const note = await run(ARGS_M, plausible, [impl()]);
+  const blocking = await run(ARGS_M, confirmed, [impl(), impl({ snapshot: T2('t2', 10) })]);
   // Then
-  assert.deepEqual(fixRounds(r), ['fix round 1 findings']);
+  assert.deepEqual(fixRounds(note), []);
+  assert.deepEqual(note.out.minor.map(m => m.title), ['unrequested rename of a helper']);
+  assert.deepEqual(fixRounds(blocking), ['fix round 1 findings']);
 });
 
 test('given a note raised by A at size L, when the verifier of a later round raises the same scope CONFIRMED, then it is fresh and blocking, and the note is not kept beside it', async () => {
@@ -390,7 +396,7 @@ test('given size M, when the final reader B is built, then a scope finding is CO
   // Given / When
   const { calls } = await run(ARGS_M, [review([])]);
   // Then
-  assert.match(calls.find(c => c.opts.label === 'reviewer B · round 1 · second opinion').prompt, /"scope".*CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any/s);
+  assert.match(calls.find(c => c.opts.label === 'reviewer B · round 1 · whole diff').prompt, /"scope".*CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any/s);
 });
 
 test('script (#D1): a cleanup id is not closed when A, the only whole reader of the delta, returned nothing, whatever the watcher says', async () => {
@@ -502,7 +508,7 @@ test('given no plan, when the loop runs, then there is one block, the size is M 
   // Then
   assert.equal(out.blocks.length, 1);
   assert.deepEqual(out.blocks[0].tasks, ['1']);
-  assert.deepEqual(reviewLabels(calls, 1), ['reviewer B · round 1 · second opinion']);
+  assert.deepEqual(reviewLabels(calls, 1), ['reviewer B · round 1 · whole diff']);
   assert.equal(out.findingsLog.size, 'M');
 });
 
@@ -514,7 +520,7 @@ test('given a block brief, when it is built, then it carries the step budget and
   // Then
   const prompt = implCalls(calls)[0].prompt;
   assert.ok(prompt.includes('Budget: about 16 turns. At that point stop widening: run the gate and report what is left.'));
-  assert.ok(prompt.includes('node ~/.claude/scripts/gate.mjs --root \'C:/repo\' --head abc123 --test "node --test x" --stuck-minutes 3'));
+  assert.ok(prompt.includes("node ~/.claude/scripts/gate.mjs --root 'C:/repo' --head abc123 --test 'node --test x' --stuck-minutes 3"));
   assert.ok(prompt.includes('paste its last output line as "gate"'));
 });
 
@@ -559,7 +565,7 @@ test('given a tests-first call, when its brief is built, then it names the test 
   const prompt = implCalls(calls)[0].prompt;
   assert.ok(prompt.includes('Read ~/.claude/skills/dotnet-testing/SKILL.md first.'));
   assert.ok(prompt.includes('the total adds the tax'));
-  assert.ok(prompt.includes('--test "node --test x" --red --unit "node --test u" --test-files'));
+  assert.ok(prompt.includes("--test 'node --test x' --red --unit 'node --test u' --test-files"));
 });
 
 test('given a red that stays unproven after one retry, when the block goes on, then the result lists the missing proof under gaps', async () => {
@@ -680,14 +686,14 @@ test('given two blocks with the same tree, when the second ends, then reader A d
   assert.equal(calls.filter(c => /reader A$/.test(c.opts.label ?? '') && c.opts.label.startsWith('block')).length, 1);
 });
 
-test('given a verify command with a double quote, when the loop starts, then it answers with an error and calls no agent', async () => {
+test('given a verify command with a single quote, when the loop starts, then it answers with an error and calls no agent', async () => {
   // Given
-  const args = { ...ARGS_M, verify: 'node -e "1"' };
+  const args = { ...ARGS_M, verify: "node -e '1'" };
   // When
   const { out, calls } = await run(args, [], [impl()]);
   // Then
   assert.equal(typeof out, 'string');
-  assert.match(out, /verify command contains a double quote/);
+  assert.match(out, /verify command contains a single quote/);
   assert.equal(calls.length, 0);
 });
 
@@ -702,9 +708,9 @@ test('given a wide block whose gate fix changes few lines, when the change is si
   assert.ok(readers.some(c => c.opts.model === 'opus'), readers.map(c => `${c.opts.label}:${c.opts.model}`).join(', '));
 });
 
-test('given an inline run whose verify command holds a double quote, when the loop starts, then it runs: no gate command is built', async () => {
+test('given an inline run whose verify command holds a single quote, when the loop starts, then it runs: no gate command is built', async () => {
   // Given
-  const args = { ...ARGS_M, verify: 'dotnet test --filter "Category=Unit"', inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
+  const args = { ...ARGS_M, verify: "dotnet test --filter 'Category=Unit'", inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
   // When
   const { out } = await run(args, [review([]), review([])]);
   // Then
@@ -739,7 +745,7 @@ test('given a root and dirty files with spaces, when the gate command is built, 
   const { calls } = await run(args, [], [green()]);
   // Then
   const prompt = implCalls(calls)[0].prompt;
-  assert.ok(prompt.includes("--root 'C:/my repo' --head abc123 --test \"node --test x\" --dirty 'docs/a b.md'"));
+  assert.ok(prompt.includes("--root 'C:/my repo' --head abc123 --test 'node --test x' --dirty 'docs/a b.md'"));
 });
 
 // ── deliver flow v2, task 13: reversible questions are answered with their default ───────────────────────

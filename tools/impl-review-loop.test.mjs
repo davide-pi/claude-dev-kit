@@ -172,7 +172,7 @@ test('given an M without touches and an S, when the final readers run, then M is
   const sRun = await run(s, [review([])]);
   // Then
   assert.deepEqual(LABELS_R1(mRun.calls), ['code-reviewer:sonnet:high']);
-  assert.deepEqual(mRun.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer B · round 1 · second opinion']);
+  assert.deepEqual(mRun.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer B · round 1 · whole diff']);
   assert.deepEqual(LABELS_R1(sRun.calls), ['code-reviewer:sonnet:high']);
   assert.deepEqual(sRun.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), ['reviewer A · round 1 · code']);
 });
@@ -199,7 +199,7 @@ test('given an S change that grows to 5 files in the fix, when the loop runs, th
 test('given risk axes on a triage size, when the loop runs, then risk only raises the floor: data lifts S to M, three axes with one block stay M, a passed L without a plan is M, a plan of two blocks is L', async () => {
   // Given
   const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
-  const B = 'reviewer B · round 1 · second opinion';
+  const B = 'reviewer B · round 1 · whole diff';
   // When
   const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([]), review([])]);
   const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] }]);
@@ -213,7 +213,7 @@ test('given risk axes on a triage size, when the loop runs, then risk only raise
   assert.deepEqual(await panel('M', { risk: ['security'] }), [B, 'reviewer security · round 1']);
   assert.deepEqual(await panel('M', { touches: ['security'] }), [B, 'reviewer security · round 1']);   // touches is the old alias
   assert.deepEqual(await panel('L', { risk: ['logic'] }), [B]);                          // no plan: one block, so M
-  assert.deepEqual(await panel('M', { plan: { tasks: tasksOf(5) } }), ['reviewer A · round 1 · code', B]);   // two blocks: L
+  assert.deepEqual(await panel('M', { plan: { tasks: tasksOf(5) } }), ['reviewer A · round 1 · code', 'reviewer B · round 1 · second opinion']);   // two blocks: L
   assert.equal(many.out.roundLog[0].size, 'M');                                            // 9+ files never split the readers, the size stays
   assert.deepEqual(many.calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label), [B]);
   assert.equal(many.out.gaps.filter((g) => /files.*size M/.test(g)).length, 1);
@@ -227,7 +227,7 @@ test('given 17 changed files at size M, when the final reader runs, then it is B
   // Then
   assert.equal(out.status, 'OK');
   const reviews = calls.filter((c) => isReview(c.opts.label, 1));
-  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer B · round 1 · second opinion:opus:high']);
+  assert.deepEqual(reviews.map((c) => `${c.opts.label}:${c.opts.model}:${c.opts.effort}`), ['reviewer B · round 1 · whole diff:opus:high']);
   for (const r of reviews) {
     assert.match(r.prompt, /Review the change made since the start/);
     assert.doesNotMatch(r.prompt, /Your share/);
@@ -394,7 +394,7 @@ test('inPerimeter / classify: a Git Bash root "/c/repo" matches a reviewer path 
 
 test('script: a scope finding on the user dirty file is not reverted, it is listed apart → OK', async () => {
   const dirtyArgs = { ...ARGS, start: { head: 'abc123', dirty: ['src/Other/User.cs'] } };
-  const { out, calls } = await run(dirtyArgs, [review([], [finding({ path: 'src/Other/User.cs', category: 'scope', priority: 'P2' })])]);
+  const { out, calls } = await run(dirtyArgs, [review([], [finding({ path: 'src/Other/User.cs', category: 'scope', confidence: 'CONFIRMED', priority: 'P2' })])]);
   assert.equal(out.status, 'OK');
   assert.equal(out.outOfScope.length, 1);
   assert.equal(calls.filter((c) => c.opts.label?.startsWith('fix')).length, 0);
