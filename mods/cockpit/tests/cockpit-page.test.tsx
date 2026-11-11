@@ -165,7 +165,7 @@ test('attention: the worklog behind is a row with its icon and log hours on the 
 })
 
 test('attention: at most five rows and eight drawn lines, the rest behind the toggle', async ($, on) => {
-  const reads = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`/src/f${i}.ts`, 3]))
+  const reads = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`/src/f${i}.ts`, 4]))
   const calls: string[] = []
   const closed = await draw($, on, snap({ insights: insights({ reads }) }), attentionBlocks, calls)
   expect((await keysOf(closed.ui, /^signal:/)).length).toBe(4)
@@ -185,15 +185,15 @@ test('attention: a workflow stall is blocking and comes first; a workflow past i
   const kinds = async (s: CockpitSnapshot) => (await keysOf((await draw($, on, s, attentionBlocks)).ui, /^signal:/)).map(k => k.split(':')[1])
 
   // the stall comes before a failed command that signalsOf emits first
-  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ lastAt: NOW - 400_000 }) }))).toEqual(['workflow', 'failedCommand'])
+  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ lastAt: NOW - 700_000 }) }))).toEqual(['workflow', 'failedCommand'])
   // a run past its rounds is no stall: it stays behind the failed command, in the order of the detectors
-  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ round: 4 }) }))).toEqual(['failedCommand', 'workflow'])
+  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ round: 5 }) }))).toEqual(['failedCommand', 'workflow'])
   // a cost signal (the context grew) outranks the failed command that comes before it
   expect(await kinds(snap({ insights: insights(failed), ctxRounds: [100_000, 150_000, 250_000] }))).toEqual(['ctxGrowth', 'failedCommand'])
 })
 
 test('page: with eight notifications at 40 rows the footer buttons are still drawn, and the rows stay within the pane', async ($, on) => {
-  const reads = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`/src/f${i}.ts`, 3]))
+  const reads = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`/src/f${i}.ts`, 4]))
   const s = snap({ insights: insights({ reads }), cost: { usd: 1 } })
   const { ui, rows } = await draw($, on, s, k => [[paneView({ ...k.ui, Client: undefined }, k.s, WIDTH, 40, k.actions)]])
   expect((await keysOf(ui, /^bar:compact$/)).length).toBe(1)

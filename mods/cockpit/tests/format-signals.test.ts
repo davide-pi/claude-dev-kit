@@ -33,7 +33,7 @@ test('heavy agent: over 150k tokens, or over 40% of the session cost; at the lim
   expect(detectHeavyAgents([agent('a3', 'x', 1000, 5)], 0)).toEqual([])
 })
 
-test('opus on a read-only agent type: Explore and the other readers; Opus on a writer, or a reader on Sonnet, is fine', () => {
+test('opus on a read-only agent type: Explore and the other readers; Opus on a writer or a reviewer, or a reader on Sonnet, is fine', () => {
   const list = [
     { id: 'a1', type: 'Explore', model: 'claude-opus-5-5' },
     { id: 'a2', type: 'implementer', model: 'claude-opus-5-5' },
@@ -41,7 +41,7 @@ test('opus on a read-only agent type: Explore and the other readers; Opus on a w
     { id: 'a4', type: 'code-reviewer', model: 'opus' },
     { id: 'a5', type: 'Explore' },
   ]
-  expect(detectOpusReadOnly(list).map(s => s.key)).toEqual(['a1', 'a4'])
+  expect(detectOpusReadOnly(list).map(s => s.key)).toEqual(['a1'])
   expect(detectOpusReadOnly([])).toEqual([])
 })
 
@@ -51,9 +51,9 @@ test('tool result over 20k characters: a result is kept as characters / 4 tokens
   expect(detectBigResults(undefined)).toEqual([])
 })
 
-test('same file read three times: the count at the limit holds, under it does not', () => {
-  expect(detectRereads({ '/w/a.ts': 2 })).toEqual([])
-  expect(detectRereads({ '/w/a.ts': 3, '/w/b.ts': 1 })).toEqual([{ kind: 'reread', key: '/w/a.ts', label: 'a.ts', n: 3 }])
+test('same file read four times: the count at the limit holds, under it does not', () => {
+  expect(detectRereads({ '/w/a.ts': 3 })).toEqual([])
+  expect(detectRereads({ '/w/a.ts': 4, '/w/b.ts': 1 })).toEqual([{ kind: 'reread', key: '/w/a.ts', label: 'a.ts', n: 4 }])
   expect(detectRereads(undefined)).toEqual([])
 })
 
@@ -88,16 +88,16 @@ test('two done-claim blocks', () => {
   expect(detectDoneClaims(2)).toEqual([{ kind: 'doneClaims', key: 'claims', n: 2 }])
 })
 
-test('workflow: a stall (a run in flight silent over five minutes) or a round past three', () => {
+test('workflow: a stall (a run in flight silent over ten minutes) or a round past four', () => {
   const run = (over: object) => ({ runId: 'r1', agents: [{ id: 'a1', isDone: false }], lastAt: NOW, round: 1, ...over })
-  expect(detectWorkflow(run({}), NOW + 5 * 60_000)).toEqual([])
-  expect(detectWorkflow(run({}), NOW + 5 * 60_000 + 1)).toEqual([{ kind: 'workflow', key: 'r1:stall', label: 'stall' }])
-  expect(detectWorkflow(run({ round: 3 }), NOW)).toEqual([])
-  expect(detectWorkflow(run({ round: 4 }), NOW)).toEqual([{ kind: 'workflow', key: 'r1:round', label: 'round', n: 4 }])
-  expect(detectWorkflow(run({ round: 4 }), NOW + 6 * 60_000).map(s => s.label)).toEqual(['stall', 'round'])
+  expect(detectWorkflow(run({}), NOW + 10 * 60_000)).toEqual([])
+  expect(detectWorkflow(run({}), NOW + 10 * 60_000 + 1)).toEqual([{ kind: 'workflow', key: 'r1:stall', label: 'stall' }])
+  expect(detectWorkflow(run({ round: 4 }), NOW)).toEqual([])
+  expect(detectWorkflow(run({ round: 5 }), NOW)).toEqual([{ kind: 'workflow', key: 'r1:round', label: 'round', n: 5 }])
+  expect(detectWorkflow(run({ round: 5 }), NOW + 11 * 60_000).map(s => s.label)).toEqual(['stall', 'round'])
   // a finished run, and a run whose agents are all done, are not stalled
-  expect(detectWorkflow(run({ endedAt: NOW }), NOW + 10 * 60_000)).toEqual([])
-  expect(isStalled(run({ agents: [{ id: 'a1', isDone: true }] }), NOW + 10 * 60_000)).toBe(false)
+  expect(detectWorkflow(run({ endedAt: NOW }), NOW + 20 * 60_000)).toEqual([])
+  expect(isStalled(run({ agents: [{ id: 'a1', isDone: true }] }), NOW + 20 * 60_000)).toBe(false)
   expect(detectWorkflow(undefined, NOW)).toEqual([])
 })
 
@@ -166,4 +166,19 @@ test('signalSeverity: a permission wait and a workflow stall block; failed comma
   expect([sev('permissionWait'), sev('workflow', 'stall')]).toEqual(['block', 'block'])
   expect([sev('failedCommand'), sev('ctxGrowth'), sev('heavyAgent'), sev('workflow', 'round'), sev('doneClaims')]).toEqual(['warn', 'warn', 'warn', 'warn', 'warn'])
   expect([sev('reread'), sev('bigResult'), sev('opusReadOnly'), sev('coldAfterIdle')]).toEqual(['info', 'info', 'info', 'info'])
+})
+
+test('signalsOf: given agents of a workflow run on Opus and over the token limit, when read, then they raise heavyAgent but not opusReadOnly; the same agents outside a run raise both', () => {
+  // Given
+  const heavyOpus = (id: string, runId?: string) => ({ id, type: 'Explore', model: 'claude-opus-5-5', tokens: 200_000, status: 'running' as const, startedAt: 0, ...(runId !== undefined && { runId }) })
+  const run = { runId: 'w1', agents: [{ id: 'a2', isDone: false }] }
+  const inFlow = { ...INITIAL, now: NOW, agents: [heavyOpus('a1', 'w1')], workflowRun: run }
+  const listedOnly = { ...INITIAL, now: NOW, agents: [heavyOpus('a2')], workflowRun: run }
+  const outside = { ...INITIAL, now: NOW, agents: [heavyOpus('a3')] }
+  // When
+  const kinds = (s: typeof INITIAL) => signalsOf(s).map(x => x.kind).filter(k => k === 'heavyAgent' || k === 'opusReadOnly')
+  // Then
+  expect(kinds(inFlow)).toEqual(['heavyAgent'])
+  expect(kinds(listedOnly)).toEqual(['heavyAgent'])
+  expect(kinds(outside)).toEqual(['heavyAgent', 'opusReadOnly'])
 })

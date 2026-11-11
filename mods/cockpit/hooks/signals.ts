@@ -10,12 +10,12 @@ export const THRESHOLDS = {
   /** A subagent over this many new tokens, or over this percent of the session's cost. */
   subagentTokens: 150_000,
   subagentCostPct: 40,
-  /** Agent types that only read: Opus on one of them is a waste. */
-  readOnlyAgents: ['Explore', 'investigator', 'code-reviewer', 'ops-analyst', 'db-analyst'],
+  /** Agent types that only read: Opus on one of them is a waste (a reviewer is left out: the kit puts one on Opus on purpose). */
+  readOnlyAgents: ['Explore', 'investigator', 'ops-analyst', 'db-analyst'],
   /** A tool result over this many characters (the insights keep it as characters / 4). */
   resultChars: 20_000,
-  /** The same file read this many times. */
-  rereads: 3,
+  /** The same file read this many times (a read after each edit is normal: three is still work, not waste). */
+  rereads: 4,
   /** The same command failed this many times. */
   failedCommands: 2,
   /** Cache hit under this percent after an idle gap over `idleGapMs`. */
@@ -26,9 +26,9 @@ export const THRESHOLDS = {
   ctxGrowthRounds: 3,
   /** This many done-claim blocks in the session. */
   doneClaims: 2,
-  /** A workflow in a round past this one, or silent for this long. */
-  workflowRound: 3,
-  stallMs: 5 * 60_000,
+  /** A workflow in a round past this one (a review loop's fourth round is still normal), or silent for this long (an implementer often works 5 min unseen). */
+  workflowRound: 4,
+  stallMs: 10 * 60_000,
   /** A permission asked of the person and unanswered for this long. */
   permissionWaitMs: 60_000,
 }
@@ -178,10 +178,12 @@ export function withLoggedSignals(s: CockpitSnapshot, at: number): CockpitSnapsh
 
 /** Every signal that holds now, from the snapshot alone (no clock, no model); one id only once (the same result read twice is one notification). */
 export function signalsOf(s: CockpitSnapshot): Signal[] {
+  // the model of a workflow run's agent is the flow's choice, so Opus there is no waste; its size is still a cost to see, whoever started it
+  const inRun = new Set([...s.agents.filter(a => a.runId !== undefined).map(a => a.id), ...(s.workflowRun?.agents.map(a => a.id) ?? [])])
   const costs = agentCosts(s.agents, s.events)
   const all = [
     ...detectHeavyAgents(costs, s.cost.usd),
-    ...detectOpusReadOnly(costs),
+    ...detectOpusReadOnly(costs.filter(a => !inRun.has(a.id))),
     ...detectBigResults(s.insights?.biggest),
     ...detectRereads(s.insights?.reads),
     ...detectFailedCommands(s.insights?.failedCmds),
