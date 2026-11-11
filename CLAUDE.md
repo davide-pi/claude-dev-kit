@@ -13,8 +13,8 @@
 1. Ask only before the irreversible: data, deploy, money, deletes. Else the approach in one line, then go;
    a shared contract (API, event, schema) -> agree the interface first.
 2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
-3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly, never the
-   `az devops configure` default. No line, unmapped, or an added dir -> ask.
+3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly on every call.
+   No line, unmapped, or an added dir -> ask.
 4. Fan-out searches, wide reads -> `Explore`. Briefs ask for concise reports.
 5. Reviews (`/code-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
 
@@ -40,10 +40,10 @@ logic, testable; **low** cosmetic.
 - Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
 
 ## Done means verified
-Never claim done, fixed, passing, verified without a command run this turn (reading isn't proof).
-A main-session reply after an edit, commit, push or install opens with a `**Verification**` line, plain
+Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
+isn't proof). A main-session reply after an edit, commit, push or install opens with a `**Verification**` line, plain
 `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
 ## Tools, no prompts
-Program first (`git -C <path> log`; `cd X && ...` prompts). Read a file once, not after an edit.
+`git -C <path>`, never `cd X && ...` (it prompts). Batch independent calls; read a file once, not after an edit.

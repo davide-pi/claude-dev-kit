@@ -12,4 +12,4 @@ paths: "**/*.tsx,**/*.jsx,**/vite.config.*,**/tailwind.config.*"
   a form library for dozens of fields with cross-field async validation; otherwise none.
 - Styling is Tailwind utilities; a Vite config change is a build change — rebuild to verify.
 
-Procedure: skill `react`.
+Procedure: Read `~/.claude/skills/react/SKILL.md`.

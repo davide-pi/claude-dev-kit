@@ -18,4 +18,4 @@ paths: "**/*.cs"
   locally, the pipeline's secret store elsewhere.
 - `*.ServiceContract` types are shared with callers: additive changes only.
 
-Procedure: skill `dotnet-backend`.
+Procedure: Read `~/.claude/skills/dotnet-backend/SKILL.md`.
