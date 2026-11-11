@@ -11,4 +11,4 @@ paths: "**/.claude/**,**/skills/*/SKILL.md,**/skills/*/references/*.md,**/agents
 - No version numbers in prose: say how to detect the version.
 - Before calling an asset done: `node tools/validate.mjs` and `node --test tools/*.test.mjs`.
 
-Shapes, skeleton, caps, description and the finish checklist: Read `~/.claude/skills/skill-forge/SKILL.md` § 2.
+Shapes, skeleton, caps, description and the finish checklist: skill `skill-forge` § 2.
