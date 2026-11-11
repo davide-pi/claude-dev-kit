@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { SESSION_LOG_KEEP, commitHash, isCommitCommand, isTestCommand, recordLog, nextCompactKey, withCompactAfter } from '../hooks/timeline'
+import { SESSION_LOG_KEEP, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withCompactAfter, withRoundUsd } from '../hooks/timeline'
 
 test('recordLog: the newest hundred stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -23,6 +23,25 @@ test('withCompactAfter: the compact entry of that key takes the reading once, no
   expect(withCompactAfter(filled, 'c1', 10)[0]?.after).toBe(90_000)
   expect(withCompactAfter(log, 'c9', 5)).toEqual(log)
   expect(withCompactAfter(undefined, 'c1', 5)).toBeUndefined()
+})
+
+test('withRoundUsd: given a newest round without a cost, when the cost settles, then only that round takes it, once', () => {
+  // Given
+  const log = recordLog(recordLog(recordLog(undefined, { at: 1, kind: 'round', usd: 0.1 }), { at: 2, kind: 'commit', key: 'abc' }), { at: 3, kind: 'round' })
+  // When
+  const filled = withRoundUsd(log, 0.7)
+  // Then
+  expect(filled?.map(e => e.usd)).toEqual([0.1, undefined, 0.7])
+  expect(withRoundUsd(filled, 9)?.map(e => e.usd)).toEqual([0.1, undefined, 0.7])
+  expect(withRoundUsd(undefined, 1)).toBeUndefined()
+  expect(withRoundUsd([{ at: 1, kind: 'commit' }], 1)).toEqual([{ at: 1, kind: 'commit' }])
+})
+
+test('parseLog: given a data file written before rounds carried a cost, when read, then the round loads without one', () => {
+  // Given / When
+  const log = parseLog([{ at: 5, kind: 'round', ms: 1000 }, { at: 6, kind: 'round', ms: 2000, usd: 0.4 }])
+  // Then
+  expect(log).toEqual([{ at: 5, kind: 'round', ms: 1000 }, { at: 6, kind: 'round', ms: 2000, usd: 0.4 }])
 })
 
 test('isTestCommand: a test run by the common runners, alone or in a chain; not a command that only mentions test', () => {

@@ -3,7 +3,7 @@ import type { EngineInterface } from 'claude-code'
 
 import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../types'
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
-import { withContextReading } from './insights'
+import { settledRoundUsd, withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
 import { parseRateCache, resolveAlm, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
@@ -11,6 +11,7 @@ import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
 import { CENT } from './shared'
 import { configDir, patch } from './store'
+import { withRoundUsd } from './timeline'
 import { autoOpenOf, costTargetOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
 import { endRun, expireRun, finishWorkflowAgent } from './workflow'
@@ -140,11 +141,17 @@ export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefi
   return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined }
 }
 
+/** `next`, a snapshot whose cost was just measured over `before`, with the round that measure settled given its cost in the session log. */
+export function withSettledRound(before: CockpitSnapshot['cost'], next: CockpitSnapshot): CockpitSnapshot {
+  const settled = settledRoundUsd(before, next.cost)
+  return settled === undefined ? next : { ...next, sessionLog: withRoundUsd(next.sessionLog, settled) }
+}
+
 export async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
     const at = await $.clock.now()
-    await patch($, s => ({
+    await patch($, s => withSettledRound(s.cost, {
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,

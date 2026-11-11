@@ -10,7 +10,7 @@ type Ui = Awaited<ReturnType<typeof mountPane>>
 /** The agents DONE lists, newest first, as `<icon> <type>`: the clock and the cost cells left out. */
 const doneAgents = async (ui: Ui) =>
   rowTexts(await ui.drawn()).flatMap(r => {
-    const m = /^\d\d:\d\d (\S) agent (\S+)/u.exec(r)
+    const m = /^[├└] \d\d:\d\d (\S) agent (\S+)/u.exec(r)
     return m ? [`${m[1]} ${m[2]}`] : []
   })
 
@@ -66,7 +66,7 @@ test('agents: one the engine lists as killed or failed ends with 󰅖, one it no
   await ui.unmount()
 })
 
-test('agents: DONE shows the newest 5 and a `󰍟 +K` button opens the rest, `󰍝 −K` folds them again', async ($, on) => {
+test('agents: DONE shows its first 5 lines (the open group header and 4 agents) and a `󰍟 +K` button opens the rest, `󰍝 −K` folds them again', async ($, on) => {
   const clock = world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -76,13 +76,13 @@ test('agents: DONE shows the newest 5 and a `󰍟 +K` button opens the rest, `�
   await openCockpit($)
   await clock.advance(135_000)
   const ui = await mountPane($)
-  expect(await doneAgents(ui)).toHaveLength(5)
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +20')
+  expect(await doneAgents(ui)).toHaveLength(4)
+  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +21')
   await ui.press({ key: 'done:more' })
   expect(await doneAgents(ui)).toHaveLength(25)
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍝 −20')
+  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍝 −21')
   await ui.press({ key: 'done:more' })
-  expect(await doneAgents(ui)).toHaveLength(5)
+  expect(await doneAgents(ui)).toHaveLength(4)
   await ui.unmount()
 })
 

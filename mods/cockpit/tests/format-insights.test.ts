@@ -11,6 +11,7 @@ import {
   resultTokens,
   withContextReading,
   roundCost,
+  settledRoundUsd,
   toolArg,
   toolArgFull,
 } from '../hooks/insights'
@@ -32,6 +33,16 @@ test('toolArg: a search shows its pattern before the folder it looks in', () => 
   expect(toolArg({ tool: 'Glob', pattern: '**/*.ts', path: '/w/src' })).toBe('**/*.ts')
   expect(toolArg({ tool: 'Grep', path: '/w/src' })).toBe('src')
   expect(toolArg({ tool: 'Read', file_path: '/w/a.ts' })).toBe('a.ts')
+})
+
+test('settledRoundUsd: given a round that ended unmeasured, when a measure settles it, then its cost is the turn cost; before that, or for a measure under a cent, none', () => {
+  // Given
+  const waiting = { usd: 5, startUsd: 5, pendingUsd: 5 }
+  // When / Then
+  expect(settledRoundUsd(waiting, { usd: 5.6, startUsd: 5.6, lastUsd: 0.6 })).toBe(0.6)
+  expect(settledRoundUsd(waiting, { ...waiting, usd: 5.2 })).toBeUndefined()
+  expect(settledRoundUsd(waiting, { usd: 5.001, startUsd: 5, pendingUsd: undefined, lastUsd: 0.4 })).toBeUndefined()
+  expect(settledRoundUsd({ usd: 5, startUsd: 4 }, { usd: 6, startUsd: 4 })).toBeUndefined()
 })
 
 test('insights: a round counts its cost where measured, its length and cache hit, and keeps the dearest; the cache hits are the last twenty', () => {

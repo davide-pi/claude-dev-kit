@@ -44,6 +44,10 @@ const INSIGHT_READS_KEEP = 200
 export const roundCost = (cost: CockpitSnapshot['cost']): number | undefined =>
   cost.usd !== undefined && cost.startUsd !== undefined && cost.usd >= cost.startUsd ? cost.usd - cost.startUsd : undefined
 
+/** The cost of a round that ended unmeasured, once a measure settled it (`before` waited, `after` does not and moved on); none otherwise. */
+export const settledRoundUsd = (before: CockpitSnapshot['cost'], after: CockpitSnapshot['cost']): number | undefined =>
+  before.pendingUsd !== undefined && after.pendingUsd === undefined && after.startUsd !== before.startUsd ? after.lastUsd : undefined
+
 /** `ins` after a main round ended: its cost where measured, its length, the cache hit of its input, and the dearest round so far. */
 export function recordRoundEnd(ins: CockpitInsights | undefined, round: { usd?: number; ms: number; cacheShare?: number; endedAt?: number }): CockpitInsights {
   const now = ins ?? emptyInsights()

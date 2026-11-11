@@ -319,9 +319,9 @@ const LOG = [
   { at: NOW - 20_000, kind: 'pr', key: '12', text: 'Fix x' },
 ] as const
 const HISTORY = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 200_000, endedAt: NOW - 10_000, tokens: 0, isFailed: false, usd: 0.5 }]
-/** A row's text: the cost right-aligned, the left padded by cells (an icon of the private use area is one cell, two UTF-16 units). */
-const fullRow = (at: number, icon: string, text: string, cost?: string) => {
-  const left = `${clockTime(at)} ${icon} ${text}`
+/** A child row of a group: the tree branch, then time, icon, text, the cost right-aligned (an icon of the private use area is one cell, two UTF-16 units). */
+const child = (at: number, icon: string, text: string, cost?: string, isLast = false) => {
+  const left = `${isLast ? '└' : '├'} ${clockTime(at)} ${icon} ${text}`
   return cost === undefined ? left : left + ' '.repeat(WIDTH - 7 - [...left].length) + cost
 }
 
@@ -329,32 +329,96 @@ test('done: hidden without a log or a finished agent', async ($, on) => {
   expect((await draw($, on, snap(), doneBlocks)).rows).toEqual([])
 })
 
-test('done: the newest five of the log and the finished agents by time, the rest behind the toggle', async ($, on) => {
+test('done: given events after the newest round, when drawn, then they are the open group, and its lines past the fifth sit behind the toggle', async ($, on) => {
+  // Given
   const calls: string[] = []
   const s = snap({ sessionLog: [...LOG], history: HISTORY })
+  // When
   const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  // Then
   expect(rows).toEqual([
     titled('DONE'),
-    fullRow(NOW - 10_000, '󰄬', 'agent reviewer', costCell(0.5, 7)),
-    fullRow(NOW - 20_000, '◆', 'PR #12 Fix x'),
-    fullRow(NOW - 30_000, '◇', 'compacted 180k → 40k'),
-    fullRow(NOW - 40_000, '󰅖', 'tests failed: npm test'),
-    fullRow(NOW - 50_000, '●', 'commit abc1234'),
-    '󰍟 +1',
+    // the summary does not fit: cut to the width with an ellipsis
+    `▾ current round  1 agent · 1 commit · 1 test · 1 PR · 1 compaction`.slice(0, WIDTH - 1) + '…',
+    child(NOW - 10_000, '󰄬', 'agent reviewer', costCell(0.5, 7)),
+    child(NOW - 20_000, '◆', 'PR #12 Fix x'),
+    child(NOW - 30_000, '◇', 'compacted 180k → 40k'),
+    child(NOW - 40_000, '󰅖', 'tests failed: npm test'),
+    '󰍟 +2',
   ])
-  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +1')
+  expect((await ui.find({ key: 'done:more' }))?.text).toBe('󰍟 +2')
   await ui.press({ key: 'done:more' })
   expect(calls).toEqual(['toggleOpen:done'])
   const open = await draw($, on, { ...s, openKeys: ['done'] }, doneBlocks)
-  // the opened rows come below the toggle, which stays where it was pressed
-  expect(open.rows.slice(-2)).toEqual(['󰍝 −1', fullRow(NOW - 60_000, '·', 'turn 02m14s', costCell(0.38, 7))])
+  // the opened rows come below the toggle, which stays where it was pressed; a round with nothing in it is a plain row
+  expect(open.rows.slice(-3)).toEqual(['󰍝 −2', child(NOW - 50_000, '●', 'commit abc1234', undefined, true), `▸ ${clockTime(NOW - 60_000)} round 1 02m14s  ${costCell(0.38, 7)}`])
 })
 
-test('done: an agent just finished, still listed in the agents, shows at once and once', async ($, on) => {
+const ROUNDS = [
+  { at: NOW - 220_000, kind: 'commit', key: 'abc1234', text: 'abc1234' },
+  { at: NOW - 200_000, kind: 'round', ms: 60_000, usd: 0.44 },
+  { at: NOW - 110_000, kind: 'test', text: 'npm test' },
+  { at: NOW - 100_000, kind: 'round', ms: 180_000, usd: 1.12 },
+] as const
+const ROUND_HISTORY = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 300_000, endedAt: NOW - 210_000, tokens: 0, isFailed: false, usd: 0.21 }]
+const header = (at: number, arrow: string, rest: string) => `${arrow} ${clockTime(at)} ${rest}`
+
+test('done: given rounds, when drawn, then only the newest is open and each header toggles under its own key', async ($, on) => {
+  // Given
+  const calls: string[] = []
+  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
+  // When
+  const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  // Then
+  expect(rows).toEqual([
+    titled('DONE'),
+    header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)}  1 test`),
+    child(NOW - 110_000, '󰄬', 'tests passed: npm test', undefined, true),
+    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}  1 agent · 1 commit`),
+  ])
+  await ui.press({ key: `done:${NOW - 200_000}` })
+  expect(calls).toEqual([`toggleOpen:done:${NOW - 200_000}`])
+})
+
+test('done: given an older group in openKeys, when drawn, then it stays open under the newest; and the newest can be closed', async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
+  // When
+  const older = await draw($, on, { ...s, openKeys: [`done:${NOW - 200_000}`] }, doneBlocks)
+  const closed = await draw($, on, { ...s, openKeys: [`done:${NOW - 100_000}`] }, doneBlocks)
+  // Then
+  expect(older.rows.slice(3)).toEqual([
+    header(NOW - 200_000, '▾', `round 1 01m00s  ${costCell(0.44, 7)}  1 agent · 1 commit`),
+    child(NOW - 210_000, '󰄬', 'agent reviewer', costCell(0.21, 7)),
+    child(NOW - 220_000, '●', 'commit abc1234', undefined, true),
+  ])
+  expect(closed.rows[1]).toBe(header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}  1 test`))
+  expect(closed.rows).toHaveLength(3)
+})
+
+test('done: given rounds with no events, when drawn, then they are one row that does not toggle; a round without a cost prints none', async ($, on) => {
+  // Given
+  const log = [{ at: NOW - 300_000, kind: 'round', usd: 0.1 }, { at: NOW - 250_000, kind: 'round', usd: 0.1 }, { at: NOW - 200_000, kind: 'round', usd: 0.11 }, { at: NOW - 100_000, kind: 'commit', key: 'abc1234', text: 'abc1234' }, { at: NOW - 90_000, kind: 'round', ms: 5_000 }] as const
+  // When
+  const { rows, ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then
+  expect(rows).toEqual([
+    titled('DONE'),
+    header(NOW - 90_000, '▾', 'round 4 00m05s  1 commit'),
+    child(NOW - 100_000, '●', 'commit abc1234', undefined, true),
+    header(NOW - 200_000, '▸', `3 chat-only rounds  ${costCell(0.31, 7)}`),
+  ])
+  expect(await keysOf(ui, /^done:\d/)).toEqual([`done:${NOW - 90_000}`])
+})
+
+test('done: given an agent just finished and still listed in the agents, when drawn, then it shows at once and once', async ($, on) => {
+  // Given
   const fresh = agent('a9', 'implementer', { status: 'done', endedAt: NOW - 5_000 })
+  // When
   const alone = await draw($, on, snap({ agents: [fresh] }), doneBlocks)
-  expect(alone.rows).toEqual([titled('DONE'), fullRow(NOW - 5_000, '󰄬', 'agent implementer')])
   const twice = await draw($, on, snap({ agents: [fresh], history: [{ id: 'a9', type: 'implementer', startedAt: NOW - 62_000, endedAt: NOW - 5_000, tokens: 0, isFailed: false }] }), doneBlocks)
+  // Then
+  expect(alone.rows).toEqual([titled('DONE'), '▾ current round  1 agent', child(NOW - 5_000, '󰄬', 'agent implementer', undefined, true)])
   expect(twice.rows).toEqual(alone.rows)
 })
 
@@ -367,7 +431,13 @@ test('page: the section titles and the empty row in Italian', async ($, on) => {
     const trend = await draw($, on, snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6 }) }), andamentoBlocks)
     expect(trend.rows.slice(0, 4)).toEqual([titled('ANDAMENTO'), cols('$/prompt', 'ultimo turno', 'subagenti', 'compattazione'), cols('$2.00 →', '—', '0%', '—'), cols('', '', 'della spesa')])
     expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
-    expect((await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows[0]).toBe(titled('FATTO'))
+    const done = await draw($, on, snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, openKeys: [`done:${NOW - 200_000}`] }), doneBlocks)
+    expect(done.rows[0]).toBe(titled('FATTO'))
+    expect(done.rows[1]).toBe(header(NOW - 100_000, '▾', `giro 2 03m00s  ${costCell(1.12, 7)}  1 test`))
+    expect(done.rows[3]).toBe(header(NOW - 200_000, '▾', `giro 1 01m00s  ${costCell(0.44, 7)}  1 agente · 1 commit`))
+    expect((await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows[1]).toBe('▾ giro in corso  1 commit · 1 test · 1 PR · 1 compattazione')
+    const idle = [{ at: 1, kind: 'round' }, { at: 2, kind: 'round' }] as const
+    expect((await draw($, on, snap({ sessionLog: [...idle] }), doneBlocks)).rows[1]).toContain('2 giri di sola conversazione')
   } finally {
     setLang('en')
   }

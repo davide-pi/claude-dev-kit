@@ -27,6 +27,14 @@ export function recordLog(log: readonly CockpitLogEntry[] | undefined, entry: Co
   return [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e).slice(-SESSION_LOG_KEEP)
 }
 
+/** `log` with the newest round entry that has no cost given `usd`: a round whose cost was measured after it ended. An entry that has one, or no round, leaves the log as it was. */
+export function withRoundUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
+  const rounds = (log ?? []).filter(e => e.kind === 'round')
+  const newest = rounds.reduce<CockpitLogEntry | undefined>((n, e) => (n === undefined || e.at >= n.at ? e : n), undefined)
+  if (newest === undefined || newest.usd !== undefined) return log?.slice()
+  return log?.map(e => (e === newest ? { ...e, usd } : e))
+}
+
 const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr']
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 

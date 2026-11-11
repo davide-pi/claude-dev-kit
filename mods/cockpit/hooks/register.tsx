@@ -34,6 +34,7 @@ import {
   endTurnCost,
   fastTick,
   measuredCost,
+  withSettledRound,
   mediumTick,
   refreshAlm,
   refreshAutoCompact,
@@ -53,6 +54,7 @@ import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession,
 import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
+import { CENT } from './shared'
 import { bashLog, nextCompactKey, recordAgentEvent, recordLog } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
 import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
@@ -199,7 +201,7 @@ export const register: Register = on => {
     const at = await $.clock.now().catch(() => undefined)
     await patch($, s => {
       isNewWindow = s.ctx.window !== undefined && e.context.window !== undefined && s.ctx.window !== e.context.window
-      return {
+      return withSettledRound(s.cost, {
         ...s,
         ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
         // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
@@ -209,7 +211,7 @@ export const register: Register = on => {
         rateLimits: e.rateLimits,
         // the old threshold is the old window's: a failed read draws none rather than a wrong one
         ...(isNewWindow && { autoCompactAt: undefined }),
-      }
+      })
     })
     // the measure goes on before the read, and two window changes still read in order
     const out = await next(e)
@@ -528,7 +530,7 @@ export const register: Register = on => {
         const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
         return {
           ...s,
-          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && { usd }) }),
+          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }) }),
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.
