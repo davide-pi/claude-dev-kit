@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { usdOf } from '../hooks/pricing'
-import { GH_CREATED, SPAWN, bashResult, settleAll, spawns } from './cockpit-fixtures'
+import { GH_CREATED, SPAWN, bashResult, paneRows, settleAll, spawns } from './cockpit-fixtures'
 import { NOW, dataOf, world } from './cockpit-world'
 
 type Logged = { at: number; kind: string; key?: string; text?: string; ms?: number; tokens?: number; after?: number; isFailed?: boolean }
@@ -109,6 +109,19 @@ test('given an open pane whose session.compact hook the harness skips, when the 
   await clock.advance(10_000)
   // Then
   expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 900_000, after: 248_000 }])
+})
+
+test('given an open pane with a measured cost, when the medium tick reads the context, then the session cost stays the measured one', async ($, on) => {
+  // Given
+  const clock = world(on, { isAutoOpen: true })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 300_000, percent: 30 }, rateLimits: [], cost: { usd: 9.5 }, changed: ['context', 'cost'] })
+  // When: the world's `$.session.usage()` answers $4.82
+  await clock.advance(10_000)
+  await settleAll()
+  // Then
+  expect((await paneRows($)).rows.join('\n')).toContain('$9.50')
 })
 
 const USAGE = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }

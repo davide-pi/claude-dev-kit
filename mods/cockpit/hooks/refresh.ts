@@ -157,6 +157,27 @@ export async function refreshUsage($: EngineInterface): Promise<void> {
   }
 }
 
+/**
+ * The tick's reading: the context only. The cost settles a turn and stays with the measures that carry it; the rate limits stay with
+ * session.measure. A reading overtaken by another context write (a measure, the compact hook) is dropped: it is older than the drawn one.
+ */
+export async function refreshContext($: EngineInterface): Promise<void> {
+  try {
+    const before = (await read($, snapshot)).ctx.tokens
+    const u = await $.session.usage()
+    const at = await $.clock.now()
+    if (u.context.tokens === undefined) return
+    await patch($, s => s.ctx.tokens !== before ? s : ({
+      ...s,
+      ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window ?? s.ctx.window, percent: u.context.percent },
+      lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
+      ...withContextReading(s, u.context.tokens, at),
+    }))
+  } catch {
+    // not measured yet
+  }
+}
+
 // The engine's reported threshold is its effective window (the window setting already applied) less this buffer.
 const COMPACT_BUFFER = 13_000
 
@@ -237,7 +258,7 @@ export async function fastTick($: EngineInterface): Promise<void> {
 export async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
-  await refreshUsage($)
+  await refreshContext($)
   await refreshGit($)
 }
 

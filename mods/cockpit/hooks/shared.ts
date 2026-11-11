@@ -397,7 +397,7 @@ export function shade(color: string, factor: number): string {
   return `#${[0, 1, 2].map(i => channel(i).toString(16).padStart(2, '0')).join('')}`
 }
 
-/** Context color by fill: green, yellow, red (no orange: too close to red). */
+/** Context color by fill of the window: green, yellow, red. The CTX bar uses it only without a compaction threshold (`ctxScale`). */
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
 
