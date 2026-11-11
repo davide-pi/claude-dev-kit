@@ -30,8 +30,11 @@ const run = (dir, ...args) =>
 const options = dir => JSON.parse(readFileSync(join(dir, 'kit-options.json'), 'utf8'));
 const withTmp = fn => () => { const dir = home(); try { fn(dir); } finally { rmSync(dir, { recursive: true, force: true }); } };
 
-test('-Without worklog installs without the component, and -Check sees no worklog problem', { skip }, withTmp(dir => {
+test('given an empty home, when install runs with -Without worklog, then it installs without the component and -Check sees no worklog problem', { skip }, withTmp(dir => {
+  // Given / When
   const r = run(dir, '-Force', '-Without', 'worklog');
+
+  // Then
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(existsSync(join(dir, 'skills', 'worklog')), false);
   assert.equal(existsSync(join(dir, 'hooks', 'worklog-pending.js')), false);
@@ -41,9 +44,14 @@ test('-Without worklog installs without the component, and -Check sees no worklo
   assert.doesNotMatch(check.stdout, /CLAUDE_WORKSPACE_ROOTS/, check.stdout);
 }));
 
-test('-With worklog brings the component back and -Check reports no worklog drift', { skip }, withTmp(dir => {
+test('given an install without worklog, when install runs with -With worklog, then the component is back and -Check reports no worklog drift', { skip }, withTmp(dir => {
+  // Given
   assert.equal(run(dir, '-Force', '-Without', 'worklog').status, 0);
+
+  // When
   const r = run(dir, '-Force', '-With', 'worklog');
+
+  // Then
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(options(dir), { without: [] });
   assert.equal(existsSync(join(dir, 'skills', 'worklog', 'SKILL.md')), true);
@@ -51,10 +59,15 @@ test('-With worklog brings the component back and -Check reports no worklog drif
   assert.doesNotMatch(run(dir, '-Check').stdout, /ISSUE.*worklog-?(pending)?(\.js)?[^\n]*(not installed|differs)/i);
 }));
 
-test('-Without on an installed copy moves it into the run backup folder', { skip }, withTmp(dir => {
+test('given an installed copy, when install runs with -Without worklog, then it moves the component into the run backup folder', { skip }, withTmp(dir => {
+  // Given
   assert.equal(run(dir, '-Force').status, 0);
   assert.equal(existsSync(join(dir, 'skills', 'worklog', 'SKILL.md')), true);
+
+  // When
   const r = run(dir, '-Force', '-Without', 'worklog');
+
+  // Then
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.equal(existsSync(join(dir, 'skills', 'worklog')), false);
   assert.equal(existsSync(join(dir, 'hooks', 'worklog-pending.js')), false);
@@ -64,8 +77,11 @@ test('-Without on an installed copy moves it into the run backup folder', { skip
   assert.match(r.stdout, /excluded by kit-options\.json/);
 }));
 
-test('an unknown component name fails and lists the known ones', { skip }, withTmp(dir => {
+test('given an unknown component name, when install runs with -Without, then it fails and lists the known ones', { skip }, withTmp(dir => {
+  // Given / When
   const r = run(dir, '-Without', 'nope');
+
+  // Then
   assert.notEqual(r.status, 0);
   assert.match(r.stdout + r.stderr, /Unknown component 'nope'.*worklog/);
 }));

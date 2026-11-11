@@ -80,9 +80,14 @@ function withOrigin() {
   return { ...f, pushed, ahead: git(f.repo, 'rev-parse', 'HEAD') };
 }
 
-test('create → <root>/<repo>-<name> on branch worktree-<name>, path alone on stdout', () => {
+test('given a repo and a worktree root, when a worktree is created, then it is <root>/<repo>-<name> on branch worktree-<name>, path alone on stdout', () => {
+  // Given
   const { repo, root } = fixture();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'billing', cwd: repo }, { CLAUDE_WORKTREE_ROOT: root });
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   const printed = r.stdout.trim();
   assert.equal(printed.split('\n').length, 1);
@@ -92,102 +97,166 @@ test('create → <root>/<repo>-<name> on branch worktree-<name>, path alone on s
   assert.equal(git(printed, 'rev-parse', '--abbrev-ref', 'HEAD'), 'worktree-billing');
 });
 
-test('created from inside a linked worktree → still named after the main repo', () => {
+test('given a linked worktree, when a worktree is created from inside it, then it is still named after the main repo', () => {
+  // Given
   const { repo, root } = fixture();
   const env = { CLAUDE_WORKTREE_ROOT: root };
   const first = hook({ hook_event_name: 'WorktreeCreate', name: 'one', cwd: repo }, env).stdout.trim();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'two', cwd: first }, env);
+
+  // Then
   assert.equal(r.stdout.trim(), join(root, 'shop-two'));
 });
 
-test('without baseRef the branch starts at the HEAD of the session, not of the main checkout', () => {
+test('given no baseRef and a commit in a linked worktree, when a worktree is created from it, then the branch starts at the HEAD of the session, not of the main checkout', () => {
+  // Given
   const { repo, root } = fixture();
   const env = { CLAUDE_WORKTREE_ROOT: root };
   const first = hook({ hook_event_name: 'WorktreeCreate', name: 'one', cwd: repo }, env).stdout.trim();
   writeFileSync(join(first, 'c.txt'), 'c\n');
   git(first, 'add', '.');
   git(first, 'commit', '-q', '-m', 'work in the first worktree');
+
+  // When
   const second = hook({ hook_event_name: 'WorktreeCreate', name: 'two', cwd: first }, env).stdout.trim();
+
+  // Then
   assert.equal(git(second, 'rev-parse', 'HEAD'), git(first, 'rev-parse', 'HEAD'));
   assert.notEqual(git(second, 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'HEAD'));
 });
 
-test('baseRef "fresh" starts at the default branch of origin, not at the local HEAD', () => {
+test('given baseRef "fresh" and a local HEAD ahead of origin, when a worktree is created, then it starts at the default branch of origin, not at the local HEAD', () => {
+  // Given
   const { repo, root, pushed, ahead } = withOrigin();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'fresh', cwd: repo },
     { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('fresh') });
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.equal(git(r.stdout.trim(), 'rev-parse', 'HEAD'), pushed);
   assert.notEqual(pushed, ahead);
 });
 
-test('baseRef "head" or unset starts at the local HEAD even when origin exists; a project setting wins', () => {
+test('given baseRef "head" and an origin, when a worktree is created, then it starts at the local HEAD, and a project setting wins', () => {
+  // Given
   const { repo, root, pushed, ahead } = withOrigin();
+
+  // When
   const head = hook({ hook_event_name: 'WorktreeCreate', name: 'head', cwd: repo },
     { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('head') });
+
+  // Then
   assert.equal(git(head.stdout.trim(), 'rev-parse', 'HEAD'), ahead);
 
+  // Given
   mkdirSync(join(repo, '.claude'));
   writeFileSync(join(repo, '.claude', 'settings.json'), JSON.stringify({ worktree: { baseRef: 'fresh' } }));
+
+  // When
   const project = hook({ hook_event_name: 'WorktreeCreate', name: 'proj', cwd: repo },
     { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('head') });
+
+  // Then
   assert.equal(git(project.stdout.trim(), 'rev-parse', 'HEAD'), pushed);
 });
 
-test('baseRef "fresh" with no origin falls back to the session HEAD', () => {
+test('given baseRef "fresh" and no origin, when a worktree is created, then it falls back to the session HEAD', () => {
+  // Given
   const { repo, root } = fixture();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'noremote', cwd: repo },
     { CLAUDE_WORKTREE_ROOT: root, CLAUDE_CONFIG_DIR: configWith('fresh') });
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.equal(git(r.stdout.trim(), 'rev-parse', 'HEAD'), git(repo, 'rev-parse', 'HEAD'));
 });
 
-test('a name with separators or dots is slugged', () => {
+test('given a name with separators or dots, when a worktree is created, then the name is slugged', () => {
+  // Given
   const { repo, root } = fixture();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: '../fix order/totals', cwd: repo }, { CLAUDE_WORKTREE_ROOT: root });
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.equal(basename(r.stdout.trim()), 'shop-fix-order-totals');
 });
 
-test('no CLAUDE_WORKTREE_ROOT → native layout under <repo>/.claude/worktrees', () => {
+test('given no CLAUDE_WORKTREE_ROOT, when a worktree is created, then the layout is native, under <repo>/.claude/worktrees', () => {
+  // Given
   const { repo } = fixture();
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'x', cwd: repo }, { CLAUDE_WORKTREE_ROOT: '' });
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.equal(r.stdout.trim(), join(repo, '.claude', 'worktrees', 'x'));
 });
 
-test('an existing worktree is reused; an existing plain directory fails loudly', () => {
+test('given an existing worktree and an existing plain directory, when a worktree is created again, then the worktree is reused and the plain directory fails loudly', () => {
+  // Given
   const { repo, root } = fixture();
   const env = { CLAUDE_WORKTREE_ROOT: root };
   const first = hook({ hook_event_name: 'WorktreeCreate', name: 'again', cwd: repo }, env).stdout.trim();
+
+  // When / Then
   assert.equal(hook({ hook_event_name: 'WorktreeCreate', name: 'again', cwd: repo }, env).stdout.trim(), first);
+
+  // Given
   mkdirSync(join(root, 'shop-taken'));
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'taken', cwd: repo }, env);
+
+  // Then
   assert.notEqual(r.status, 0);
   assert.equal(r.stdout, '');
   assert.match(r.stderr, /not a worktree/);
 });
 
-test('outside a repository → non-zero with the git error, nothing on stdout', () => {
+test('given a directory outside a repository, when a worktree is created, then it exits non-zero with the git error and nothing on stdout', () => {
+  // Given
   const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'wtr-norepo-')));
   created.push(dir);
+
+  // When
   const r = hook({ hook_event_name: 'WorktreeCreate', name: 'x', cwd: dir }, { CLAUDE_WORKTREE_ROOT: dir, GIT_CEILING_DIRECTORIES: dirname(dir) });
+
+  // Then
   assert.notEqual(r.status, 0);
   assert.equal(r.stdout, '');
 });
 
-test('remove → clean worktree removed, branch kept; dirty one refused and kept', () => {
+test('given a clean and a dirty worktree, when each is removed, then the clean one is removed with its branch kept and the dirty one is refused and kept', () => {
+  // Given
   const { repo, root } = fixture();
   const env = { CLAUDE_WORKTREE_ROOT: root };
   const clean = hook({ hook_event_name: 'WorktreeCreate', name: 'clean', cwd: repo }, env).stdout.trim();
+
+  // When
   let r = hook({ hook_event_name: 'WorktreeRemove', worktree_path: clean, cwd: repo }, env);
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.ok(!existsSync(clean));
   assert.equal(git(repo, 'branch', '--list', 'worktree-clean'), 'worktree-clean');
 
+  // Given
   const dirty = hook({ hook_event_name: 'WorktreeCreate', name: 'dirty', cwd: repo }, env).stdout.trim();
   writeFileSync(join(dirty, 'a.txt'), 'changed\n');
+
+  // When
   r = hook({ hook_event_name: 'WorktreeRemove', worktree_path: dirty, cwd: repo }, env);
+
+  // Then
   assert.notEqual(r.status, 0);
   assert.ok(existsSync(dirty));
 });

@@ -44,12 +44,16 @@ function userData(port) {
   return dir;
 }
 
-test('the port in DevToolsActivePort answers: silent, no pwsh', async () => {
+test('given the port in DevToolsActivePort answers, when the gate runs, then it is silent and pwsh does not run', async () => {
+  // Given
   const server = await listen();
   const dir = userData(server.address().port);
   let fallback = 0;
   try {
+    // When
     const out = await run({ userData: dir, defaultPort: await closedPort(), fallback: () => { fallback += 1; return 'x'; } });
+
+    // Then
     assert.equal(out, '');
     assert.equal(fallback, 0);
   } finally {
@@ -58,11 +62,13 @@ test('the port in DevToolsActivePort answers: silent, no pwsh', async () => {
   }
 });
 
-test('no DevToolsActivePort but the default port answers: silent, no pwsh', async () => {
+test('given no DevToolsActivePort but the default port answers, when the gate runs, then it is silent and pwsh does not run', async () => {
+  // Given
   const server = await listen();
   const dir = userData();
   let fallback = 0;
   try {
+    // When / Then
     assert.equal(await run({ userData: dir, defaultPort: server.address().port, fallback: () => { fallback += 1; return 'x'; } }), '');
     assert.equal(fallback, 0);
   } finally {
@@ -71,19 +77,28 @@ test('no DevToolsActivePort but the default port answers: silent, no pwsh', asyn
   }
 });
 
-test('no port answers: the pwsh script runs and its message is passed through', async () => {
+test('given no port answers, when the gate runs, then the pwsh script runs and its message is passed through', async () => {
+  // Given
   const dir = userData(await closedPort());
   try {
+    // When
     const out = await run({ userData: dir, defaultPort: await closedPort(), fallback: () => '{"systemMessage":"started Edge"}' });
+
+    // Then
     assert.equal(out, '{"systemMessage":"started Edge"}');
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test('settings.json wires the node gate, not pwsh, before browser-use tools', () => {
+test('given settings.json, when the PreToolUse hooks for browser-use tools are read, then they wire the node gate, not pwsh', () => {
+  // Given
   const { hooks } = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'));
+
+  // When
   const group = hooks.PreToolUse.find((g) => g.matcher.startsWith('mcp__plugin_browser-use'));
+
+  // Then
   assert.equal(group.hooks[0].command, 'node');
   assert.ok(group.hooks[0].args.join(' ').includes('edge-cdp.js'));
 });

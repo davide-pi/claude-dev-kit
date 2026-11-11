@@ -68,41 +68,66 @@ function fixture() {
   return { projects: join(root, 'projects'), log };
 }
 
-test('baseline is the first assistant message of each session in the window', () => {
+test('given a fixture with sessions, when the audit runs, then the baseline is the first assistant message of each session in the window', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.equal(r.sessions.length, 1);
   assert.equal(r.sessions[0].baseline, 50_002);
   assert.equal(r.sessions[0].session, 'sess-1');
 });
 
-test('the share of input tokens in turns above 200k and 300k; repeats and subagents do not count', () => {
+test('given repeated messages and a subagent, when the audit runs, then the share of input tokens above 200k and 300k leaves repeats and subagents out', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const { share } = audit({ projects, log, now: NOW });
+
+  // Then
   assert.equal(share.turns, 3);
   assert.equal(share.total, 50_002 + 250_001 + 350_001);
   assert.deepEqual(share.over, [250_001 + 350_001, 350_001]);
 });
 
-test('skill loads, MCP calls (subagents included), hook injections and the done-claim log, all windowed', () => {
+test('given a fixture with an old turn, when the audit runs, then skill loads, MCP calls (subagents included), hook injections and the done-claim log are all windowed', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.deepEqual([...r.skills], [['commit', 2]]);
   assert.deepEqual(Object.fromEntries(r.mcp), { 'srv-a': 2, 'srv-b': 1 });
   assert.deepEqual(Object.fromEntries(r.hooks), { 'worklog-pending': 1, 'context-nudge': 1, 'SessionStart (other)': 1 });
   assert.deepEqual(Object.fromEntries(r.doneClaim), { 'claim-without-evidence / fatto': 1, 'shell-ran / fatto': 1 });
 });
 
-test('a wider window brings the old turn back', () => {
+test('given a fixture with an old turn, when the audit runs with a 90-day window, then the old turn comes back', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const r = audit({ projects, log, now: NOW, days: 90 });
+
+  // Then
   assert.equal(r.skills.get('old-skill'), 1);
   assert.equal(r.doneClaim.get('claim-without-evidence / done'), 1);
 });
 
-test('the CLI prints the report; a missing directory is exit 2', () => {
+test('given a fixture, when the CLI runs on it or on a missing directory, then it prints the report, and the missing directory is exit 2', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const ok = spawnSync(process.execPath, [TOOL, '--projects', projects, '--log', log, '--now', new Date(NOW).toISOString()], { encoding: 'utf8' });
+
+  // Then
   assert.equal(ok.status, 0, ok.stderr);
   assert.match(ok.stdout, /sessions 1, min 50k, median 50k, max 50k/);
   assert.match(ok.stdout, /context > 200k: 92\.3 %/);
@@ -112,27 +137,36 @@ test('the CLI prints the report; a missing directory is exit 2', () => {
   assert.match(report(audit({ projects, log, now: NOW })), /# Cost audit - last 30 days/);
 });
 
-test('a session that began before the window has no baseline: its first message is outside it', () => {
+test('given a session that began before the window, when the audit runs, then it has no baseline: its first message is outside it', () => {
+  // Given
   const { projects, log } = fixture();
   const file = join(projects, 'proj-b.jsonl');
   writeFileSync(file, [
     turn('b1', 40, { input: 1, create: 30_000 }),
     turn('b2', 1, { input: 1, read: 120_000 }),
   ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.deepEqual(r.sessions.map((s) => s.session), ['sess-1']);
   assert.equal(r.share.turns, 4, 'its in-window turn still counts towards the context shares');
 });
 
-test('--help prints the usage and exits 0', () => {
+test('given the --help or -h flag, when the CLI runs, then it prints the usage and exits 0', () => {
   for (const flag of ['--help', '-h']) {
+    // Given / When
     const r = spawnSync(process.execPath, [TOOL, flag], { encoding: 'utf8' });
+
+    // Then
     assert.equal(r.status, 0, r.stderr);
     assert.match(r.stdout, /^usage: node cost-audit\.mjs/);
   }
 });
 
-test('the unproven-row and tail-truncated done-claim rules are counted with the row state as word', () => {
+test('given unproven-row and tail-truncated done-claim entries, when the audit runs, then they are counted with the row state as word', () => {
+  // Given
   const { projects, log } = fixture();
   const day = at(1);
   writeFileSync(log, [
@@ -140,29 +174,43 @@ test('the unproven-row and tail-truncated done-claim rules are counted with the 
     { at: day, rule: 'unproven-row', word: 'fatto' },
     { at: day, rule: 'tail-truncated', word: 'failed' },
   ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.deepEqual(Object.fromEntries(r.doneClaim), { 'unproven-row / fatto': 2, 'tail-truncated / failed': 1 });
   assert.match(report(r), /2\s+unproven-row \/ fatto/);
 });
 
-test('a Lang: line is attributed to workspace-context', () => {
+test('given a hook injection with a Lang: line, when the audit runs, then it is attributed to workspace-context', () => {
+  // Given
   const { projects, log } = fixture();
   writeFileSync(join(projects, 'proj-d.jsonl'), [
     hook(1, 'SessionStart', 'Lang: commit en · pr en · prComment en · items en · wiki en'),
     turn('d1', 1, { input: 1, read: 1000 }),
   ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.equal(r.hooks.get('workspace-context'), 1);
 });
 
-test('input and output are reported apart; the new hook markers are recognised per line', () => {
+test('given output tokens and hook injections with new markers, when the audit runs, then input and output are reported apart and the markers are recognised per line', () => {
+  // Given
   const { projects, log } = fixture();
   writeFileSync(join(projects, 'proj-c.jsonl'), [
     hook(1, 'SessionStart', 'ALM: x\ndetached HEAD at abc1234, clean'),
     hook(1, 'PreToolUse', 'Fuori perimetro: `a.cs` non è nel perimetro'),
     { ...turn('c1', 1, { input: 1, read: 1000 }), message: { id: 'c1', role: 'assistant', content: [], usage: { input_tokens: 1, cache_read_input_tokens: 1000, output_tokens: 700 } } },
   ].map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  // When
   const r = audit({ projects, log, now: NOW });
+
+  // Then
   assert.equal(r.share.output, 700);
   assert.equal(r.hooks.get('scope-guard'), 1);
   assert.equal(r.hooks.get('workspace-context'), 1, 'the first matching marker wins');
@@ -171,9 +219,14 @@ test('input and output are reported apart; the new hook markers are recognised p
   assert.match(text, /output 0\.00M/);
 });
 
-test('an over-size or unreadable transcript is counted and printed, not swallowed', () => {
+test('given a transcript over the size limit, when the audit runs, then it is counted and printed, not swallowed', () => {
+  // Given
   const { projects, log } = fixture();
+
+  // When
   const r = audit({ projects, log, now: NOW, maxBytes: 100 });
+
+  // Then
   assert.ok(r.skipped.oversize.length >= 1);
   assert.deepEqual(r.skipped.unreadable, []);
   assert.match(report(r), /## Skipped transcripts: 0 unreadable, \d+ over/);
