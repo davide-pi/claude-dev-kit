@@ -1,5 +1,5 @@
 ---
-paths: "**/.claude/**,**/skills/*/SKILL.md,**/skills/*/references/*.md,**/agents/*.md,**/rules/*.md,**/output-styles/*.md,**/workflows/*.js,**/hooks/*.js,**/hooks/lib/*.js"
+paths: "**/skills/*/SKILL.md,**/skills/*/references/*.md,**/agents/*.md,**/rules/*.md,**/output-styles/*.md,**/.claude/skills/**,**/.claude/agents/**"
 ---
 # Kit assets — the facts every edit needs
 
