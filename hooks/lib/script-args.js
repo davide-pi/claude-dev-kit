@@ -25,7 +25,7 @@
  * loads code from the command line (`--import`, `--require`, `--loader`, `--eval`, a `data:` URL…): test
  * files from the repository are fine, inline code is not. The same goes for `dotnet test` MSBuild properties and
  * targets (`-p:`, `-t:`) and `-e` / `--environment`, and for `--script-shell` / `--node-options` of npm, pnpm and yarn.
- * A gate.mjs call with `--supervise` or `--run` (the internal supervisor flags) asks. Under Bash a backslash inside
+ * A gate.mjs call with `--supervise` or `--run` (the internal supervisor flags) asks, and so does `--lane-remove` (it deletes lane work). Under Bash a backslash inside
  * double quotes asks too: it is an escape there that this tokenizer would not follow.
  *
  * Pure text analysis, no I/O.
@@ -128,6 +128,9 @@ function checkScriptArgs(command, tool) {
     if (script === 'gate.mjs') {
       if (tokens.some((t) => t === '--supervise' || t === '--run')) {
         return 'gate.mjs is called with --supervise or --run, its internal flags: the foreground starts the supervisor itself, never through the shell tool. Confirm?';
+      }
+      if (tokens.includes('--lane-remove')) {
+        return 'gate.mjs --lane-remove force-removes lane worktrees and deletes their branches: unmerged lane work is lost. Confirm?';
       }
       for (let i = 0; i < tokens.length - 1; i++) {
         if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {

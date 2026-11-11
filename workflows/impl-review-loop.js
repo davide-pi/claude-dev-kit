@@ -130,8 +130,21 @@ const cycleIds = left => {
   }
 }
 // Independent task groups: tasks that share neither a dependency (transitively) nor a file are in different lanes, in input order.
-// A task that names no file could touch any, so it joins everything; two globs that overlap without one matching the other are not seen.
-const sharesFile = (a, b) => norm(a) === norm(b) || entryRegex(a).test(norm(b)) || entryRegex(b).test(norm(a))
+// A task that names no file could touch any, so it joins everything. A glob (a directory counts as one) is also taken to share with any entry
+// that starts with its literal prefix, or whose own prefix starts with it: overlapping globs are not matched by either regex.
+const globPrefix = e => {
+  const n = norm(String(e).trim())
+  const body = n.endsWith('/') ? `${n}**` : n
+  const i = body.search(/[*?]/)
+  return i < 0 ? null : body.slice(0, i).replace(/[^/]*$/, '')
+}
+const sharesFile = (a, b) => {
+  if (norm(a) === norm(b) || entryRegex(a).test(norm(b)) || entryRegex(b).test(norm(a))) return true
+  const pa = globPrefix(a), pb = globPrefix(b)
+  if (pa === null && pb === null) return false
+  const x = pa ?? norm(a), y = pb ?? norm(b)
+  return x.startsWith(y) || y.startsWith(x)
+}
 const lanesFor = tasks => {
   const parent = tasks.map((_, i) => i)
   const find = i => (parent[i] === i ? i : (parent[i] = find(parent[i])))
@@ -995,7 +1008,7 @@ const readLane = text => {
   for (const raw of String(text ?? '').split('\n').reverse()) {
     let l
     try { l = JSON.parse(raw.trim()) } catch { continue }
-    if (l && typeof l.path === 'string' && l.path && typeof l.branch === 'string' && l.branch) return { path: l.path, branch: l.branch }
+    if (l && typeof l.path === 'string' && l.path.trim() && typeof l.branch === 'string' && /^deliver-lane\/[A-Za-z0-9._-]+$/.test(l.branch)) return { path: l.path, branch: l.branch }
   }
   return null
 }
@@ -1003,6 +1016,10 @@ const laneStem = String(startHead || 'head').replace(/[^A-Za-z0-9]/g, '').slice(
 
 // Independent task groups, each in its own worktree (plain `git worktree add` through gate.mjs, never the native isolation), then one merge gate.
 const runLanes = async groups => {
+  // The worktrees and branches a stall leaves behind: where they are and the command that removes them.
+  const leftText = made => (made.length
+    ? `lane worktrees left behind: ${made.map(l => `${l.path} (branch ${l.branch})`).join(', ')}; remove them with node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --lane-remove ${made.map(l => l.branch).join(' ')}`
+    : '')
   let next = 1
   const lanes = groups.map((tasks, i) => ({ n: i + 1, items: blocksFor(tasks).map(block => ({ block, bid: next++ })) }))
   const total = next - 1
@@ -1015,11 +1032,20 @@ const runLanes = async groups => {
   const lost = found.findIndex(f => !f)
   if (lost >= 0) {
     const label = `lane ${lost + 1} · add worktree`
-    return stallAgain(0, `no worktree for lane ${lost + 1} (the runner returned none${why(label)}); worktrees already added stay next to the repository, remove them with git worktree remove`, { why: 'lane-setup' })
+    const made = lanes.map((l, i) => ({ ...l, ...found[i] })).filter((l, i) => found[i])
+    return stallAgain(0, [`no valid worktree for lane ${lost + 1} (the runner returned none or a line with no path or no deliver-lane/ branch${why(label)})`, leftText(made)].filter(Boolean).join('; '), { why: 'lane-setup' })
   }
   lanes.forEach((l, i) => Object.assign(l, found[i]))
   const stalled = (await parallel(lanes.map(l => () => runBlocks(l.items, total, l)))).find(Boolean)
-  if (stalled) return stalled
+  if (stalled) {
+    // the reasons of a block stall speak of a tree that is not the start tree here: say where the work is
+    const note = leftText(lanes)
+    return {
+      ...stalled,
+      stall: { ...stalled.stall, reason: [stalled.stall.reason, note].filter(Boolean).join('; ') },
+      resume: stalled.stall.why === 'question' ? `${stalled.resume} ${note}` : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
+    }
+  }
   blockLog.sort((a, b) => a.id - b.id)
   phase('Implement')
   const label = 'lanes · merge'
@@ -1032,10 +1058,14 @@ const runLanes = async groups => {
   const g = readGate(merged?.gate)
   if (!gateGreen(g)) {
     const conflict = g?.gate === 'red: merge'
+    // only the gate can say the rollback worked: a failed one names itself in the text
+    const rolledBack = !/rollback failed/.test(g?.test ?? '')
     return stallAgain(0, conflict
-      ? `the lanes conflict on merge (aborted, the start tree is untouched; each lane's work stays on its branch ${lanes.map(l => l.branch).join(', ')}): ${g.outside.join(', ') || g.test}`
-      : `the merge gate is not green: ${g?.line ?? 'no gate line returned'}${why(label)}`, { why: conflict ? 'merge-conflict' : gateWhy(g) })
+      ? `the lanes conflict on merge (${rolledBack ? 'aborted, the start tree is untouched' : `the start tree may hold part of the merge, ${g.test}`}); ${leftText(lanes)}: ${g.outside.join(', ') || g.test}`
+      : `the merge gate is not green: ${g?.line ?? 'no gate line returned'}${why(label)}${g ? '' : `; ${leftText(lanes)}`}`, { why: conflict ? 'merge-conflict' : gateWhy(g) })
   }
+  const leftover = Array.isArray(g.leftover) ? g.leftover.filter(x => typeof x === 'string' && x) : []
+  if (leftover.length) gaps.push(`lanes: merged, but could not remove ${leftover.join('; ')}`)
   // The merge gate verified the merged tree: it replaces the lanes' own last verify, and its tree is the base for what follows.
   if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: 'the merge gate', line: g.line } }
   lastTree = g.tree
@@ -1046,7 +1076,12 @@ if (!inline) {
   phase('Implement')
   if (!input.verify && loopSize !== 'S') gaps.push('no verify: blocks were not read by reader A')
   if (input.lanes === true && !input.verify) gaps.push('lanes: no verify command, so the plan ran serially')
-  const laneGroups = input.lanes === true && input.verify ? lanesFor(planTasks) : []
+  let laneGroups = input.lanes === true && input.verify ? lanesFor(planTasks) : []
+  // a lane is cut from the start commit: it would not see the user's uncommitted edit of a file a task shares
+  if (lanesWorth(laneGroups) && planTasks.some(t => (t.files ?? []).some(f => dirty.some(d => sharesFile(f, rel(d, repoRoot)))))) {
+    gaps.push('lanes: a task shares a file with those already modified before the start, so the plan ran serially')
+    laneGroups = []
+  }
   const stalled = lanesWorth(laneGroups) ? await runLanes(laneGroups) : await runBlocks(blocks.map((block, i) => ({ block, bid: i + 1 })), blocks.length, null)
   if (stalled) return stalled
 

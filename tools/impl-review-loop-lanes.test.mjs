@@ -94,3 +94,107 @@ test('given a lane runner that returns no worktree, when the loop runs, then it 
   assert.equal(out.status, 'STALL');
   assert.equal(calls.filter((c) => c.opts.agentType === 'implementer').length, 0);
 });
+
+const stallsFor = (calls) => calls.filter((c) => c.opts.agentType === 'implementer').length;
+const lanePathLine = (opts) => { const n = /\d+/.exec(opts.label)[0]; return { line: JSON.stringify({ lane: `l${n}`, path: `C:/lanes/l${n}`, branch: `deliver-lane/l${n}` }) }; };
+
+test('given a file already modified before the start that a task shares, when the loop runs with lanes, then it runs serially and says why', async () => {
+  // Given
+  const args = lanesArgs(two, { start: { head: 'abc1234', dirty: ['src/Orders/Dto/Row.cs'] }, dirtyConfirmed: true });
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [green()]);
+  // Then
+  assert.equal(lanePrompts(calls).length, 0);
+  assert.equal(stallsFor(calls), 1);
+  assert.equal(out.gaps.filter((g) => /lanes.*modified before the start/.test(g)).length, 1);
+});
+
+test('given a modified file that no task shares, when the loop runs with lanes, then the lanes still run', async () => {
+  // Given
+  const args = lanesArgs(two, { start: { head: 'abc1234', dirty: ['docs/readme.md'] } });
+  // When
+  const { calls } = await run(args, [review([]), review([]), review([])], [green(), green()]);
+  // Then
+  assert.equal(calls.filter((c) => / · add worktree$/.test(c.opts.label ?? '')).length, 2);
+});
+
+test('given a lane runner that returns a branch outside deliver-lane/, when the loop runs, then it stalls as lane-setup before any implementer runs', async () => {
+  // Given
+  const lanes = (prompt, opts) => ({ line: JSON.stringify({ lane: 'x', path: `C:/lanes/x${/\d+/.exec(opts.label)[0]}`, branch: 'main' }) });
+  // When
+  const { out, calls } = await run(lanesArgs(two), [], [], { lanes });
+  // Then
+  assert.equal(out.stall.why, 'lane-setup');
+  assert.equal(stallsFor(calls), 0);
+});
+
+test('given a lane runner that returns an empty path, when the loop runs, then it stalls as lane-setup', async () => {
+  // Given
+  const lanes = (prompt, opts) => ({ line: JSON.stringify({ lane: 'x', path: '', branch: `deliver-lane/l${/\d+/.exec(opts.label)[0]}` }) });
+  // When
+  const { out } = await run(lanesArgs(two), [], [], { lanes });
+  // Then
+  assert.equal(out.stall.why, 'lane-setup');
+});
+
+test('given a lane set-up that fails for one lane, when the loop stalls, then the reason names the worktrees already added and how to remove them', async () => {
+  // Given
+  const lanes = (prompt, opts) => (/^lane 2 /.test(opts.label) ? null : lanePathLine(opts));
+  // When
+  const { out } = await run(lanesArgs(two), [], [], { lanes });
+  // Then
+  assert.equal(out.stall.why, 'lane-setup');
+  assert.match(out.stall.reason, /C:\/lanes\/l1/);
+  assert.match(out.stall.reason, /--lane-remove deliver-lane\/l1/);
+});
+
+test('given a lane that stalls, when the loop stops, then the reason names every worktree and branch left behind and the resume does not say the edits are kept in the tree', async () => {
+  // Given
+  const stuck = () => impl({ gate: gate('red: timeout', { test: 'slow test' }) });
+  // When
+  const { out, calls } = await run(lanesArgs(two), [], [stuck(), stuck()]);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'gate-timeout');
+  assert.match(out.stall.reason, /C:\/lanes\/l1/);
+  assert.match(out.stall.reason, /C:\/lanes\/l2/);
+  assert.match(out.stall.reason, /--lane-remove deliver-lane\/l1 deliver-lane\/l2/);
+  assert.ok(!/in the tree/.test(out.resume));
+  assert.match(out.resume, /--lane-remove/);
+  assert.equal(calls.filter((c) => c.opts.label === 'lanes · merge').length, 0);
+});
+
+test('given a merge gate that reports a conflict, when the loop stalls, then the reason names the kept worktrees and the start tree untouched', async () => {
+  // Given
+  const conflict = () => ({ gate: laneGate('red: merge', { test: 'merge conflict in deliver-lane/l2', outside: ['src/Orders/Dto/Row.cs'] }) });
+  const lanes = (prompt, opts) => (/^lane \d+ /.test(opts.label) ? lanePathLine(opts) : conflict());
+  // When
+  const { out } = await run(lanesArgs(two), [review([]), review([])], [green(), green()], { lanes });
+  // Then
+  assert.match(out.stall.reason, /untouched/);
+  assert.match(out.stall.reason, /C:\/lanes\/l1/);
+  assert.match(out.stall.reason, /--lane-remove/);
+});
+
+test('given a merge gate whose rollback failed, when the loop stalls, then the reason does not claim the start tree is untouched', async () => {
+  // Given
+  const failed = () => ({ gate: laneGate('red: merge', { test: 'rollback failed: the start branch is at beef123, not at abc1234; check git status', outside: ['src/Orders/Dto/Row.cs'] }) });
+  const lanes = (prompt, opts) => (/^lane \d+ /.test(opts.label) ? lanePathLine(opts) : failed());
+  // When
+  const { out } = await run(lanesArgs(two), [review([]), review([])], [green(), green()], { lanes });
+  // Then
+  assert.ok(!/untouched/.test(out.stall.reason));
+  assert.match(out.stall.reason, /rollback failed/);
+  assert.match(out.stall.reason, /beef123/);
+});
+
+test('given a merge gate that lists leftover worktrees, when the loop goes on, then a gaps line names them', async () => {
+  // Given
+  const leftover = ['worktree C:/lanes/l1: locked', 'branch deliver-lane/l1: checked out'];
+  const lanes = (prompt, opts) => (/^lane \d+ /.test(opts.label) ? lanePathLine(opts) : { gate: laneGate('green', { leftover }) });
+  // When
+  const { out } = await run(lanesArgs(two), [review([]), review([]), review([])], [green(), green()], { lanes });
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.ok(out.gaps.some((g) => /worktree C:\/lanes\/l1: locked/.test(g) && /branch deliver-lane\/l1/.test(g)));
+});

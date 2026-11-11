@@ -811,6 +811,20 @@ test('given gate.mjs called with the hidden --supervise or --run flag, when the 
   }
 });
 
+test('given gate.mjs called with --lane-remove, when the guard reads it, then it asks in both shells and names the lost lane work', () => {
+  // Given
+  const command = `${GATE} --root . --lane-remove deliver-lane/a deliver-lane/b`;
+
+  for (const tool of BOTH) {
+    // When
+    const result = runTool(tool, command);
+
+    // Then
+    assert.equal(result.decision, 'ask', tool);
+    assert.match(result.reason, /--lane-remove/, tool);
+  }
+});
+
 test('given a backslash inside double quotes under Bash, when the guard reads an allowed script call, then it asks', () => {
   // Given
   const commands = [

@@ -8,12 +8,16 @@
  *   node gate.mjs --root <repoRoot> --wait
  *   node gate.mjs --root <repoRoot> --head <start head> --lane-add <name>
  *   node gate.mjs --root <repoRoot> --head <start head> --test "<command>" --merge <lane branch> [<lane branch> ...]
+ *   node gate.mjs --root <repoRoot> --lane-remove <lane branch> [<lane branch> ...]
  *
  * `--lane-add` makes the worktree `<root>-lane-<name>` (the next free name) on the new branch `deliver-lane/<name>` from
  * the head, gives it the start's perimeter for that branch and prints `{lane,path,branch}`. `--merge` commits each lane's
  * work, merges the branches in order, then runs the plain gate (tests, scope) on the start tree: a conflict is aborted
- * (`git merge --abort`, the branch put back at its head) and answered `red: merge` with the files in `outside`; the lane
- * worktrees are removed after the merge, the branches too unless it was red; the merged change is left uncommitted.
+ * (`git merge --abort`, the branch put back at its head, checked: a failed rollback says so in `test`) and answered
+ * `red: merge` with the files in `outside`. `--merge` refuses (exit 2, nothing written) a start tree with staged changes
+ * or with a modified or untracked file that a lane changes. Lane worktrees and branches are removed only after a good merge
+ * (what could not be removed is `leftover` in the last line); the merged change is left uncommitted. `--lane-remove`
+ * force-removes the worktree and the branch of each `deliver-lane/*` branch and prints `{removed:[{branch,path,ok}]}`.
  *
  * `--red` runs the unit command only, proves at least one test fails and stores the names with the SHA-256 of each
  * test file; the next plain run is green only while those files are unchanged. The tree hash (a temporary index,
@@ -51,6 +55,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FLAGS = ['--wait', '--supervise', '--force', '--no-scope', '--red'];
 const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add'];
+const LISTS = ['--merge', '--lane-remove'];
 
 function parseArgs(argv) {
   const a = { _: [] };
@@ -58,10 +63,10 @@ function parseArgs(argv) {
     const k = argv[i];
     if (FLAGS.includes(k)) a[k.slice(2)] = true;
     else if (VALUES.includes(k)) a[k.slice(2)] = argv[++i];
-    else if (k === '--merge') {
+    else if (LISTS.includes(k)) {
       // every token up to the next known option is a ref, a dash-led one included: validated (and refused) later
-      a.merge = [];
-      while (i + 1 < argv.length && ![...FLAGS, ...VALUES, '--merge'].includes(argv[i + 1])) a.merge.push(argv[++i]);
+      a[k.slice(2)] = [];
+      while (i + 1 < argv.length && ![...FLAGS, ...VALUES, ...LISTS].includes(argv[i + 1])) a[k.slice(2)].push(argv[++i]);
     } else a._.push(k);
   }
   return a;
@@ -81,8 +86,11 @@ function minutes(args, name, fallback) {
   return n;
 }
 
+// What a good `--merge` could not remove, added to every last line this process prints.
+let LEFTOVER = [];
+
 function emit(gate, exit, extra = {}) {
-  console.log(JSON.stringify({ gate, test: '', outside: [], formatOnly: [], tree: '', greenAt: '', seconds: 0, ...extra }));
+  console.log(JSON.stringify({ gate, test: '', outside: [], formatOnly: [], tree: '', greenAt: '', seconds: 0, ...(LEFTOVER.length ? { leftover: LEFTOVER } : {}), ...extra }));
   process.exit(exit);
 }
 
@@ -283,42 +291,111 @@ function worktreesByBranch(root) {
   return map;
 }
 
+/** Exits 2 unless every ref is an existing `deliver-lane/*` branch (a plain name, never an option or a revision range). */
+function laneRefs(root, list, flag) {
+  if (!list.length) usage(`${flag} takes at least one lane branch`);
+  for (const ref of list) {
+    if (!ref.startsWith(LANE_PREFIX) || !/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes('..')) usage(`${flag} takes ${LANE_PREFIX}* branch names, got "${ref}"`);
+    if (git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${ref}`]).status !== 0) usage(`${flag}: no branch "${ref}"`);
+  }
+}
+
+const nulList = (res) => (res.stdout ?? '').split('\0').filter(Boolean);
+/** Files of the tree at `cwd` that differ from `rev` (tracked) or are untracked; `rev` null: only the unstaged and untracked ones. */
+function dirtyFiles(cwd, rev) {
+  return [
+    ...nulList(git(cwd, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', ...(rev ? ['--end-of-options', rev] : [])])),
+    ...nulList(git(cwd, ['-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard', '-z'])),
+  ];
+}
+
+/** Refuses (exit 2, nothing written) a start tree whose staged or uncommitted files the merge could take or overwrite. */
+function checkStartTree(root, start, list, trees) {
+  if (git(root, ['diff', '--cached', '--quiet']).status !== 0) usage('--merge: the start tree has staged changes; commit or unstage them first');
+  const mine = new Set(dirtyFiles(root, null));
+  if (!mine.size) return;
+  for (const ref of list) {
+    const lane = trees.get(ref);
+    const changed = new Set([
+      ...nulList(git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', '--end-of-options', start, ref])),
+      ...(lane ? dirtyFiles(lane, start) : []),
+    ]);
+    const clash = [...mine].filter((f) => changed.has(f));
+    if (clash.length) usage(`--merge: the start tree has uncommitted changes in files ${ref} changes: ${clash.join(', ')}; commit or stash them, or run the plan serially`);
+  }
+}
+
 /**
  * Commits each lane's work, merges the lane branches into the current branch one by one and ends with the branch back at
  * `head` and the merged change uncommitted in the tree, like a serial run. A conflict (or a refused merge) is aborted, the
- * branch put back and `{ red: true, files, text }` returned. The lane worktrees are removed either way, the branches after a merge only.
+ * branch put back and `{ red: true, files, text }` returned; when that rollback fails `text` says so. The lane worktrees and
+ * branches are removed after a good merge only; what could not be removed is in `leftover`.
  */
 function mergeLanes(root, list) {
-  for (const ref of list) {
-    if (!/^[A-Za-z0-9][A-Za-z0-9._/-]*$/.test(ref) || ref.includes('..')) usage(`--merge takes branch names, got "${ref}"`);
-    if (git(root, ['rev-parse', '--verify', '--quiet', `refs/heads/${ref}`]).status !== 0) usage(`--merge: no branch "${ref}"`);
-  }
-  if (!list.length) usage('--merge takes at least one lane branch');
+  laneRefs(root, list, '--merge');
   const start = out(git(root, ['rev-parse', 'HEAD']));
   const trees = worktreesByBranch(root);
-  const lanePaths = list.filter((ref) => ref.startsWith(LANE_PREFIX) && trees.has(ref)).map((ref) => trees.get(ref));
+  checkStartTree(root, start, list, trees);
+  const lanePaths = list.filter((ref) => trees.has(ref)).map((ref) => trees.get(ref));
   for (const path of lanePaths) {
-    laneGit(path, ['add', '-A']);
-    if (git(path, ['diff', '--cached', '--quiet']).status !== 0) {
+    const added = laneGit(path, ['add', '-A']);
+    if (added.status !== 0) usage(`could not stage the lane at ${path}: ${(added.stderr ?? '').trim()}`);
+    const staged = git(path, ['diff', '--cached', '--quiet']).status;
+    if (staged > 1) usage(`could not read the staged changes of the lane at ${path}`);
+    if (staged === 1) {
       const res = laneGit(path, ['commit', '--no-verify', '-q', '-m', 'deliver lane']);
       if (res.status !== 0) usage(`could not commit the lane at ${path}: ${(res.stderr ?? '').trim()}`);
     }
   }
-  const result = { red: false, files: [], text: '' };
+  const result = { red: false, files: [], text: '', leftover: [] };
   for (const [i, ref] of list.entries()) {
     const res = laneGit(root, ['merge', '--no-ff', '--no-edit', '--no-verify', '--end-of-options', ref]);
     if (res.status === 0) continue;
     result.red = true;
     result.files = out(git(root, ['diff', '--name-only', '--diff-filter=U'])).split(/\r?\n/).filter(Boolean);
     result.text = result.files.length ? `merge conflict in ${ref}` : tail(`${res.stdout ?? ''}\n${res.stderr ?? ''}`, 3).join(' | ');
+    // a refused merge has nothing to abort: only a merge still in progress after the abort, a failed reset or a moved head is a failed rollback
     git(root, ['merge', '--abort']);
-    if (i > 0) git(root, ['reset', '--keep', start]);
+    const inMerge = git(root, ['rev-parse', '-q', '--verify', 'MERGE_HEAD']).status === 0;
+    const resetFailed = i > 0 && git(root, ['reset', '--keep', start]).status !== 0;
+    const now = out(git(root, ['rev-parse', 'HEAD']));
+    if (inMerge || resetFailed || now !== start) {
+      result.text = `rollback failed: the start branch is at ${now || '(unknown)'}, not at ${start}; check git status in ${root} (${result.text})`;
+    }
     break;
   }
-  if (!result.red) git(root, ['reset', '-q', start]);
-  for (const path of lanePaths) git(root, ['worktree', 'remove', '--force', path]);
-  if (!result.red) for (const ref of list.filter((r) => r.startsWith(LANE_PREFIX))) git(root, ['branch', '-D', ref]);
+  if (!result.red) {
+    git(root, ['reset', '-q', start]);
+    for (const path of lanePaths) {
+      const res = git(root, ['worktree', 'remove', '--force', path]);
+      if (res.status !== 0) result.leftover.push(`worktree ${path}: ${(res.stderr ?? '').trim()}`);
+    }
+    for (const ref of list) {
+      const res = git(root, ['branch', '-D', ref]);
+      if (res.status !== 0) result.leftover.push(`branch ${ref}: ${(res.stderr ?? '').trim()}`);
+    }
+  }
   return result;
+}
+
+/** Force-removes the worktree and the branch of each lane branch and prints what happened to each. */
+function laneRemove(root, list) {
+  laneRefs(root, list, '--lane-remove');
+  const trees = worktreesByBranch(root);
+  const removed = list.map((branch) => {
+    const path = trees.get(branch) ?? '';
+    const errors = [];
+    // doubled: only a double force removes a locked worktree
+    if (path) {
+      const res = git(root, ['worktree', 'remove', '--force', '--force', path]);
+      if (res.status !== 0) errors.push(`worktree: ${(res.stderr ?? '').trim()}`);
+    }
+    const res = git(root, ['branch', '-D', branch]);
+    if (res.status !== 0) errors.push(`branch: ${(res.stderr ?? '').trim()}`);
+    return { branch, path, ok: !errors.length, ...(errors.length ? { error: errors.join(' | ') } : {}) };
+  });
+  console.log(JSON.stringify({ removed }));
+  process.exit(removed.every((x) => x.ok) ? 0 : 1);
 }
 
 /** The tree of the working directory, hashed through a temporary index so the real one stays untouched; '' when git failed. */
@@ -363,6 +440,7 @@ const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\
 function finalize(dir, state) {
   const run = state.run;
   const o = run.opts;
+  if (o.leftover?.length) LEFTOVER = o.leftover;
   const seconds = Math.round(((run.endedAt ?? Date.now()) - run.startedAt) / 1000);
   const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}) };
   let log = '';
@@ -434,6 +512,7 @@ async function main() {
 
   if (args.supervise) return supervise(dir, root, args.run);
   if (args['lane-add'] !== undefined) return laneAdd(root, dir0, args['lane-add'], args.head);
+  if (args['lane-remove'] !== undefined) return laneRemove(root, args['lane-remove']);
   const maxMinutes = minutes(args, 'max-minutes', 9);
   const stuckMinutes = minutes(args, 'stuck-minutes', 5);
   if (args.wait) return waitFor(dir, maxMinutes);
@@ -453,6 +532,7 @@ async function main() {
   if (args.head.startsWith('-')) usage(`--head takes a revision, got "${args.head}"`);
   if (args.merge) {
     const merged = mergeLanes(root, args.merge);
+    LEFTOVER = merged.leftover;
     if (merged.red) emit('red: merge', 1, { test: merged.text, outside: merged.files });
   }
   const noScope = !!args['no-scope'];
@@ -474,7 +554,7 @@ async function main() {
   }
   return startRun(dir, state, root, {
     command: args.test, stuckMinutes,
-    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped },
+    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped, leftover: LEFTOVER },
   }, maxMinutes);
 }
 

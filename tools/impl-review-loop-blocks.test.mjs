@@ -331,3 +331,30 @@ test('given a question whose reversible flag is not the boolean true, when the p
   // Then
   assert.deepEqual(policies, ['stop', 'stop', 'stop']);
 });
+
+test('given two globs whose literal prefixes nest, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/**/x.cs'] }, 2: { files: ['src/a/**'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given two globs that cut back to the same directory, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/*.cs'] }, 2: { files: ['src/a*.cs'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given a glob and a literal file under its literal prefix, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/**/x.cs'] }, 2: { files: ['src/a/y.cs'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
