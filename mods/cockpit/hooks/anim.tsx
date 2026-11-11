@@ -25,13 +25,15 @@ const ONCE_STEPS = 17
 /** The newest FATTO row fades from its highlight to its own colour in this many steps (~2 s). */
 const FADE_STEPS = 22
 const PULSE_HALF = 8
-/** A beat's period (lit for the first half, dim for the second); the fast one is half the slow one, so every fast cycle lines up with a slow one. */
+/** A beat's period (lit at its start, darkest at its middle); the fast one is half the slow one, so every fast cycle lines up with a slow one. */
 export const BEAT_SLOW_MS = 1600
 export const BEAT_FAST_MS = BEAT_SLOW_MS / 2
 /** How often a beat looks at the clock. */
 const BEAT_TICK_MS = 50
-/** How far a beat's dim half goes from the figure's colour towards the quiet grey. */
+/** How far a beat's darkest level goes from the figure's colour towards the quiet grey. */
 const BEAT_DIM = 0.55
+/** Shades of a beat between lit (0) and darkest: enough for the eye to read a glow, not an on/off. */
+export const BEAT_LEVELS = 6
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 /** Intermediate colours of a breath or a fade, besides its two ends. */
 const LEVELS = 3
@@ -58,10 +60,10 @@ export function beatSpeed(color: string | undefined): BeatSpeed | undefined {
   return color === COLORS.yellow || color === COLORS.amber || color === COLORS.orange ? 'slow' : undefined
 }
 
-/** A beat's step at clock time `now`: 0 lit, 1 dim. From the clock alone, so beats mounted at different moments flash together. */
+/** A beat's level at clock time `now`: 0 lit .. `BEAT_LEVELS` darkest, on a cosine so it glows rather than switches. From the clock alone, so beats mounted at different moments glow together. */
 export const beatStep = (speed: BeatSpeed | undefined, now: number): number => {
   const period = speed === 'fast' ? BEAT_FAST_MS : BEAT_SLOW_MS
-  return (now % period) / period < 0.5 ? 0 : 1
+  return Math.round(((1 - Math.cos((2 * Math.PI * (now % period)) / period)) / 2) * BEAT_LEVELS)
 }
 
 /** The header's state glyph breathes while Claude works or waits. */
@@ -110,7 +112,7 @@ export function frame(kind: AnimKind, step: number, cells: readonly Span[]): Spa
     case 'pulse':
       return isLit(PULSE_HALF) ? toned(cells, () => COLORS.orange) : cells.map(dimmed)
     case 'beat':
-      return step % 2 === 0 ? [...cells] : toned(cells, s => mixHex(s.c ?? COLORS.text, COLORS.empty, BEAT_DIM))
+      return step === 0 ? [...cells] : toned(cells, s => mixHex(s.c ?? COLORS.text, COLORS.empty, (BEAT_DIM * Math.min(step, BEAT_LEVELS)) / BEAT_LEVELS))
     case 'once':
       return step >= ONCE_STEPS ? [...cells] : cells.map(s => (isBlank(s) ? s : { ...s, c: ACCENT, bold: true, dim: false }))
     case 'fade':
@@ -136,7 +138,7 @@ const Anim: ClientModule<AnimProps, AnimState> = (props, surface) => {
   const state = surface.state
   const next = reconcile(state, props.kind, props.token, props.speed)
   // One clock for the instance's life: a tick redraws only while its kind still has steps to show (a finished one-shot goes idle).
-  // A beat takes its step from the wall clock, not from a count of its own, and redraws only when the step changes.
+  // A beat takes its level from the wall clock, not from a count of its own, and redraws only when the level changes.
   if (!state) {
     surface.every(props.kind === 'beat' ? BEAT_TICK_MS : STEP_MS, () => {
       const now = surface.state

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { BEAT_FAST_MS, BEAT_SLOW_MS, FADE_WINDOW_MS, FLASH_WINDOW_MS, beatSpeed, beatStep, frame, isAnimating, isBreathing, isFading, mixHex, reconcile, signalAnim } from '../hooks/anim'
+import { BEAT_FAST_MS, BEAT_LEVELS, BEAT_SLOW_MS, FADE_WINDOW_MS, FLASH_WINDOW_MS, beatSpeed, beatStep, frame, isAnimating, isBreathing, isFading, mixHex, reconcile, signalAnim } from '../hooks/anim'
 import { COLORS } from '../hooks/shared'
 import type { Span } from '../hooks/shared'
 
@@ -114,13 +114,19 @@ test('beatSpeed: Given a figure colour, When it is green, Then it is quiet; the 
   expect(beatSpeed(COLORS.blue)).toBeUndefined()
 })
 
-test('beatStep: Given the clock, When it is in the first half of a period, Then the beat is lit, else dim; the fast period is half the slow one', () => {
+test('beatStep: Given the clock, When a period goes by, Then the beat brightens and darkens smoothly: lit at the start, darkest at the middle, through every level in between', () => {
   // Given
   const t0 = 1_000 * BEAT_SLOW_MS
-  // When / Then
+  // When
+  const slow = Array.from({ length: 33 }, (_, i) => beatStep('slow', t0 + (i * BEAT_SLOW_MS) / 32))
+  // Then
   expect(BEAT_FAST_MS * 2).toBe(BEAT_SLOW_MS)
-  expect([0, 799, 800, 1599].map(d => beatStep('slow', t0 + d))).toEqual([0, 0, 1, 1])
-  expect([0, 399, 400, 799, 800, 1199, 1200].map(d => beatStep('fast', t0 + d))).toEqual([0, 0, 1, 1, 0, 0, 1])
+  expect(slow[0]).toBe(0)
+  expect(slow[16]).toBe(BEAT_LEVELS)
+  expect(slow[32]).toBe(0)
+  expect(new Set(slow).size).toBe(BEAT_LEVELS + 1)
+  slow.forEach((v, i) => expect(Math.abs(v - (slow[i - 1] ?? v))).toBeLessThanOrEqual(1))
+  expect([0, BEAT_FAST_MS / 2, BEAT_FAST_MS].map(d => beatStep('fast', t0 + d))).toEqual([0, BEAT_LEVELS, 0])
 })
 
 test('beatStep: Given two beats mounted at different moments, When the clock reads the same, Then both are in the same step', () => {
@@ -134,11 +140,12 @@ test('beatStep: Given two beats mounted at different moments, When the clock rea
   expect(beatStep(mountedA.speed, now)).toBe(beatStep(mountedB.speed, now))
 })
 
-test('frame: Given a beat, When it is lit, Then the cells keep their colour; when dim, a darker step of it, never the page colour of another', () => {
-  // Given / When / Then
-  expect(frame('beat', 0, icon)[0]?.c).toBe(COLORS.red)
-  const dimmed = frame('beat', 1, icon)[0]?.c
-  expect(dimmed).toBe(mixHex(COLORS.red, COLORS.empty, 0.55))
-  expect(dimmed).not.toBe(COLORS.red)
+test('frame: Given a beat, When its level goes from lit to darkest, Then the colour fades step by step towards the page grey, never reaching it', () => {
+  // Given / When
+  const shades = Array.from({ length: BEAT_LEVELS + 1 }, (_, k) => frame('beat', k, icon)[0]?.c)
+  // Then
+  expect(shades[0]).toBe(COLORS.red)
+  expect(shades[BEAT_LEVELS]).toBe(mixHex(COLORS.red, COLORS.empty, 0.55))
+  expect(new Set(shades).size).toBe(BEAT_LEVELS + 1)
   expect(isAnimating('beat', 1_000_000)).toBe(true)
 })
