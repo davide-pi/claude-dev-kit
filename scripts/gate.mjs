@@ -18,7 +18,11 @@
  * supervisor is alive exits 2; a dead supervisor is `red` ("supervisor died"). The foreground call polls the state
  * up to `--max-minutes`, then prints `running` and exits 3; `--wait` polls again. Minutes may be fractions.
  *
- * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}`. Exit 0 green, 1 red, 2 not checked
+ * A stored red proof makes every plain run `red: tests changed` while a proven test file differs; `--force` drops the
+ * proof and adds `"proof":"dropped"` to the last line. A supervisor pid is stored with its start time: a live pid that
+ * started at another time is a reused one, and the supervisor counts as dead (checked every 30 s while waiting).
+ *
+ * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}` (plus `proof` when dropped). Exit 0 green, 1 red, 2 not checked
  * (bad arguments, no git repository, a scope or git step that failed), 3 still running. git runs through argv,
  * never a shell.
  *
@@ -28,7 +32,7 @@
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, statSync, rmSync, realpathSync } from 'node:fs';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync, openSync, closeSync, statSync, rmSync, realpathSync } from 'node:fs';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -90,8 +94,34 @@ function pidAlive(pid) {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 }
 
-/** The supervisor writes its pid right after it starts; until then a recent run counts as alive. */
-const supervisorAlive = (run) => (run.pid ? pidAlive(run.pid) : Date.now() - run.startedAt < 30000);
+/** Start time (epoch ms) of a live process, null when it can't be read. */
+function startTimeOf(pid) {
+  try {
+    const res = WIN
+      ? spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', `(Get-Process -Id ${pid}).StartTime.ToUniversalTime().ToString('o')`], { encoding: 'utf8', windowsHide: true })
+      : spawnSync('ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8' });
+    const t = Date.parse((res.stdout ?? '').trim());
+    return res.status === 0 && !Number.isNaN(t) ? t : null;
+  } catch { return null; }
+}
+
+const REUSE_CHECK_MS = 30000;
+
+/**
+ * The supervisor writes its pid and start time right after it starts; until then a recent run counts as alive. A live pid
+ * whose start time differs from the stored one is a reused pid, so the supervisor is dead. The start time is read at most
+ * every 30 s per `memo` (the read costs a process spawn); one that can't be read counts as alive.
+ */
+function supervisorAlive(run, memo = {}) {
+  if (!run.pid) return Date.now() - run.startedAt < 30000;
+  if (!pidAlive(run.pid)) return false;
+  if (run.pidStarted && (!memo.at || Date.now() - memo.at >= REUSE_CHECK_MS)) {
+    memo.at = Date.now();
+    const actual = startTimeOf(run.pid);
+    if (actual !== null && Math.abs(actual - run.pidStarted) > 2000) return false;
+  }
+  return true;
+}
 
 /** Notes a process the gate started in `gate.json` as `{ pid, started }` (the last 50), for `sweep.mjs` to match by pid and start time. */
 function recordProcess(dir, pid) {
@@ -132,6 +162,7 @@ async function supervise(dir, root, id) {
   const state = readState(dir);
   const run = state.run;
   if (!run || run.id !== id) return;
+  run.pidStarted = startTimeOf(process.pid) ?? undefined;
   run.pid = process.pid;
   writeState(dir, state);
   const logPath = join(dir, 'gate.log');
@@ -199,6 +230,11 @@ const out = (res) => (res.stdout ?? '').trim();
 function treeHash(root, dir) {
   const env = { GIT_INDEX_FILE: join(dir, `index.${process.pid}`) };
   try {
+    // Seeding the temporary index with the real one lets git reuse its stat data instead of rehashing every file.
+    const real = out(git(root, ['rev-parse', '--git-path', 'index']));
+    if (real) copyFileSync(resolve(root, real), env.GIT_INDEX_FILE);
+  } catch { /* no index yet: git builds one */ }
+  try {
     if (git(root, ['add', '-A'], env).status !== 0) return '';
     const res = git(root, ['write-tree'], env);
     return res.status === 0 ? out(res) : '';
@@ -209,10 +245,10 @@ function treeHash(root, dir) {
 
 /** Changed files whose diff against `head` is empty once whitespace and blank lines are ignored. */
 function formatOnlyFiles(root, head) {
-  const list = git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', head]);
+  const list = git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', '--end-of-options', head]);
   if (list.status !== 0) return [];
   return (list.stdout ?? '').split('\0').filter(Boolean).filter((f) => {
-    const res = git(root, ['diff', '--ignore-all-space', '--ignore-blank-lines', head, '--', f]);
+    const res = git(root, ['diff', '--ignore-all-space', '--ignore-blank-lines', '--end-of-options', head, '--', f]);
     return res.status === 0 && !out(res);
   });
 }
@@ -233,7 +269,7 @@ function finalize(dir, state) {
   const run = state.run;
   const o = run.opts;
   const seconds = Math.round(((run.endedAt ?? Date.now()) - run.startedAt) / 1000);
-  const base = { tree: o.tree ?? '', seconds };
+  const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}) };
   let log = '';
   try { log = readFileSync(join(dir, 'gate.log'), 'utf8'); } catch { /* no output */ }
   state.run = null;
@@ -263,12 +299,13 @@ function finalize(dir, state) {
 
 async function waitFor(dir, maxMinutes) {
   const deadline = Date.now() + maxMinutes * 60000;
+  const memo = {};
   for (;;) {
     const state = readState(dir);
     if (!state.run) usage('no run to wait for');
     if (state.run.status === 'done') return finalize(dir, state);
     const seconds = Math.round((Date.now() - state.run.startedAt) / 1000);
-    if (!supervisorAlive(state.run)) {
+    if (!supervisorAlive(state.run, memo)) {
       // It may have written its result between the read above and the liveness check.
       const fresh = readState(dir);
       if (fresh.run?.status === 'done') return finalize(dir, fresh);
@@ -317,8 +354,11 @@ async function main() {
   }
   if (!args.test) usage('--test is required');
   if (!args.head) usage('--head is required');
+  if (args.head.startsWith('-')) usage(`--head takes a revision, got "${args.head}"`);
   const noScope = !!args['no-scope'];
   const dirty = args.dirty ?? '';
+  const proofDropped = !!args.force && !!state.proof;
+  if (proofDropped) { delete state.proof; writeState(dir, state); }
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
   if (changed.length) emit('red: tests changed', 1, { test: changed.join('; ') });
   const tree = treeHash(root, dir);
@@ -326,7 +366,7 @@ async function main() {
   if (!noScope) {
     const scope = scopeCheck(root, args.head, dirty);
     if (scope.verdict === 'unchecked') process.exit(2);
-    if (scope.verdict === 'outside') emit('red: scope', 1, { tree, outside: scope.outside });
+    if (scope.verdict === 'outside') emit('red: scope', 1, { tree, outside: scope.outside, ...(proofDropped ? { proof: 'dropped' } : {}) });
   }
   const g = state.green;
   if (!args.force && !state.proof && g && g.tree === tree && g.head === args.head && g.dirty === dirty && g.test === args.test && g.scope === !noScope) {
@@ -334,7 +374,7 @@ async function main() {
   }
   return startRun(dir, state, root, {
     command: args.test, stuckMinutes,
-    opts: { root, head: args.head, dirty, noScope, tree, command: args.test },
+    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped },
   }, maxMinutes);
 }
 

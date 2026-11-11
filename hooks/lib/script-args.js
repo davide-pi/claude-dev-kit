@@ -23,7 +23,10 @@
  * `& | < > ^ % $`, a backtick, parentheses or a newline; a `;` is allowed only inside double quotes. Off
  * Windows a backslash or a single quote asks too (sh quoting could hide a `;`), and so does any option that
  * loads code from the command line (`--import`, `--require`, `--loader`, `--eval`, a `data:` URL…): test
- * files from the repository are fine, inline code is not.
+ * files from the repository are fine, inline code is not. The same goes for `dotnet test` MSBuild properties and
+ * targets (`-p:`, `-t:`) and `-e` / `--environment`, and for `--script-shell` / `--node-options` of npm, pnpm and yarn.
+ * A gate.mjs call with `--supervise` or `--run` (the internal supervisor flags) asks. Under Bash a backslash inside
+ * double quotes asks too: it is an escape there that this tokenizer would not follow.
  *
  * Pure text analysis, no I/O.
  *
@@ -45,9 +48,16 @@ const CODE_LOADING = /(?:^|\s)--test-adapter-path(?=[\s=]|$)|\b(?:data|https?|fi
 /** Node's own: `-r` and `-e` mean runtime and environment to `dotnet test`. A module path given to a reporter or config is repo code, like the test files. */
 const NODE_CODE_LOADING = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader|-e|--eval|-p|--print|-pe|-ep)(?=[\s=]|$)/;
 
+/** `dotnet test` options that run inline code: MSBuild properties and targets, environment (DOTNET_STARTUP_HOOKS). */
+const DOTNET_CODE_LOADING = /(?:^|\s)(?:(?:-{1,2}|\/)(?:p|property|t|target)(?=[:=\s]|$)|(?:-e|--environment)(?=[:=\s]|$))/i;
+/** The npm family's options that pick the shell or the node flags the script runs with. */
+const PACKAGE_RUNNER_CODE_LOADING = /(?:^|\s)--(?:script-shell|node-options)(?=[\s=]|$)/;
+
 /** True when the gate may run this `--test` / `--unit` value without a prompt. */
 function isPlainTestCommand(value) {
   const command = value.trim();
+  if (/^dotnet\s/.test(command) && DOTNET_CODE_LOADING.test(command)) return false;
+  if (/^(?:npm|pnpm|yarn)\s/.test(command) && PACKAGE_RUNNER_CODE_LOADING.test(command)) return false;
   if (process.platform !== 'win32' && POSIX_QUOTE_DANGER.test(command)) return false;
   if (/^node\s/.test(command) && NODE_CODE_LOADING.test(command)) return false;
   return TEST_RUNNER.test(command) && !TEST_COMMAND_DANGER.test(command) && !CODE_LOADING.test(command)
@@ -64,7 +74,7 @@ const TYPOGRAPHIC_QUOTE = /[‘’‚‛“”„]/;
  * Walks the argument text with quotes honoured. Returns the tokens (split on unquoted whitespace,
  * quotes stripped), or the reason it must ask.
  */
-function tokenize(text) {
+function tokenize(text, posix) {
   if (TYPOGRAPHIC_QUOTE.test(text)) return { risk: 'a typographic quote that PowerShell reads as a quote' };
   const tokens = [];
   let token = null;
@@ -73,6 +83,7 @@ function tokenize(text) {
     if (quote) {
       if (c === quote) quote = null;
       else if (quote === '"' && (c === '$' || c === '`')) return { risk: `a ${c === '$' ? '$' : 'backtick'} inside double quotes` };
+      else if (quote === '"' && c === '\\' && posix) return { risk: 'a backslash inside double quotes (an escape in Bash)' };
       else token += c;
     } else if (c === '"' || c === "'") {
       quote = c;
@@ -94,7 +105,7 @@ function tokenize(text) {
 }
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
-function checkScriptArgs(command) {
+function checkScriptArgs(command, tool) {
   if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|(?:gate|sweep)\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
@@ -105,7 +116,7 @@ function checkScriptArgs(command) {
       if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;
       tail = tail.slice(1);
     }
-    const { tokens, risk } = tokenize(tail);
+    const { tokens, risk } = tokenize(tail, tool === 'Bash');
     if (risk) {
       return `The arguments of ${script} hold ${risk}: it could run code before the script starts, `
         + 'outside the allowed call. Quote text in single quotes. Confirm?';
@@ -115,6 +126,9 @@ function checkScriptArgs(command) {
         + 'accepting a credential with write grants needs your explicit consent. Confirm?';
     }
     if (script === 'gate.mjs') {
+      if (tokens.some((t) => t === '--supervise' || t === '--run')) {
+        return 'gate.mjs is called with --supervise or --run, its internal flags: the foreground starts the supervisor itself, never through the shell tool. Confirm?';
+      }
       for (let i = 0; i < tokens.length - 1; i++) {
         if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
           return `The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `

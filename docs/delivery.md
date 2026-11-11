@@ -59,13 +59,16 @@ flowchart TD
   IM --> G{"Gate · none"}
   G -- "red: timeout" --> ST(["STALL: gate-timeout"])
   G -- "no gate line" --> ST2(["STALL: verify-not-run"])
+  G -- running --> ST5(["STALL: gate-running"])
   G -- red --> F1["One fix call · implementer, Sonnet medium"]
   F1 --> G2{"Gate again"}
   G2 -- red --> ST3(["STALL: gate-red"])
   G -- green --> RA
   G2 -- green --> RA["Reader A on the block delta · code-reviewer, Sonnet high"]
   RA --> IF["In-block fix, then gate · implementer, Sonnet medium; open ones carried"]
-  IF --> NB{"More blocks?"}
+  IF --> IG{"Gate after the fix"}
+  IG -- red --> ST6(["STALL: gate-red"])
+  IG -- green --> NB{"More blocks?"}
   NB -- yes --> TFQ
   NB -- no --> FV["Final verification, together · reader B: Sonnet high, Opus high at L or past the threshold · second reader at L: Sonnet high · specialists by risk axis"]
   FV --> FR{"Open P1 or P2?"}

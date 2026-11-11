@@ -121,8 +121,10 @@ flowchart TD
   T["Triage: scenario, size S, risk axes"] --> A["Analysis, plan tasks, challenger"]
   A --> Q["Questions batch, owner ok"]
   Q --> P["Launch: plan cut into blocks"]
-  P --> TF["Tests first and red gate (tdd blocks)"]
-  TF --> IM["Implement"]
+  P --> TQ{"tdd block?"}
+  TQ -- yes --> TF["Tests first and red gate"]
+  TQ -- no --> IM["Implement"]
+  TF --> IM
   IM --> G{"Gate"}
   G -- red --> F1["One fix call"]
   F1 --> G2{"Gate again"}
@@ -131,7 +133,7 @@ flowchart TD
   G2 -- green --> RA
   RA --> IF["In-block fix and gate"]
   IF --> NB{"More blocks?"}
-  NB -- yes --> TF
+  NB -- yes --> TQ
   NB -- no --> FV["Final verification: reader B, second reader, specialists"]
   FV --> FR{"Open P1 or P2?"}
   FR -- yes --> FX["Fix round and gate"]
@@ -213,7 +215,7 @@ a broken hook must never block work (`worktree-root.js` alone fails loudly: a si
 | `scripts/db-ro.ps1` | Read-only access to non-dev databases — SQL Server (go-sqlcmd), PostgreSQL (`psql`), Redis (`redis-cli`): targets from local-only `~/.claude/db-targets.json` (copy `db-targets.example.json`), by project → environment → engine (`-Env prod -Engine postgres`, `-Project` a name or a path), any string value able to embed `${VAR}` (the project's env file, then the environment) and a Postgres block able to take a `url`; the client runs native, else in WSL, else through docker (`sqlcmd`: native only); the secret travels in the client's own environment variable for that process only (`WSLENV` forwards it into WSL and is restored afterwards); a permission probe runs first (`-Probe` runs it alone): exit 3 when read-only cannot be proven, exit 4 listing the grants when the credential can write — the user is asked once per target and `-AcceptWriteGrant` then runs on the client-side filter alone (reads only, the header says `readonly=NO`) — and write commands in the query are rejected. An environment may set `"readOnly": false` only on a dev host (`devHosts` plus the loopback names; any other host is exit 2 before connecting): no probe and no read filter, the header says `readonly=NO(local)`, the escape filters stay. `hooks/lib/sql-target.js` denies a raw client at a non-dev host and points here. |
 | `scripts/snapshot.ps1` | Run beside `perimeter.ps1` as the last step of every `impl-review-loop` implementer and fixer (`-Since <previous tree or start head> -Start <start head> -Dirty <files>`): prints `{ tree, files, churn, big }` of the working tree from a throwaway git index, so the user's index and tree are never touched; `big` lists the changed text files past 600 lines, or with 200+ lines at the start that grew by 30% (the loop turns each into a split proposal). |
 | `scripts/gate.mjs` | The `deliver` test gate (`--root <repo> --head <start> --test "<command>"`, `--wait`): runs the test command under a detached supervisor with a stuck check (output not growing for `--stuck-minutes` → killed and run once more; a second stall is `red: timeout`), skips the run when the tree, the command and the scope setting equal the last green's, runs `scope-guard.js --check`, lists format-only files and, with `--red`, proves failing tests before green. Last stdout line: one JSON object `{ gate, test, outside, formatOnly, tree, greenAt, seconds }`; exit 0 green, 1 red, 2 not checked, 3 still running. State in `<git dir>/deliver/gate.json`, output in `gate.log`. `--force` runs on an unchanged tree, `--no-scope` skips the scope check, `--dirty a,b` names files already dirty at the start, `--max-minutes` caps the foreground wait. The allow rule covers the script; the guard asks when `--test`/`--unit` isn't a known test runner command. |
-| `scripts/sweep.mjs` | Run after the final gate (`--root <repo> --since <ISO start of the run> [--close]`): closes the process trees the gate started and lists other leftover processes that name the work folder; never closes those. One row per process (`pid | name | started | owner: gate|unknown | action: closed|listed`), then a last JSON line `{ closed, listed }`. A process is the gate's only when its pid and start time both match the entry in `gate.json`. |
+| `scripts/sweep.mjs` | Run after the final gate (`--root <repo> --since <ISO start of the run> [--close]`): closes the process trees the gate started and the orphaned children of a gate shell that exited (ppid = the recorded pid, started after it), and lists other leftover processes that name the work folder; never closes those. Exits 2 when it can't read the process table. One row per process (`pid | name | started | owner: gate|unknown | action: closed|listed`), then a last JSON line `{ closed, listed }`. A process is the gate's only when its pid and start time both match the entry in `gate.json`. |
 | `scripts/kit-usage.mjs` | Offline usage report for `/retro monthly` (`--days N`, `--config <dir>`, `--json`): the skill references no transcript Read opened in the period, the `done-claim` rules that fired and the hooks that crashed (`hook-errors.log`). Node, no dependencies, read-only. |
 | `scripts/perimeter.ps1` | Writes (`-Files a,b,c`) or closes (`-Close`) the `deliver` perimeter of the current worktree: `<git dir>/deliver/perimeter.md`, bound to the checked-out branch, stamped `opened:` (UTC), UTF-8 without BOM, linked worktrees included. `-Close -FindingsLog '<json>' [-Run <id>] [-Tokens <n>]` first appends one line (the loop's findings log plus `at`, `run`, `minutes`, `tokens`) to `<git dir>/deliver/findings.jsonl`; `-LogRun '<json>'` appends the same line without closing (a change with several runs; `minutes` count from the previous logged run); a bare `-Close` needs a run logged since `opened:`, `-FindingsLog` or `-NoFindings` (a change that never ran the loop), else exit 2. The settings allow exactly this script. |
 | `db-targets.example.json` | Shape of the local-only `~/.claude/db-targets.json` read by `db-ro.ps1`: project → environment → engine (`sql`, `postgres`, `redis`), `${VAR}` values for the secrets, the allowed databases, `readOnly`. Placeholders only. |

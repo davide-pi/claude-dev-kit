@@ -721,7 +721,7 @@ test('given gate.mjs called with a known test runner, when the guard reads it, t
     `${GATE} --test 'dotnet test --logger "console;verbosity=normal"'`,
     `${GATE} --test 'node --test tools/gate.test.mjs'`,
     `${GATE} --red --unit 'npx vitest run' --test-files a.test.ts`,
-    `${GATE} --test 'dotnet test -r linux-x64 -e FOO=1'`,
+    `${GATE} --test 'dotnet test -r linux-x64'`,
   ];
 
   for (const command of commands) {
@@ -766,6 +766,68 @@ test('given gate.mjs off Windows with sh quoting that hides a semicolon, when th
 
   // Then
   assert.equal(result.decision, 'ask');
+});
+
+test('given a test command whose options run inline code, when the guard reads it, then it asks in both shells', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'dotnet test -p:Foo=1'`,
+    `${GATE} --test 'dotnet test /p:Foo=1'`,
+    `${GATE} --test 'dotnet test -property:Foo=1'`,
+    `${GATE} --test 'dotnet test /property:Foo=1'`,
+    `${GATE} --test 'dotnet test -t:Foo'`,
+    `${GATE} --test 'dotnet test /t:Foo'`,
+    `${GATE} --test 'dotnet test -target:Foo'`,
+    `${GATE} --test 'dotnet test -e DOTNET_STARTUP_HOOKS=x.dll'`,
+    `${GATE} --test 'dotnet test --environment DOTNET_STARTUP_HOOKS=x.dll'`,
+    `${GATE} --test 'npm test --script-shell calc.exe'`,
+    `${GATE} --test 'pnpm test --node-options=--require=x.js'`,
+    `${GATE} --test 'yarn test --node-options x'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with the hidden --supervise or --run flag, when the guard reads it, then it asks in both shells', () => {
+  // Given
+  const commands = [`${GATE} --supervise --run abc`, `${GATE} --test 'npm test' --run abc`, `${GATE} --supervise`];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given a backslash inside double quotes under Bash, when the guard reads an allowed script call, then it asks', () => {
+  // Given
+  const commands = [
+    String.raw`${GATE} --test "npm test x\" "\""&calc"`,
+    String.raw`${PERIMETER} -Files "a\" "\""&calc"`,
+    String.raw`${DB} -Env prod -Query "\"" ; calc # "`,
+    String.raw`${PERIMETER} -Files "\"" ; calc # "`,
+    String.raw`${DB} -Env prod -Query "\"" -AcceptWriteGrant # "`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const result = runTool('Bash', command);
+
+    // Then
+    assert.equal(result.decision, 'ask', command);
+  }
 });
 
 const SWEEP = 'node ~/.claude/scripts/sweep.mjs';

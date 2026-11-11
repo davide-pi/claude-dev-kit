@@ -24,7 +24,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | --- | --- |
 | `request` | the owner's messages for this change, verbatim, beside `brief`: the readers judge the change against both; a brief that departs from it comes back as a reviewer `question`, never a fix |
 | `plan` | `{ tasks: [{ id, title, files, dependsOn, tdd, criteria }] }` (`references/analysis.md`). Absent: one block holding one task named after the brief. A cycle or an unknown id refuses the plan |
-| `unit` | the unit-test command; without it no block is test-first. A `"` in it or in `verify` is refused: no inline gate command |
+| `unit` | the unit-test command; without it no block is test-first. A `'` in it or in `verify` is refused (both go to the gate in single quotes) |
 | `testSkill` | the test skill the test-first call reads (`dotnet-testing`) |
 | `stuckMinutes` | default 5, passed to the gate; 0 turns the stuck check off for a command known to be quiet |
 | `decisions` | the owner's decisions that touch the perimeter, one line each, in their words: every agent gets them; an edit that contradicts one is a `question` |
@@ -58,11 +58,11 @@ environment failure of the verify changes no code for it.
 
 A run has a large fixed cost whatever its size: launch once per coherent request, the whole plan in `plan`. The loop
 cuts it into blocks of up to 4 tasks, as even as possible (5 → 3+2), in dependency order; per block one implementer
-(two with `tdd` tasks: the tests and the `--red` gate first, then the code), the gate, then reader A. Tasks on the same files
-stay in one block: a second agent pays the fixed context again. Parallel runs only for areas that share no file and no
+(two with `tdd` tasks: the tests and the `--red` gate first, then the code), the gate, then reader A. The cut is by count only:
+the analysis orders tasks so those on the same files are adjacent (a second agent pays the fixed context again). Parallel runs only for areas that share no file and no
 test, each in its own worktree (`branch-flow`). Each implementer call has a turn budget (`min(35, 10 + 6 × tasks)`)
 and runs the gate before it reports; a fresh one continues from its edits, up to four times (`stall.why: incomplete`
-after that: split the plan). A `"` in `verify` or `unit` runs the gate by hand, not inline.
+after that: split the plan). A `'` in `verify` or `unit` is refused, so the gate runs by hand; `"` is fine (`dotnet test --logger "console;verbosity=normal"` per test works through the loop). Test files proven red by `--red` are frozen for the code call.
 
 ## Weight, criteria, proof
 
@@ -92,6 +92,7 @@ one JSON object; `gate` says:
 | `green` | tests passed, nothing outside the perimeter: go on to the matrix |
 | `skipped: tree unchanged` | the last green stands for this tree, command and scope check: same as `green` |
 | `red`, `red: timeout` | the tests failed, or stalled twice: relaunch with the gate line as the brief (`references/stall.md`) |
+| `red: tests changed` | a test file proven red was edited after the proof: rerun with `--force`, which drops the stored proof |
 | `red: scope` | `outside` lists the files: `references/loop-extras.md` |
 | exit 2 | not checked (bad arguments, no repository, no active perimeter): never read it as clean. Write the perimeter file and run again |
 | exit 3, `running` | output still growing: run it again with `--root <repoRoot> --wait` |
@@ -102,7 +103,7 @@ After the final gate, close what the run left behind (a rule decides, no model):
 node ~/.claude/scripts/sweep.mjs --root <repoRoot> --since <ISO time of the launch> --close
 ```
 
-It closes only the process trees the gate recorded (pid and start time both match) and lists the other processes that
+It closes only the process trees the gate recorded (pid and start time both match), plus the orphaned children of a gate shell that exited (ppid = the recorded pid, started after it); it exits 2 when it can't read the process table (nothing checked, never clean). It lists the other processes that
 started during the run and name the work folder in their path or command line. Show that list to the owner and close
 nothing on it. A process that doesn't name the folder is out of its reach.
 

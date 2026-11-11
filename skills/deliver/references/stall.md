@@ -4,7 +4,7 @@ Read only when `impl-review-loop` returns `status: STALL` (a `question` one incl
 
 ## Questions: the `question` stall
 
-The implementer, the fixer and the reviewers may return `questions: [{ text, default, why }]`: a behaviour choice the
+Every implementer call (tests-first, gate fix, reader-A fix, fix rounds), the fixer and the reviewers may return `questions: [{ text, default, why }]`: a behaviour choice the
 owner would see (never an internal one); a reviewer's are a brief that departs from `request`, an edit that contradicts
 a `decisions` line, a hunk the owner asked for that would be reverted as `scope`. Any question stops the run before the
 fix or the review: `status: STALL`, `stall.why: "question"`, `stall.questions`, `stall.round` (0 for the implementer or
@@ -39,9 +39,9 @@ round restarts its count, `retry` does not.
 | `verify-failed` | the fixer could not make the verify command pass: `guidance` with a direction, or relaunch without `verify`; `retry` alone replays the cached fixer report and stalls again, `accept` is not offered |
 | `green-to-red` | the verify passed, then a fix broke it: same as `verify-failed` |
 | `verify-not-run` | `verify` was given and the implementer returned no parsable gate line: same as `verify-failed` |
-| `gate-red` | a block's gate stayed red after its one fix call (`stall.findings` holds the gate line): same as `verify-failed` |
-| `gate-timeout` | the gate said `red: timeout`: the run stalled twice on the test named in the line. Never green, never retried by the loop: `guidance` (fix or split the test, or a quieter command with `stuckMinutes: 0`) or relaunch without `verify` |
-| `gate-running` | the gate still said `running` when the agent reported: run `gate.mjs --root <repoRoot> --wait` yourself, then resume with `retry: true` or relaunch with its line as the brief |
+| `gate-red` | a block's gate stayed red after its one fix call (`stall.reason` holds the gate line): relaunch as in "Gate stalls" below |
+| `gate-timeout` | the gate said `red: timeout`: the run stalled twice on the test named in the line. Never green, never retried by the loop: relaunch as below with the direction in `brief` (fix or split the test, or a quieter command with `stuckMinutes: 0`) or without `verify` |
+| `gate-running` | the gate still said `running` when the agent reported: run `node ~/.claude/scripts/gate.mjs --root <repoRoot> --wait` yourself, then relaunch as below with its line as the brief |
 | `still-open` | a finding is still open after its fix: `accept`, `guidance` with a direction, or `retry` |
 | `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same as `still-open` |
 | `no-verdict` | two rounds in a row without a reviewer verdict on the same id (one round is not a stall: only that id is asked again, and listed under `gaps`): same as `still-open` |
@@ -50,6 +50,8 @@ round restarts its count, `retry` does not.
 | `widen` | a P1/P2 outside the perimeter in a file the change touched or causes: on the user's yes write the widened list (old and new entries) with `perimeter.ps1 -Files` and resume with `{ round, widen: [the new entries] }` (it applies from that round on); else `accept` it as out of scope |
 | `disputed` | the fixer rejected the finding twice and the reviewer kept it |
 | `not-reproduced` | the fixer could not reproduce it and the reviewer kept it with steps; never goes back to the fixer |
+
+**Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `incomplete`), from round 0 or a fix round: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
 
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
 cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report or a non-empty `remaining` is continued (twice at most), never reviewed partial. A red implementer verify at round 0 is no stall: it

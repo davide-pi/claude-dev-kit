@@ -7,15 +7,17 @@ reads what.
 
 - **Reader A, per block**: Sonnet at high reads each block's delta as soon as its gate is green. An open P1/P2 inside
   the perimeter gets one fix call and one gate run; what is still open is carried to the final verification and
-  counted in `blocks[].readerA`. The brief names the gate's `formatOnly` files once: no formatting findings on them.
+  counted in `blocks[].readerA`. S has none; without `verify` no block is read by reader A and a `gaps` line says so. The brief names the gate's `formatOnly` files once: no formatting findings on them.
 - **Final verification**: once, after the last block, the readers `finalReadersFor` picks read the whole diff together
   with the carried findings: reader B (Sonnet at high; Opus at high at L, with a security or data axis, past 10 files
   or 600 lines unless mechanical, or with 3+ axes besides `logic`), at L a second Sonnet reader at high, and the
-  specialists the risk names.- **Verifier**: after each fix round and its gate, one `code-reviewer` marks each finding closed or open and reads the
+  specialists the risk names. At M the sole reader B is labelled `whole diff`; its coverage rerun goes to B alone at
+  effort medium.
+- **Verifier**: after each fix round and its gate, one `code-reviewer` marks each finding closed or open and reads the
   fix delta for new defects: Sonnet at high; Opus at medium with a P1 or a fix over 30 lines.
 - **Arbiter**: a finding the implementer rejects and its raiser keeps goes once to Opus at medium; its ruling stands.
 
-A `scope` finding raised by one reader alone and not CONFIRMED (M, L), in a round another reader also answered, blocks nothing and is never fixed: it stays in `minor`.
+A `scope` finding raised by one reader alone and not CONFIRMED (M, L), in a round another reader also answered, blocks nothing and is never fixed: it stays in `minor`. A sole final reader B (M) has no other: its `scope` finding that is not CONFIRMED is a note (soft scope), a CONFIRMED one blocks.
 
 ## The cleanup pass before OK (M, L)
 

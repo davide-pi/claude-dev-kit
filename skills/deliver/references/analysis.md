@@ -12,8 +12,8 @@ At M and L the analysis ends in tasks, passed to the loop as `plan`; the loop cu
 computes the size from them. A task is `{ id, title, files, dependsOn, tdd, criteria }`: `files` its own files,
 `dependsOn` the ids it needs first, `criteria` Given/When/Then lines. A task is `tdd` when a unit-test project covers
 the code it touches and its behaviour can be written as criteria; layout, config, a migration or a mechanical batch is
-not. Pass `unit` (the unit-test command) and `testSkill` too, or no block is test-first. Tasks on the same files stay
-in one block, in order.
+not. Pass `unit` (the unit-test command) and `testSkill` too, or no block is test-first. The cut is by count only:
+order the tasks so those on the same files are adjacent, and make each atomic (it needs no other task except ones done before it).
 
 **Scout.** One `Explore` agent (Sonnet, medium) only when the analysis would pass about 30 file reads; its summary
 replaces them.

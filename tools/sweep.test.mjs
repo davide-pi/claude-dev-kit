@@ -9,6 +9,9 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -83,6 +86,78 @@ test('given a process started before the run, when the sweep runs, then it is no
   // Then
   assert.deepEqual(closed, []);
   assert.deepEqual(result.rows, []);
+});
+
+test('given a recorded gate shell that already exited, when its child outlives it, then the orphan is closed with its descendants', () => {
+  // Given
+  const procs = [proc(700, DURING, 'node child.js', 100), proc(701, DURING, 'node grandchild.js', 700)];
+
+  // When
+  const { result, closed } = run({ procs, recorded: [{ pid: 100, started: DURING }] });
+
+  // Then
+  assert.deepEqual(closed, [700]);
+  assert.deepEqual(result.rows.map((r) => [r.pid, r.owner, r.action]), [[700, 'gate', 'closed']]);
+});
+
+test('given a child of a recorded pid that another process now holds, when the sweep runs with close, then the child is left running', () => {
+  // Given
+  const procs = [proc(100, LATER, 'node other.js'), proc(710, LATER, 'node child.js', 100)];
+
+  // When
+  const { closed } = run({ procs, recorded: [{ pid: 100, started: DURING }] });
+
+  // Then
+  assert.deepEqual(closed, []);
+});
+
+test('given a child of a recorded pid that started before the record, when the sweep runs with close, then the child is left running', () => {
+  // Given
+  const procs = [proc(720, BEFORE, 'node old.js', 100)];
+
+  // When
+  const { closed } = run({ procs, recorded: [{ pid: 100, started: DURING }] });
+
+  // Then
+  assert.deepEqual(closed, []);
+});
+
+test('given a process table that cannot be read, when the sweep runs, then it throws instead of reporting a clean sweep', () => {
+  // Given
+  const unreadable = () => { throw new Error('cannot read the process table'); };
+
+  // When
+  const act = () => sweep({ root: ROOT, since: SINCE, readProcesses: unreadable });
+
+  // Then
+  assert.throws(act, /cannot read the process table/);
+});
+
+test('given no process table available, when sweep.mjs runs, then it exits 2 with a message on stderr and no JSON summary', () => {
+  // Given
+  const root = mkdtempSync(join(tmpdir(), 'sweep-'));
+  spawnSync('git', ['init'], { cwd: root });
+  const env = { ...process.env, PATH: '', Path: '' };
+
+  // When
+  const res = spawnSync(process.execPath, [SCRIPT, '--root', root, '--since', SINCE], { encoding: 'utf8', env });
+  rmSync(root, { recursive: true, force: true });
+
+  // Then
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /sweep: .*process table/);
+  assert.doesNotMatch(res.stdout, /"closed"/);
+});
+
+test('given a recorded pid reused one second later, when the sweep runs on Windows, then it is left running', { skip: process.platform !== 'win32' }, () => {
+  // Given
+  const procs = [proc(800, '2026-01-01T10:05:01.000Z', 'node other.js')];
+
+  // When
+  const { closed } = run({ procs, recorded: [{ pid: 800, started: DURING }] });
+
+  // Then
+  assert.deepEqual(closed, []);
 });
 
 test('given nothing left behind, when the sweep runs, then the last line reports zero closed and zero listed', () => {
