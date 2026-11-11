@@ -184,6 +184,16 @@ export type CockpitEventKind = 'agent'
 /** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
 
+/** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request. */
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr'
+
+/**
+ * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`; `commit`: `text` and `key` are the short hash;
+ * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title.
+ * `key` makes an entry once-only (per kind).
+ */
+export type CockpitLogEntry = { at: number; kind: CockpitLogKind; key?: string; text?: string; usd?: number; ms?: number; tokens?: number; after?: number; isFailed?: boolean }
+
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
  * for it); per session, not persisted.
@@ -208,6 +218,8 @@ export type CockpitInsights = {
   cacheShares: number[]
   /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument, the whole one when it differs (a file's full path, a long command) and the result's estimated tokens (characters / 4). */
   biggest?: { tool: string; arg?: string; fullArg?: string; tokens: number }[]
+  /** The estimated tokens (characters / 4) the main loop's results added to the context by tool, since the last compaction. */
+  byTool?: Record<string, number>
   /** How many times each Bash command failed (its short argument). */
   failedCmds?: Record<string, number>
   /** When the last main round ended (`$.clock.now()`). */
@@ -306,6 +318,12 @@ export type CockpitSnapshot = {
   repo?: CockpitRepo
   /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
+  /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests), oldest first, at most 100; kept in the session data file. Not `history`, the agent history. */
+  sessionLog?: CockpitLogEntry[]
+  /** The USD each agent type's finished agents cost, summed when each ended (the agent history is capped); kept in the session data file. */
+  agentSpend?: Record<string, number>
+  /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */
+  costTarget?: number
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or Lavoro's `log hours`. */

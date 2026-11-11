@@ -2,6 +2,7 @@ import type { CockpitInsights, CockpitSnapshot } from '../types'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
 import { THRESHOLDS } from './signals'
+import { lastCompactKey, nextCompactKey, recordLog, withCompactAfter } from './timeline'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
@@ -88,9 +89,12 @@ export function recordToolCall(
   const failedKey = !call.isOk && call.tool === 'Bash' ? call.arg : undefined
   const isCmdKept = failedKey !== undefined && (failedKey in (now.failedCmds ?? {}) || Object.keys(now.failedCmds ?? {}).length < FAILED_CMDS_KEEP)
   const error = call.error?.replace(/\s+/g, ' ').trim().slice(0, ERROR_MAX)
+  const tokens = call.tokens ?? 0
+  const isByToolKept = tokens > 0 && (call.tool in (now.byTool ?? {}) || Object.keys(now.byTool ?? {}).length < INSIGHT_TOOLS_KEEP)
   return {
     ...now,
     tools,
+    ...(isByToolKept && { byTool: { ...now.byTool, [call.tool]: (now.byTool?.[call.tool] ?? 0) + tokens } }),
     toolMs: now.toolMs + Math.max(0, call.ms),
     ...(isCmdKept && failedKey !== undefined && { failedCmds: { ...now.failedCmds, [failedKey]: (now.failedCmds?.[failedKey] ?? 0) + 1 } }),
     reads: isReadKept ? { ...now.reads, [path]: (now.reads[path] ?? 0) + 1 } : now.reads,
@@ -115,6 +119,7 @@ export const recordCompaction = (ins: CockpitInsights | undefined, before?: numb
     compactions: now.compactions + 1,
     // what grew the context is measured from the compaction on
     biggest: undefined,
+    byTool: undefined,
     ...(before !== undefined && before > 0 && { compactCtx: [...(now.compactCtx ?? []), { before }].slice(-COMPACT_CTX_KEEP) }),
   }
 }
@@ -133,14 +138,19 @@ const COMPACT_DROP_TOKENS = 50_000
 /**
  * The snapshot after a context measurement of the main loop. The harness skips `session.compact` for this mod, so a compaction is
  * read from the data that does arrive: a drop between consecutive readings, recorded once (a compaction the engine event already
- * recorded, still waiting for its `after`, is the same one).
+ * recorded, still waiting for its `after`, is the same one). The session log's compact entry follows: made with a drop, its `after` filled by key.
  */
-export function withContextReading(s: CockpitSnapshot, tokens: number | undefined): Pick<CockpitSnapshot, 'insights'> {
+export function withContextReading(s: CockpitSnapshot, tokens: number | undefined, at: number = s.now): Pick<CockpitSnapshot, 'insights' | 'sessionLog'> {
   const prev = s.ctx.tokens
   const pending = s.insights?.compactCtx?.at(-1)?.after === undefined && (s.insights?.compactCtx?.length ?? 0) > 0
   const isDrop = prev !== undefined && tokens !== undefined && !pending && prev - tokens > COMPACT_DROP_TOKENS && prev - tokens > prev * COMPACT_DROP_RATIO
   const base = isDrop ? recordCompaction(s.insights, prev) : s.insights
-  return { insights: recordCtxAfter(base, tokens) }
+  let sessionLog = isDrop && base ? recordLog(s.sessionLog, { at, kind: 'compact', key: nextCompactKey(s.sessionLog), tokens: prev }) : s.sessionLog
+  const insights = recordCtxAfter(base, tokens)
+  const after = insights?.compactCtx?.at(-1)?.after
+  const key = lastCompactKey(sessionLog)
+  if (insights !== base && insights && after !== undefined && key !== undefined) sessionLog = withCompactAfter(sessionLog, key, after)
+  return { insights, sessionLog }
 }
 
 export const emptyInsights =(): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })

@@ -11,24 +11,28 @@ import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
 import { CENT } from './shared'
 import { configDir, patch } from './store'
-import { autoOpenOf, langOf, setLang } from './strings'
+import { autoOpenOf, costTargetOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
 import { endRun, expireRun, finishWorkflowAgent } from './workflow'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
-/** Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English) and tells whether the pane opens at session start (`autoOpen`, true unless `false`). */
-export async function refreshConfig($: EngineInterface): Promise<boolean> {
+/**
+ * Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English), tells whether
+ * the pane opens at session start (`autoOpen`, true unless `false`) and returns the $/prompt target (`costTarget`) for the caller's
+ * own patch: it writes nothing, so a drawing can call it.
+ */
+export async function refreshConfig($: EngineInterface): Promise<{ autoOpen: boolean; costTarget?: number }> {
   try {
     const dir = await configDir($)
     const text = dir ? await $.fs.read(`${dir}/cockpit.json`) : undefined
     const raw = typeof text === 'string' ? text : ''
     setLang(langOf(raw))
-    return autoOpenOf(raw)
+    return { autoOpen: autoOpenOf(raw), costTarget: costTargetOf(raw) }
   } catch {
     setLang('en')
-    return true
+    return { autoOpen: true }
   }
 }
 
@@ -139,11 +143,12 @@ export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefi
 export async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
+    const at = await $.clock.now()
     await patch($, s => ({
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
-      ...withContextReading(s, u.context.tokens),
+      ...withContextReading(s, u.context.tokens, at),
       cost: measuredCost(s.cost, u.cost?.usd),
       rateLimits: u.rateLimits,
     }))

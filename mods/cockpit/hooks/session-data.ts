@@ -1,14 +1,16 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitHistoryEntry, CockpitNote, CockpitPr, CockpitSnapshot, CockpitTab } from '../types'
+import type { CockpitHistoryEntry, CockpitLogEntry, CockpitNote, CockpitPr, CockpitSnapshot, CockpitTab } from '../types'
 import { historyTokens, parseHistory } from './agents'
+import { parseAgentSpend } from './andamento'
 import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
 import { openContext } from './refresh-context'
 import { parseNotes, savedTab } from './session'
 import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
+import { parseLog } from './timeline'
 import { agentCounts, taskCounts } from './view-agents'
 import { parseEdited, parseSavedPrs } from './work'
 
@@ -47,6 +49,8 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
     ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(s.edited !== undefined && { edited: s.edited }),
+    ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
+    ...(s.agentSpend !== undefined && { agentSpend: s.agentSpend }),
     ...(ctx && { ctx }),
     ...(s.startedAt !== undefined && { startedAt: s.startedAt }),
   }
@@ -134,6 +138,8 @@ type Saved = {
   ctxSamples?: number[]
   ctxRounds?: number[]
   edited?: string[]
+  sessionLog?: CockpitLogEntry[]
+  agentSpend?: Record<string, number>
   ctx?: { tokens: number; window: number; percent: number }
   startedAt?: number
 }
@@ -165,6 +171,8 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       edited: parseEdited(data?.edited),
+      sessionLog: parseLog(data?.sessionLog),
+      agentSpend: parseAgentSpend(data?.agentSpend),
       ctx: parseCtx(data?.ctx),
       startedAt: count(data?.startedAt),
     }
@@ -200,6 +208,8 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   ctxSamples: undefined,
   ctxRounds: undefined,
   edited: undefined,
+  sessionLog: undefined,
+  agentSpend: undefined,
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
   // the last turn's cost and the one still to measure were this session's turns
@@ -230,7 +240,7 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 

@@ -102,6 +102,26 @@ test('recordToolCall: keeps the five largest results (tool, argument, tokens), b
   expect(recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 0, error: 'x'.repeat(500) }).lastError?.text).toHaveLength(200)
 })
 
+test('byTool sums result tokens per tool', () => {
+  let ins = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, tokens: 100 })
+  ins = recordToolCall(ins, { tool: 'Read', isOk: true, ms: 0, tokens: 50 })
+  ins = recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 0, tokens: 7 })
+  ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0 })
+  ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0, tokens: 0 })
+  expect(ins.byTool).toEqual({ Read: 150, Bash: 7 })
+  // a tool past the cap of forty is not counted, a known one still is
+  let capped = emptyInsights()
+  for (let i = 0; i < 45; i++) capped = recordToolCall(capped, { tool: `t${i}`, isOk: true, ms: 0, tokens: 1 })
+  expect(Object.keys(capped.byTool ?? {})).toHaveLength(40)
+  expect(recordToolCall(capped, { tool: 't0', isOk: true, ms: 0, tokens: 4 }).byTool?.t0).toBe(5)
+})
+
+test('a compaction empties byTool', () => {
+  const ins = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, tokens: 100 })
+  expect(recordCompaction(ins, 1000).byTool).toBeUndefined()
+  expect(recordToolCall(recordCompaction(ins), { tool: 'Read', isOk: true, ms: 0, tokens: 5 }).byTool).toEqual({ Read: 5 })
+})
+
 test('resultTokens: the characters of the text over four, rounded up; the JSON of the result when there is no text', () => {
   expect(resultTokens({ text: 'x'.repeat(10) })).toBe(3)
   expect(resultTokens({ result: { a: 'xxxx' } })).toBe(3)

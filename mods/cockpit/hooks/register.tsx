@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitLogEntry, CockpitSnapshot, CockpitTask } from '../types'
 import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
 import { recordCtxSample, recordRound } from './context'
 import {
@@ -54,7 +54,7 @@ import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession,
 import { DIFF_PANE, INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
-import { recordAgentEvent } from './timeline'
+import { bashLog, nextCompactKey, recordAgentEvent, recordLog } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
 import { diffView } from './view-work'
 import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
@@ -106,7 +106,7 @@ async function open($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // First: the command registered below is described in the language read here.
-    const autoOpen = await refreshConfig($)
+    const { autoOpen, costTarget } = await refreshConfig($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
@@ -121,6 +121,7 @@ export const register: Register = on => {
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
       isLangRead: true,
+      costTarget,
       startedAt: s.startedAt ?? now,
     }))
     await refreshLastRates($)
@@ -210,6 +211,7 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     // another window (a /model) moves where the engine compacts
     let isNewWindow = false
+    const at = await $.clock.now().catch(() => undefined)
     await patch($, s => {
       isNewWindow = s.ctx.window !== undefined && e.context.window !== undefined && s.ctx.window !== e.context.window
       return {
@@ -217,7 +219,7 @@ export const register: Register = on => {
         ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
         // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
         lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
-        ...withContextReading(s, e.context.tokens),
+        ...withContextReading(s, e.context.tokens, at),
         cost: measuredCost(s.cost, e.cost?.usd, e.changed.includes('cost')),
         rateLimits: e.rateLimits,
         // the old threshold is the old window's: a failed read draws none rather than a wrong one
@@ -430,10 +432,16 @@ export const register: Register = on => {
   // told by what the command printed.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    if (isOk(ran) && /\bpr\s+create\b/.test(e.command)) {
-      const pr = parseCreatedPr(e.command, bashOutput(ran))
-      if (pr) await patch($, s => ({ ...s, prs: upsertPr(s.prs, pr) })).catch(() => undefined)
-    }
+    const isRan = isOk(ran)
+    const out = bashOutput(ran)
+    const pr = isRan && /\bpr\s+create\b/.test(e.command) ? parseCreatedPr(e.command, out) : undefined
+    const at = await $.clock.now().catch(() => undefined)
+    // The same call feeds the session log: a test run, a commit that exited 0, the PR above.
+    await patch($, s => {
+      // a call the person or a rule refused never ran: it makes no entry
+      const entries = ran.deny !== undefined ? [] : bashLog({ command: e.command, arg: toolArg(e), out, isOk: isRan, at: at ?? s.now, pr })
+      return entries.length === 0 && !pr ? s : { ...s, ...(pr && { prs: upsertPr(s.prs, pr) }), sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
+    }).catch(() => undefined)
     return ran
   })
 
@@ -470,7 +478,13 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
-      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
+      const at = await $.clock.now().catch(() => undefined)
+      await patch($, s => {
+        const before = done.tokensBefore ?? s.ctx.tokens
+        const insights = recordCompaction(s.insights, before)
+        // the entry's `after` comes by key from the next context reading (`withContextReading`)
+        return { ...s, insights, sessionLog: recordLog(s.sessionLog, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) }) }
+      }).catch(() => undefined)
     }
     return done
   })
@@ -519,9 +533,11 @@ export const register: Register = on => {
       }
       // The steps already counted their part of the session's tokens: the turn's own total replaces it.
       await patch($, s => {
-        const insights = recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare, endedAt: now })
+        const usd = roundCost(s.cost)
+        const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
         return {
           ...s,
+          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && { usd }) }),
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.
@@ -551,8 +567,12 @@ export const register: Register = on => {
           }
         })
         const ended = agents.find(a => a.id === agentId)
+        const spent = ended ? usdOf(ended.model, ended.usage) : 0
+        // A turn that ended twice replaces the agent's event: only the change is added to its type.
+        const delta = ended ? spent - (s.events?.find(ev => ev.kind === 'agent' && ev.id === agentId)?.usd ?? 0) : 0
         return {
           ...s,
+          ...(ended && delta !== 0 && { agentSpend: { ...s.agentSpend, [ended.type]: (s.agentSpend?.[ended.type] ?? 0) + delta } }),
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
           events: ended
@@ -577,8 +597,8 @@ export const register: Register = on => {
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {
-      await refreshConfig($)
-      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
+      const { costTarget } = await refreshConfig($)
+      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true, costTarget })).catch(() => undefined))
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
