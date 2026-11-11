@@ -12,8 +12,12 @@
 
 const fs = require('fs');
 
-/** No output => the normal permission flow applies. */
-function approve() {
+/**
+ * No output => the normal permission flow applies. With `context`, only `additionalContext` is printed,
+ * never a decision: the user's ask and deny rules still apply.
+ */
+function approve(context) {
+  if (context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } }));
   process.exit(0);
 }
 
@@ -38,12 +42,13 @@ const deny = (reason) => decide('deny', reason);
  * Run the tool with a rewritten input. The harness applies `updatedInput` only together with a
  * decision, so this allows: callers rewrite only commands the permission list already allows.
  */
-function rewrite(updatedInput) {
+function rewrite(updatedInput, context) {
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'allow',
       updatedInput,
+      ...(context && { additionalContext: context }),
     },
   }));
   process.exit(0);

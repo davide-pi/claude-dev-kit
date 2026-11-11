@@ -22,8 +22,8 @@
 
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
-import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync } from 'node:fs';
+import { spawnSync, spawn } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, utimesSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -944,6 +944,81 @@ test('a read-only agent may still read git; an editing agent or the main session
   rmSync(cwd, { recursive: true, force: true });
 });
 
+test('given agent_type item-analyst, when it runs git commit, then the shell guard denies', () => {
+  // Given
+  const payload = { tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'item-analyst' };
+  // When
+  const r = evaluate(payload);
+  // Then
+  assert.equal(r?.decision, 'deny');
+  assert.match(r.reason, /read-only agent \(item-analyst\)/);
+});
+
+test('given agent_type e2e-verifier, when it runs git push, then the shell guard denies', () => {
+  // Given
+  const payload = { tool_name: 'Bash', tool_input: { command: 'git push' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'e2e-verifier' };
+  // When
+  const r = evaluate(payload);
+  // Then
+  assert.equal(r?.decision, 'deny');
+  assert.match(r.reason, /read-only agent \(e2e-verifier\)/);
+});
+
+const TRACKER_WRITES = [
+  'az boards work-item create --title x --type Task', 'az boards work-item update --id 5 --state Done', 'az boards work-item delete --id 5',
+  'az boards work-item relation add --id 5 --relation-type parent --target-id 6', 'az boards work-item relation remove --id 5 --relation-type parent --target-id 6',
+  'az repos pr create --title x', 'az repos pr update --id 3 --title y', 'az repos pr set-vote --id 3 --vote approve',
+  'az repos pr reviewer add --id 3 --reviewers a', 'az repos pr work-item add --id 3 --work-items 5',
+  'az devops wiki page create --wiki w --path p', 'az devops wiki page update --wiki w --path p', 'az devops wiki page delete --wiki w --path p',
+  'gh pr create --fill', 'gh pr edit 3 --title x', 'gh pr merge 3', 'gh pr close 3', 'gh pr comment 3 -b x', 'gh pr review 3 --approve', 'gh pr ready 3',
+  'gh issue create -t x', 'gh issue edit 3', 'gh issue close 3', 'gh issue comment 3 -b x', 'gh issue delete 3',
+  'gh api repos/o/r/issues -X POST', 'gh api repos/o/r/pulls/3 --method PATCH', 'gh api repos/o/r/x --method=DELETE', 'gh api repos/o/r/x -f title=t',
+  'git status && az repos pr create --title x', 'pwsh -c "gh pr merge 3"',
+  'az devops invoke --area git --resource pullRequestThreads --http-method POST --in-file b.json', 'az rest -m patch --url u --body b',
+  'az repos pr checkout --id 3', 'az repos pr reviewer remove --id 3 --reviewers a', 'az repos pr work-item remove --id 3 --work-items 5',
+  'gh pr checkout 3', 'gh pr reopen 3', 'gh pr update-branch 3', 'gh issue reopen 3', 'gh issue transfer 3 o/r2',
+  'gh pr -R o/r comment 3 -b x', 'gh api repos/o/r/issues/1/comments -fbody=hi', 'gh api graphql -f query="mutation { addComment(input: {}) { clientMutationId } }"',
+];
+
+test('given agent_type item-analyst, when it runs a tracker or pull request write, then the shell guard denies and names the agent', () => {
+  // Given
+  const cwd = tmpdir();
+  for (const command of TRACKER_WRITES) {
+    // When
+    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'item-analyst' });
+    // Then
+    assert.equal(r?.decision, 'deny', command);
+    assert.match(r.reason, /read-only agent \(item-analyst\).*return the write to the caller/i, command);
+  }
+});
+
+test('given agent_type item-analyst, when it reads the tracker or a pull request, then the shell guard does not deny', () => {
+  // Given
+  const cwd = tmpdir();
+  for (const command of ['az boards work-item show --id 5', 'az repos pr list', 'az repos pr show --id 3', 'az devops wiki page show --wiki w --path p',
+    'gh pr view 3', 'gh pr list', 'gh pr diff 3', 'gh issue view 3', 'gh issue list', 'gh api repos/o/r/pulls/3', 'gh api repos/o/r/pulls/3 -X GET',
+    'az devops invoke --area wit --resource workitems --route-parameters id=5', 'az rest --url u', 'gh pr -R o/r view 3',
+    'gh api graphql -f query="{ repository(owner: \\"o\\", name: \\"r\\") { id } }"']) {
+    // When
+    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'item-analyst' });
+    // Then
+    assert.notEqual(r?.decision, 'deny', command);
+  }
+});
+
+test('given the main session or an implementer, when it runs a tracker write, then the read-only rule does not deny', () => {
+  // Given
+  const cwd = tmpdir();
+  for (const extra of [{}, { agent_id: 'a1', agent_type: 'implementer' }]) {
+    for (const command of ['gh pr comment 3 -b x', 'gh issue create -t x', 'az boards work-item relation add --id 5 --relation-type parent --target-id 6']) {
+      // When
+      const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, ...extra });
+      // Then
+      assert.notEqual(r?.decision, 'deny', `${JSON.stringify(extra)} ${command}`);
+    }
+  }
+});
+
 // /retro 2026-11-03: `browser-use <<'PY' … PY` from Bash ended in exit 127 twice; the plugin is reached through its MCP tools.
 const { checkBrowserUseCli } = createRequire(import.meta.url)('../hooks/lib/browser-use-cli.js');
 
@@ -987,4 +1062,172 @@ test('the shell guard denies browser-use through evaluate when the CLI is missin
     for (const [k, v] of Object.entries(saved)) { if (v === undefined) delete process.env[k]; else process.env[k] = v; }
     rmSync(empty, { recursive: true, force: true });
   }
+});
+
+// The batching nudge: five shell calls in a row, each alone in its request, earn one reminder.
+const { nudgeFor } = createRequire(import.meta.url)('../hooks/lib/batch-nudge.js');
+const NUDGE = '5 shell calls in a row, one per request: send independent ones in one message, chain dependent ones in one command.';
+
+/** Feed `nudgeFor` one call per entry of `times`; the texts it returned and the final record. */
+function feed(times, record = null) {
+  const texts = [];
+  for (const now of times) {
+    const out = nudgeFor(record, now);
+    record = out.record;
+    texts.push(out.text);
+  }
+  return { texts, record };
+}
+
+/** A config dir whose session `s1` already holds four single calls, 20 s apart. */
+function seededConfig() {
+  const config = mkdtempSync(join(tmpdir(), 'guard-nudge-'));
+  created.push(config);
+  mkdirSync(join(config, '.cache'), { recursive: true });
+  const now = Date.now();
+  writeFileSync(join(config, '.cache', 'batch-nudge-s1.txt'), [80_000, 60_000, 40_000, 20_000].map((ago) => `${now - ago}\n`).join(''));
+  return config;
+}
+
+const stateFile = (config) => join(config, '.cache', 'batch-nudge-s1.txt');
+const hookInput = (command, extra = {}) => JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: onFeature, session_id: 's1', ...extra });
+
+/** Run the hook once; the stdout `hookSpecificOutput`, or null when it printed nothing. */
+function runHook(config, command, extra) {
+  const r = spawnSync(process.execPath, [HOOK], { input: hookInput(command, extra), encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: config } });
+  assert.equal(r.status, 0, r.stderr);
+  return r.stdout ? JSON.parse(r.stdout).hookSpecificOutput : null;
+}
+
+test('given four single shell calls in a row, when the fifth arrives, then nudgeFor returns the batching nudge', () => {
+  // Given
+  const { record } = feed([10_000, 20_000, 30_000, 40_000]);
+  // When
+  const { texts } = feed([50_000], record);
+  // Then
+  assert.equal(record.run, 4);
+  assert.equal(texts[0], NUDGE);
+});
+
+test('given four single shell calls in the cache, when the fifth arrives, then it is allowed with only the batching nudge and logged', () => {
+  // Given
+  const config = seededConfig();
+  // When
+  const out = runHook(config, 'git status');
+  // Then
+  assert.deepEqual(out, { hookEventName: 'PreToolUse', additionalContext: NUDGE });
+  const logged = JSON.parse(readFileSync(join(config, '.cache', 'batch-nudge.log'), 'utf8').trim());
+  assert.deepEqual({ session: logged.session, run: logged.run }, { session: 's1', run: 5 });
+});
+
+test('given a run already nudged, when a sixth single call arrives, then there is no second nudge', () => {
+  // Given
+  const { record } = feed([10_000, 20_000, 30_000, 40_000, 50_000]);
+  // When
+  const { texts } = feed([60_000, 70_000], record);
+  // Then
+  assert.equal(record.nudged, true);
+  assert.deepEqual(texts, [null, null]);
+});
+
+test('given two calls 100 ms apart, when the next single call arrives, then the run restarts from one', () => {
+  // Given
+  const { record } = feed([10_000, 20_000, 30_000, 30_100]);
+  // When
+  const { record: next } = feed([40_000], record);
+  // Then
+  assert.equal(record.run, 0);
+  assert.equal(next.run, 1);
+});
+
+test('given a record idle for 10 minutes, when a single call arrives, then the run restarts from one', () => {
+  // Given
+  const { record } = feed([10_000, 20_000, 30_000, 40_000]);
+  // When
+  const { record: next, texts } = feed([40_000 + 10 * 60 * 1000 + 1], record);
+  // Then
+  assert.equal(next.run, 1);
+  assert.deepEqual(texts, [null]);
+});
+
+test('given a subagent payload, when it sends a fifth single call, then there is no nudge and the state is untouched', () => {
+  // Given
+  const config = seededConfig();
+  const before = readFileSync(stateFile(config), 'utf8');
+  // When
+  const out = runHook(config, 'git status', { agent_id: 'a1', agent_type: 'implementer' });
+  // Then
+  assert.equal(out, null);
+  assert.equal(readFileSync(stateFile(config), 'utf8'), before);
+});
+
+test('given a fifth single call the output filter rewrites, when the guard answers, then the rewrite carries the nudge', () => {
+  // Given
+  const config = seededConfig();
+  // When
+  const out = runHook(config, 'dotnet test');
+  // Then
+  assert.equal(out.permissionDecision, 'allow');
+  assert.ok(out.updatedInput.command.includes('dotnet test'));
+  assert.equal(out.additionalContext, NUDGE);
+});
+
+test('given a fifth single call that asks, when the guard answers, then the ask carries no nudge and the state is untouched', () => {
+  // Given
+  const config = seededConfig();
+  const before = readFileSync(stateFile(config), 'utf8');
+  // When
+  const out = runHook(config, 'docker compose down -v');
+  // Then
+  assert.equal(out.permissionDecision, 'ask');
+  assert.equal(out.additionalContext, undefined);
+  assert.equal(readFileSync(stateFile(config), 'utf8'), before);
+});
+
+test('given an unwritable cache dir, when a single call arrives, then the guard decision is unchanged', () => {
+  // Given
+  const config = mkdtempSync(join(tmpdir(), 'guard-nudge-'));
+  created.push(config);
+  writeFileSync(join(config, '.cache'), 'a file where the cache dir should be');
+  // When
+  const out = runHook(config, 'dotnet test');
+  // Then
+  assert.equal(out.permissionDecision, 'allow');
+  assert.ok(out.updatedInput.command.includes('dotnet test'));
+  assert.equal(out.additionalContext, undefined);
+});
+
+test('given four single calls in the cache, when two calls of one message run concurrently, then neither nudges and the run is reset', async () => {
+  // Given
+  const config = seededConfig();
+  const once = () => new Promise((resolve) => {
+    const child = spawn(process.execPath, [HOOK], { env: { ...process.env, CLAUDE_CONFIG_DIR: config } });
+    let stdout = '';
+    child.stdout.on('data', (chunk) => { stdout += chunk; });
+    child.on('close', () => resolve(stdout));
+    child.stdin.end(hookInput('git status'));
+  });
+  // When
+  const outputs = await Promise.all([once(), once()]);
+  // Then
+  assert.deepEqual(outputs, ['', '']);
+  const times = readFileSync(stateFile(config), 'utf8').split('\n').filter(Boolean).map(Number).sort((a, b) => a - b);
+  assert.equal(times.length, 6);
+  assert.equal(feed(times).record.run, 0);
+});
+
+test('given another session file and a leftover tmp idle for two hours, when a call earns no nudge, then both are pruned', () => {
+  // Given
+  const config = mkdtempSync(join(tmpdir(), 'guard-nudge-'));
+  created.push(config);
+  mkdirSync(join(config, '.cache'), { recursive: true });
+  const stale = [join(config, '.cache', 'batch-nudge-old.txt'), join(config, '.cache', 'batch-nudge-old.txt.123.tmp')];
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  for (const file of stale) { writeFileSync(file, '1\n'); utimesSync(file, twoHoursAgo, twoHoursAgo); }
+  // When
+  const out = runHook(config, 'git status');
+  // Then
+  assert.equal(out?.additionalContext, undefined);
+  assert.deepEqual(stale.map(existsSync), [false, false]);
+  assert.ok(existsSync(stateFile(config)));
 });

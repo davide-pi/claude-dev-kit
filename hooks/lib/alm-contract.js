@@ -145,4 +145,4 @@ function checkAlmContract(command) {
   return unique.length ? `${unique.join('\n')}\nConfirm only if this exception is intended.` : null;
 }
 
-module.exports = { checkAlmContract };
+module.exports = { checkAlmContract, parseAzCall };

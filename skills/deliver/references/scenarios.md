@@ -63,3 +63,9 @@ The migration is created, never applied by the loop or a subagent.
 | end | the verdict (yes, no, unknown and why), the probe deleted, `git status` unchanged. **Stop**: building the feature is a new triage |
 
 A spike has no loop and no review. The perimeter is the probe itself.
+
+## The e2e level
+
+When the proof needs a running local environment, the session writes the steps and the expected result of each,
+hands them to `e2e-verifier` with how to reach the environment, and reads the table it returns. A `fail` row goes
+back to the loop as the brief; `not-run` rows are reported as not verified.
