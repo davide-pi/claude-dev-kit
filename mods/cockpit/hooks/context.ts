@@ -37,17 +37,17 @@ export const ROUNDS_KEEP = 20
 /** `rounds` with this main turn's context size added, the last twenty kept. A shrinking context stays: a compaction is a drop to see. */
 export const recordRound = (rounds: readonly number[] | undefined, tokens: number): number[] => [...(rounds ?? []), tokens].slice(-ROUNDS_KEEP)
 
-/** The CTX bar is full at this multiple of the autocompact threshold, so the threshold's tick sits at 1/1.2 of the bar. */
-const CTX_SCALE = 1.2
+/** The CTX bar is full at this multiple of the autocompact threshold, so the threshold's tick sits at 1/1.1 of the bar. */
+const CTX_SCALE = 1.1
 
 /** The share of the autocompact threshold from which the CTX fill turns orange, then red. */
-const CTX_ORANGE_PCT = 50
-const CTX_RED_PCT = 80
+const CTX_ORANGE_PCT = 60
+const CTX_RED_PCT = 90
 
 /**
- * The CTX bar's fill and the tick of the autocompact threshold. Where the engine reports `autoCompactAt` the bar is `1.2 × autoCompactAt` tokens long
+ * The CTX bar's fill and the tick of the autocompact threshold. Where the engine reports `autoCompactAt` the bar is `1.1 × autoCompactAt` tokens long
  * (`pct` is the context over that, capped at 100, `markPct` the threshold's place, `limit` the bar's length in tokens); without one it is the window's own percent, no tick.
- * `color` is the fill's: by the share of the threshold reached (under 50% green, under 80% orange, else red), or by the window's own percent without one.
+ * `color` is the fill's: by the share of the threshold reached (under 60% green, under 90% orange, else red), or by the window's own percent without one.
  */
 export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompactAt'>): { pct: number; color: string; markPct?: number; limit?: number } {
   // Until the engine measures the window (a resumed session) the last state's reading stands in.

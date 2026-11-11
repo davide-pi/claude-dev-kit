@@ -59,7 +59,7 @@ export function contextText(s: CockpitSnapshot): Span[] {
   // The readout follows the bar: where the engine reports a threshold, the percent and the length are of the bar's scale; else the window's own.
   // Before the first response nothing is measured: the fill reads as empty, not as missing.
   const pct = scale.limit === undefined ? (percent ?? 0) : Math.round(scale.pct)
-  // rounded to the thousand: `/232K` keeps the window's cells (`/231.6K` would not)
+  // rounded to the thousand: `/212K` keeps the window's cells (`/212.3K` would not)
   const length = scale.limit === undefined ? window : Math.round(scale.limit / 1000) * 1000
   const out: Span[] = [...pctSpans(pct, scale.color, isStale), sp(` ${abbrevTokens(tokens ?? 0, true).padStart(TOKENS_CELLS)}`)]
   // the length keeps its cells too: unmeasured or switched (`/1M`, `/200K`), the bar keeps its length

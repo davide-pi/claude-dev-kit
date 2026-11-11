@@ -127,7 +127,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
 
   // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
   // the readout keeps its cells (blank before the first turn's cache hit), so the bar keeps its length; its glow flows while Claude works
-  // The bar is 1.2 x the autocompact threshold long where the engine reports one: the fill, its colour, the tick and the warning follow that scale
+  // The bar is 1.1 x the autocompact threshold long where the engine reports one: the fill, its colour, the tick and the warning follow that scale
   const scale = ctxScale(s)
   const cacheShown: Span[] = [dim('· '), dim(S.cache), sp(pctCell(s.cacheShare ?? 0), cacheColor(s.cacheShare ?? 0))]
   const cacheSpans: Span[] = s.cacheShare === undefined ? [sp(' '.repeat(spanWidth(cacheShown)))] : cacheShown

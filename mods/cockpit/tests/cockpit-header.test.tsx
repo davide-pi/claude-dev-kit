@@ -110,10 +110,10 @@ test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, o
   for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const { bar, colors } = await ctxBar(ui)
-    // the bar is 1.2 x the threshold long: the amber cell at 1/1.2 of it, still a bar cell
+    // the bar is 1.1 x the threshold long: the amber cell at 1/1.1 of it, still a bar cell
     expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).not.toContain('┃')
     expect(colors.filter(c => c === COLORS.amber)).toHaveLength(1)
-    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.2)))
+    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.1)))
     await ui.unmount()
   }
 })
@@ -125,12 +125,12 @@ for (const { pct } of [
   { pct: 'abc' },
   { pct: '0' },
 ]) {
-  test(`CTX bar: percent override ${pct} leaves the tick at 1/1.2 of the bar, the reported threshold`, async ($, on) => {
+  test(`CTX bar: percent override ${pct} leaves the tick at 1/1.1 of the bar, the reported threshold`, async ($, on) => {
     world(on, { autoCompactAt: 954_000, env: { CLAUDE_CONFIG_DIR: '/cfg', CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: pct } })
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
     const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
     const { bar, colors } = await ctxBar(ui)
-    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.2)))
+    expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.1)))
     await ui.unmount()
   })
 }
@@ -146,7 +146,7 @@ test('CTX bar: a /model that changes the window reads the threshold again', asyn
   await $.session.measure({ context: { window: 200_000, tokens: 100_000, percent: 50 }, rateLimits: [], cost: { usd: 1 }, changed: ['context'] })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const { bar, colors } = await ctxBar(ui)
-  expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.2)))
+  expect(colors.indexOf(COLORS.amber)).toBe(Math.min(bar.length - 1, Math.round(bar.length / 1.1)))
   await ui.unmount()
 })
 
