@@ -3,7 +3,7 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
 import { sessionTokens } from './agents'
 import { worklogLabel } from './session'
-import { COLORS, clockTime, fmtCost, spanWidth, splitCells, textCells, truncateSpans, wrapCells } from './shared'
+import { COLORS, clockTime, spanWidth, splitCells, textCells, truncateSpans, wrapCells } from './shared'
 import type { Span } from './shared'
 import { agentCosts, signalId, signalSeverity } from './signals'
 import type { Signal, SignalSeverity } from './signals'
@@ -12,7 +12,6 @@ import { signalAnim } from './anim'
 import { agentRow, agentWarning, pairRow, subagentDetails } from './view-agents'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
-import { activeRun } from './workflow'
 
 // ── What the page draws with: the pane's actions and the helpers every section shares ──
 
@@ -63,18 +62,7 @@ export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: Pane
   }
 }
 
-// ── Agents: the workflow run in one row, every agent one row ──
-
-/** The workflow run in flight in one row: name, phase, round, finished agents out of all and what they cost so far (its agents' cost). */
-export function workflowLine(k: Kit): RenderElement | undefined {
-  const { s, width, ui } = k
-  const run = activeRun(s.workflowRun)
-  if (!run) return undefined
-  const ids = new Set(run.agents.map(a => a.id))
-  const usd = agentCosts(s.agents, s.events).filter(a => ids.has(a.id)).reduce((sum, a) => sum + (a.usd ?? 0), 0)
-  const done = run.agents.filter(a => a.isDone).length
-  return line(ui, truncateSpans([sp(t().workflowRow(run.name, run.phase ?? '—', run.round, done, run.agents.length, fmtCost(usd)))], width))
-}
+// ── Agents: every agent one row ──
 
 /** The first `shown` rows, then a button that opens the rest (`󰍟 +K`) and folds them again (`󰍝 −K`), which open below it so the button stays where it was pressed; no button when every row fits. */
 export function collapsible(k: Kit, key: string, rows: Block[], shown: number, isOpen: boolean, onToggle: () => void): Block {

@@ -1,20 +1,15 @@
-import type { CockpitLogEntry } from '../types'
-import { agentLog } from './agents'
-import { runIdOf } from './workflow'
 import { spendSplit } from './andamento'
 import { openTasks } from './context'
-import { COLORS, abbrevTokens, barCells, clockTime, costCell, duration, localDate, padCells, shortModel, spanWidth, truncateSpans } from './shared'
+import { COLORS, barCells, localDate, padCells, spanWidth, truncateSpans } from './shared'
 import type { Span } from './shared'
-import { loggedSignal, signalId, signalSeverity, signalsOf } from './signals'
+import { signalId, signalSeverity, signalsOf } from './signals'
 import type { Signal, SignalKind } from './signals'
 import { t } from './strings'
-import { isFading } from './anim'
-import { groupDone } from './done-groups'
-import type { DoneEvent, DoneGroup } from './done-groups'
-import { agentIcon, orderAgents, pairRow, taskCounts, visibleAgents } from './view-agents'
-import { BUTTON_GAP, animCell, dim, line, sp, spanNodes } from './view-base'
-import { SEVERITY_COLORS, collapsible, makeAgentBlock, signalIcon, signalRow, signalText, workflowLine, worklogBehindRows } from './view-kit'
+import { orderAgents, taskCounts, visibleAgents } from './view-agents'
+import { BUTTON_GAP, dim, line, sp } from './view-base'
+import { collapsible, makeAgentBlock, signalRow, worklogBehindRows } from './view-kit'
 import type { Block, Kit } from './view-kit'
+import { dayRow, liveBlocks } from './view-log'
 
 // ── The single page: four sections, each hidden when empty (ATTENZIONE says there is nothing to do) ──
 
@@ -22,13 +17,10 @@ import type { Block, Kit } from './view-kit'
 const MAX_ROWS = 5
 /** ATTENZIONE also stops at this many drawn lines: a closed notification takes two (what, then what to do), so four of them fill it. */
 const ATTENTION_LINES = 8
-/** LOG shows this many groups (an open one with its whole subtree); the rest sits behind its toggle. */
-const DONE_ROWS = 5
 /** Cells the caption of a bar takes, so the bar and its legend line up. */
 const CAPTION_W = 9
 /** A bar's parts beyond this many tools join "other". */
 const TOP_TOOLS = 3
-const COST_W = 7
 
 /** The notifications that cost money; every other kind that is not blocking comes after them. */
 const COST_KINDS: readonly SignalKind[] = ['heavyAgent', 'opusReadOnly', 'bigResult', 'reread', 'coldAfterIdle', 'ctxGrowth']
@@ -59,8 +51,26 @@ export function attentionBlocks(k: Kit): Block[] {
   // a blocking one stays on top (the collapse must never hide it), the others newest first
   const pinned = (sig: Signal): number => (signalSeverity(sig) === 'block' ? 0 : 1)
   const signals = [...signalsOf(s)].sort((a, b) => pinned(a) - pinned(b) || since(b) - since(a) || rankOf(a) - rankOf(b))
-  const rows: Block[] = signals.map(sig => signalRow(k, sig))
-  const lines: number[] = rows.map(() => 2)
+  const rows: Block[] = []
+  const lines: number[] = []
+  const add = (sig: Signal) => {
+    rows.push(signalRow(k, sig))
+    lines.push(2)
+  }
+  // a day row only when the signals span two or more local days; the blocking ones stay on top, outside any day
+  const dayOf = (sig: Signal) => localDate(s.signalsAt?.[signalId(sig)] ?? s.now)
+  signals.filter(sig => signalSeverity(sig) === 'block').forEach(add)
+  const rest = signals.filter(sig => signalSeverity(sig) !== 'block')
+  if (new Set(rest.map(dayOf)).size < 2) rest.forEach(add)
+  else {
+    ;[...new Set(rest.map(dayOf))].forEach((date, i) => {
+      const key = `day:att:${date}`
+      const isOpen = s.groupsOpen?.[key] ?? i === 0
+      rows.push(dayRow(k, key, date, isOpen, []))
+      lines.push(1)
+      if (isOpen) rest.filter(sig => dayOf(sig) === date).forEach(add)
+    })
+  }
 
   const late = worklogBehindRows(k, n => S.worklog.withoutHours(n))
   if (late !== undefined) {
@@ -136,13 +146,13 @@ export function andamentoBlocks(k: Kit): Block[] {
 
 // ── IN CORSO ──
 
-/** The deliver tasks and their perimeter, the workflow run and the running agents; hidden when nothing runs and no task is open. */
+/** The deliver tasks and their perimeter, the open nodes (the open round, the workflow run still open or silent) and the running agents; hidden when nothing runs and no task is open. */
 export function inProgressBlocks(k: Kit): Block[] {
   const { ui, s, width, title, actions } = k
   const S = t()
   const running = visibleAgents(s).filter(a => a.status === 'running')
-  const run = workflowLine(k)
-  if (running.length === 0 && run === undefined && openTasks(s).length === 0) return []
+  const nodes = liveBlocks(k)
+  if (running.length === 0 && nodes.length === 0 && openTasks(s).length === 0) return []
 
   const rows: Block[] = []
   const counts = taskCounts(s)
@@ -156,7 +166,7 @@ export function inProgressBlocks(k: Kit): Block[] {
     const spans = outside.length > 0 ? [sp(S.filesOutside(outside.length), COLORS.red)] : s.perimeterCheck ? [sp('󰄬 ', COLORS.green), dim(S.perimeter(s.perimeter.length))] : [dim(S.perimeter(s.perimeter.length))]
     rows.push([line(ui, truncateSpans(spans, width))])
   }
-  if (run !== undefined) rows.push([run])
+  rows.push(...nodes)
   const agentBlock = makeAgentBlock(k)
   rows.push(...orderAgents(running).map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth)))
 
@@ -165,144 +175,4 @@ export function inProgressBlocks(k: Kit): Block[] {
 
 // ── LOG ──
 
-/** The cells of a cost share (`100%`). */
-const SHARE_W = 4
-
-/** A row of the log: the icon and text of its kind; an agent also carries its model, cost, length and start. */
-type DoneEntry = DoneEvent & {
-  icon: Span
-  text: string
-  /** Dim, after the text. */
-  detail?: string
-  /** The time the row shows, when it is not `at`. */
-  start?: number
-  usd?: number
-  ms?: number
-}
-
-/** `son5.5·high`: the short model and the effort, whichever there is. */
-const modelEffort = (model: string | undefined, effort: string | number | undefined): string =>
-  [shortModel(model).replace(' ', ''), effort === undefined ? '' : String(effort)].filter(Boolean).join('·')
-
-/** The row of an agent entry. */
-function agentEntry(e: CockpitLogEntry): DoneEntry {
-  const detail = modelEffort(e.model, e.effort)
-  const icon = agentIcon({ id: e.key ?? '', type: '', startedAt: 0, tokens: 0, status: 'done', isFailed: e.isFailed === true })
-  return { at: e.at, kind: 'agent', icon, text: e.text ?? '?', ...(detail !== '' && { detail }), ...(e.ms !== undefined && { ms: e.ms, start: e.at - e.ms }), ...(e.usd !== undefined && { usd: e.usd }) }
-}
-
-/** The row of a log entry; none for a round, which ends a group instead, and for a signal of a kind unknown. */
-function logEntry(e: CockpitLogEntry): DoneEntry | undefined {
-  const E = t().page.events
-  switch (e.kind) {
-    case 'round':
-      return undefined
-    case 'agent':
-      return agentEntry(e)
-    case 'signal': {
-      const sig = loggedSignal(e)
-      if (sig === undefined) return undefined
-      return { at: e.at, kind: 'signal', icon: sp(signalIcon(sig), SEVERITY_COLORS[e.severity ?? signalSeverity(sig)]), text: signalText(sig).what }
-    }
-    case 'commit':
-      return { at: e.at, kind: 'commit', icon: sp('●', COLORS.green), text: E.commit(e.text ?? e.key ?? '') }
-    case 'test':
-      return { at: e.at, kind: 'test', icon: e.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green), text: E.test(e.text ?? '', e.isFailed === true) }
-    case 'compact':
-      return { at: e.at, kind: 'compact', icon: sp('◇', COLORS.blue), text: E.compact(e.tokens === undefined ? '' : abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
-    case 'pr':
-      return { at: e.at, kind: 'pr', icon: sp('◆', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? '') }
-    case 'flow':
-      return { at: e.at, kind: 'flow', icon: sp('󱎖', e.isFailed ? COLORS.red : COLORS.blue), text: e.text ?? e.key ?? '', ...(e.ms !== undefined && { ms: e.ms, start: e.at - e.ms }), ...(e.usd !== undefined && { usd: e.usd }) }
-  }
-}
-
-/** What a group holds by kind (`2 agents · 1 commit`), then its tool calls (`34 tools: Read 20 · Bash 9 · Edit 5`, the top three); empty when it holds nothing. */
-function doneSummary(g: DoneGroup<DoneEntry>): string {
-  const S = t().page.events.summary
-  const kinds = (['agent', 'signal', 'commit', 'test', 'pr', 'compact'] as const).flatMap(kind => {
-    const n = g.events.filter(e => e.kind === kind).length
-    return n > 0 ? [S[kind](n)] : []
-  })
-  const tools = Object.entries(g.tools ?? {}).sort((a, b) => b[1] - a[1])
-  const total = tools.reduce((n, [, count]) => n + count, 0)
-  const top = tools.slice(0, TOP_TOOLS).map(([name, count]) => `${name} ${count}`).join(' · ')
-  return [...kinds, ...(total > 0 ? [S.tools(total, top)] : [])].join(' · ')
-}
-
-/** The figures of a round or an agent, dim: its share of the session's cost (aligned), its cost, its length; a cell with no data is left out. */
-function figures(usd: number | undefined, ms: number | undefined, sessionUsd: number | undefined): Span[] {
-  const share = usd !== undefined && sessionUsd !== undefined && sessionUsd > 0 ? `${Math.round((usd / sessionUsd) * 100)}%` : ''
-  const cells = [...(usd === undefined ? [] : [share.padStart(SHARE_W), costCell(usd, COST_W)]), ...(ms === undefined ? [] : [duration(ms)])]
-  return cells.flatMap((c, i) => [...(i > 0 ? [sp(' ')] : []), dim(c)])
-}
-
-/** When a group began: its round's end less its length; the open round and a merged run only know their `at`. */
-const startOf = (g: DoneGroup<DoneEntry>): number => (g.ms !== undefined && !g.isCurrent ? g.at - g.ms : g.at)
-
-/** The header of a group: toggle arrow, start time, round (or the open round, or the run of chat-only rounds), its share of the session's cost, cost and length. */
-function doneHeader(g: DoneGroup<DoneEntry>, isOpen: boolean, width: number, sessionUsd: number | undefined): { arrow: Span; rest: Span[] } {
-  const E = t().page.events
-  const label = g.isCurrent ? E.current : g.chatOnly !== undefined ? E.chatOnly(g.chatOnly) : E.round(g.round ?? 0)
-  const cells = figures(g.usd, g.ms, sessionUsd)
-  const arrow = sp(isOpen ? '▾ ' : '▸ ')
-  const rest = truncateSpans([...(g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]), sp(label), ...(cells.length > 0 ? [sp(' '), ...cells] : [])], width - 2)
-  return { arrow, rest }
-}
-
-/**
- * The session log by main round, newest first, under a day header (`2026-11-11`) where the date changes: each round a toggle row (start time, number, its
- * share of the session's cost, cost, length) over a summary of what it holds (with its tool calls) and its children (time, icon, text; an agent also its
- * model, share, cost and length) in a tree, newest first. The newest group is open until a person gives it a state, which stays. The groups count, not
- * their lines: the newest five, the rest behind the toggle.
- */
-export function doneBlocks(k: Kit): Block[] {
-  const { ui, s, width, title, actions } = k
-  const { Box, Button, Text } = ui
-  const S = t()
-  const log = s.sessionLog ?? []
-  // An agent that just finished is logged as it ends; one still listed and not yet in the log shows once all the same.
-  const logged = new Set(log.filter(e => e.kind === 'agent').map(e => e.key))
-  const pending = visibleAgents(s).filter(a => a.status === 'done' && !logged.has(a.id)).flatMap(a => agentLog(a, runIdOf(s.workflowRun, a.id)) ?? [])
-  const entries = [...log, ...pending].flatMap(e => logEntry(e) ?? [])
-  const groups = groupDone(entries, log)
-  if (groups.length === 0) return []
-
-  const rows: Block[] = groups.map((g, gi): Block => {
-    // a state a person gave holds; else the newest group is open
-    const isOpen = g.events.length > 0 && (s.groupsOpen?.[g.key] ?? gi === 0)
-    const { arrow, rest } = doneHeader(g, isOpen, width, s.cost.usd)
-    // the newest group's header fades from its highlight as it appears; the arrow stays a button beside the animated cells
-    const isNewest = gi === 0 && ui.Client !== undefined && isFading(g.at, s.now)
-    const toggle = () => actions.setGroupOpen(g.key, !isOpen)
-    let header: Block
-    if (g.events.length === 0) header = [line(ui, [arrow, ...rest])]
-    else if (isNewest) {
-      header = [
-        <Box>
-          <Button key={g.key} plain onPress={toggle}>
-            <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
-          </Button>
-          {animCell(ui, 'anim:done', 'fade', rest)}
-        </Box>,
-      ]
-    } else {
-      header = [
-        <Button key={g.key} plain onPress={toggle}>
-          <Text wrap="truncate">{spanNodes(ui, [arrow, ...rest])}</Text>
-        </Button>,
-      ]
-    }
-    const summary = doneSummary(g)
-    const children = isOpen
-      ? [...(summary === '' ? [] : [[line(ui, [sp('├ ', COLORS.rule), dim(summary)])]]), ...g.events.map((e, i): Block => {
-          const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(e.detail === undefined ? [] : [sp(' '), dim(e.detail)])]
-          return [line(ui, [sp(i === g.events.length - 1 ? '└ ' : '├ ', COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, s.cost.usd) : [], width - 2)])]
-        })]
-      : []
-    const day = localDate(startOf(g))
-    const prev = groups[gi - 1]
-    return [(prev === undefined || localDate(startOf(prev)) !== day) && line(ui, [dim(day)]), header, ...children]
-  })
-  return [[title(S.page.done), collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
-}
+export { doneBlocks } from './view-log'

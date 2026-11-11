@@ -79,7 +79,7 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
   if (!Array.isArray(value)) return undefined
   const entries = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
-    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId } = v as Record<string, unknown>
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
     const counts = parseToolCounts(tools)
     return [{
@@ -88,6 +88,7 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
       ...(typeof key === 'string' && { key }),
       ...(typeof runId === 'string' && { runId }),
       ...(typeof text === 'string' && { text }),
+      ...(typeof desc === 'string' && { desc }),
       ...(isNum(usd) && { usd }),
       ...(isNum(ms) && { ms }),
       ...(isNum(tokens) && { tokens }),

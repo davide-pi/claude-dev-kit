@@ -157,6 +157,8 @@ export type CockpitLogEntry = {
   key?: string
   runId?: string
   text?: string
+  /** An agent's spawn description (its label, which names its loop round under a flow). */
+  desc?: string
   usd?: number
   ms?: number
   tokens?: number

@@ -10,7 +10,7 @@ type Ui = Awaited<ReturnType<typeof mountPane>>
 /** The agents DONE lists, newest first, as `<icon> <type>`: the clock and the cost cells left out. */
 const doneAgents = async (ui: Ui) =>
   rowTexts(await ui.drawn()).flatMap(r => {
-    const m = /^[├└] \d\d:\d\d (\S) (\S+)/u.exec(r)
+    const m = /^[├└] \d\d:\d\d (?!→)(\S) (\S+)/u.exec(r)
     return m ? [`${m[1]} ${m[2]}`] : []
   })
 

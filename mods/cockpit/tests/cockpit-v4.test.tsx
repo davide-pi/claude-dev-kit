@@ -117,7 +117,7 @@ test('Notifications: a permission ask unanswered over 60 seconds is a notificati
 
 // ── IN PROGRESS: the workflow run in one row ──
 
-test('IN PROGRESS: the workflow run is one row with its name, phase and agents done out of all', async ($, on) => {
+test('IN PROGRESS: the workflow run is a node with its name, phase and agents done out of all', async ($, on) => {
   const clock = world(on)
   permissionChecks(on)
   workflowLaunches(on, 'release-notes')
@@ -130,7 +130,7 @@ test('IN PROGRESS: the workflow run is one row with its name, phase and agents d
   await clock.advance(7000)
   await settleAll()
   const { rows } = await paneRows($, 58)
-  const run = rows.findIndex(r => /^workflow release-notes · .* · 0\/0 · \$0\.00/.test(r))
+  const run = rows.findIndex(r => /^[▾▸] \d\d:\d\d flow relea /.test(r))
   expect(run).toBeGreaterThan(-1)
   expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)
   release('rm x')

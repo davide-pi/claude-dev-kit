@@ -36,9 +36,6 @@ const EN = {
   lastTool: 'last tool ',
   costDetail: { tokens: (n: string) => `tokens ${n}` },
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
-  /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
-  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
-    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · round ${round}`} · ${done}/${total} · ${usd}`,
 
   // Notifications
   signalFields: { why: 'why: ', todo: 'what to do: ' },
@@ -83,7 +80,7 @@ const EN = {
     other: 'other',
     tasks: (done: number, total: number) => `tasks ${done}/${total}`,
     events: {
-      round: (n: number) => `round ${String(n).padStart(3, '0')}`,
+      round: (n: number) => `round ${String(n).padStart(3)}`,
       current: 'current round',
       chatOnly: (n: number) => `${n} chat-only rounds`,
       summary: {
@@ -125,8 +122,6 @@ const IT: Strings = {
   lastTool: 'ultimo tool ',
   costDetail: { tokens: (n: string) => `token ${n}` },
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
-  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
-    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · giro ${round}`} · ${done}/${total} · ${usd}`,
 
   signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
   signalText: {
@@ -167,7 +162,7 @@ const IT: Strings = {
     other: 'altro',
     tasks: (done: number, total: number) => `task ${done}/${total}`,
     events: {
-      round: (n: number) => `giro ${String(n).padStart(3, '0')}`,
+      round: (n: number) => `giro ${String(n).padStart(3)}`,
       current: 'giro in corso',
       chatOnly: (n: number) => `${n} giri di sola conversazione`,
       summary: {

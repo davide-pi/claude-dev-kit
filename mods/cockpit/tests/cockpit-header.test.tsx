@@ -529,10 +529,13 @@ test('header: the cache hit is green from 80 %, amber from 50 to 79, red below 5
     })
   await complete(94, 6)
   expect(colorOf((await paneRows($)).root, /^ 94%$/)).toBe(GREEN)
+  // the icon is in full colour, the same as the share it heads, not dim
+  expect(colorOf((await paneRows($)).root, /^\u{F09D1} $/u)).toBe(GREEN)
   await complete(60, 40)
   expect(colorOf((await paneRows($)).root, /^ 60%$/)).toBe('#e8a35a')
   await complete(20, 80)
   expect(colorOf((await paneRows($)).root, /^ 20%$/)).toBe(RED)
+  expect(colorOf((await paneRows($)).root, /^\u{F09D1} $/u)).toBe(RED)
 })
 
 test('a state file of an earlier version with a saved tab still loads, and is written back without it', async ($, on) => {
