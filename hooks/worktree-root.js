@@ -126,8 +126,10 @@ function remove(payload) {
   git(mainRoot(target), ['worktree', 'remove', target]);
 }
 
+const fire = require('./lib/fire-log').armFire('worktree-root', 'WorktreeCreate');
 try {
   const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+  fire.event = payload.hook_event_name || fire.event;
   if (payload.hook_event_name === 'WorktreeRemove') remove(payload);
   else process.stdout.write(`${create(payload)}\n`);
   process.exit(0);

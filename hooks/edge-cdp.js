@@ -69,21 +69,26 @@ async function run({
 module.exports = { run };
 
 /** An `e2e-verifier` call that breaks its browser rules is denied here; any other call, and any error, falls through. */
-function denyForE2eVerifier() {
+function denyForE2eVerifier(fire) {
   try {
     const payload = JSON.parse(fs.readFileSync(0, 'utf8') || 'null');
+    fire.sub = require('./lib/fire-log').isSub(payload);
     if (payload?.agent_type !== 'e2e-verifier') return;
     const result = require('./lib/e2e-browser').checkE2eBrowser(payload);
-    if (result) require('./lib/decision').deny(result.reason);
+    if (result) {
+      fire.decision = 'deny';
+      require('./lib/decision').deny(result.reason);
+    }
   } catch (error) {
     require('./lib/cache').logError('edge-cdp', error);
   }
 }
 
 if (!global.__edgeCdpLibrary) {
-  denyForE2eVerifier();
+  const fire = require('./lib/fire-log').armFire('edge-cdp', 'PreToolUse');
+  denyForE2eVerifier(fire);
   run()
-    .then((out) => { if (out) process.stdout.write(out); })
+    .then((out) => { if (out) { fire.decision = 'context'; process.stdout.write(out); } })
     .catch(() => { /* silence */ })
     .finally(() => process.exit(0));
 }

@@ -16,7 +16,7 @@
 const { deny, readPayload } = require('./lib/decision');
 
 try {
-  const input = readPayload()?.tool_input;
+  const input = readPayload('agent-guard')?.tool_input;
   if (input && typeof input === 'object') {
     const type = typeof input.subagent_type === 'string' ? input.subagent_type.trim() : '';
     if (!type) {

@@ -51,6 +51,9 @@ const zlib = require('zlib');
 const { spawnSync } = require('child_process');
 const { findGitDir, currentBranch } = require('./lib/git-dir');
 const { CONFIG_DIR } = require('./lib/cache');
+const { armFire, distinctDays, DAYS_MAX } = require('./lib/fire-log');
+
+const fire = armFire('session-brief', 'SessionStart');
 
 /**
  * Beside the statusline's own snapshot, in the Claude Code configuration directory — honouring
@@ -80,6 +83,7 @@ function silent() {
 function emit(lines, extra) {
   const text = [...lines.filter(Boolean).slice(0, MAX_LINES), extra].filter(Boolean).join('\n');
   if (!text) silent();
+  fire.decision = 'context';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'SessionStart',
@@ -345,6 +349,12 @@ function takeHandoff(cwd) {
   }
 }
 
+/** The one line a closed hook fire log earns (`scripts/hook-fires.mjs` reads it, `--delete` ends it), or null. */
+function hookLogLine() {
+  const days = distinctDays().size;
+  return days >= DAYS_MAX ? `hook log: ${days} days recorded: run scripts/hook-fires.mjs, decide, then --delete` : null;
+}
+
 // ── Cache ────────────────────────────────────────────────────────────────────
 
 function readCache() {
@@ -378,7 +388,7 @@ try {
 
   // The retro lines once per session: a resume, clear or compact re-fire repeats only the brief.
   const since = payload.source && payload.source !== 'startup' ? null : sinceRetro(found.gitDir);
-  const nudge = [since && withRuns(findingsNudge(since), since), payload.source === 'clear' ? takeHandoff(cwd) : null].filter(Boolean).join('\n');
+  const nudge = [since && withRuns(findingsNudge(since), since), since && hookLogLine(), payload.source === 'clear' ? takeHandoff(cwd) : null].filter(Boolean).join('\n');
   if (entry && Date.now() - entry.at < TTL_MS && Array.isArray(entry.lines)) {
     emit(entry.lines, nudge);
   }

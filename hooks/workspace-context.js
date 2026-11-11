@@ -20,6 +20,9 @@ const os = require('os');
 const path = require('path');
 
 const { readRoots, resolveDir, matchRoot, langLine } = require('./lib/workspaces');
+const { armFire } = require('./lib/fire-log');
+
+const fire = armFire('workspace-context', 'SessionStart');
 
 const PLATFORMS = { 'azure-devops': 'Azure DevOps', github: 'GitHub' };
 
@@ -67,6 +70,7 @@ try {
   } catch {
     // no map or a malformed one: no ALM line, the Lang line still prints
   }
+  fire.decision = 'context';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: [alm, langLine(dir)].filter(Boolean).join('\n') },
   }));

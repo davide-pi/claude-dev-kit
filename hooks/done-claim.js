@@ -77,6 +77,9 @@ const { tailEntries, blocks, entryText, isNotification, isPeerMessage, isPrompt 
 const { READ_ONLY_AGENTS } = require('./lib/read-only-agents');
 const { expandSegments, stripWrappers, baseName, withoutBodies } = require('./lib/shell-parse');
 const { parseGitCall } = require('./lib/default-branch');
+const { armFire, isSub } = require('./lib/fire-log');
+
+const fire = armFire('done-claim', 'Stop');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
@@ -240,6 +243,7 @@ function allowWith(payload, turn, rows) {
       const head = repo ? shortHead(repo.gitDir, branch) : null;
       fs.mkdirSync(path.dirname(HANDOFF), { recursive: true });
       fs.writeFileSync(HANDOFF, JSON.stringify({ at: Date.now(), cwd: payload.cwd, branch, ...(head && { head }), rows: closed, tokens }));
+      fire.decision = 'context';
       process.stdout.write(JSON.stringify({ systemMessage: `Contesto a ${Math.round(tokens / 1000)}k e task chiuso: /clear prima del prossimo (il punto di ripresa lo riporta session-brief).` }));
     }
   } catch {
@@ -271,6 +275,7 @@ function blockOpenPerimeter(payload, rows, message) {
   // A progress report mid-run, not the closing verdict: the perimeter is rightly still active.
   if (rows.some((r) => IN_PROGRESS.test(r.state) || (/impl-review-loop/.test(r.command) && /non verificat|not verified/i.test(r.state)))) return;
   log(payload, 'perimeter-open', 'verdict', message);
+  fire.decision = 'block';
   process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));
   process.exit(0);
 }
@@ -366,8 +371,10 @@ function log(payload, rule, word, message, excerpt) {
 }
 
 try {
+  const raw = fs.readFileSync(0, 'utf8');
+  try { fire.sub = isSub(JSON.parse(raw)); } catch { /* a bad payload: sub stays false */ }
   if (process.env.CLAUDE_DONE_CLAIM !== '1') allow();
-  const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
+  const payload = JSON.parse(raw || '{}');
   if (typeof payload.transcript_path !== 'string') allow();
 
   const { entries, truncated } = tailEntries(payload.transcript_path);
@@ -388,6 +395,7 @@ try {
     if (!turn.complete) {
       // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
       log(payload, 'tail-cut', unproven[0].state, message);
+      fire.decision = 'block';
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict rows against the command output. '
@@ -397,6 +405,7 @@ try {
     }
     // The excerpt is the failing row itself, so the log shows what the rule judged.
     log(payload, 'unproven-row', unproven[0].state, message, `${unproven[0].command} | ${unproven[0].line}`.slice(0, 200));
+    fire.decision = 'block';
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',
@@ -412,6 +421,7 @@ try {
 
   // A shell run after the edit is no proof by itself: the rule wants its output in the message (the log tells the two apart).
   log(payload, turn.shellAfterEdit ? 'shell-ran' : 'claim-without-evidence', word, message);
+  fire.decision = 'block';
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `

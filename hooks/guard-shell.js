@@ -55,7 +55,7 @@ const { nudge } = require('./lib/batch-nudge');
 const { logError } = require('./lib/cache');
 
 try {
-  const payload = readPayload();
+  const payload = readPayload('guard-shell');
   const result = evaluate(payload);
   // Only a call that goes through counts toward the run: an ask or a deny gets no nudge.
   if (!result) approve(nudge(payload));

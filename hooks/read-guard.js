@@ -30,7 +30,7 @@ function reasonFor(path, size) {
 }
 
 try {
-  const input = readPayload()?.tool_input;
+  const input = readPayload('read-guard')?.tool_input;
   const path = typeof input?.file_path === 'string' ? input.file_path : '';
   if (path && input.offset == null && input.limit == null && !input.allow_large) {
     const size = statSync(path).size;

@@ -42,6 +42,9 @@ const fs = require('fs');
 const path = require('path');
 
 const { CONFIG_DIR, readJson } = require('./lib/cache');
+const { armFire } = require('./lib/fire-log');
+
+const fire = armFire('worklog-pending', 'SessionStart');
 const HISTORY = path.join(CONFIG_DIR, 'history.jsonl');
 const AUDIT = path.join(CONFIG_DIR, 'worklog', 'pushed.json');
 const TARGETS = path.join(CONFIG_DIR, 'worklog', 'targets.json');
@@ -261,6 +264,7 @@ const snapshot = compute();
 save(snapshot);
 if (!snapshot.pending.length && !snapshot.underTarget.length) silent();
 
+fire.decision = 'context';
 process.stdout.write(JSON.stringify({
   hookSpecificOutput: {
     hookEventName: 'SessionStart',

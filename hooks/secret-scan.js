@@ -203,7 +203,7 @@ function redact(value) {
 }
 
 try {
-  const payload = readPayload();
+  const payload = readPayload('secret-scan');
   const filePath = payload?.tool_input?.file_path ?? payload?.tool_input?.notebook_path ?? '';
   const text = newText(payload?.tool_input);
   if (typeof text !== 'string' || !text.trim()) approve();
