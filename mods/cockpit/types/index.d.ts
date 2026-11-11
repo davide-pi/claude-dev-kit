@@ -35,6 +35,8 @@ export type CockpitAgent = {
   usage?: CockpitUsage
   /** The part of `usage` that the steps of the turn in progress added; the turn's end swaps it for the turn's own total. */
   stepUsage?: CockpitUsage
+  /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
+  runId?: string
 }
 
 /** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */
@@ -53,6 +55,8 @@ export type CockpitHistoryEntry = {
   usd?: number
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
+  /** The workflow run the agent belonged to, kept so a reload still groups it under its flow. */
+  runId?: string
 }
 
 export type CockpitGit = {
@@ -113,6 +117,8 @@ export type CockpitWorkflowRun = {
   round?: number
   lastAt?: number
   endedAt?: number
+  /** Set when the silence check closed the run: it is logged only once a newer run replaces it, as failed. */
+  isSilent?: boolean
 }
 
 /** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
@@ -135,18 +141,21 @@ export type CockpitEventKind = 'agent'
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
 
 /** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request, a finished agent, a notification that first held. */
-export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal'
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal' | 'flow'
 
 /**
  * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`, `tools` the main loop's tool calls of the round by tool name; `commit`: `text` and `key` are the short hash;
  * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title;
  * `agent` (`at` is its end): `key` the agent id, `text` its type, `model`, `effort`, `usd`, `ms` its length, `isFailed`; `signal`: `key` the `kind:key` id of the notification, `text` its label, `n` its number, `severity`.
- * `key` makes an entry once-only (per kind).
+ * `flow` (`at` is the run's end): `key` the run id, `text` the script name, `usd` the sum of its agents, `ms` first agent start to end, `n` the highest loop round, `isFailed` when it ended silent (not observed closing);
+ * `agent` also carries `runId` when it belongs to a workflow run.
+ * `key` makes an entry once-only (per kind); a `flow` entry is replaced instead, so a resumed run is one node.
  */
 export type CockpitLogEntry = {
   at: number
   kind: CockpitLogKind
   key?: string
+  runId?: string
   text?: string
   usd?: number
   ms?: number
@@ -212,8 +221,9 @@ export type CockpitSnapshot = {
   /** Context window of the main loop. */
   ctx: { tokens?: number; window?: number; percent?: number }
   /** Session cost in USD; `startUsd` is the total when the last turn began, `lastUsd` the cost of the last main turn that ended,
-   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet. */
-  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number }
+   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet, `isSettled` that a measure settled the last
+   * turn since (so `lastUsd` is final and the spend after it is not the turn's). */
+  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number; isSettled?: boolean }
   rateLimits: CockpitRateLimit[]
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number

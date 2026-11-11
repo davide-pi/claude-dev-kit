@@ -1,6 +1,6 @@
 import type { CockpitLogEntry } from '../types'
 
-export type DoneEvent = { at: number; kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' }
+export type DoneEvent = { at: number; kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' | 'flow' }
 
 /** One row of LOG: a main round with its events, the open round after the newest one, or a run of rounds that held none. */
 export type DoneGroup<E extends DoneEvent> = {

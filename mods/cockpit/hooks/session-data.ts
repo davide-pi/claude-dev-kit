@@ -203,7 +203,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
   // the last turn's cost and the one still to measure were this session's turns
-  cost: { ...s.cost, lastUsd: undefined, pendingUsd: undefined },
+  cost: { ...s.cost, lastUsd: undefined, pendingUsd: undefined, isSettled: undefined },
   lastCtx: undefined,
   skillsUsed: undefined,
   workflowRun: undefined,

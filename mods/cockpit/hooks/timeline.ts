@@ -20,22 +20,50 @@ export const recordAgentEvent = (list: readonly CockpitEvent[] | undefined, even
 /** The session log's entries kept: the oldest go first. */
 export const SESSION_LOG_KEEP = 300
 
-/** `log` with `entry` in its place by time; one whose kind and `key` are already there is not added twice. The log keeps the newest `SESSION_LOG_KEEP`. */
+/**
+ * `log` with `entry` in its place by time; one whose kind and `key` are already there is not added twice, except a 'flow' entry, which replaces
+ * its node (a resumed run closes again). The log keeps the newest `SESSION_LOG_KEEP`.
+ */
 export function recordLog(log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] {
-  const entries = log ?? []
-  if (entry.key !== undefined && entries.some(e => e.kind === entry.kind && e.key === entry.key)) return entries.slice()
+  const all = log ?? []
+  const isSame = (e: CockpitLogEntry) => entry.key !== undefined && e.kind === entry.kind && e.key === entry.key
+  if (entry.kind !== 'flow' && all.some(isSame)) return all.slice()
+  const entries = entry.kind === 'flow' ? all.filter(e => !isSame(e)) : all
   return [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e).slice(-SESSION_LOG_KEEP)
 }
 
 /** `log` with the newest round entry that has no cost given `usd`: a round whose cost was measured after it ended. An entry that has one, or no round, leaves the log as it was. */
 export function withRoundUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
-  const rounds = (log ?? []).filter(e => e.kind === 'round')
-  const newest = rounds.reduce<CockpitLogEntry | undefined>((n, e) => (n === undefined || e.at >= n.at ? e : n), undefined)
+  const newest = newestRound(log)
   if (newest === undefined || newest.usd !== undefined) return log?.slice()
-  return log?.map(e => (e === newest ? { ...e, usd } : e))
+  const own = Math.max(0, usd - roundFlowUsd(log, newest, Infinity))
+  return log?.map(e => (e === newest ? { ...e, usd: own } : e))
 }
 
-const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal']
+/** `log` with the newest round entry given `usd`, replacing the one it has: the header's figure and the log's stay one. No round leaves the log as it was. */
+export function withRoundLastUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
+  const newest = newestRound(log)
+  return newest === undefined ? log?.slice() : log?.map(e => (e === newest ? { ...e, usd } : e))
+}
+
+/** The cost of the flow agents (log agents with a `runId`) that ended between `from` and `to`: theirs belongs to the flow, not to the round. */
+export const flowUsdIn = (log: readonly CockpitLogEntry[] | undefined, from: number, to: number): number =>
+  (log ?? []).reduce((n, e) => (e.kind === 'agent' && e.runId !== undefined && e.at >= from && e.at <= to ? n + (e.usd ?? 0) : n), 0)
+
+/** The flow cost from the start of the round entry `round` (it ended at `at`, after `ms`) up to `to` (its end by default). */
+export const roundFlowUsd = (log: readonly CockpitLogEntry[] | undefined, round: CockpitLogEntry, to = round.at): number => flowUsdIn(log, round.at - (round.ms ?? 0), to)
+
+/** The newest round entry of `log`; none without one. */
+const newestRound = (log: readonly CockpitLogEntry[] | undefined): CockpitLogEntry | undefined =>
+  (log ?? []).filter(e => e.kind === 'round').reduce<CockpitLogEntry | undefined>((n, e) => (n === undefined || e.at >= n.at ? e : n), undefined)
+
+/** The flow cost since the start of the newest round entry of `log`, the flow agents that ended after it (the loop idle) included; 0 without one. */
+export const lastRoundFlowUsd = (log: readonly CockpitLogEntry[] | undefined): number => {
+  const newest = newestRound(log)
+  return newest === undefined ? 0 : roundFlowUsd(log, newest, Infinity)
+}
+
+const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal', 'flow']
 const SEVERITIES: readonly string[] = ['block', 'warn', 'info']
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -51,13 +79,14 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
   if (!Array.isArray(value)) return undefined
   const entries = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
-    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools } = v as Record<string, unknown>
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
     const counts = parseToolCounts(tools)
     return [{
       at,
       kind: kind as CockpitLogEntry['kind'],
       ...(typeof key === 'string' && { key }),
+      ...(typeof runId === 'string' && { runId }),
       ...(typeof text === 'string' && { text }),
       ...(isNum(usd) && { usd }),
       ...(isNum(ms) && { ms }),

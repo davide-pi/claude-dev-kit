@@ -40,9 +40,9 @@ export function toolArgFull(input: { readonly [key: string]: unknown }): string 
 const INSIGHT_TOOLS_KEEP = 40
 const INSIGHT_READS_KEEP = 200
 
-/** The cost of the main round that just ended: the session's cost now over what it was when the round began; none when either was not measured. */
-export const roundCost = (cost: CockpitSnapshot['cost']): number | undefined =>
-  cost.usd !== undefined && cost.startUsd !== undefined && cost.usd >= cost.startUsd ? cost.usd - cost.startUsd : undefined
+/** The cost of the main round that just ended: the session's cost now over what it was when the round began, less the flow agents' (`flowUsd`, never below 0); none when either was not measured. */
+export const roundCost = (cost: CockpitSnapshot['cost'], flowUsd = 0): number | undefined =>
+  cost.usd !== undefined && cost.startUsd !== undefined && cost.usd >= cost.startUsd ? Math.max(0, cost.usd - cost.startUsd - flowUsd) : undefined
 
 /** The cost of a round that ended unmeasured, once a measure settled it (`before` waited, `after` does not and moved on); none otherwise. */
 export const settledRoundUsd = (before: CockpitSnapshot['cost'], after: CockpitSnapshot['cost']): number | undefined =>

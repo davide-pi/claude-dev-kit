@@ -56,9 +56,9 @@ import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { CENT } from './shared'
-import { bashLog, nextCompactKey, recordAgentEvent, recordLog } from './timeline'
+import { bashLog, flowUsdIn, lastRoundFlowUsd, nextCompactKey, recordAgentEvent, recordLog, withRoundLastUsd } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
-import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
+import { addWorkflowAgent, agentRunId, endRun, recordAgentLog, finishWorkflowAgent, launchedRun, logRunChange, nameRun, runIdOf, touchRun } from './workflow'
 import { parseCreatedPr, upsertPr } from './work'
 
 // The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
@@ -166,7 +166,7 @@ export const register: Register = on => {
         const own = s.sessionId === e.sessionId ? s : undefined
         const at = await $.clock.now()
         const left = (own?.agents ?? [])
-          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a))
+          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a, runIdOf(own?.workflowRun, a.id)))
           .filter((h): h is CockpitHistoryEntry => h !== undefined)
           .sort((a, b) => b.endedAt - a.endedAt)
         const history = addHistory(own?.history, left)
@@ -227,12 +227,19 @@ export const register: Register = on => {
       mainTools = []
       asks.clear()
       const now = await $.clock.now()
-      await patch($, s => ({
-        ...s,
-        cost: startedCost(s.cost),
-        claudeState: { kind: 'working' },
-        workflowRun: endRun(s.workflowRun, now),
-      }))
+      await patch($, s => {
+        const workflowRun = endRun(s.workflowRun, now)
+        const cost = startedCost(s.cost, lastRoundFlowUsd(s.sessionLog))
+        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun)
+        return {
+          ...s,
+          cost,
+          claudeState: { kind: 'working' },
+          workflowRun,
+          // the header's figure took the flow agents that ended after the round: the round entry takes it too
+          sessionLog: cost.lastUsd !== undefined && cost.lastUsd !== s.cost.lastUsd ? withRoundLastUsd(log, cost.lastUsd) : log,
+        }
+      })
       markClaudeState({ kind: 'working' })
     }
     return next(e)
@@ -358,7 +365,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
     const ran = await next(e)
     const launched = isOk(ran) ? launchedRun(ran.result) : undefined
-    if (launched) await patch($, s => ({ ...s, workflowRun: nameRun(s.workflowRun, launched) })).catch(() => undefined)
+    if (launched) {
+      await patch($, s => {
+        const workflowRun = nameRun(s.workflowRun, launched)
+        return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun) }
+      }).catch(() => undefined)
+    }
     return ran
   })
 
@@ -491,10 +503,13 @@ export const register: Register = on => {
     if (spawned.agentId !== undefined) {
       const id = spawned.agentId
       const startedAt = await $.clock.now()
-      await patch($, s => ({
+      await patch($, s => {
+        const workflowRun = e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun
+        return {
         ...s,
         // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
-        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun,
+        workflowRun,
+        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun),
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
@@ -502,10 +517,12 @@ export const register: Register = on => {
           description: e.description,
           requested: e.model,
           model: spawned.model,
+          ...(e.workflow && { runId: e.workflow.runId }),
           // events that outran the spawn keep their status, tokens, effort and start
           startedAt: Math.min(a.startedAt, startedAt),
         })),
-      }))
+        }
+      })
     }
     return spawned
   })
@@ -530,7 +547,8 @@ export const register: Register = on => {
       }
       // The steps already counted their part of the session's tokens: the turn's own total replaces it.
       await patch($, s => {
-        const usd = roundCost(s.cost)
+        const flowUsd = flowUsdIn(s.sessionLog, now - e.durationMs, now)
+        const usd = roundCost(s.cost, flowUsd)
         const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
         return withLoggedSignals({
           ...s,
@@ -541,7 +559,7 @@ export const register: Register = on => {
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
-          cost: endTurnCost(s.cost),
+          cost: endTurnCost(s.cost, flowUsd),
         }, now)
       })
       await setClaudeState($, { kind: 'idle' })
@@ -564,7 +582,7 @@ export const register: Register = on => {
           }
         })
         const ended = agents.find(a => a.id === agentId)
-        const entry = ended && agentLog(ended)
+        const entry = ended && agentLog(ended, agentRunId(s.workflowRun, ended))
         const spent = ended ? usdOf(ended.model, ended.usage) : 0
         // A turn that ended twice replaces the agent's event: only the change is added to its type.
         const delta = ended ? spent - (s.events?.find(ev => ev.kind === 'agent' && ev.id === agentId)?.usd ?? 0) : 0
@@ -574,7 +592,7 @@ export const register: Register = on => {
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
           // the agent is logged as it ends; a turn that ended twice is one entry
-          sessionLog: entry ? recordLog(s.sessionLog, entry) : s.sessionLog,
+          sessionLog: entry ? recordAgentLog(s.sessionLog, entry) : s.sessionLog,
           events: ended
             ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage) })
             : s.events,

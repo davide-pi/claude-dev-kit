@@ -1,5 +1,6 @@
-import type { CockpitWorkflowRun } from '../types'
+import type { CockpitAgent, CockpitLogEntry, CockpitWorkflowRun } from '../types'
 import { isRecord } from './shared'
+import { recordLog } from './timeline'
 
 // ── The workflow run in flight, from the events that really reach the mod: the `Workflow` tool's result names it, the `agent.spawn` of its agents counts it ──
 
@@ -34,6 +35,7 @@ export function addWorkflowAgent(run: CockpitWorkflowRun | undefined, runId: str
   return {
     ...kept,
     endedAt: undefined,
+    isSilent: undefined,
     agents: kept.agents.some(a => a.id === id) ? kept.agents : [...kept.agents, { id, isDone: false }],
     ...(label !== '' && { phase: label }),
     ...(round !== undefined && { round: Math.max(round, kept.round ?? 0) }),
@@ -62,6 +64,62 @@ export const expireRun = (run: CockpitWorkflowRun | undefined, now: number): Coc
   run && run.endedAt === undefined && now - (run.lastAt ?? now) > WORKFLOW_SILENCE_MS && run.agents.some(a => !a.isDone)
     ? { ...run, agents: run.agents.map(a => ({ ...a, isDone: true })) }
     : run
+
+/** `run` after the silence check closed it: it stays unlogged (`isSilent`) until a newer run replaces it. */
+export const silenceRun = (run: CockpitWorkflowRun | undefined): CockpitWorkflowRun | undefined =>
+  run?.endedAt === undefined ? run : { ...run, isSilent: true }
+
+/** The id of the run agent `agentId` belongs to; none for an agent outside it. */
+export const runIdOf = (run: CockpitWorkflowRun | undefined, agentId: string): string | undefined =>
+  run?.agents.some(a => a.id === agentId) ? run.runId : undefined
+
+/** The run agent `a` belongs to: the one its spawn named, else the one `run` holds it in. */
+export const agentRunId = (run: CockpitWorkflowRun | undefined, a: CockpitAgent): string | undefined => a.runId ?? runIdOf(run, a.id)
+
+/**
+ * The 'flow' node of `run` in `log`: its cost is the stored figure plus the agents logged since the node was written (so agents pruned from the log keep their cost),
+ * its length runs from the first agent's start, `isFailed` when the run ended silent. A resumed run updates its one node.
+ */
+function flowLog(log: CockpitLogEntry[] | undefined, run: CockpitWorkflowRun, isFailed: boolean): CockpitLogEntry[] {
+  const prev = (log ?? []).find(e => e.kind === 'flow' && e.key === run.runId)
+  const agents = (log ?? []).filter(e => e.kind === 'agent' && e.runId === run.runId && (prev === undefined || e.at > prev.at))
+  const starts = [...(prev ? [prev.at - (prev.ms ?? 0)] : []), ...agents.map(e => e.at - (e.ms ?? 0))]
+  const at = run.endedAt ?? run.lastAt ?? 0
+  const n = Math.max(run.round ?? 0, prev?.n ?? 0)
+  return recordLog(log, {
+    at,
+    kind: 'flow',
+    key: run.runId,
+    usd: (prev?.usd ?? 0) + agents.reduce((sum, e) => sum + (e.usd ?? 0), 0),
+    ...(run.name !== undefined && { text: run.name }),
+    ...(starts.length > 0 && { ms: Math.max(0, at - Math.min(...starts)) }),
+    ...(n > 0 && { n }),
+    ...(isFailed && { isFailed: true }),
+  })
+}
+
+/**
+ * `log` after the run went from `before` to `after`: a run that closed (not by silence) writes its flow node; a run that never closed properly
+ * (silent-closed, or still open) writes it, failed, once a different run replaces it. Anything else leaves the log as it was.
+ */
+export function logRunChange(log: CockpitLogEntry[] | undefined, before: CockpitWorkflowRun | undefined, after: CockpitWorkflowRun | undefined): CockpitLogEntry[] | undefined {
+  const isUnclosed = before !== undefined && before.agents.length > 0 && (before.isSilent === true ? before.endedAt !== undefined : before.endedAt === undefined)
+  if (before && before.runId !== after?.runId && isUnclosed) return flowLog(log, before, true)
+  if (before && after && before.endedAt === undefined && after.endedAt !== undefined && after.isSilent !== true) return flowLog(log, after, false)
+  return log
+}
+
+/**
+ * `log` with an agent's own entry: an agent of a run whose flow node is already written (a run replaced while it still worked) adds its cost to that node,
+ * which now ends with it, so its cost lands in the flow it belongs to and not in a round. An entry already in the log changes nothing.
+ */
+export function recordAgentLog(log: CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] {
+  const isNew = !(log ?? []).some(e => e.kind === entry.kind && e.key === entry.key)
+  const next = recordLog(log, entry)
+  const node = isNew && entry.runId !== undefined ? next.find(e => e.kind === 'flow' && e.key === entry.runId) : undefined
+  if (node === undefined || entry.at <= node.at) return next
+  return recordLog(next, { ...node, at: entry.at, usd: (node.usd ?? 0) + (entry.usd ?? 0), ms: (node.ms ?? 0) + (entry.at - node.at) })
+}
 
 /** The run still in flight; none once it ended. */
 export const activeRun = (run: CockpitWorkflowRun | undefined): CockpitWorkflowRun | undefined => (run?.endedAt === undefined ? run : undefined)

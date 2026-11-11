@@ -284,3 +284,23 @@ test('agents: IN PROGRESS shows the newest 5 and the button opens the rest, none
   await settleAll()
   await ui.unmount()
 })
+
+test('flow: given a run silent past the limit, when the tick closes it, then no flow node is logged until another run replaces it, and then it is logged failed', { timeoutMs: 15_000 }, async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  spawns(on)
+  await start($)
+  await openCockpit($)
+  await spawnWorkflowAgent($, 'w1', 1)
+  // When
+  await clock.advance(16 * 60_000)
+  await clock.advance(3000)
+  const before = (dataOf(writes)?.sessionLog as Array<{ kind: string }> | undefined) ?? []
+  await spawnWorkflowAgent($, 'w2', 1)
+  await clock.advance(3000)
+  const after = (dataOf(writes)?.sessionLog as Array<{ kind: string; key?: string; isFailed?: boolean }> | undefined) ?? []
+  // Then
+  expect(before.filter(e => e.kind === 'flow')).toEqual([])
+  expect(after.filter(e => e.kind === 'flow')).toMatchObject([{ key: 'w1', isFailed: true }])
+})

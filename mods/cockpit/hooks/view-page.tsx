@@ -1,5 +1,6 @@
 import type { CockpitLogEntry } from '../types'
 import { agentLog } from './agents'
+import { runIdOf } from './workflow'
 import { spendSplit } from './andamento'
 import { openTasks } from './context'
 import { COLORS, abbrevTokens, barCells, clockTime, costCell, duration, localDate, padCells, shortModel, spanWidth, truncateSpans } from './shared'
@@ -211,6 +212,8 @@ function logEntry(e: CockpitLogEntry): DoneEntry | undefined {
       return { at: e.at, kind: 'compact', icon: sp('◇', COLORS.blue), text: E.compact(e.tokens === undefined ? '' : abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
     case 'pr':
       return { at: e.at, kind: 'pr', icon: sp('◆', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? '') }
+    case 'flow':
+      return { at: e.at, kind: 'flow', icon: sp('󱎖', e.isFailed ? COLORS.red : COLORS.blue), text: e.text ?? e.key ?? '', ...(e.ms !== undefined && { ms: e.ms, start: e.at - e.ms }), ...(e.usd !== undefined && { usd: e.usd }) }
   }
 }
 
@@ -260,7 +263,7 @@ export function doneBlocks(k: Kit): Block[] {
   const log = s.sessionLog ?? []
   // An agent that just finished is logged as it ends; one still listed and not yet in the log shows once all the same.
   const logged = new Set(log.filter(e => e.kind === 'agent').map(e => e.key))
-  const pending = visibleAgents(s).filter(a => a.status === 'done' && !logged.has(a.id)).flatMap(a => agentLog(a) ?? [])
+  const pending = visibleAgents(s).filter(a => a.status === 'done' && !logged.has(a.id)).flatMap(a => agentLog(a, runIdOf(s.workflowRun, a.id)) ?? [])
   const entries = [...log, ...pending].flatMap(e => logEntry(e) ?? [])
   const groups = groupDone(entries, log)
   if (groups.length === 0) return []
