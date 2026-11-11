@@ -31,7 +31,7 @@ Not for: quality-only cleanup across the change (`/simplify`); fixing what a rev
 | Part | Values | Absent → |
 | --- | --- | --- |
 | scope | `<branch>` → `git fetch origin <branch>`, diff `origin/<branch>...HEAD` · `HEAD~<n>`, `<sha>`, `<sha>..<sha>` → that range · paths → the diff restricted to them, or the files as they stand (say so) · a PR id or URL → **PR mode**: read it via `gh`/`azdo-cli`, same fan-out, post only genuine tagged questions (`references/pr-mode.md`) | `git diff HEAD` + `--staged`; both empty → `git show HEAD`, said |
-| effort | `low` · `medium` · `high` · `xhigh` · `max` | `medium` |
+| effort | `low` · `medium` · `high` · `xhigh` · `max` | `high` |
 | focus | `security` · `performance` · `completeness` · any axis | none |
 
 ### Who reviews — one message, every brief identical except `model`

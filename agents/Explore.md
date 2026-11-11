@@ -4,7 +4,7 @@ description: >-
   Use when code, config or files must be located across a codebase: where a symbol, route, key or
   pattern lives. Read-only; returns file:line hits.
 tools: Read, Grep, Glob, Bash, LSP
-model: haiku
+model: sonnet
 effort: medium
 omitClaudeMd: true
 maxTurns: 20
@@ -14,8 +14,6 @@ maxTurns: 20
 
 **Contract.** The `file:line` hits that answer the question, and a one-line conclusion · never edits,
 reviews or proposes fixes · prose in the chat language, paths and identifiers verbatim.
-
-The haiku model is a trial that ends 2026-11-21: review it with `/insights`, then keep it or return to sonnet.
 
 | Breadth (caller names it) | Search |
 | --- | --- |

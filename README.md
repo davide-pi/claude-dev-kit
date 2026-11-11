@@ -123,7 +123,7 @@ is expected.
 ## Subagents
 
 Analysis and authoring on their own model boundary, so the main context window stays free. All
-default to Sonnet, except `Explore` (Haiku); the caller can override.
+default to Sonnet; the caller can override.
 
 | Agent | Does |
 |---|---|
@@ -135,7 +135,7 @@ default to Sonnet, except `Explore` (Haiku); the caller can override.
 | `agents/db-analyst.md` | The only holder of database access, and where `/db` runs: a query, plan or schema read through the CLI clients (non-dev hosts only via `db-ro.ps1`), the cause, the index that would change it, and its cost. Applies nothing. |
 | `agents/ops-analyst.md` | Logs, metrics, profiles and traces of a running service, and where `/logs` runs: Grafana through an inline MCP server (`GRAFANA_URL`, `GRAFANA_TOKEN`) that never reaches the main conversation, plus compose, containers, kubectl, Aspire and log files. Read-only, redacts secrets. |
 | `agents/doc-keeper.md` | Maintains code-derived and experience-derived docs against the source. Active only where the repository actually has a docs tree. |
-| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Haiku at medium effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
+| `agents/Explore.md` | Overrides the built-in `Explore` so searches run on Sonnet at medium effort without CLAUDE.md: `file:line` hits and a one-line conclusion, nothing else. |
 | `agents/analyst.md` | Where `/retro` runs forked: a read-only tool allowlist with no Edit or Write (a shell can still write: the agent's rules say what it may create); the skill supplies the task and the report. |
 
 ## Hooks
@@ -286,7 +286,7 @@ In a new session, started in a directory your `workspaces.json` maps:
 3. `dotnet test` through PowerShell, on a run of over 60 output lines, opens with `[output-filter]` and keeps the run's exit code.
 4. `/db "select 1"` against localhost returns `1`.
 5. A worktree opened by Claude Code lands under `<CLAUDE_WORKTREE_ROOT>`.
-6. `/usage` lists the `Explore` subagent on `haiku`.
+6. `/usage` lists the `Explore` subagent on `sonnet`.
 
 ## Plugins
 

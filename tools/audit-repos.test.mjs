@@ -44,6 +44,21 @@ test('the question is required', async () => {
   assert.equal(spawned.length, 0);
 });
 
+test('given a list of repos, when the per-repo agents are spawned, then each runs Explore on sonnet', async () => {
+  // Given
+  const list = repos(3);
+
+  // When
+  const { spawned } = await dryRun({ question: 'q', repos: list });
+
+  // Then
+  assert.equal(spawned.length, 3);
+  for (const s of spawned) {
+    assert.equal(s.agentType, 'Explore');
+    assert.equal(s.model, 'sonnet');
+  }
+});
+
 test('above 12 repositories it refuses and asks for explicit repos', async () => {
   const { out, spawned } = await dryRun({ question: 'q', repos: repos(13) });
   assert.match(out, /above the cap of 12: pass repos explicitly/);
