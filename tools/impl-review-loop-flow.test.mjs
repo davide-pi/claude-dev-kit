@@ -527,3 +527,292 @@ test("script (#P43): a note shifted by the fix's inserted lines is judged by the
   const later = await run(ARGS_M, [review([], [other, scope(10)]), review([], [other]), review(closedIds('F1'), [scope(15)]), review(closedIds('F1')), review(closedIds('F1', 'F4'))], [impl(), impl({ snapshot: T2('t2', 10) }), impl({ snapshot: T2('t3', 10) })], { finals: [review(closedIds('F1'), [confirmed])] });
   assert.deepEqual(fixes(later), ['fix round 1 findings', 'fix round 3 findings']);
 });
+
+// ── deliver flow v2, tasks 9-10: blocks, the gate, test-first ─────────────────────────────────────────────
+import { gate, tasksOf, reviewLabels } from './impl-review-loop.harness.mjs';
+
+const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
+const BLOCK_ARGS = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
+const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
+
+test('given a plan of five tasks, when the loop runs, then the implementer is called once per block, three tasks then two', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  const prompts = implCalls(calls).map(c => c.prompt);
+  assert.equal(prompts.length, 2);
+  for (const t of ['task-1-title', 'task-2-title', 'task-3-title']) assert.ok(prompts[0].includes(t) && !prompts[1].includes(t), t);
+  for (const t of ['task-4-title', 'task-5-title']) assert.ok(prompts[1].includes(t) && !prompts[0].includes(t), t);
+});
+
+test('given a block whose gate comes back red, when the fix call turns it green, then the loop goes on to the next block', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), green(), green()];
+  // When
+  const { calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  const made = implCalls(calls);
+  assert.deepEqual(made.map(c => c.opts.label), ['implement block 1', 'implement block 1 (gate fix)', 'implement block 2']);
+  assert.ok(made[1].prompt.includes('OrdersTests.Total fails'));
+});
+
+test('given a gate that reports red: timeout, when the block ends, then the loop stalls at once and names the test', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red: timeout', { test: 'SlowSyncTest' }) }), green()];
+  // When
+  const { out, calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.match(out.stall.reason, /SlowSyncTest/);
+  assert.equal(implCalls(calls).length, 1);
+});
+
+test('given no plan, when the loop runs, then there is one block and the size is M', async () => {
+  // Given
+  const args = { ...ARGS, size: undefined };
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [impl()]);
+  // Then
+  assert.equal(out.blocks.length, 1);
+  assert.deepEqual(out.blocks[0].tasks, ['1']);
+  assert.equal(reviewLabels(calls, 1).length, 2);
+  assert.equal(out.findingsLog.size, 'M');
+});
+
+test('given a block brief, when it is built, then it carries the step budget and the gate command', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] }, stuckMinutes: 3 };
+  // When
+  const { calls } = await run(args, [review([]), review([])], [green()]);
+  // Then
+  const prompt = implCalls(calls)[0].prompt;
+  assert.ok(prompt.includes('Budget: about 16 turns. At that point stop widening: run the gate and report what is left.'));
+  assert.ok(prompt.includes('node ~/.claude/scripts/gate.mjs --root \'C:/repo\' --head abc123 --test "node --test x" --stuck-minutes 3'));
+  assert.ok(prompt.includes('paste its last output line as "gate"'));
+});
+
+test('given every agent call of a run, when the script launches it, then the call carries an effort', async () => {
+  // Given
+  const lost = await run(ARGS_M, [], [null, null, null, null, null], { probe: { files: ['src/Orders/OrdersQuery.cs'] } });
+  const full = await run(BLOCK_ARGS, [review([], [finding()]), review([]), review([]), review([])], [green(), green(), green()]);
+  // When
+  const all = [...lost.calls, ...full.calls];
+  // Then
+  assert.ok(lost.calls.some(c => c.opts.agentType === 'Explore'));
+  assert.deepEqual(all.filter(c => !c.opts.effort).map(c => c.opts.label), []);
+});
+
+test('given a stack skill and a test skill, when the briefs are built, then both are read from the skill file, never loaded', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u', stackSkill: 'dotnet-backend', testSkill: 'dotnet-testing', plan: { tasks: [{ ...tasksOf(1)[0], tdd: true, criteria: ['c1'] }] } };
+  // When
+  const { calls } = await run(args, [review([]), review([])], [impl({ gate: gate('red-proven') }), green()]);
+  // Then
+  const [tests, code] = implCalls(calls).map(c => c.prompt);
+  assert.ok(code.includes('Read ~/.claude/skills/dotnet-backend/SKILL.md first (the stack skill).'));
+  assert.ok(tests.includes('Read ~/.claude/skills/dotnet-testing/SKILL.md first.'));
+  assert.ok(!code.includes('Stack skill to load first') && !tests.includes('Load the skill'));
+});
+
+const TDD_ARGS = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u', testSkill: 'dotnet-testing', plan: { tasks: [{ ...tasksOf(1)[0], tdd: true, criteria: ['the total adds the tax'] }] } };
+
+test('given a block with a tdd task and a unit command, when it runs, then a tests-first call precedes the code call', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red-proven') }), green()];
+  // When
+  const { calls } = await run(TDD_ARGS, [review([]), review([])], impls);
+  // Then
+  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['implement the change (tests first)', 'implement the change']);
+});
+
+test('given a tests-first call, when its brief is built, then it names the test skill and the red gate command', async () => {
+  // Given / When
+  const { calls } = await run(TDD_ARGS, [review([]), review([])], [impl({ gate: gate('red-proven') }), green()]);
+  // Then
+  const prompt = implCalls(calls)[0].prompt;
+  assert.ok(prompt.includes('Read ~/.claude/skills/dotnet-testing/SKILL.md first.'));
+  assert.ok(prompt.includes('the total adds the tax'));
+  assert.ok(prompt.includes('--test "node --test x" --red --unit "node --test u" --test-files'));
+});
+
+test('given a red that stays unproven after one retry, when the block goes on, then the result lists the missing proof under gaps', async () => {
+  // Given
+  const none = () => impl({ gate: gate('red: no failing test') });
+  // When
+  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], [none(), none(), green()]);
+  // Then
+  assert.equal(implCalls(calls).length, 3);
+  assert.ok(out.gaps.includes('block 1: red not proven'));
+});
+
+test('given a tdd task and no unit command, when the block runs, then there is one implementer call and a gap line', async () => {
+  // Given
+  const { unit, ...args } = TDD_ARGS;
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [green()]);
+  // Then
+  assert.equal(implCalls(calls).length, 1);
+  assert.ok(out.gaps.some(g => g.startsWith('block 1: ') && g.includes('no unit command')));
+});
+
+// ── review round: a requested gate is the only proof, size is always computed, quoting ────────────────────
+const plainGate = () => gate('green', { tree: '' });
+
+test('given a gate was requested, when the report carries no gate line, then it is not verified and the loop stalls', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x' };
+  // When
+  const { out, calls } = await run(args, [], [impl()]);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'verify-not-run');
+  assert.equal(calls.filter(c => c.opts.agentType !== 'implementer').length, 0);
+});
+
+test('given a gate line inside a code fence with prose around it, when the report is read, then the last JSON line is the gate', async () => {
+  // Given
+  const wrapped = `I ran it:\n\`\`\`\n${gate('green')}\n\`\`\`\nall done`;
+  // When
+  const { out, calls } = await run({ ...ARGS_M, verify: 'node --test x' }, [review([]), review([])], [impl({ gate: wrapped })]);
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.ok(calls.some(c => c.opts.label === 'block 1 · reader A'));
+});
+
+test('given a red gate that the fix call leaves red, when the block ends again, then the loop stalls with gate-red and the files', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red', { test: 'A fails' }) }), impl({ gate: gate('red', { test: 'A still fails' }) })];
+  // When
+  const { out, calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'gate-red');
+  assert.match(out.stall.reason, /A still fails/);
+  assert.equal(implCalls(calls).length, 2);
+  assert.deepEqual(out.files, ['src/Orders/OrdersQuery.cs']);
+  assert.equal(out.verify.status, 'fail');
+});
+
+test('given a gate fix that returns no gate line, when the block ends again, then the loop stalls as not verified', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red', { test: 'A fails' }) }), impl()];
+  // When
+  const { out } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.stall.why, 'verify-not-run');
+});
+
+test('given a gate that is still running, when the block ends, then there is no fix call and the loop stalls with gate-running', async () => {
+  // Given
+  const impls = [impl({ gate: gate('running') }), green()];
+  // When
+  const { out, calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.stall.why, 'gate-running');
+  assert.equal(implCalls(calls).length, 1);
+});
+
+test('given a size L and no plan, when the loop runs, then the size is M and a gap says so', async () => {
+  // Given
+  const args = { ...ARGS, size: 'L' };
+  // When
+  const { out } = await run(args, [review([]), review([])], [impl()]);
+  // Then
+  assert.equal(out.findingsLog.size, 'M');
+  assert.ok(out.gaps.some(g => g.includes('size is M, not the L passed')));
+});
+
+test('given a tests-first call whose gate is a build failure, when it is retried, then the brief asks for the stubs and quotes the gate', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red', { test: 'CS0246 type Order not found' }) }), impl({ gate: gate('red-proven') }), green()];
+  // When
+  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], impls);
+  // Then
+  const retry = implCalls(calls)[1];
+  assert.equal(retry.opts.label, 'implement the change (tests first, retry)');
+  assert.ok(retry.prompt.includes('CS0246 type Order not found') && retry.prompt.includes('stubs'));
+  assert.ok(!out.gaps.includes('block 1: red not proven'));
+});
+
+test('given a tests-first call whose gate is neither unproven nor a build failure, when it ends, then there is no retry and a gap', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red: timeout', { test: 'Slow' }) }), green()];
+  // When
+  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], impls);
+  // Then
+  assert.equal(implCalls(calls).length, 2);
+  assert.ok(out.gaps.includes('block 1: red not proven'));
+});
+
+test('given two blocks with the same tree, when the second ends, then reader A does not read an empty delta', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { calls } = await run(BLOCK_ARGS, [review([]), review([]), review([]), review([])], impls);
+  // Then
+  assert.equal(calls.filter(c => /reader A$/.test(c.opts.label ?? '') && c.opts.label.startsWith('block')).length, 1);
+});
+
+test('given a verify command with a double quote, when the loop starts, then it answers with an error and calls no agent', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node -e "1"' };
+  // When
+  const { out, calls } = await run(args, [], [impl()]);
+  // Then
+  assert.equal(typeof out, 'string');
+  assert.match(out, /verify command contains a double quote/);
+  assert.equal(calls.length, 0);
+});
+
+test('given a wide block whose gate fix changes few lines, when the change is sized, then both churns count and reader B runs on opus', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x' };
+  const impls = [impl({ gate: gate('red', { test: 'A fails' }), snapshot: T2('t1', 800) }), impl({ gate: gate('green'), snapshot: T2('t2', 5) })];
+  // When
+  const { calls } = await run(args, [review([]), review([])], impls);
+  // Then
+  const readers = calls.filter(c => c.opts.agentType !== 'implementer' && !/reader A$/.test(c.opts.label ?? ''));
+  assert.ok(readers.some(c => c.opts.model === 'opus'), readers.map(c => `${c.opts.label}:${c.opts.model}`).join(', '));
+});
+
+test('given an inline run whose verify command holds a double quote, when the loop starts, then it runs: no gate command is built', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'dotnet test --filter "Category=Unit"', inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
+  // When
+  const { out } = await run(args, [review([]), review([])]);
+  // Then
+  assert.equal(typeof out, 'object');
+  assert.equal(out.status, 'OK');
+});
+
+test('given an inline run with size L passed, when the loop runs, then the size is M and a gap says so', async () => {
+  // Given
+  const args = { ...ARGS, size: 'L', inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
+  // When
+  const { out } = await run(args, [review([]), review([])]);
+  // Then
+  assert.equal(out.findingsLog.size, 'M');
+  assert.ok(out.gaps.some(g => g.includes('size is M, not the L passed')));
+});
+
+test('given a two-block plan that stalls before any review round, when the result is built, then the findings log names size L', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red: timeout', { test: 'Slow' }) })];
+  // When
+  const { out } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.findingsLog.size, 'L');
+});
+
+test('given a root and dirty files with spaces, when the gate command is built, then both are quoted', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x', repoRoot: 'C:/my repo', start: { head: 'abc123', dirty: [' M docs/a b.md'] } };
+  // When
+  const { calls } = await run(args, [], [green()]);
+  // Then
+  const prompt = implCalls(calls)[0].prompt;
+  assert.ok(prompt.includes("--root 'C:/my repo' --head abc123 --test \"node --test x\" --dirty 'docs/a b.md'"));
+});

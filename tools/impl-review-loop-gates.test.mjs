@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
+import { gate } from './impl-review-loop.harness.mjs';
 
 // ── the verify gate: delta command, verify finding, gate stalls (T10, T4) ──────────────────────────
 test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {
@@ -46,7 +47,7 @@ test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → 
 });
 
 test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
-  const { out, calls } = await run({ ...ARGS_M, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
+  const { out, calls } = await run(ARGS_M, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 3);                                                    // the V1 fix is a review fix: round 3 is the final read
   assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
@@ -71,7 +72,7 @@ test('script: a V finding is fixed together with the review findings and OK is r
 });
 
 test('script: a fixer whose verify still fails with a V in its toFix is a STALL "verify-failed" listing V1; the result carries verify, evidence, notVerified', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL, evidence: 'red' }), impl({ verify: FAIL, evidence: 'still red', notVerified: 'the db part' })]);
+  const { out } = await run(ARGS, [review([])], [impl({ verify: FAIL, evidence: 'red' }), impl({ verify: FAIL, evidence: 'still red', notVerified: 'the db part' })]);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.round, 1);
   assert.equal(out.stall.why, 'verify-failed');
@@ -84,22 +85,22 @@ test('script: a fixer whose verify still fails with a V in its toFix is a STALL 
 });
 
 test('script: a review fix that stalls on verify still records its churn (the roundLog, hence the final-read tier of a resume)', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
+  const { out } = await run(ARGS, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
   assert.equal(out.stall.why, 'verify-failed');
   assert.equal(out.roundLog[0].churn, 40);
 });
 
 test('script: a guided resume after verify-failed runs the fixer again, and a pass closes V1', async () => {
   const first = [impl({ verify: FAIL }), impl({ verify: FAIL })];
-  const stalled = await run({ ...ARGS, verify: 'node --test' }, [review([])], first);
+  const stalled = await run(ARGS, [review([])], first);
   assert.equal(stalled.out.status, 'STALL');
-  const resumed = await run({ ...ARGS, verify: 'node --test', resolutions: [{ round: 1, guidance: 'check the fixture' }] }, [review([]), review([])], [first[0], impl()]);
+  const resumed = await run({ ...ARGS, resolutions: [{ round: 1, guidance: 'check the fixture' }] }, [review([]), review([])], [first[0], impl()]);
   assert.equal(resumed.out.status, 'OK');
   assert.match(resumed.calls.find((c) => c.opts.label === 'fix round 1 findings').prompt, /check the fixture/);
 });
 
 test('script: pass then fail after a fix is a STALL "green-to-red"', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), impl({ verify: FAIL })]);
+  const { out } = await run(ARGS, [review([], [finding()])], [impl(), impl({ verify: FAIL })]);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.why, 'green-to-red');
   assert.equal(out.stall.round, 1);
@@ -113,7 +114,7 @@ test('script: a report that did not run the verify command is a STALL "verify-no
   assert.equal(stalled.out.stall.why, 'verify-not-run');
   assert.equal(stalled.out.stall.round, 0);
   assert.equal(stalled.calls.filter((c) => isReview(c.opts.label)).length, 0);
-  const fixer = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), none]);
+  const fixer = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl({ gate: gate('green', { tree: '' }) }), none]);
   assert.equal(fixer.out.stall.why, 'verify-not-run');
   assert.equal(fixer.out.stall.round, 1);
   const openV = await run(ARGS, [review([])], [impl({ verify: FAIL }), none]);                    // no args.verify, but a V is open
