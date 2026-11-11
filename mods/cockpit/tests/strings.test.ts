@@ -43,7 +43,6 @@ test('Italian: a percent after its article elides it before a number read with a
   try {
     setLang('it')
     for (const [pct, text] of [[80, "all'80%"], [85, "all'85%"], [90, 'al 90%'], [100, 'al 100%']] as const) {
-      expect(t().contextAt(pct)).toBe(`󰀦 contesto ${text}`)
       expect(t().alertContext(pct)).toBe(`contesto ${text}`)
     }
   } finally {

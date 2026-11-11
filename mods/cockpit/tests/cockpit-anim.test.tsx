@@ -9,6 +9,9 @@ import type { World } from './cockpit-world'
 
 type Cell = { props?: { module?: string; props?: { kind?: string } } }
 
+/** Credits in the green: the default world's 7d window is red, which beats. */
+const QUIET: World = { rateLimits: [{ kind: 'five_hour', percentUsed: 10 }, { kind: 'seven_day', percentUsed: 10 }] }
+
 /** The kinds of animated cell a pane draws after a measure of `tokens` (none: no measure), in order. */
 async function animKinds($: Engine, on: On, tokens: number | undefined, options: World = {}, before?: () => Promise<void>) {
   world(on, options)
@@ -32,9 +35,67 @@ test('pulse: Given a threshold of 193k, When the context is at 144k (below 75%),
 })
 
 test('idle: Given a quiet pane (ready, nothing new, nothing running), When it is drawn, Then it holds no animated cell', async ($, on) => {
-  expect(await animKinds($, on, undefined)).toEqual([])
+  // the default world's 7d window is red and beats: a quiet pane has green credits
+  expect(await animKinds($, on, undefined, QUIET)).toEqual([])
+})
+
+type BeatCell = { props?: { module?: string; props?: { kind?: string; speed?: string; cells?: { t: string }[] } } }
+
+/** The beating percent figures a pane draws after a measure: the speed and the text of each, in order. */
+async function beats($: Engine, on: On, tokens: number, usedFiveHour: number | undefined, options: World = {}) {
+  world(on, options)
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  const rateLimits = usedFiveHour === undefined ? [] : [{ kind: 'five_hour' as const, percentUsed: usedFiveHour }]
+  await $.session.measure({ context: { window: 1_000_000, tokens, percent: Math.round(tokens / 10_000) }, rateLimits, cost: { usd: 1 }, changed: ['context'] })
+  const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  const cells = ((await ui.findAll({ type: 'Client' })) as BeatCell[]).filter(c => c.props?.props?.kind === 'beat')
+  await ui.unmount()
+  return cells.map(c => ({ speed: c.props?.props?.speed, text: c.props?.props?.cells?.map(x => x.t).join('') }))
+}
+
+test('beat: Given a threshold of 200k, When the context is red (180k, 90%), Then its percent is a fast beat cell', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 180_000, undefined, { autoCompactAt: 200_000 })
+  // Then
+  expect(found).toEqual([{ speed: 'fast', text: ' 82%' }])
+})
+
+test('beat: Given a threshold of 200k, When the context is orange (170k), Then its percent is a slow beat cell', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 170_000, undefined, { autoCompactAt: 200_000 })
+  // Then
+  expect(found.map(f => f.speed)).toEqual(['slow'])
+})
+
+test('beat: Given a threshold of 200k, When the context is green (110k), Then no beat cell is drawn', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 110_000, undefined, { autoCompactAt: 200_000 })
+  // Then
+  expect(found).toEqual([])
+})
+
+test('beat: Given a 5h window with 85% used (red), When the pane is drawn, Then its percent is a fast beat cell', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 110_000, 85)
+  // Then
+  expect(found).toEqual([{ speed: 'fast', text: '15%' }])
+})
+
+test('beat: Given a 5h window with 50% used (yellow), When the pane is drawn, Then its percent is a slow beat cell', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 110_000, 50)
+  // Then
+  expect(found).toEqual([{ speed: 'slow', text: '50%' }])
+})
+
+test('beat: Given a 5h window with 30% used (green), When the pane is drawn, Then no beat cell is drawn', async ($, on) => {
+  // Given / When
+  const found = await beats($, on, 110_000, 30)
+  // Then
+  expect(found).toEqual([])
 })
 
 test('breathe: Given Claude is working, When the pane is drawn, Then the state glyph breathes', async ($, on) => {
-  expect(await animKinds($, on, undefined, {}, async () => void (await $.turn.start({ text: 'go', turnId: 't1' })))).toEqual(['breathe'])
+  expect(await animKinds($, on, undefined, QUIET, async () => void (await $.turn.start({ text: 'go', turnId: 't1' })))).toEqual(['breathe'])
 })

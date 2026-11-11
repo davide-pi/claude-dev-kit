@@ -1,6 +1,6 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
-import type { AnimKind } from './anim'
+import type { AnimKind, BeatSpeed } from './anim'
 import { spanWidth } from './shared'
 import type { Span } from './shared'
 
@@ -39,11 +39,11 @@ export function line(ui: Ui, spans: readonly Span[]): RenderElement {
 }
 
 /** `cells` as an animated cell of `kind` where the surface has surface modules, else drawn still. A Client cannot sit inside a Button: its cells go beside it. */
-export function animCell(ui: Ui, key: string, kind: AnimKind, cells: readonly Span[], token?: string): RenderElement {
+export function animCell(ui: Ui, key: string, kind: AnimKind, cells: readonly Span[], token?: string, speed?: BeatSpeed): RenderElement {
   if (!ui.Client) return line(ui, cells)
   // props cross to the surface as plain data: a span's unset fields are left out, not undefined
   const plain = cells.map(s => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as Span)
-  return <ui.Client key={key} module="./anim.tsx" props={{ kind, cells: plain, ...(token === undefined ? {} : { token }) }} width={spanWidth(cells)} />
+  return <ui.Client key={key} module="./anim.tsx" props={{ kind, cells: plain, ...(token === undefined ? {} : { token }), ...(speed === undefined ? {} : { speed }) }} width={spanWidth(cells)} />
 }
 
 /** Cells a row of terminal Buttons takes with these labels. */

@@ -259,28 +259,34 @@ test('cache share: the last main-loop turn, at the end of the CTX row; a subagen
 
 // ── The header's context warning ──
 
-test('the context line at 80% or more is red, with no button of its own', async ($, on) => {
+test('Given the context at 87%, When the pane is drawn, Then there is no warning row and no button of its own', async ($, on) => {
+  // Given
   world(on, { ctxPercent: 87 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^󰀦 context at 87%$/ })).toBeDefined()
-  expect(colorOf(await ui.drawn(), /^󰀦 context at 87%$/)).toBe(RED)
+  // Then
+  expect(rowTexts(await ui.drawn()).some(r => /^󰀦|context at/.test(r))).toBe(false)
+  expect(colorOf(await ui.drawn(), /^ *87%$/)).toBe(RED)
   expect(await ui.find({ key: 'compact-now' })).toBeUndefined()
   expect((await ui.findAll({ type: 'Button' })).some(b => /compact ora/.test(b.text ?? ''))).toBe(false)
   await ui.unmount()
 })
 
-test('below 80% there is no warning; 80% exactly has it', async ($, on) => {
+test('Given the context below and then at 80%, When the pane is drawn, Then neither draws a warning row', async ($, on) => {
+  // Given
   const clock = world(on, { ctxPercent: 79 })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
   let ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^󰀦/ })).toBeUndefined()
+  // Then
+  expect(rowTexts(await ui.drawn()).some(r => /^󰀦|context at/.test(r))).toBe(false)
   await ui.unmount()
   await clock.advance(1)
   await $.session.measure({ context: { window: 1_000_000, tokens: 800_000, percent: 80 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
   ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
-  expect(await ui.find({ type: 'Text', text: /^󰀦 context at 80%$/ })).toBeDefined()
+  expect(rowTexts(await ui.drawn()).some(r => /^󰀦|context at/.test(r))).toBe(false)
   await ui.unmount()
 })
 

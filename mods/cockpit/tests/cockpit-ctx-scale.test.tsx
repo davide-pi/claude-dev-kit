@@ -37,10 +37,12 @@ test('CTX readout: without a threshold it stays the window\'s own, /1M', async (
   expect(row).toMatch(/^CTX [▰▱]+ {2}15% {3}151K\/1M/)
 })
 
-test('CTX readout: the warning prints the scaled percent, and the scale decides when it shows', async ($, on) => {
-  // 200k of 212.3k is 94% of the bar, 20% of the window
+test('CTX readout: Given 200k of a 193k threshold (94% of the bar), When the pane is drawn, Then no warning row is drawn', async ($, on) => {
+  // Given / When
   const at = await ctxRows($, on, 200_000, { autoCompactAt: 193_000 })
-  expect(at.warning).toBe('󰀦 context at 94%')
+  // Then
+  expect(at.warning).toBeUndefined()
+  expect(at.row).toMatch(/^CTX [▰▱]+ {2}94% /)
 })
 
 test('CTX readout: it keeps its cells, so the row is as wide with a threshold as without', async ($, on) => {

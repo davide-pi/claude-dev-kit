@@ -29,7 +29,6 @@ const EN = {
 
   // Header
   noRateData: 'no rate-limit data',
-  contextAt: (pct: number) => `󰀦 context at ${pct}%`,
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
@@ -127,7 +126,6 @@ const IT: Strings = {
   confirmRetro: 'quale retrospettiva? invia /retro',
 
   noRateData: 'nessun dato sui limiti',
-  contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
   lastTool: 'ultimo tool ',

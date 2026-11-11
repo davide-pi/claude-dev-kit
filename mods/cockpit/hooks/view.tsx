@@ -2,7 +2,7 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
 import { claudeStateSpans } from './agents'
-import { isBreathing } from './anim'
+import { beatSpeed, isBreathing } from './anim'
 import { andamento } from './andamento'
 import { ctxScale } from './context'
 import { isWorking } from './session'
@@ -34,8 +34,6 @@ import { aheadBehindSpans } from './work'
 
 export type { PaneActions } from './view-kit'
 
-/** The context fill from which the header warns. */
-const CTX_WARN_PCT = 80
 // The shortest bar a budget cell draws: below it the credit windows go one row each.
 const BUDGET_BAR_MIN = 4
 
@@ -125,9 +123,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     return [head, ...barCells(barLength(head, cells, text), parts, markPct), sp(' '), ...text]
   }
 
-  // CTX row: the fill, red from 80% with a warning line, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
+  // CTX row: the fill, its percent beating by its colour, then the prompt cache hit of the last main-loop turn (coloured by thresholds);
   // the readout keeps its cells (blank before the first turn's cache hit), so the bar keeps its length; its glow flows while Claude works
-  // The bar is 1.1 x the autocompact threshold long where the engine reports one: the fill, its colour, the tick and the warning follow that scale
+  // The bar is 1.1 x the autocompact threshold long where the engine reports one: the fill, its colour and the tick follow that scale
   const scale = ctxScale(s)
   const cacheShown: Span[] = [dim('· '), dim(S.cache), sp(pctCell(s.cacheShare ?? 0), cacheColor(s.cacheShare ?? 0))]
   const cacheSpans: Span[] = s.cacheShare === undefined ? [sp(' '.repeat(spanWidth(cacheShown)))] : cacheShown
@@ -137,17 +135,26 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const budgetRow = (key: string, label: string, cells: number, parts: BarPart[], text: Span[], isFlowing: boolean, tone?: string, markPct?: number): RenderElement => {
     if (!ui.Client) return line(ui, budget(label, cells, parts, text, markPct))
     const head = dim(`${label} `)
+    // The readout's percent beats where its colour is in the middle band or red (a green one has no cell: a quiet pane runs no timer); the cell keeps the percent's width
+    const at = text.findIndex(x => /^\s*\d+%$/.test(x.t))
+    const speed = at < 0 ? undefined : beatSpeed(text[at]?.c)
     return (
       <Box>
         {line(ui, [head])}
         <ui.Client key={key} module="./bar.tsx" props={{ cells: barCells(barLength(head, cells, text), parts, markPct), isFlowing, ...(tone === undefined ? {} : { tone }) }} width={barLength(head, cells, text)} />
-        {line(ui, [sp(' '), ...text])}
+        {speed === undefined ? (
+          line(ui, [sp(' '), ...text])
+        ) : (
+          <Box>
+            {line(ui, [sp(' '), ...text.slice(0, at)])}
+            {animCell(ui, `beat:${key}`, 'beat', text.slice(at, at + 1), undefined, speed)}
+            {line(ui, text.slice(at + 1))}
+          </Box>
+        )}
       </Box>
     )
   }
   const ctxRow = budgetRow('ctxbar', 'CTX', width, ctxParts, ctxText, isWorking(s, s.now), undefined, scale.markPct)
-  // triggered on the scaled percent, which it prints too
-  const ctxWarning = s.ctx.percent !== undefined && scale.pct >= CTX_WARN_PCT && line(ui, [sp(S.contextAt(Math.round(scale.limit === undefined ? s.ctx.percent : scale.pct)), COLORS.red)])
 
   // Credits row: the 5h and 7d windows side by side, the bars sharing what their readouts leave of the row, or one row each when a bar would be too short;
   // the week's pace shows as the gap segment of the 7d bar and, ending the 7d readout, as its figure
@@ -248,7 +255,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     )
 
   // The header, above the page: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
-  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ctxWarning, ...creditsRows]
+  const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ...creditsRows]
 
   // The sections in their order, told apart by an empty row; an empty one is not built (ATTENZIONE says there is nothing to do).
   const sections = [attentionBlocks, andamentoBlocks, inProgressBlocks, doneBlocks].flatMap(build => build(kit))

@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { FADE_WINDOW_MS, FLASH_WINDOW_MS, frame, isAnimating, isBreathing, isFading, mixHex, reconcile, signalAnim } from '../hooks/anim'
+import { BEAT_FAST_MS, BEAT_SLOW_MS, FADE_WINDOW_MS, FLASH_WINDOW_MS, beatSpeed, beatStep, frame, isAnimating, isBreathing, isFading, mixHex, reconcile, signalAnim } from '../hooks/anim'
 import { COLORS } from '../hooks/shared'
 import type { Span } from '../hooks/shared'
 
@@ -101,4 +101,44 @@ test('mixHex: Given two colours, When mixed, Then the channels move proportional
   expect(mixHex('#000000', '#ffffff', 1)).toBe('#ffffff')
   expect(mixHex('#000000', '#ff8000', 0.5)).toBe('#804000')
   expect(mixHex('#000000', 'subtle', 0.5)).toBe('subtle')
+})
+
+test('beatSpeed: Given a figure colour, When it is green, Then it is quiet; the middle band is slow, red is fast, an unknown colour is quiet', () => {
+  // Given / When / Then
+  expect(beatSpeed(COLORS.green)).toBeUndefined()
+  expect(beatSpeed(COLORS.yellow)).toBe('slow')
+  expect(beatSpeed(COLORS.amber)).toBe('slow')
+  expect(beatSpeed(COLORS.orange)).toBe('slow')
+  expect(beatSpeed(COLORS.red)).toBe('fast')
+  expect(beatSpeed(undefined)).toBeUndefined()
+  expect(beatSpeed(COLORS.blue)).toBeUndefined()
+})
+
+test('beatStep: Given the clock, When it is in the first half of a period, Then the beat is lit, else dim; the fast period is half the slow one', () => {
+  // Given
+  const t0 = 1_000 * BEAT_SLOW_MS
+  // When / Then
+  expect(BEAT_FAST_MS * 2).toBe(BEAT_SLOW_MS)
+  expect([0, 799, 800, 1599].map(d => beatStep('slow', t0 + d))).toEqual([0, 0, 1, 1])
+  expect([0, 399, 400, 799, 800, 1199, 1200].map(d => beatStep('fast', t0 + d))).toEqual([0, 0, 1, 1, 0, 0, 1])
+})
+
+test('beatStep: Given two beats mounted at different moments, When the clock reads the same, Then both are in the same step', () => {
+  // Given: the step comes from the clock alone, so the moment of mounting does not enter it
+  const mountedA = reconcile(undefined, 'beat', undefined, 'slow')
+  const mountedB = { ...reconcile(undefined, 'beat', undefined, 'slow'), step: 1 }
+  // When
+  const now = 5_000_000 + 1234
+  // Then
+  expect(mountedA.speed).toBe('slow')
+  expect(beatStep(mountedA.speed, now)).toBe(beatStep(mountedB.speed, now))
+})
+
+test('frame: Given a beat, When it is lit, Then the cells keep their colour; when dim, a darker step of it, never the page colour of another', () => {
+  // Given / When / Then
+  expect(frame('beat', 0, icon)[0]?.c).toBe(COLORS.red)
+  const dimmed = frame('beat', 1, icon)[0]?.c
+  expect(dimmed).toBe(mixHex(COLORS.red, COLORS.empty, 0.55))
+  expect(dimmed).not.toBe(COLORS.red)
+  expect(isAnimating('beat', 1_000_000)).toBe(true)
 })

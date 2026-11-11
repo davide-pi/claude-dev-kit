@@ -6,9 +6,10 @@ import type { SignalSeverity } from './signals'
 
 // A few cells drawn with a pattern on a surface clock of their own: terminal animations as discrete colour or glyph steps.
 // The pure parts (which frame at which step, which cells qualify) are exported for the tests; the module below only runs the clock.
-export type AnimKind = 'breathe' | 'blink' | 'flash3' | 'once' | 'spin' | 'fade' | 'pulse'
-/** `cells` is the still look (what a surface without the module draws); `token` names a value, so a change of it restarts a `once`. */
-export type AnimProps = { kind: AnimKind; cells: Span[]; token?: string }
+export type AnimKind = 'breathe' | 'blink' | 'flash3' | 'once' | 'spin' | 'fade' | 'pulse' | 'beat'
+export type BeatSpeed = 'slow' | 'fast'
+/** `cells` is the still look (what a surface without the module draws); `token` names a value, so a change of it restarts a `once`; `speed` is a `beat`'s. */
+export type AnimProps = { kind: AnimKind; cells: Span[]; token?: string; speed?: BeatSpeed }
 
 /** One frame is this long. */
 export const STEP_MS = 90
@@ -24,6 +25,13 @@ const ONCE_STEPS = 17
 /** The newest FATTO row fades from its highlight to its own colour in this many steps (~2 s). */
 const FADE_STEPS = 22
 const PULSE_HALF = 8
+/** A beat's period (lit for the first half, dim for the second); the fast one is half the slow one, so every fast cycle lines up with a slow one. */
+export const BEAT_SLOW_MS = 1600
+export const BEAT_FAST_MS = BEAT_SLOW_MS / 2
+/** How often a beat looks at the clock. */
+const BEAT_TICK_MS = 50
+/** How far a beat's dim half goes from the figure's colour towards the quiet grey. */
+const BEAT_DIM = 0.55
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 /** Intermediate colours of a breath or a fade, besides its two ends. */
 const LEVELS = 3
@@ -42,6 +50,18 @@ export const FADE_WINDOW_MS = FADE_STEPS * STEP_MS
 export function signalAnim(severity: SignalSeverity, at: number | undefined, now: number): 'blink' | 'flash3' | undefined {
   if (severity === 'block') return 'blink'
   return at !== undefined && now >= at && now - at < FLASH_WINDOW_MS ? 'flash3' : undefined
+}
+
+/** A percent figure beats by its colour's band: green is quiet, the middle band (yellow, amber, orange) beats slowly, red fast. */
+export function beatSpeed(color: string | undefined): BeatSpeed | undefined {
+  if (color === COLORS.red) return 'fast'
+  return color === COLORS.yellow || color === COLORS.amber || color === COLORS.orange ? 'slow' : undefined
+}
+
+/** A beat's step at clock time `now`: 0 lit, 1 dim. From the clock alone, so beats mounted at different moments flash together. */
+export const beatStep = (speed: BeatSpeed | undefined, now: number): number => {
+  const period = speed === 'fast' ? BEAT_FAST_MS : BEAT_SLOW_MS
+  return (now % period) / period < 0.5 ? 0 : 1
 }
 
 /** The header's state glyph breathes while Claude works or waits. */
@@ -89,6 +109,8 @@ export function frame(kind: AnimKind, step: number, cells: readonly Span[]): Spa
       return step >= FLASH_STEPS || isLit(FLASH_HALF) ? [...cells] : cells.map(dimmed)
     case 'pulse':
       return isLit(PULSE_HALF) ? toned(cells, () => COLORS.orange) : cells.map(dimmed)
+    case 'beat':
+      return step % 2 === 0 ? [...cells] : toned(cells, s => mixHex(s.c ?? COLORS.text, COLORS.empty, BEAT_DIM))
     case 'once':
       return step >= ONCE_STEPS ? [...cells] : cells.map(s => (isBlank(s) ? s : { ...s, c: ACCENT, bold: true, dim: false }))
     case 'fade':
@@ -100,30 +122,36 @@ export function frame(kind: AnimKind, step: number, cells: readonly Span[]): Spa
 
 // ── The module's state ──
 
-export type AnimState = { kind: AnimKind; step: number; token?: string }
+export type AnimState = { kind: AnimKind; step: number; token?: string; speed?: BeatSpeed }
 
 /** The state after a reading: the first one starts the kind; a `once` whose value changed starts over; a different kind starts afresh. */
-export function reconcile(state: AnimState | undefined, kind: AnimKind, token?: string): AnimState {
-  if (!state || state.kind !== kind) return { kind, step: initialStep(kind), token }
-  if (kind === 'once' && state.token !== undefined && token !== undefined && state.token !== token) return { kind, step: 0, token }
-  return state.token === token ? state : { ...state, token }
+export function reconcile(state: AnimState | undefined, kind: AnimKind, token?: string, speed?: BeatSpeed): AnimState {
+  if (!state || state.kind !== kind) return { kind, step: initialStep(kind), token, speed }
+  if (kind === 'once' && state.token !== undefined && token !== undefined && state.token !== token) return { kind, step: 0, token, speed }
+  return state.token === token && state.speed === speed ? state : { ...state, token, speed }
 }
 
 const Anim: ClientModule<AnimProps, AnimState> = (props, surface) => {
   const { Text } = surface.elements
   const state = surface.state
-  const next = reconcile(state, props.kind, props.token)
+  const next = reconcile(state, props.kind, props.token, props.speed)
   // One clock for the instance's life: a tick redraws only while its kind still has steps to show (a finished one-shot goes idle).
+  // A beat takes its step from the wall clock, not from a count of its own, and redraws only when the step changes.
   if (!state) {
-    surface.every(STEP_MS, () => {
+    surface.every(props.kind === 'beat' ? BEAT_TICK_MS : STEP_MS, () => {
       const now = surface.state
-      if (now && isAnimating(now.kind, now.step)) surface.setState({ ...now, step: now.step + 1 })
+      if (!now) return
+      if (now.kind === 'beat') {
+        const step = beatStep(now.speed, Date.now())
+        if (step !== now.step) surface.setState({ ...now, step })
+      } else if (isAnimating(now.kind, now.step)) surface.setState({ ...now, step: now.step + 1 })
     })
     surface.setState(next)
   } else if (next !== state) surface.setState(next)
+  const step = next.kind === 'beat' ? beatStep(next.speed, Date.now()) : next.step
   return (
     <Text wrap="truncate">
-      {frame(next.kind, next.step, props.cells).map((s, i) => (
+      {frame(next.kind, step, props.cells).map((s, i) => (
         <Text key={i} color={s.c} dimColor={s.dim} weight={s.bold ? 'bold' : undefined}>
           {s.t}
         </Text>
