@@ -5,7 +5,7 @@ import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../type
 import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
 import { withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
-import { parseRateCache, resolveAlm, tabNeeds, worklogDays } from './session'
+import { parseRateCache, resolveAlm, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
 import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
@@ -225,19 +225,12 @@ async function tickClock($: EngineInterface): Promise<number> {
   return now
 }
 
-/** Whether the pane is open and its selected tab asks for the fast tier. */
-async function isFastWanted($: EngineInterface): Promise<boolean> {
-  if (!isOpen) return false
-  const { tab } = await read($, snapshot)
-  return tabNeeds(tab).fast
-}
-
-/** Fast tier (2 s): the elapsed times of a tab that draws them. */
+/** Fast tier (2 s): the elapsed times the page draws, while the pane is open. */
 export async function fastTick($: EngineInterface): Promise<void> {
-  if (await isFastWanted($)) await tickClock($)
+  if (isOpen) await tickClock($)
 }
 
-/** Medium tier (10 s): git (and, with the Work tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
+/** Medium tier (10 s): git while the pane is open: the header shows it. */
 export async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
@@ -253,7 +246,7 @@ export async function refreshOnOpen($: EngineInterface): Promise<void> {
   await refreshDoneClaims($)
 }
 
-/** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
+/** Slow tier (30 s): the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
 export async function slowTick($: EngineInterface): Promise<void> {
   if (!isOpen) {
     // The status line's badges read the snapshot: while any agent is running, the local list (no model call) keeps the agent badge from staying lit for one that ended unseen;

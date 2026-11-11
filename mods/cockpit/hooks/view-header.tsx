@@ -1,4 +1,5 @@
 import type { CockpitSnapshot } from '../types'
+import { ctxScale } from './context'
 import { parseReset, weeklyPace } from './session'
 import { abbrevTokens, countdown, ctxColor, effortGlyph, pctCell, rateColor } from './shared'
 import type { Span } from './shared'
@@ -56,11 +57,15 @@ export function contextText(s: CockpitSnapshot): Span[] {
   // Until the engine measures the window (a resumed session, before its first response) the last state's reading stands in, with a `~`.
   const isStale = s.ctx.percent === undefined && s.lastCtx !== undefined
   const { tokens, window, percent } = isStale && s.lastCtx ? s.lastCtx : s.ctx
+  const scale = ctxScale(s)
+  // The readout follows the bar: where the engine reports a threshold, the percent and the length are of the bar's scale; else the window's own.
   // Before the first response nothing is measured: the fill reads as empty, not as missing.
-  const pct = percent ?? 0
-  const out: Span[] = [...pctSpans(pct, ctxColor(pct), isStale), sp(` ${abbrevTokens(tokens ?? 0, true).padStart(TOKENS_CELLS)}`)]
-  // the window keeps its cells too: unmeasured or switched (`/1M`, `/200K`), the bar keeps its length
-  out.push(dim((window ? `/${abbrevTokens(window, true)}` : '').padEnd(WINDOW_CELLS)))
+  const pct = scale.limit === undefined ? (percent ?? 0) : Math.round(scale.pct)
+  // rounded to the thousand: `/232K` keeps the window's cells (`/231.6K` would not)
+  const length = scale.limit === undefined ? window : Math.round(scale.limit / 1000) * 1000
+  const out: Span[] = [...pctSpans(pct, ctxColor(scale.pct), isStale), sp(` ${abbrevTokens(tokens ?? 0, true).padStart(TOKENS_CELLS)}`)]
+  // the length keeps its cells too: unmeasured or switched (`/1M`, `/200K`), the bar keeps its length
+  out.push(dim((length ? `/${abbrevTokens(length, true)}` : '').padEnd(WINDOW_CELLS)))
   return out
 }
 

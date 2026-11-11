@@ -6,43 +6,37 @@ import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
 import { flagOf, iso, rowTexts, settle, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-test('English is the default: the tab labels, the footer and the titles', async ($, on) => {
+test('English is the default: the footer and the titles', async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('tab:agents'), await label('tab:context'), await label('tab:signals'), await label('tab:work'), await label('tab:notes'), await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['Agents', 'Ctx', 'Notifications', 'Work', 'Notes', 'compact', 'retrospective', 'log hours'])
-  expect(rowTexts(await ui.drawn()).some(r => r.startsWith('SUBAGENTS · 0 running'))).toBe(true)
+  expect([await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['compact', 'retrospective', 'log hours'])
+  expect(rowTexts(await ui.drawn()).some(r => r === 'ATTENTION')).toBe(true)
   await ui.unmount()
 })
 
-test('both languages draw every tab, with every label of the bundles in both and no key missing', async ($, on) => {
+test('both languages draw the page, with every label of the bundles in both and no key missing', async ($, on) => {
   const options: World = { sessionId: () => 'chat-7', branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
   world(on, options)
   const keys = (o: unknown, prefix = ''): string[] =>
     Object.entries(o as Record<string, unknown>).flatMap(([k, v]) => (v !== null && typeof v === 'object' ? keys(v, prefix + k + '.') : [prefix + k]))
   try {
     setLang('en')
-    const named = (k: string) => !k.startsWith('contextCategories.') // the engine's own names stay as they are in English
-    const en = keys(t()).filter(named).sort()
+    const en = keys(t()).sort()
     setLang('it')
-    expect(keys(t()).filter(named).sort()).toEqual(en)
-    for (const [lang, files, tabs] of [
-      ['en', {}, ['Agents', 'Context', 'Notifications', 'Work', 'Notes']],
-      ['it', IT_FILE, ['Agenti', 'Contesto', 'Notifiche', 'Lavoro', 'Note']],
+    expect(keys(t()).sort()).toEqual(en)
+    for (const [lang, files, titles] of [
+      ['en', {}, ['ATTENTION']],
+      ['it', IT_FILE, ['ATTENZIONE']],
     ] as const) {
       options.files = files
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
       const ui = await mountPane($, 58)
-      const ids = ['agents', 'context', 'signals', 'work', 'notes']
-      for (const [i, id] of ids.entries()) {
-        await ui.press({ key: 'tab:' + id })
-        expect((await ui.find({ key: 'tab:' + id }))?.text).toBe(tabs[i]) // the selected tab keeps its full name
-        const drawn = rowTexts(await ui.drawn()).join('\n')
-        // an undefined or raw key would show as "undefined" or a dotted path
-        expect(drawn, lang + ' ' + id).not.toMatch(/undefined|\[object|\bbuttons\.|\bsignalText\./)
-      }
-      expect(rowTexts(await ui.drawn()).some(r => (lang === 'en' ? /^no saved notes/ : /^nessuna nota salvata/).test(r))).toBe(true)
+      const rows = rowTexts(await ui.drawn())
+      for (const title of titles) expect(rows, lang).toContain(title)
+      // an undefined or raw key would show as "undefined" or a dotted path
+      expect(rows.join(' '), lang).not.toMatch(/undefined|\[object|\bbuttons\.|\bsignalText\./)
       await ui.unmount()
     }
   } finally {
@@ -53,7 +47,7 @@ test('both languages draw every tab, with every label of the bundles in both and
 test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {
   const options: World = { files: IT_FILE }
   world(on, options)
-  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^SUBAGENTI · /.test(r)) ? 'it' : 'en')
+  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^ATTENZIONE$/.test(r)) ? 'it' : 'en')
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const italian = 'it'
   const english = 'en'
@@ -89,7 +83,7 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
-    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^SUBAGENTI · /.test(r))
+    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^ATTENZIONE$/.test(r))
     expect(await isItalian()).toBe(true)
     // read once: a change of the file is for the next session start
     options.files = {}

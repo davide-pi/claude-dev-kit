@@ -3,15 +3,10 @@ import { expect, test } from 'claude-code/testing'
 import {
   autocompactForecast,
   compactInstructions,
-  contextOf,
   ctxGrowth,
   parseCtx,
   recordCtxSample,
   recordRound,
-  shouldCompact,
-  staticOf,
-  withDeltas,
-  withStatic,
 } from '../hooks/context'
 
 // ── Compaction instructions, the worklog scope, the deliver perimeter ──
@@ -91,66 +86,12 @@ test('autocompactForecast: requests left from the average growth; absent without
   expect(autocompactForecast([100_000, 110_000], 150_000)).toBe(4)
 })
 
-test('contextOf: the rows, the window and the skills listing count', () => {
-  const row = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred') => ({ name, tokens, color: 'promptBorder', isDeferred: kind === 'deferred', kind })
-  const context = contextOf(
-    {
-      categories: [row('System prompt', 8000, 'used'), row('Messages', 90_000, 'used'), row('Free space', 700_000, 'free')],
-      totalTokens: 248_000,
-      rawMaxTokens: 1_000_000,
-      skills: { totalSkills: 60, includedSkills: 41, tokens: 4200, skillFrontmatter: [] },
-    },
-    false,
-  )
-  // biggest first, free space last
-  expect(context.rows).toEqual([
-    { name: 'Messages', tokens: 90_000, kind: 'used' },
-    { name: 'System prompt', tokens: 8000, kind: 'used' },
-    { name: 'Free space', tokens: 700_000, kind: 'free' },
-  ])
-  expect([context.total, context.max, context.isExact]).toEqual([248_000, 1_000_000, false])
-  expect(context.skills).toEqual({ listed: 41, total: 60 })
-  // no skill listing: none claimed
-  expect(contextOf({ categories: [], totalTokens: 0, rawMaxTokens: 0 }, true)).toEqual({
-    rows: [],
-    total: 0,
-    max: 0,
-    isExact: true,
-  })
-})
-
-test('contextOf: an exact reading marks isExact on every row, an estimate on none', () => {
-  const row = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer') => ({ name, tokens, color: 'promptBorder', isDeferred: false, kind })
-  const b = {
-    categories: [row('System prompt', 8000, 'used'), row('Messages', 90_000, 'used'), row('Free space', 700_000, 'free')],
-    totalTokens: 98_000,
-    rawMaxTokens: 1_000_000,
-    memoryFiles: [],
-    mcpTools: [],
-    agents: [],
-  }
-  expect(contextOf(b, true).rows.map(r => r.isExact)).toEqual([true, true, true])
-  expect(contextOf(b, false).rows.map(r => r.isExact)).toEqual([undefined, undefined, undefined])
-})
-
 test('recordRound keeps the last twenty main-turn contexts, and a shrinking context stays in the series', () => {
   const rounds = Array.from({ length: 25 }, (_, i) => i + 1).reduce<number[]>((all, n) => recordRound(all, n * 1000), [])
   expect(rounds).toHaveLength(20)
   expect(rounds[0]).toBe(6000)
   expect(rounds.at(-1)).toBe(25_000)
   expect(recordRound([200_000], 40_000)).toEqual([200_000, 40_000])
-})
-
-test('shouldCompact: from 70 % with the last three rounds each growing over 5 %, or with a forecast of 3 requests or fewer', () => {
-  const grown = [100, 106, 113, 120] // +6 %, +6.6 %, +6.2 %
-  expect(shouldCompact({ percent: 70, rounds: grown })).toBe(true)
-  expect(shouldCompact({ percent: 69, rounds: grown })).toBe(false)
-  expect(shouldCompact({ percent: 90, rounds: [100, 106, 113, 118] })).toBe(false) // the last grew 4.4 %
-  expect(shouldCompact({ percent: 90, rounds: grown.slice(1) })).toBe(false) // only two growths seen
-  expect(shouldCompact({ percent: 90, rounds: [100, 100, 100, 100] })).toBe(false)
-  expect(shouldCompact({ percent: 10, forecast: 3 })).toBe(true)
-  expect(shouldCompact({ percent: 10, forecast: 4 })).toBe(false)
-  expect(shouldCompact({})).toBe(false)
 })
 
 test('ctxGrowth: the average growth per turn of the samples; none with fewer than two or a context that does not grow', () => {
@@ -168,46 +109,3 @@ test('parseCtx: the context a data file keeps, or none when any number is missin
   expect(parseCtx('x')).toBeUndefined()
 })
 
-const ctxRow = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred' = 'used') => ({ name, tokens, kind })
-
-test('staticOf and withStatic: the static rows of an exact reading replace the estimate of a later one, Messages stay live, free space gives back what the used rows took', () => {
-  const exact = {
-    rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500), ctxRow('MCP tools', 4000, 'deferred'), ctxRow('Free space', 690_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
-    total: 100_500,
-    max: 1_000_000,
-    skills: { listed: 4, total: 5 },
-    isExact: true,
-  }
-  expect(staticOf(exact)).toEqual({
-    rows: [
-      { name: 'System prompt', tokens: 9500 },
-      { name: 'MCP tools', tokens: 4000 },
-    ],
-    skills: { listed: 4, total: 5 },
-  })
-  const summary = {
-    rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 8000), ctxRow('MCP tools', 3000, 'deferred'), ctxRow('Free space', 700_000, 'free'), ctxRow('Autocompact buffer', 33_000, 'buffer')],
-    total: 103_000,
-    max: 1_000_000,
-    isExact: false,
-  }
-  const merged = withStatic(summary, staticOf(exact))
-  expect(merged.rows).toEqual([
-    { name: 'Messages', tokens: 95_000, kind: 'used' },
-    { name: 'System prompt', tokens: 9500, kind: 'used', isExact: true },
-    { name: 'MCP tools', tokens: 4000, kind: 'deferred', isExact: true },
-    { name: 'Free space', tokens: 698_500, kind: 'free' },
-    { name: 'Autocompact buffer', tokens: 33_000, kind: 'buffer' },
-  ])
-  expect([merged.total, merged.isExact, merged.skills]).toEqual([104_500, false, { listed: 4, total: 5 }])
-})
-
-test('withDeltas: a round read stamps each row with its change from the reading before; any other read keeps the deltas it had', () => {
-  const before = { rows: [ctxRow('Messages', 91_000), ctxRow('System prompt', 9500)], total: 100_500, max: 1_000_000, isExact: false }
-  const next = { ...before, rows: [ctxRow('Messages', 95_000), ctxRow('System prompt', 9500), ctxRow('Skills', 2000)] }
-  const round = withDeltas(next, before, true)
-  expect(round.rows.map(r => r.delta)).toEqual([4000, 0, undefined])
-  const later = withDeltas({ ...next, rows: [ctxRow('Messages', 96_000), ctxRow('System prompt', 9500), ctxRow('Skills', 2000)] }, round, false)
-  expect(later.rows.map(r => r.delta)).toEqual([4000, 0, undefined])
-  expect(withDeltas(next, undefined, true).rows.map(r => r.delta)).toEqual([undefined, undefined, undefined])
-})

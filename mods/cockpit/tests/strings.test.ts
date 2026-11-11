@@ -30,24 +30,10 @@ test('what reads the same in both languages is one value, shared by both bundles
     setLang('it')
     const it = t()
     expect(it.tokenLabels).toBe(en.tokenLabels)
-    expect(it.diffTitle).toBe(en.diffTitle)
-    for (const key of ['cache', 'taskTitle'] as const) expect(it[key]).toBe(en[key])
+    for (const key of ['cache'] as const) expect(it[key]).toBe(en[key])
     // the texts of the v4 views are not shared: each language has its own
-    for (const key of ['tabs', 'signalText', 'tabsShort', 'signalFields', 'buttons'] as const) expect(it[key]).not.toBe(en[key])
+    for (const key of ['signalText', 'signalFields', 'buttons', 'page'] as const) expect(it[key]).not.toBe(en[key])
     expect(it.buttons.retro).not.toBe(en.buttons.retro)
-  } finally {
-    setLang('en')
-  }
-})
-
-test('Italian: the context details title and the tabs are translated', () => {
-  try {
-    setLang('it')
-    expect(t().contextDetailsTitle).toBe('DETTAGLI CONTESTO')
-    expect(t().tabs).toEqual({ agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' })
-    setLang('en')
-    expect(t().contextDetailsTitle).toBe('CONTEXT DETAILS')
-    expect(t().tabs).toEqual({ agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' })
   } finally {
     setLang('en')
   }
@@ -64,27 +50,32 @@ test('Italian: a percent after its article elides it before a number read with a
     setLang('en')
   }
 })
-
-test('Italian: the context category names are translated, one the engine adds shows as it is; English shows them as they are', () => {
+test('the four page sections are titled in both languages, and no todo points at a tab', () => {
   try {
-    setLang('it')
-    expect(t().contextCategories.Messages).toBe('Messaggi')
-    expect(t().contextCategories['System prompt']).toBe('Prompt di sistema')
-    expect(t().contextCategories['Free space']).toBeUndefined() // not a row: the Context table lists the used categories only
-    expect(t().contextCategories['A new category']).toBeUndefined()
     setLang('en')
-    expect(t().contextCategories.Messages).toBeUndefined()
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENTION', 'TREND', 'IN PROGRESS', 'DONE', 'nothing to do'])
+    expect(t().signalText.workflow('stall').todo).toContain('IN PROGRESS')
+    setLang('it')
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENZIONE', 'ANDAMENTO', 'IN CORSO', 'FATTO', 'niente da fare'])
+    expect(t().signalText.workflow('stall').todo).toContain('IN CORSO')
+    for (const lang of ['en', 'it'] as const) {
+      setLang(lang)
+      expect(t().signalText.ctxGrowth(50_000).todo).not.toMatch(/\(Contes|\(Context/)
+      expect(t().signalText.workflow('stall').todo).not.toMatch(/tab/i)
+    }
   } finally {
     setLang('en')
   }
 })
 
-test('the context growth and changes additions are translated', () => {
+test('a compact event without tokens reads "compacted" with no double space, in both languages', () => {
   try {
-    setLang('en')
-    expect([t().grewTitle, t().editedHere]).toEqual(['WHAT GREW THE CONTEXT', '󰧞 this chat'])
-    setLang('it')
-    expect([t().grewTitle, t().editedHere]).toEqual(['COSA HA GONFIATO IL CONTESTO', '󰧞 questa chat'])
+    for (const [lang, word] of [['en', 'compacted'], ['it', 'compattato']] as const) {
+      setLang(lang)
+      expect(t().page.events.compact('', '')).toBe(word)
+      expect(t().page.events.compact('120k', '40k')).toBe(`${word} 120k → 40k`)
+      expect(t().page.events.compact('', '40k')).toBe(`${word} → 40k`)
+    }
   } finally {
     setLang('en')
   }

@@ -46,17 +46,15 @@ import {
   slowTick,
   startedCost,
 } from './refresh'
-import { diffActions, paneActions } from './pane-actions'
+import { paneActions } from './pane-actions'
 import { usdOf } from './pricing'
-import { scheduleContextRead } from './refresh-context'
 import { refreshGit } from './refresh-git'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
-import { DIFF_PANE, INITIAL, PANE } from './state'
+import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { bashLog, nextCompactKey, recordAgentEvent, recordLog } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
-import { diffView } from './view-work'
 import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
 import { parseCreatedPr, upsertPr } from './work'
 
@@ -171,7 +169,7 @@ export const register: Register = on => {
         const history = addHistory(own?.history, left)
         // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
         const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', mainTokens: own?.mainTokens, agentTokens }
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
         // The history takes the running agents as interrupted; a snapshot that is not this session's has nothing of it to write.
         if (own) await $.fs.write(`${dir}/.cache/cockpit-data-${e.sessionId}.json`, JSON.stringify(sessionData(own, history)))
@@ -186,19 +184,6 @@ export const register: Register = on => {
   on('command.run', { command: 'cockpit' }, async $ => {
     const opened = await open($)
     return { text: opened.isPlaced ? t().commandOpen : t().commandWaiting(opened.reason) }
-  })
-
-  // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
-  on('ui.render', { component: 'Pane', requestId: DIFF_PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const s = await read($, snapshot)
-    return diffView(ui, s.diff, e.props.bodyColumns, diffActions($))
-  })
-
-  on('ui.close', { id: DIFF_PANE }, async ($, e, next) => {
-    const closed = await next(e)
-    await patch($, s => ({ ...s, diff: undefined })).catch(() => undefined)
-    return closed
   })
 
   // Any close, whoever asked for it: the pane stays closed until `/cockpit` or the next session start (autoOpen).
@@ -547,7 +532,6 @@ export const register: Register = on => {
         }
       })
       await setClaudeState($, { kind: 'idle' })
-      await scheduleContextRead($).catch(() => undefined)
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
       await refreshGit($)
       await refreshDoneClaims($)

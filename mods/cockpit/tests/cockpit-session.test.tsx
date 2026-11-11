@@ -10,12 +10,9 @@ import {
   finishAgent,
   measureWith,
   mountPane,
-  noteKeys,
-  notesPane,
   openCockpit,
   paneRows,
   rlCache,
-  saveNote,
   settleAll,
   spawnAgent,
   spawns,
@@ -30,7 +27,7 @@ test('a data file from before the model usage was dropped still loads: its histo
   world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
+  expect(rowTexts(await ui.drawn()).some(r => /agent implementer/.test(r))).toBe(true)
   await ui.unmount()
   await settle()
   expect(dataOf(writes)).not.toHaveProperty('modelUse')
@@ -47,14 +44,13 @@ test('the state file is written at session start with open:false and the session
     agents: { running: 0, modelWarnings: 0 },
     effort: 'high',
     tasks: null,
-    tab: 'agents',
   })
-  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks', 'tab'])
+  expect(Object.keys(flagOf(writes) as object)).toEqual(['open', 'at', 'lastTurnUsd', 'agents', 'effort', 'tasks'])
   // what must survive a resume is in the session data file
   expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX, startedAt: NOW })
 })
 
-const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: 'agents' }
+const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
 
 test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
   const writes = new Map<string, string>()
@@ -181,7 +177,6 @@ test('the state file follows the last turn cost and the agent counts, at most on
     agents: { running: 1, modelWarnings: 1 },
     effort: 'high',
     tasks: null,
-    tab: 'agents',
   })
   const afterFlush = log.length
 
@@ -205,43 +200,10 @@ test("the state file's last turn cost is the ended turn's while the next one has
   expect(flagOf(writes)).toMatchObject({ lastTurnUsd: 0.38 })
 })
 
-test('the selected tab is written in the state file', async ($, on) => {
-  const writes = new Map<string, string>()
-  const clock = world(on, { writes })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await paneRows($, 50, 'work')
-  await clock.advance(3000)
-  expect(flagOf(writes)).toMatchObject({ tab: 'work' })
-})
-
-test('a state file left by an earlier run brings its tab back', async ($, on) => {
-  world(on, { stateFile: JSON.stringify({ open: false, tab: 'context' }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { rows } = await paneRows($)
-  expect(rows.some(r => /^SUBAGENTS/.test(r))).toBe(false)
-  expect(rows.some(r => /^CONTEXT/.test(r))).toBe(true)
-})
-
-test('an unknown tab in the state file is ignored', async ($, on) => {
-  world(on, { stateFile: JSON.stringify({ open: false, tab: 'nope' }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^SUBAGENTS/.test(r))).toBe(true)
-})
-
 test('a state file that is not JSON is ignored', async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^SUBAGENTS/.test(r))).toBe(true)
-})
-
-test('session.end keeps the tab in the closed file, so a resume finds it', async ($, on) => {
-  const writes = new Map<string, string>()
-  world(on, { writes })
-  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await paneRows($, 50, 'work')
-  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  expect(flagOf(writes)).toEqual({ ...CLOSED, tab: 'work' })
+  expect((await paneRows($)).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
 })
 
 test('a write delayed across a /clear writes nothing to the new session\'s file', async ($, on) => {
@@ -287,10 +249,9 @@ test('session.end while id() still answers the ending session: a tick in between
   id = 's-2' // no session.start follows a /clear
   await clock.advance(135_000)
   const ui = await mountPane($)
-  await ui.press({ key: 'tab:agents' })
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a2' })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
+  expect(rowTexts(await ui.drawn()).some(r => /agent (running|finished)-one/.test(r))).toBe(false)
   await ui.unmount()
   expect(fileOfSession(writes, 's-2')?.history).toEqual([])
   expect(fileOfSession(writes, 's-1')).toEqual(ended)
@@ -310,7 +271,6 @@ test('a session.end whose file write is cut short still leaves nothing of the en
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
   id = 's-2'
   const ui = await mountPane($)
-  await ui.press({ key: 'tab:agents' })
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   await ui.unmount()
 })
@@ -318,7 +278,7 @@ test('a session.end whose file write is cut short still leaves nothing of the en
 test('a resume reloads the history of the session it resumes', async ($, on) => {
   let id = 's-2'
   const history = [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)]
-  const clock = world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, tab: 'agents', history }) })
+  const clock = world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, history }) })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   id = 's-1'
@@ -326,7 +286,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 2')
+  expect(rowTexts(await ui.drawn()).filter(r => /agent (implementer|reviewer)/.test(r))).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -345,7 +305,7 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
 test('follow-up: a saved state without agentTokens starts the count from the history it lists', async ($, on) => {
   const writes = new Map<string, string>()
   const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
-  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', history: [h('x1', 3000), h('x2', 2000)] }) })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, history: [h('x1', 3000), h('x2', 2000)] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((flagOf(writes) as { agentTokens?: number }).agentTokens).toBe(5000)
 })
@@ -353,7 +313,7 @@ test('follow-up: a saved state without agentTokens starts the count from the his
 test('follow-up: a saved agentTokens wins over the history sum', async ($, on) => {
   const writes = new Map<string, string>()
   const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
-  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'agents', agentTokens: 9000, history: [h('x1', 3000)] }) })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, agentTokens: 9000, history: [h('x1', 3000)] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((flagOf(writes) as { agentTokens?: number }).agentTokens).toBe(9000)
 })
@@ -376,33 +336,11 @@ function refusingFirstWriteTimer(on: On): On {
   return wrapped as unknown as On
 }
 
-test('follow-up: a state-file timer the engine refused does not stop a later change from being written', async ($, on) => {
-  const writes = new Map<string, string>()
-  const clock = world(refusingFirstWriteTimer(on), { writes })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 50)
-  await settleAll()
-  // Context draws no elapsed time: no fast tick writes the file behind the timer's back.
-  await ui.press({ key: 'tab:context' }) // inside the throttle window: its timer is refused, nothing is written
-  await settleAll()
-  await clock.advance(6500)
-  await ui.press({ key: 'tab:agents' }) // the window is over: written at once
-  await settleAll()
-  expect((flagOf(writes) as { tab?: string }).tab).toBe('agents')
-  await clock.advance(500)
-  await ui.press({ key: 'tab:context' }) // inside the window again: the refused timer must not hold this one back
-  await settleAll()
-  await clock.advance(2500)
-  await settleAll()
-  expect((flagOf(writes) as { tab?: string }).tab).toBe('context')
-  await ui.unmount()
-})
-
 // ── Phase 6: session data file ──
 
 const SAVED_PR = { number: 7, title: 'Old work' }
 
-test('session data: history, PRs, the notes and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
+test('session data: history, PRs and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   spawns(on)
@@ -413,22 +351,18 @@ test('session data: history, PRs, the notes and the context rounds go to cockpit
   await finishAgent($, 'a1')
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
   await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 'm1', reason: 'answer' })
-  const ui = await notesPane($)
-  await saveNote(ui, 'ask Anna')
-  await ui.unmount()
-  expect(dataOf(writes)?.notes).toBeUndefined() // inside the 3 s window of the start write
+  expect(dataOf(writes)?.prs).toEqual([]) // inside the 3 s window of the start write
+  await openCockpit($) // the tiers tick only while the pane is open
   await clock.advance(135_000) // the finished agent leaves the list for the history
   const data = dataOf(writes)
-  expect(data).toMatchObject({ notes: [{ id: 1, text: 'ask Anna' }], ctxRounds: [248_000], prs: [{ number: 42, title: 'Add filter' }] })
+  expect(data).toMatchObject({ ctxRounds: [248_000], prs: [{ number: 42, title: 'Add filter' }] })
   expect(data?.history).toHaveLength(1)
   const flag = flagOf(writes) as Record<string, unknown>
   expect(flag.history).toBeUndefined()
   expect(flag.prs).toBeUndefined()
-  expect(flag.notes).toBeUndefined()
-  expect(data?.note).toBeUndefined() // the single note of the old file is gone from the new one
 })
 
-test('session data: a resume brings back the history, the PRs, the notes and the context samples', async ($, on) => {
+test('session data: a resume brings back the history, the PRs and the context samples; the notes an old file holds are dropped', async ($, on) => {
   const writes = new Map<string, string>()
   const dataFile = JSON.stringify({
     history: [entry('a9', 'implementer', NOW - 30_000)],
@@ -440,60 +374,32 @@ test('session data: a resume brings back the history, the PRs, the notes and the
   world(on, { writes, dataFile })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect((await ui.find({ type: 'Text', text: /^HISTORY · / }))?.text).toBe('HISTORY · 1')
-  await ui.press({ key: 'tab:notes' })
-  expect(await noteKeys(ui, 'send')).toEqual(['note:send:3', 'note:send:5'])
-  await ui.press({ key: 'tab:work' })
-  expect(rowTexts(await ui.drawn())).toContain('PR · 1')
+  expect(rowTexts(await ui.drawn()).some(r => /agent implementer/.test(r))).toBe(true)
   await ui.unmount()
   // written back as it was read
-  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }], ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
-})
-
-test('session data: the single note of a data file from before the list becomes its first entry, and is written as a list', async ($, on) => {
-  const writes = new Map<string, string>()
-  world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [], note: 'ask Anna' }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  // written back as a list, the old key gone
-  expect(dataOf(writes)?.note).toBeUndefined()
-  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'ask Anna' }] })
-  const ui = await notesPane($)
-  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1'])
-  expect(rowTexts(await ui.drawn()).some(r => r.startsWith('ask Anna'))).toBe(true)
-  await saveNote(ui, 'call back')
-  expect(await noteKeys(ui, 'send')).toEqual(['note:send:1', 'note:send:2'])
-  await ui.unmount()
-})
-
-test('session data: when the data file holds both, the list wins over the old single note', async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ history: [], prs: [], note: 'old', notes: [{ id: 2, text: 'new' }] }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await notesPane($)
-  expect(await noteKeys(ui, 'send')).toEqual(['note:send:2'])
-  await ui.unmount()
+  expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
 })
 
 test('session data: a state file from before the data file hands its history and PRs over, once', async ($, on) => {
   const writes = new Map<string, string>()
   const history = [entry('a9', 'implementer', NOW - 30_000)]
-  world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'work', history, prs: [SAVED_PR] }) })
+  world(on, { writes, stateFile: JSON.stringify({ open: false, history, prs: [SAVED_PR] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(dataOf(writes)).toEqual({ history, prs: [SAVED_PR], ctx: LIVE_CTX, startedAt: NOW })
   const flag = flagOf(writes) as Record<string, unknown>
   expect(flag.history).toBeUndefined()
   expect(flag.prs).toBeUndefined()
-  expect(flag.tab).toBe('work')
+  expect(flag.tab).toBeUndefined()
 })
 
 test('session data: once the data file exists the old place is never read again, even with its fields empty', async ($, on) => {
   world(on, {
     dataFile: JSON.stringify({ history: [], prs: [] }),
-    stateFile: JSON.stringify({ open: false, tab: 'work', history: [entry('a9', 'implementer', NOW - 30_000)], prs: [SAVED_PR] }),
+    stateFile: JSON.stringify({ open: false, history: [entry('a9', 'implementer', NOW - 30_000)], prs: [SAVED_PR] }),
   })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect(await ui.find({ type: 'Text', text: /^HISTORY · / })).toBeUndefined()
-  expect(rowTexts(await ui.drawn()).some(r => /^PR · [1-9]/.test(r))).toBe(false)
+  expect(rowTexts(await ui.drawn()).some(r => /agent implementer/.test(r))).toBe(false)
   await ui.unmount()
 })
 
@@ -502,24 +408,6 @@ test('session data: a field of the wrong shape is left out, never thrown', async
   world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, notes: [null, { id: 1, text: 7 }, { id: 'x', text: 'a' }, { id: 2, text: ' ' }], ctxRounds: ['a', -1], ctxSamples: null }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX, startedAt: NOW })
-})
-
-test('session data: the end of the session writes the notes into the data file; a snapshot of another session writes none', async ($, on) => {
-  let id = 's-1'
-  const writes = new Map<string, string>()
-  world(on, { sessionId: () => id, writes })
-  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await notesPane($)
-  await saveNote(ui, 'keep me')
-  await ui.unmount()
-  id = 's-2'
-  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
-  expect(dataOf(writes)).toMatchObject({ notes: [{ id: 1, text: 'keep me' }] })
-  const text = () => writes.get([...writes.keys()].find(k => DATA.test(k)) ?? '')
-  const before = text()
-  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } }) // nothing owns the snapshot now
-  expect(text()).toBe(before)
 })
 
 test('last known: before the first live reading the credits come from the status line cache with a dim ~, and a live reading replaces them', async ($, on) => {

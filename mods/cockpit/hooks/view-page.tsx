@@ -9,13 +9,15 @@ import type { Signal, SignalKind } from './signals'
 import { t } from './strings'
 import { agentIcon, orderAgents, pairRow, taskCounts, visibleAgents } from './view-agents'
 import { BUTTON_GAP, dim, line, sp } from './view-base'
-import { collapsible, makeAgentBlock, signalRow, workflowLine, worklogDays } from './view-tabs'
-import type { Block, Kit } from './view-tabs'
+import { collapsible, makeAgentBlock, signalRow, workflowLine, worklogBehindRows } from './view-kit'
+import type { Block, Kit } from './view-kit'
 
 // ── The single page: four sections, each hidden when empty (ATTENZIONE says there is nothing to do) ──
 
 /** ATTENZIONE and IN CORSO show this many rows; the rest sits behind a toggle so the footer stays in view. */
 const MAX_ROWS = 5
+/** ATTENZIONE also stops at this many drawn lines: a closed notification takes two (what, then what to do), so four of them fill it. */
+const ATTENTION_LINES = 8
 /** FATTO shows this many events; the rest sits behind its toggle. */
 const DONE_ROWS = 5
 /** Cells the caption of a bar takes, so the bar and its legend line up. */
@@ -32,6 +34,18 @@ const rankOf = (sig: Signal): number => (isBlocking(sig) ? 0 : COST_KINDS.includ
 
 // ── ATTENZIONE ──
 
+/** How many rows, each as tall as its entry of `lines`, fit in `maxRows` rows and `maxLines` drawn lines; the first row always shows. */
+function rowsWithin(lines: readonly number[], maxRows: number, maxLines: number): number {
+  let used = 0
+  let n = 0
+  for (const cost of lines) {
+    if (n >= maxRows || (n > 0 && used + cost > maxLines)) break
+    used += cost
+    n++
+  }
+  return n
+}
+
 /** The live notifications, blocking first then cost then the rest, and the worklog behind; "nothing to do" when there is neither. */
 export function attentionBlocks(k: Kit): Block[] {
   const { ui, s, gap, title, actions } = k
@@ -39,8 +53,9 @@ export function attentionBlocks(k: Kit): Block[] {
   const S = t()
   const signals = [...signalsOf(s)].sort((a, b) => rankOf(a) - rankOf(b))
   const rows: Block[] = signals.map(sig => signalRow(k, sig, { isBlocking: isBlocking(sig) }))
+  const lines: number[] = rows.map(() => 2)
 
-  const late = worklogDays(k, n => `worklog · ${S.worklog.behind(n)}`)
+  const late = worklogBehindRows(k, n => `worklog · ${S.worklog.behind(n)}`)
   if (late !== undefined) {
     const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
     rows.push([
@@ -54,10 +69,11 @@ export function attentionBlocks(k: Kit): Block[] {
       </Box>,
       late.days,
     ])
+    lines.push(1)
   }
 
   if (rows.length === 0) return [[gap(), title(S.page.attention), line(ui, [sp('✓ ', COLORS.green), dim(S.page.nothingToDo)])]]
-  return [[gap(), title(S.page.attention), collapsible(k, 'attention', rows, MAX_ROWS, s.openKeys?.includes('attention') === true, () => actions.toggleOpen('attention'))]]
+  return [[gap(), title(S.page.attention), collapsible(k, 'attention', rows, rowsWithin(lines, MAX_ROWS, ATTENTION_LINES), s.openKeys?.includes('attention') === true, () => actions.toggleOpen('attention'))]]
 }
 
 // ── ANDAMENTO ──
@@ -152,7 +168,7 @@ function logEntry(e: CockpitLogEntry): DoneEntry {
     case 'test':
       return { at: e.at, icon: e.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green), text: E.test(e.text ?? '', e.isFailed === true) }
     case 'compact':
-      return { at: e.at, icon: sp('◇', COLORS.blue), text: E.compact(abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
+      return { at: e.at, icon: sp('◇', COLORS.blue), text: E.compact(e.tokens === undefined ? '' : abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
     case 'pr':
       return { at: e.at, icon: sp('◆', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? '') }
   }

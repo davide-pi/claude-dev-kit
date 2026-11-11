@@ -7,8 +7,9 @@ import { clockTime, costCell } from '../hooks/shared'
 import { INITIAL } from '../hooks/state'
 import { setLang } from '../hooks/strings'
 import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks } from '../hooks/view-page'
-import { makeKit } from '../hooks/view-tabs'
-import type { Block, Kit, PaneActions } from '../hooks/view-tabs'
+import { paneView } from '../hooks/view'
+import { makeKit } from '../hooks/view-kit'
+import type { Block, Kit, PaneActions } from '../hooks/view-kit'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
 import { NOW, rowTexts } from './cockpit-world'
 
@@ -110,19 +111,41 @@ test('attention: the worklog behind is a row with log hours; up to date it is no
   expect(await noSkill.ui.find({ key: 'attention:worklog' })).toBeUndefined()
 })
 
-test('attention: at most five rows, the rest behind the toggle', async ($, on) => {
+test('attention: at most five rows and eight drawn lines, the rest behind the toggle', async ($, on) => {
   const reads = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`/src/f${i}.ts`, 3]))
   const calls: string[] = []
   const closed = await draw($, on, snap({ insights: insights({ reads }) }), attentionBlocks, calls)
-  expect((await keysOf(closed.ui, /^signal:/)).length).toBe(5)
-  expect((await closed.ui.find({ key: 'attention:more' }))?.text).toBe('󰍟 +2')
+  expect((await keysOf(closed.ui, /^signal:/)).length).toBe(4)
+  // a closed notification draws two lines, so four fill the eight
+  expect((await closed.ui.find({ key: 'attention:more' }))?.text).toBe('󰍟 +3')
   await closed.ui.press({ key: 'attention:more' })
   expect(calls).toEqual(['toggleOpen:attention'])
   const open = await draw($, on, snap({ insights: insights({ reads }), openKeys: ['attention'] }), attentionBlocks)
   expect((await keysOf(open.ui, /^signal:/)).length).toBe(7)
-  expect((await open.ui.find({ key: 'attention:more' }))?.text).toBe('󰍝 −2')
+  expect((await open.ui.find({ key: 'attention:more' }))?.text).toBe('󰍝 −3')
 })
 
+test('attention: a workflow stall is blocking and comes first; a workflow past its rounds is not, and a cost outranks a rest that signalsOf emits before it', async ($, on) => {
+  const agents = [{ id: 'a9', isDone: false }]
+  const run = (over: object) => ({ runId: 'wf_1', name: 'review', phase: 'x', round: 1, agents, lastAt: NOW, ...over })
+  const failed = { failedCmds: { 'npm test': 3 }, rounds: 5 }
+  const kinds = async (s: CockpitSnapshot) => (await keysOf((await draw($, on, s, attentionBlocks)).ui, /^signal:/)).map(k => k.split(':')[1])
+
+  // the stall comes before a failed command that signalsOf emits first
+  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ lastAt: NOW - 400_000 }) }))).toEqual(['workflow', 'failedCommand'])
+  // a run past its rounds is no stall: it stays behind the failed command, in the order of the detectors
+  expect(await kinds(snap({ insights: insights(failed), workflowRun: run({ round: 4 }) }))).toEqual(['failedCommand', 'workflow'])
+  // a cost signal (the context grew) outranks the failed command that comes before it
+  expect(await kinds(snap({ insights: insights(failed), ctxRounds: [100_000, 150_000, 250_000] }))).toEqual(['ctxGrowth', 'failedCommand'])
+})
+
+test('page: with eight notifications at 40 rows the footer buttons are still drawn, and the rows stay within the pane', async ($, on) => {
+  const reads = Object.fromEntries(Array.from({ length: 8 }, (_, i) => [`/src/f${i}.ts`, 3]))
+  const s = snap({ insights: insights({ reads }), cost: { usd: 1 } })
+  const { ui, rows } = await draw($, on, s, k => [[paneView({ ...k.ui, Client: undefined }, k.s, WIDTH, 40, k.actions)]])
+  expect((await keysOf(ui, /^bar:compact$/)).length).toBe(1)
+  expect(rows.length).toBeLessThanOrEqual(40)
+})
 // ── ANDAMENTO ──
 
 const BAR = 51
