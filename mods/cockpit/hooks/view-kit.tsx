@@ -8,8 +8,9 @@ import type { Span } from './shared'
 import { agentCosts, signalId, signalSeverity } from './signals'
 import type { Signal, SignalSeverity } from './signals'
 import { t } from './strings'
+import { signalAnim } from './anim'
 import { agentRow, agentWarning, pairRow, subagentDetails } from './view-agents'
-import { dim, line, sp, spanNodes } from './view-base'
+import { animCell, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 import { activeRun } from './workflow'
 
@@ -93,17 +94,31 @@ export function collapsible(k: Kit, key: string, rows: Block[], shown: number, i
  */
 export function makeAgentBlock(k: Kit): (key: string, agent: CockpitAgent, depth: number, usd?: number) => Block {
   const { ui, s, width, gap, actions } = k
-  const { Button, Text } = ui
+  const { Box, Button, Text } = ui
   const sessionTotal = sessionTokens(s)
   const usdById = new Map(agentCosts(s.agents, s.events).map(a => [a.id, a.usd]))
   return (key, agent, depth, usd) => {
     const indent = '  '.repeat(depth + 1)
     const isOpen = s.agentsOpen?.includes(agent.id) === true
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    return [
+    const spans = agentRow(agent, depth, s.now, width, sessionTotal, usd ?? usdById.get(agent.id))
+    // A running agent's icon spins: it leaves the button (which holds the rest of the row) for an animated cell beside it
+    const [icon, space, ...rest] = spans
+    const isSpinning = ui.Client !== undefined && agent.status === 'running' && icon !== undefined && space?.t === ' '
+    const button = (
       <Button key={key} plain onPress={() => actions.toggleAgent(agent.id)}>
-        <Text wrap="truncate">{spanNodes(ui, agentRow(agent, depth, s.now, width, sessionTotal, usd ?? usdById.get(agent.id)))}</Text>
-      </Button>,
+        <Text wrap="truncate">{spanNodes(ui, isSpinning ? rest : spans)}</Text>
+      </Button>
+    )
+    return [
+      isSpinning ? (
+        <Box>
+          {animCell(ui, `anim:${key}`, 'spin', [icon!, space!])}
+          {button}
+        </Box>
+      ) : (
+        button
+      ),
       isOpen && [
         warn !== undefined && line(ui, [sp(`${indent}󰀦 ${warn}`, COLORS.yellow)]),
         ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
@@ -176,7 +191,7 @@ function signalIcon(sig: Signal): string {
  */
 export function signalRow(k: Kit, sig: Signal): Block {
   const { ui, s, width, actions } = k
-  const { Button, Text } = ui
+  const { Box, Button, Text } = ui
   const S = t()
   // An open notification's text wraps under its row, indented, instead of being cut
   const wrapped = (text: string, style: (t: string) => Span) => wrapCells(text, Math.max(4, width - 2)).map(l => line(ui, [style(`  ${l}`)]))
@@ -190,10 +205,23 @@ export function signalRow(k: Kit, sig: Signal): Block {
   const at = s.signalsAt?.[id]
   const time = at === undefined ? [] : [dim(clockTime(at))]
   const [head, rest] = isOpen ? splitCells(text.what, width - textCells(icon) - spanWidth(time) - 1) : [text.what, '']
-  return [
+  // A blocking icon blinks and a new one flashes: it is an animated cell beside the button, which then holds the rest of the row
+  const iconSpan = sp(icon, SEVERITY_COLORS[severity])
+  const kind = ui.Client ? signalAnim(severity, at, s.now) : undefined
+  const button = (
     <Button key={`signal:${id}`} plain onPress={() => actions.toggleSignal(id)}>
-      <Text wrap="truncate">{spanNodes(ui, pairRow([sp(icon, SEVERITY_COLORS[severity]), style(head)], time, width))}</Text>
-    </Button>,
+      <Text wrap="truncate">{spanNodes(ui, kind ? pairRow([style(head)], time, width - textCells(icon)) : pairRow([iconSpan, style(head)], time, width))}</Text>
+    </Button>
+  )
+  return [
+    kind ? (
+      <Box>
+        {animCell(ui, `anim:signal:${id}`, kind, [iconSpan], undefined)}
+        {button}
+      </Box>
+    ) : (
+      button
+    ),
     isOpen && wrapped(rest, style),
     isOpen && wrapped(`${S.signalFields.why}${text.why}`, dim),
     isOpen && wrapped(`${S.signalFields.todo}${text.todo}`, dim),

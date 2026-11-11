@@ -32,9 +32,14 @@ const keysOf = async (ui: Awaited<ReturnType<Engine['ui']['mount']>>, re: RegExp
 
 /** Whether the first leaf Text whose content matches `re` is bold. */
 const boldOf = (root: unknown, re: RegExp): boolean | undefined => {
-  const o = root as { props?: { weight?: string }; children?: unknown[] } | null
+  const o = root as { type?: string; props?: { weight?: string; props?: { cells?: { t: string; bold?: boolean }[] } }; children?: unknown[] } | null
   const [only] = o?.children ?? []
   if (typeof only === 'string' && re.test(only)) return o?.props?.weight === 'bold'
+  // an animated cell (surface module) holds the spans it draws in its props
+  if (o?.type === 'Client') {
+    const cell = o.props?.props?.cells?.find(c => re.test(c.t))
+    if (cell !== undefined) return cell.bold === true
+  }
   for (const c of o?.children ?? []) {
     const found = boldOf(c, re)
     if (found !== undefined) return found
@@ -59,7 +64,8 @@ async function draw($: Engine, on: On, s: CockpitSnapshot, build: (k: Kit) => Bl
     on('ui.render', { component: 'Pane' }, ($$, e, next) => {
       const slot = own.slots.get(e.requestId ?? '')
       if (slot === undefined) return next(e)
-      const ui = $$.ui.resolve(e)
+      // the harness cannot load a surface module for this test plugin: the page is drawn as a surface without them draws it
+      const ui = { ...$$.ui.resolve(e), Client: undefined }
       const { Box } = ui
       const actions = new Proxy({}, { get: (_, name) => (...args: unknown[]) => void slot.calls.push(`${String(name)}:${args.join(',')}`) }) as PaneActions
       return <Box flexDirection="column">{flat(slot.build(makeKit(ui, slot.s, WIDTH, actions))) as never}</Box>

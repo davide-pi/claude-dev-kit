@@ -1,5 +1,7 @@
 import type { Elements, RenderElement, RenderSurface } from 'claude-code'
 
+import type { AnimKind } from './anim'
+import { spanWidth } from './shared'
 import type { Span } from './shared'
 
 /** The elements the views draw with; every surface's table has them. */
@@ -34,6 +36,14 @@ export function spanNodes({ Text }: Ui, spans: readonly Span[]): RenderElement[]
 export function line(ui: Ui, spans: readonly Span[]): RenderElement {
   const { Text } = ui
   return <Text wrap="truncate">{spanNodes(ui, spans)}</Text>
+}
+
+/** `cells` as an animated cell of `kind` where the surface has surface modules, else drawn still. A Client cannot sit inside a Button: its cells go beside it. */
+export function animCell(ui: Ui, key: string, kind: AnimKind, cells: readonly Span[], token?: string): RenderElement {
+  if (!ui.Client) return line(ui, cells)
+  // props cross to the surface as plain data: a span's unset fields are left out, not undefined
+  const plain = cells.map(s => Object.fromEntries(Object.entries(s).filter(([, v]) => v !== undefined)) as Span)
+  return <ui.Client key={key} module="./anim.tsx" props={{ kind, cells: plain, ...(token === undefined ? {} : { token }) }} width={spanWidth(cells)} />
 }
 
 /** Cells a row of terminal Buttons takes with these labels. */

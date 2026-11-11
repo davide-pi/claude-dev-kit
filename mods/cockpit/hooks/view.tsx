@@ -2,6 +2,8 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
 import { claudeStateSpans } from './agents'
+import { isBreathing } from './anim'
+import { andamento } from './andamento'
 import { ctxScale } from './context'
 import { isWorking } from './session'
 import {
@@ -21,7 +23,7 @@ import {
 } from './shared'
 import type { BarPart, Span } from './shared'
 import { t } from './strings'
-import { BUTTON_GAP, buttonRowWidth, dim, line, sp } from './view-base'
+import { BUTTON_GAP, animCell, buttonRowWidth, dim, line, sp } from './view-base'
 import type { Ui } from './view-base'
 import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
@@ -97,9 +99,21 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
     [sp(displayModel(s.model) || '—', COLORS.blue), ...headerEffort(s.effort), sp('  '), ...claudeStateSpans(s.claudeState)],
     Math.max(0, width - spanWidth(costSpans) - 1),
   )
+  // While Claude works or waits the state's icon breathes: an animated cell between the text before it and the state's word
+  const stateSpan = modelSpans.at(-1)
+  const stateIcon = [...(stateSpan?.t ?? '')][0]
+  const isBreathe = ui.Client !== undefined && isBreathing(s.claudeState?.kind) && stateSpan !== undefined && stateIcon !== undefined && stateSpan.t === claudeStateSpans(s.claudeState)[0]?.t.slice(0, stateSpan.t.length)
   const modelLine = (
     <Box justifyContent="space-between">
-      {line(ui, modelSpans)}
+      {isBreathe && stateSpan !== undefined && stateIcon !== undefined ? (
+        <Box>
+          {line(ui, modelSpans.slice(0, -1))}
+          {animCell(ui, 'anim:state', 'breathe', [{ ...stateSpan, t: stateIcon }])}
+          {line(ui, [{ ...stateSpan, t: stateSpan.t.slice(stateIcon.length) }])}
+        </Box>
+      ) : (
+        line(ui, modelSpans)
+      )}
       {line(ui, costSpans)}
     </Box>
   )
@@ -180,6 +194,9 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]
   const retroLabels = [S.buttons.retroDays, S.buttons.retroSession, S.buttons.no]
   const logLabels = [S.buttons.logSession, S.buttons.logDay, S.buttons.no]
+  // From 75% of the autocompact threshold a glyph beside the compact button pulses (a Client cannot sit inside the Button)
+  const isPulsing = ui.Client !== undefined && andamento(s).isCompactDue
+  const pulseCells = isPulsing ? 2 : 0
   const buttonsRow =
     s.confirm === 'retro' ? (
       <Box flexDirection="column">
@@ -212,10 +229,13 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         </Box>
       </Box>
     ) : (
-      <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
-        <Button key="bar:compact" onPress={() => actions.compact()}>
-          {S.buttons.compact}
-        </Button>
+      <Box flexDirection={buttonRowWidth(barLabels) + pulseCells <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+        <Box columnGap={BUTTON_GAP}>
+          <Button key="bar:compact" onPress={() => actions.compact()}>
+            {S.buttons.compact}
+          </Button>
+          {isPulsing && animCell(ui, 'anim:compact', 'pulse', [sp('●', COLORS.orange)])}
+        </Box>
         <Button key="bar:retro" onPress={() => actions.ask('retro')}>
           {S.buttons.retro}
         </Button>

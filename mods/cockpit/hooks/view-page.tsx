@@ -7,8 +7,9 @@ import type { Span } from './shared'
 import { signalSeverity, signalsOf } from './signals'
 import type { Signal, SignalKind } from './signals'
 import { t } from './strings'
+import { isFading } from './anim'
 import { agentIcon, orderAgents, pairRow, taskCounts, visibleAgents } from './view-agents'
-import { BUTTON_GAP, dim, line, sp } from './view-base'
+import { BUTTON_GAP, animCell, dim, line, sp } from './view-base'
 import { collapsible, makeAgentBlock, signalRow, workflowLine, worklogBehindRows } from './view-kit'
 import type { Block, Kit } from './view-kit'
 
@@ -108,18 +109,29 @@ function toolParts(byTool: Record<string, number> | undefined, other: string): B
 }
 
 /** A column of the figures: its dim label, its bold value (`—` where there is none) and its dim caption. */
-type Column = { label: string; value?: Span[]; caption?: string }
+type Column = { label: string; value?: Span[]; caption?: string; /** The value shows bold in the accent for a moment when it changes. */ isAnimated?: boolean }
 
 /** The figures rows: the columns side by side, floor(width / 4) cells each, a cell cut to leave a space before the next. */
 function figureRows(k: Kit, columns: readonly Column[]): Block {
   const { ui, width } = k
+  const { Box } = ui
   const cells = Math.floor(width / COLUMNS)
-  const row = (pick: (c: Column) => Span[]) =>
-    line(ui, columns.flatMap(c => {
-      const cut = truncateSpans(pick(c), cells - 1)
-      return [...cut, sp(' '.repeat(cells - spanWidth(cut)))]
-    }))
-  return [row(c => [dim(c.label)]), row(c => c.value ?? [dim(MISSING)]), row(c => (c.caption ? [dim(c.caption)] : []))]
+  const fit = (spans: Span[]): Span[] => {
+    const cut = truncateSpans(spans, cells - 1)
+    return [...cut, sp(' '.repeat(cells - spanWidth(cut)))]
+  }
+  const row = (pick: (c: Column) => Span[]) => line(ui, columns.flatMap(c => fit(pick(c))))
+  // where the surface has modules, an animated value is a cell of its own that restarts when its text changes
+  const values = ui.Client ? (
+    <Box>
+      {columns.map((c, i) => (
+        <Box key={i}>{c.isAnimated && c.value !== undefined ? animCell(ui, `anim:figure:${i}`, 'once', fit(c.value), c.value.map(v => v.t).join('')) : line(ui, fit(c.value ?? [dim(MISSING)]))}</Box>
+      ))}
+    </Box>
+  ) : (
+    row(c => c.value ?? [dim(MISSING)])
+  )
+  return [row(c => [dim(c.label)]), values, row(c => (c.caption ? [dim(c.caption)] : []))]
 }
 
 /** The last main round's duration: the newest round of the session log; none before one ended. */
@@ -138,10 +150,10 @@ export function andamentoBlocks(k: Kit): Block[] {
   const turnUsd = shownTurnUsd(s.cost)
   const roundMs = lastRoundMs(s)
   const figures = figureRows(k, [
-    { label: S.page.perPrompt, value: a.perPrompt === undefined ? undefined : [sp(fmtCost(a.perPrompt), trendColor, true), sp(' '), arrow], caption: a.target === undefined ? undefined : S.page.max(fmtCost(a.target)) },
+    { label: S.page.perPrompt, value: a.perPrompt === undefined ? undefined : [sp(fmtCost(a.perPrompt), trendColor, true), sp(' '), arrow], caption: a.target === undefined ? undefined : S.page.max(fmtCost(a.target)), isAnimated: true },
     { label: S.page.lastTurn, value: turnUsd === undefined || turnUsd < CENT ? undefined : [sp(`$${turnUsd.toFixed(2)}`, COLORS.text, true)], caption: roundMs === undefined ? undefined : duration(roundMs) },
-    { label: S.page.subagents, value: a.agentPct === undefined ? undefined : [sp(`${Math.round(a.agentPct)}%`, COLORS.lavender, true)], caption: a.agentPct === undefined ? undefined : S.page.ofSpend },
-    { label: S.page.compaction, value: a.turnsLeft === undefined ? undefined : [sp(S.page.turnsLeft(a.turnsLeft), a.isCompactDue ? COLORS.yellow : COLORS.text, true)], caption: s.autoCompactAt === undefined ? undefined : S.page.compactAt(abbrevTokens(s.autoCompactAt, true)) },
+    { label: S.page.subagents, value: a.agentPct === undefined ? undefined : [sp(`${Math.round(a.agentPct)}%`, COLORS.lavender, true)], caption: a.agentPct === undefined ? undefined : S.page.ofSpend, isAnimated: true },
+    { label: S.page.compaction, value: a.turnsLeft === undefined ? undefined : [sp(S.page.turnsLeft(a.turnsLeft), a.isCompactDue ? COLORS.yellow : COLORS.text, true)], caption: s.autoCompactAt === undefined ? undefined : S.page.compactAt(abbrevTokens(s.autoCompactAt, true)), isAnimated: true },
   ])
 
   const label = (p: { label: string }) => (p.label === 'main' ? S.page.main : p.label === 'other' ? S.page.other : p.label)
@@ -211,6 +223,10 @@ export function doneBlocks(k: Kit): Block[] {
     ...history.map((h): DoneEntry => ({ at: h.endedAt, icon: agentIcon({ ...h, status: 'done' }), text: S.page.events.agent(h.type), usd: h.usd })),
   ].sort((a, b) => b.at - a.at)
   if (entries.length === 0) return []
-  const rows = entries.map((e): Block => [line(ui, pairRow([dim(clockTime(e.at)), sp(' '), e.icon, sp(' '), sp(e.text)], e.usd === undefined ? [] : [dim(costCell(e.usd, COST_W))], width))])
+  // the newest row fades from its highlight to its own colour as it appears
+  const rows = entries.map((e, i): Block => {
+    const cells = pairRow([dim(clockTime(e.at)), sp(' '), e.icon, sp(' '), sp(e.text)], e.usd === undefined ? [] : [dim(costCell(e.usd, COST_W))], width)
+    return [i === 0 && ui.Client && isFading(e.at, s.now) ? animCell(ui, 'anim:done', 'fade', cells) : line(ui, cells)]
+  })
   return [[title(S.page.done), collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
 }

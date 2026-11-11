@@ -28,9 +28,14 @@ export const updateTask = ($: Engine, taskId: string, status: 'pending' | 'in_pr
 
 /** The color of the first leaf Text whose content matches `re`. */
 export const colorOf = (root: unknown, re: RegExp): string | undefined => {
-  const o = root as { props?: { color?: string }; children?: unknown[] } | null
+  const o = root as { type?: string; props?: { color?: string; props?: { cells?: { t: string; c?: string }[] } }; children?: unknown[] } | null
   const [only] = o?.children ?? []
   if (typeof only === 'string' && re.test(only)) return o?.props?.color
+  // an animated cell (surface module) holds the spans it draws in its props
+  if (o?.type === 'Client') {
+    const cell = o.props?.props?.cells?.find(c => re.test(c.t))
+    if (cell !== undefined) return cell.c
+  }
   for (const c of o?.children ?? []) {
     const found = colorOf(c, re)
     if (found !== undefined) return found
