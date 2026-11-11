@@ -145,7 +145,8 @@ test('frame: Given a beat, When its level goes from lit to darkest, Then the col
   const shades = Array.from({ length: BEAT_LEVELS + 1 }, (_, k) => frame('beat', k, icon)[0]?.c)
   // Then
   expect(shades[0]).toBe(COLORS.red)
-  expect(shades[BEAT_LEVELS]).toBe(mixHex(COLORS.red, COLORS.empty, 0.55))
+  expect(shades[BEAT_LEVELS]).toBe(mixHex(COLORS.red, COLORS.empty, 0.85))
+  expect(BEAT_LEVELS).toBe(12)
   expect(new Set(shades).size).toBe(BEAT_LEVELS + 1)
   expect(isAnimating('beat', 1_000_000)).toBe(true)
 })

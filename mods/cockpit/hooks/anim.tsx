@@ -31,9 +31,9 @@ export const BEAT_FAST_MS = BEAT_SLOW_MS / 2
 /** How often a beat looks at the clock. */
 const BEAT_TICK_MS = 50
 /** How far a beat's darkest level goes from the figure's colour towards the quiet grey. */
-const BEAT_DIM = 0.55
+const BEAT_DIM = 0.85
 /** Shades of a beat between lit (0) and darkest: enough for the eye to read a glow, not an on/off. */
-export const BEAT_LEVELS = 6
+export const BEAT_LEVELS = 12
 const SPIN = ['⠋', '⠙', '⠹', '⠸', '⠼', '⠴', '⠦', '⠧', '⠇', '⠏']
 /** Intermediate colours of a breath or a fade, besides its two ends. */
 const LEVELS = 3
