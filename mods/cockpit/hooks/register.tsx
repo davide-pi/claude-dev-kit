@@ -464,12 +464,18 @@ export const register: Register = on => {
     const done = await next(e)
     if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
       const at = await $.clock.now().catch(() => undefined)
+      const after = done.tokensAfter
       await patch($, s => {
         const before = done.tokensBefore ?? s.ctx.tokens
         const insights = recordCompaction(s.insights, before)
-        // the entry's `after` comes by key from the next context reading (`withContextReading`)
-        return { ...s, insights, sessionLog: recordLog(s.sessionLog, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) }) }
+        const logged = { ...s, insights, sessionLog: recordLog(s.sessionLog, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) }) }
+        if (after === undefined) return logged
+        // the size the compaction reports is the context now: drawn at once, and the entry's `after`, not left until the next reading
+        const { window } = s.ctx
+        return { ...logged, ctx: { ...s.ctx, tokens: after, percent: window !== undefined && window > 0 ? (100 * after) / window : undefined }, ...withContextReading(logged, after, at) }
       }).catch(() => undefined)
+      // no size reported: the engine's own reading, rather than the context before the compaction until the next turn
+      if (after === undefined) await refreshUsage($)
     }
     return done
   })

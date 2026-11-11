@@ -80,18 +80,13 @@ test('sessionLog: a main turn end logs a round with its length; a subagent turn 
   expect((await logOf(clock, writes)).map(e => [e.kind, e.ms])).toEqual([['round', 4200]])
 })
 
-test('sessionLog: a compaction logs the context before it at the hook, and the first reading after it fills the entry\'s after', async ($, on) => {
+test('sessionLog: a compaction that reports no size logs the context before it at the hook, and the engine reading taken right after fills the entry\'s after', async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const measure = (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
-  await measure(300_000)
+  await $.session.measure({ context: { window: 1_000_000, tokens: 300_000, percent: 30 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
   await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
-  let log = await logOf(clock, writes)
-  expect(log.filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000 }])
-  expect(log.find(e => e.kind === 'compact')?.after).toBeUndefined()
-  await measure(120_000)
-  log = await logOf(clock, writes)
-  expect(log.filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 120_000 }])
+  // the world's `$.session.usage()` answers 248K
+  expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 248_000 }])
 })
 
 test('sessionLog: a drop in the context readings is one compaction entry, its after the reading that showed it', async ($, on) => {
@@ -157,4 +152,33 @@ test('sessionLog: a test command the person refused is not logged', async ($, on
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'npm test -- --refused' })
   expect(await logOf(clock, writes)).toEqual([])
+})
+
+test('Given a compaction that reports its size afterwards, When it stands, Then the context reads that size at once and the log entry gets it as its after', async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, compacts: true, compactAfter: 120_000 })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 300_000, percent: 30 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  // When
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+  const log = await logOf(clock, writes)
+  // Then
+  expect((dataOf(writes) as { ctx?: { tokens?: number; percent?: number } } | null)?.ctx).toMatchObject({ tokens: 120_000, percent: 12 })
+  expect(log.filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 120_000 }])
+})
+
+test('Given a compaction that reports no size afterwards, When it stands, Then the context is read again from the engine', async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, compacts: true, ctxPercent: 9 })
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.session.measure({ context: { window: 1_000_000, tokens: 300_000, percent: 30 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
+  // When
+  await $.session.compact({ trigger: 'manual', messages: [{ role: 'user', text: 'hi', toolUses: [] }] } as never)
+  await logOf(clock, writes)
+  // Then
+  expect((dataOf(writes) as { ctx?: { percent?: number } } | null)?.ctx?.percent).toBe(9)
 })
