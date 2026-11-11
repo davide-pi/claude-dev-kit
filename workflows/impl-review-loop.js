@@ -85,14 +85,75 @@ const FLOOR_M = ['data', 'money', 'concurrency', 'contract', 'security']
 const riskAxes = (risk, touches) => [...new Set([...(Array.isArray(risk) ? risk : []), ...(Array.isArray(touches) ? touches : [])].filter(x => RISKS.includes(x)))]
 // A reviewer's tool calls: 35, plus 2 for each expected file above WIDE_FILES, capped at 60.
 const reviewCalls = count => Math.min(60, 35 + 2 * Math.max(0, count - WIDE_FILES))
-const sizeFor = (given, axes = []) => {
+// With a block count (from the plan) the size is computed, never passed: one block M, more L; only a triage S stands unless a floor axis lifts it.
+const sizeFor = (given, axes = [], blockCount) => {
+  if (blockCount !== undefined) return given === 'S' && !axes.some(x => FLOOR_M.includes(x)) ? 'S' : blockCount > 1 ? 'L' : 'M'
   const floor = axes.filter(x => x !== 'logic').length >= 3 ? 'L' : axes.some(x => FLOOR_M.includes(x)) ? 'M' : 'S'
   return SIZES[Math.max(SIZES.indexOf(given), SIZES.indexOf(floor))]
 }
+// A plan is cut into blocks of at most BLOCK_TASKS tasks, in dependency order (stable by input order), as even as possible, larger first.
+const BLOCK_TASKS = 4
+const blocksFor = tasks => {
+  const ids = new Set()
+  for (const t of tasks) {
+    if (ids.has(t.id)) throw new Error(`duplicate task id: ${t.id}`)
+    ids.add(t.id)
+  }
+  for (const t of tasks) for (const d of t.dependsOn ?? []) if (!ids.has(d)) throw new Error(`task ${t.id} depends on an unknown task: ${d}`)
+  const done = new Set()
+  const order = []
+  while (order.length < tasks.length) {
+    const next = tasks.find(t => !done.has(t.id) && (t.dependsOn ?? []).every(d => done.has(d)))
+    if (!next) throw new Error(`dependency cycle among tasks: ${cycleIds(tasks.filter(t => !done.has(t.id))).join(', ')}`)
+    done.add(next.id)
+    order.push(next)
+  }
+  const count = Math.ceil(order.length / BLOCK_TASKS)
+  const blocks = []
+  let from = 0
+  for (let i = 0; i < count; i++) {
+    const size = Math.floor(order.length / count) + (i < order.length % count ? 1 : 0)
+    blocks.push(order.slice(from, from + size))
+    from += size
+  }
+  return blocks
+}
+// The unplaced tasks left once those no other unplaced task depends on are peeled off: the cycle, not what waits on it.
+const cycleIds = left => {
+  let rest = left
+  for (;;) {
+    const needed = new Set(rest.flatMap(t => t.dependsOn ?? []))
+    const kept = rest.filter(t => needed.has(t.id))
+    if (kept.length === rest.length) return rest.map(t => t.id)
+    rest = kept
+  }
+}
+const stepBudget = taskCount => Math.min(35, 10 + 6 * taskCount)
 // More files than the triage size implies: a signal for the verdict, never a bump of the size.
 const sizeSignal = (size, count) => (size === 'S' && count > 1) || (size === 'M' && count > 6)
   ? `the change touches ${count} files, more than a size ${size} triage implies: the triage may have been too small`
   : ''
+
+// Flow v2 readers. Reader A reads each block; the final read is reader B on the whole diff, at L beside the Sonnet reader.
+// B runs on opus at M past reviewersFor's own triggers also with three risk axes besides logic.
+const blockReader = { key: 'A', agentType: 'code-reviewer', model: 'sonnet', effort: 'high' }
+const finalReadersFor = (size, touches = [], mechanical = false, wide = false) => {
+  const manyAxes = touches.filter(x => x !== 'logic').length >= 3
+  const readers = reviewersFor(size, touches, mechanical, wide)
+  return size === 'M' ? readers.filter(r => r.key !== 'A').map(r => (r.key === 'B' && manyAxes ? { ...r, model: 'opus' } : r)) : readers
+}
+// A verifier of a fix round: opus when a P1 was fixed or a fix is past 30 lines.
+const verifierFor = ({ hasP1, maxFixLines }) => (hasP1 || maxFixLines > 30
+  ? { agentType: 'code-reviewer', model: 'opus', effort: 'medium' }
+  : { agentType: 'code-reviewer', model: 'sonnet', effort: 'high' })
+const ARBITER = { agentType: 'code-reviewer', model: 'opus', effort: 'medium' }
+// A question is answered with its default only when reversible is the boolean true, a default is given and the axis is a known
+// risk axis other than data, contract, money or security; anything else (a missing or unknown axis too) stops.
+const STOP_AXES = ['data', 'contract', 'money', 'security']
+const questionPolicy = q => {
+  const axis = typeof q.axis === 'string' ? q.axis.trim().toLowerCase() : ''
+  return q.reversible === true && String(q.default ?? '').trim() && RISKS.includes(axis) && !STOP_AXES.includes(axis) ? 'default' : 'stop'
+}
 
 const VERIFY_STATUSES = ['pass', 'fail', 'not-run']
 const readReport = r => {
