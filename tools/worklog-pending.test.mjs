@@ -76,54 +76,84 @@ function run(dir, env = {}) {
 
 const skip = DAY ? false : 'no past weekday inside the window today';
 
-test('roots unset → silent, however much work the history shows', { skip }, () => {
+test('given the workspace roots unset, when the hook runs on a history full of work, then it is silent', { skip }, () => {
+  // Given / When / Then
   assert.equal(run(config()), '');
 });
 
-test('a worked day under a root, with no audit → named in the reminder', { skip }, () => {
+test('given a worked day under a root with no audit, when the hook runs, then the day is named in the reminder', { skip }, () => {
+  // Given / When
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+
+  // Then
   assert.match(out, new RegExp(`${iso(DAY)} \\(product\\)`));
 });
 
-test('the reminder stays short and keeps the one instruction: hours are written only via /worklog', { skip }, () => {
+test('given a worked day under a root, when the hook runs, then the reminder stays short and ends with the one instruction that hours are written only via /worklog', { skip }, () => {
+  // Given / When
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+
+  // Then
   assert.match(out, /Only \/worklog writes hours\.$/);
   assert.ok(out.length < 200, `${out.length} chars`);
 });
 
-test('settings.json runs it on session start only, not on resume, clear or compact', () => {
+test('given settings.json, when the worklog-pending hook group is looked up, then it runs on session start only, not on resume, clear or compact', () => {
+  // Given
   const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+
+  // When
   const group = settings.hooks.SessionStart.find((g) => g.hooks.some((h) => (h.args ?? []).join(' ').includes('worklog-pending.js')));
+
+  // Then
   assert.equal(group?.matcher, 'startup');
 });
 
-test('roots match case- and slash-insensitively, trailing separator optional', { skip }, () => {
+test('given roots written in another case and slash style, when the hook runs, then they match case- and slash-insensitively', { skip }, () => {
+  // Given / When
   const out = run(config(), { CLAUDE_WORKSPACE_ROOTS: 'd:/WORK' });
+
+  // Then
   assert.match(out, new RegExp(iso(DAY)));
 });
 
-test('a nested root labels the subfolder and drops the bare root', { skip }, () => {
+test('given a nested root, when the hook runs, then it labels the subfolder and drops the bare root', { skip }, () => {
+  // Given
   const dir = config({ projects: [`${ROOT}clients\\acme\\repo`, `${ROOT}clients`] });
+
+  // When
   const out = run(dir, { CLAUDE_WORKSPACE_ROOTS: ROOT, CLAUDE_WORKSPACE_NESTED: 'clients' });
+
+  // Then
   assert.match(out, /\(clients\/acme\)/);
 });
 
-test('an audit entry covering the day closes it, zero hours included', { skip }, () => {
+test('given an audit entry covering the day, when the hook runs, then the day is closed, zero hours included', { skip }, () => {
+  // Given
   const audit = [{ periodFrom: iso(DAY), periodTo: iso(DAY), hoursLogged: 0 }];
+
+  // When / Then
   assert.equal(run(config({ audit }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
 });
 
-test('work outside every root is tooling, not pending', { skip }, () => {
+test('given work outside every root, when the hook runs, then it is tooling, not pending', { skip }, () => {
+  // Given / When / Then
   assert.equal(run(config({ projects: ['C:\\tools\\x'] }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
 });
 
-test('fewer than three prompts is a check-in, not a working day', { skip }, () => {
+test('given fewer than three prompts in a day, when the hook runs, then it is a check-in, not a working day', { skip }, () => {
+  // Given / When / Then
   assert.equal(run(config({ prompts: 2 }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
 });
 
-test('the snapshot for the statusline is written either way', { skip }, () => {
+test('given a config dir, when the hook runs, then the snapshot for the statusline is written either way', { skip }, () => {
+  // Given
   const dir = config();
+
+  // When
   run(dir);
+
+  // Then
   assert.ok(existsSync(join(dir, '.worklog-pending.json')));
 });
 
@@ -131,34 +161,52 @@ test('the snapshot for the statusline is written either way', { skip }, () => {
 
 const logged = (hours) => [{ periodFrom: iso(DAY), periodTo: iso(DAY), itemId: 1, hoursLogged: hours }];
 
-test('a logged day more than an hour short of 8h → named as under target, with its hours', { skip }, () => {
+test('given a logged day more than an hour short of 8h, when the hook runs, then it is named as under target with its hours', { skip }, () => {
+  // Given / When
   const out = run(config({ audit: logged(2) }), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+
+  // Then
   assert.ok(out.includes(`Under target on 1 day: ${iso(DAY)} (2/8h)`), out);
   assert.doesNotMatch(out, /Unlogged hours/);
 });
 
-test('exactly an hour short is close enough → silent', { skip }, () => {
+test('given a logged day exactly an hour short, when the hook runs, then it is close enough and silent', { skip }, () => {
+  // Given / When / Then
   assert.equal(run(config({ audit: logged(7) }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
 });
 
-test('a date target in targets.json wins: 0 for an event day → silent', { skip }, () => {
+test('given a date target of 0 in targets.json for an event day, when the hook runs, then the date target wins and it is silent', { skip }, () => {
+  // Given
   const targets = { targetHours: 8, days: { [iso(DAY)]: { hours: 0, note: 'evento' } } };
+
+  // When / Then
   assert.equal(run(config({ audit: logged(2), targets }), { CLAUDE_WORKSPACE_ROOTS: ROOT }), '');
 });
 
-test('a reduced date target is measured against its own hours', { skip }, () => {
+test('given a reduced date target in targets.json, when the hook runs, then the day is measured against its own hours', { skip }, () => {
+  // Given
   const targets = { days: { [iso(DAY)]: 6 } };
+
+  // When
   const out = run(config({ audit: logged(4.5), targets }), { CLAUDE_WORKSPACE_ROOTS: ROOT });
+
+  // Then
   assert.match(out, /\(4\.5\/6h\)/);
 });
 
-test('roots unset → no under-target line either', { skip }, () => {
+test('given the roots unset and an under-target day, when the hook runs, then there is no under-target line either', { skip }, () => {
+  // Given / When / Then
   assert.equal(run(config({ audit: logged(2) })), '');
 });
 
-test('the snapshot carries the under-target days for the statusline', { skip }, () => {
+test('given an under-target day, when the hook runs, then the snapshot carries the under-target days for the statusline', { skip }, () => {
+  // Given
   const dir = config({ audit: logged(2) });
+
+  // When
   run(dir, { CLAUDE_WORKSPACE_ROOTS: ROOT });
+
+  // Then
   const snap = JSON.parse(readFileSync(join(dir, '.worklog-pending.json'), 'utf8'));
   assert.deepEqual(snap.underTarget, [{ date: iso(DAY), logged: 2, target: 8 }]);
 });
