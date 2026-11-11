@@ -20,8 +20,9 @@
  *                             the plugin is reached through its MCP tools;
  *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
- *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` / `db-ro.ps1` / `gate.mjs`
- *                             calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`… unquoted),
+ *   - lib/script-args.js    — a DENY when an argument of the allowed `perimeter.ps1` / `db-ro.ps1` / `gate.mjs`
+ *                             calls holds a construct a single-quote re-quote fixes (`$`, `(`, `@`, `<`… unquoted);
+ *                             an ask for an unbalanced or typographic quote, a non-ASCII character,
  *                             `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation), or a `gate.mjs`
  *                             `--test` / `--unit` that isn't a known test runner command;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /

@@ -1,9 +1,9 @@
 /**
  * PreToolUse hook on Read: keeps a whole read of a big text file out of the context.
  *
- * Denies a Read with no `offset`, no `limit` and no `allow_large` of: a persisted tool output (a file
+ * Denies a Read with no `offset`, no `limit` and no `allow_large` of: a persisted tool output above 20 KB (a file
  * under the temp `claude` folder, the scratchpad excepted, or under a project's `tool-results`), a session transcript (`.jsonl` under
- * `.claude/projects`), or any other text file above 256 KB. The reason points at Grep with a
+ * `.claude/projects`) of any size, or any other text file above 256 KB. The reason points at Grep with a
  * `head_limit`, or a Read of the needed range. Images, PDFs and notebooks pass: Read renders them.
  *
  * A cost guard, not a security guard: any error lets the read through. Always exits 0.
@@ -17,14 +17,16 @@ const { statSync } = require('fs');
 const { deny, readPayload } = require('./lib/decision');
 
 const MAX_BYTES = 256 * 1024;
+/** A persisted tool output is denied only above this size: a small one costs less than the Grep round trip. */
+const PERSISTED_MAX_BYTES = 20 * 1024;
 const RENDERED = /\.(?:png|jpe?g|gif|webp|bmp|svg|pdf|ipynb)$/i;
 const PERSISTED = /[\\/]temp[\\/]claude[\\/](?!.*[\\/]scratchpad[\\/])|[\\/]\.claude[\\/]projects[\\/].*[\\/]tool-results[\\/]/i;
 const TRANSCRIPT = /[\\/]\.claude[\\/]projects[\\/].*\.jsonl$/i;
 
 function reasonFor(path, size) {
   if (RENDERED.test(path)) return '';
-  if (PERSISTED.test(path)) return 'a persisted tool output';
   if (TRANSCRIPT.test(path)) return 'a session transcript';
+  if (PERSISTED.test(path)) return size > PERSISTED_MAX_BYTES ? 'a persisted tool output' : '';
   if (size > MAX_BYTES) return `a ${Math.round(size / 1024)} KB file`;
   return '';
 }

@@ -6,8 +6,10 @@
  * `docker exec -i db sqlcmd -Q "DROP DATABASE Sales"`, `docker compose down -v`,
  * `az group delete --yes`. This check reads the whole line, per chained command.
  *
- * No subprocess and no file system access at all: it is pure text analysis, so the common case
- * (a line with none of the danger words) is one regex and nothing else.
+ * No subprocess and, but for one case, no file system access: it is text analysis, so the common case
+ * (a line with none of the danger words) is one regex and nothing else. The one case: a recursive delete
+ * whose every operand sits in Claude's own temp folder (`<tmp>/claude/<proj>/<session>/…`) passes, after an
+ * lstat per path component to refuse a symbolic link or junction.
  *
  * The interesting half of the problem is the false positives. Four of them are worth naming,
  * because each one would have trained the user to click through the prompt:
@@ -33,6 +35,8 @@
 
 'use strict';
 
+const fs = require('fs');
+const os = require('os');
 const { splitSegments, expandTexts, hasSubstitution, SEARCHERS } = require('./shell-parse');
 
 /**
@@ -238,12 +242,105 @@ function effectiveCommand(segment) {
 const PIPE_LOOPS = new Set(['%', 'foreach', 'foreach-object']);
 const DELETER_WORD = /(?<![-\w])(?:remove-item|rm|ri|del|erase|rd|rmdir)(?![-\w])/i;
 const DELETERS = new Set(['rm', 'ri', 'del', 'rd', 'rmdir', 'erase', 'remove-item']);
-/** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. */
-function deletesRecursively(scan, keep, segment) {
+const RM_FLAG = /^(?:-[rRfv]+|--recursive|--force|--verbose)$/;
+const CMD_SWITCH = /^\/[sqf]$/i;
+const PATH_FLAG = /^-(?:path|literalpath|lp)$/i;
+/** True when `flag` is `-name` or an abbreviation of it at least `min` letters long (PowerShell binds unique prefixes). */
+const abbreviates = (flag, name, min) => {
+  const f = flag.slice(1).toLowerCase();
+  return f.length >= min && name.startsWith(f);
+};
+/** Anything a shell would expand, substitute or reinterpret: a path holding one is not a plain path. */
+const NOT_PLAIN = /[$`%*?[\]{}()<>|;&'"!#^=]/;
+
+/**
+ * The path operands of a delete segment, or null when any token is not clearly a known flag of that
+ * deleter or a plain path (null = the caller asks). Reads the raw segment, never the prepared one:
+ * the preparation blanks quoted text, which could hide a substitution.
+ */
+function deleteOperands(text, command) {
+  if (/[\r\n]/.test(text)) return null;
+  const tokens = text.trim().split(/\s+/);
+  if (leadingCommand(tokens[0]) !== command) return null; // a wrapper (`sudo`, `xargs`, `env`) or anything before the deleter
+  const powershell = command === 'remove-item' || command === 'ri';
+  const operands = [];
+  let flagsEnded = false;
+  const addOperand = (raw) => {
+    const quoted = /^(["'])([^"'\s]*)\1$/.exec(raw);
+    const operand = quoted ? quoted[2] : raw;
+    if (!operand || operand.startsWith('~') || NOT_PLAIN.test(operand) || (command === 'rm' && operand.includes('\\'))) return false; // bash reads `\` as an escape, not a separator // a leading ~ expands to the home folder
+    operands.push(operand);
+    return true;
+  };
+  for (let i = 1; i < tokens.length; i += 1) {
+    const token = tokens[i];
+    if (!flagsEnded && command === 'rm' && token === '--') { flagsEnded = true; continue; }
+    const flagLike = !flagsEnded && (token.startsWith('-') || (!powershell && command !== 'rm' && /^\/\w$/.test(token)));
+    if (!flagLike) {
+      for (const piece of token.split(',')) if (!addOperand(piece)) return null; // cmd and PowerShell split on `,`; bash fails closed here
+    } else if (command === 'rm') {
+      if (!RM_FLAG.test(token)) return null;
+    } else if (powershell) {
+      if (PATH_FLAG.test(token)) {
+        const value = tokens[i += 1];
+        if (value === undefined) return null;
+        for (const piece of value.split(',')) if (!addOperand(piece)) return null;
+      } else if (!(abbreviates(token, 'recurse', 1) || abbreviates(token, 'force', 2))) return null;
+    } else if (!CMD_SWITCH.test(token)) return null;
+  }
+  return operands.length ? operands : null;
+}
+
+const normalizePath = (p) => (process.platform === 'win32' ? p.replace(/\\/g, '/').toLowerCase() : p.replace(/\\/g, '/'));
+/** Anything on the line that could make or move a link or junction before the delete runs. */
+const LINK_CREATOR = /(?<![-\w])(?:ln|mklink|new-item|ni|symlink|symboliclink|junction|mv|move|move-item|mi)(?![-\w])/i;
+const SHORT_TEMP_CLAUDE = /^[a-z]:\/users\/[^/]+~\d+\/appdata\/local\/temp\/claude\//;
+
+/**
+ * True when the operand is a strict descendant of `<tmp>/claude/<proj>/<session>` (at least one segment
+ * below the session folder): absolute, no `.`/`..`, no symbolic link or junction on the way. Any doubt is false.
+ */
+function isThrowawayPath(operand, sessionId) {
+  try {
+    const p = normalizePath(operand).replace(/\/$/, '');
+    if (!(/^[a-z]:\//i.test(p) || (p.startsWith('/') && !p.startsWith('//')))) return false;
+    const root = `${normalizePath(os.tmpdir()).replace(/\/+$/, '')}/claude/`;
+    const rootLength = p.startsWith(root) ? root.length : process.platform === 'win32' ? SHORT_TEMP_CLAUDE.exec(p)?.[0].length : undefined;
+    if (!rootLength) return false;
+    const segments = p.slice(rootLength).split('/');
+    if (segments.length < 3 || segments.some((s) => !s || /^\.+$/.test(s) || s.includes(':'))) return false;
+    // With a session id in the payload, only this session's own folder; without one, any session's (a known limit).
+    if (sessionId && segments[1] !== normalizePath(String(sessionId))) return false;
+    for (let i = 0; i <= segments.length; i += 1) { // i = 0: the claude folder itself
+      try {
+        // No trailing slash: lstat on `link/` would follow the link.
+        if (fs.lstatSync([p.slice(0, rootLength - 1), ...segments.slice(0, i)].join('/')).isSymbolicLink()) return false;
+      } catch (error) {
+        if (error?.code === 'ENOENT' || error?.code === 'ENOTDIR') break; // nothing deeper can exist
+        return false;
+      }
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. Not one aimed only at Claude's own temp folders. */
+function deletesRecursively(scan, keep, segment, piped, whole = segment, sessionId = undefined) {
   const command = effectiveCommand(segment);
   if (!DELETERS.has(command)) return false;
-  if (command === 'rm') return /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep);
-  return /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
+  const recursive = command === 'rm'
+    ? /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep)
+    : /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
+  if (!recursive) return false;
+  // Windows PowerShell 5.1 `Remove-Item -Recurse` can follow a junction inside the tree: never exempt.
+  if (command === 'remove-item' || command === 'ri') return true;
+  // The hook reads every segment before any runs: a link made earlier on the same line (by any tool or
+  // interpreter) is not on disk yet. So the exemption holds only when every command on the line is a delete.
+  if (LINK_CREATOR.test(whole) || !splitSegments(whole).every((s) => DELETERS.has(effectiveCommand(s)))) return true;
+  const operands = deleteOperands(segment, command);
+  return !(operands && operands.every((operand) => isThrowawayPath(operand, sessionId)));
 }
 
 /** `git [-c k=v] <verb> …`: the verb is the first word after git and its options, never a word inside a message. */
@@ -489,7 +586,7 @@ const RULES = [
 ];
 
 /** The reason for the first action with no undo in one command string (a whole line or a nested one), else null. */
-function checkText(command) {
+function checkText(command, whole = command, sessionId = undefined) {
   let at = 0;
   for (const segment of splitSegments(command)) {
     at = command.indexOf(segment, at);
@@ -505,18 +602,18 @@ function checkText(command) {
     // The preparation may have blanked the only occurrence (a comment, a path, a read-only query).
     if (!isDangerous(scan) && !isDangerous(keep)) continue;
 
-    const rule = RULES.find((r) => r.test(scan, keep, segment, piped));
+    const rule = RULES.find((r) => r.test(scan, keep, segment, piped, whole, sessionId));
     if (rule) return rule.reason;
   }
   return null;
 }
 
 /** The confirmation reason for the first action with no undo in `command`, nested wrappers included, else null. */
-function checkDestructive(command) {
+function checkDestructive(command, sessionId = undefined) {
   // Fast path: nothing here can be one of the rules.
   if (!isDangerous(command)) return null;
   for (const text of expandTexts(command)) {
-    const reason = checkText(text);
+    const reason = checkText(text, command, sessionId);
     if (reason) return reason;
   }
   return null;
