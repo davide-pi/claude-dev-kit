@@ -18,7 +18,7 @@ export const recordAgentEvent = (list: readonly CockpitEvent[] | undefined, even
 // ── The session log: what FATTO lists. A ring of its own, so its kinds never evict the agent events the costs read. ──
 
 /** The session log's entries kept: the oldest go first. */
-export const SESSION_LOG_KEEP = 100
+export const SESSION_LOG_KEEP = 300
 
 /** `log` with `entry` in its place by time; one whose kind and `key` are already there is not added twice. The log keeps the newest `SESSION_LOG_KEEP`. */
 export function recordLog(log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] {
@@ -35,16 +35,25 @@ export function withRoundUsd(log: readonly CockpitLogEntry[] | undefined, usd: n
   return log?.map(e => (e === newest ? { ...e, usd } : e))
 }
 
-const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr']
+const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal']
+const SEVERITIES: readonly string[] = ['block', 'warn', 'info']
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
-/** The session log a data file keeps: the entries with a time and a known kind (the other fields only when they have their type), the newest hundred; none for anything else. */
+/** A record of positive counts by name out of a parsed file; none for anything else or an empty one. */
+export function parseToolCounts(value: unknown): Record<string, number> | undefined {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return undefined
+  const counts = Object.entries(value).filter((e): e is [string, number] => isNum(e[1]) && e[1] > 0)
+  return counts.length > 0 ? Object.fromEntries(counts) : undefined
+}
+
+/** The session log a data file keeps: the entries with a time and a known kind (the other fields only when they have their type), the newest `SESSION_LOG_KEEP`; none for anything else. */
 export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
   if (!Array.isArray(value)) return undefined
   const entries = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
-    const { at, kind, key, text, usd, ms, tokens, after, isFailed } = v as Record<string, unknown>
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
+    const counts = parseToolCounts(tools)
     return [{
       at,
       kind: kind as CockpitLogEntry['kind'],
@@ -55,6 +64,11 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
       ...(isNum(tokens) && { tokens }),
       ...(isNum(after) && { after }),
       ...(typeof isFailed === 'boolean' && { isFailed }),
+      ...(typeof model === 'string' && { model }),
+      ...((typeof effort === 'string' || isNum(effort)) && { effort }),
+      ...(isNum(n) && { n }),
+      ...(typeof severity === 'string' && SEVERITIES.includes(severity) && { severity: severity as CockpitLogEntry['severity'] }),
+      ...(counts && { tools: counts }),
     }]
   }).slice(-SESSION_LOG_KEEP)
   return entries.length > 0 ? entries : undefined

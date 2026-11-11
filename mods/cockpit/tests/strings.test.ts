@@ -52,10 +52,10 @@ test('Italian: a percent after its article elides it before a number read with a
 test('the four page sections are titled in both languages, and no todo points at a tab', () => {
   try {
     setLang('en')
-    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENTION', 'TREND', 'IN PROGRESS', 'DONE', 'nothing to do'])
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENTION', 'TREND', 'IN PROGRESS', 'LOG', 'nothing to do'])
     expect(t().signalText.workflow('stall').todo).toContain('IN PROGRESS')
     setLang('it')
-    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENZIONE', 'ANDAMENTO', 'IN CORSO', 'FATTO', 'niente da fare'])
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENZIONE', 'ANDAMENTO', 'IN CORSO', 'LOG', 'niente da fare'])
     expect(t().signalText.workflow('stall').todo).toContain('IN CORSO')
     for (const lang of ['en', 'it'] as const) {
       setLang(lang)

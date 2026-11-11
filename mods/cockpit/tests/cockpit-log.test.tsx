@@ -71,13 +71,13 @@ test('sessionLog: a PR create that exits 0 with its URL is logged by its number;
   expect((await logOf(clock, writes)).map(e => [e.kind, e.key, e.text])).toEqual([['pr', '42', 'Add filter'], ['pr', '77', 'Az']])
 })
 
-test('sessionLog: a main turn end logs a round with its length; a subagent turn does not', async ($, on) => {
+test('sessionLog: a main turn end logs a round with its length; a subagent turn logs its agent once', async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'x' })
   await $.turn.complete({ answer: '', durationMs: 900, isAborted: false, turnId: 'a1-t', agentId: 'a1', reason: 'answer' })
   await $.turn.complete({ answer: '', durationMs: 4200, isAborted: false, turnId: 'm1', reason: 'answer' })
-  expect((await logOf(clock, writes)).map(e => [e.kind, e.ms])).toEqual([['round', 4200]])
+  expect((await logOf(clock, writes)).map(e => [e.kind, e.ms])).toEqual([['agent', 0], ['round', 4200]])
 })
 
 test('sessionLog: a compaction that reports no size logs the context before it at the hook, and the engine reading taken right after fills the entry\'s after', async ($, on) => {
@@ -167,7 +167,7 @@ test('the session log never evicts an agent event: 2 agents and 300 test runs le
   for (let i = 0; i < 300; i++) await $.tool.call({ tool: 'Bash', command: 'npm test' })
   // a1 ends again: only the change is added, which needs its event still in the list; one shared list would hold 2 + 300 > 300 and drop it, and a1 would be counted twice
   await end('a1')
-  expect((await logOf(clock, writes)).filter(e => e.kind === 'test')).toHaveLength(100)
+  expect((await logOf(clock, writes)).filter(e => e.kind === 'test')).toHaveLength(300)
   const one = usdOf('claude-sonnet-5-5', { input: 1000, output: 10, cacheRead: 9000, cacheWrite: 0 })
   const spend = Object.values(dataOf(writes)?.agentSpend as Record<string, number>).reduce((a, b) => a + b, 0)
   expect(Math.round(spend * 1e9)).toBe(Math.round(3 * one * 1e9))
@@ -207,4 +207,33 @@ test('Given a compaction that reports no size afterwards, When it stands, Then t
   await logOf(clock, writes)
   // Then
   expect((dataOf(writes) as { ctx?: { percent?: number } } | null)?.ctx?.percent).toBe(9)
+})
+
+test('Given tool calls in a round, When the round ends, Then its log entry holds their counts and the next round starts from zero', async ($, on) => {
+  // Given
+  const { writes, clock } = await start(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  await $.tool.call({ tool: 'Bash', command: 'ls' })
+  const end = () => $.turn.complete({ answer: '', durationMs: 5, isAborted: false, turnId: 't', reason: 'answer' })
+  // When
+  await end()
+  await clock.advance(1000)
+  await end()
+  // Then
+  const rounds = (await logOf(clock, writes)).filter(e => e.kind === 'round') as (Logged & { tools?: Record<string, number> })[]
+  expect(rounds.map(r => r.tools)).toEqual([{ Bash: 2 }, undefined])
+})
+
+test('Given a command that failed twice, When the second call ends, Then the signal is logged once with its time', async ($, on) => {
+  // Given
+  const { writes, clock } = await start(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  await $.tool.call({ tool: 'Bash', command: 'npm test -- --bail' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test -- --bail' })
+  await $.tool.call({ tool: 'Bash', command: 'npm test -- --bail' })
+  // Then
+  const signals = (await logOf(clock, writes)).filter(e => e.kind === 'signal')
+  expect(signals.map(e => e.key)).toEqual(['failedCommand:npm test -- --bail'])
 })

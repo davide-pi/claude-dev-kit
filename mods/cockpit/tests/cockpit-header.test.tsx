@@ -67,7 +67,7 @@ test('the pane shows header, context, credits and an agent that finished before 
     // the two credit windows share one row: label, bar, remaining, reset countdown
     expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [\u25b0\u25b1]+ 62% \u21bb 2h14m \u00b7 7d [\u25b0\u25b1]+ 41% \u21bb 3d\d\dh [+\u2212-]\d+%$/)
     // the finished agent is a row of DONE
-    expect(rowTexts(await ui.drawn()).some(r => /agent code-reviewer/.test(r))).toBe(true)
+    expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ code-reviewer/.test(r))).toBe(true)
     await ui.unmount()
   }
 })

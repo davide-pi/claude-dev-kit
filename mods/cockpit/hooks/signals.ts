@@ -1,6 +1,7 @@
 import type { CockpitAgent, CockpitClaudeState, CockpitEvent, CockpitInsights, CockpitSnapshot, CockpitWorkflowRun } from '../types'
 import { usdOf } from './pricing'
 import { baseName, modelFamily } from './shared'
+import { recordLog } from './timeline'
 import { claimsOf } from './work'
 import { activeRun } from './workflow'
 
@@ -152,6 +153,27 @@ export function withSignalTimes(s: CockpitSnapshot, at: number): CockpitSnapshot
   const ids = [...new Set(signalsOf(s).map(signalId))]
   if (ids.length === Object.keys(prev).length && ids.every(id => id in prev)) return s
   return { ...s, signalsAt: Object.fromEntries(ids.map(id => [id, prev[id] ?? at])) }
+}
+
+export const SIGNAL_KINDS: readonly string[] = ['heavyAgent', 'opusReadOnly', 'bigResult', 'reread', 'failedCommand', 'coldAfterIdle', 'ctxGrowth', 'doneClaims', 'workflow', 'permissionWait']
+
+/** The signal a log entry names (`kind:key`, its label and number); none when the entry is not one of a kind known. */
+export function loggedSignal(e: { key?: string; text?: string; n?: number }): Signal | undefined {
+  const [kind, ...rest] = (e.key ?? '').split(':')
+  if (kind === undefined || !SIGNAL_KINDS.includes(kind)) return undefined
+  return { kind: kind as SignalKind, key: rest.join(':'), ...(e.text !== undefined && { label: e.text }), ...(e.n !== undefined && { n: e.n }) }
+}
+
+/** `s` with a session log entry for each signal in force that the log does not hold yet, at the time `signalsAt` gives it (else `at`): a notification is logged once, the first time it holds. `s` itself when there is none. */
+export function withLoggedSignals(s: CockpitSnapshot, at: number): CockpitSnapshot {
+  const logged = new Set((s.sessionLog ?? []).filter(e => e.kind === 'signal').map(e => e.key))
+  const fresh = signalsOf(s).filter(sig => !logged.has(signalId(sig)))
+  if (fresh.length === 0) return s
+  const sessionLog = fresh.reduce<CockpitSnapshot['sessionLog']>(
+    (log, sig) => recordLog(log, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }),
+    s.sessionLog,
+  )
+  return { ...s, sessionLog }
 }
 
 /** Every signal that holds now, from the snapshot alone (no clock, no model); one id only once (the same result read twice is one notification). */

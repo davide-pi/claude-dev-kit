@@ -134,15 +134,31 @@ export type CockpitEventKind = 'agent'
 /** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
 
-/** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request. */
-export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr'
+/** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request, a finished agent, a notification that first held. */
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal'
 
 /**
- * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`; `commit`: `text` and `key` are the short hash;
- * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title.
+ * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`, `tools` the main loop's tool calls of the round by tool name; `commit`: `text` and `key` are the short hash;
+ * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title;
+ * `agent` (`at` is its end): `key` the agent id, `text` its type, `model`, `effort`, `usd`, `ms` its length, `isFailed`; `signal`: `key` the `kind:key` id of the notification, `text` its label, `n` its number, `severity`.
  * `key` makes an entry once-only (per kind).
  */
-export type CockpitLogEntry = { at: number; kind: CockpitLogKind; key?: string; text?: string; usd?: number; ms?: number; tokens?: number; after?: number; isFailed?: boolean }
+export type CockpitLogEntry = {
+  at: number
+  kind: CockpitLogKind
+  key?: string
+  text?: string
+  usd?: number
+  ms?: number
+  tokens?: number
+  after?: number
+  isFailed?: boolean
+  model?: string
+  effort?: string | number
+  n?: number
+  severity?: 'block' | 'warn' | 'info'
+  tools?: Record<string, number>
+}
 
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
@@ -251,8 +267,10 @@ export type CockpitSnapshot = {
   prs?: CockpitPr[]
   /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
-  /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests), oldest first, at most 100; kept in the session data file. Not `history`, the agent history. */
+  /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests, finished agents, notifications), oldest first, at most 300; kept in the session data file. Not `history`, the agent history. */
   sessionLog?: CockpitLogEntry[]
+  /** The main loop's tool calls since the last round ended, by tool name: the next round entry takes them. Kept in the session data file. */
+  roundTools?: Record<string, number>
   /** The USD each agent type's finished agents cost, summed when each ended (the agent history is capped); kept in the session data file. */
   agentSpend?: Record<string, number>
   /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */

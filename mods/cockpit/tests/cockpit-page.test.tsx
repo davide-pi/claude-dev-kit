@@ -3,12 +3,12 @@ import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { emptyInsights } from '../hooks/insights'
-import { COLORS, clockTime, costCell } from '../hooks/shared'
+import { COLORS, clockTime, costCell, duration, localDate } from '../hooks/shared'
 import { INITIAL } from '../hooks/state'
 import { setLang } from '../hooks/strings'
 import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks } from '../hooks/view-page'
 import { paneView } from '../hooks/view'
-import { makeKit } from '../hooks/view-kit'
+import { makeKit, signalIcon, signalText } from '../hooks/view-kit'
 import type { Block, Kit, PaneActions } from '../hooks/view-kit'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
 import { colorOf, keysInOrder } from './cockpit-fixtures'
@@ -309,21 +309,26 @@ test('in progress: at most five rows, the rest behind the toggle', async ($, on)
   expect((await keysOf(open.ui, /^agent:/)).length).toBe(7)
 })
 
-// ── FATTO ──
+// ── LOG ──
 
+const SESSION_AGENT = { at: NOW - 10_000, kind: 'agent', key: 'h1', text: 'reviewer', model: 'claude-sonnet-5-5', effort: 'high', usd: 0.5, ms: 190_000 } as const
 const LOG = [
   { at: NOW - 60_000, kind: 'round', usd: 0.38, ms: 134_000 },
   { at: NOW - 50_000, kind: 'commit', key: 'abc1234', text: 'abc1234' },
   { at: NOW - 40_000, kind: 'test', text: 'npm test', isFailed: true },
   { at: NOW - 30_000, kind: 'compact', key: 'c1', tokens: 180_000, after: 40_000 },
   { at: NOW - 20_000, kind: 'pr', key: '12', text: 'Fix x' },
+  SESSION_AGENT,
 ] as const
-const HISTORY = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 200_000, endedAt: NOW - 10_000, tokens: 0, isFailed: false, usd: 0.5 }]
-/** A child row of a group: the tree branch, then time, icon, text, the cost right-aligned (an icon of the private use area is one cell, two UTF-16 units). */
-const child = (at: number, icon: string, text: string, cost?: string, isLast = false) => {
+/** The dim figures a round or an agent ends with: its share of the session's cost (4 cells), its cost, its length. */
+const figs = (share: string, usd: number, ms?: number) => `${share.padStart(4)} ${costCell(usd, 7)}${ms === undefined ? '' : ` ${duration(ms)}`}`
+/** A child row of a group: the tree branch, then time, icon, text, the figures right-aligned (an icon of the private use area is one cell, two UTF-16 units). */
+const child = (at: number, icon: string, text: string, right?: string, isLast = false) => {
   const left = `${isLast ? '└' : '├'} ${clockTime(at)} ${icon} ${text}`
-  return cost === undefined ? left : left + ' '.repeat(WIDTH - 7 - [...left].length) + cost
+  return right === undefined ? left : left + ' '.repeat(WIDTH - [...left].length - [...right].length) + right
 }
+/** The day header row. */
+const day = (at: number) => localDate(at)
 
 test('done: hidden without a log or a finished agent', async ($, on) => {
   expect((await draw($, on, snap(), doneBlocks)).rows).toEqual([])
@@ -332,23 +337,24 @@ test('done: hidden without a log or a finished agent', async ($, on) => {
 /** The summary row an open group starts with. */
 const summary = (text: string) => `├ ${text}`
 
-test('done: given events after the newest round, when drawn, then they are the open group: the header, a summary row, and its whole subtree', async ($, on) => {
+test('done: given events after the newest round, when drawn, then they are the open group under a day header: the header, a summary row, and its whole subtree, the agent with its model, cost and length', async ($, on) => {
   // Given
-  const s = snap({ sessionLog: [...LOG], history: HISTORY })
+  const s = snap({ sessionLog: [...LOG] })
   // When
   const { rows } = await draw($, on, s, doneBlocks)
   // Then
   expect(rows).toEqual([
-    titled('DONE'),
+    titled('LOG'),
+    day(NOW - 10_000),
     '▾ current round',
     summary('1 agent · 1 commit · 1 test · 1 PR · 1 compaction'),
-    child(NOW - 10_000, '󰄬', 'agent reviewer', costCell(0.5, 7)),
+    child(NOW - 200_000, '󰄬', 'reviewer son5.5·high', figs('', 0.5, 190_000)),
     child(NOW - 20_000, '◆', 'PR #12 Fix x'),
     child(NOW - 30_000, '◇', 'compacted 180k → 40k'),
     child(NOW - 40_000, '󰅖', 'tests failed: npm test'),
     child(NOW - 50_000, '●', 'commit abc1234', undefined, true),
-    // a round with nothing in it is a plain row
-    `▸ ${clockTime(NOW - 60_000)} round 1 02m14s  ${costCell(0.38, 7)}`,
+    // a round with nothing in it is a plain row, under the start time
+    `▸ ${clockTime(NOW - 194_000)} round 001 ${figs('', 0.38, 134_000)}`,
   ])
 })
 
@@ -375,22 +381,26 @@ const ROUNDS = [
   { at: NOW - 110_000, kind: 'test', text: 'npm test' },
   { at: NOW - 100_000, kind: 'round', ms: 180_000, usd: 1.12 },
 ] as const
-const ROUND_HISTORY = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 300_000, endedAt: NOW - 210_000, tokens: 0, isFailed: false, usd: 0.21 }]
+const ROUND_AGENT = { at: NOW - 210_000, kind: 'agent', key: 'h1', text: 'reviewer', usd: 0.21, ms: 90_000 } as const
 const header = (at: number, arrow: string, rest: string) => `${arrow} ${clockTime(at)} ${rest}`
+/** The start of the rounds above: their end less their length. */
+const START_2 = NOW - 280_000
+const START_1 = NOW - 260_000
 
 test('done: given rounds, when drawn, then only the newest is open and each header toggles under its own key, to the opposite state', async ($, on) => {
   // Given
   const calls: string[] = []
-  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
+  const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT] })
   // When
   const { rows, ui } = await draw($, on, s, doneBlocks, calls)
   // Then
   expect(rows).toEqual([
-    titled('DONE'),
-    header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)}`),
+    titled('LOG'),
+    day(START_2),
+    header(START_2, '▾', `round 002 ${figs('', 1.12, 180_000)}`),
     summary('1 test'),
     child(NOW - 110_000, '󰄬', 'tests passed: npm test', undefined, true),
-    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}`),
+    header(START_1, '▸', `round 001 ${figs('', 0.44, 60_000)}`),
   ])
   await ui.press({ key: `done:${NOW - 200_000}` })
   await ui.press({ key: `done:${NOW - 100_000}` })
@@ -399,19 +409,19 @@ test('done: given rounds, when drawn, then only the newest is open and each head
 
 test('done: given a state a person gave, when drawn, then an older group stays open under the newest, and the newest can be closed', async ($, on) => {
   // Given
-  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY })
+  const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT] })
   // When
   const older = await draw($, on, { ...s, groupsOpen: { [`done:${NOW - 200_000}`]: true } }, doneBlocks)
   const closed = await draw($, on, { ...s, groupsOpen: { [`done:${NOW - 100_000}`]: false } }, doneBlocks)
   // Then
-  expect(older.rows.slice(4)).toEqual([
-    header(NOW - 200_000, '▾', `round 1 01m00s  ${costCell(0.44, 7)}`),
+  expect(older.rows.slice(5)).toEqual([
+    header(START_1, '▾', `round 001 ${figs('', 0.44, 60_000)}`),
     summary('1 agent · 1 commit'),
-    child(NOW - 210_000, '󰄬', 'agent reviewer', costCell(0.21, 7)),
+    child(NOW - 300_000, '󰄬', 'reviewer', figs('', 0.21, 90_000)),
     child(NOW - 220_000, '●', 'commit abc1234', undefined, true),
   ])
-  expect(closed.rows[1]).toBe(header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}`))
-  expect(closed.rows).toHaveLength(3)
+  expect(closed.rows[2]).toBe(header(START_2, '▸', `round 002 ${figs('', 1.12, 180_000)}`))
+  expect(closed.rows).toHaveLength(4)
 })
 
 test('done: given the newest group closed by a person, when a newer round arrives, then the old group stays closed and the new one is open', async ($, on) => {
@@ -419,28 +429,31 @@ test('done: given the newest group closed by a person, when a newer round arrive
   const groupsOpen = { [`done:${NOW - 100_000}`]: false }
   const newer = [...ROUNDS, { at: NOW - 40_000, kind: 'commit', key: 'def5678', text: 'def5678' } as const, { at: NOW - 30_000, kind: 'round', ms: 10_000 } as const]
   // When
-  const { rows } = await draw($, on, snap({ sessionLog: newer, history: ROUND_HISTORY, groupsOpen }), doneBlocks)
+  const { rows } = await draw($, on, snap({ sessionLog: newer, groupsOpen }), doneBlocks)
   // Then
   expect(rows).toEqual([
-    titled('DONE'),
-    header(NOW - 30_000, '▾', 'round 3 00m10s'),
+    titled('LOG'),
+    day(NOW - 40_000),
+    header(NOW - 40_000, '▾', 'round 003 00m10s'),
     summary('1 commit'),
     child(NOW - 40_000, '●', 'commit def5678', undefined, true),
-    header(NOW - 100_000, '▸', `round 2 03m00s  ${costCell(1.12, 7)}`),
-    header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)}`),
+    header(START_2, '▸', `round 002 ${figs('', 1.12, 180_000)}`),
+    header(START_1, '▸', `round 001 ${figs('', 0.44, 60_000)}`),
   ])
 })
 
-test('done: given the session total, when drawn, then each header shows its cost share in percent; none without a total or a cost', async ($, on) => {
+test('done: given the session total, when drawn, then each header and each agent shows its cost share in percent, aligned before the cost; none without a total or a cost', async ($, on) => {
   // Given
-  const s = snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, groupsOpen: { [`done:${NOW - 200_000}`]: false } })
+  const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT], groupsOpen: { [`done:${NOW - 200_000}`]: false } })
   // When
   const withTotal = await draw($, on, { ...s, cost: { usd: 4 } }, doneBlocks)
   const noCost = await draw($, on, { ...s, cost: { usd: 4 }, sessionLog: [{ at: NOW - 50_000, kind: 'round' }, { at: NOW - 60_000, kind: 'commit', key: 'abc1234', text: 'abc1234' }] }, doneBlocks)
+  const agent = await draw($, on, { ...s, cost: { usd: 4 }, groupsOpen: { [`done:${NOW - 200_000}`]: true } }, doneBlocks)
   // Then
-  expect(withTotal.rows[1]).toBe(header(NOW - 100_000, '▾', `round 2 03m00s  ${costCell(1.12, 7)} 28%`))
-  expect(withTotal.rows.at(-1)).toBe(header(NOW - 200_000, '▸', `round 1 01m00s  ${costCell(0.44, 7)} 11%`))
-  expect(noCost.rows[1]).not.toContain('%')
+  expect(withTotal.rows[2]).toBe(header(START_2, '▾', `round 002 ${figs('28%', 1.12, 180_000)}`))
+  expect(withTotal.rows.at(-1)).toBe(header(START_1, '▸', `round 001 ${figs('11%', 0.44, 60_000)}`))
+  expect(agent.rows).toContain(child(NOW - 300_000, '󰄬', 'reviewer', figs('5%', 0.21, 90_000)))
+  expect(noCost.rows[2]).not.toContain('%')
 })
 
 test('done: given rounds with no events, when drawn, then they are one row that does not toggle; a round without a cost prints none', async ($, on) => {
@@ -450,24 +463,88 @@ test('done: given rounds with no events, when drawn, then they are one row that 
   const { rows, ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
   // Then
   expect(rows).toEqual([
-    titled('DONE'),
-    header(NOW - 90_000, '▾', 'round 4 00m05s'),
+    titled('LOG'),
+    day(NOW - 95_000),
+    header(NOW - 95_000, '▾', `round 004 ${'00m05s'}`),
     summary('1 commit'),
     child(NOW - 100_000, '●', 'commit abc1234', undefined, true),
-    header(NOW - 200_000, '▸', `3 chat-only rounds  ${costCell(0.31, 7)}`),
+    header(NOW - 200_000, '▸', `3 chat-only rounds ${figs('', 0.31)}`),
   ])
   expect(await keysOf(ui, /^done:\d/)).toEqual([`done:${NOW - 90_000}`])
 })
 
-test('done: given an agent just finished and still listed in the agents, when drawn, then it shows at once and once', async ($, on) => {
+test('done: given an agent just finished and still listed in the agents, when drawn, then it shows at once and once, from its start, without a cost it has none', async ($, on) => {
   // Given
   const fresh = agent('a9', 'implementer', { status: 'done', endedAt: NOW - 5_000 })
+  const logged = { at: NOW - 5_000, kind: 'agent', key: 'a9', text: 'implementer', model: 'claude-sonnet-5-5', ms: 57_000, isFailed: false } as const
   // When
   const alone = await draw($, on, snap({ agents: [fresh] }), doneBlocks)
-  const twice = await draw($, on, snap({ agents: [fresh], history: [{ id: 'a9', type: 'implementer', startedAt: NOW - 62_000, endedAt: NOW - 5_000, tokens: 0, isFailed: false }] }), doneBlocks)
+  const twice = await draw($, on, snap({ agents: [fresh], sessionLog: [logged] }), doneBlocks)
   // Then
-  expect(alone.rows).toEqual([titled('DONE'), '▾ current round', summary('1 agent'), child(NOW - 5_000, '󰄬', 'agent implementer', undefined, true)])
+  expect(alone.rows).toEqual([titled('LOG'), day(NOW - 5_000), '▾ current round', summary('1 agent'), child(NOW - 62_000, '󰄬', 'implementer son5.5', duration(57_000), true)])
   expect(twice.rows).toEqual(alone.rows)
+})
+
+test('done: given agents that finished only in the history, when drawn, then the capped history adds no row', async ($, on) => {
+  // Given
+  const history = [{ id: 'h1', type: 'reviewer', startedAt: NOW - 200_000, endedAt: NOW - 10_000, tokens: 0, isFailed: false, usd: 0.5 }]
+  // When
+  const { rows } = await draw($, on, snap({ history }), doneBlocks)
+  // Then
+  expect(rows).toEqual([])
+})
+
+test('done: given an agent with no model, effort or length, when drawn, then its row shows only what there is', async ($, on) => {
+  // Given
+  const log = [
+    { at: NOW - 30_000, kind: 'agent', key: 'x', text: 'bare', isFailed: true },
+    { at: NOW - 20_000, kind: 'agent', key: 'y', text: 'tuned', model: 'claude-opus-5-5', effort: 'max', ms: 5_000 },
+    { at: NOW - 10_000, kind: 'agent', key: 'z', text: 'effortless', effort: 'low' },
+  ] as const
+  // When
+  const { rows } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then
+  expect(rows.slice(4)).toEqual([
+    child(NOW - 10_000, '󰄬', 'effortless low'),
+    child(NOW - 25_000, '󰄬', 'tuned opu5.5·max', duration(5_000)),
+    child(NOW - 30_000, '󰅖', 'bare', undefined, true),
+  ])
+})
+
+test('done: given tool counts on a round, when drawn, then the summary ends with the total and the top three by count', async ($, on) => {
+  // Given
+  const log = [{ at: NOW - 50_000, kind: 'commit', key: 'abc1234', text: 'abc1234' }, { at: NOW - 40_000, kind: 'round', tools: { Grep: 1, Read: 20, Edit: 5, Bash: 9 } }] as const
+  // When
+  const { rows } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then
+  expect(rows[3]).toBe(summary('1 commit · 35 tools: Read 20 · Bash 9 · Edit 5'))
+})
+
+test('done: given a signal entry, when drawn, then it is a child row with its time, its severity icon and the text ATTENTION gives it', async ($, on) => {
+  // Given
+  const sig = { kind: 'failedCommand', key: 'npm test', label: 'npm test', n: 3 } as const
+  const log = [{ at: NOW - 30_000, kind: 'signal', key: 'failedCommand:npm test', text: 'npm test', n: 3, severity: 'warn' }, { at: NOW - 25_000, kind: 'signal', key: 'gone:x' }] as const
+  // When
+  const { rows, ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then: a signal of a kind unknown is left out
+  expect(rows.slice(2)).toEqual(['▾ current round', summary('1 signal'), child(NOW - 30_000, signalIcon(sig), signalText(sig).what, undefined, true)])
+  expect(colorOf(await ui.drawn(), /^\u{F018D}/u)).toBe(COLORS.orange)
+})
+
+test('done: given groups on two dates, when drawn, then a day header opens the groups of each date, and the older one stays with its group', async ($, on) => {
+  // Given
+  const log = [
+    { at: NOW - 90_000_000, kind: 'commit', key: 'a', text: 'a' },
+    { at: NOW - 89_990_000, kind: 'round', ms: 1_000 },
+    { at: NOW - 50_000, kind: 'commit', key: 'b', text: 'b' },
+    { at: NOW - 40_000, kind: 'round', ms: 1_000 },
+  ] as const
+  // When
+  const { rows } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then
+  expect(rows.filter(r => /^\d{4}-\d\d-\d\d$/.test(r))).toEqual([day(NOW - 41_000), day(NOW - 89_991_000)])
+  expect(rows.at(-1)).toMatch(/^▸ \d\d:\d\d round 001/)
+  expect(rows.at(-2)).toBe(day(NOW - 89_991_000))
 })
 
 // ── Both languages ──
@@ -479,16 +556,16 @@ test('page: the section titles and the empty row in Italian', async ($, on) => {
     const trend = await draw($, on, snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6 }) }), andamentoBlocks)
     expect(trend.rows.slice(0, 4)).toEqual([titled('ANDAMENTO'), cols('$/prompt', 'ultimo turno', 'subagenti', 'compattazione'), cols('$2.00 →', '—', '0%', '—'), cols('', '', 'della spesa')])
     expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
-    const done = await draw($, on, snap({ sessionLog: [...ROUNDS], history: ROUND_HISTORY, groupsOpen: { [`done:${NOW - 200_000}`]: true } }), doneBlocks)
-    expect(done.rows[0]).toBe(titled('FATTO'))
-    expect(done.rows[1]).toBe(header(NOW - 100_000, '▾', `giro 2 03m00s  ${costCell(1.12, 7)}`))
-    expect(done.rows[2]).toBe(summary('1 test'))
-    expect(done.rows[4]).toBe(header(NOW - 200_000, '▾', `giro 1 01m00s  ${costCell(0.44, 7)}`))
-    expect(done.rows[5]).toBe(summary('1 agente · 1 commit'))
+    const done = await draw($, on, snap({ sessionLog: [...ROUNDS, ROUND_AGENT], groupsOpen: { [`done:${NOW - 200_000}`]: true } }), doneBlocks)
+    expect(done.rows[0]).toBe(titled('LOG'))
+    expect(done.rows[2]).toBe(header(START_2, '▾', `giro 002 ${figs('', 1.12, 180_000)}`))
+    expect(done.rows[3]).toBe(summary('1 test'))
+    expect(done.rows[5]).toBe(header(START_1, '▾', `giro 001 ${figs('', 0.44, 60_000)}`))
+    expect(done.rows[6]).toBe(summary('1 agente · 1 commit'))
     const current = (await draw($, on, snap({ sessionLog: [...LOG] }), doneBlocks)).rows
-    expect(current.slice(1, 3)).toEqual(['▾ giro in corso', summary('1 commit · 1 test · 1 PR · 1 compattazione')])
+    expect(current.slice(2, 4)).toEqual(['▾ giro in corso', summary('1 agente · 1 commit · 1 test · 1 PR · 1 compattazione')])
     const idle = [{ at: 1, kind: 'round' }, { at: 2, kind: 'round' }] as const
-    expect((await draw($, on, snap({ sessionLog: [...idle] }), doneBlocks)).rows[1]).toContain('2 giri di sola conversazione')
+    expect((await draw($, on, snap({ sessionLog: [...idle] }), doneBlocks)).rows.join('\n')).toContain('2 giri di sola conversazione')
   } finally {
     setLang('en')
   }

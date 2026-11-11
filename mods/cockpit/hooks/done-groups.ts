@@ -1,8 +1,8 @@
 import type { CockpitLogEntry } from '../types'
 
-export type DoneEvent = { at: number; kind: 'agent' | 'commit' | 'test' | 'pr' | 'compact' }
+export type DoneEvent = { at: number; kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' }
 
-/** One row of FATTO: a main round with its events, the open round after the newest one, or a run of rounds that held none. */
+/** One row of LOG: a main round with its events, the open round after the newest one, or a run of rounds that held none. */
 export type DoneGroup<E extends DoneEvent> = {
   /** The key the group toggles under: `done:<at>`, `done:current` for the open round. */
   key: string
@@ -12,6 +12,8 @@ export type DoneGroup<E extends DoneEvent> = {
   at: number
   ms?: number
   usd?: number
+  /** The main loop's tool calls of the round by tool name. */
+  tools?: Record<string, number>
   /** The events of the group, newest first. */
   events: E[]
   /** How many chat-only rounds a merged run holds (two or more). */
@@ -42,7 +44,7 @@ export function groupDone<E extends DoneEvent>(events: readonly E[], log: readon
   }
   rounds.forEach((r, i) => {
     const own = bucket(rounds[i - 1]?.at ?? -Infinity, r.at)
-    const group: DoneGroup<E> = { key: `done:${r.at}`, round: i + 1, at: r.at, events: own, ...(r.ms !== undefined && { ms: r.ms }), ...(r.usd !== undefined && { usd: r.usd }) }
+    const group: DoneGroup<E> = { key: `done:${r.at}`, round: i + 1, at: r.at, events: own, ...(r.ms !== undefined && { ms: r.ms }), ...(r.usd !== undefined && { usd: r.usd }), ...(r.tools !== undefined && { tools: r.tools }) }
     if (own.length === 0) run.push(group)
     else {
       flush()

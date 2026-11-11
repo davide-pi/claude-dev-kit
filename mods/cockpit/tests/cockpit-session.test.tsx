@@ -24,10 +24,10 @@ const LIVE_CTX = { tokens: 248_000, window: 1_000_000, percent: 25 }
 
 test('a data file from before the model usage was dropped still loads: its history comes back, the old modelUse is ignored', async ($, on) => {
   const writes = new Map<string, string>()
-  world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
+  world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], sessionLog: [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  expect(rowTexts(await ui.drawn()).some(r => /agent implementer/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ implementer/.test(r))).toBe(true)
   await ui.unmount()
   await settle()
   expect(dataOf(writes)).not.toHaveProperty('modelUse')
@@ -278,7 +278,8 @@ test('a session.end whose file write is cut short still leaves nothing of the en
 test('a resume reloads the history of the session it resumes', async ($, on) => {
   let id = 's-2'
   const history = [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)]
-  const clock = world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, history }) })
+  const sessionLog = [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }, { at: NOW - 90_000, kind: 'agent', key: 'a8', text: 'reviewer', isFailed: true }]
+  const clock = world(on, { sessionId: () => id, stateFile: JSON.stringify({ open: false, history }), dataFile: JSON.stringify({ sessionLog }) })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   id = 's-1'
@@ -286,7 +287,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).filter(r => /agent (implementer|reviewer)/.test(r))).toHaveLength(2)
+  expect(rowTexts(await ui.drawn()).filter(r => /\d\d:\d\d \S+ (implementer|reviewer)/.test(r))).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -299,7 +300,10 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
   await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
   // a file without agentTokens starts the count from the history it lists; the history itself is in the data file
   expect(flagOf(writes)).toEqual({ ...CLOSED, agentTokens: 5400 })
-  expect(dataOf(writes)).toEqual({ history, prs: [], ctx: LIVE_CTX, startedAt: NOW })
+  // the log, which an old file lacks, takes the history's agents
+  const { sessionLog, ...data } = dataOf(writes) as Record<string, unknown>
+  expect(data).toEqual({ history, prs: [], ctx: LIVE_CTX, startedAt: NOW })
+  expect((sessionLog as { kind: string; key: string; at: number }[]).map(e => [e.kind, e.key, e.at])).toEqual([['agent', 'a9', NOW - 30_000]])
 })
 
 test('follow-up: a saved state without agentTokens starts the count from the history it lists', async ($, on) => {
@@ -366,6 +370,7 @@ test('session data: a resume brings back the history, the PRs and the context sa
   const writes = new Map<string, string>()
   const dataFile = JSON.stringify({
     history: [entry('a9', 'implementer', NOW - 30_000)],
+    sessionLog: [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }],
     prs: [SAVED_PR],
     notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }],
     ctxRounds: [100_000, 200_000],
@@ -374,7 +379,7 @@ test('session data: a resume brings back the history, the PRs and the context sa
   world(on, { writes, dataFile })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).some(r => /agent implementer/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ implementer/.test(r))).toBe(true)
   await ui.unmount()
   // written back as it was read
   expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
@@ -385,7 +390,9 @@ test('session data: a state file from before the data file hands its history and
   const history = [entry('a9', 'implementer', NOW - 30_000)]
   world(on, { writes, stateFile: JSON.stringify({ open: false, history, prs: [SAVED_PR] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect(dataOf(writes)).toEqual({ history, prs: [SAVED_PR], ctx: LIVE_CTX, startedAt: NOW })
+  const { sessionLog, ...data } = dataOf(writes) as Record<string, unknown>
+  expect(data).toEqual({ history, prs: [SAVED_PR], ctx: LIVE_CTX, startedAt: NOW })
+  expect((sessionLog as { key: string }[]).map(e => e.key)).toEqual(['a9'])
   const flag = flagOf(writes) as Record<string, unknown>
   expect(flag.history).toBeUndefined()
   expect(flag.prs).toBeUndefined()

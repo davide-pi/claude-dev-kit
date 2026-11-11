@@ -159,10 +159,10 @@ export function signalText(sig: Signal): { what: string; why: string; todo: stri
   }
 }
 
-const SEVERITY_COLORS: Record<SignalSeverity, string> = { block: COLORS.red, warn: COLORS.orange, info: COLORS.yellow }
+export const SEVERITY_COLORS: Record<SignalSeverity, string> = { block: COLORS.red, warn: COLORS.orange, info: COLORS.yellow }
 
 /** A notification's icon: one per kind, a workflow's by whether it stalled or ran past its rounds. */
-function signalIcon(sig: Signal): string {
+export function signalIcon(sig: Signal): string {
   switch (sig.kind) {
     case 'permissionWait':
       return '\u{F033E}'

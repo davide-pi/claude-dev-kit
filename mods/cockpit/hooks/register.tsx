@@ -2,7 +2,8 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitLogEntry, CockpitSnapshot, CockpitTask } from '../types'
-import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import { addHistory, agentLog, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import { withLoggedSignals } from './signals'
 import { recordCtxSample, recordRound } from './context'
 import {
   addStepUsage,
@@ -201,7 +202,7 @@ export const register: Register = on => {
     const at = await $.clock.now().catch(() => undefined)
     await patch($, s => {
       isNewWindow = s.ctx.window !== undefined && e.context.window !== undefined && s.ctx.window !== e.context.window
-      return withSettledRound(s.cost, {
+      return withLoggedSignals(withSettledRound(s.cost, {
         ...s,
         ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
         // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
@@ -211,7 +212,7 @@ export const register: Register = on => {
         rateLimits: e.rateLimits,
         // the old threshold is the old window's: a failed read draws none rather than a wrong one
         ...(isNewWindow && { autoCompactAt: undefined }),
-      })
+      }), at ?? s.now)
     })
     // the measure goes on before the read, and two window changes still read in order
     const out = await next(e)
@@ -406,10 +407,12 @@ export const register: Register = on => {
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
-      await patch($, s => ({
+      await patch($, s => withLoggedSignals({
         ...s,
+        // the round's tool counts, which its log entry takes when it ends
+        roundTools: { ...s.roundTools, [tool]: (s.roundTools?.[tool] ?? 0) + 1 },
         insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), fullArg: toolArgFull(e), tokens: outcome?.tokens, error: outcome?.error }),
-      })).catch(() => undefined)
+      }, ended ?? s.now)).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
@@ -446,6 +449,7 @@ export const register: Register = on => {
         const from = await $.clock.now()
         asks.set(e.tool_use_id, { from, held })
         await setClaudeState($, { kind: 'waiting', since: from })
+        await patch($, s => withLoggedSignals(s, from))
       }
     } catch {
       // observing must never break the verdict
@@ -528,16 +532,17 @@ export const register: Register = on => {
       await patch($, s => {
         const usd = roundCost(s.cost)
         const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
-        return {
+        return withLoggedSignals({
           ...s,
-          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }) }),
+          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }) }),
+          roundTools: undefined,
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
           cost: endTurnCost(s.cost),
-        }
+        }, now)
       })
       await setClaudeState($, { kind: 'idle' })
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
@@ -559,6 +564,7 @@ export const register: Register = on => {
           }
         })
         const ended = agents.find(a => a.id === agentId)
+        const entry = ended && agentLog(ended)
         const spent = ended ? usdOf(ended.model, ended.usage) : 0
         // A turn that ended twice replaces the agent's event: only the change is added to its type.
         const delta = ended ? spent - (s.events?.find(ev => ev.kind === 'agent' && ev.id === agentId)?.usd ?? 0) : 0
@@ -567,6 +573,8 @@ export const register: Register = on => {
           ...(ended && delta !== 0 && { agentSpend: { ...s.agentSpend, [ended.type]: (s.agentSpend?.[ended.type] ?? 0) + delta } }),
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
+          // the agent is logged as it ends; a turn that ended twice is one entry
+          sessionLog: entry ? recordLog(s.sessionLog, entry) : s.sessionLog,
           events: ended
             ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage) })
             : s.events,

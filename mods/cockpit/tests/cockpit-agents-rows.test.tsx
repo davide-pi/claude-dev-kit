@@ -126,7 +126,7 @@ test('agents: the turn\'s own total replaces what its steps added, a turn that s
   const writes = new Map<string, string>()
   void writes
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).filter(r => /agent (one|two)/.test(r))).toHaveLength(2)
+  expect(rowTexts(await ui.drawn()).filter(r => /\d\d:\d\d \S+ (one|two)/.test(r))).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -238,11 +238,11 @@ test('agents: every live row that has a usage carries the agent\'s cost in a fix
   }
 })
 
-test('agents: DONE shows the cost a history entry kept', async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ history: [{ ...entry('a1', 'two', NOW - 1000), usd: 1.5 }], prs: [] }) })
+test('agents: LOG shows the cost a log entry kept', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: NOW - 1000, kind: 'agent', key: 'a1', text: 'two', usd: 1.5, ms: 60_000 }], prs: [] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  expect(rowTexts(await ui.drawn()).find(r => /agent two/.test(r))).toMatch(/\$ {2}1\.50$/)
+  expect(rowTexts(await ui.drawn()).find(r => /\d\d:\d\d \S+ two/.test(r))).toMatch(/\$ {2}1\.50 /)
   await ui.unmount()
 })
 

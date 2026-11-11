@@ -1,8 +1,9 @@
-import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitUsage } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitLogEntry, CockpitSnapshot, CockpitUsage } from '../types'
 import { usdOf } from './pricing'
 import { COLORS, isRecord, truncEnd } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
+import { recordLog } from './timeline'
 
 /** How long a finished agent stays listed. */
 export const AGENT_KEEP_MS = 120_000
@@ -91,6 +92,45 @@ export const HISTORY_KEEP = 300
 export function toHistory(a: CockpitAgent): CockpitHistoryEntry | undefined {
   if (a.type === '?' || a.endedAt === undefined) return undefined
   return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
+}
+
+/** The session log entry of a finished agent (`at` its end, `key` its id); undefined for one the mod only saw through its events (type `?`) or one that has not ended. */
+export function agentLog(a: CockpitAgent): CockpitLogEntry | undefined {
+  if (a.type === '?' || a.endedAt === undefined) return undefined
+  return {
+    at: a.endedAt,
+    kind: 'agent',
+    key: a.id,
+    text: a.type,
+    ms: Math.max(0, a.endedAt - a.startedAt),
+    isFailed: a.isFailed === true,
+    ...(a.model !== undefined && { model: a.model }),
+    ...(a.effort !== undefined && { effort: a.effort }),
+    ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }),
+  }
+}
+
+/**
+ * `log` with an 'agent' entry for each agent of `history`, for a log saved before agents had entries of their own (one-off, at load);
+ * `log` itself when it holds any 'agent' entry or the history is empty.
+ */
+export function withHistoryAgents(log: CockpitLogEntry[] | undefined, history: readonly CockpitHistoryEntry[]): CockpitLogEntry[] | undefined {
+  if (history.length === 0 || (log ?? []).some(e => e.kind === 'agent')) return log
+  return history.reduce<CockpitLogEntry[] | undefined>(
+    (l, h) =>
+      recordLog(l, {
+        at: h.endedAt,
+        kind: 'agent',
+        key: h.id,
+        text: h.type,
+        ms: Math.max(0, h.endedAt - h.startedAt),
+        isFailed: h.isFailed,
+        ...(h.model !== undefined && { model: h.model }),
+        ...(h.effort !== undefined && { effort: h.effort }),
+        ...(h.usd !== undefined && { usd: h.usd }),
+      }),
+    log,
+  )
 }
 
 /** `entries` go in front (newest first), an id already there replaced; the list is cut to `HISTORY_KEEP`. */

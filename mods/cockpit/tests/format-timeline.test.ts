@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { SESSION_LOG_KEEP, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withCompactAfter, withRoundUsd } from '../hooks/timeline'
 
-test('recordLog: the newest hundred stay, ordered by time; the same kind and key is one entry', () => {
+test('recordLog: the newest 300 stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
   log = recordLog(log, { at: 10, kind: 'round', ms: 5 })
   log = recordLog(log, { at: 30, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -10,10 +10,10 @@ test('recordLog: the newest hundred stay, ordered by time; the same kind and key
   // the same key of another kind is another entry
   expect(recordLog(log, { at: 40, kind: 'pr', key: 'abc1234' })).toHaveLength(3)
   let full = log
-  for (let i = 0; i < 150; i++) full = recordLog(full, { at: 100 + i, kind: 'round' })
+  for (let i = 0; i < 350; i++) full = recordLog(full, { at: 100 + i, kind: 'round' })
   expect(full).toHaveLength(SESSION_LOG_KEEP)
-  expect(SESSION_LOG_KEEP).toBe(100)
-  expect(full.at(-1)?.at).toBe(249)
+  expect(SESSION_LOG_KEEP).toBe(300)
+  expect(full.at(-1)?.at).toBe(449)
 })
 
 test('withCompactAfter: the compact entry of that key takes the reading once, no other entry changes', () => {
@@ -69,4 +69,22 @@ test('nextCompactKey: after the highest key the log holds, so a resumed session 
   const log = recordLog(recordLog(undefined, { at: 1, kind: 'compact', key: 'c1' }), { at: 2, kind: 'compact', key: 'c2' })
   expect(nextCompactKey(log)).toBe('c3')
   expect(nextCompactKey(recordLog(log, { at: 3, kind: 'commit', key: 'c9' }))).toBe('c3')
+})
+
+test('Given a data file with agent, signal and tool-count fields and an unknown kind, When parsed, Then the new kinds and fields load and the unknown kind is dropped', () => {
+  // Given
+  const file = [
+    { at: 1, kind: 'agent', key: 'a1', text: 'reviewer', model: 'claude-sonnet-5-5', effort: 'high', usd: 0.5, ms: 4000, isFailed: false },
+    { at: 2, kind: 'signal', key: 'failedCommand:npm test', text: 'npm test', n: 3, severity: 'warn' },
+    { at: 3, kind: 'round', ms: 10, tools: { Read: 20, Bash: 0, Edit: 'x' } },
+    { at: 4, kind: 'mystery', key: 'm' },
+  ]
+  // When
+  const log = parseLog(file)
+  // Then
+  expect(log).toEqual([
+    { at: 1, kind: 'agent', key: 'a1', text: 'reviewer', model: 'claude-sonnet-5-5', effort: 'high', usd: 0.5, ms: 4000, isFailed: false },
+    { at: 2, kind: 'signal', key: 'failedCommand:npm test', text: 'npm test', n: 3, severity: 'warn' },
+    { at: 3, kind: 'round', ms: 10, tools: { Read: 20 } },
+  ])
 })

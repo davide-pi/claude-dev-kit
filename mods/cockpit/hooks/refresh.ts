@@ -2,7 +2,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../types'
-import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
+import { AGENT_KEEP_MS, addHistory, agentLog, toHistory, withAgentTokens } from './agents'
 import { settledRoundUsd, withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
 import { parseRateCache, resolveAlm, worklogDays } from './session'
@@ -11,7 +11,7 @@ import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
 import { CENT } from './shared'
 import { configDir, patch } from './store'
-import { withRoundUsd } from './timeline'
+import { recordLog, withRoundUsd } from './timeline'
 import { autoOpenOf, costTargetOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
 import { endRun, expireRun, finishWorkflowAgent } from './workflow'
@@ -246,6 +246,11 @@ async function tickClock($: EngineInterface): Promise<number> {
       workflowRun,
       agents: agents.filter(isListed),
       history: left.length > 0 ? addHistory(s.history, left) : s.history,
+      // an agent that ended without a turn.complete we saw (the engine stopped listing it) is logged here; one already logged is left as it was
+      sessionLog: agents.reduce<CockpitSnapshot['sessionLog']>((log, a) => {
+        const entry = a.status === 'done' ? agentLog(a) : undefined
+        return entry ? recordLog(log, entry) : log
+      }, s.sessionLog),
       // An agent leaving the list (type `?` ones too: they used tokens) joins the count that the share keeps.
       agentTokens: withAgentTokens(s.agentTokens, gone),
     }

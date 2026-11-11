@@ -10,9 +10,12 @@ type Ui = Awaited<ReturnType<typeof mountPane>>
 /** The agents DONE lists, newest first, as `<icon> <type>`: the clock and the cost cells left out. */
 const doneAgents = async (ui: Ui) =>
   rowTexts(await ui.drawn()).flatMap(r => {
-    const m = /^[├└] \d\d:\d\d (\S) agent (\S+)/u.exec(r)
+    const m = /^[├└] \d\d:\d\d (\S) (\S+)/u.exec(r)
     return m ? [`${m[1]} ${m[2]}`] : []
   })
+
+/** A log entry of a finished agent, as the log keeps it. */
+const logged = (id: string, type: string, at: number, isFailed = false) => ({ at, kind: 'agent', key: id, text: type, ms: 60_000, isFailed })
 
 /** Starts a session in the test world. */
 const start = ($: Engine) => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -83,7 +86,7 @@ test('agents: DONE shows an open group with every agent it holds, and no `󰍟 +
 
 test('agents: the history survives a reload (the session id reads its data file); another id starts empty', async ($, on) => {
   let id = 's-1'
-  world(on, { sessionId: () => id, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)] }) })
+  world(on, { sessionId: () => id, dataFile: JSON.stringify({ sessionLog: [logged('a8', 'reviewer', NOW - 90_000, true), logged('a9', 'implementer', NOW - 30_000)] }) })
   await start($)
   let ui = await mountPane($)
   expect(await doneAgents(ui)).toEqual(['󰄬 implementer', '󰅖 reviewer'])
@@ -139,20 +142,23 @@ test('agents: a reload of the same session id keeps the live agents, the finishe
   expect((dataOf(writes)?.history as { id: string }[]).map(h => h.id)).toEqual(['a2'])
 })
 
-test('agents: DONE draws an interrupted agent as a dim 󰓛, and a resume of the ended id brings its history back', async ($, on) => {
+test('agents: Given a data file from before agent entries, When the session resumes, Then LOG lists the agents of its history, once', async ($, on) => {
+  // Given
   const history = [{ ...entry('a1', 'running-one', NOW - 1000), isInterrupted: true }]
   world(on, { dataFile: JSON.stringify({ history }) })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  // When
   await start($)
   await $.session.end({ reason: 'resume', sessionId: 's-1', resume: { id: 's-1' } })
   await start($)
   const ui = await mountPane($)
-  expect(await doneAgents(ui)).toEqual(['󰓛 running-one'])
+  // Then
+  expect(await doneAgents(ui)).toEqual(['󰄬 running-one'])
   await ui.unmount()
 })
 
-test('agents: entries a data file holds wrongly are left out, a file with no history means none', async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ history: [{ id: 'x' }, 'text', entry('a1', 'ok', NOW - 1000)] }) })
+test('agents: entries a data file holds wrongly are left out, a file with no log means none', async ($, on) => {
+  world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: 1, kind: 'nope' }, 'text', logged('a1', 'ok', NOW - 1000)] }) })
   await start($)
   const ui = await mountPane($)
   expect(await doneAgents(ui)).toEqual(['󰄬 ok'])
@@ -219,7 +225,8 @@ test('workflow agents: the end of their run (silence past the limit) ends the on
   await clock.advance(6 * 60_000)
   ui = await mountPane($)
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
-  expect(await doneAgents(ui)).toEqual(['󰄬 implementer'])
+  // the stall that closed the run is logged when it first held, beside the agent it ended
+  expect(await doneAgents(ui)).toEqual(['󰄬 implementer', '󰏥 workflow'])
   await ui.press({ key: 'bar:compact' })
   expect(instructions.at(-1)).not.toContain('Running workflow')
   await ui.unmount()

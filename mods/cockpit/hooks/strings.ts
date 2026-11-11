@@ -74,7 +74,7 @@ const EN = {
     attention: 'ATTENTION',
     trend: 'TREND',
     inProgress: 'IN PROGRESS',
-    done: 'DONE',
+    done: 'LOG',
     nothingToDo: 'nothing to do',
     perPrompt: '$/prompt',
     lastTurn: 'last turn',
@@ -90,10 +90,12 @@ const EN = {
     other: 'other',
     tasks: (done: number, total: number) => `tasks ${done}/${total}`,
     events: {
-      round: (n: number) => `round ${n}`,
+      round: (n: number) => `round ${String(n).padStart(3, '0')}`,
       current: 'current round',
       chatOnly: (n: number) => `${n} chat-only rounds`,
       summary: {
+        tools: (n: number, top: string) => `${n} ${plural(n, 'tool', 'tools')}: ${top}`,
+        signal: (n: number) => `${n} ${plural(n, 'signal', 'signals')}`,
         agent: (n: number) => `${n} ${plural(n, 'agent', 'agents')}`,
         commit: (n: number) => `${n} ${plural(n, 'commit', 'commits')}`,
         test: (n: number) => `${n} ${plural(n, 'test', 'tests')}`,
@@ -104,7 +106,6 @@ const EN = {
       test: (cmd: string, isFailed: boolean) => `tests ${isFailed ? 'failed' : 'passed'}: ${cmd}`,
       compact: (before: string, after: string) => ['compacted', before, after === '' ? '' : `→ ${after}`].filter(Boolean).join(' '),
       pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
-      agent: (type: string) => `agent ${type}`,
     },
   },
 
@@ -164,7 +165,7 @@ const IT: Strings = {
     attention: 'ATTENZIONE',
     trend: 'ANDAMENTO',
     inProgress: 'IN CORSO',
-    done: 'FATTO',
+    done: 'LOG',
     nothingToDo: 'niente da fare',
     perPrompt: '$/prompt',
     lastTurn: 'ultimo turno',
@@ -180,10 +181,12 @@ const IT: Strings = {
     other: 'altro',
     tasks: (done: number, total: number) => `task ${done}/${total}`,
     events: {
-      round: (n: number) => `giro ${n}`,
+      round: (n: number) => `giro ${String(n).padStart(3, '0')}`,
       current: 'giro in corso',
       chatOnly: (n: number) => `${n} giri di sola conversazione`,
       summary: {
+        tools: (n: number, top: string) => `${n} ${plural(n, 'strumento', 'strumenti')}: ${top}`,
+        signal: (n: number) => `${n} ${plural(n, 'segnale', 'segnali')}`,
         agent: (n: number) => `${n} ${plural(n, 'agente', 'agenti')}`,
         commit: (n: number) => `${n} commit`,
         test: (n: number) => `${n} test`,
@@ -194,7 +197,6 @@ const IT: Strings = {
       test: (cmd: string, isFailed: boolean) => `test ${isFailed ? 'falliti' : 'passati'}: ${cmd}`,
       compact: (before: string, after: string) => ['compattato', before, after === '' ? '' : `→ ${after}`].filter(Boolean).join(' '),
       pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
-      agent: (type: string) => `agente ${type}`,
     },
   },
 
