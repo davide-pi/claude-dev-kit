@@ -67,6 +67,14 @@ test('a "fatto" row whose deciding line the turn never printed is blocked; the l
   assert.match(stop(edited(claim, 'Passed: 47, Failed: 1')).reason, /"fatto"/);
 });
 
+test('given a "fallito" row whose deciding line the turn never printed, when the turn stops, then it is blocked; printed, it is silent', () => {
+  // Given: the Italian failed status, as CLAUDE.md lists it beside `failed`
+  const claim = `Esito.\n\n${head}\n${row('3 failed, 45 passed', 'fallito')}`;
+  // When / Then: an invented deciding line blocks, the printed one passes
+  assert.match(stop(edited(claim, 'ok')).reason, /3 failed, 45 passed/);
+  assert.equal(stop(edited(claim, 'Total: 48\n3 failed, 45 passed')).reason, '');
+});
+
 test('an escaped pipe in a cell is cell text: the deciding line is read from the right column', () => {
   const piped = verdict(row('Passed: 48').replace('dotnet test', 'dotnet test \\| tail -1'));
   assert.equal(stop(edited(piped, 'Passed: 48')).reason, '');

@@ -129,8 +129,8 @@ const QUOTED_TABLE_LINE = /^[ \t]*>[ \t]*\|.*$/gm;
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
 /** The `deliver` verdict table's header, plain or inside the quoted `> **Verifica**` / `> **Verification**` block; its rows are the contiguous `|` lines (each with the same optional `>`) that follow. */
 const VERDICT_HEAD = /^[ \t]*(?:>[ \t]*)?\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*(?:Comando|Command)[ \t]*\|[^\n]*\|[ \t]*(?:Stato|Status)[ \t]*\|[ \t]*$/i;
-/** A row's state that claims a result and so needs proof (`non verificato: …` / `not verified: …` do not). */
-const PROOF_STATE = /^(?:fatto|done|failed)$/i;
+/** A row's state that claims a result (`fatto`, `fallito` and their English forms) and so needs proof (`non verificato: …` / `not verified: …` do not). */
+const PROOF_STATE = /^(?:fatto|done|fallito|failed)$/i;
 
 /** Lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
 const normalise = (text) => text.replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
