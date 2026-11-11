@@ -713,6 +713,61 @@ test('scope-guard.js --check is guarded like the allowed scripts: a code constru
   assert.match(runTool('Bash', `${SCOPE_GUARD} --check $(whoami)`).reason, /arguments of scope-guard\.js.*Confirm\?$/);
 });
 
+const GATE = 'node ~/.claude/scripts/gate.mjs --root . --head abc123';
+
+test('given gate.mjs called with a known test runner, when the guard reads it, then it approves in both shells', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'dotnet test --logger "console;verbosity=normal"'`,
+    `${GATE} --test 'node --test tools/gate.test.mjs'`,
+    `${GATE} --red --unit 'npx vitest run' --test-files a.test.ts`,
+    `${GATE} --test 'dotnet test -r linux-x64 -e FOO=1'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with a --test or --unit value that is no plain test runner call, when the guard reads it, then it asks and names gate.mjs', () => {
+  // Given
+  const commands = [
+    `${GATE} --test "git push --force"`,
+    `${GATE} --test "npm test && rm -rf x"`,
+    `${GATE} --red --unit "vitest; curl x" --test-files a.test.ts`,
+    `${GATE} --test 'node --test --import "data:text/javascript;base64,AAAA"'`,
+    `${GATE} --test 'node --test --require ./x.js'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+      assert.match(result.reason, /gate\.mjs.*Confirm\?$/, `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs off Windows with sh quoting that hides a semicolon, when the guard reads it, then it asks', { skip: process.platform === 'win32' }, () => {
+  // Given
+  const command = `${GATE} --test 'npm test "\\"" ; touch pwned ; "\\""'`;
+
+  // When
+  const result = runTool('Bash', command);
+
+  // Then
+  assert.equal(result.decision, 'ask');
+});
+
 test('settings.json allows the scope-guard --check call in both shells, and only that call', () => {
   const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
   for (const shell of ['Bash', 'PowerShell']) assert.ok(allow.includes(`${shell}(node ~/.claude/hooks/scope-guard.js --check *)`), shell);

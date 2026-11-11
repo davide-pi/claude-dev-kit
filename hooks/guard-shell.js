@@ -20,9 +20,10 @@
  *                             the plugin is reached through its MCP tools;
  *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
- *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /
- *                             `db-ro.ps1` calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`…
- *                             unquoted), or `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation);
+ *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` / `db-ro.ps1` / `gate.mjs`
+ *                             calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`… unquoted),
+ *                             `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation), or a `gate.mjs`
+ *                             `--test` / `--unit` that isn't a known test runner command;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);
