@@ -574,3 +574,121 @@ test("given a runner the gate can't read, when it runs with --red, then it exits
   assert.equal(res.status, 2);
   assert.ok(!res.stdout.includes('red-proven'));
 });
+
+// ── lanes: --lane-add and --merge ─────────────────────────────────────────────
+const laneAdd = (r, name) => {
+  const res = gate(r.root, '--head', r.head, '--lane-add', name);
+  assert.equal(res.status, 0, res.stderr);
+  const lane = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
+  created.push(lane.path);
+  return lane;
+};
+const lf = (path) => readFileSync(path, 'utf8').replace(/\r\n/g, '\n'); // autocrlf checkouts write CRLF
+const mergeRun = (r, refs, command = OK) => gate(r.root, '--head', r.head, '--test', command, '--merge', ...refs);
+const refs = (lanes) => lanes.map((l) => l.branch);
+
+test('given a start head, when a lane is added, then a worktree and a branch exist from that head and the perimeter follows the lane branch', () => {
+  // Given
+  const r = repo(['src/**']);
+
+  // When
+  const lane = laneAdd(r, 'l1');
+
+  // Then
+  assert.equal(lane.branch, 'deliver-lane/l1');
+  assert.equal(git(lane.path, 'rev-parse', 'HEAD'), r.head);
+  assert.equal(git(lane.path, 'rev-parse', '--abbrev-ref', 'HEAD'), 'deliver-lane/l1');
+  const laneGitDir = git(lane.path, 'rev-parse', '--absolute-git-dir');
+  const perimeter = readFileSync(join(laneGitDir, 'deliver', 'perimeter.md'), 'utf8');
+  assert.match(perimeter, /^branch: deliver-lane\/l1$/m);
+  assert.match(perimeter, /^- src\/\*\*$/m);
+});
+
+test('given a lane name already taken, when a lane is added, then the next free name is used', () => {
+  // Given
+  const r = repo();
+  const first = laneAdd(r, 'l1');
+
+  // When
+  const second = laneAdd(r, 'l1');
+
+  // Then
+  assert.notEqual(second.branch, first.branch);
+  assert.notEqual(second.path, first.path);
+});
+
+test('given two lane branches that edit different files, when the merge gate runs, then both changes are in the start tree, the tests run green and the lanes are gone', () => {
+  // Given
+  const r = repo();
+  const lanes = [laneAdd(r, 'l1'), laneAdd(r, 'l2')];
+  writeFileSync(join(lanes[0].path, 'one.txt'), 'one\n');
+  writeFileSync(join(lanes[1].path, 'two.txt'), 'two\n');
+
+  // When
+  const res = mergeRun(r, refs(lanes));
+
+  // Then
+  assert.equal(lastLine(res).gate, 'green');
+  assert.equal(res.status, 0);
+  assert.equal(lf(join(r.root, 'one.txt')), 'one\n');
+  assert.equal(lf(join(r.root, 'two.txt')), 'two\n');
+  assert.equal(git(r.root, 'rev-parse', 'HEAD'), r.head);
+  assert.ok(!existsSync(lanes[0].path) && !existsSync(lanes[1].path));
+  assert.equal(git(r.root, 'branch', '--list', 'deliver-lane/*'), '');
+});
+
+test('given two lane branches that conflict, when the merge gate runs, then the merge is aborted and reported as red: merge', () => {
+  // Given
+  const r = repo();
+  const lanes = [laneAdd(r, 'l1'), laneAdd(r, 'l2')];
+  writeFileSync(join(lanes[0].path, 'README.md'), 'from lane one\n');
+  writeFileSync(join(lanes[1].path, 'README.md'), 'from lane two\n');
+
+  // When
+  const res = mergeRun(r, refs(lanes), STAMP);
+
+  // Then
+  const out = lastLine(res);
+  assert.equal(out.gate, 'red: merge');
+  assert.deepEqual(out.outside, ['README.md']);
+  assert.equal(res.status, 1);
+  assert.equal(git(r.root, 'rev-parse', 'HEAD'), r.head);
+  assert.equal(git(r.root, 'status', '--porcelain'), '');
+  assert.ok(!existsSync(join(r.root, '.git', 'MERGE_HEAD')));
+  assert.equal(lf(join(r.root, 'README.md')), 'hello\n');
+  assert.equal(git(r.root, 'branch', '--list', 'deliver-lane/*').split('\n').length, 2);
+});
+
+test('given a first lane that merges and a second that conflicts, when the merge gate runs, then the start branch is back at its head with no lane change left', () => {
+  // Given
+  const r = repo();
+  const lanes = [laneAdd(r, 'l1'), laneAdd(r, 'l2'), laneAdd(r, 'l3')];
+  writeFileSync(join(lanes[0].path, 'one.txt'), 'one\n');
+  writeFileSync(join(lanes[1].path, 'README.md'), 'from lane two\n');
+  writeFileSync(join(lanes[2].path, 'README.md'), 'from lane three\n');
+
+  // When
+  const res = mergeRun(r, refs(lanes));
+
+  // Then
+  assert.equal(lastLine(res).gate, 'red: merge');
+  assert.equal(git(r.root, 'rev-parse', 'HEAD'), r.head);
+  assert.equal(git(r.root, 'status', '--porcelain'), '');
+});
+
+test('given a ref that starts with a dash or is unknown, when the merge gate runs, then it exits 2 and merges nothing', () => {
+  // Given
+  const r = repo();
+  const lane = laneAdd(r, 'l1');
+  writeFileSync(join(lane.path, 'one.txt'), 'one\n');
+
+  // When
+  const dashed = mergeRun(r, [lane.branch, '-x']);
+  const unknown = mergeRun(r, [lane.branch, 'deliver-lane/nope']);
+
+  // Then
+  assert.equal(dashed.status, 2);
+  assert.equal(unknown.status, 2);
+  assert.ok(!existsSync(join(r.root, 'one.txt')));
+  assert.ok(existsSync(lane.path));
+});
