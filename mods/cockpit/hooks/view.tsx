@@ -201,9 +201,8 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]
   const retroLabels = [S.buttons.retroDays, S.buttons.retroSession, S.buttons.no]
   const logLabels = [S.buttons.logSession, S.buttons.logDay, S.buttons.no]
-  // From 75% of the autocompact threshold a glyph beside the compact button pulses (a Client cannot sit inside the Button)
-  const isPulsing = ui.Client !== undefined && andamento(s).isCompactDue
-  const pulseCells = isPulsing ? 2 : 0
+  // From 75% of the autocompact threshold the compact button beats (a Button cannot hold a Client, so a Client draws the Button)
+  const isDue = ui.Client !== undefined && andamento(s).isCompactDue
   const buttonsRow =
     s.confirm === 'retro' ? (
       <Box flexDirection="column">
@@ -236,13 +235,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         </Box>
       </Box>
     ) : (
-      <Box flexDirection={buttonRowWidth(barLabels) + pulseCells <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
-        <Box columnGap={BUTTON_GAP}>
+      <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+        {ui.Client && isDue ? (
+          <ui.Client key="anim:compact" module="./compact-button.tsx" props={{ label: S.buttons.compact }} width={buttonRowWidth([S.buttons.compact])} />
+        ) : (
           <Button key="bar:compact" onPress={() => actions.compact()}>
             {S.buttons.compact}
           </Button>
-          {isPulsing && animCell(ui, 'anim:compact', 'pulse', [sp('●', COLORS.orange)])}
-        </Box>
+        )}
         <Button key="bar:retro" onPress={() => actions.ask('retro')}>
           {S.buttons.retro}
         </Button>

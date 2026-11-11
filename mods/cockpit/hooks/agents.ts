@@ -112,11 +112,11 @@ export function agentLog(a: CockpitAgent): CockpitLogEntry | undefined {
 
 /**
  * `log` with an 'agent' entry for each agent of `history`, for a log saved before agents had entries of their own (one-off, at load);
- * `log` itself when it holds any 'agent' entry or the history is empty.
+ * `log` itself when it holds any 'agent' entry or the history is empty. An interrupted agent is left out: it may resume under its id and log its real end.
  */
 export function withHistoryAgents(log: CockpitLogEntry[] | undefined, history: readonly CockpitHistoryEntry[]): CockpitLogEntry[] | undefined {
   if (history.length === 0 || (log ?? []).some(e => e.kind === 'agent')) return log
-  return history.reduce<CockpitLogEntry[] | undefined>(
+  return history.filter(h => h.isInterrupted !== true).reduce<CockpitLogEntry[] | undefined>(
     (l, h) =>
       recordLog(l, {
         at: h.endedAt,

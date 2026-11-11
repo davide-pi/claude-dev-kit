@@ -142,9 +142,9 @@ test('agents: a reload of the same session id keeps the live agents, the finishe
   expect((dataOf(writes)?.history as { id: string }[]).map(h => h.id)).toEqual(['a2'])
 })
 
-test('agents: Given a data file from before agent entries, When the session resumes, Then LOG lists the agents of its history, once', async ($, on) => {
+test('agents: Given a data file from before agent entries, When the session resumes, Then LOG lists the finished agents of its history, an interrupted one left out', async ($, on) => {
   // Given
-  const history = [{ ...entry('a1', 'running-one', NOW - 1000), isInterrupted: true }]
+  const history = [{ ...entry('a1', 'running-one', NOW - 1000), isInterrupted: true }, entry('a2', 'finished-one', NOW - 2000)]
   world(on, { dataFile: JSON.stringify({ history }) })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
   // When
@@ -153,7 +153,7 @@ test('agents: Given a data file from before agent entries, When the session resu
   await start($)
   const ui = await mountPane($)
   // Then
-  expect(await doneAgents(ui)).toEqual(['󰄬 running-one'])
+  expect(await doneAgents(ui)).toEqual(['󰄬 finished-one'])
   await ui.unmount()
 })
 

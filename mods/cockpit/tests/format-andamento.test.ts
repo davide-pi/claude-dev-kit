@@ -1,7 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
 import { andamento, spendSplit } from '../hooks/andamento'
-import { emptyInsights } from '../hooks/insights'
 import { INITIAL } from '../hooks/state'
 import { costTargetOf } from '../hooks/strings'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
@@ -10,7 +9,6 @@ const snap = (over: Partial<CockpitSnapshot>): CockpitSnapshot => ({ ...INITIAL,
 const ONE_MILLION_INPUT = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 }
 /** A Sonnet agent whose usage costs $2 (list price: $2 per million input tokens). */
 const agent = (id: string, type: string, status: CockpitAgent['status']): CockpitAgent => ({ id, type, status, startedAt: 0, tokens: 0, model: 'claude-sonnet-5-5', usage: ONE_MILLION_INPUT })
-const rounds = (n: number, usd: number) => ({ ...emptyInsights(), rounds: n, usd })
 
 test('spendSplit: the main loop alone is the whole spend; no cost measured and no agent is no split', () => {
   expect(spendSplit(snap({ cost: { usd: 10 } }))).toEqual([{ label: 'main', usd: 10, pct: 100 }])
@@ -28,27 +26,11 @@ test('spendSplit: parts under 5% join one "other" part, last; the shares add up 
   expect(Math.round(split.reduce((n, p) => n + p.pct, 0))).toBe(100)
 })
 
-test('andamento: no round yet has no $/prompt, a flat trend and no compact due', () => {
-  expect(andamento(snap({}))).toEqual({ trend: 'flat', isCompactDue: false })
-})
-
-test('andamento: $/prompt is the insights spend over its rounds; with a target the trend is against it (10% band), without one the last round against the mean', () => {
-  const base = { insights: rounds(3, 6) }
-  expect(andamento(snap({ ...base, costTarget: 1.5 }))).toMatchObject({ perPrompt: 2, target: 1.5, trend: 'up' })
-  expect(andamento(snap({ ...base, costTarget: 2.1 })).trend).toBe('flat')
-  expect(andamento(snap({ ...base, costTarget: 3 })).trend).toBe('down')
-  expect(andamento(snap({ ...base, cost: { lastUsd: 3 } }))).toMatchObject({ perPrompt: 2, trend: 'up' })
-  expect(andamento(snap({ ...base, cost: { lastUsd: 3 } }))).not.toHaveProperty('target')
-  expect(andamento(snap({ ...base, cost: { lastUsd: 2 } })).trend).toBe('flat')
-  expect(andamento(snap({ ...base, cost: { lastUsd: 1 } })).trend).toBe('down')
-  expect(andamento(snap({ ...base })).trend).toBe('flat')
-})
-
-test('andamento: the agents\' share of the spend, and the turns left before autocompact', () => {
-  expect(andamento(snap({ cost: { usd: 10 }, agentSpend: { x: 2.5 } })).agentPct).toBe(25)
-  expect(andamento(snap({})).agentPct).toBeUndefined()
-  expect(andamento(snap({ ctxSamples: [100_000, 110_000], autoCompactAt: 130_000 })).turnsLeft).toBe(2)
-  expect(andamento(snap({ ctxSamples: [100_000, 110_000] })).turnsLeft).toBeUndefined()
+test('andamento: Given no measure, When it is read, Then no compact is due', () => {
+  // Given / When
+  const figures = andamento(snap({}))
+  // Then
+  expect(figures).toEqual({ isCompactDue: false })
 })
 
 test('andamento: a compact is due from 75% of the autocompact threshold, not at 74%', () => {

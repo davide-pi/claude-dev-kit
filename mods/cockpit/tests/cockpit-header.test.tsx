@@ -21,11 +21,13 @@ import type { World } from './cockpit-world'
 /** The left margin of the drawn root: the column its content starts at. */
 const marginOf = (root: unknown): number => (root as { props?: { marginLeft?: number } }).props?.marginLeft ?? 0
 
-/** The last turn's cost, the second column of ANDAMENTO's figures row; undefined while the section is hidden (no round ended yet) or the column holds no cost. */
-const lastTurn = async ($: Parameters<typeof paneRows>[0]) => {
-  const { rows } = await paneRows($, 58)
-  const at = rows.findIndex(r => /^\$\/prompt/.test(r))
-  return at < 0 ? undefined : rows[at + 1]?.match(/^\$\S+ \S\s+(\$\S+)/)?.[1]
+/** The last turn's cost as the state file holds it once its write window has passed (`$0.38`); undefined where it holds none. */
+const lastTurn = async (writes: Map<string, string>, clock: ReturnType<typeof world>, id = 's-1') => {
+  await clock.advance(5000)
+  await settleAll()
+  const path = [...writes.keys()].find(k => k.endsWith(`cockpit-${id}.json`))
+  const usd = (JSON.parse(writes.get(path ?? '') ?? 'null') as { lastTurnUsd?: number | null } | null)?.lastTurnUsd
+  return typeof usd === 'number' ? `$${usd.toFixed(2)}` : undefined
 }
 
 test('the pane shows header, context, credits and an agent that finished before its spawn was noted', async ($, on) => {
@@ -359,8 +361,9 @@ test('header: above the page, with the model, effort, state, session cost and th
   }
 })
 
-test('header: the last round cost is in ANDAMENTO, the session cost alone on the first line, and no trend row in the header', async ($, on) => {
-  world(on)
+test('header: the last round cost is in the state file, the session cost alone on the first line, and no trend row in the header', async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('turn.complete', () => ({ text: '' }))
@@ -372,12 +375,13 @@ test('header: the last round cost is in ANDAMENTO, the session cost alone on the
   expect(header[0]).toMatch(/\$5\.20$/)
   expect(header[0]).not.toContain('0.38')
   expect(header.some(r => /^turn /.test(r))).toBe(false)
-  expect(await lastTurn($)).toBe('$0.38')
+  expect(await lastTurn(writes, clock)).toBe('$0.38')
 })
 
 for (const order of ['end, measure', 'measure, end', 'end, next start, measure'] as const) {
-  test(`header: ANDAMENTO keeps the last turn's cost while the next one runs (${order})`, async ($, on) => {
-    world(on)
+  test(`header: the last turn's cost stays while the next one runs (${order})`, async ($, on) => {
+    const writes = new Map<string, string>()
+  const clock = world(on, { writes })
     on('turn.start', (_, e) => ({ turnId: e.turnId }))
     on('session.measure', (_, e) => ({ changed: e.changed }))
     on('turn.complete', () => ({ text: '' }))
@@ -390,14 +394,15 @@ for (const order of ['end, measure', 'measure, end', 'end, next start, measure']
     if (order === 'end, measure') await measure(5.2)
     await $.turn.start({ text: 'next', turnId: 't2' })
     if (order === 'end, next start, measure') await measure(5.2)
-    expect(await lastTurn($)).toBe('$0.38')
+    expect(await lastTurn(writes, clock)).toBe('$0.38')
     await measure(5.5)
-    expect(await lastTurn($)).toBe('$0.30')
+    expect(await lastTurn(writes, clock)).toBe('$0.30')
   })
 }
 
 test('header: a turn under a cent does not split the next turn on a mid-turn measure', async ($, on) => {
-  world(on)
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('turn.complete', () => ({ text: '' }))
@@ -416,11 +421,12 @@ test('header: a turn under a cent does not split the next turn on a mid-turn mea
   // a rate-limit point moves while t3 runs: the turn keeps counting from its start
   await measure(5.3, ['rateLimits'])
   await measure(5.5)
-  expect(await lastTurn($)).toBe('$0.30')
+  expect(await lastTurn(writes, clock)).toBe('$0.30')
 })
 
 test("header: a measure that arrives after the turn ended counts in the last turn's cost", async ($, on) => {
-  world(on)
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('turn.complete', () => ({ text: '' }))
@@ -432,11 +438,12 @@ test("header: a measure that arrives after the turn ended counts in the last tur
   await end('t1')
   await measure(5.2)
   await $.turn.start({ text: 'next', turnId: 't2' })
-  expect(await lastTurn($)).toBe('$0.38')
+  expect(await lastTurn(writes, clock)).toBe('$0.38')
 })
 
 test("header: a measure without the cost does not settle the ended turn's cost", async ($, on) => {
-  world(on)
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
   on('turn.complete', () => ({ text: '' }))
@@ -454,13 +461,14 @@ test("header: a measure without the cost does not settle the ended turn's cost",
   await $.turn.start({ text: 'three', turnId: 't3' })
   await measure(5.5, ['cost'])
   await measure(5.6, ['cost'])
-  expect(await lastTurn($)).toBe('$0.10')
+  expect(await lastTurn(writes, clock)).toBe('$0.10')
 })
 
 for (const order of ['measure, end', 'end only'] as const) {
   test(`header: a new session (/clear) does not show the previous session's turn cost (${order})`, async ($, on) => {
     let id = 's-1'
-    world(on, { sessionId: () => id })
+    const writes = new Map<string, string>()
+    const clock = world(on, { writes, sessionId: () => id })
     on('turn.start', (_, e) => ({ turnId: e.turnId }))
     on('session.measure', (_, e) => ({ changed: e.changed }))
     on('turn.complete', () => ({ text: '' }))
@@ -470,7 +478,7 @@ for (const order of ['measure, end', 'end only'] as const) {
     await $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't1', reason: 'answer' })
     id = 's-2'
     await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-    expect(await lastTurn($)).toBeUndefined()
+    expect(await lastTurn(writes, clock, 's-2')).toBeUndefined()
   })
 }
 
@@ -539,8 +547,9 @@ test('a state file of an earlier version with a saved tab still loads, and is wr
 
 // ── Phase 3 follow-ups ──
 
-test('header: the round duration stays out of the last-turn cost figure, and sits under it as its caption', async ($, on) => {
-  world(on)
+test("header: a long turn (134 s) does not change the last turn's cost", async ($, on) => {
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -548,11 +557,7 @@ test('header: the round duration stays out of the last-turn cost figure, and sit
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.session.measure({ context: { window: 1_000_000, tokens: 260_000, percent: 26 }, rateLimits: [], cost: { usd: 5.2 }, changed: ['context', 'cost'] })
   await $.turn.complete({ answer: '', durationMs: 134_000, isAborted: false, turnId: 't1', reason: 'answer' })
-  expect(await lastTurn($)).toBe('$0.38')
-  const { rows } = await paneRows($, 58)
-  const at = rows.findIndex(r => /^\$\/prompt/.test(r))
-  expect(rows[at + 1]).not.toMatch(/2m|134/)
-  expect(rows[at + 2]).toMatch(/02m14s/)
+  expect(await lastTurn(writes, clock)).toBe('$0.38')
 })
 
 test('header: after a rule, the CTX row with the cache share, then the 5h and 7d windows on one row, and no burn line', async ($, on) => {

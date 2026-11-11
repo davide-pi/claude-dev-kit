@@ -80,10 +80,6 @@ test('frame spin: Given a running agent, When steps pass, Then the braille frame
   expect(isAnimating('spin', 1_000_000)).toBe(true)
 })
 
-test('frame pulse: Given the compact glyph, When steps pass, Then it alternates orange and dim', () => {
-  expect(colorsOver('pulse', [0, 7, 8, 15, 16])).toEqual([COLORS.orange, COLORS.orange, COLORS.dim, COLORS.dim, COLORS.orange])
-})
-
 test('reconcile: Given the readings of a value, When the first one comes, Then no animation; a change restarts it, the same value does not', () => {
   const first = reconcile(undefined, 'once', '$0.12')
   expect(isAnimating('once', first.step)).toBe(false)

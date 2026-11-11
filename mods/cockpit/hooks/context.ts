@@ -40,14 +40,14 @@ export const recordRound = (rounds: readonly number[] | undefined, tokens: numbe
 /** The CTX bar is full at this multiple of the autocompact threshold, so the threshold's tick sits at 1/1.1 of the bar. */
 const CTX_SCALE = 1.1
 
-/** The share of the autocompact threshold from which the CTX fill turns orange, then red. */
-const CTX_ORANGE_PCT = 60
+/** The share of the autocompact threshold from which the CTX fill turns yellow (as the credit windows' middle band), then red. */
+const CTX_YELLOW_PCT = 60
 const CTX_RED_PCT = 90
 
 /**
  * The CTX bar's fill and the tick of the autocompact threshold. Where the engine reports `autoCompactAt` the bar is `1.1 × autoCompactAt` tokens long
  * (`pct` is the context over that, capped at 100, `markPct` the threshold's place, `limit` the bar's length in tokens); without one it is the window's own percent, no tick.
- * `color` is the fill's: by the share of the threshold reached (under 60% green, under 90% orange, else red), or by the window's own percent without one.
+ * `color` is the fill's: by the share of the threshold reached (under 60% green, under 90% yellow, else red), or by the window's own percent without one.
  */
 export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompactAt'>): { pct: number; color: string; markPct?: number; limit?: number } {
   // Until the engine measures the window (a resumed session) the last state's reading stands in.
@@ -55,7 +55,7 @@ export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompa
   if (s.autoCompactAt === undefined || s.autoCompactAt <= 0) return { pct: percent ?? 0, color: ctxColor(percent ?? 0) }
   const limit = CTX_SCALE * s.autoCompactAt
   const share = ((tokens ?? 0) / s.autoCompactAt) * 100
-  const color = share < CTX_ORANGE_PCT ? COLORS.green : share < CTX_RED_PCT ? COLORS.orange : COLORS.red
+  const color = share < CTX_YELLOW_PCT ? COLORS.green : share < CTX_RED_PCT ? COLORS.yellow : COLORS.red
   return { pct: Math.min(100, ((tokens ?? 0) / limit) * 100), color, markPct: 100 / CTX_SCALE, limit }
 }
 

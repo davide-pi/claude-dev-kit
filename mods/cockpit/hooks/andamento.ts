@@ -1,13 +1,10 @@
 import type { CockpitSnapshot } from '../types'
-import { autocompactForecast } from './context'
 import { usdOf } from './pricing'
 
-// ── Andamento: where the session's money goes and how the next compaction looks ──
+// ── Andamento: where the session's money goes and whether the next compaction is due ──
 
 /** A part of the spend under this share joins "other". */
 const OTHER_BELOW_PCT = 5
-/** A figure within this share of what it is compared with is flat. */
-const FLAT_BAND = 0.1
 /** The share of the autocompact threshold from which a compact is due, as a fraction (3 / 4). */
 const DUE_NUM = 3
 const DUE_DEN = 4
@@ -45,30 +42,8 @@ export function parseAgentSpend(value: unknown): Record<string, number> | undefi
   return kept.length > 0 ? Object.fromEntries(kept) : undefined
 }
 
-const trendOf = (value: number, reference: number): 'up' | 'flat' | 'down' =>
-  value > reference * (1 + FLAT_BAND) ? 'up' : value < reference * (1 - FLAT_BAND) ? 'down' : 'flat'
-
-/**
- * The figures of the Andamento section. `perPrompt`: the main rounds' cost over their count (a round is one main turn, its cost the session delta
- * including subagents). `trend`: that figure against `costTarget` when `cockpit.json` has one, else the last round against the session mean; flat
- * when nothing can be compared. `agentPct`: the agents' share of the spend. `turnsLeft`: the autocompact forecast. `isCompactDue`: the context is at
- * 75% of where the engine compacts or more.
- */
-export function andamento(s: CockpitSnapshot): { perPrompt?: number; target?: number; trend: 'up' | 'flat' | 'down'; agentPct?: number; turnsLeft?: number; isCompactDue: boolean } {
-  const { insights, costTarget: target } = s
-  const perPrompt = insights && insights.rounds > 0 ? insights.usd / insights.rounds : undefined
-  const last = s.cost.lastUsd
-  const trend = perPrompt === undefined ? 'flat' : target !== undefined ? trendOf(perPrompt, target) : last === undefined ? 'flat' : trendOf(last, perPrompt)
-  const agentsUsd = sum(agentParts(s).values())
-  const total = s.cost.usd ?? (agentsUsd > 0 ? agentsUsd : undefined)
+/** The context is at 75% of where the engine compacts or more: a compact is due. */
+export function andamento(s: CockpitSnapshot): { isCompactDue: boolean } {
   const tokens = s.ctx.tokens
-  const turnsLeft = autocompactForecast(s.ctxSamples, s.autoCompactAt)
-  return {
-    ...(perPrompt !== undefined && { perPrompt }),
-    ...(target !== undefined && { target }),
-    trend,
-    ...(total !== undefined && total > 0 && { agentPct: (100 * agentsUsd) / total }),
-    ...(turnsLeft !== undefined && { turnsLeft }),
-    isCompactDue: tokens !== undefined && s.autoCompactAt !== undefined && tokens * DUE_DEN >= s.autoCompactAt * DUE_NUM,
-  }
+  return { isCompactDue: tokens !== undefined && s.autoCompactAt !== undefined && tokens * DUE_DEN >= s.autoCompactAt * DUE_NUM }
 }

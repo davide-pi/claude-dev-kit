@@ -602,4 +602,14 @@ export const register: Register = on => {
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
+
+  // The compact button of a pane where a compaction is due is drawn by a surface module, which can only post: the press runs here.
+  on('ui.message', ($, e, next) => {
+    const { data } = e
+    if (typeof data === 'object' && data !== null && 'action' in data && data.action === 'compact') {
+      paneActions($).compact()
+      return {}
+    }
+    return next(e)
+  })
 }

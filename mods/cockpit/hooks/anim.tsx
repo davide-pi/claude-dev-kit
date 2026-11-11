@@ -6,7 +6,7 @@ import type { SignalSeverity } from './signals'
 
 // A few cells drawn with a pattern on a surface clock of their own: terminal animations as discrete colour or glyph steps.
 // The pure parts (which frame at which step, which cells qualify) are exported for the tests; the module below only runs the clock.
-export type AnimKind = 'breathe' | 'blink' | 'flash3' | 'once' | 'spin' | 'fade' | 'pulse' | 'beat'
+export type AnimKind = 'breathe' | 'blink' | 'flash3' | 'once' | 'spin' | 'fade' | 'beat'
 export type BeatSpeed = 'slow' | 'fast'
 /** `cells` is the still look (what a surface without the module draws); `token` names a value, so a change of it restarts a `once`; `speed` is a `beat`'s. */
 export type AnimProps = { kind: AnimKind; cells: Span[]; token?: string; speed?: BeatSpeed }
@@ -24,12 +24,11 @@ const FLASH_STEPS = 3 * 2 * FLASH_HALF
 const ONCE_STEPS = 17
 /** The newest FATTO row fades from its highlight to its own colour in this many steps (~2 s). */
 const FADE_STEPS = 22
-const PULSE_HALF = 8
 /** A beat's period (lit at its start, darkest at its middle); the fast one is half the slow one, so every fast cycle lines up with a slow one. */
 export const BEAT_SLOW_MS = 1600
 export const BEAT_FAST_MS = BEAT_SLOW_MS / 2
 /** How often a beat looks at the clock. */
-const BEAT_TICK_MS = 50
+export const BEAT_TICK_MS = 50
 /** How far a beat's darkest level goes from the figure's colour towards the quiet grey. */
 const BEAT_DIM = 0.85
 /** Shades of a beat between lit (0) and darkest: enough for the eye to read a glow, not an on/off. */
@@ -109,8 +108,6 @@ export function frame(kind: AnimKind, step: number, cells: readonly Span[]): Spa
       return isLit(BLINK_HALF) ? [...cells] : cells.map(dimmed)
     case 'flash3':
       return step >= FLASH_STEPS || isLit(FLASH_HALF) ? [...cells] : cells.map(dimmed)
-    case 'pulse':
-      return isLit(PULSE_HALF) ? toned(cells, () => COLORS.orange) : cells.map(dimmed)
     case 'beat':
       return step === 0 ? [...cells] : toned(cells, s => mixHex(s.c ?? COLORS.text, COLORS.empty, (BEAT_DIM * Math.min(step, BEAT_LEVELS)) / BEAT_LEVELS))
     case 'once':

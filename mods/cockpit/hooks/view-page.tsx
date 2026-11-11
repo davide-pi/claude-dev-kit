@@ -1,10 +1,10 @@
 import type { CockpitLogEntry } from '../types'
 import { agentLog } from './agents'
-import { andamento, spendSplit } from './andamento'
+import { spendSplit } from './andamento'
 import { openTasks } from './context'
-import { CENT, COLORS, abbrevTokens, barCells, clockTime, costCell, duration, fmtCost, localDate, padCells, shortModel, shownTurnUsd, spanWidth, truncateSpans } from './shared'
+import { COLORS, abbrevTokens, barCells, clockTime, costCell, duration, localDate, padCells, shortModel, spanWidth, truncateSpans } from './shared'
 import type { Span } from './shared'
-import { loggedSignal, signalSeverity, signalsOf } from './signals'
+import { loggedSignal, signalId, signalSeverity, signalsOf } from './signals'
 import type { Signal, SignalKind } from './signals'
 import { t } from './strings'
 import { isFading } from './anim'
@@ -28,9 +28,6 @@ const CAPTION_W = 9
 /** A bar's parts beyond this many tools join "other". */
 const TOP_TOOLS = 3
 const COST_W = 7
-/** The columns of ANDAMENTO's figures. */
-const COLUMNS = 4
-const MISSING = '—'
 
 /** The notifications that cost money; every other kind that is not blocking comes after them. */
 const COST_KINDS: readonly SignalKind[] = ['heavyAgent', 'opusReadOnly', 'bigResult', 'reread', 'coldAfterIdle', 'ctxGrowth']
@@ -56,7 +53,11 @@ export function attentionBlocks(k: Kit): Block[] {
   const { ui, s, title, actions } = k
   const { Box, Button } = ui
   const S = t()
-  const signals = [...signalsOf(s)].sort((a, b) => rankOf(a) - rankOf(b))
+  // newest first by the time each first held; at the same time a blocking one, then a costly one, first
+  const since = (sig: Signal) => s.signalsAt?.[signalId(sig)] ?? 0
+  // a blocking one stays on top (the collapse must never hide it), the others newest first
+  const pinned = (sig: Signal): number => (signalSeverity(sig) === 'block' ? 0 : 1)
+  const signals = [...signalsOf(s)].sort((a, b) => pinned(a) - pinned(b) || since(b) - since(a) || rankOf(a) - rankOf(b))
   const rows: Block[] = signals.map(sig => signalRow(k, sig))
   const lines: number[] = rows.map(() => 2)
 
@@ -88,13 +89,23 @@ export function attentionBlocks(k: Kit): Block[] {
 
 const PALETTE = [COLORS.blue, COLORS.green, COLORS.amber, COLORS.lavender, COLORS.yellow]
 
-type BarPart = { label: string; pct: number; isOther?: boolean }
+/** `short` is the label on a legend too long for the pane; absent, `shortLabel` makes it. */
+type BarPart = { label: string; pct: number; isOther?: boolean; short?: string }
+
+/** The last hyphen-separated segment of a label, its first 4 letters and a dot when it is longer (`code-reviewer` -> `revi.`). */
+export function shortLabel(label: string): string {
+  const letters = [...(label.split('-').at(-1) ?? label)]
+  return letters.length > 4 ? `${letters.slice(0, 4).join('')}.` : letters.join('')
+}
 
 /** A bar behind its dim caption and the legend under it, from the first column: each part's glyph in its colour, its label and share in the text colour. */
 function barRows(k: Kit, caption: string, parts: readonly BarPart[]): Block {
   const { ui, width } = k
   const colors = parts.map((p, i) => (p.isOther ? COLORS.gray : (PALETTE[i % PALETTE.length] ?? COLORS.blue)))
-  const legend: Span[] = parts.flatMap((p, i) => [...(i > 0 ? [sp('  ')] : []), sp('▰ ', colors[i]), sp(`${p.label} ${Math.round(p.pct)}%`)])
+  const legendOf = (name: (p: BarPart) => string): Span[] => parts.flatMap((p, i) => [...(i > 0 ? [sp('  ')] : []), sp('▰ ', colors[i]), sp(`${name(p)} ${Math.round(p.pct)}%`)])
+  // full labels while they fit, else each shortened; still too long is cut
+  const full = legendOf(p => p.label)
+  const legend = spanWidth(full) <= width ? full : legendOf(p => p.short ?? (p.isOther ? p.label : shortLabel(p.label)))
   return [
     line(ui, [dim(padCells(caption, CAPTION_W)), ...barCells(Math.max(1, width - CAPTION_W), parts.map((p, i) => ({ pct: p.pct, color: colors[i] ?? COLORS.blue })))]),
     line(ui, truncateSpans(legend, width)),
@@ -110,58 +121,16 @@ function toolParts(byTool: Record<string, number> | undefined, other: string): B
   return [...tools.slice(0, TOP_TOOLS).map(([label, tokens]) => ({ label, pct: (100 * tokens) / total })), ...(rest > 0 ? [{ label: other, pct: (100 * rest) / total, isOther: true }] : [])]
 }
 
-/** A column of the figures: its dim label, its bold value (`—` where there is none) and its dim caption. */
-type Column = { label: string; value?: Span[]; caption?: string; /** The value shows bold in the accent for a moment when it changes. */ isAnimated?: boolean }
-
-/** The figures rows: the columns side by side, floor(width / 4) cells each, a cell cut to leave a space before the next. */
-function figureRows(k: Kit, columns: readonly Column[]): Block {
-  const { ui, width } = k
-  const { Box } = ui
-  const cells = Math.floor(width / COLUMNS)
-  const fit = (spans: Span[]): Span[] => {
-    const cut = truncateSpans(spans, cells - 1)
-    return [...cut, sp(' '.repeat(cells - spanWidth(cut)))]
-  }
-  const row = (pick: (c: Column) => Span[]) => line(ui, columns.flatMap(c => fit(pick(c))))
-  // where the surface has modules, an animated value is a cell of its own that restarts when its text changes
-  const values = ui.Client ? (
-    <Box>
-      {columns.map((c, i) => (
-        <Box key={i}>{c.isAnimated && c.value !== undefined ? animCell(ui, `anim:figure:${i}`, 'once', fit(c.value), c.value.map(v => v.t).join('')) : line(ui, fit(c.value ?? [dim(MISSING)]))}</Box>
-      ))}
-    </Box>
-  ) : (
-    row(c => c.value ?? [dim(MISSING)])
-  )
-  return [row(c => [dim(c.label)]), values, row(c => (c.caption ? [dim(c.caption)] : []))]
-}
-
-/** The last main round's duration: the newest round of the session log; none before one ended. */
-const lastRoundMs = (s: Kit['s']): number | undefined =>
-  (s.sessionLog ?? []).reduce<CockpitLogEntry | undefined>((n, e) => (e.kind === 'round' && e.ms !== undefined && (n === undefined || e.at > n.at) ? e : n), undefined)?.ms
-
-/** Four columns of figures ($/prompt with its trend, the last turn, the subagents' share, the turns to autocompact), then the spend bar and the context bar; hidden before the first round. */
+/** The spend bar and the context bar, each with its legend; hidden before the first round. */
 export function andamentoBlocks(k: Kit): Block[] {
-  const { ui, s, title } = k
+  const { s, title } = k
   const S = t()
   if (s.insights === undefined || s.insights.rounds <= 0) return []
-  const a = andamento(s)
-  const trendColor = a.trend === 'up' ? COLORS.red : a.trend === 'down' ? COLORS.green : undefined
-  const arrow = a.trend === 'up' ? sp('↑', COLORS.red) : a.trend === 'down' ? sp('↓', COLORS.green) : dim('→')
-  // the running turn's cost once it reaches a cent, else the last ended turn's
-  const turnUsd = shownTurnUsd(s.cost)
-  const roundMs = lastRoundMs(s)
-  const figures = figureRows(k, [
-    { label: S.page.perPrompt, value: a.perPrompt === undefined ? undefined : [sp(fmtCost(a.perPrompt), trendColor, true), sp(' '), arrow], caption: a.target === undefined ? undefined : S.page.max(fmtCost(a.target)), isAnimated: true },
-    { label: S.page.lastTurn, value: turnUsd === undefined || turnUsd < CENT ? undefined : [sp(`$${turnUsd.toFixed(2)}`, COLORS.text, true)], caption: roundMs === undefined ? undefined : duration(roundMs) },
-    { label: S.page.subagents, value: a.agentPct === undefined ? undefined : [sp(`${Math.round(a.agentPct)}%`, COLORS.lavender, true)], caption: a.agentPct === undefined ? undefined : S.page.ofSpend, isAnimated: true },
-    { label: S.page.compaction, value: a.turnsLeft === undefined ? undefined : [sp(S.page.turnsLeft(a.turnsLeft), a.isCompactDue ? COLORS.yellow : COLORS.text, true)], caption: s.autoCompactAt === undefined ? undefined : S.page.compactAt(abbrevTokens(s.autoCompactAt, true)), isAnimated: true },
-  ])
 
   const label = (p: { label: string }) => (p.label === 'main' ? S.page.main : p.label === 'other' ? S.page.other : p.label)
-  const spend = spendSplit(s).map((p): BarPart => ({ label: label(p), pct: p.pct, isOther: p.label === 'other' }))
+  const spend = spendSplit(s).map((p): BarPart => ({ label: label(p), pct: p.pct, isOther: p.label === 'other', ...(p.label === 'main' && { short: S.page.mainShort }) }))
   const context = toolParts(s.insights.byTool, S.page.other)
-  return [[title(S.page.trend), figures, spend.length > 0 && barRows(k, S.page.spend, spend), context.length > 0 && barRows(k, S.page.context, context)]]
+  return [[title(S.page.trend), spend.length > 0 && barRows(k, S.page.spend, spend), context.length > 0 && barRows(k, S.page.context, context)]]
 }
 
 // ── IN CORSO ──

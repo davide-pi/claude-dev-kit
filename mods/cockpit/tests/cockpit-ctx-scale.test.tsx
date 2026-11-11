@@ -64,8 +64,8 @@ async function ctxColourOf($: Engine, on: On, tokens: number, options: World = {
 
 for (const [tokens, color, name] of [
   [110_000, COLORS.green, 'green under 60%'],
-  [120_000, COLORS.orange, 'orange from 60%'],
-  [170_000, COLORS.orange, 'orange under 90%'],
+  [120_000, COLORS.yellow, 'yellow from 60%'],
+  [170_000, COLORS.yellow, 'yellow under 90%'],
   [180_000, COLORS.red, 'red from 90%'],
 ] as const) {
   test(`CTX colour: given a threshold of 200K, ${tokens / 1000}K reads ${name} of it`, async ($, on) => {

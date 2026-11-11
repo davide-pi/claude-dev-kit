@@ -6,7 +6,7 @@ import { emptyInsights } from '../hooks/insights'
 import { COLORS, clockTime, costCell, duration, localDate } from '../hooks/shared'
 import { INITIAL } from '../hooks/state'
 import { setLang } from '../hooks/strings'
-import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks } from '../hooks/view-page'
+import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks, shortLabel } from '../hooks/view-page'
 import { paneView } from '../hooks/view'
 import { makeKit, signalIcon, signalText } from '../hooks/view-kit'
 import type { Block, Kit, PaneActions } from '../hooks/view-kit'
@@ -105,6 +105,20 @@ test('attention: blocking first, then cost, then the rest; each row has its seve
   ])
 })
 
+test('attention: Given signals that first held at different times, When drawn, Then a blocking one stays on top and the others come newest first', async ($, on) => {
+  // Given: the permission wait is the oldest, the opus agent the newest, the failed command in between
+  const s = snap({
+    agents: [agent('a1', 'Explore', { model: 'claude-opus-5-5' })],
+    insights: insights({ failedCmds: { 'npm test': 3 } }),
+    claudeState: WAITING,
+    signalsAt: { [`permissionWait:${SINCE}`]: NOW - 120_000, 'failedCommand:npm test': NOW - 60_000, 'opusReadOnly:a1': NOW - 30_000 },
+  })
+  // When
+  const { rows } = await draw($, on, s, attentionBlocks)
+  // Then
+  expect(rows.filter(r => /^\S/.test(r) && r !== titled('ATTENTION')).map(r => [...r][0])).toEqual(['\u{F033E}', '\u{F0114}', '\u{F018D}'])
+})
+
 test('attention: the icon takes the colour of its severity (block red, warn orange, info yellow) and a blocking title is bold', async ($, on) => {
   const s = snap({ agents: [agent('a1', 'Explore', { model: 'claude-opus-5-5' })], insights: insights({ failedCmds: { 'npm test': 3 } }), claudeState: WAITING })
   const { ui } = await draw($, on, s, attentionBlocks)
@@ -187,23 +201,19 @@ test('page: with eight notifications at 40 rows the footer buttons are still dra
 
 const BAR = 51
 const bar = (n: number) => '▰'.repeat(n)
-/** The four columns of the figures rows: floor(WIDTH / 4) cells each. */
-const COL = WIDTH / 4
-const cols = (...cells: string[]) => cells.map(c => c.padEnd(COL)).join('').trimEnd()
-
 test('andamento: hidden before the first round', async ($, on) => {
   expect((await draw($, on, snap(), andamentoBlocks)).rows).toEqual([])
   expect((await draw($, on, snap({ insights: insights() }), andamentoBlocks)).rows).toEqual([])
 })
 
-test('andamento: main loop only: four columns with — for what is missing, the spend bar is all main, the context bar by tool', async ($, on) => {
+test('andamento: Given the main loop only, When it is drawn, Then the spend bar is all main, the context bar by tool, and no figures row', async ($, on) => {
+  // Given
   const s = snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 30_000, Edit: 10_000 } }) })
+  // When
   const { rows } = await draw($, on, s, andamentoBlocks)
+  // Then
   expect(rows).toEqual([
     titled('TREND'),
-    cols('$/prompt', 'last turn', 'subagents', 'compaction'),
-    cols('$2.00 →', '—', '0%', '—'),
-    cols('', '', 'of spend', ''),
     `spend    ${bar(BAR)}`,
     '▰ main 100%',
     `context  ${bar(31 + 15 + 5)}`,
@@ -223,38 +233,44 @@ const AGENTS_SNAP = () =>
     insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 20_000, Edit: 10_000, Grep: 6_000, Glob: 4_000 } }),
   })
 
-test('andamento: main and two agent types over the target: arrow up, its max, last turn and its time, agents share, turns to compact and where, top three tools and other', async ($, on) => {
+test('andamento: Given main and two agent types, When it is drawn, Then only the spend bar and the context bar (top three tools and other) show, with their legends', async ($, on) => {
+  // Given / When
   const { rows } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
+  // Then
   expect(rows).toEqual([
     titled('TREND'),
-    cols('$/prompt', 'last turn', 'subagents', 'compaction'),
-    cols('$2.00 ↑', '$0.44', '40%', '~3 turns'),
-    cols('max $1.50', '01m01s', 'of spend', 'at 150K'),
     `spend    ${bar(BAR)}`,
     '▰ main 60%  ▰ implementer 30%  ▰ reviewer 10%',
     `context  ${bar(BAR)}`,
     '▰ Read 60%  ▰ Bash 20%  ▰ Edit 10%  ▰ other 10%',
   ])
-  const down = await draw($, on, { ...AGENTS_SNAP(), costTarget: 3 }, andamentoBlocks)
-  expect(down.rows[2]).toBe(cols('$2.00 ↓', '$0.44', '40%', '~3 turns'))
 })
 
-test('andamento: the figures take their colours, the legend glyph the colour of its part and the label the text colour', async ($, on) => {
+test('andamento: the legend glyph takes the colour of its part and the label the text colour', async ($, on) => {
   const { ui } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
   const root = await ui.drawn()
-  expect(colorOf(root, /^\$2\.00$/)).toBe(COLORS.red)
-  expect(colorOf(root, /^↑$/)).toBe(COLORS.red)
-  expect(colorOf(root, /^\$0\.44$/)).toBe(COLORS.text)
-  expect(colorOf(root, /^40%$/)).toBe(COLORS.lavender)
-  expect(colorOf(root, /^~3 turns$/)).toBe(COLORS.yellow) // 120K of 150K: a compact is due
   expect(colorOf(root, /^▰ $/)).toBe(COLORS.blue)
   expect(colorOf(root, /^main 60%$/)).toBeUndefined()
 })
 
-test('andamento: with no target and no autocompact threshold the max and the compaction caption are blank', async ($, on) => {
-  const s = { ...AGENTS_SNAP(), autoCompactAt: undefined, costTarget: undefined }
-  const { rows } = await draw($, on, s, andamentoBlocks)
-  expect(rows[3]).toBe(cols('', '01m01s', 'of spend'))
+const LONG_SPEND = () => snap({ cost: { usd: 10 }, agentSpend: { 'code-reviewer': 2.5, implementer: 2.5, Plan: 1 }, insights: insights({ rounds: 3, usd: 6 }) })
+
+test('andamento: Given a spend legend wider than the pane, When it is drawn, Then each label is its last hyphen segment cut to 4 letters and a dot', async ($, on) => {
+  // Given / When
+  const { rows } = await draw($, on, LONG_SPEND(), andamentoBlocks)
+  // Then
+  expect(rows[2]).toBe('▰ main 40%  ▰ revi. 25%  ▰ impl. 25%  ▰ Plan 10%')
+})
+
+test('andamento: Given a spend legend that fits the pane, When it is drawn, Then the labels stay whole', async ($, on) => {
+  // Given / When
+  const { rows } = await draw($, on, { ...LONG_SPEND(), agentSpend: { 'code-reviewer': 2.5, Plan: 1 } }, andamentoBlocks)
+  // Then
+  expect(rows[2]).toBe('▰ main 65%  ▰ code-reviewer 25%  ▰ Plan 10%')
+})
+
+test('shortLabel: Given agent types, When abbreviated, Then the last segment keeps 4 letters and a dot when longer', () => {
+  expect(['implementer', 'code-reviewer', 'Explore', 'Plan', 'main'].map(shortLabel)).toEqual(['impl.', 'revi.', 'Expl.', 'Plan', 'main'])
 })
 
 // ── IN CORSO ──
@@ -553,8 +569,8 @@ test('page: the section titles and the empty row in Italian', async ($, on) => {
   try {
     setLang('it')
     expect((await draw($, on, snap(), attentionBlocks)).rows).toEqual([titled('ATTENZIONE'), '✓ niente da fare'])
-    const trend = await draw($, on, snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6 }) }), andamentoBlocks)
-    expect(trend.rows.slice(0, 4)).toEqual([titled('ANDAMENTO'), cols('$/prompt', 'ultimo turno', 'subagenti', 'compattazione'), cols('$2.00 →', '—', '0%', '—'), cols('', '', 'della spesa')])
+    const trend = await draw($, on, LONG_SPEND(), andamentoBlocks)
+    expect([trend.rows[0], trend.rows[2]]).toEqual([titled('ANDAMENTO'), '▰ princ. 40%  ▰ revi. 25%  ▰ impl. 25%  ▰ Plan 10%'])
     expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
     const done = await draw($, on, snap({ sessionLog: [...ROUNDS, ROUND_AGENT], groupsOpen: { [`done:${NOW - 200_000}`]: true } }), doneBlocks)
     expect(done.rows[0]).toBe(titled('LOG'))

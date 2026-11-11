@@ -27,6 +27,15 @@ test('withHistoryAgents: Given a log that already holds an agent entry, When loa
   expect(withHistoryAgents(undefined, [])).toBeUndefined()
 })
 
+test('withHistoryAgents: Given an interrupted agent in the history, When loaded, Then it gets no entry, so its real end can still be logged under its id', () => {
+  // Given
+  const interrupted = { ...hist('a1', NOW - 20_000), isInterrupted: true }
+  // When
+  const out = withHistoryAgents([], [interrupted, hist('a2', NOW - 5_000)])
+  // Then
+  expect(out?.map(e => e.key)).toEqual(['a2'])
+})
+
 test('withLoggedSignals: Given a signal first seen at a time of its own, When logged later, Then its entry carries the time it first held', () => {
   // Given: a command failed twice, seen at NOW - 30 s
   const s: CockpitSnapshot = { ...INITIAL, now: NOW, insights: { ...emptyInsights(), failedCmds: { 'npm test': 2 } } }
