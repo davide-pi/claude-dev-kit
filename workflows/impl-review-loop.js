@@ -129,6 +129,38 @@ const cycleIds = left => {
     rest = kept
   }
 }
+// Independent task groups: tasks that share neither a dependency (transitively) nor a file are in different lanes, in input order.
+// A task that names no file could touch any, so it joins everything. A glob (a directory counts as one) is also taken to share with any entry
+// that starts with its literal prefix, or whose own prefix starts with it: overlapping globs are not matched by either regex.
+const globPrefix = e => {
+  const n = norm(String(e).trim())
+  const body = n.endsWith('/') ? `${n}**` : n
+  const i = body.search(/[*?]/)
+  return i < 0 ? null : body.slice(0, i).replace(/[^/]*$/, '')
+}
+const sharesFile = (a, b) => {
+  if (norm(a) === norm(b) || entryRegex(a).test(norm(b)) || entryRegex(b).test(norm(a))) return true
+  const pa = globPrefix(a), pb = globPrefix(b)
+  if (pa === null && pb === null) return false
+  const x = pa ?? norm(a), y = pb ?? norm(b)
+  return x.startsWith(y) || y.startsWith(x)
+}
+const lanesFor = tasks => {
+  const parent = tasks.map((_, i) => i)
+  const find = i => (parent[i] === i ? i : (parent[i] = find(parent[i])))
+  const union = (i, j) => { parent[find(i)] = find(j) }
+  const at = new Map(tasks.map((t, i) => [t.id, i]))
+  tasks.forEach((t, i) => {
+    for (const d of t.dependsOn ?? []) if (at.has(d)) union(i, at.get(d))
+    if (!(t.files ?? []).length) tasks.forEach((_, j) => union(i, j))
+    for (let j = 0; j < i; j++) if ((t.files ?? []).some(a => (tasks[j].files ?? []).some(b => sharesFile(a, b)))) union(i, j)
+  })
+  const groups = new Map()
+  tasks.forEach((t, i) => groups.set(find(i), [...(groups.get(find(i)) ?? []), t]))
+  return [...groups.values()]
+}
+// Lanes pay when there are two and at least two tasks run outside the largest one.
+const lanesWorth = lanes => lanes.length >= 2 && lanes.reduce((n, l) => n + l.length, 0) - Math.max(...lanes.map(l => l.length)) >= 2
 const stepBudget = taskCount => Math.min(35, 10 + 6 * taskCount)
 // More files than the triage size implies: a signal for the verdict, never a bump of the size.
 const sizeSignal = (size, count) => (size === 'S' && count > 1) || (size === 'M' && count > 6)
@@ -228,7 +260,16 @@ const coverageOwners = (unread, reviewers, axes = []) => {
 
 // At M and L a scope finding raised by A alone and not CONFIRMED stays a note: it blocks nothing and is never sent to a fix.
 // Only in a round B answered too: without B "no other reviewer found it" is not established.
-const isSoftScope = (f, finders, size, readers) => size !== 'S' && readers.includes('B') && f.category === 'scope' && f.confidence !== 'CONFIRMED' && (finders ?? []).join() === 'A'
+// The sole final reader (M: B alone, S: A alone) has no second opinion to wait for: its not CONFIRMED scope finding is a note too.
+const soleReader = (size, readers) => {
+  const whole = readers.filter(k => k === 'A' || k === 'B')
+  return size !== 'L' && whole.length === 1 ? whole[0] : ''
+}
+const isSoftScope = (f, finders, size, readers) => {
+  if (f.category !== 'scope' || f.confidence === 'CONFIRMED') return false
+  const by = (finders ?? []).join()
+  return (size !== 'S' && readers.includes('B') && by === 'A') || (!!by && by === soleReader(size, readers))
+}
 const softScope = (found, raisedBy, size, readers = []) => found.filter(f => isSoftScope(f, raisedBy[f.id], size, readers)).map(f => f.id)
 
 const findingHistory = roundLog => {
@@ -506,9 +547,9 @@ const planTasks = (Array.isArray(input.plan?.tasks) ? input.plan.tasks : []).fil
 let blocks
 try { blocks = planTasks.length ? blocksFor(planTasks) : [[{ id: '1', title: brief, files: [], dependsOn: [], tdd: false, criteria: [] }]] } catch (e) { return `impl-review-loop: args.plan: ${e.message}` }
 const loopSize = sizeFor(givenSize, risk, blocks.length)
-// Only the gate command (built when the implementer runs, not inline) wraps them in double quotes.
-if (!inline && /"/.test(text(input.verify))) return 'impl-review-loop: verify command contains a double quote: the gate command wraps it in double quotes.'
-if (!inline && /"/.test(text(input.unit))) return 'impl-review-loop: unit command contains a double quote: the gate command wraps it in double quotes.'
+// Only the gate command (built when the implementer runs, not inline) wraps them in single quotes: a literal in PowerShell and bash, `;` and `"` pass.
+if (!inline && /'/.test(text(input.verify))) return 'impl-review-loop: verify command contains a single quote: the gate command wraps it in single quotes.'
+if (!inline && /'/.test(text(input.unit))) return 'impl-review-loop: unit command contains a single quote: the gate command wraps it in single quotes.'
 // mechanical holds only while the size stays S: a risk axis that lifts it brings back the default models.
 const mechanical = input.mechanical === true && loopSize === 'S'
 const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : mechanical ? 'low' : 'medium'
@@ -542,34 +583,39 @@ const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|per
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
 
 // The agents start in the session's folder, which may be another repo.
-const REPO = `REPOSITORY: ${repoRoot}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. Write in the chat language; any PR comment in the prComment language, as the Lang: line gives it.`
+const repoLine = root => `REPOSITORY: ${root}. Every path in this prompt is relative to it; read and edit files only under it and run every command (verify, git, snapshot) with it as the working directory, never in your starting folder. You are a subagent: never ask the user anything. Write in the chat language; any PR comment in the prComment language, as the Lang: line gives it.`
 // The implementer body already says the rest (Open questions, the Never list); reviewers and Explore get it here.
-const RULES = `${REPO} A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
+const rulesFor = root => `${repoLine(root)} A decision you cannot make goes under Open questions. Never commit, push, apply a migration, deploy or write through an MCP server.`
+const RULES = rulesFor(repoRoot)
 const quote = s => `'${String(s).replace(/'/g, "''")}'`
 const snapshotText = since => [
   'Last step, after the verify command and before the structured output: run this exactly with the PowerShell tool (the quoting of -Dirty is PowerShell\'s) and return the one JSON line it prints as `snapshot`, unchanged (the loop reads the files you changed from it). The snapshot\'s `files` lists the whole change since the start (the implementer\'s files too), not only your own edits: expected, not to be reported as an anomaly.',
   ['pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1', `-Since ${since || startHead || 'HEAD'}`, startHead ? `-Start ${startHead}` : '', dirty.length ? `-Dirty ${quote(dirty.join(','))}` : ''].filter(Boolean).join(' '),
 ].join('\n')
 // The implementer has no tool budget (its run is task-sized).
-const writerTail = (budget, cleaning = false) => [
+const writerTail = (budget, cleaning = false, root = repoRoot, since = lastTree) => [
   input.stackSkill ? `Read ~/.claude/skills/${input.stackSkill}/SKILL.md first (the stack skill).` : '',
   input.verify ? `Verify with: ${input.verify}` : '',
   cleaning ? '' : 'Questions: a behaviour choice the owner would see (a contract, a default, an error policy) is not yours to make and not to guess: list it under `questions` as { text, default: what you would do, why }, and do the rest of the scope. An internal choice (naming, structure) is yours, not a question.',
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
-  REPO,
+  repoLine(root),
   budget ?? '',
   'Environment: when the verify fails for an environment reason (a missing file, tool or config), change no code for it: return verify.status fail and explain it in notVerified.',
   'Time: when the work is long, return the structured output before the turn budget runs out, with the work done so far and what is left under `openQuestions`: a partial report beats none, and a run that ends without it is lost.',
   'Return your report through the structured output: scope, files, evidence, verify {status, command, line}, snapshot as printed by the script, rejected, noticed, notVerified, openQuestions, remaining (the tasks or parts of the brief not done yet; empty when the work is complete).',
-  snapshotText(lastTree),
+  snapshotText(since),
 ]
 
 // The script has no shell: the implementer runs the gate and returns its last line as `gate`.
-const gateBase = () => `node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --head ${startHead || 'HEAD'} --test "${input.verify || input.unit}"${dirty.length ? ` --dirty ${quote(dirty.join(','))}` : ''}${Number.isFinite(input.stuckMinutes) ? ` --stuck-minutes ${input.stuckMinutes}` : ''}`
-const gateLines = () => (input.verify
-  ? [`Before you report, run the gate and paste its last output line as "gate": ${gateBase()}`, `On exit 3 run it again with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --wait`]
+const gateBase = (root = repoRoot) => `node ~/.claude/scripts/gate.mjs --root ${quote(root)} --head ${startHead || 'HEAD'} --test ${quote(input.verify || input.unit)}${dirty.length ? ` --dirty ${quote(dirty.join(','))}` : ''}${Number.isFinite(input.stuckMinutes) ? ` --stuck-minutes ${input.stuckMinutes}` : ''}`
+// A lane's gate skips the scope check (the merge gate runs it once on the start tree).
+const gateLines = (root = repoRoot, noScope = false) => (input.verify
+  ? [`Before you report, run the gate and paste its last output line as "gate": ${gateBase(root)}${noScope ? ' --no-scope' : ''}`, `On exit 3 run it again with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(root)} --wait`]
   : [])
 const gated = !!input.verify   // block reports are read against the gate: no parsable gate line, not verified
+// The fixer's rules, one text for the fix round and the reader A fix.
+const FIX_RULE = 'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.'
+const REPRODUCE_RULE = 'A finding marked PLAUSIBLE is not proven: REPRODUCE FIRST (a failing test or a run that shows the failure) before any edit. If you cannot reproduce it, change no code for it and list it under `rejected` with the reason "not reproduced"; a finding you judge wrong goes under `rejected` with your reason, no code change either. Mark each `rejected` entry with `kind`: "not-reproduced" when you could not make the failure happen, "wrong" when you judge the finding incorrect.'
 const gateWhy = g => (!g ? 'verify-not-run' : g.gate === 'red: timeout' ? 'gate-timeout' : g.gate === 'running' ? 'gate-running' : 'gate-red')
 
 const str = description => ({ type: 'string', ...(description ? { description } : {}) })
@@ -654,8 +700,9 @@ const ask = async (prompt, opts) => {
 const why = label => (failures[label] ? `: ${failures[label]}` : '')
 
 // A declared dirty file is kept (the snapshot drops it) so the change's own edit of it is reviewed.
-const takeFiles = r => {
-  if (!r.snapshot) return r.files.forEach(f => changed.add(f))
+// additive: a lane's snapshot lists only its own files, so it never drops what another lane added.
+const takeFiles = (r, additive = false) => {
+  if (!r.snapshot || additive) return [...r.files, ...(r.snapshot?.files ?? [])].forEach(f => { if (typeof f === 'string' && f) changed.add(f) })
   const declaredDirty = r.files.filter(f => typeof f === 'string' && f && isDirty(f, dirty, repoRoot))
   const listed = [...r.snapshot.files.filter(f => typeof f === 'string' && f), ...declaredDirty]
   const keep = new Set(listed.map(f => rel(f, repoRoot)))
@@ -675,22 +722,24 @@ const takeSide = r => {
   takeDefaults(r)
   addNotes(r.openQuestions)
 }
-const takeReport = r => {
-  takeFiles(r)
+const takeReport = (r, additive = false) => {
+  takeFiles(r, additive)
   if (r.snapshot?.tree) lastTree = r.snapshot.tree
   lastReport = r
   if (Array.isArray(r.snapshot?.big)) bigFiles = growthProposals(r.snapshot.big)
   takeSide(r)
 }
-const gateReport = (r, toFixHadVerify) => {
-  const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: lastReport?.verify.status, next: nextV })
+// outside: the files a `red: scope` gate names; the red is then a finding to fix (never green-to-red) that says what to revert.
+const gateReport = (r, toFixHadVerify, outside = []) => {
+  const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: outside.length ? undefined : lastReport?.verify.status, next: nextV })
+  if (g.finding && outside.length) g.finding.fix = `${g.finding.fix}; revert your own edits outside the perimeter (never the user's earlier work): ${outside.join(', ')}`
   if (g.finding) { known[g.finding.id] = g.finding; nextV += 1; verifyOpen = [g.finding] }
   else if (g.status === 'pass') verifyOpen = []
   return g.stall
 }
-const absorb = r => {
+const absorb = (r, additive = false) => {
   const gate = gateReport(r, false)
-  takeReport(r)
+  takeReport(r, additive)
   return gate
 }
 
@@ -736,6 +785,16 @@ const result = extra => withHistory({
 })
 
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
+// A run with no second call (a continuation, the preview pass): a question the policy would not answer alone stalls for the
+// owner, unless the resolution already answers it; the rest stay notes, as before.
+const questionsOrStall = (qs, at, label, resolution) => {
+  const answered = readAnswers(resolution)
+  const pending = qs.filter(q => questionPolicy(q) !== 'default' && !answered.some(a => plain(a.text) === plain(q.text)))
+  addQuestionNotes(qs.filter(q => !pending.includes(q)))
+  return pending.length
+    ? questionStall(at, pending, `${label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH))
+    : null
+}
 const CONTINUE = "Your first run's edits are already in the tree: continue from them, do not start over, and list in `files` only the files you change in this run."
 const answersBlock = answers => `The owner answered your questions: apply each answer. ${CONTINUE}\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
 const defaultsBlock = list => `Your reversible questions are answered with your own defaults (the owner can change them later): apply each. ${CONTINUE}\n${list.map(q => `- ${q.text} -> ${q.default}`).join('\n')}`
@@ -768,31 +827,32 @@ const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, b
 }
 
 // An implementer that stopped without a report may still have changed the tree: the files in the perimeter go to review.
-const recoverChanges = async () => {
+const recoverChanges = async (root = repoRoot) => {
   const since = startHead || 'HEAD'
   const skip = dirty.length ? `, minus the files already modified before the start (${dirty.join(', ')}; an entry ending with "/" is a whole directory)` : ''
   const r = await ask([
     `List the files changed in the working tree since ${since}: \`git diff ${since} --name-only\` plus \`git ls-files -o --exclude-standard\`${skip}. Read only, change nothing; return them in \`files\`.`,
-    RULES,
+    rulesFor(root),
   ].join('\n\n'), { label: 'find the files to change', phase: 'Implement', agentType: 'Explore', effort: 'medium', schema: obj(['files'], { files: arr(str('repo-relative path')) }) })
   return strings(r?.files).filter(f => inPerimeter(f, files, repoRoot))
 }
 
-if (!inline) {
-  phase('Implement')
-  const resolution0 = resolutions.find(r => Number(r?.round) === 0)
+const resolution0 = resolutions.find(r => Number(r?.round) === 0)
+// The blocks of one lane, or of the whole plan when serial (lane null): `items` are { block, bid }, `total` the run's block count.
+// Returns a stall result, or null when every block is done.
+const runBlocks = async (items, total, lane) => {
+  const root = lane?.path ?? repoRoot
   let blockTree = ''   // the previous block's tree: the base of the next block's delta
-  for (const [bi, block] of blocks.entries()) {
-    const bid = bi + 1
+  for (const { block, bid } of items) {
     phase('Implement')
-    const base = blocks.length === 1 ? 'implement the change' : `implement block ${bid}`
+    const base = total === 1 ? 'implement the change' : `implement block ${bid}`
     const optsFor = label => ({ label, phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION })
     const implOpts = optsFor(base)
     const tasksText = planTasks.length
       ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}`
       : ''
     const budgetLine = `Budget: about ${stepBudget(block.length)} turns. At that point stop widening: run the gate and report what is left.`
-    const buildImpl = (extra, tail = gateLines()) => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail()].filter(Boolean).join('\n\n')
+    const buildImpl = (extra, tail = gateLines(root, !!lane)) => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree)].filter(Boolean).join('\n\n')
     const tdd = block.some(t => t.tdd)
     if (tdd && !input.unit) gaps.push(`block ${bid}: tdd task but no unit command, so the block is not test-first`)
     if (tdd && input.unit) {
@@ -800,15 +860,18 @@ if (!inline) {
       let proven = false
       let retryNote = ''
       for (let attempt = 0; attempt < 2 && !proven; attempt++) {
-        const tests = readReport(await ask(buildImpl([
+        const askedTests = await askWithQuestions(extra => buildImpl([
           retryNote,
           criteria.length ? `Criteria:\n${criteria.map(c => `- ${c}`).join('\n')}` : '',
           input.testSkill ? `Read ~/.claude/skills/${input.testSkill}/SKILL.md first.` : '',
           'Write only the tests for these criteria, Given/When/Then, and the stubs they need to compile. Then run:',
-          `${gateBase()} --red --unit "${input.unit}" --test-files <the test files you wrote, comma-separated>`,
+          `${gateBase(root)} --red --unit ${quote(input.unit)} --test-files <the test files you wrote, comma-separated>`,
           'and paste its last output line as "gate".',
-        ].filter(Boolean).join('\n'), []), optsFor(`${base} (tests first${attempt ? ', retry' : ''})`)))
-        if (tests) { takeSide(tests); addQuestionNotes(tests.questions) }
+          extra,
+        ].filter(Boolean).join('\n'), []), optsFor(`${base} (tests first${attempt ? ', retry' : ''})`), 0, resolution0, false, bid)
+        if (askedTests.stall) return askedTests.stall
+        const tests = askedTests.report
+        if (tests) takeSide(tests)
         const red = readGate(tests?.gate)
         proven = red?.gate === 'red-proven'
         // One retry, only for a red the implementer can mend: tests that pass, or a build that fails; anything else (no line, exit 2, timeout) goes on unproven.
@@ -833,12 +896,13 @@ if (!inline) {
         'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
         left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
       ].filter(Boolean).join('\n')), { ...implOpts, label }), gated)
-      if (next) addQuestionNotes(next.questions)
+      const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
+      if (nextStall) return nextStall
       impl = next ?? impl
     }
     if (!impl || impl.remaining.length) {
       // A report lists its own files; only a missing one needs the probe.
-      const done = impl ? strings(impl.files) : await recoverChanges()
+      const done = impl ? strings(impl.files) : await recoverChanges(root)
       const todo = impl?.remaining ?? []
       return stall(0, {
         why: 'incomplete',
@@ -849,48 +913,50 @@ if (!inline) {
     // The gate, run by the implementer, decides the block: a red one gets one fix call and the gate again.
     let g = readGate(impl.gate)
     if (g && !gateGreen(g)) {
-      takeReport(impl)   // the stall result then carries the files and the red gate line
+      takeReport(impl, !!lane)   // the stall result then carries the files and the red gate line
       if (g.gate === 'red: timeout') return stallAgain(0, `the gate stalled twice on block ${bid}; last test seen: ${g.test || '(none)'}`, { why: 'gate-timeout' })
       // exit 3: the brief already told the implementer to wait with --wait, so a fix call would only race the running suite
       if (g.gate === 'running') return stallAgain(0, `the gate was still running at the end of block ${bid}: ${g.line}`, { why: 'gate-running' })
       const fixLabel = `${base} (gate fix)`
-      const fixed = readReport(await ask(buildImpl([
+      const askedFix = await askWithQuestions(extra => buildImpl([
         `The gate is red at the end of block ${bid}: ${g.line}`,
         g.test ? `Failing: ${g.test}` : '',
         g.outside.length ? `Outside the perimeter (revert your own edits there, never the user's earlier work): ${g.outside.join(', ')}` : '',
         'Fix the cause and nothing else: the tree already holds your edits.',
-      ].filter(Boolean).join('\n')), optsFor(fixLabel)), gated)
+        extra,
+      ].filter(Boolean).join('\n')), optsFor(fixLabel), 0, resolution0, gated, bid)
+      if (askedFix.stall) return askedFix.stall
+      const fixed = askedFix.report
       if (!fixed) return stallAgain(0, `the implementer returned nothing on the gate fix of block ${bid} (stopped or failed${why(fixLabel)})`)
-      addQuestionNotes(fixed.questions)
       g = readGate(fixed.gate)
       if (!gateGreen(g)) {
-        takeReport(fixed)
+        takeReport(fixed, !!lane)
         return stallAgain(0, `the gate is not green after the fix of block ${bid}: ${g?.line ?? 'no gate line returned'}`, { why: gateWhy(g) })
       }
       // each snapshot measures from the previous one: the block's size is the sum
       if (Number.isFinite(impl.snapshot?.churn)) changeLines += impl.snapshot.churn
       impl = fixed
     }
-    const implStall = absorb(impl)
+    const implStall = absorb(impl, !!lane)
     if (Number.isFinite(impl.snapshot?.churn)) changeLines += impl.snapshot.churn
     if (implStall) return verifyStall(0, implStall)
 
     const entry = { id: bid, tasks: block.map(t => t.id), gate: g?.line ?? '', readerA: { raised: 0, fixed: 0, carried: 0 } }
     blockLog.push(entry)
     // An unchanged tree is an empty delta: nothing to read.
-    if (gateGreen(g) && g.tree && g.tree !== blockTree) {
+    if (loopSize !== 'S' && gateGreen(g) && g.tree && g.tree !== blockTree) {
       // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried.
       phase('Block review')
       const readLabel = `block ${bid} · reader A`
       const read = await ask([
-        `Review block ${bid} of ${blocks.length} (tasks ${entry.tasks.join(', ')}): its delta is \`${deltaCommand(blockTree, g.tree, startHead)}\` (the trees are snapshots of the working tree, untracked files included): run it first, then judge the code as it is now.`,
+        `Review block ${bid} of ${total} (tasks ${entry.tasks.join(', ')}): its delta is \`${deltaCommand(blockTree, g.tree, startHead)}\` (the trees are snapshots of the working tree, untracked files included): run it first, then judge the code as it is now.`,
         `Intent: ${brief}`,
         decisionsText,
         perimeterTextFor(files, false),
         dirtyText,
         g.formatOnly.length ? `Format-only files (whitespace changes only): ${g.formatOnly.join(', ')}. Do not raise formatting findings on them.` : '',
         'PREVIOUS FINDINGS: none (the first read of this block): return `previous` as an empty list.',
-        `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output and list under filesReviewed every file you actually read.`,
+        `${rulesFor(root)} Report only P1/P2/P3 findings with a concrete failure; return the structured output and list under filesReviewed every file you actually read.`,
         budgetText(reviewCalls(changed.size)),
       ].filter(Boolean).join('\n\n'), { label: readLabel, phase: 'Block review', agentType: blockReader.agentType, model: blockReader.model, effort: blockReader.effort, schema: REVIEW })
       if (!read) gaps.push(`block ${bid}: reader A returned nothing${why(readLabel)}`)
@@ -900,7 +966,13 @@ if (!inline) {
         entry.readerA.raised = raised.length
         const open = raised.filter(x => BLOCKING.has(x.priority))
         const inside = open.filter(x => inPerimeter(x.path, files, repoRoot))
-        const carried = open.filter(x => !inside.includes(x)).map(x => ({ ...x, block: bid, why: 'outside perimeter' }))
+        // Outside the perimeter a defect the change did not cause is reported, not tracked: only a blocking or widen one is carried.
+        const outside = open.filter(x => !inside.includes(x))
+        for (const x of outside.filter(x => classify(x, files, { dirty, root: repoRoot, touched: [...changed] }) === 'outOfScope')) {
+          known[x.id] = x
+          outOfScope.push({ source: 'review', ...x })
+        }
+        const carried = outside.filter(x => classify(x, files, { dirty, root: repoRoot, touched: [...changed] }) !== 'outOfScope').map(x => ({ ...x, block: bid, why: 'outside perimeter' }))
         // P3 never blocks: inside the perimeter it joins the minor findings, outside it the out-of-scope list.
         for (const x of raised.filter(x => !BLOCKING.has(x.priority))) {
           known[x.id] = x
@@ -909,18 +981,21 @@ if (!inline) {
         }
         if (inside.length) {
           const fixLabel = `${base} (reader A fix)`
-          const fixed = readReport(await ask(buildImpl([
-            `Reader A raised these findings on block ${bid}. Fix exactly these and nothing else; one you judge wrong or cannot reproduce goes under \`rejected\` with its reason, no code change:`,
-            ...inside.map(x => `- ${x.id} [${x.priority}] ${x.path}${x.line ? `:${x.line}` : ''} - ${x.title}: ${x.failure}${x.fix ? ` (suggested: ${x.fix})` : ''}`),
-          ].join('\n')), optsFor(fixLabel)), gated)
+          const askedA = await askWithQuestions(extra => buildImpl([
+            `Reader A raised these findings on block ${bid}. ${FIX_RULE} One you judge wrong or cannot reproduce goes under \`rejected\` with its reason, no code change:`,
+            ...inside.map(x => `- ${x.id} [${x.priority}] ${x.path}${x.line ? `:${x.line}` : ''} - ${x.title}: ${x.failure}${x.fix ? ` (suggested: ${x.fix})` : ''}${x.confidence === 'PLAUSIBLE' ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}`),
+            inside.some(x => x.confidence === 'PLAUSIBLE') ? REPRODUCE_RULE : '',
+            extra,
+          ].filter(Boolean).join('\n')), optsFor(fixLabel), 0, resolution0, gated, bid)
+          if (askedA.stall) return askedA.stall
+          const fixed = askedA.report
           if (!fixed) return stallAgain(0, `the implementer returned nothing on the reader A fix of block ${bid} (stopped or failed${why(fixLabel)})`)
-          addQuestionNotes(fixed.questions)
           const after = readGate(fixed.gate)
           if (!gateGreen(after)) {
-            takeReport(fixed)
+            takeReport(fixed, !!lane)
             return stallAgain(0, `the gate is not green after the reader A fix of block ${bid}: ${after?.line ?? 'no gate line returned'}`, { why: gateWhy(after) })
           }
-          const stallAfter = absorb(fixed)
+          const stallAfter = absorb(fixed, !!lane)
           if (Number.isFinite(fixed.snapshot?.churn)) changeLines += fixed.snapshot.churn
           if (stallAfter) return verifyStall(0, stallAfter)
           const rejectedIds = new Set(fixed.rejected.map(r => r.id))
@@ -935,6 +1010,91 @@ if (!inline) {
     }
     blockTree = g?.tree || impl.snapshot?.tree || blockTree
   }
+  return null
+}
+
+const LANE_LINE = obj(['line'], { line: str('the last output line of the command, verbatim') })
+const LANE_MERGE = obj(['gate'], { gate: str('the last output line of the command, verbatim') })
+const readLane = text => {
+  for (const raw of String(text ?? '').split('\n').reverse()) {
+    let l
+    try { l = JSON.parse(raw.trim()) } catch { continue }
+    if (l && typeof l.path === 'string' && l.path.trim() && typeof l.branch === 'string' && /^deliver-lane\/[A-Za-z0-9._-]+$/.test(l.branch)) return { path: l.path, branch: l.branch }
+  }
+  return null
+}
+const laneStem = String(startHead || 'head').replace(/[^A-Za-z0-9]/g, '').slice(0, 8) || 'head'
+
+// Independent task groups, each in its own worktree (plain `git worktree add` through gate.mjs, never the native isolation), then one merge gate.
+const runLanes = async groups => {
+  // The worktrees and branches a stall leaves behind: where they are and the command that removes them.
+  const leftText = made => (made.length
+    ? `lane worktrees left behind: ${made.map(l => `${l.path} (branch ${l.branch})`).join(', ')}; remove them with node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --lane-remove ${made.map(l => l.branch).join(' ')}`
+    : '')
+  let next = 1
+  const lanes = groups.map((tasks, i) => ({ n: i + 1, items: blocksFor(tasks).map(block => ({ block, bid: next++ })) }))
+  const total = next - 1
+  const added = await parallel(lanes.map(l => () => ask([
+    'Run this command and paste its last output line as "line", unchanged. Change nothing else.',
+    `node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --head ${startHead || 'HEAD'} --lane-add l${l.n}-${laneStem}`,
+    RULES,
+  ].join('\n\n'), { label: `lane ${l.n} · add worktree`, phase: 'Implement', model: 'haiku', effort: 'low', schema: LANE_LINE })))
+  const found = added.map(a => readLane(a?.line))
+  const lost = found.findIndex(f => !f)
+  if (lost >= 0) {
+    const label = `lane ${lost + 1} · add worktree`
+    const made = lanes.map((l, i) => ({ ...l, ...found[i] })).filter((l, i) => found[i])
+    return stallAgain(0, [`no valid worktree for lane ${lost + 1} (the runner returned none or a line with no path or no deliver-lane/ branch${why(label)})`, leftText(made)].filter(Boolean).join('; '), { why: 'lane-setup' })
+  }
+  lanes.forEach((l, i) => Object.assign(l, found[i]))
+  const stalled = (await parallel(lanes.map(l => () => runBlocks(l.items, total, l)))).find(Boolean)
+  if (stalled) {
+    // the reasons of a block stall speak of a tree that is not the start tree here: say where the work is
+    const note = leftText(lanes)
+    return {
+      ...stalled,
+      stall: { ...stalled.stall, reason: [stalled.stall.reason, note].filter(Boolean).join('; ') },
+      resume: stalled.stall.why === 'question' ? `${stalled.resume} ${note}` : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
+    }
+  }
+  blockLog.sort((a, b) => a.id - b.id)
+  phase('Implement')
+  const label = 'lanes · merge'
+  const merged = await ask([
+    'Run this command and paste its last output line as "gate", unchanged. It merges the lane branches into the start branch, then runs the tests and the scope check.',
+    `${gateBase()} --merge ${lanes.map(l => l.branch).join(' ')}`,
+    `On exit 3 run it again WITHOUT --merge, with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --wait`,
+    RULES,
+  ].join('\n\n'), { label, phase: 'Implement', model: 'haiku', effort: 'low', schema: LANE_MERGE })
+  const g = readGate(merged?.gate)
+  if (!gateGreen(g)) {
+    const conflict = g?.gate === 'red: merge'
+    // only the gate can say the rollback worked: a failed one names itself in the text
+    const rolledBack = !/rollback failed/.test(g?.test ?? '')
+    return stallAgain(0, conflict
+      ? `the lanes conflict on merge (${rolledBack ? 'aborted, the start tree is untouched' : `the start tree may hold part of the merge, ${g.test}`}); ${leftText(lanes)}: ${g.outside.join(', ') || g.test}`
+      : `the merge gate is not green: ${g?.line ?? 'no gate line returned'}${why(label)}${g ? '' : `; ${leftText(lanes)}`}`, { why: conflict ? 'merge-conflict' : gateWhy(g) })
+  }
+  const leftover = Array.isArray(g.leftover) ? g.leftover.filter(x => typeof x === 'string' && x) : []
+  if (leftover.length) gaps.push(`lanes: merged, but could not remove ${leftover.join('; ')}`)
+  // The merge gate verified the merged tree: it replaces the lanes' own last verify, and its tree is the base for what follows.
+  if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: 'the merge gate', line: g.line } }
+  lastTree = g.tree
+  return null
+}
+
+if (!inline) {
+  phase('Implement')
+  if (!input.verify && loopSize !== 'S') gaps.push('no verify: blocks were not read by reader A')
+  if (input.lanes === true && !input.verify) gaps.push('lanes: no verify command, so the plan ran serially')
+  let laneGroups = input.lanes === true && input.verify ? lanesFor(planTasks) : []
+  // a lane is cut from the start commit: it would not see the user's uncommitted edit of a file a task shares
+  if (lanesWorth(laneGroups) && planTasks.some(t => (t.files ?? []).some(f => dirty.some(d => sharesFile(f, rel(d, repoRoot)))))) {
+    gaps.push('lanes: a task shares a file with those already modified before the start, so the plan ran serially')
+    laneGroups = []
+  }
+  const stalled = lanesWorth(laneGroups) ? await runLanes(laneGroups) : await runBlocks(blocks.map((block, i) => ({ block, bid: i + 1 })), blocks.length, null)
+  if (stalled) return stalled
 
   if (previewText && loopSize !== 'S') {
     const previewQuestion = {
@@ -949,10 +1109,11 @@ if (!inline) {
           ' A bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the review; any other answer runs the implementer once more with it as its direction. The verdict carries a final screenshot of the same surface.'))
     }
     if (!PREVIEW_OK.test(said.answer)) {
-      const again = readReport(await ask([brief, answersBlock([said]), decisionsText, perimeterTextFor(files), dirtyText, ...writerTail()].filter(Boolean).join('\n\n'),
-        { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }))
+      const again = readReport(await ask([brief, answersBlock([said]), decisionsText, perimeterTextFor(files), dirtyText, ...gateLines(), ...writerTail()].filter(Boolean).join('\n\n'),
+        { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }), gated)
       if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
-      addQuestionNotes(again.questions)
+      const previewStall = questionsOrStall(again.questions, 0, 'implement the change (preview feedback)', resolution0)
+      if (previewStall) return previewStall
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
     }
@@ -1036,7 +1197,9 @@ while (true) {
   const picked = only ? [...everyone, verifier].filter(r => only.includes(r.key)) : round === 1 ? everyone : [verifier]
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
-  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === 'V' ? 'verify the fixes' : r.key === 'B' ? 'second opinion' : 'code')
+  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === 'V' ? 'verify the fixes' : r.key === 'B' ? (everyone.some(x => x.key === 'A') ? 'second opinion' : 'whole diff') : 'code')
+  // The coverage rerun that only B reads (M) is a reading of named files: medium effort, same model.
+  const effortOf = r => (coverage && r.key === 'B' && !everyone.some(x => x.key === 'A') ? 'medium' : r.effort)
   const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, everyId()]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
@@ -1053,14 +1216,14 @@ while (true) {
     dirtyText,
     'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2; CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
-    `Effort: ${r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
+    `Effort: ${effortOf(r)}.${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(),
     r.key === 'V' ? 'You are the VERIFIER of the last fix round: mark every previous finding closed or open from the code as it is now, and read the fix delta for defects the fix introduced (new findings apart). Nothing else.' : '',
     challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     budgetText(reviewCalls(expected.length)),
-  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Final verification', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
+  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Final verification', agentType: r.agentType, model: r.model, effort: effortOf(r), schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
   alive.forEach(takeDefaults)
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
@@ -1102,7 +1265,7 @@ while (true) {
   cleanupSent = cleanupWait
   const readers = alive.map(a => a.key)
   // Only a stronger repeat (CONFIRMED, or raised by someone besides A) turns a note into a fresh blocker; a PLAUSIBLE repeat from A stays absorbed.
-  const blocks = f => f.category !== 'scope' || f.confidence === 'CONFIRMED' || findersOf(f, alive, repoRoot).join() !== 'A'
+  const blocks = f => f.category !== 'scope' || f.confidence === 'CONFIRMED' || !['A', soleReader(size, readers)].includes(findersOf(f, alive, repoRoot).join())
   // A repeat off the note's own lines, in a file the last fix changed, is the fix's new hunk, not the note.
   const apart = (f, note) => isDirty(f.path, lastFix?.files ?? [], repoRoot) && Number.isFinite(f.line) && Number.isFinite(note.line) && Math.abs(f.line - note.line) > NOTE_WINDOW
   const deduped = dedupeFound({ found: merged.found, known, tracked, verdicts: merged.verdicts, root: repoRoot, softIds, blocks, apart })
@@ -1219,12 +1382,12 @@ while (true) {
     cleaning
       ? 'Cleanup pass, once: these minor review findings (P3) are inside the perimeter. Fix each one that is a safe, local change and nothing else; one you cannot fix without changing behaviour, or that needs a decision, goes under `rejected` with a one-line reason, no code change: never ask about it. No other edit.'
       : sending.length
-        ? 'Fix exactly these review findings and nothing else. A "scope" finding means revert that hunk: a change the brief does not require, outside the perimeter or inside it, only an edit the change itself made, never the user\'s earlier work. Do not keep it in another form: the proposal is recorded for the user, so nothing is lost.'
+        ? FIX_RULE
         : 'No review finding is open: Apply the owner\'s answers below and nothing else.',
     fix,
     routed.answered.length ? `The owner answered the reviewers' questions: apply each answer; an answer that keeps the code as it is needs no edit, say so in \`scope\`.\n${routed.answered.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}` : '',
     extra,
-    sending.some(id => unproven(id)) ? 'A finding marked PLAUSIBLE is not proven: REPRODUCE FIRST (a failing test or a run that shows the failure) before any edit. If you cannot reproduce it, change no code for it and list it under `rejected` with the reason "not reproduced"; a finding you judge wrong goes under `rejected` with your reason, no code change either. Mark each `rejected` entry with `kind`: "not-reproduced" when you could not make the failure happen, "wrong" when you judge the finding incorrect.' : '',
+    sending.some(id => unproven(id)) ? REPRODUCE_RULE : '',
     vIds.length ? 'A finding whose id starts with V (path "(verify)", category verify) is the verify command failing: make it pass without weakening the check or changing what it runs.' : '',
     `Intent: ${brief}`,
     resolution?.guidance ? `The user directs: ${resolution.guidance}` : '',
@@ -1239,7 +1402,13 @@ while (true) {
   if (asked1.stall) return asked1.stall
   const fixed = asked1.report
   if (!fixed) return stallAgain(round, `the implementer returned nothing on the fix (stopped or failed${why(fixOpts.label)})`)
-  const fixStall = gateReport(fixed, vIds.length > 0 && !resolution?.guidance && resolution?.retry !== true)
+  // A running or timed-out gate is no red verify to retry: it stalls as the block phase does; a scope red names the files to revert.
+  const fixGate = gated ? readGate(fixed.gate) : null
+  if (fixGate && ['gate-running', 'gate-timeout'].includes(gateWhy(fixGate)) && !gateGreen(fixGate)) {
+    takeReport(fixed)
+    return stallAgain(round, `the gate ${fixGate.gate === 'running' ? 'was still running' : 'timed out'} after the fix of round ${round}: ${fixGate.line}`, { why: gateWhy(fixGate) })
+  }
+  const fixStall = gateReport(fixed, vIds.length > 0 && !resolution?.guidance && resolution?.retry !== true, fixGate?.gate === 'red: scope' ? fixGate.outside : [])
   const treeBefore = lastTree
   lastDeltaBase = treeBefore || startHead || 'HEAD'
   takeReport(fixed)

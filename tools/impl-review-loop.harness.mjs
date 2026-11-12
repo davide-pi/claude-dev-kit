@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -27,6 +27,12 @@ const BODY = SOURCE.replace(/^export /, '');
 const PASS = { status: 'pass', command: 'node --test', line: '# fail 0' };
 const snapshot = (files) => ({ tree: 't1', files, churn: 0 });
 const ALL_READ = Symbol('every file the change touched');
+// The lane runners (labels "lane <n> · add worktree" and "lanes · merge"): a worktree line per lane, a green merge gate; `extra.lanes` replaces it.
+const laneGate = (kind = 'green', extra = {}) => JSON.stringify({ gate: kind, test: '', outside: [], formatOnly: [], tree: 'tr9', greenAt: '2026-11-11T10:00:00Z', seconds: 1, ...extra });
+const laneRunner = (prompt, opts) => {
+  const n = /^lane (\d+) /.exec(opts.label)?.[1];
+  return n ? { line: JSON.stringify({ lane: `l${n}`, path: `C:/lanes/l${n}`, branch: `deliver-lane/l${n}` }) } : { gate: laneGate() };
+};
 
 /**
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
@@ -45,6 +51,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
     calls.push({ prompt, opts });
     // an Error in a queue is an agent() that throws (turn cap, no StructuredOutput)
     let answer = opts.label === 'find the files to change' ? (extra.probe ?? null)
+      : /^lanes? /.test(opts.label ?? '') ? (extra.lanes ?? laneRunner)(prompt, opts)
       : opts.agentType === 'implementer'
       ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
@@ -90,4 +97,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, gate, tasksOf,plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy };
+export { laneGate, SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, gate, tasksOf,plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy };

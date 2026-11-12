@@ -42,6 +42,8 @@ round restarts its count, `retry` does not.
 | `gate-red` | a block's gate stayed red after its one fix call (`stall.reason` holds the gate line): relaunch as in "Gate stalls" below |
 | `gate-timeout` | the gate said `red: timeout`: the run stalled twice on the test named in the line. Never green, never retried by the loop: relaunch as below with the direction in `brief` (fix or split the test, or a quieter command with `stuckMinutes: 0`) or without `verify` |
 | `gate-running` | the gate still said `running` when the agent reported: run `node ~/.claude/scripts/gate.mjs --root <repoRoot> --wait` yourself, then relaunch as below with its line as the brief |
+| `merge-conflict` | `lanes: true`: the lane branches conflict on merge. The gate aborted it (`stall.reason` says "untouched" only when the rollback worked, else the start branch may hold part of the merge: check `git status`); nothing was merged, each lane stays in its worktree and branch. Remove them with `gate.mjs --root <repoRoot> --lane-remove <branches>`, then relaunch WITHOUT `resumeFromRunId` with a brief that separates the lanes, or without `lanes` |
+| `lane-setup` | `lanes: true`: a lane worktree was not created or the runner returned an unusable line (no path, or a branch outside `deliver-lane/`). The reason lists the worktrees already added: remove them with `--lane-remove`, then relaunch as for `gate-red` |
 | `still-open` | a finding is still open after its fix: `accept`, `guidance` with a direction, or `retry` |
 | `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same as `still-open` |
 | `no-verdict` | two rounds in a row without a reviewer verdict on the same id (one round is not a stall: only that id is asked again, and listed under `gaps`): same as `still-open` |
@@ -50,6 +52,8 @@ round restarts its count, `retry` does not.
 | `widen` | a P1/P2 outside the perimeter in a file the change touched or causes: on the user's yes write the widened list (old and new entries) with `perimeter.ps1 -Files` and resume with `{ round, widen: [the new entries] }` (it applies from that round on); else `accept` it as out of scope |
 | `disputed` | the fixer rejected the finding twice and the reviewer kept it |
 | `not-reproduced` | the fixer could not reproduce it and the reviewer kept it with steps; never goes back to the fixer |
+
+**Lane stalls** (`lanes: true`): any stall raised while the lanes run (a lane's `gate-red`, `incomplete`, `question`, ...) keeps its own `why`, but its reason ends with the worktree path and branch of every lane, and `resume` says to ask the user: nothing is merged (no partial merge of the green lanes). Remove the lanes with `node ~/.claude/scripts/gate.mjs --root <repoRoot> --lane-remove deliver-lane/<name> ...` (force: unmerged work in them is lost), then relaunch WITHOUT `resumeFromRunId`. A merge that went through but could not remove a worktree or branch is no stall: the verdict has a `gaps` line naming them.
 
 **Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `incomplete`), from round 0 or a fix round: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
 

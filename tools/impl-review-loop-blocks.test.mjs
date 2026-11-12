@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { blocksFor, stepBudget, sizeFor, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } from './impl-review-loop.harness.mjs';
+import { blocksFor, lanesFor, lanesWorth, stepBudget, sizeFor, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } from './impl-review-loop.harness.mjs';
 
 const tasks = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `t${i + 1}`, title: `task ${i + 1}`, files: [], dependsOn: [], tdd: false, criteria: [], ...(extra[i + 1] ?? {}) }));
 const shape = (blocks) => blocks.map((b) => b.length);
@@ -78,6 +78,63 @@ test('given two tasks with the same id, when the blocks are cut, then the plan i
   const cut = () => blocksFor(plan);
   // Then
   assert.throws(cut, /duplicate task id: t1/);
+});
+
+// ── lanes ──────────────────────────────────────────────────────────────────
+const ids = (lanes) => lanes.map((lane) => lane.map((t) => t.id));
+
+test('given two task groups with no shared file or dependency, when the lanes are computed, then there are two lanes', () => {
+  // Given
+  const plan = tasks(4, { 1: { files: ['src/a/one.cs'] }, 2: { files: ['src/a/two.cs'], dependsOn: ['t1'] }, 3: { files: ['src/b/one.cs'] }, 4: { files: ['src/b/two.cs'], dependsOn: ['t3'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3', 't4']]);
+});
+
+test('given two tasks that share a file, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/a.cs'] }, 2: { files: ['./SRC/a.cs'] }, 3: { files: ['src/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given a task whose file is inside a directory another task owns, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/orders/'] }, 2: { files: ['src/orders/query.cs'] }, 3: { files: ['src/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given a task chain through a third task, when the lanes are computed, then the dependency is followed transitively', () => {
+  // Given
+  const plan = tasks(4, { 1: { files: ['a'] }, 2: { files: ['b'], dependsOn: ['t1'] }, 3: { files: ['c'], dependsOn: ['t2'] }, 4: { files: ['d'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2', 't3'], ['t4']]);
+});
+
+test('given a task that names no file, when the lanes are computed, then everything is one lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['a'] }, 3: { files: ['c'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2', 't3']]);
+});
+
+test('given lanes of two and two tasks, when their worth is asked, then they pay; of three and one, or one lane, they do not', () => {
+  // Given
+  const lane = (n) => Array.from({ length: n }, (_, i) => ({ id: `x${i}` }));
+  // When
+  const worth = [[lane(2), lane(2)], [lane(3), lane(1)], [lane(4)], [lane(2), lane(1), lane(1)]].map(lanesWorth);
+  // Then
+  assert.deepEqual(worth, [true, false, false, true]);
 });
 
 test('given a block of three tasks, when its budget is computed, then it is 28 turns', () => {
@@ -273,4 +330,31 @@ test('given a question whose reversible flag is not the boolean true, when the p
   const policies = ['false', 'true', 1].map((reversible) => questionPolicy({ ...q, reversible }));
   // Then
   assert.deepEqual(policies, ['stop', 'stop', 'stop']);
+});
+
+test('given two globs whose literal prefixes nest, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/**/x.cs'] }, 2: { files: ['src/a/**'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given two globs that cut back to the same directory, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/*.cs'] }, 2: { files: ['src/a*.cs'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+test('given a glob and a literal file under its literal prefix, when the lanes are computed, then they are in the same lane', () => {
+  // Given
+  const plan = tasks(3, { 1: { files: ['src/**/x.cs'] }, 2: { files: ['src/a/y.cs'] }, 3: { files: ['lib/c.cs'] } });
+  // When
+  const lanes = lanesFor(plan);
+  // Then
+  assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
 });

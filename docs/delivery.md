@@ -90,7 +90,7 @@ flowchart TD
 Reader B runs on Opus at M with a security or data axis, past 10 files or 600 lines (not mechanical), or with three
 or more axes besides `logic`. A question from the implementer stops the run only on the `stop` side of
 `questionPolicy`; the result lists the rest in `defaultsApplied`. Each STALL exit has its resume in
-`skills/deliver/references/stall.md`; `STALL: question` (a `stop` question) is raised from any agent node.
+`skills/deliver/references/stall.md`; `STALL: question` (a `stop` question) is raised from any agent node. With `lanes: true` (independent task groups in parallel git worktrees, joined by `gate.mjs --merge`) two more exits exist: `merge-conflict` and `lane-setup`; a stall inside a lane keeps its own `why` and lists the lane worktrees, removed with `gate.mjs --lane-remove`. A start tree with staged changes, or with uncommitted edits in a file a task shares, runs serially or is refused by `--merge`.
 
 ## Plans are working files
 

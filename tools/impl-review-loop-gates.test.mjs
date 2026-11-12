@@ -54,7 +54,7 @@ test('given no gate command and a red verify after implement, when the loop runs
   // Then
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);                                                    // the V1 fix is a review fix: round 2 is its verifier
-  const r1 = calls.find((c) => c.opts.label === 'reviewer B · round 1 · second opinion').prompt;
+  const r1 = calls.find((c) => c.opts.label === 'reviewer B · round 1 · whole diff').prompt;
   assert.match(r1, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
   const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
   assert.match(fix, /- V1 \[P1\] \(verify\) - .*node --test.*# fail 2/);
@@ -294,7 +294,7 @@ test('script: a P2 caused by the change in a file it did not touch is a widen to
 });
 
 test('script: an unrequested hunk inside the perimeter is reverted by the fixer and listed as a scope-revert proposal; noticed items reach outOfScope', async () => {
-  const hunk = finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const dto = { title: 'rename the DTO', path: 'src/Orders/Dto/A.cs', why: 'not asked' };
   const dead = { title: 'dead branch', path: 'src/Orders/OrdersQuery.cs', why: 'left alone' };
   const { out, calls } = await run(ARGS, [review([], [hunk]), review([{ id: 'F1', status: 'closed' }])], [impl({ noticed: [dto], openQuestions: ['which tenant?'] }), impl({ noticed: [dto, dead] })]);
