@@ -1,19 +1,19 @@
 # Cockpit — design rules
 
-What the pane shows, tab by tab, is the README's "Cockpit mod" section. This page holds the rules every
+What the pane shows, section by section on its single page, is the README's "Cockpit mod" section. This page holds the rules every
 change to `mods/cockpit/` keeps, and the options already tried and dropped.
 
 ## Rules
 
 1. **Zero model tokens.** Everything is computed locally from harness events, `session.usage()` and local
    files. No hook injects context or calls the model. Only the buttons a person presses spend anything:
-   `compact`, `log hours`, the exact context count behind `refresh`.
+   `compact`, `retrospective`, `log hours`.
 2. **Nothing faked.** A value the engine does not give is left out. A value not measured yet in a new
    session is the last known one, drawn with a dim `~`. An estimate is marked as an estimate.
-3. **Nothing submitted on the person's behalf.** A note is sent with `prompt.fill`, never `prompt.submit`:
+3. **Nothing submitted on the person's behalf.** A button that sends a command asks first which scope, and
    the person decides when a turn starts.
-4. **Cheap while open, nearly idle while closed.** The fast tier runs only while a tab that draws elapsed times
-   is selected, the medium tier (git) only while the pane is open. While the pane is closed the slow tier only
+4. **Cheap while open, nearly idle while closed.** The fast tier (elapsed times) and the medium tier (git and
+   context) run only while the pane is open. While the pane is closed the slow tier only
    updates the agents' list while one runs or a permission waits; the heartbeat, the ALM line, git and the worklog
    wait for the pane to open (`hooks/refresh.ts`).
 5. **Fixed width.** Content is at most 60 columns plus a margin of one on each side. Rows truncate (only a name
@@ -32,8 +32,8 @@ change to `mods/cockpit/` keeps, and the options already tried and dropped.
   consumed by a managed plugin before the user tier, so they never reach the mod. It derives the same data from
   events that do arrive: skills from `tool.call` on `Skill`, a permission wait from `tool.check`, the workflow
   run from `agent.spawn` (`e.workflow`). A test dispatches none of the classic events and checks all three.
-- `usage({ breakdown: 'full' })` spends one token-count request per tool and memory file. It runs when the
-  Context tab opens (at most once every 15 s) and on `refresh` (one-minute cooldown), never on every read.
+- `usage({ breakdown: 'full' })` spends one token-count request per tool and memory file, so the mod never
+  asks for it: it reads only the `summary` breakdown, which estimates locally, for the autocompact threshold.
 - The engine places a pane opened unasked only from 144 columns; `/cockpit` places it at any width.
 
 ## Tried and dropped

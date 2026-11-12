@@ -307,15 +307,15 @@ test('Given an armed chat, When SessionStart resumes or compacts, Then the check
   assert.equal(fresh, null);
 });
 
-test('Given a pace file armed for a resume more than 6 hours ago, When SessionStart resumes, Then nothing is printed', () => {
+test('Given a pace file armed for a resume a day ago, When the closed chat is resumed by hand, Then the checkpoint is still named', () => {
   // Given
   const dir = world();
   mkdirSync(join(dir, '.cache', 'pace'), { recursive: true });
-  writeFileSync(join(dir, '.cache', 'pace', `${SID}.json`), JSON.stringify({ checkpoint: '/x/resume.md', resumeAt: NOW - 7 * 3600_000 }));
+  writeFileSync(join(dir, '.cache', 'pace', `${SID}.json`), JSON.stringify({ checkpoint: '/x/resume.md', resumeAt: NOW - 24 * 3600_000 }));
   // When
   const out = plan({ hook_event_name: 'SessionStart', session_id: SID, source: 'resume' }, ctx(dir, null));
   // Then
-  assert.equal(out, null);
+  assert.match(text(out), /checkpoint: \/x\/resume\.md/);
 });
 
 test('Given a done chat, When SessionStart resumes, Then nothing is printed', () => {

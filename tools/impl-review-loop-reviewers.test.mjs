@@ -572,6 +572,17 @@ test('given reader A raises a P3 inside the perimeter, when the block closes, th
   assert.equal(calls.filter(c => c.opts.agentType === 'implementer').length, 1);
 });
 
+test('given a reader A fix that edits a proven test, when its gate says red: tests changed, then the loop stalls as tests-changed for the owner', async () => {
+  // Given
+  const raised = review([], [finding({ title: 'tax rounds the wrong way' })]);
+  const changed = greenImpl({ gate: gate('red: tests changed', { test: 'tests/Tax.test.cs' }) });
+  // When
+  const { out } = await run(BLOCK, [raised], [greenImpl(), changed]);
+  // Then
+  assert.equal(out.stall.why, 'tests-changed');
+  assert.match(out.resume, /Ask the user/);
+});
+
 test('given reader A fix whose gate comes back red, when the block closes, then the loop stalls with gate-red and the gate line', async () => {
   // Given
   const raised = review([], [finding({ title: 'tax rounds the wrong way' })]);

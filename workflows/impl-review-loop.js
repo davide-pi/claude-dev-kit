@@ -940,6 +940,8 @@ const runBlocks = async (items, total, lane) => {
       if (askedFix.stall) return askedFix.stall
       const fixed = askedFix.report
       if (!fixed) return stallAgain(0, `the implementer returned nothing on the gate fix of block ${bid} (stopped or failed${why(fixLabel)})`)
+      const fixChanged = testsChanged(fixed)
+      if (fixChanged) return fixChanged
       g = readGate(fixed.gate)
       if (!gateGreen(g)) {
         takeReport(fixed, !!lane)
@@ -1002,6 +1004,8 @@ const runBlocks = async (items, total, lane) => {
           if (askedA.stall) return askedA.stall
           const fixed = askedA.report
           if (!fixed) return stallAgain(0, `the implementer returned nothing on the reader A fix of block ${bid} (stopped or failed${why(fixLabel)})`)
+          const fixChanged = testsChanged(fixed)
+          if (fixChanged) return fixChanged
           const after = readGate(fixed.gate)
           if (!gateGreen(after)) {
             takeReport(fixed, !!lane)
@@ -1066,7 +1070,10 @@ const runLanes = async groups => {
     return {
       ...stalled,
       stall: { ...stalled.stall, reason: [stalled.stall.reason, note].filter(Boolean).join('; ') },
-      resume: ['question', 'tests-changed'].includes(stalled.stall.why) ?`${stalled.resume} ${note}` : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
+      // a relaunch makes new lanes from the start tree: an accept run inside the old lane would be lost
+      resume: stalled.stall.why === 'question' ? `${stalled.resume} ${note}`
+        : stalled.stall.why === 'tests-changed' ? `Ask the user: accept the edited test or revert it. ${note}. Relaunch WITHOUT resumeFromRunId and without lanes, with the answer in the brief: nothing was merged, and each lane's work stays in its worktree until it is removed.`
+        : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
     }
   }
   blockLog.sort((a, b) => a.id - b.id)

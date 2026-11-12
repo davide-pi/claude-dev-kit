@@ -90,7 +90,7 @@ test('resumeStep: Given the resume time come, When the reading of the window tha
   expect(resumeStep(pace(), {}, [fresh.seven_day], NOW, true)).toBe('resume')
 })
 
-test('compactInstructions and resumePrompt: Given the checkpoint, When written, Then the compact keeps its path first and verbatim, and the resume names it as the launcher does', () => {
+test('compactInstructions and resumePrompt: Given the checkpoint, When written, Then the compact keeps its path first and verbatim, and the resume names it', () => {
   // Given
   const path = 'C:/repo/.git/deliver/resume-s-1.md'
   // When

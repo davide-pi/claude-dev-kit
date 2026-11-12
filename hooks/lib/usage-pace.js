@@ -131,25 +131,25 @@ function brake(input, ctx) {
   return `Usage pace: the ${WINDOW_NAME[hot[0]]} window is at ${hot[1].pct}%, so no new flow starts. Finish the work in hand; if the owner wants it anyway, write \`pace: owner asked\` in the prompt, or \`pace: finish\` when the flow closes work already begun.`;
 }
 
-const ARMED_FOR_MS = 6 * 60 * MIN; // the resume task's own life: resumeAt + 6 h
-
-/** The chat's pace state while it is armed: a checkpoint, not done, its resume not more than 6 hours past. */
-const armed = (configDir, sid, now) => {
+/**
+ * The chat's pace state while it is armed: a checkpoint, not done. A closed chat reopens only by hand, any time
+ * later, so the file lives until `--done` or the 7-day prune of pace-state.mjs.
+ */
+const armed = (configDir, sid) => {
   const state = readJson(cachePath(configDir, 'pace', `${sid}.json`));
-  if (!state || !state.checkpoint || state.done === true) return null;
-  return Number.isFinite(state.resumeAt) && now > state.resumeAt + ARMED_FOR_MS ? null : state;
+  return !state || !state.checkpoint || state.done === true ? null : state;
 };
 
 /** SessionStart after a resume or a compaction: where the checkpoint is and what to do first. */
 function resumeContext(input, ctx) {
-  const state = armed(ctx.configDir, input.session_id, ctx.now);
+  const state = armed(ctx.configDir, input.session_id);
   if (!state) return null;
   return `Usage pace checkpoint: ${state.checkpoint}. Read it and verify the real state first (git status, the perimeter, the last gate), then continue. When the work is finished run \`node ${PACE_STATE} --done --session ${input.session_id}\` and CronDelete the resume prompt if you created one.`;
 }
 
 /** PreCompact stdout: the path first, verbatim, then the head of the checkpoint, so the summary keeps both. */
 function compactContext(input, ctx) {
-  const state = armed(ctx.configDir, input.session_id, ctx.now);
+  const state = armed(ctx.configDir, input.session_id);
   if (!state) return null;
   let head = '';
   try { head = fs.readFileSync(state.checkpoint, 'utf8').split(/\r?\n/).slice(0, 20).join('\n'); } catch { /* not written yet */ }
@@ -157,12 +157,12 @@ function compactContext(input, ctx) {
 }
 
 /**
- * PreCompact of an armed chat: records compactedAt in the chat's pace file (the launcher compacts a closed chat
- * headless before reopening it only when this is missing). Atomic rename; a failure is silent.
+ * PreCompact of an armed chat: records compactedAt in the chat's pace file, which the cockpit mod reads to skip a
+ * compaction already done. Atomic rename; a failure is silent.
  */
 function markCompacted(configDir, sid, now) {
   const file = cachePath(configDir, 'pace', `${sid}.json`);
-  const state = armed(configDir, sid, now);
+  const state = armed(configDir, sid);
   if (!state) return;
   const tmp = `${file}.${process.pid}.tmp`;
   try { fs.writeFileSync(tmp, JSON.stringify({ ...state, compactedAt: now })); fs.renameSync(tmp, file); } catch {

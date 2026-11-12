@@ -154,7 +154,7 @@ export const openCockpit = ($: Engine) => $.command.run({ command: 'cockpit', ar
 export const mainTurnEnd = ($: Engine, agentId?: string) =>
   $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
 
-// ── Cockpit v3, phase 4: the final tabs and the Work tab ──
+// ── Cockpit v3, phase 4: work fixtures ──
 
 export const GH_CREATED = 'https://github.com/example/orders/pull/42'
 export const bashResult = (stdout: string) => ({ result: { stdout, stderr: '', interrupted: false } })

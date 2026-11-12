@@ -110,7 +110,14 @@ $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
              'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
              'hooks/az-identity.js', 'scripts/sql-ro.ps1',
              'mods/cockpit/hooks/format.ts', 'mods/cockpit/tests/cockpit.test.tsx', 'mods/cockpit/tests/format.test.ts',
-             'scripts/resume-task.ps1', 'scripts/resume-launch.ps1')
+             'scripts/resume-task.ps1', 'scripts/resume-launch.ps1',
+             'mods/cockpit/hooks/refresh-context.ts', 'mods/cockpit/hooks/view-context.tsx', 'mods/cockpit/hooks/view-insights.tsx',
+             'mods/cockpit/hooks/view-tabs.tsx', 'mods/cockpit/hooks/view-work.tsx',
+             'mods/cockpit/tests/cockpit-context-reads.test.tsx', 'mods/cockpit/tests/cockpit-context.test.tsx',
+             'mods/cockpit/tests/cockpit-notes.test.tsx', 'mods/cockpit/tests/cockpit-subagents-cost.test.tsx',
+             'mods/cockpit/tests/cockpit-subagents-rows.test.tsx', 'mods/cockpit/tests/cockpit-subagents.test.tsx',
+             'mods/cockpit/tests/cockpit-tabs.test.tsx', 'mods/cockpit/tests/cockpit-work-pr.test.tsx',
+             'mods/cockpit/tests/cockpit-work.test.tsx')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'

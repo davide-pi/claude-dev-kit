@@ -8,7 +8,7 @@ flows back near the limit, and resumes the work after the reset.
 
 | File | Owner | Role |
 | --- | --- | --- |
-| `~/.claude/.usage-pace.json` | status line (and the cockpit mod) | shared usage: `{v:1, updatedAt, writer, five_hour:{pct,resetsAt}, seven_day:{pct,resetsAt}, samples5h, samples7d}` |
+| `~/.claude/.usage-pace.json` | status line (the cockpit mod only reads it) | shared usage: `{v:1, updatedAt, writer, five_hour:{pct,resetsAt}, seven_day:{pct,resetsAt}, samples5h, samples7d}` |
 | `~/.claude/.cache/pace/<sid>.json` | the chat, through `scripts/pace-state.mjs` | `{v:1, sessionId, window, resetsAt, resumeAt, checkpoint, ready}` plus `armedAt` and `compactedAt` (written by the `PreCompact` hook); `--done` deletes the file, and a missing file means nothing to resume |
 | `~/.claude/.cache/pace/<sid>.mod.json` | the cockpit mod | `{v:1, compactedAt, resumedAt, aliveAt}`; the mod is alive when `aliveAt` is under 3 minutes old |
 | `<git-dir>/deliver/resume-<id8>.md`, else `~/.claude/.cache/resume/<sid>.md` | the chat | the checkpoint: what was done, what runs, what is next; it lives on disk, so no compaction loses it |

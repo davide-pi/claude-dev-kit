@@ -103,7 +103,7 @@ export function bashOutput(ran: { result?: unknown; text?: string }): string {
   return typeof result === 'object' && result !== null && 'stdout' in result && typeof result.stdout === 'string' ? result.stdout : (ran.text ?? '')
 }
 
-/** An edit call that ran clean adds its file to the ones this chat edited (a subagent's edit too), for the Work tab's marker. */
+/** An edit call that ran clean adds its file to the ones this chat edited (a subagent's edit too), to tell which checkout is the chat's. */
 export async function noteEdit($: EngineInterface, input: { readonly [key: string]: unknown }, ran: { deny?: string; isError?: boolean }): Promise<void> {
   const path = editedPathOf(input)
   if (path !== undefined && isOk(ran)) await patch($, s => ({ ...s, edited: recordEdited(s.edited, path) })).catch(() => undefined)

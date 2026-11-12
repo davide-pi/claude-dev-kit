@@ -22,7 +22,7 @@ export const rowTexts = (root: unknown): string[] => {
     // the CTX bar's surface module draws the cells it is handed (its glow changes their colour, not their text)
     const client = (el as { type?: string; props?: { props?: { cells?: { t: string }[] } } } | null)
     if (client?.type === 'Client') return (client.props?.props?.cells ?? []).map(c => c.t).join('')
-    // the System tab's numbers are items of a wrapping Box with a gap of two cells
+    // the numbers are items of a wrapping Box with a gap of two cells
     const gap = (o as { props?: { flexWrap?: string; columnGap?: number } } | null)?.props
     return o?.text ?? (o?.children ?? []).map(text).join(gap?.flexWrap === 'wrap' && gap.columnGap === 2 ? '  ' : '')
   }
@@ -185,7 +185,7 @@ export type World = {
   promptReadFails?: boolean
   /** The commit `git merge-base HEAD <default branch>` answers; absent, there is none (the branch has no default branch to count from). */
   mergeBase?: string
-  /** Receives the arguments (joined by spaces, after the `-C <dir> --no-optional-locks` prefix) of every git call that reads the Work tab. */
+  /** Receives the arguments (joined by spaces, after the `-C <dir> --no-optional-locks` prefix) of every git call the git refresh makes. */
   repoCalls?: string[]
 }
 

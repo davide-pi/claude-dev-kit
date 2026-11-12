@@ -105,7 +105,7 @@ if (mode === 'arm') {
   writeAtomic(file, state);
   console.log(`resumeAt=${state.resumeAt}\nresumeAtLocal=${localIso(state.resumeAt)}\ncron=${cronAt(state.resumeAt)}\ncheckpoint=${state.checkpoint}`);
 } else if (mode === 'done') {
-  // The mod and the launcher read a missing file as nothing to resume.
+  // The mod and the hook read a missing file as nothing to resume.
   try { unlinkSync(file); } catch (e) { if (e.code !== 'ENOENT') fail(`cannot delete ${file}: ${e.code || e.message}`); }
 } else {
   const state = readState(file);
