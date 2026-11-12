@@ -12,4 +12,4 @@ paths: "**/Dockerfile*,**/docker-compose*.y*ml,**/compose*.y*ml,**/*AppHost*/**"
   not installed on the host.
 - A backend with an app host runs through Aspire; its old compose file is stale.
 
-Procedure: skill `docker-dev-env`.
+Procedure: Read `~/.claude/skills/docker-dev-env/SKILL.md`.

@@ -73,117 +73,160 @@ function run(box, cwd, { source = 'startup', env = {} } = {}) {
   return { context, envFile: readFileSync(box.envFile, 'utf8') };
 }
 
-test('mapped root → ALM line with org, project, identity; env file pinned', () => {
+test('given a mapped root, when a session starts in a subfolder, then the ALM line carries org, project and identity and the env file is pinned', () => {
+  // Given
   const box = sandbox();
+  // When
   const { context, envFile } = run(box, p('D:\\work\\product\\repo-a\\src'));
+  // Then
   assert.equal(context, `ALM: Azure DevOps · org org-a · project Product · az identity work\n${EN}`, 'the manual az prefix lives in azdo-cli, not in every session');
   assert.match(envFile, /^export AZURE_CONFIG_DIR='.*\/\.azure-work'\nexport AZ_IDENTITY=work\n$/);
   assert.doesNotMatch(envFile, /\\/);
 });
 
-test('a home directory with a space, a quote or a dollar sign survives being sourced by bash', () => {
+test('given a home directory with a space, a quote or a dollar sign, when bash sources the env file, then AZURE_CONFIG_DIR survives intact', () => {
+  // Given
   const bash = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
   if (bash.status !== 0) return; // no bash here: the quoting is checked by the previous test's shape
   for (const homeName of ['my home', "o'neil", 'dollar$HOME']) {
     const box = sandbox({ homeName });
+    // When
     run(box, p('D:\\work\\product\\repo-a'));
     const sourced = spawnSync('bash', ['-c', `. "$ENVFILE"; printf %s "$AZURE_CONFIG_DIR"`], {
       encoding: 'utf8', env: { ...process.env, ENVFILE: box.envFile.replace(/\\/g, '/') },
     });
+    // Then
     assert.equal(sourced.stdout, join(box.home, '.azure-work').replace(/\\/g, '/'), homeName);
   }
 });
 
-test('cwd case does not matter', () => {
+test('given a cwd in a different case, when a session starts, then the mapped project is still found', () => {
+  // Given / When
   const { context } = run(sandbox(), p('d:\\WORK\\Product\\repo'));
+  // Then
   assert.match(context, /project Product/);
 });
 
-test('per-subfolder root: listed subfolder → its project, case-insensitive', () => {
+test('given a per-subfolder root and a listed subfolder, when a session starts there, then its project is used, case-insensitive', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\clients\\ACME\\api'));
+  // Then
   assert.match(context, /org org-b · project Acme/);
 });
 
-test('per-subfolder root: unlisted subfolder → resolve against the org, else ask', () => {
+test('given a per-subfolder root and an unlisted subfolder, when a session starts there, then the project is resolved against the org, else asked', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\clients\\globex'));
+  // Then
   assert.match(context, /project to resolve: subfolder "globex"/);
   assert.match(context, /ask/);
 });
 
-test('per-subfolder root itself → ask', () => {
+test('given a per-subfolder root itself, when a session starts there, then the project is asked', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\clients'));
+  // Then
   assert.match(context, /project: ask/);
 });
 
-test('project "ask" → ask', () => {
+test('given a root whose project is ask, when a session starts there, then the project is asked', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\open\\x'));
+  // Then
   assert.match(context, /project: ask/);
 });
 
-test('github root → GitHub line with the note, no project, no env', () => {
+test('given a github root, when a session starts there, then the GitHub line carries the note with no project and no env', () => {
+  // Given
   const box = sandbox();
+  // When
   const { context, envFile } = run(box, p('D:\\work\\gh\\tool'));
+  // Then
   assert.equal(context, `ALM: GitHub · org gh-org · hours on a sheet\n${EN}`);
   assert.equal(envFile, '');
 });
 
-test('nested root wins over its parent (longest path)', () => {
+test('given a root nested in another, when a session starts in the nested one, then it wins over its parent by longest path', () => {
+  // Given / When
   const { context, envFile } = run(sandbox(), p('D:\\work\\gh\\moved\\repo'));
+  // Then
   assert.match(context, /^ALM: Azure DevOps · org org-b · project Moved · az identity labs/);
   assert.match(envFile, /AZ_IDENTITY=labs/);
 });
 
-test('a sibling sharing the prefix is not a match', () => {
+test('given a sibling folder sharing a root prefix, when a session starts there, then it is not a match', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\productive'));
+  // Then
   assert.equal(context, `ALM: unmapped — ask\n${EN}`);
 });
 
-test('unmapped cwd with a map → unmapped, nothing pinned', () => {
+test('given an unmapped cwd and a map, when a session starts, then the line says unmapped and nothing is pinned', () => {
+  // Given
   const box = sandbox();
+  // When
   const { context, envFile } = run(box, p('E:\\elsewhere'));
+  // Then
   assert.equal(context, `ALM: unmapped — ask\n${EN}`);
   assert.equal(envFile, '');
 });
 
-test('identity dir missing → said so, env file untouched', () => {
+test('given a missing identity directory, when a session starts, then the line says so and the env file is untouched', () => {
+  // Given
   const box = sandbox({ azDirs: [] });
+  // When
   const { context, envFile } = run(box, p('D:\\work\\product'));
+  // Then
   assert.match(context, /az identity work assente/);
   assert.equal(envFile, '');
 });
 
-test('compact source still prints the line', () => {
+test('given the compact source, when a session starts, then the line is still printed', () => {
+  // Given / When
   const { context } = run(sandbox(), p('D:\\work\\product'), { source: 'compact' });
+  // Then
   assert.match(context, /^ALM: Azure DevOps/);
 });
 
-test('no CLAUDE_ENV_FILE → line still printed', () => {
+test('given no CLAUDE_ENV_FILE, when a session starts, then the line is still printed', () => {
+  // Given
   const box = sandbox();
+  // When
   const { context } = run(box, p('D:\\work\\product'), { env: { CLAUDE_ENV_FILE: '' } });
+  // Then
   assert.match(context, /project Product/);
   assert.equal(readFileSync(box.envFile, 'utf8'), '');
 });
 
-test('no workspaces.json → no ALM line, Lang line only', () => {
+test('given no workspaces.json, when a session starts, then there is no ALM line and only the Lang line', () => {
+  // Given
   const box = sandbox({ map: null });
   assert.ok(!existsSync(join(box.config, 'workspaces.json')));
+  // When
   const { context, envFile } = run(box, p('D:\\work\\product'));
+  // Then
   assert.equal(context, EN);
   assert.equal(envFile, '');
 });
 
-test('malformed workspaces.json → Lang line only', () => {
+test('given a malformed workspaces.json, when a session starts, then only the Lang line is printed', () => {
+  // Given / When
   const { context } = run(sandbox({ map: '{ not json' }), p('D:\\work\\product'));
+  // Then
   assert.equal(context, EN);
 });
 
-test('map without roots → Lang line only', () => {
+test('given a map without roots, when a session starts, then only the Lang line is printed', () => {
+  // Given / When
   const { context } = run(sandbox({ map: { other: 1 } }), p('D:\\work\\product'));
+  // Then
   assert.equal(context, EN);
 });
 
-test('Lang line follows the ALM line, mapped and unmapped', () => {
+test('given a map with a language, when a session starts mapped or unmapped, then the Lang line follows the ALM line', () => {
+  // Given
   const map = { lang: { commit: 'it', pr: 'it', prComment: 'it', items: 'it', wiki: 'it' }, roots: ROOTS };
+  // When / Then
   assert.equal(run(sandbox({ map }), p('D:\\work\\gh\\tool')).context, `ALM: GitHub · org gh-org · hours on a sheet\n${IT}`);
   assert.equal(run(sandbox({ map }), p('E:\\elsewhere')).context, `ALM: unmapped — ask\n${IT}`);
   assert.equal(run(sandbox(), p('E:\\elsewhere')).context, `ALM: unmapped — ask\n${EN}`);
@@ -200,7 +243,8 @@ function lang(box, cwd) {
 }
 const ALL = (v) => ({ commit: v, pr: v, prComment: v, items: v, wiki: v });
 
-test('resolveLang: no file → all en; global it; root overrides one key; non-string ignored', () => {
+test('given no file, a global language or a root override, when resolveLang runs, then it gives all en, the global value, or the root override of one key and ignores non-strings', () => {
+  // Given / When / Then
   assert.deepEqual(lang(sandbox({ map: null }), p('D:\\work\\product')), ALL('en'));
   assert.deepEqual(lang(sandbox({ map: '{ not json' }), p('D:\\work\\product')), ALL('en'));
   const roots = [{ ...ROOTS[0], lang: { pr: 'de', wiki: 5, items: '', commit: null } }, ROOTS[1]];
@@ -209,13 +253,16 @@ test('resolveLang: no file → all en; global it; root overrides one key; non-st
   assert.deepEqual(lang(sandbox({ map: { lang: { pr: 'it', other: 'fr' }, roots } }), p('E:\\elsewhere')), { ...ALL('en'), pr: 'it' });
 });
 
-test('resolveLang: the longest root wins', () => {
+test('given nested roots with languages, when resolveLang runs, then the longest root wins', () => {
+  // Given
   const roots = [{ ...ROOTS[2], lang: { commit: 'fr', pr: 'fr' } }, { ...ROOTS[3], lang: { commit: 'it' } }];
+  // When / Then
   assert.deepEqual(lang(sandbox({ map: { lang: { wiki: 'es' }, roots } }), p('D:\\work\\gh\\moved\\r')), { ...ALL('en'), commit: 'it', wiki: 'es' });
   assert.deepEqual(lang(sandbox({ map: { lang: { wiki: 'es' }, roots } }), p('D:\\work\\gh\\other')), { ...ALL('en'), commit: 'fr', pr: 'fr', wiki: 'es' });
 });
 
-test('a linked worktree resolves to its main repository for the root match', () => {
+test('given a linked worktree of a mapped repository, when the root is matched, then it resolves to its main repository', () => {
+  // Given
   const box = sandbox({ map: { roots: [{ path: '', platform: 'github', org: 'o', lang: { commit: 'it' } }] } });
   const main = join(dirname(box.config), 'main-repo');
   const wt = join(dirname(box.config), 'elsewhere', 'wt');
@@ -223,6 +270,7 @@ test('a linked worktree resolves to its main repository for the root match', () 
   mkdirSync(join(wt, 'src'), { recursive: true });
   writeFileSync(join(wt, '.git'), `gitdir: ${join(main, '.git', 'worktrees', 'wt').replace(/\\/g, '/')}\n`);
   writeFileSync(join(box.config, 'workspaces.json'), JSON.stringify({ roots: [{ path: main, platform: 'github', org: 'o', lang: { commit: 'it' } }] }));
+  // When / Then
   assert.equal(lang(box, join(wt, 'src')).commit, 'it');
   assert.equal(run(box, join(wt, 'src')).context.split('\n')[0], 'ALM: GitHub · org o');
   assert.equal(lang(box, join(dirname(box.config), 'elsewhere')).commit, 'en');

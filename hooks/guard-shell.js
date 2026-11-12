@@ -14,15 +14,22 @@
  *   - lib/secret-read.js    — the second DENY: Get-Content / cat / grep / find -exec naming a secret file
  *                             (`.env`, keys, token caches), which the Read deny rules do not cover;
  *   - lib/guard.js          — a DENY too: a read-only agent (`agent_type` in `lib/read-only-agents.js`) running a
- *                             git write (checkout, switch, reset, stash, rebase, commit, push); no `agent_type`, no deny;
+ *                             git write (checkout, switch, reset, stash, rebase, commit, push) or a tracker / pull request
+ *                             write (`az boards|repos|wiki` writes, `gh pr|issue` writes, `gh api` POST); no `agent_type`, no deny;
+ *   - lib/browser-use-cli.js — a DENY too: `browser-use` run from a shell while no such CLI is on the PATH;
+ *                             the plugin is reached through its MCP tools;
  *   - lib/self-protect.js   — a shell write into ~/.claude hooks, settings*.json or CLAUDE.md;
  *   - lib/docker-cp.js      — a `docker cp` that overwrites a host file outside the cwd or under ~/.claude;
- *   - lib/script-args.js    — an argument of the allowed `perimeter.ps1` /
- *                             `db-ro.ps1` calls outside a quote-aware allowlist (`$`, `(`, `@`, `<`…
- *                             unquoted), or `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation);
+ *   - lib/script-args.js    — a DENY when an argument of the allowed `perimeter.ps1` / `db-ro.ps1` / `gate.mjs`
+ *                             calls holds a construct a single-quote re-quote fixes (`$`, `(`, `@`, `<`… unquoted);
+ *                             an ask for an unbalanced or typographic quote, a non-ASCII character,
+ *                             `db-ro.ps1 -AcceptWriteGrant` (or an abbreviation), or a `gate.mjs`
+ *                             `--test` / `--unit` that isn't a known test runner command;
  *   - lib/output-filter.js  — not a check: when nothing above fired, a plain `dotnet test` /
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);
+ *   - lib/batch-nudge.js    — not a check: on an allowed or rewritten call of the main session, the fifth
+ *                             single shell call in a row adds one `additionalContext` line to batch;
  *   - lib/az-pin.js         — the other rewrite: an `az` command the allow list already covers, in a
  *                             directory the workspace map gives an identity, is pinned to that
  *                             identity's AZURE_CONFIG_DIR (opt-out `# raw`).
@@ -46,12 +53,15 @@
 
 const { approve, requestConfirmation, deny, rewrite, readPayload } = require('./lib/decision');
 const { evaluate } = require('./lib/guard');
+const { nudge } = require('./lib/batch-nudge');
 const { logError } = require('./lib/cache');
 
 try {
-  const result = evaluate(readPayload());
-  if (!result) approve();
-  if (result.rewrite) rewrite(result.rewrite);
+  const payload = readPayload('guard-shell');
+  const result = evaluate(payload);
+  // Only a call that goes through counts toward the run: an ask or a deny gets no nudge.
+  if (!result) approve(nudge(payload));
+  if (result.rewrite) rewrite(result.rewrite, nudge(payload));
   if (result.decision === 'deny') deny(result.reason);
   requestConfirmation(result.reason);
 } catch (error) {

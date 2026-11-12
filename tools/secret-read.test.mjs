@@ -33,7 +33,8 @@ function run(command, tool_name = 'Bash') {
   return { decision: out.permissionDecision, reason: out.permissionDecisionReason ?? '' };
 }
 
-test('a shell read of a secret file is denied, whatever the reader', () => {
+test('given a shell command reading a secret file with any reader, when the hook runs, then it is denied', () => {
+  // Given
   const denied = [
     'Get-Content .env', 'gc ./.env.local', 'type .env.production', 'cat ~/.ssh/id_rsa', 'cat keys/server.pem',
     'Get-Content -Path D:\\profile\\.claude.json', 'Select-String -Pattern token -Path .env', 'grep KEY .env', 'Select-String -Path .env -Pattern token',
@@ -42,31 +43,43 @@ test('a shell read of a secret file is denied, whatever the reader', () => {
     'find . -name .env -exec cat {} +', 'find . -name "*.pem" -exec cat {} \\;',
   ];
   for (const command of denied) {
+    // When
     const r = run(command);
+
+    // Then
     assert.equal(r.decision, 'deny', command);
     assert.match(r.reason, /secret-bearing file/, command);
   }
 });
 
-test('a secret read hidden in a shell wrapper or a chain is denied too', () => {
+test('given a secret read hidden in a shell wrapper or a chain, when the hook runs, then it is denied too', () => {
+  // Given / When / Then
   assert.equal(run('bash -c "cat .env"').decision, 'deny');
   assert.equal(run('pwsh -NoProfile -c "Get-Content ~/.config/gh/hosts.yml"').decision, 'deny');
   assert.equal(run('echo go && cat .env').decision, 'deny');
   assert.equal(run('Get-Content .env', 'PowerShell').decision, 'deny');
 });
 
-test('documentation, search patterns and look-alikes stay readable', () => {
+test('given documentation, search patterns and look-alikes, when the hook runs, then they stay readable', () => {
+  // Given
   const quiet = [
     'Get-Content .env.example', 'cat .env.template', 'cat README.md', 'Get-Content appsettings.json',
     'grep -rn "\\.pem" src', 'grep "\\.env" docs/setup.md', 'Select-String -Pattern pem -Path a.txt',
     'find . -name .env', 'git log -p', 'ls .env', 'cat .envrc.md',
   ];
+
+  // When / Then
   for (const command of quiet) assert.equal(run(command).decision, 'approve', command);
 });
 
-test('docker cp onto the host outside the cwd or under ~/.claude asks; inside the cwd or into a container passes', () => {
+test('given docker cp commands, when the hook runs, then a copy onto the host outside the cwd or under ~/.claude asks, and one inside the cwd or into a container passes', () => {
+  // Given
   const absolute = join(homedir(), '.claude', 'hooks', 'x.js').replaceAll(String.fromCharCode(92), '/');
+
+  // When
   const claude = run(`docker cp api:/app/x.js ${absolute}`);
+
+  // Then
   assert.equal(claude.decision, 'ask');
   assert.match(claude.reason, /Confirm\?$/);
   assert.equal(run('docker cp api:/app/x.js ~/.claude/hooks/x.js').decision, 'ask');
@@ -78,7 +91,8 @@ test('docker cp onto the host outside the cwd or under ~/.claude asks; inside th
   assert.equal(run('docker ps').decision, 'approve');
 });
 
-test('a secret read through a pipeline, a transformer, a copy or git history is denied', () => {
+test('given a secret read through a pipeline, a transformer, a copy or git history, when the hook runs, then it is denied', () => {
+  // Given
   const denied = [
     'Get-ChildItem -Filter .env | Get-Content', 'ls .env | xargs cat', 'Get-ChildItem . -Filter *.pem | Select-String BEGIN',
     'sed -n 1p .env', 'sed s/a/b/ .env.local', 'awk -F= \'{print $2}\' .env', 'cut -d= -f2 .env', 'sort .env', 'base64 id_rsa', 'jq . .env.json',
@@ -88,15 +102,20 @@ test('a secret read through a pipeline, a transformer, a copy or git history is 
     'cat ~/.aws/credentials', 'cat .npmrc', 'type ~/.pgpass', 'cat ~/.netrc', 'cat ~/.kube/config', 'Get-Content kubeconfig', 'cat secrets.json',
     'cat id_dsa', 'cat ~/.ssh/id_ecdsa', 'tail store.jks', 'bash -c "Get-ChildItem -Filter .env | Get-Content"',
   ];
+
+  // When / Then
   for (const command of denied) assert.equal(run(command).decision, 'deny', command);
 });
 
-test('samples with a further suffix, program text and plain copies stay readable', () => {
+test('given samples with a further suffix, program text and plain copies, when the hook runs, then they stay readable', () => {
+  // Given
   const quiet = [
     'cat .env.example.local', 'cat .env.sample.bak', 'Get-Content .env.template', 'cp .env.example .env', 'Copy-Item .env.example .env',
     "jq '.env' package.json", "sed -n '/env/p' README.md", "awk '/.env/ {print}' notes.txt", 'cat *.json', 'cat *',
     'git show HEAD:README.md', 'git log -p -- src/a.cs', 'git diff -- .env.example', 'git log --oneline', 'ls .env | sort',
     'Get-ChildItem -Filter .env', 'cat config.json.md', 'git show HEAD:docs/.env.example',
   ];
+
+  // When / Then
   for (const command of quiet) assert.equal(run(command).decision, 'approve', command);
 });

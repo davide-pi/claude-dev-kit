@@ -67,29 +67,15 @@ In this order, so the table is what is still on screen when the report ends:
 2. **Posted vs chat** — which findings became threads (thread ids on Azure DevOps, the review URL on
    GitHub) and, for each finding kept in chat, why. If nothing was posted, say so explicitly. On an
    incremental pass, name the reviewed range (`<last-reviewed>..<head>`).
-3. **Summary tables** — the **last** blocks, same numbers and order as above. Shape and columns per
-   `report-format.md`, with `Posted` added:
-
-   **To do**
-
-   | # | Priority | Category | Location | Finding | Verdict | Risk | Effort | Posted |
-   |---|----------|----------|----------|---------|---------|------|--------|--------|
-   | 1 | P1 | security | `src/Api/UsersController.cs:42` | route id concatenated into the SQL text | CONFIRMED | low | S | yes — thread 118 |
-   | 2 | P2 | duplication | `src/Core/Mapper.cs:88` | duplicates `MapAddress` and diverges from it | CONFIRMED | low | S | no — chat only |
-
-   **Already done**
-
-   | # | Category | Location | Finding | Resolved by |
-   |---|----------|----------|---------|-------------|
-   | 3 | correctness | `src/Core/Sync.cs:51` | null check removed on the retry path | `a1b2c3d` |
-
+3. **Summary table** — the **last** block, same numbers and order as above. Shape and columns per
+   `report-format.md`; each finding block carries `- Posted: yes — thread 118` or `- Posted: chat only`.
    Labels follow the chat language, as in `report-format.md`: at `it` they are the equivalents on the
-   `At chat it:` line after its skeleton, plus yes=sì, chat only=solo chat. Only text posted on the PR follows the
+   `At chat it:` line after its skeleton, plus yes=sì. Only text posted on the PR follows the
    prComment language.
 
-4. **Quick fixes** and **Verdict** — one line each:
-   `N findings (X to do, Y already done · P1: N · X posted) · security: N · completeness: N` (at `it`:
-   `N rilievi (X da fare, Y già fatti · P1: N · X postati) · security: N · completezza: N`), plus
-   which agents ran at which effort, and which interface posted. Nothing after it.
+4. **Footer** — the Verdict line, then the `Reply` line, per the skeleton; nothing after it. The Verdict:
+   `N findings (X open, Y already done · P1: N · X posted) · security: N · completeness: N` (at `it`:
+   `N rilievi (X aperti, Y già fatti · P1: N · X postati) · security: N · completezza: N`), plus
+   which agents ran at which effort, and which interface posted.
 
 No findings at all → say exactly that, list what was verified, and **skip the table**.

@@ -94,46 +94,66 @@ function figures(out) {
   return { claude, tu, totale, fuori };
 }
 
-test('a 60-min turn and the reply 5 min later: CLAUDE 60, TU 5', { skip }, async () => {
+test('given a 60-min turn and a prompt 5 min after it, when the engine runs, then CLAUDE is 60 and TU is 5', { skip }, async () => {
+  // Given / When
   const f = figures(await runEngine([...worked(60, 60), prompt(65)], [], []));
+
+  // Then
   assert.deepEqual(f, { claude: 60, tu: 5, totale: 65, fuori: 0 });
 });
 
-test('a reply that never comes: the user time stops at the margin', { skip }, async () => {
+test('given a reply that never comes, when the engine runs with the default and a 10-min margin, then the user time stops at the margin', { skip }, async () => {
+  // Given / When / Then
   assert.deepEqual(figures(await runEngine(worked(60, 60), [], [])), { claude: 60, tu: 15, totale: 75, fuori: 0 });
   assert.equal(figures(await runEngine(worked(60, 60), [], ['-MarginMinutes', '10'])).tu, 10);
 });
 
-test('two overlapping 60-min turns in two chats: CLAUDE adds up, TU only after the last one ends', { skip }, async () => {
+test('given two overlapping 60-min turns in two chats, when the engine runs, then CLAUDE adds up and TU counts only after the last one ends', { skip }, async () => {
+  // Given
   const main = [...worked(60, 60), ...worked(90, 60, { session: 's2' })];   // s1 10:00-11:00, s2 10:30-11:30
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 120, tu: 15, totale: 135, fuori: 0 });
 });
 
-test('the user time is never counted while another chat is busy, and once where it overlaps', { skip }, async () => {
+test('given turns in two chats that overlap or leave a gap, when the engine runs, then the user time is never counted while another chat is busy and once where it overlaps', { skip }, async () => {
+  // Given
   const busy = [...worked(10, 10), ...worked(40, 35, { session: 's2' })];   // s1 0-10, s2 5-40
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(busy, [], [])), { claude: 45, tu: 15, totale: 60, fuori: 0 });
   const gap = [...worked(10, 10), ...worked(30, 10, { session: 's2' })];   // s1 0-10, s2 20-30: 10-20 is free, 20-25 is covered
   assert.deepEqual(figures(await runEngine(gap, [], [])), { claude: 20, tu: 25, totale: 45, fuori: 0 });
 });
 
-test('an idle open chat adds nothing', { skip }, async () => {
+test('given an idle open chat, when the engine runs, then it adds nothing', { skip }, async () => {
+  // Given
   const main = [...worked(60, 60), ...worked(5, 5, { session: 's2' })];   // s2 answered at 10:05 and was left open for the hour
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 65, tu: 15, totale: 80, fuori: 0 });
 });
 
-test('a turn with no turn_duration runs from its prompt to the last reply before the next prompt', { skip }, async () => {
+test('given turns with no turn_duration, when the engine runs, then a turn runs from its prompt to the last reply before the next prompt', { skip }, async () => {
+  // Given / When / Then
   assert.deepEqual(figures(await runEngine([prompt(0), reply(20), prompt(30), reply(35)], [], [])), { claude: 25, tu: 25, totale: 50, fuori: 0 });
   const build = [prompt(0), toolUse(1, 't1'), toolResult(61, 't1'), reply(62)];   // interrupted turn with a long tool call
   assert.equal(figures(await runEngine(build, [], [])).claude, 62);
 });
 
-test('subagent activity after the turn (a background agent) counts as CLAUDE', { skip }, async () => {
+test('given subagent activity after the turn (a background agent), when the engine runs, then it counts as CLAUDE', { skip }, async () => {
+  // Given
   const sub = Array.from({ length: 7 }, (_, i) => reply(1 + i * 10));   // 10:01 … 11:01
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 61, tu: 15, totale: 76, fuori: 0 });
 });
 
-test('a subagent tool call that spans a long gap counts; the same gap with no call does not', { skip }, async () => {
+test('given subagent tool calls that span a long gap and the same gap with no call, when the engine runs, then only the call counts', { skip }, async () => {
+  // Given
   const call = [reply(1), toolUse(2, 'sub1'), toolResult(42, 'sub1'), reply(43)];   // a 40-min tool call after the turn
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(worked(1, 1), call, [])), { claude: 43, tu: 15, totale: 58, fuori: 0 });
   assert.equal(figures(await runEngine(worked(1, 1), [reply(1), reply(43)], [])).claude, 1);   // idle, then resumed: the gap is not work
   const long = await runEngine(worked(1, 1), [toolUse(2, 'sub1'), toolResult(142, 'sub1')], []);   // 140 min: counted up to MaxSpanMinutes, listed in full
@@ -145,41 +165,59 @@ test('a subagent tool call that spans a long gap counts; the same gap with no ca
   assert.equal(figures(await runEngine(worked(1, 1), [toolUse(2, 'q2'), toolResult(12, 'q2')], [])).claude, 11);
 });
 
-test('a subagent tool call straddling midnight keeps its part inside the period', { skip }, async () => {
+test('given a subagent tool call straddling midnight, when the engine runs, then it keeps its part inside the period', { skip }, async () => {
+  // Given
   const sub = [toolUse(-610, 'x1'), toolResult(-570, 'x1')];   // 23:50 yesterday - 00:30 today
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 1, tu: 15, totale: 16, fuori: 45 });   // 30m of the call + 15m of TU, both before 08:00
 });
 
-test('a turn across midnight keeps its part before the end of the period in a per-day run', { skip }, async () => {
+test('given a turn across midnight, when the engine runs for the single day, then it keeps its part before the end of the period', { skip }, async () => {
+  // Given
   const main = [prompt(-630), reply(-570), turn(-570, 60)];   // 23:30 yesterday - 00:30 today
+
+  // When
   const out = await engineAt({ 'C--work-api/s1.jsonl': main }, '-From', dayStr(1), '-To', dayStr(1));
+
+  // Then
   assert.deepEqual(figures(out), { claude: 0, tu: 0, totale: 0, fuori: 30 });
 });
 
-test('a background dev server never counts', { skip }, async () => {
+test('given a background dev server, when the engine runs, then it never counts', { skip }, async () => {
+  // Given
   const main = [
     ...worked(2, 2), toolUse(1, 'bg1', { run_in_background: true }), toolResult(1, 'bg1'),
     { type: 'queue-operation', operation: 'enqueue', timestamp: at(90), sessionId: 's1',
       content: '<task-notification><tool-use-id>bg1</tool-use-id></task-notification>' },
   ];
+
+  // When / Then
   assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 2, tu: 15, totale: 17, fuori: 0 });
 });
 
-test('minutes outside 08:00-20:00 go to FUORI, never dropped', { skip }, async () => {
+test('given minutes outside 08:00-20:00, when the engine runs, then they go to FUORI, never dropped', { skip }, async () => {
+  // Given / When / Then
   assert.deepEqual(figures(await runEngine(worked(-90, 90), [], [])), { claude: 30, tu: 15, totale: 45, fuori: 60 });   // 07:00-08:30
   assert.deepEqual(figures(await runEngine(worked(590, 10), [], [])), { claude: 10, tu: 10, totale: 20, fuori: 5 });   // 19:50-20:00, then 15 min of TU
   assert.equal(figures(await runEngine(worked(-90, 90), [], ['-DayStart', '7'])).fuori, 0);
 });
 
-test('a 150-min turn counts and is listed under "Attese lunghe"', { skip }, async () => {
+test('given a 150-min turn, when the engine runs, then it counts and is listed under "Attese lunghe"', { skip }, async () => {
+  // Given / When
   const out = await runEngine(worked(150, 150), [], []);
+
+  // Then
   assert.equal(figures(out).claude, 150);
   assert.match(out, /Attese lunghe[\s\S]*2h 30m/);
   assert.doesNotMatch(await runEngine(worked(100, 100), [], []), /Attese lunghe/);
 });
 
-test('the GIORNO table reads CLAUDE, TU, TOTALE, FUORI, TARGET, LOGGATO, MANCANO', { skip }, async () => {
+test('given a worked hour, when the engine runs, then the GIORNO table reads CLAUDE, TU, TOTALE, FUORI, TARGET, LOGGATO, MANCANO', { skip }, async () => {
+  // Given / When
   const out = await runEngine(worked(60, 60), [], []);
+
+  // Then
   assert.match(out, /^GIORNO +CLAUDE +TU +TOTALE +FUORI +TARGET +LOGGATO +MANCANO\s*$/m);
   assert.match(out, new RegExp(`^${TODAY} +1h 0m +15m +1h 15m +0m `, 'm'));
   assert.doesNotMatch(out, /RECUPERATI/);
@@ -199,9 +237,12 @@ const twoSessions = () => [
   prompt(5), reply(6), prompt(7, { session: 's2', branch: 'feature/b' }), reply(8, { session: 's2', branch: 'feature/b' }),
 ];
 
-test('-SessionId marks only the topics of that session and leaves the minutes alone', { skip }, async () => {
+test('given two sessions, when the engine runs with -SessionId, then only the topics of that session are marked and the minutes are left alone', { skip }, async () => {
+  // Given / When
   const plain = await engine(twoSessions());
   const scoped = await engine(twoSessions(), '-SessionId', 's2');
+
+  // Then
   assert.doesNotMatch(plain, /^Sessione /m);
   assert.deepEqual(figures(scoped), figures(plain));
   const sec = sessionSection(scoped);
@@ -220,10 +261,15 @@ function branchRow(out, branch) {
   return { claude, tu, totale, fuori };
 }
 
-test('the user time goes to the topic of the chat whose busy interval ended most recently', { skip }, async () => {
+test('given two chats on two branches, when the engine runs, then the user time goes to the topic of the chat whose busy interval ended most recently', { skip }, async () => {
+  // Given
   const b = { session: 's2', branch: 'feature/b' };
   // s1 (feature/a) busy 0-10, s2 (feature/b) busy 5-15 then a new prompt at 18: 15-18 is s2's, the rest of s1's margin (18-25) is s1's
+
+  // When
   const out = await engine([...worked(10, 10), ...worked(15, 10, b), prompt(18, b)]);
+
+  // Then
   assert.deepEqual(branchRow(out, 'feature/a'), { claude: 10, tu: 7, totale: 17, fuori: 0 });
   assert.deepEqual(branchRow(out, 'feature/b'), { claude: 10, tu: 3, totale: 13, fuori: 0 });
 });
@@ -237,69 +283,95 @@ const s1Head = () => [prompt(0), reply(3), turn(3, 3)].map((e, i) => withSession
 const copiesAsS9 = () => s1Head().map((e) => withSession(e, 's9', e.uuid));
 const own = (session, uuidFrom, ...evs) => evs.map((e, i) => withSession(e, session, `u${uuidFrom + i}`));
 
-test('a resumed transcript counts once: one session, and -SessionId of the resume still finds the topic', { skip }, async () => {
+test('given a resumed transcript copying the original head, when the engine runs with the resume -SessionId, then it counts once and still finds the topic', { skip }, async () => {
+  // Given / When
   const out = await engineAt({
     'C--work-api/s1.jsonl': s1Head(),
     'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))],
   }, '-From', TODAY, '-SessionId', 's9');
   const single = await engineAt({ 'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(5), reply(6), turn(6, 1))] }, '-From', TODAY);
+
+  // Then
   assert.deepEqual(figures(out), figures(single));
   assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });   // 0-3 and 5-6, then 3-5 and 6-21
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
 });
 
-test('a fork (the original keeps working in parallel) keeps two sessions and drops only the duplicates', { skip }, async () => {
+test('given a fork where the original keeps working in parallel, when the engine runs, then it keeps two sessions and drops only the duplicates', { skip }, async () => {
+  // Given / When
   const out = await engineAt({
     'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(8), reply(10), turn(10, 2))],
     'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 7, prompt(6), reply(12), turn(12, 6))],
   }, '-From', TODAY);
+
+  // Then
   assert.deepEqual(figures(out), { claude: 11, tu: 18, totale: 29, fuori: 0 });   // s1 0-3, 8-10 = 5m; s9 6-12 = 6m; one joined session would be 9m
 });
 
-test('a fork abandoned early keeps the original its own head (the copy ends first)', { skip }, async () => {
+test('given a fork abandoned early, when the engine runs, then the original keeps its own head because the copy ends first', { skip }, async () => {
+  // Given
   const files = {
     'C--work-api/s1.jsonl': [...s1Head(), ...own('s1', 4, prompt(8), reply(12), turn(12, 4))],
     'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 7, prompt(5), reply(10), turn(10, 5))],
   };
+
+  // When
   const out = await engineAt(files, '-From', TODAY, '-SessionId', 's1');
+
+  // Then
   assert.deepEqual(figures(out), { claude: 12, tu: 17, totale: 29, fuori: 0 });   // s1 0-3, 8-12 = 7m; s9 5-10 = 5m
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +24m`));   // s1: 7m + TU 3-5 and 12-27; with the head on s9 it would lose the 3m
 });
 
-test('a tie on the first timestamp goes to the file a continued-in line points away from, not to the older file', { skip }, async () => {
+test('given a tie on the first timestamp, when the engine runs, then the head goes to the file a continued-in line points away from, not to the older file', { skip }, async () => {
+  // Given
   const continuedIn = { type: 'continued-in', timestamp: at(7), sessionId: 's1', continuedInSessionId: 's9' };
   const files = (withLine) => ({   // s9 is written first: by creation time alone it would own the copied head
     'C--work-api/s9.jsonl': [...copiesAsS9(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))],
     'C--work-api/s1.jsonl': [...s1Head(), ...(withLine ? [continuedIn] : [])],
   });
+
+  // When
   const out = await engineAt(files(true), '-From', TODAY, '-SessionId', 's1');
+
+  // Then
   assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));   // s1 owns the head, s9 joins it
   assert.match(sessionSection(await engineAt(files(false), '-From', TODAY, '-SessionId', 's1')), /nessun evento/);   // the fallback: creation time
 });
 
-test('a simple --resume of a resume (no continued-in line of its own) does not take the head of the chain', { skip }, async () => {
+test('given a simple --resume of a resume with no continued-in line of its own, when the engine runs, then it does not take the head of the chain', { skip }, async () => {
+  // Given
   const continuedIn = { type: 'continued-in', timestamp: at(7), sessionId: 's1', continuedInSessionId: 's9' };
   const all = [...s1Head(), ...own('s9', 4, prompt(5), reply(6), turn(6, 1))];
+
+  // When
   const out = await engineAt({   // s8 is written last and copies everything s9 has: the chain s1 -> s9 owns the lines
     'C--work-api/s1.jsonl': [...s1Head(), continuedIn],
     'C--work-api/s9.jsonl': [...copiesAsS9(), ...all.slice(3).map((e) => withSession(e, 's9', e.uuid))],
     'C--work-api/s8.jsonl': all.map((e) => withSession(e, 's8', e.uuid)),
   }, '-From', TODAY, '-SessionId', 's9');
+
+  // Then
   assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
 });
 
-test('a plain --resume original keeps its head when its resume is itself continued by a continued-in line', { skip }, async () => {
+test('given a plain --resume original whose resume is itself continued by a continued-in line, when the engine runs, then the original keeps its head', { skip }, async () => {
+  // Given
   const continuedIn = { type: 'continued-in', timestamp: at(9), sessionId: 'sA', continuedInSessionId: 'sB' };
   const copy = (session, evs) => evs.map((e) => withSession(e, session, e.uuid));
   const headX = s1Head().map((e) => withSession(e, 'sX', e.uuid));
   const aOwn = own('sA', 4, prompt(5), reply(6), turn(6, 1));
+
+  // When
   const out = await engineAt({   // written in the order sX, sA, sB: sX is in no chain but is the oldest file
     'C--work-api/sX.jsonl': headX,
     'C--work-api/sA.jsonl': [...copy('sA', headX), ...aOwn, continuedIn],
     'C--work-api/sB.jsonl': [...copy('sB', headX), ...copy('sB', aOwn), ...own('sB', 7, prompt(10), reply(11), turn(11, 1))],
   }, '-From', TODAY, '-SessionId', 'sX');
+
+  // Then
   assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a`));
 });
 
@@ -307,9 +379,12 @@ test('a plain --resume original keeps its head when its resume is itself continu
 const rawToolResult = (min, id, uuid, cwdJson = 'C:\\\\work\\\\api') =>
   `{"parentUuid":null,"isSidechain":false,"cwd":"${cwdJson}","sessionId":"s1","gitBranch":"feature/a","type":"user","message":{"role":"user","content":[{"tool_use_id":"${id}","type":"tool_result","content":"ok"}]},"uuid":"${uuid}","timestamp":"${at(min)}"}`;
 
-test('tool_result lines in the real shape (string-search path) give the same figures as the parsed ones, with escaped cwds too', { skip }, async () => {
+test('given tool_result lines in the real shape and with escaped cwds, when the engine runs, then the string-search path gives the same figures as the parsed ones', { skip }, async () => {
+  // Given
   const rest = [prompt(0), toolUse(1, 'c1'), reply(9)];
   const withResults = (rawCwd) => ({ 'C--work-api/s1.jsonl': [...rest, rawToolResult(20, 'c1', 'r1', rawCwd), prompt(30)] });
+
+  // When / Then
   const parsed = await engineAt({ 'C--work-api/s1.jsonl': [...rest, toolResult(20, 'c1'), prompt(30)] }, '-From', TODAY);
   for (const cwd of ['C:\\\\work\\\\api', 'C:\\u005cwork\\u005capi']) {   // \\ in the JSON, then a \u escape (the fallback parse)
     const out = await engineAt(withResults(cwd), '-From', TODAY);
@@ -319,13 +394,18 @@ test('tool_result lines in the real shape (string-search path) give the same fig
   }
 });
 
-test('-SessionId on a branch shared with another chat flags it and marks the digest lines of the session', { skip }, async () => {
+test('given a branch shared with another chat, when the engine runs with -SessionId, then it flags the branch and marks the digest lines of the session', { skip }, async () => {
+  // Given
   const shared = { branch: 'main' };
   const main = [
     prompt(0, shared), reply(1, shared), prompt(2, { ...shared, session: 's2' }), reply(3, { ...shared, session: 's2' }),
     prompt(5, shared), reply(6, shared),
   ];
+
+  // When
   const out = await engine(main, '-SessionId', 's1');
+
+  // Then
   assert.match(sessionSection(out), /main .*\[anche altre sessioni\]/);
   const digest = readFileSync(out.match(/^Digest: (.+)$/m)[1].trim(), 'utf8');
   assert.match(digest, /\| sessione: si/);
@@ -333,14 +413,20 @@ test('-SessionId on a branch shared with another chat flags it and marks the dig
   assert.doesNotMatch(sessionSection(await engine(twoSessions(), '-SessionId', 's2')), /anche altre sessioni/);
 });
 
-test('-SessionId is compared case-insensitively', { skip }, async () => {
+test('given an upper-case session id, when the engine runs with -SessionId, then it is compared case-insensitively', { skip }, async () => {
+  // Given / When
   const sec = sessionSection(await engine(twoSessions(), '-SessionId', 'S2'));
+
+  // Then
   assert.match(sec, /feature\/b/);
   assert.doesNotMatch(sec, /feature\/a/);
 });
 
-test('-SessionId with a session absent from the period says so and marks nothing', { skip }, async () => {
+test('given a session absent from the period, when the engine runs with -SessionId, then it says so and marks nothing', { skip }, async () => {
+  // Given / When
   const sec = sessionSection(await engine(twoSessions(), '-SessionId', 'nope'));
+
+  // Then
   assert.match(sec, /nessun evento/);
   assert.doesNotMatch(sec, /feature\//);
 });
@@ -367,12 +453,17 @@ async function engineAt(files, ...flags) {
 }
 const digestOf = (out) => readFileSync(out.match(/^Digest: (.+)$/m)[1].trim(), 'utf8');
 
-test('-SessionId without -From starts at the first day of the session and runs to today', { skip }, async () => {
+test('given a session that began two days ago and no -From, when the engine runs with -SessionId, then it starts at the first day of the session and runs to today', { skip }, async () => {
+  // Given
   const mine = { session: 'AbC-1' };
+
+  // When
   const out = await engineAt({
     'C--work-api/AbC-1.jsonl': [back(2, prompt(0, mine)), back(2, reply(1, mine)), prompt(0, mine), reply(1, mine)],
     'C--work-web/other.jsonl': [back(5, prompt(0, { session: 'o1', branch: 'main' })), back(5, reply(1, { session: 'o1', branch: 'main' }))],
   }, '-SessionId', 'abc-1');   // the id differs in case from the file name and the events
+
+  // Then
   assert.match(out, new RegExp(`^Sessione abc-1: dal ${dayStr(2)}\\r?$`, 'm'));
   assert.match(out, new RegExp(`^=== WORKLOG ${dayStr(2)} -> ${TODAY} ===`, 'm'));
   assert.match(sessionSection(out), new RegExp(`${dayStr(2)}  api / feature/a`));
@@ -380,15 +471,21 @@ test('-SessionId without -From starts at the first day of the session and runs t
   assert.doesNotMatch(out, /web \/ main/);   // the other chat's earlier day is outside the period
 });
 
-test('-SessionId with an explicit -From keeps it and prints no derived first day', { skip }, async () => {
+test('given an explicit -From with -SessionId, when the engine runs, then it keeps it and prints no derived first day', { skip }, async () => {
+  // Given / When
   const out = await engineAt({ 'C--work-api/s1.jsonl': [back(2, prompt(0)), back(2, reply(1)), prompt(0), reply(1)] },
     '-SessionId', 's1', '-From', TODAY);
+
+  // Then
   assert.doesNotMatch(out, /: dal /);
   assert.doesNotMatch(out, new RegExp(dayStr(2)));
 });
 
-test('-SessionId with no events in the period says so, not only "Nessuna attivita\'"', { skip }, async () => {
+test('given a -SessionId with no events in the period, when the engine runs, then it says so, not only "Nessuna attivita"', { skip }, async () => {
+  // Given / When
   const out = await engineAt({ 'C--work-api/s1.jsonl': [prompt(0), reply(1)] }, '-SessionId', 's1', '-From', '2020-01-01');
+
+  // Then
   assert.match(out, /^Sessione s1: nessun evento in questo periodo\.\r?$/m);
   assert.match(out, /Nessuna attivita/);
   const unknown = await engineAt({}, '-SessionId', 'nope');   // no file for the id: nothing to derive, today only
@@ -396,13 +493,18 @@ test('-SessionId with no events in the period says so, not only "Nessuna attivit
   assert.doesNotMatch(await engineAt({}, '-From', '2020-01-01'), /^Sessione /m);
 });
 
-test('-MaxLinesPerProj never drops the [S] lines nor the "sessione: si" header of the session', { skip }, async () => {
+test('given a session on the less busy branch and -MaxLinesPerProj, when the engine runs, then the [S] lines and the "sessione: si" header are never dropped', { skip }, async () => {
+  // Given
   const b = { session: 's2', branch: 'feature/b' };
   const main = [
     prompt(0), reply(1), prompt(2), reply(3), prompt(4), reply(5),   // feature/a, the busier branch, listed first
     prompt(6, b), reply(7, b), prompt(8, b), reply(9, b),
   ];
+
+  // When
   const out = await engine(main, '-SessionId', 's2', '-MaxLinesPerProj', '2');
+
+  // Then
   const digest = digestOf(out);
   assert.match(digest, /^### topic \(branch\): feature\/b .*\| sessione: si\r?$/m);
   assert.equal(digest.match(/^- \[[^\]]+\] \[S\]/gm).length, 4);   // all of s2's lines, none counted toward the limit
@@ -410,8 +512,11 @@ test('-MaxLinesPerProj never drops the [S] lines nor the "sessione: si" header o
   assert.match(digest, /righe successive troncate/);
 });
 
-test('the raw digest marks "sessione: si" on the branch of the session only', { skip }, async () => {
+test('given two sessions, when the raw digest is built with -SessionId, then "sessione: si" marks the branch of the session only', { skip }, async () => {
+  // Given / When
   const digest = digestOf(await engine(twoSessions(), '-SessionId', 's2'));
+
+  // Then
   const headers = digest.match(/^### topic \(branch\): .*$/gm);
   assert.equal(headers.length, 2);
   assert.deepEqual(headers.filter((h) => h.includes('sessione: si')).map((h) => h.match(/branch\): (\S+)/)[1]), ['feature/b']);
@@ -457,9 +562,14 @@ process.stdout.write(JSON.stringify({ id: Number(id), fields: { 'Microsoft.VSTS.
 
 const row = (extra = {}) => ({ date: '2026-10-20', org: 'contoso', project: 'P', itemId: 101, hours: 1.5, topic: 'fix cache', ...extra });
 
-test('push adds the delta to CompletedWork and records the period total in the audit', { skip: skipWin }, async () => {
+test('given a row for an item, when the push runs, then it adds the delta to CompletedWork and records the period total in the audit', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   const r = await sb.push([row()]);
+
+  // Then
   assert.equal(r.code, 0, r.out);
   assert.equal(sb.read('state.json')[101], 3.5);
   const [e] = sb.read('wl/pushed.json');
@@ -468,48 +578,71 @@ test('push adds the delta to CompletedWork and records the period total in the a
   assert.equal(e.mcp, 'cli');
 });
 
-test('push re-run of the same row writes nothing; a higher total adds only the difference', { skip: skipWin }, async () => {
+test('given a row already pushed, when the push re-runs, then the same row writes nothing and a higher total adds only the difference', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   await sb.push([row()]);
   const before = sb.calls().length;
   await sb.push([row()]);
+
+  // Then
   assert.equal(sb.calls().slice(before).filter((c) => c.includes(' update ')).length, 0);
   await sb.push([row({ hours: 2 })]);
   assert.equal(sb.read('state.json')[101], 4);
   assert.equal(sb.read('wl/pushed.json').length, 1);
 });
 
-test('push re-run with a minimal row keeps the parent, the created flag and the links', { skip: skipWin }, async () => {
+test('given a row with parent, created flag and links, when a minimal row is pushed again, then the audit keeps them', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   await sb.push([row({ created: true, parentId: 50, prs: [1] })]);
   await sb.push([row()]);
+
+  // Then
   const [e] = sb.read('wl/pushed.json');
   assert.equal(e.created, true);
   assert.equal(e.parentId, 50);
   assert.deepEqual(e.prs, [1]);
 });
 
-test('push honours an explicit delta 0 (hours already logged by hand) and still closes the day', { skip: skipWin }, async () => {
+test('given a row with an explicit delta 0 (hours already logged by hand), when the push runs, then it writes no hours and still closes the day', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   await sb.push([row({ hours: 3, delta: 0 })]);
+
+  // Then
   assert.equal(sb.read('state.json')[101], 2);
   assert.equal(sb.read('wl/pushed.json')[0].hoursLogged, 3);
 });
 
-test('push close and target rows touch only the audit and targets.json', { skip: skipWin }, async () => {
+test('given close and target rows, when the push runs, then it touches only the audit and targets.json', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   const r = await sb.push([
     { date: '2026-10-13', itemId: null, hours: 0, topic: 'nulla-da-registrare' },
     { date: '2026-10-13', targetHours: 0, note: 'evento' },
   ]);
+
+  // Then
   assert.equal(r.code, 0, r.out);
   assert.equal(sb.calls().length, 0);
   assert.equal(sb.read('wl/pushed.json')[0].topic, 'nulla-da-registrare');
   assert.deepEqual(sb.read('wl/targets.json').days['2026-10-13'], { hours: 0, note: 'evento' });
 });
 
-test('push refuses hours or a delta that is not a multiple of 0.5, and writes nothing for that row', { skip: skipWin }, async () => {
+test('given hours or a delta that is not a multiple of 0.5, when the push runs, then it refuses and writes nothing for that row', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When / Then
   for (const bad of [row({ hours: 1.25 }), row({ hours: 2, delta: 0.3 }), { date: '2026-10-13', itemId: null, hours: 0.75, topic: 'x' }]) {
     const r = await sb.push([bad]);
     assert.equal(r.code, 1, JSON.stringify(bad));
@@ -519,25 +652,36 @@ test('push refuses hours or a delta that is not a multiple of 0.5, and writes no
   assert.ok(!existsSync(join(sb.dir, 'wl', 'pushed.json')));
 });
 
-test('push -DryRun calls nothing and writes nothing', { skip: skipWin }, async () => {
+test('given a push with -DryRun, when it runs, then it calls nothing and writes nothing', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   const r = await sb.push([row(), { date: '2026-10-13', targetHours: 0 }], '-DryRun');
+
+  // Then
   assert.equal(r.code, 0, r.out);
   assert.equal(sb.calls().length, 0);
   assert.ok(!existsSync(join(sb.dir, 'wl', 'pushed.json')));
   assert.ok(!existsSync(join(sb.dir, 'wl', 'targets.json')));
 });
 
-test('push: a failing item exits 1 and leaves its audit entry unwritten, the others go through', { skip: skipWin }, async () => {
+test('given a failing item and a good one, when the push runs, then it exits 1 and leaves the failing audit entry unwritten while the other goes through', { skip: skipWin }, async () => {
+  // Given
   const sb = sandbox();
+
+  // When
   const r = await sb.push([row({ itemId: 999 }), row()]);
+
+  // Then
   assert.equal(r.code, 1);
   assert.match(r.out, /ERRORE/);
   const audit = sb.read('wl/pushed.json');
   assert.deepEqual(audit.map((e) => e.itemId), [101]);
 });
 
-test('push picks the az identity of the root whose project matches the row, not the first root of the org', { skip: skipWin }, async () => {
+test('given two roots on one org with different identities, when the push runs, then it picks the az identity of the root whose project matches the row, not the first root of the org', { skip: skipWin }, async () => {
+  // Given
   // Two roots on one org, each with its own identity: the per-org config dir must follow the row's project.
   // The script resolves ~/.azure-<identity> under the real home, so the two dirs live there, uniquely named,
   // and the exit handler removes them with the temp dirs (a killed run can leave them behind, empty).
@@ -553,7 +697,11 @@ test('push picks the az identity of the root whose project matches the row, not 
     { path: 'C:\\ws\\org\\p', org: 'contoso', project: 'P', identity: ids.b },
   ];
   const sb = sandbox({ 101: 2, 102: 0 }, { roots });
+
+  // When
   const r = await sb.push([row(), row({ itemId: 102, project: 'X' })]);
+
+  // Then
   assert.equal(r.code, 0, r.out);
   const used = readFileSync(join(sb.dir, 'cfg.log'), 'utf8').trim().split('\n');
   const byItem = (id) => used.filter((_, i) => sb.calls()[i].includes(`--id ${id}`));

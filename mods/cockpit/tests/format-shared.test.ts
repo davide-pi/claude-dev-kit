@@ -23,6 +23,7 @@ import {
   sameSnapshot,
   shade,
   shortModel,
+  shownTurnUsd,
   spanText,
   spanWidth,
   taskBarCells,
@@ -278,4 +279,11 @@ test('withPulse brightens the fill while on and leaves the text and width alone'
   expect(spanText(withPulse(bar, true))).toBe(spanText(bar))
   expect(spanWidth(withPulse(bar, true))).toBe(10)
   expect(withPulse(bar, true)[0]?.c).toBe(brighten('#204060', 0.45))
+})
+
+test('shownTurnUsd: Given a running turn, When it costs a cent or more, Then it shows; below a cent the last ended turn shows', () => {
+  // Given / When / Then
+  expect(Math.round(100 * (shownTurnUsd({ usd: 5.5, startUsd: 5.2, lastUsd: 0.38 }) ?? 0))).toBe(30)
+  expect(shownTurnUsd({ usd: 5.201, startUsd: 5.2, lastUsd: 0.38 })).toBe(0.38)
+  expect(shownTurnUsd({ usd: 5.5 })).toBeUndefined()
 })

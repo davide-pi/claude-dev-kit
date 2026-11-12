@@ -6,7 +6,8 @@
  *   - the DENIES first (a raw database client on a non-dev host, a shell read of a secret file, a git write by a
  *     read-only agent):
  *     when one fires nothing else matters;
- *   - then every ASK, gathered, so one prompt carries all the reasons;
+ *   - then every ASK, gathered, so one prompt carries all the reasons; a script-args quoting deny (a re-quote
+ *     fixes it) is returned as a deny, its reason first and the ask reasons after it;
  *   - then the REWRITES (az identity pin, output filter), which never meet an ask.
  *
  * Each check is isolated: a bug in one must not silence the others, and is logged
@@ -18,12 +19,14 @@
 'use strict';
 
 const { checkDefaultBranch, parseGitCall } = require('./default-branch');
-const { expandTexts, parseSegments } = require('./shell-parse');
+const { expandTexts, expandSegments, parseSegments } = require('./shell-parse');
+const { parseAzCall } = require('./alm-contract');
 const { READ_ONLY_AGENTS } = require('./read-only-agents');
 const { checkDestructive } = require('./destructive');
 const { checkSqlTarget } = require('./sql-target');
 const { checkAlmContract } = require('./alm-contract');
 const { checkSecretRead } = require('./secret-read');
+const { checkBrowserUseCli } = require('./browser-use-cli');
 const { checkDockerCp } = require('./docker-cp');
 const { checkScriptArgs } = require('./script-args');
 const { checkSelfWrite } = require('./self-protect');
@@ -44,7 +47,59 @@ function safely(name, check) {
 /** git verbs that move HEAD, the index or the stash, or publish: never for an agent that only reads. */
 const GIT_WRITE_VERBS = new Set(['checkout', 'switch', 'reset', 'stash', 'rebase', 'commit', 'push']);
 
-/** `{ reason }` when a read-only agent's command runs a git write, else null (no `agent_type`: fail open). */
+/** `az` command words that write to the tracker, a pull request or a wiki. */
+const AZ_WRITES = ['boards work-item create', 'boards work-item update', 'boards work-item delete', 'boards work-item relation add', 'boards work-item relation remove',
+  'repos pr create', 'repos pr update', 'repos pr set-vote', 'repos pr reviewer add', 'repos pr reviewer remove',
+  'repos pr work-item add', 'repos pr work-item remove', 'repos pr checkout',
+  'devops wiki page create', 'devops wiki page update', 'devops wiki page delete'];
+/** `pr checkout` moves HEAD like `git checkout`; `pr update-branch` pushes to the PR branch. */
+const GH_WRITES = {
+  pr: new Set(['create', 'edit', 'merge', 'close', 'reopen', 'comment', 'review', 'ready', 'checkout', 'update-branch']),
+  issue: new Set(['create', 'edit', 'close', 'reopen', 'comment', 'delete', 'transfer', 'lock', 'unlock', 'pin', 'unpin', 'develop']),
+};
+const GH_BODY_FLAGS = /^(?:-[fF]|--field(?:=|$)|--raw-field(?:=|$)|--input(?:=|$))/;
+/** gh flags that take a value and may sit between `gh` and its command words. */
+const GH_VALUE_FLAGS = new Set(['-R', '--repo', '--hostname']);
+const WRITE_METHOD = /^(?:POST|PATCH|PUT|DELETE)$/i;
+
+/** The `gh api` method written as `-X POST`, `-XPOST`, `--method POST` or `--method=POST`, else null. */
+function ghApiMethod(args) {
+  for (let i = 0; i < args.length; i += 1) {
+    const flag = /^(?:-X|--method)(?:=?(.+))?$/i.exec(args[i]);
+    if (flag) return (flag[1] ?? args[i + 1] ?? '').toUpperCase();
+  }
+  return null;
+}
+
+/** What one segment writes to the tracker or a pull request, as a label, else null. */
+function trackerWrite(tokens) {
+  const az = parseAzCall(tokens);
+  const verb = az && AZ_WRITES.find((write) => az.verb === write || az.verb.startsWith(`${write} `));
+  if (verb) return `az ${verb}`;
+  // The generic REST verbs write as soon as they carry a write method; their default is GET.
+  if (az?.verb.startsWith('devops invoke') && WRITE_METHOD.test(az.flags.get('--http-method') ?? '')) return 'az devops invoke (write)';
+  if (az?.verb === 'rest' && WRITE_METHOD.test(az.flags.get('--method') ?? az.flags.get('-m') ?? '')) return 'az rest (write)';
+  const gh = tokens.findIndex((token) => /^(?:.*[\\/])?gh(?:\.exe)?$/i.test(token));
+  if (gh < 0) return null;
+  // The first two command words, skipping flags (and the value of `-R owner/repo`) placed before them.
+  const words = [];
+  const rest = tokens.slice(gh + 1);
+  for (let i = 0; i < rest.length && words.length < 2; i += 1) {
+    if (GH_VALUE_FLAGS.has(rest[i])) i += 1;
+    else if (!rest[i].startsWith('-')) words.push({ word: rest[i].toLowerCase(), at: i });
+  }
+  const [group, action] = words.map((entry) => entry.word);
+  if (GH_WRITES[group]?.has(action)) return `gh ${group} ${action}`;
+  if (group !== 'api') return null;
+  const args = rest.slice(words[0].at + 1);
+  const method = ghApiMethod(args);
+  // GraphQL is always a POST with a body: only a mutation writes.
+  if (action === 'graphql') return /\bmutation\b/.test(args.join(' ')) ? 'gh api graphql (mutation)' : null;
+  // `gh api` turns into a POST on its own as soon as it carries a body.
+  return (method ? WRITE_METHOD.test(method) : args.some((arg) => GH_BODY_FLAGS.test(arg))) ? 'gh api (write)' : null;
+}
+
+/** `{ reason }` when a read-only agent's command runs a git write or a tracker or pull request write, else null (no `agent_type`: fail open). */
 function checkReadOnlyAgent(command, agentType) {
   if (!READ_ONLY_AGENTS.has(agentType)) return null;
   const verb = expandTexts(command)
@@ -55,7 +110,9 @@ function checkReadOnlyAgent(command, agentType) {
       const next = call.args[call.args.indexOf(call.subcommand) + 1];
       return !(call.subcommand === 'stash' && (next === 'list' || next === 'show'));
     });
-  return verb ? { reason: `A read-only agent (${agentType}) may not run 'git ${verb.subcommand}': it would move HEAD, the index or the stash, or publish. Read with git diff / git show / git log on a ref instead.` } : null;
+  if (verb) return { reason: `A read-only agent (${agentType}) may not run 'git ${verb.subcommand}': it would move HEAD, the index or the stash, or publish. Read with git diff / git show / git log on a ref instead.` };
+  const write = expandSegments(command.replace(/[\\`][ \t]*\r?\n/g, ' ')).map(trackerWrite).find(Boolean);
+  return write ? { reason: `A read-only agent (${agentType}) may not run '${write}': it writes to the tracker or a pull request. Return the write to the caller.` } : null;
 }
 
 /**
@@ -68,17 +125,23 @@ function evaluate(payload) {
 
   const target = safely('sql-target', () => checkSqlTarget(command))
     ?? safely('secret-read', () => checkSecretRead(command))
-    ?? safely('read-only-agent', () => checkReadOnlyAgent(command, payload.agent_type));
+    ?? safely('read-only-agent', () => checkReadOnlyAgent(command, payload.agent_type))
+    ?? safely('browser-use-cli', () => checkBrowserUseCli(command));
   if (target) return { decision: 'deny', reason: target.reason };
 
+  const scriptArgs = safely('script-args', () => checkScriptArgs(command, payload.tool_name));
   const reasons = [
     safely('default-branch', () => checkDefaultBranch(command, payload.cwd)),
-    safely('destructive', () => checkDestructive(command)),
+    safely('destructive', () => checkDestructive(command, payload.session_id)),
     safely('alm-contract', () => checkAlmContract(command)),
     safely('docker-cp', () => checkDockerCp(command, payload.cwd)),
-    safely('script-args', () => checkScriptArgs(command, payload.tool_name)),
+    scriptArgs?.reason,
     safely('self-protect', () => checkSelfWrite(command, payload.cwd)),
   ].filter(Boolean);
+  // A re-quote fixes a script-args deny: it wins over the asks, whose reasons ride along.
+  if (scriptArgs?.decision === 'deny') {
+    return { decision: 'deny', reason: [scriptArgs.reason, ...reasons.filter((r) => r !== scriptArgs.reason)].join('\n\n') };
+  }
   if (reasons.length) return { decision: 'ask', reason: reasons.join('\n\n') };
 
   // One updatedInput, whichever rewrite applies. They never meet: no filter mode is an `az` command.

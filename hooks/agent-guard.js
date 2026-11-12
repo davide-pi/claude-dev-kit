@@ -16,14 +16,14 @@
 const { deny, readPayload } = require('./lib/decision');
 
 try {
-  const input = readPayload()?.tool_input;
+  const input = readPayload('agent-guard')?.tool_input;
   if (input && typeof input === 'object') {
     const type = typeof input.subagent_type === 'string' ? input.subagent_type.trim() : '';
     if (!type) {
       deny('Name the agent type (subagent_type): a kit agent (Explore, analyst, implementer, code-reviewer, …) or `fork`.');
     }
     if (type === 'Plan' && !input.model) {
-      deny('Plan needs a model: sonnet (opus only for the L challenger, deliver loop.md).');
+      deny('Plan needs a model: sonnet (opus only for the L challenger, deliver analysis.md).');
     }
     const said = (text) => [input.description, input.prompt].some((v) => typeof v === 'string' && v.toLowerCase().includes(text));
     if (String(input.effort ?? '').trim().toLowerCase() === 'max' && !said('owner asked')) {

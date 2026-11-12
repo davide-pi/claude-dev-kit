@@ -13,4 +13,4 @@ paths: "**/*.component.ts,**/*.component.html,**/*.module.ts,**/*.service.ts,**/
   that caused the change, not in an `effect`.
 - One shared-state mechanism per app: the existing store or signal services, never both.
 
-Procedure: skill `angular`.
+Procedure: Read `~/.claude/skills/angular/SKILL.md`.

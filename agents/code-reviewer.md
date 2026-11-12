@@ -76,7 +76,7 @@ files or previous findings arrive; § Effort from `high`.
 ## Output
 
 A structured-output schema in the call is the format. Without one, finding blocks as the preloaded `finding-format` skill gives them (the block, one defect per block,
-the verdict line). Close with
+the verdict line); `risk` and `effort` each end with a one-line why. Close with
 `Intent: N points — covered N` (chat language) plus one line per partial, missing or wrong point and the scope creep, then
 the verdict line with ` · security: N · completeness: N` appended.
 Nothing wrong → one line naming the passes run and the intent points verified. Never list covered intent

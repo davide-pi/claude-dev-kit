@@ -366,7 +366,11 @@
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close*)",
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -LogRun *)",
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "PowerShell(node ~/.claude/scripts/pace-state.mjs *)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/resume-task.ps1 *)",
       "PowerShell(node ~/.claude/hooks/scope-guard.js --check *)",
+      "PowerShell(node ~/.claude/scripts/gate.mjs *)",
+      "PowerShell(node ~/.claude/scripts/sweep.mjs *)",
       "Bash(az account show)",
       "Bash(az account show *)",
       "Bash(gh pr view)",
@@ -438,7 +442,11 @@
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close*)",
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -LogRun *)",
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "Bash(node ~/.claude/scripts/pace-state.mjs *)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/resume-task.ps1 *)",
       "Bash(node ~/.claude/hooks/scope-guard.js --check *)",
+      "Bash(node ~/.claude/scripts/gate.mjs *)",
+      "Bash(node ~/.claude/scripts/sweep.mjs *)",
       "Bash(wc *)",
       "PowerShell(Get-Content *)",
       "PowerShell(Select-String *)",
@@ -559,7 +567,11 @@
       "WebFetch(domain:raw.githubusercontent.com)",
       "WebFetch(domain:learn.microsoft.com)",
       "WebFetch(domain:code.claude.com)",
-      "WebFetch(domain:platform.claude.com)"
+      "WebFetch(domain:platform.claude.com)",
+      "PowerShell(sqlcmd *)",
+      "Bash(sqlcmd *)",
+      "PowerShell(git branch -D*)",
+      "Bash(git branch -D*)"
     ],
     "deny": [
       "Read(**/.env)",
@@ -615,19 +627,15 @@
       "PowerShell(git reset --hard*)",
       "PowerShell(git rebase*)",
       "PowerShell(git cherry-pick*)",
-      "PowerShell(sqlcmd *)",
       "PowerShell(docker compose down*)",
       "PowerShell(dotnet ef database update*)",
       "PowerShell(dotnet tool install*)",
       "Bash(git reset --hard*)",
       "Bash(git rebase*)",
       "Bash(git cherry-pick*)",
-      "Bash(sqlcmd *)",
       "Bash(docker compose down*)",
       "Bash(dotnet ef database update*)",
       "Bash(dotnet tool install*)",
-      "PowerShell(git branch -D*)",
-      "Bash(git branch -D*)",
       "PowerShell(git push --delete*)",
       "Bash(git push --delete*)",
       "PowerShell(git push -d*)",
@@ -674,7 +682,51 @@
   "model": "opus",
   "fallbackModel": ["sonnet", "haiku"],
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Agent|Task|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "Agent|Task",
         "hooks": [
@@ -691,6 +743,20 @@
         ]
       },
       {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/read-guard.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "mcp__plugin_browser-use_browser-use__.*",
         "hooks": [
           {
@@ -702,6 +768,20 @@
             ],
             "timeout": 30,
             "statusMessage": "Checking Edge's CDP port for browser-use..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_browser-use_browser-use__browser_screenshot",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/screenshot-guard.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10
           }
         ]
       },
@@ -756,6 +836,20 @@
       }
     ],
     "SessionStart": [
+      {
+        "matcher": "resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [

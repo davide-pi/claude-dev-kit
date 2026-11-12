@@ -1,7 +1,5 @@
-import type { SessionContextBreakdown } from 'claude-code'
-
-import type { CockpitContext, CockpitContextRow, CockpitSnapshot, CockpitStatic, CockpitTask } from '../types'
-import { isCount, isRecord, truncEnd } from './shared'
+import type { CockpitSnapshot, CockpitTask } from '../types'
+import { COLORS, ctxColor, isCount, isRecord, truncEnd } from './shared'
 
 // ── Context growth and the autocompact forecast ──
 
@@ -31,96 +29,34 @@ export function ctxGrowth(samples: readonly number[] | undefined): number | unde
   return growth > 0 ? growth : undefined
 }
 
-// ── The Context tab: the breakdown, when to compact ──
+// ── Rounds and the CTX bar's scale ──
 
-/** Main turns the compact hint keeps. */
+/** Main turns the context rounds keep. */
 export const ROUNDS_KEEP = 20
-/** How long the Context tab's `refresh` waits after a press: an exact count spends token-count requests. */
-export const REFRESH_COOLDOWN_MS = 60_000
-/** The context fill from which the compact hint can show with the rounds' growth, and the growth each of the last rounds needs. */
-export const COMPACT_HINT_PCT = 70
-const COMPACT_GROWTH = 1.05
-const COMPACT_ROUNDS = 3
-/** The hint shows with this many requests (or fewer) left before auto-compaction, whatever the fill. */
-const COMPACT_FORECAST_MAX = 3
 
 /** `rounds` with this main turn's context size added, the last twenty kept. A shrinking context stays: a compaction is a drop to see. */
 export const recordRound = (rounds: readonly number[] | undefined, tokens: number): number[] => [...(rounds ?? []), tokens].slice(-ROUNDS_KEEP)
 
-/**
- * Whether `worth compacting` shows: the context is at 70 % or more and each of the last three rounds grew it by more than 5 %
- * of the round before, or auto-compaction is three requests away or nearer (`forecast`), whatever the fill.
- */
-export function shouldCompact(p: { percent?: number; rounds?: readonly number[]; forecast?: number }): boolean {
-  if (p.forecast !== undefined && p.forecast <= COMPACT_FORECAST_MAX) return true
-  const last = (p.rounds ?? []).slice(-(COMPACT_ROUNDS + 1))
-  const isGrowing = last.length === COMPACT_ROUNDS + 1 && last.every((v, i) => i === 0 || v > (last[i - 1] ?? Infinity) * COMPACT_GROWTH)
-  return (p.percent ?? 0) >= COMPACT_HINT_PCT && isGrowing
-}
+/** The CTX bar is full at this multiple of the autocompact threshold, so the threshold's tick sits at 1/1.1 of the bar. */
+const CTX_SCALE = 1.1
 
-const ROW_ORDER = { used: 0, deferred: 1, free: 2, buffer: 3 } as const
-
-/** The rows biggest first: what fills the window, then the tool schemas outside it, then the free space and the compaction buffer. */
-export const sortRows = (rows: readonly CockpitContextRow[]): CockpitContextRow[] =>
-  [...rows].sort((a, b) => ROW_ORDER[a.kind] - ROW_ORDER[b.kind] || b.tokens - a.tokens)
-
-/** Messages are what the conversation holds and change with every response; every other row of the window is fixed for a session. */
-const isStaticRow = (r: CockpitContextRow): boolean => (r.kind === 'used' || r.kind === 'deferred') && !/^messages$/i.test(r.name)
-
-/** What an exact reading fixes for the session: its static rows and skills listing. */
-export const staticOf = (c: CockpitContext): CockpitStatic => ({
-  rows: c.rows.filter(isStaticRow).map(r => ({ name: r.name, tokens: r.tokens })),
-  ...(c.skills && { skills: c.skills }),
-})
+/** The share of the autocompact threshold from which the CTX fill turns yellow (as the credit windows' middle band), then red. */
+const CTX_YELLOW_PCT = 60
+const CTX_RED_PCT = 90
 
 /**
- * A summary reading with the static part of an exact count laid over it: those rows (marked exact) and the skills
- * listing come from the count, Messages stay the summary's. The free space gives back what the used rows took, the total follows.
+ * The CTX bar's fill and the tick of the autocompact threshold. Where the engine reports `autoCompactAt` the bar is `1.1 × autoCompactAt` tokens long
+ * (`pct` is the context over that, capped at 100, `markPct` the threshold's place, `limit` the bar's length in tokens); without one it is the window's own percent, no tick.
+ * `color` is the fill's: by the share of the threshold reached (under 60% green, under 90% yellow, else red), or by the window's own percent without one.
  */
-export function withStatic(c: CockpitContext, fixed: CockpitStatic): CockpitContext {
-  let diff = 0
-  const rows = c.rows.map((r): CockpitContextRow => {
-    const exact = isStaticRow(r) ? fixed.rows.find(f => f.name === r.name) : undefined
-    if (!exact) return r
-    if (r.kind === 'used') diff += exact.tokens - r.tokens
-    return { ...r, tokens: exact.tokens, isExact: true }
-  })
-  return {
-    ...c,
-    rows: sortRows(rows.map(r => (r.kind === 'free' ? { ...r, tokens: Math.max(0, r.tokens - diff) } : r))),
-    total: c.total + diff,
-    ...(fixed.skills && { skills: fixed.skills }),
-    isExact: false,
-  }
-}
-
-/** `next` with each row's change from `previous`: measured by a round's read, kept as it was by any other; a row the reading before did not have has none. */
-export function withDeltas(next: CockpitContext, previous: CockpitContext | undefined, isRound: boolean): CockpitContext {
-  const before = new Map((previous?.rows ?? []).map(r => [r.name, r]))
-  return {
-    ...next,
-    rows: next.rows.map((r): CockpitContextRow => {
-      const was = before.get(r.name)
-      const delta = was === undefined ? undefined : isRound ? r.tokens - was.tokens : was.delta
-      return delta === undefined ? r : { ...r, delta }
-    }),
-  }
-}
-
-/**
- * What the Context tab keeps of a breakdown: every row as the engine lists it, the window, and how many skills the listing holds.
- */
-export function contextOf(
-  b: Pick<SessionContextBreakdown, 'categories' | 'totalTokens' | 'rawMaxTokens' | 'skills'>,
-  isExact: boolean,
-): CockpitContext {
-  return {
-    rows: sortRows(b.categories.map((c): CockpitContextRow => ({ name: c.name, tokens: c.tokens, kind: c.kind, ...(isExact && { isExact: true as const }) }))),
-    total: b.totalTokens,
-    max: b.rawMaxTokens,
-    ...(b.skills && { skills: { listed: b.skills.includedSkills, total: b.skills.totalSkills } }),
-    isExact,
-  }
+export function ctxScale(s: Pick<CockpitSnapshot, 'ctx' | 'lastCtx' | 'autoCompactAt'>): { pct: number; color: string; markPct?: number; limit?: number } {
+  // Until the engine measures the window (a resumed session) the last state's reading stands in.
+  const { tokens, percent } = s.ctx.percent === undefined && s.lastCtx ? s.lastCtx : s.ctx
+  if (s.autoCompactAt === undefined || s.autoCompactAt <= 0) return { pct: percent ?? 0, color: ctxColor(percent ?? 0) }
+  const limit = CTX_SCALE * s.autoCompactAt
+  const share = ((tokens ?? 0) / s.autoCompactAt) * 100
+  const color = share < CTX_YELLOW_PCT ? COLORS.green : share < CTX_RED_PCT ? COLORS.yellow : COLORS.red
+  return { pct: Math.min(100, ((tokens ?? 0) / limit) * 100), color, markPct: 100 / CTX_SCALE, limit }
 }
 
 /** The context a data file keeps (`tokens`, `window`, `percent`); none when any of the three is not a count. */

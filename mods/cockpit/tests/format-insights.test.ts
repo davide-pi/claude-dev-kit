@@ -11,6 +11,7 @@ import {
   resultTokens,
   withContextReading,
   roundCost,
+  settledRoundUsd,
   toolArg,
   toolArgFull,
 } from '../hooks/insights'
@@ -32,6 +33,16 @@ test('toolArg: a search shows its pattern before the folder it looks in', () => 
   expect(toolArg({ tool: 'Glob', pattern: '**/*.ts', path: '/w/src' })).toBe('**/*.ts')
   expect(toolArg({ tool: 'Grep', path: '/w/src' })).toBe('src')
   expect(toolArg({ tool: 'Read', file_path: '/w/a.ts' })).toBe('a.ts')
+})
+
+test('settledRoundUsd: given a round that ended unmeasured, when a measure settles it, then its cost is the turn cost; before that, or for a measure under a cent, none', () => {
+  // Given
+  const waiting = { usd: 5, startUsd: 5, pendingUsd: 5 }
+  // When / Then
+  expect(settledRoundUsd(waiting, { usd: 5.6, startUsd: 5.6, lastUsd: 0.6 })).toBe(0.6)
+  expect(settledRoundUsd(waiting, { ...waiting, usd: 5.2 })).toBeUndefined()
+  expect(settledRoundUsd(waiting, { usd: 5.001, startUsd: 5, pendingUsd: undefined, lastUsd: 0.4 })).toBeUndefined()
+  expect(settledRoundUsd({ usd: 5, startUsd: 4 }, { usd: 6, startUsd: 4 })).toBeUndefined()
 })
 
 test('insights: a round counts its cost where measured, its length and cache hit, and keeps the dearest; the cache hits are the last twenty', () => {
@@ -100,6 +111,26 @@ test('recordToolCall: keeps the five largest results (tool, argument, tokens), b
   expect(ins.lastError).toEqual({ tool: 'Bash', text: 'exit 1 boom here' })
   expect(recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 0 }).lastError).toEqual(ins.lastError)
   expect(recordToolCall(ins, { tool: 'Bash', isOk: false, ms: 0, error: 'x'.repeat(500) }).lastError?.text).toHaveLength(200)
+})
+
+test('byTool sums result tokens per tool', () => {
+  let ins = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, tokens: 100 })
+  ins = recordToolCall(ins, { tool: 'Read', isOk: true, ms: 0, tokens: 50 })
+  ins = recordToolCall(ins, { tool: 'Bash', isOk: true, ms: 0, tokens: 7 })
+  ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0 })
+  ins = recordToolCall(ins, { tool: 'Grep', isOk: true, ms: 0, tokens: 0 })
+  expect(ins.byTool).toEqual({ Read: 150, Bash: 7 })
+  // a tool past the cap of forty is not counted, a known one still is
+  let capped = emptyInsights()
+  for (let i = 0; i < 45; i++) capped = recordToolCall(capped, { tool: `t${i}`, isOk: true, ms: 0, tokens: 1 })
+  expect(Object.keys(capped.byTool ?? {})).toHaveLength(40)
+  expect(recordToolCall(capped, { tool: 't0', isOk: true, ms: 0, tokens: 4 }).byTool?.t0).toBe(5)
+})
+
+test('a compaction empties byTool', () => {
+  const ins = recordToolCall(undefined, { tool: 'Read', isOk: true, ms: 0, tokens: 100 })
+  expect(recordCompaction(ins, 1000).byTool).toBeUndefined()
+  expect(recordToolCall(recordCompaction(ins), { tool: 'Read', isOk: true, ms: 0, tokens: 5 }).byTool).toEqual({ Read: 5 })
 })
 
 test('resultTokens: the characters of the text over four, rounded up; the JSON of the result when there is no text', () => {

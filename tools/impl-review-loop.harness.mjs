@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -27,30 +27,35 @@ const BODY = SOURCE.replace(/^export /, '');
 const PASS = { status: 'pass', command: 'node --test', line: '# fail 0' };
 const snapshot = (files) => ({ tree: 't1', files, churn: 0 });
 const ALL_READ = Symbol('every file the change touched');
+// The lane runners (labels "lane <n> · add worktree" and "lanes · merge"): a worktree line per lane, a green merge gate; `extra.lanes` replaces it.
+const laneGate = (kind = 'green', extra = {}) => JSON.stringify({ gate: kind, test: '', outside: [], formatOnly: [], tree: 'tr9', greenAt: '2026-11-11T10:00:00Z', seconds: 1, ...extra });
+const laneRunner = (prompt, opts) => {
+  const n = /^lane (\d+) /.exec(opts.label)?.[1];
+  return n ? { line: JSON.stringify({ lane: `l${n}`, path: `C:/lanes/l${n}`, branch: `deliver-lane/l${n}` }) } : { gate: laneGate() };
+};
 
 /**
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
- * Two reviewers are answered by the harness, not by the queue: the Haiku watcher of the delta rounds (label "reviewer S · round <n> · check the fixes":
- * `review([])` unless `extra.watcher` is given: an answer, null = it returned nothing, or an array of one answer per round) and reviewer A of the final read (label
- * "reviewer <key> · round <n> · <role>, final read": every previous id closed unless `extra.finals` queues its answers).
+ * Two calls are answered by the harness, not by the queue: the verifier of a fix round (label "reviewer V · round <n> · verify the fixes": every previous id closed
+ * unless `extra.verifiers` or the review queue holds its answer) and the arbiter (label "arbiter · round <n>": every id kept open unless `extra.arbiters` queues its answers).
  */
 async function run(args, reviews, implementers = [], extra = {}) {
   const calls = [];
   const queue = [...reviews];
-  const finals = [...(extra.finals ?? [])];
-  const watchers = Array.isArray(extra.watcher) ? [...extra.watcher] : null;   // one answer per round, then the default
+  const verifiers = [...(extra.verifiers ?? [])];   // verifier answers; the default closes every previous id of its prompt
+  const arbiters = [...(extra.arbiters ?? [])];     // arbiter answers; the default keeps every finding open
+  const closeAll = (prompt, status) => review([...prompt.matchAll(/^- ([A-Z]\d+(?:\.\d+)?) \[/gm)].map((m) => ({ id: m[1], status })));
   const impls = [...implementers];                // optional scripted implementer answers (null = it returned nothing)
   const touched = new Set(Array.isArray(args?.changed) ? args.changed : []);   // every file the scripted implementer reports, for ALL_READ
   const agent = async (prompt, opts = {}) => {
     calls.push({ prompt, opts });
     // an Error in a queue is an agent() that throws (turn cap, no StructuredOutput)
-    const isFinal = /, final read$/.test(opts.label ?? '');
     let answer = opts.label === 'find the files to change' ? (extra.probe ?? null)
+      : /^lanes? /.test(opts.label ?? '') ? (extra.lanes ?? laneRunner)(prompt, opts)
       : opts.agentType === 'implementer'
       ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
-      : /^reviewer S · round \d+ · check the fixes$/.test(opts.label ?? '') ? (watchers ? (watchers.length ? watchers.shift() : review([])) : 'watcher' in extra ? extra.watcher : review([]))
-      : isFinal && !finals.length ? review([...prompt.matchAll(/^- ([FV]\d+) \[/gm)].map((m) => ({ id: m[1], status: 'closed' })))
-      : isFinal ? finals.shift()
+      : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
+      : /^arbiter · round \d+/.test(opts.label ?? '') ? (arbiters.length ? arbiters.shift() : closeAll(prompt, 'open'))
       : queue.shift();
     if (answer instanceof Error) throw answer;
     if (opts.agentType === 'implementer' && answer) [...(answer.snapshot?.files ?? []), ...(answer.files ?? [])].forEach((f) => touched.add(f));
@@ -82,6 +87,9 @@ const reviewLabels = (calls, round) => calls.filter(c => isReview(c.opts.label, 
 const impl = (extra = {}) => ({ scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: { tree: 't1', files: ['src/Orders/OrdersQuery.cs'], churn: 3 }, rejected: [], noticed: [], openQuestions: [], ...extra });
 const FAIL = { status: 'fail', command: 'node --test', line: '# fail 2' };
 const HELPER = 'src/Other/Helper.cs';
+// The last line of scripts/gate.mjs, as a scripted implementer reports it in `gate`.
+const gate = (kind = 'green', extra = {}) => JSON.stringify({ gate: kind, test: '', outside: [], formatOnly: [], tree: 'tr1', greenAt: '2026-11-11T10:00:00Z', seconds: 1, ...extra });
+const tasksOf = (n) => Array.from({ length: n }, (_, i) => ({ id: `T${i + 1}`, title: `task-${i + 1}-title`, files: [], dependsOn: [], tdd: false, criteria: [] }));
 const plausible = () => finding({ confidence: 'PLAUSIBLE', title: 'tenant filter dropped' });
 const defect = (n) => finding({ line: 1000 * n, title: `defect${n}x` });
 const nit = (n) => finding({ priority: 'P3', line: 40 * n, title: ['minor naming', 'comment typo', 'unused import', 'spacing'][n - 1] });
@@ -89,4 +97,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, deltaReviewers, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope };
+export { laneGate, SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, gate, tasksOf,plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy };

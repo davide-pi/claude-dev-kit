@@ -13,4 +13,4 @@ paths: "**/*.tsx,**/*.jsx,**/*.component.html,**/*.css,**/*.scss"
   `aspect-ratio`, a fixed-size placeholder); late data never pushes visible content.
 - Modals and menus trap and restore focus; state is never conveyed by color alone.
 
-Procedure: skill `angular` or `react`.
+Procedure: the `angular` or `react` `SKILL.md` under `~/.claude/skills/` (Read it).

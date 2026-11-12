@@ -35,6 +35,8 @@ export type CockpitAgent = {
   usage?: CockpitUsage
   /** The part of `usage` that the steps of the turn in progress added; the turn's end swaps it for the turn's own total. */
   stepUsage?: CockpitUsage
+  /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
+  runId?: string
 }
 
 /** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */
@@ -53,6 +55,8 @@ export type CockpitHistoryEntry = {
   usd?: number
   /** Present (true) only for an agent still running when its session ended. */
   isInterrupted?: boolean
+  /** The workflow run the agent belonged to, kept so a reload still groups it under its flow. */
+  runId?: string
 }
 
 export type CockpitGit = {
@@ -64,27 +68,12 @@ export type CockpitGit = {
   untracked: number
   /** Root of the linked worktree the session runs in; absent in a main checkout. */
   worktreeRoot?: string
-  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the Work tab's git reads run and the paths they list start. */
+  /** Top level of the checkout the session runs in (`rev-parse --show-toplevel`): where the git reads run and the paths they list start. */
   root?: string
   /** The branch's upstream (`origin/feature/x`) and the commits ahead of it and behind it; absent without an upstream. */
   upstream?: string
   ahead?: number
   behind?: number
-}
-
-/** One changed file of the Work tab: tracked with its added and deleted lines, a binary one without counts, or untracked. */
-export type CockpitChange = { path: string; added?: number; deleted?: number; isBinary?: boolean; isUntracked?: boolean }
-
-/** What the Work tab draws of the repository beyond the header, read only while that tab is selected. */
-export type CockpitRepo = {
-  /** The changed files, tracked first then untracked, kept to a few dozen. */
-  files: CockpitChange[]
-  /** How many files changed in all (`files` may hold fewer). */
-  total: number
-  /** The commit the files are compared with: where the branch left the default branch (`git merge-base`). Absent when no default branch is known: the files are then the uncommitted ones, against HEAD. */
-  base?: string
-  /** The name of the default branch the branch is counted from (`main`). */
-  from?: string
 }
 
 /** A pull request of this chat, as a link: seen for the branch checked out (`gh pr view`, `az repos pr list`) or created in the session. `url` is absent when the CLI named no web address. */
@@ -95,9 +84,6 @@ export type CockpitPr = {
   /** Where the pull request stands, as the last reading said; absent (a pull request only seen created) counts as open. */
   state?: 'open' | 'draft' | 'merged' | 'closed'
 }
-
-/** The diff the second pane draws: `text` is what `Code` takes (unified hunks); `isCut` when it was cut to fit; `isUnreadable` when the file is too big or cannot be read (no text). */
-export type CockpitDiff = { file: string; text: string; isCut?: boolean; isUnreadable?: boolean }
 
 export type CockpitWorklog = {
   /** Days with work that never reached a work item (ISO dates). */
@@ -131,6 +117,8 @@ export type CockpitWorkflowRun = {
   round?: number
   lastAt?: number
   endedAt?: number
+  /** Set when the silence check closed the run: it is logged only once a newer run replaces it, as failed. */
+  isSilent?: boolean
 }
 
 /** One line of `<config>/.cache/done-claim.log`: when, which rule fired, the words around the claim. */
@@ -146,43 +134,42 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
  */
 export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string; /** `$.clock.now()` when the wait for the person began (`waiting` only). */ since?: number }
 
-/** One row of the Context tab's table: a category of the context breakdown, `kind` as the engine stamps it (`used` fills the window, `free` is what is left, `buffer` the compaction reserve, `deferred` is outside the window). */
-export type CockpitContextRow = {
-  name: string
-  tokens: number
-  kind: 'used' | 'free' | 'buffer' | 'deferred'
-  /** The change of the row in the last round (negative: it shrank); absent before a round was seen. */
-  delta?: number
-  /** True when the tokens are those of an exact count kept from earlier, not this reading's estimate. */
-  isExact?: true
-}
-
-/** What an exact (`full`) reading fixes for the rest of the session: the static rows (every one but Messages) and the skills listing. */
-export type CockpitStatic = {
-  rows: { name: string; tokens: number }[]
-  skills?: { listed: number; total: number }
-}
-
-/** What the Context tab draws from `usage({ breakdown })`: the rows and the window they are measured against. */
-export type CockpitContext = {
-  rows: CockpitContextRow[]
-  /** Tokens in use and the window measured against (the compaction window), as the breakdown counts them. */
-  total: number
-  max: number
-  /** How many skills the listing includes of those the session has; absent when the session lists none. */
-  skills?: { listed: number; total: number }
-  /** True when the whole breakdown was counted with the token-count API (`full`); false for the local estimate (its static rows may still be exact: `isExact` per row). */
-  isExact: boolean
-}
-
-/** The view the pane draws, the tab bar's five buttons: `agents` is Agenti, `context` Contesto, `signals` Notifiche, `work` Lavoro, `notes` Note. */
-export type CockpitTab = 'agents' | 'context' | 'signals' | 'work' | 'notes'
-
 /** What an entry of the event ring buffer is about: a finished agent (the Context tab prices it). */
 export type CockpitEventKind = 'agent'
 
 /** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
+
+/** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request, a finished agent, a notification that first held. */
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal' | 'flow'
+
+/**
+ * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`, `tools` the main loop's tool calls of the round by tool name; `commit`: `text` and `key` are the short hash;
+ * `test`: `text` the command, `isFailed`; `compact`: `tokens` before, `after` the first reading that followed, `key` `c<n>`; `pr`: `key` the number, `text` the title;
+ * `agent` (`at` is its end): `key` the agent id, `text` its type, `model`, `effort`, `usd`, `ms` its length, `isFailed`; `signal`: `key` the `kind:key` id of the notification, `text` its label, `n` its number, `severity`.
+ * `flow` (`at` is the run's end): `key` the run id, `text` the script name, `usd` the sum of its agents, `ms` first agent start to end, `n` the highest loop round, `isFailed` when it ended silent (not observed closing);
+ * `agent` also carries `runId` when it belongs to a workflow run.
+ * `key` makes an entry once-only (per kind); a `flow` entry is replaced instead, so a resumed run is one node.
+ */
+export type CockpitLogEntry = {
+  at: number
+  kind: CockpitLogKind
+  key?: string
+  runId?: string
+  text?: string
+  /** An agent's spawn description (its label, which names its loop round under a flow). */
+  desc?: string
+  usd?: number
+  ms?: number
+  tokens?: number
+  after?: number
+  isFailed?: boolean
+  model?: string
+  effort?: string | number
+  n?: number
+  severity?: 'block' | 'warn' | 'info'
+  tools?: Record<string, number>
+}
 
 /**
  * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
@@ -208,6 +195,8 @@ export type CockpitInsights = {
   cacheShares: number[]
   /** The five main-loop calls whose result was the largest since the last compaction, biggest first: the tool, its short argument, the whole one when it differs (a file's full path, a long command) and the result's estimated tokens (characters / 4). */
   biggest?: { tool: string; arg?: string; fullArg?: string; tokens: number }[]
+  /** The estimated tokens (characters / 4) the main loop's results added to the context by tool, since the last compaction. */
+  byTool?: Record<string, number>
   /** How many times each Bash command failed (its short argument). */
   failedCmds?: Record<string, number>
   /** When the last main round ended (`$.clock.now()`). */
@@ -219,9 +208,6 @@ export type CockpitInsights = {
   /** The context before and after each of the last three compactions, oldest first; `after` is the first reading that followed (absent until one did). */
   compactCtx?: { before: number; after?: number }[]
 }
-
-/** A note saved on the Notes tab; `id` is stable, the list keeps the order the notes were saved in. */
-export type CockpitNote = { id: number; text: string }
 
 export type CockpitSnapshot = {
   /** The session the per-session fields (agents, history, tasks, cache share, 5h samples) belong to; absent between a session's end and the next one's first event. */
@@ -237,8 +223,9 @@ export type CockpitSnapshot = {
   /** Context window of the main loop. */
   ctx: { tokens?: number; window?: number; percent?: number }
   /** Session cost in USD; `startUsd` is the total when the last turn began, `lastUsd` the cost of the last main turn that ended,
-   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet. */
-  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number }
+   * `pendingUsd` the `startUsd` of an ended turn whose cost no measure has reported yet, `isSettled` that a measure settled the last
+   * turn since (so `lastUsd` is final and the spend after it is not the turn's). */
+  cost: { usd?: number; startUsd?: number; lastUsd?: number; pendingUsd?: number; isSettled?: boolean }
   rateLimits: CockpitRateLimit[]
   /** Share of the last main-loop turn's input served from the prompt cache, 0-100; absent before the first turn. */
   cacheShare?: number
@@ -258,12 +245,6 @@ export type CockpitSnapshot = {
   edited?: string[]
   /** The top level of the checkout the process's first git read found ('' when it started outside any repo), kept across a /clear or a resume: the PR of its branch is the chat's without an edit. */
   homeRoot?: string
-  /** The Costi tab's last reading of the context breakdown; absent until the tab was opened. */
-  context?: CockpitContext
-  /** The number of the read that `context` holds: reads overlap, and one that started earlier than it never replaces it. */
-  contextSeq?: number
-  /** The static part of the session's first exact count: every later summary reading reuses it (Messages stay live); absent until one ran. */
-  contextStatic?: CockpitStatic
   /** The context of the session's last state (its data file), drawn with a `~` until the engine measures the live window; never an alert's input. */
   lastCtx?: { tokens: number; window: number; percent: number }
   /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
@@ -273,17 +254,11 @@ export type CockpitSnapshot = {
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
   autoCompactAt?: number
   alm?: CockpitAlm
-  /** The selected tab; absent is the Subagents view. */
-  tab?: CockpitTab
   agents: CockpitAgent[]
   /** Finished agents that left the live list, newest first; absent in a state written before the history existed. */
   history?: CockpitHistoryEntry[]
-  /** The HISTORY list shows every entry; absent shows the newest few. */
-  isHistoryOpen?: boolean
   /** The notification whose why and what-to-do are shown (`kind:key`); absent shows none. */
   signalOpen?: string
-  /** The notifications the person has seen (the ids the Notifications tab listed when it was open); the tab label counts the others. */
-  seenSignals?: string[]
   /** When each notification in force first held (`kind:key` → ms): the time on its row. One that stops holding is dropped. */
   signalsAt?: Record<string, number>
   git?: CockpitGit
@@ -302,34 +277,30 @@ export type CockpitSnapshot = {
   doneClaims?: CockpitDoneClaim[]
   /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
   prs?: CockpitPr[]
-  /** The Work tab's changed files; absent until that tab was selected, and without git. */
-  repo?: CockpitRepo
   /** The ring buffer of finished rounds and agents, oldest first. */
   events?: CockpitEvent[]
+  /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests, finished agents, notifications), oldest first, at most 300; kept in the session data file. Not `history`, the agent history. */
+  sessionLog?: CockpitLogEntry[]
+  /** The main loop's tool calls since the last round ended, by tool name: the next round entry takes them. Kept in the session data file. */
+  roundTools?: Record<string, number>
+  /** The USD each agent type's finished agents cost, summed when each ended (the agent history is capped); kept in the session data file. */
+  agentSpend?: Record<string, number>
+  /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */
+  costTarget?: number
   /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or Lavoro's `log hours`. */
-  confirm?: 'retro' | 'worklog' | `note:${number}`
+  confirm?: 'retro' | 'worklog'
   /** What the Insights tab shows; absent before the first round or tool call. */
   insights?: CockpitInsights
   /** The agents expanded on the Agents tab (the others show their one line): description, facts, warning, four token counters, tool. */
   agentsOpen?: string[]
-  /** The notes shown in full on the Notes tab (the others show their first lines). */
-  notesOpen?: number[]
-  /** The lists shown in full and the rows expanded on the Context and Work tabs: `changes`, `outside`, `signals:more`, `tasks:more`, `prs:<state>` (a pull request group flipped from its default), `grew:<tool>:<arg>:<tokens>`. */
+  /** The lists shown in full and the rows expanded: `attention`, `inProgress`, `done`, `worklog:days`. */
   openKeys?: string[]
-  /** `$.clock.now()` when the Context tab's `refresh` was last pressed: the button waits a minute from it. */
-  refreshedAt?: number
-  /** The Notes tab's saved notes, kept with the session in its data file; `send` appends one to the prompt box and keeps it. Absent when none. */
-  notes?: CockpitNote[]
-  /** What the Notes tab's field holds (not kept in the data file); absent when empty. */
-  noteDraft?: string
+  /** The state a person gave to a group of FATTO, by its key: it holds when the group stops being the newest. Absent: the newest is open, the others closed. */
+  groupsOpen?: Record<string, boolean>
   /** True once the pane's language was read (a session start or the first drawing); not kept in any file. */
   isLangRead?: boolean
-  /** The id of the note the field was loaded from: `save` replaces that note instead of adding one. */
-  noteEditing?: number
-  /** The diff of the file pressed on the Work tab, drawn by the pane `cockpit-diff`; absent when that pane is closed. */
-  diff?: CockpitDiff
   /** The repo's default branch, as `origin/HEAD` names it: no pull request is looked for on it. Absent when `origin/HEAD` is not set. */
   defaultBranch?: string
   /** Last tick, in `$.clock.now()` milliseconds: the "now" countdowns and durations count from. */

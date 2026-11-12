@@ -203,13 +203,17 @@ test('script: guidance or accept on a not-converging round restarts the count; a
   assert.deepEqual(stalledAt(retried.out), ['STALL', 'not-converging', 6]);      // one more fix, then the same stall: the count was not restarted
 });
 
-test('script: a reviewer with no verdict on F1 while another finds a new P2 is not a stall: F2 is fixed, F1 follows the no-verdict rule (F5)', async () => {
+test('given the verifier gives no verdict on F1 and finds a new P2, when round 2 closes, then F2 is fixed and F1 is asked again, never a stall (F5)', async () => {
+  // Given
+  const args = { ...ARGS, perimeter: { files: ['src/Orders/'] } };
   const at = (n, extra = {}) => finding({ path: `src/Orders/F${n}.cs`, line: n, ...extra });
-  const { calls } = await run(manyArgs(), [
-    review([], [at(0)]), review([]),                                                               // R1: A finds F1
-    null,                                                                                          // R2: A returns nothing
-  ], [manyImpl], { watcher: review([], [at(9, { title: 'pagination offset calculation' })]) });    // R2: S finds F2
+  const queue = [review([], [at(0)]), review([], [at(9, { title: 'pagination offset calculation' })])];   // R1: A finds F1; R2: V has no verdict on F1 and finds F2
+  // When
+  const { out, calls } = await run(args, queue);
+  // Then
+  assert.equal(out.status, 'OK');
   assert.deepEqual(labels(calls, 'fix').slice(0, 2), ['fix round 1 findings', 'fix round 2 findings']);
+  assert.match(out.gaps.join('\n'), /round 2: no verdict for F1, asked again/);
 });
 
 test('script: a coverage rerun after a fix that closed F1 is not a fix round: its new P2 is fixed, never a stall (F1, F4)', async () => {
@@ -226,7 +230,7 @@ test('script: a coverage rerun after a fix that closed F1 is not a fix round: it
 
 test('script: a fix round that closes one finding and a verify that turned green are progress, never a stall', async () => {
   const noVerdict = (n) => review([], [reviewsNew(n).found[0]]);
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()]), noVerdict(2), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [impl({ verify: FAIL }), impl(), impl()]);
+  const { out } = await run(ARGS, [review([], [finding()]), noVerdict(2), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [impl({ verify: FAIL }), impl(), impl()]);
   assert.equal(out.status, 'OK');                                              // V1 sent with F1: round 2's F1 got no verdict, yet the green verify is progress
   assert.deepEqual(out.roundLog.map(r => r.toFix), [['V1', 'F1'], ['F2'], []]);
 });
@@ -250,7 +254,7 @@ test('script: every STALL carries the finding history', async () => {
   assert.deepEqual(noReviewer.out.stall.history, []);
   const stalled = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'open' }])]);
   assert.equal(stalled.out.stall.history[0].id, 'F1');
-  const red = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL })]);
+  const red = await run(ARGS, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL })]);
   assert.deepEqual(red.out.stall.history.map(h => h.id), ['V1']);
   assert.equal(red.out.status === 'STALL' && Array.isArray(red.out.stall.history), true);
 });
@@ -292,20 +296,19 @@ test('script: a finding history lists only the findings that were tracked, not a
   assert.deepEqual(out.roundLog[0].new, ['F1']);
 });
 
-test('script: RECHECK reruns only the reviewers that skipped the id: L round where A and the Sonnet S skipped F2 and B returned nothing, round 3 has A and S', async () => {
-  const boom = new Error('max turns');
-  const closed = (...ids) => review(ids.map(id => ({ id, status: 'closed' })));
+test('given an L round 1 and a verifier that skipped F2, when RECHECK runs, then round 3 is the verifier alone, asked about F2 only', async () => {
+  // Given
   const f1 = finding({ path: 'src/Orders/F1.cs' });
   const f2 = finding({ path: 'src/Orders/F12.cs', line: 50, title: 'a second defect elsewhere' });
-  const { out, calls } = await run(manyArgs(), [
-    review([], [f1]), review([], [f2]),                                      // R1: A finds F1, B finds F2
-    closed('F1'), boom,                                                       // R2: A skips F2, B returns nothing
-    closed('F2'),                                                             // R3: A answers F2
-  ], [manyImpl, { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok', rejected: [], noticed: [] }], { watcher: [closed('F1'), closed('F2')] });   // R2: S skips F2; R3: S closes it
+  const fixed = { scope: 'fixed', files: ['src/Orders/F1.cs'], evidence: 'ok', rejected: [], noticed: [] };
+  const verifiers = [review(closed('F1')), review(closed('F2'))];   // R2: V skips F2; R3: V closes it
+  // When
+  const { out, calls } = await run(manyArgs({ plan: { tasks: tasksOf(5) } }), [review([], [f1]), review([], [f2])], [manyImpl, manyImpl, fixed], { verifiers });   // R1: A finds F1, B finds F2
+  // Then
   assert.equal(out.status, 'OK');
-  assert.deepEqual(reviewLabels(calls, 2), ['reviewer A · round 2 · code', 'reviewer B · round 2 · second opinion', 'reviewer S · round 2 · check the fixes']);
-  assert.deepEqual(reviewLabels(calls, 3), ['reviewer A · round 3 · code', 'reviewer S · round 3 · check the fixes']);   // B returned nothing: a gap, not a skip
-  const r3 = calls.find(c => c.opts.label === 'reviewer S · round 3 · check the fixes').prompt;
+  assert.deepEqual(reviewLabels(calls, 2), ['reviewer V · round 2 · verify the fixes']);
+  assert.deepEqual(reviewLabels(calls, 3), ['reviewer V · round 3 · verify the fixes']);
+  const r3 = calls.find(c => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt;
   assert.match(r3, /you skipped last round.*ids only/s);
   assert.match(r3, /- F2 \[open\]/);
   assert.doesNotMatch(r3, /- F1 /);
@@ -321,10 +324,10 @@ test('script: a closed finding on a file the last fix did not touch is not asked
     review([{ id: 'F1', status: 'closed' }, { id: 'F3', status: 'closed' }]),
   ], [impl({ files: both }), impl({ files: both, snapshot: { tree: 't2', files: both, churn: 1 } }), impl({ snapshot: { tree: 't3', files: both, churn: 1 } })]);
   assert.equal(out.status, 'OK');
-  const r2 = calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt;
+  const r2 = calls.find(c => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt;
   assert.match(r2, /- F1 \[open\]/);
   assert.match(r2, /- F2 \[open\]/);
-  const r3 = calls.find(c => c.opts.label === 'reviewer A · round 3 · code').prompt;
+  const r3 = calls.find(c => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt;
   assert.match(r3, /- F1 \[closed\]/);                                       // the last fix touched OrdersQuery.cs
   assert.match(r3, /- F3 \[open\]/);
   assert.doesNotMatch(r3, /- F2 /);                                           // Dto/A.cs was not touched by it
@@ -341,7 +344,7 @@ test('script: a snapshot without a tree is no snapshot: the declared files are u
 });
 
 test('script: a scope-revert proposal exists only once the fixer has reported: a STALL round before any revert records none; a rejected revert records none', async () => {
-  const hunk = () => finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = () => finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const both = ['src/Orders/OrdersQuery.cs', HELPER];
   const touched = impl({ files: both, snapshot: { tree: 't1', files: both, churn: 3 } });
   const stalled = await run(ARGS, [review([], [hunk(), finding({ path: HELPER, line: 3, title: 'helper drops the tenant filter' })])], [touched]);
@@ -362,9 +365,9 @@ test('script: t1, a fix without snapshot, a fix with t3: round 3 reviewers read 
     impl(), { scope: 'fixed once', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', rejected: [], noticed: [] }, impl({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 2 } }),
   ]);
   assert.equal(out.status, 'OK');
-  const r3 = calls.find(c => c.opts.label === 'reviewer A · round 3 · code').prompt;
+  const r3 = calls.find(c => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt;
   assert.match(r3, /Review the changes since t1: `git diff t1 t3`/);
-  assert.match(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /Review the changes since t1/);
+  assert.match(calls.find(c => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt, /Review the changes since t1/);
 });
 
 test('script: rejected[].kind decides a "not reproduced" stall; the reason text only when kind is absent; kind is in the schema', async () => {
@@ -383,11 +386,11 @@ test('script: rejected[].kind decides a "not reproduced" stall; the reason text 
 test('script: a P2 on a file that also has a scope finding goes to the fixer with the revert; next round the reviewers judge it as a previous finding', async () => {
   const both = ['src/Orders/OrdersQuery.cs', HELPER];
   const touched = impl({ files: both, snapshot: { tree: 't1', files: both, churn: 3 } });
-  const hunk = finding({ path: HELPER, category: 'scope', priority: 'P3', line: 4, title: 'extra logging added to the helper' });
+  const hunk = finding({ path: HELPER, category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 4, title: 'extra logging added to the helper' });
   const p2 = (extra = {}) => finding({ path: HELPER, line: 30, title: 'helper drops the tenant filter', ...extra });
   const { out, calls } = await run(ARGS, [review([], [hunk, p2()]), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [touched, impl()]);
   assert.equal(out.status, 'OK');
-  assert.match(calls.find(c => c.opts.label === 'reviewer A · round 2 · code').prompt, /- F2 \[open\] src\/Other\/Helper\.cs:30/);   // asked a verdict after the revert
+  assert.match(calls.find(c => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt, /- F2 \[open\] src\/Other\/Helper\.cs:30/);   // asked a verdict after the revert
   const fix = calls.find(c => c.opts.label === 'fix round 1 findings').prompt;
   assert.match(fix, /- F1 \[P3\] src\/Other\/Helper\.cs:4/);
   assert.match(fix, /- F2 \[P2\] src\/Other\/Helper\.cs:30.*revert the hunk of this file; this defect should disappear with it/);
@@ -409,7 +412,7 @@ test('script: skipped ids that are partly challenged: the previous block asks a 
     review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }]),
   ], [impl(), impl({ rejected: [{ id: 'F1', kind: 'not-reproduced', reason: 'cannot trigger it' }] })]);
   assert.equal(out.status, 'OK');
-  const r3 = calls.find(c => c.opts.label === 'reviewer A · round 3 · code').prompt;
+  const r3 = calls.find(c => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt;
   assert.match(r3, /you skipped last round \(give a verdict, closed or open, for each of these ids and for each id of the CHALLENGE below;/);
   assert.match(r3, /- F2 \[open\]/);
   assert.match(r3, /CHALLENGE.*- F1 \[P2\]/s);
@@ -437,14 +440,14 @@ test('script: a churn stall is accepted on its own round: the reviewers already 
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 5);
   assert.deepEqual(out.accepted.map(x => x.id), ['F5']);
-  const r5 = calls.find(c => c.opts.label === 'reviewer A · round 5 · code').prompt;                    // the last fix was read before F5 is let go
+  const r5 = calls.find(c => c.opts.label === 'reviewer V · round 5 · verify the fixes').prompt;                    // the last fix was read before F5 is let go
   assert.match(r5, /Review the changes since t4: `git diff t4 t5`/);
   assert.equal(calls.filter(c => c.opts.label?.startsWith('fix')).length, 4);
   assert.deepEqual(out.roundLog.map(r => r.churn), [30, 10, 20, 30, null]);
 });
 
 test('script: a scope finding the fixer rejected, the reviewer kept and the fixer then reverted is proposed once; guided after a stall it is still one proposal', async () => {
-  const hunk = () => finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = () => finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const wrong = impl({ rejected: [{ id: 'F1', kind: 'wrong', reason: 'the brief requires this logging' }] });
   const kept = await run(ARGS, [review([], [hunk()]), review([{ id: 'F1', status: 'open', note: 'the brief does not mention logging' }]), review([{ id: 'F1', status: 'closed' }])], [impl(), wrong, impl()]);
   assert.equal(kept.out.status, 'OK');
@@ -482,13 +485,18 @@ test('script: questions a cleanup fixer returns anyway never stall the run: they
   assert.ok(out.outOfScope.some(o => /Rename the helper\?/.test(o.text ?? '')));
 });
 
-test('script (#P42): a soft note that comes back as a blocking finding leaves the notes: the closing table lists the defect once', async () => {
-  const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
+test('given a soft scope note that the verifier raises again as CONFIRMED, when round 2 closes, then it leaves the notes and the closing table lists the defect once (#P42)', async () => {
+  // Given
   const scope = (extra = {}) => finding({ category: 'scope', title: 'unrequested rename of a helper', line: 300, ...extra });
   const other = finding({ line: 300, title: 'a second defect elsewhere' });
   const t = (tree) => impl({ snapshot: { tree, files: ['src/Orders/OrdersQuery.cs'], churn: 10 } });
-  // R1: A alone, PLAUSIBLE: a note beside a fixed P2 (F1); the final read raises the same hunk CONFIRMED: F3, fixed.
-  const { out } = await run({ ...ARGS, size: 'M' }, [review([], [other, scope({ confidence: 'PLAUSIBLE' })]), review([]), review(closed('F1')), review(closed('F1', 'F3'))], [impl(), t('t2'), t('t3')], { finals: [review(closed('F1'), [scope({ confidence: 'CONFIRMED' })])] });
+  const args = { ...ARGS, size: 'L', plan: { tasks: tasksOf(5) } };
+  // R1: A alone, PLAUSIBLE: a note beside a fixed P2 (F1), B read it too; R2: the verifier raises the same hunk CONFIRMED: F3, fixed.
+  const queue = [review([], [other, scope({ confidence: 'PLAUSIBLE' })]), review([])];
+  const verifiers = [review(closed('F1'), [scope({ confidence: 'CONFIRMED' })]), review(closed('F1', 'F3'))];
+  // When
+  const { out } = await run(args, queue, [impl(), impl(), t('t2'), t('t3')], { verifiers });
+  // Then
   assert.equal(out.status, 'OK');
   assert.deepEqual(out.minor, []);
 });
@@ -496,4 +504,109 @@ test('script (#P42): a soft note that comes back as a blocking finding leaves th
 test('script: the reviewer prompt names filesReviewed explicitly', async () => {
   const { calls } = await run(ARGS, [review([])]);
   assert.match(calls.find(c => c.opts.label === 'reviewer A · round 1 · code').prompt, /under filesReviewed list every file you actually read/);
+});
+
+// ── deliver flow v2, task 12: the final verification reads the whole diff once ───────────────────────────
+import { ARGS_M, tasksOf, gate, isReview } from './impl-review-loop.harness.mjs';
+
+const finals = (calls, round = 1) => calls.filter(c => isReview(c.opts.label, round));
+const verifierCalls = (calls) => calls.filter(c => /^reviewer V · round \d+ · /.test(c.opts.label ?? ''));
+const arbiterCalls = (calls) => calls.filter(c => /^arbiter · round \d+/.test(c.opts.label ?? ''));
+const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
+
+test('given an M run with no risk axis, when the final verification starts, then reader B runs once on sonnet at high', async () => {
+  // Given
+  const args = ARGS_M;
+  // When
+  const { calls } = await run(args, [review([])]);
+  // Then
+  const readers = finals(calls);
+  assert.deepEqual(readers.map(c => c.opts.label), ['reviewer B · round 1 · whole diff']);
+  assert.deepEqual([readers[0].opts.model, readers[0].opts.effort], ['sonnet', 'high']);
+});
+
+test('given an L run, when the final verification starts, then reader B on opus at high and a second reader on sonnet at high run together', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasksOf(5) } };
+  // When
+  const { calls } = await run(args, [review([]), review([])]);
+  // Then
+  const readers = finals(calls);
+  assert.deepEqual(readers.map(c => `${c.opts.label}|${c.opts.model}|${c.opts.effort}`).sort(), ['reviewer A · round 1 · code|sonnet|high', 'reviewer B · round 1 · second opinion|opus|high']);
+});
+
+test('given a fix round with a P1, when it is verified, then one verifier runs on opus at medium', async () => {
+  // Given
+  const raised = review([], [finding({ priority: 'P1' })]);
+  // When
+  const { out, calls } = await run(ARGS_M, [raised], [impl(), impl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 2 } })]);
+  // Then
+  assert.equal(out.status, 'OK');
+  const [v, ...more] = verifierCalls(calls);
+  assert.equal(more.length, 0);
+  assert.deepEqual([v.opts.agentType, v.opts.model, v.opts.effort], ['code-reviewer', 'opus', 'medium']);
+  assert.ok(v.prompt.includes('git diff t1 t2'));
+});
+
+test('given a verifier that finds a new P2 in the fix delta, when the round closes, then another fix round follows', async () => {
+  // Given
+  const newDefect = finding({ line: 300, title: 'a defect the fix introduced' });
+  const verifiers = [review(closed('F1'), [newDefect]), review(closed('F1', 'F2'))];
+  // When
+  const { out, calls } = await run(ARGS_M, [review([], [finding()])], [impl(), impl(), impl()], { verifiers });
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(calls.filter(c => c.opts.label?.startsWith('fix round')).map(c => c.opts.label), ['fix round 1 findings', 'fix round 2 findings']);
+  assert.equal(verifierCalls(calls).length, 2);
+});
+
+test('given a finding the implementer rejects and its raiser keeps, when the round closes, then the arbiter rules once on opus at medium', async () => {
+  // Given
+  const rejects = impl({ rejected: [{ id: 'F1', reason: 'not a defect', kind: 'wrong' }] });
+  const verifiers = [review([{ id: 'F1', status: 'open', note: 'still wrong' }]), review(closed('F1'))];
+  // When
+  const { out, calls } = await run(ARGS_M, [review([], [finding()])], [impl(), rejects, impl()], { verifiers });
+  // Then
+  assert.equal(out.status, 'OK');
+  const [a, ...more] = arbiterCalls(calls);
+  assert.equal(more.length, 0);
+  assert.deepEqual([a.opts.agentType, a.opts.model, a.opts.effort], ['code-reviewer', 'opus', 'medium']);
+  assert.ok(calls.filter(c => c.opts.label?.startsWith('fix round')).length === 2);
+});
+
+test('given a carried finding, when the final readers judge it closed, then the run is OK and the finding is not open', async () => {
+  // Given
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
+  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
+  // When
+  const { out, calls } = await run(bid, [raised, review(closed('A1.1'))], [green()]);
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.deepEqual(out.open, []);
+  assert.match(finals(calls)[0].prompt, /- A1\.1 \[open\]/);
+});
+
+test('given a carried finding outside the perimeter, when the final readers keep it open, then the loop stalls on it', async () => {
+  // Given
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
+  // When
+  const { out } = await run(bid, [raised, review([{ id: 'A1.1', status: 'open' }])], [impl({ gate: gate('green', { tree: 'tr1' }) })]);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.deepEqual(out.stall.findings.map(x => [x.id, x.why]), [['A1.1', 'widen']]);
+});
+
+test('given a review fix under the gate, when its report is read, then the fix prompt carries the gate lines and the verify comes from the gate', async () => {
+  // Given
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
+  const claimsRed = green({ verify: FAIL, gate: gate('green', { tree: 'tr2' }) });
+  // When
+  const { out, calls } = await run(bid, [review([]), review([], [finding()])], [green(), claimsRed], { verifiers: [review(closed('F1'))] });
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.equal(out.verify.status, 'pass');
+  assert.ok(calls.find(c => c.opts.label === 'fix round 1 findings').prompt.includes('node ~/.claude/scripts/gate.mjs --root'));
 });

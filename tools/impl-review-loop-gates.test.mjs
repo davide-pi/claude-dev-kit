@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
+import { gate } from './impl-review-loop.harness.mjs';
 
 // ── the verify gate: delta command, verify finding, gate stalls (T10, T4) ──────────────────────────
 test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {
@@ -45,18 +46,23 @@ test('verifyGate: fail → a P1 V finding; fail with a V in the fixer toFix → 
   assert.deepEqual(verifyGate({ report: rep(PASS), verifyCmd: 'x', toFixHadVerify: true, previous: 'fail' }), { status: 'pass' });
 });
 
-test('script: a red verify after implement goes to the fixer as V1 and the reviewers see the verify line; V ids are never asked to reviewers', async () => {
-  const { out, calls } = await run({ ...ARGS_M, verify: 'node --test' }, [review([]), review([])], [impl({ verify: FAIL }), impl()]);
+test('given no gate command and a red verify after implement, when the loop runs, then the fixer gets V1, the readers see the verify line and no V id is asked to them', async () => {
+  // Given
+  const queue = [review([])];                                                     // round 1: reader B on the whole diff
+  // When
+  const { out, calls } = await run(ARGS_M, queue, [impl({ verify: FAIL }), impl()]);
+  // Then
   assert.equal(out.status, 'OK');
-  assert.equal(out.rounds, 3);                                                    // the V1 fix is a review fix: round 3 is the final read
-  assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
+  assert.equal(out.rounds, 2);                                                    // the V1 fix is a review fix: round 2 is its verifier
+  const r1 = calls.find((c) => c.opts.label === 'reviewer B · round 1 · whole diff').prompt;
+  assert.match(r1, /Verify \(run by the implementer\): `node --test` → fail: # fail 2/);
   const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
   assert.match(fix, /- V1 \[P1\] \(verify\) - .*node --test.*# fail 2/);
   assert.match(fix, /category verify/);
-  const r2 = calls.find((c) => c.opts.label === 'reviewer S · round 2 · check the fixes').prompt;
+  const r2 = calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt;
   assert.match(r2, /Verify \(run by the implementer\): `node --test` → pass: # fail 0/);
   assert.doesNotMatch(r2, /V1/);
-  assert.doesNotMatch(calls.find((c) => c.opts.label === 'reviewer A · round 1 · code').prompt, /V1/);
+  assert.doesNotMatch(r1, /V1/);
   assert.deepEqual(out.roundLog[0].toFix, ['V1']);
   assert.deepEqual(out.open, []);
   assert.deepEqual(out.verify, PASS);
@@ -71,7 +77,7 @@ test('script: a V finding is fixed together with the review findings and OK is r
 });
 
 test('script: a fixer whose verify still fails with a V in its toFix is a STALL "verify-failed" listing V1; the result carries verify, evidence, notVerified', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL, evidence: 'red' }), impl({ verify: FAIL, evidence: 'still red', notVerified: 'the db part' })]);
+  const { out } = await run(ARGS, [review([])], [impl({ verify: FAIL, evidence: 'red' }), impl({ verify: FAIL, evidence: 'still red', notVerified: 'the db part' })]);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.round, 1);
   assert.equal(out.stall.why, 'verify-failed');
@@ -84,22 +90,22 @@ test('script: a fixer whose verify still fails with a V in its toFix is a STALL 
 });
 
 test('script: a review fix that stalls on verify still records its churn (the roundLog, hence the final-read tier of a resume)', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
+  const { out } = await run(ARGS, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL, snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 40 } })]);
   assert.equal(out.stall.why, 'verify-failed');
   assert.equal(out.roundLog[0].churn, 40);
 });
 
 test('script: a guided resume after verify-failed runs the fixer again, and a pass closes V1', async () => {
   const first = [impl({ verify: FAIL }), impl({ verify: FAIL })];
-  const stalled = await run({ ...ARGS, verify: 'node --test' }, [review([])], first);
+  const stalled = await run(ARGS, [review([])], first);
   assert.equal(stalled.out.status, 'STALL');
-  const resumed = await run({ ...ARGS, verify: 'node --test', resolutions: [{ round: 1, guidance: 'check the fixture' }] }, [review([]), review([])], [first[0], impl()]);
+  const resumed = await run({ ...ARGS, resolutions: [{ round: 1, guidance: 'check the fixture' }] }, [review([]), review([])], [first[0], impl()]);
   assert.equal(resumed.out.status, 'OK');
   assert.match(resumed.calls.find((c) => c.opts.label === 'fix round 1 findings').prompt, /check the fixture/);
 });
 
 test('script: pass then fail after a fix is a STALL "green-to-red"', async () => {
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), impl({ verify: FAIL })]);
+  const { out } = await run(ARGS, [review([], [finding()])], [impl(), impl({ verify: FAIL })]);
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.why, 'green-to-red');
   assert.equal(out.stall.round, 1);
@@ -113,7 +119,7 @@ test('script: a report that did not run the verify command is a STALL "verify-no
   assert.equal(stalled.out.stall.why, 'verify-not-run');
   assert.equal(stalled.out.stall.round, 0);
   assert.equal(stalled.calls.filter((c) => isReview(c.opts.label)).length, 0);
-  const fixer = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl(), none]);
+  const fixer = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()])], [impl({ gate: gate('green', { tree: '' }) }), none]);
   assert.equal(fixer.out.stall.why, 'verify-not-run');
   assert.equal(fixer.out.stall.round, 1);
   const openV = await run(ARGS, [review([])], [impl({ verify: FAIL }), none]);                    // no args.verify, but a V is open
@@ -269,7 +275,7 @@ test('script: a P2 outside the perimeter in a touched file is a STALL "widen"; r
   const perimeterLine = (label) => resumed.calls.find((c) => c.opts.label === label).prompt.match(/PERIMETER \(the only files you may change\): [^\n]*/)[0];
   assert.doesNotMatch(perimeterLine('reviewer A · round 1 · code'), /Helper/);
   assert.match(perimeterLine('fix round 1 findings'), /Helper\.cs/);
-  assert.match(perimeterLine('reviewer A · round 2 · code'), /Helper\.cs/);
+  assert.match(perimeterLine('reviewer V · round 2 · verify the fixes'), /Helper\.cs/);
   const accepted = await run({ ...ARGS, resolutions: [{ round: 1, accept: ['F1'] }] }, reviews(), [touched]);
   assert.equal(accepted.out.status, 'OK');
   assert.equal(accepted.out.rounds, 1);
@@ -288,7 +294,7 @@ test('script: a P2 caused by the change in a file it did not touch is a widen to
 });
 
 test('script: an unrequested hunk inside the perimeter is reverted by the fixer and listed as a scope-revert proposal; noticed items reach outOfScope', async () => {
-  const hunk = finding({ category: 'scope', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
+  const hunk = finding({ category: 'scope', confidence: 'CONFIRMED', priority: 'P3', line: 12, title: 'extra logging added to the query', failure: 'a hunk the brief does not require' });
   const dto = { title: 'rename the DTO', path: 'src/Orders/Dto/A.cs', why: 'not asked' };
   const dead = { title: 'dead branch', path: 'src/Orders/OrdersQuery.cs', why: 'left alone' };
   const { out, calls } = await run(ARGS, [review([], [hunk]), review([{ id: 'F1', status: 'closed' }])], [impl({ noticed: [dto], openQuestions: ['which tenant?'] }), impl({ noticed: [dto, dead] })]);
@@ -319,7 +325,7 @@ test('script: a rejected finding is challenged next round and a reviewer that wi
   const { out, calls } = await run(ARGS, [review([], [plausible()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ rejected: [{ id: 'F1', reason: 'not reproduced' }] })]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);
-  const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
+  const r2 = calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt;
   assert.match(r2, /CHALLENGE/);
   assert.match(r2, /- F1 \[P2\] src\/Orders\/OrdersQuery\.cs - tenant filter dropped.*the fixer's reason: not reproduced/);
   assert.doesNotMatch(r2, /- F1 \[open\]/);                                                          // not a plain previous finding any more
@@ -329,7 +335,7 @@ test('script: a rejected finding is challenged next round and a reviewer that wi
 
 test('script: when the only previous finding is challenged, the previous block does not say "give no verdict"', async () => {
   const { calls } = await run(ARGS, [review([], [plausible()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ rejected: [{ id: 'F1', reason: 'not reproduced' }] })]);
-  const r2 = calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt;
+  const r2 = calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt;
   assert.match(r2, /CHALLENGE/);
   assert.doesNotMatch(r2, /give no verdict/);
   assert.match(r2, /PREVIOUS FINDINGS: none besides the CHALLENGE below/);
@@ -354,8 +360,8 @@ test('script: a rejection the reviewer keeps once goes back to the fixer with th
   assert.deepEqual(ok.calls.filter((c) => c.opts.label?.startsWith('fix')).map((c) => c.opts.label), ['fix round 1 findings', 'fix round 2 findings']);
   const fix2 = ok.calls.find((c) => c.opts.label === 'fix round 2 findings').prompt;
   assert.match(fix2, /- F1 \[P2\].*the guard is missing at line 12/);
-  assert.match(ok.calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /the fixer's reason: the guard exists upstream/);
-  assert.doesNotMatch(ok.calls.find((c) => c.opts.label === 'reviewer A · round 3 · code').prompt, /CHALLENGE/);              // answered: the challenge is over
+  assert.match(ok.calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt, /the fixer's reason: the guard exists upstream/);
+  assert.doesNotMatch(ok.calls.find((c) => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt, /CHALLENGE/);              // answered: the challenge is over
   const twice = await run(ARGS, [review([], [plausible()]), keep('missing'), keep('still missing')], [impl(), reject('exists upstream'), reject('exists upstream, really')]);
   assert.equal(twice.out.status, 'STALL');
   assert.equal(twice.out.stall.round, 3);
@@ -366,11 +372,11 @@ test('script: a challenged finding no reviewer answers is asked again, the chall
   const { out, calls } = await run(ARGS, [review([], [plausible()]), review([]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ rejected: [{ id: 'F1', reason: 'not reproduced' }] })]);
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 3);
-  assert.match(calls.find((c) => c.opts.label === 'reviewer A · round 3 · code').prompt, /CHALLENGE.*the fixer's reason: not reproduced/s);
+  assert.match(calls.find((c) => c.opts.label === 'reviewer V · round 3 · verify the fixes').prompt, /CHALLENGE.*the fixer's reason: not reproduced/s);
 });
 
 test('script: a rejected id the fixer was not given (a V finding, an unknown id) is ignored', async () => {
   const { out, calls } = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl(), impl({ rejected: [{ id: 'V1', reason: 'x' }, { id: 'F9', reason: 'y' }] })]);
   assert.equal(out.status, 'OK');
-  assert.doesNotMatch(calls.find((c) => c.opts.label === 'reviewer A · round 2 · code').prompt, /CHALLENGE/);
+  assert.doesNotMatch(calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt, /CHALLENGE/);
 });

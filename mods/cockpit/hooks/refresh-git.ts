@@ -1,17 +1,13 @@
 import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitAlm, CockpitChange, CockpitPerimeterCheck, CockpitPr } from '../types'
-import { DIFF_PANE, INITIAL } from './state'
+import type { CockpitAlm, CockpitPerimeterCheck, CockpitPr } from '../types'
+import { INITIAL } from './state'
 import { patch } from './store'
-import { t } from './strings'
 import {
-  additionsDiff,
   azArgv,
   azureRepo,
-  capDiff,
   checkPerimeter,
-  diffHunks,
   isAzureRemote,
   isDefaultBranch,
   isGithubRemote,
@@ -20,7 +16,6 @@ import {
   parseGitStatus,
   parseGithubPr,
   parsePrCreatedAt,
-  parseNumstat,
   parsePerimeter,
   parseWorktree,
   repoRelative,
@@ -31,8 +26,6 @@ import {
 const PR_EVERY_MS = 5 * 60_000
 // How far the server's clock may run behind this one: a pull request opened just as the chat began is still the chat's.
 const CLOCK_SLACK_MS = 30_000
-/** The Work tab keeps this many changed files; it draws 8 of them. */
-const REPO_FILES_KEEP = 50
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -71,9 +64,6 @@ async function readPerimeterCheck($: EngineInterface, root: string, entries: rea
 // `asked`: the saved pull requests it read again.
 let lastPrRead: { key: string; at: number; asked: number[] } | undefined
 let isPrReading = false
-
-/** A file the Work tab's diff pane draws whole (an untracked one) is at most this big: the engine's `$.fs.read` takes 4 MiB. */
-const DIFF_FILE_MAX = 4 * 1024 * 1024
 
 /** The private config folder of the ALM `identity` (`~/.azure-<identity>`, as hooks/lib/az-pin.js picks it), when it exists. */
 async function azConfigDir($: EngineInterface, identity: string | undefined): Promise<string | undefined> {
@@ -212,91 +202,6 @@ async function refreshPr($: EngineInterface, cwd: string, branch: string): Promi
   }
 }
 
-type GitRun = (args: string[]) => ReturnType<EngineInterface['process']['run']>
-
-/** A git read that exited clean and was not cut. */
-const isRead = (r: { exitCode: number; isStdoutTruncated: boolean }) => r.exitCode === 0 && !r.isStdoutTruncated
-
-/**
- * Where the branch left the default branch: the ref of the default branch (the one `origin/HEAD` names, else `main` or `master`; its
- * remote-tracking ref before the local one) and the merge base with it. Undefined when no such ref exists.
- */
-async function branchPoint(run: GitRun, known: string | undefined): Promise<{ ref: string; name: string; base: string } | undefined> {
-  let name = known
-  if (name === undefined) {
-    const head = await run(['symbolic-ref', '--short', 'refs/remotes/origin/HEAD'])
-    name = head.exitCode === 0 ? parseDefaultBranch(head.stdout) : undefined
-  }
-  for (const candidate of name === undefined ? ['main', 'master'] : [name]) {
-    for (const ref of [`origin/${candidate}`, candidate]) {
-      const mergeBase = await run(['merge-base', 'HEAD', ref])
-      const base = mergeBase.exitCode === 0 ? mergeBase.stdout.trim() : ''
-      if (/^[0-9a-f]{7,64}$/.test(base)) return { ref, name: candidate, base }
-    }
-  }
-  return undefined
-}
-
-/**
- * The Work tab's reads, only while that tab is selected: the files changed on the branch since it left the default branch plus the
- * uncommitted ones (tracked, with their line counts, then untracked and not ignored). Without a default
- * branch to count from, the changed files are the uncommitted ones against HEAD. Every read failing keeps the last reading.
- */
-export async function refreshRepo($: EngineInterface): Promise<void> {
-  try {
-    const s = await read($, snapshot)
-    const { cwd, git } = s
-    if (s.tab !== 'work' || !git?.root) return
-    const base = ['git', '-C', git.root, '--no-optional-locks']
-    const run: GitRun = args => $.process.run([...base, ...args], { timeoutMs: 3000 })
-    const from = await branchPoint(run, s.defaultBranch)
-    const [tracked, untracked] = await Promise.all([
-      run(['diff', '--numstat', '--no-renames', '-z', from?.base ?? 'HEAD', '--']),
-      run(['ls-files', '--others', '--exclude-standard', '-z']),
-    ])
-    if (!isRead(tracked) && !isRead(untracked)) return
-    const names = isRead(untracked) ? untracked.stdout.split('\0').filter(Boolean) : []
-    const files = parseNumstat(isRead(tracked) ? tracked.stdout : '', names)
-    const repo = { files: files.slice(0, REPO_FILES_KEEP), total: files.length, ...(from && { base: from.base, from: from.name }) }
-    await patch($, x => (x.cwd === cwd && x.git?.branch === git.branch ? { ...x, repo } : x))
-  } catch {
-    // git missing or too slow: keep the last reading
-  }
-}
-
-/**
- * The hunks of `change` to draw: `git diff <base> -- <file>` (`base` is the commit the Work tab compares with, HEAD without one), or the whole file as additions when it is untracked.
- * Undefined when they cannot be had: a file over `DIFF_FILE_MAX` or unreadable, a git that failed, was cut or too slow.
- */
-async function readHunks($: EngineInterface, root: string, change: CockpitChange, base = 'HEAD'): Promise<string | undefined> {
-  try {
-    if (change.isUntracked) {
-      const file = `${root}/${change.path}`
-      if ((await $.fs.stat(file)).size > DIFF_FILE_MAX) return undefined
-      const text = await $.fs.read(file)
-      return typeof text === 'string' ? additionsDiff(change.path, text) : undefined
-    }
-    const out = await $.process.run(['git', '-C', root, '--no-optional-locks', 'diff', '--no-color', '--no-ext-diff', '--no-renames', base, '--', change.path], { timeoutMs: 5000 })
-    return out.exitCode === 0 && !out.isStdoutTruncated ? diffHunks(out.stdout) : undefined
-  } catch {
-    return undefined
-  }
-}
-
-/** Draws the diff of `change` in the second pane; a file that cannot be had opens it saying so. */
-export async function showDiff($: EngineInterface, change: CockpitChange): Promise<void> {
-  try {
-    const { git, repo } = await read($, snapshot)
-    if (!git?.root) return
-    const hunks = await readHunks($, git.root, change, repo?.base)
-    const { text, isCut } = capDiff(hunks ?? '')
-    await patch($, s => ({ ...s, diff: { file: change.path, text, ...(isCut && { isCut }), ...(hunks === undefined && { isUnreadable: true }) } }))
-    await $.ui.open({ id: DIFF_PANE, title: t().diffTitle(change.path), closeOnEscape: true })
-  } catch {
-    // the snapshot or the pane failed: the pane stays as it was
-  }
-}
-
 export async function refreshGit($: EngineInterface): Promise<void> {
   try {
     const cwd = await $.session.cwd()
@@ -307,7 +212,7 @@ export async function refreshGit($: EngineInterface): Promise<void> {
       return void (await patch($, s => {
         lastPrRead = undefined
         // A process that starts outside any repo has no home one ('').
-        return { ...s, cwd, homeRoot: s.homeRoot ?? '', git: undefined, perimeter: undefined, perimeterCheck: undefined, defaultBranch: undefined, repo: undefined }
+        return { ...s, cwd, homeRoot: s.homeRoot ?? '', git: undefined, perimeter: undefined, perimeterCheck: undefined, defaultBranch: undefined }
       }))
     }
     const tree = await $.process.run([...base, 'rev-parse', '--git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs: 2000 })
@@ -329,11 +234,9 @@ export async function refreshGit($: EngineInterface): Promise<void> {
         perimeter,
         perimeterCheck,
         defaultBranch: isSameRepo ? s.defaultBranch : undefined,
-        repo: isSameRepo ? s.repo : undefined,
       }
     })
     if (!parsed.isDetached) void refreshPr($, cwd, parsed.branch).catch(() => undefined)
-    await refreshRepo($)
   } catch {
     // git missing or too slow: keep the last reading
   }

@@ -1,8 +1,6 @@
 import type { Engine } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
-import { TABS } from '../hooks/session'
-import type { CockpitTab } from '../types'
 import { NOW, PANE, rowTexts, settle } from './cockpit-world'
 
 /** Lets what a hook left running (the unawaited flag write of a first render) settle. */
@@ -26,22 +24,18 @@ export const createTask = ($: Engine, subject: string, agentId?: string) =>
 export const updateTask = ($: Engine, taskId: string, status: 'pending' | 'in_progress' | 'completed' | 'deleted') =>
   $.tool.call({ tool: 'TaskUpdate', taskId, status })
 
-export async function taskRows($: Engine, bodyColumns = 50) {
-  const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
-  await ui.press({ key: 'tab:work' })
-  const rows = rowTexts(await ui.drawn())
-  await ui.unmount()
-  const i = rows.findIndex(r => /^TASK/.test(r))
-  return { rows, i }
-}
-
 // ── Credits, cache share, ALM ──
 
 /** The color of the first leaf Text whose content matches `re`. */
 export const colorOf = (root: unknown, re: RegExp): string | undefined => {
-  const o = root as { props?: { color?: string }; children?: unknown[] } | null
+  const o = root as { type?: string; props?: { color?: string; props?: { cells?: { t: string; c?: string }[] } }; children?: unknown[] } | null
   const [only] = o?.children ?? []
   if (typeof only === 'string' && re.test(only)) return o?.props?.color
+  // an animated cell (surface module) holds the spans it draws in its props
+  if (o?.type === 'Client') {
+    const cell = o.props?.props?.cells?.find(c => re.test(c.t))
+    if (cell !== undefined) return cell.c
+  }
   for (const c of o?.children ?? []) {
     const found = colorOf(c, re)
     if (found !== undefined) return found
@@ -52,16 +46,13 @@ export const colorOf = (root: unknown, re: RegExp): string | undefined => {
 export const RED = '#f07a6f'
 export const MIN = 60_000
 
-/** The pane's rows with the tab pressed first (the one the mod state already holds when none is given). */
-export async function paneRows($: Engine, bodyColumns = 50, tab?: string) {
+/** The pane's drawn tree and its rows. */
+export async function paneRows($: Engine, bodyColumns = 50) {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
-  if (tab) await ui.press({ key: `tab:${tab}` })
   const root = await ui.drawn()
   await ui.unmount()
   return { root, rows: rowTexts(root) }
 }
-
-// ── Tabs ──
 
 export const spawnAgent = ($: Engine, subagentType: string) =>
   $.agent.spawn({
@@ -124,40 +115,9 @@ export const fileOfSession = (writes: Map<string, string>, id: string): { histor
   return path === undefined ? undefined : JSON.parse(writes.get(path) ?? 'null')
 }
 
-/** The tab labels of a pane `columns` wide, the cells they take (a terminal Button draws `[ label ]`: 4 cells of chrome, one between two) and the drawn tree. */
-export const tabsAt = async ($: Engine, columns: number) => {
-  const ui = await mountPane($, columns)
-  const labels = (await ui.findAll({ type: 'Button' })).filter(b => (b.key ?? '').startsWith('tab:')).map(b => b.text ?? '')
-  const root = await ui.drawn()
-  await ui.unmount()
-  return { labels, cells: labels.reduce((n, l) => n + [...l].length + 4, 0) + labels.length - 1, root }
-}
-
-/** The tab labels in each language. */
-export const NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
-  en: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
-  it: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
-}
-
-const SHORT_NAMES: Record<'en' | 'it', Record<CockpitTab, string>> = {
-  en: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
-  it: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
-}
-
-/**
- * The tab bar's labels at 58 columns: `level` 1 is every full name but Context (a bare bar), 2 the selected tab's name and the others short (a badge
- * or the worklog dot is on); `extras` adds a badge (` 1`, ` 󰧞`) after a label.
- */
-export const barLabels = (extras: Partial<Record<CockpitTab, string>> = {}, lang: 'en' | 'it' = 'en', active: CockpitTab = 'agents', level: 1 | 2 = 1) =>
-  TABS.map(tab => {
-    const isShort = level === 2 ? tab !== active : tab === 'context' && tab !== active
-    return `${(isShort ? SHORT_NAMES : NAMES)[lang][tab]}${extras[tab] ?? ''}`
-  })
-
-// ── Phase 4: Work, per agent ──
+// ── Work, per agent ──
 
 export const PERIMETER = 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n'
-export const workRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns, 'work')).rows
 
 /** A workflow agent's spawn: `runId` and its place in the run. */
 export const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number) =>
@@ -187,28 +147,14 @@ export const SPAWN = {
 
 // ── Cockpit v3, phase 1: layout, header, refresh tiers, buttons at the bottom ──
 
-/** The rows above the tab bar: the always-visible header (its inner rule sets the budgets apart, the second one closes it). */
+/** The rows above the page: the always-visible header (its inner rule sets the budgets apart, the second one closes it). */
 export const headerOf = (rows: string[]): string[] => rows.slice(0, rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))[1])
 
-// ── Cockpit v3, phase 3: the Context tab ──
-
-export const breakdownRow = (name: string, tokens: number, kind: 'used' | 'free' | 'buffer' | 'deferred' = 'used') => ({ name, tokens, color: 'promptBorder', isDeferred: kind === 'deferred', kind })
-export const CONTEXT_ROWS = [breakdownRow('System prompt', 8000), breakdownRow('Messages', 90_000), breakdownRow('Free space', 700_000, 'free')]
 export const openCockpit = ($: Engine) => $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
 export const mainTurnEnd = ($: Engine, agentId?: string) =>
   $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: 't', reason: 'answer', ...(agentId ? { agentId } : {}) })
 
 // ── Cockpit v3, phase 4: the final tabs and the Work tab ──
-
-/** The Work tab's rows once the reads its selection started have settled. */
-export async function lavoroRows($: Engine, bodyColumns = 50) {
-  const ui = await mountPane($, bodyColumns)
-  await ui.press({ key: 'tab:work' })
-  await settleAll()
-  const rows = rowTexts(await ui.drawn())
-  await ui.unmount()
-  return rows
-}
 
 export const GH_CREATED = 'https://github.com/example/orders/pull/42'
 export const bashResult = (stdout: string) => ({ result: { stdout, stderr: '', interrupted: false } })
@@ -237,32 +183,12 @@ export const until = async (isDone: () => boolean) => {
   for (let i = 0; i < 100 && !isDone(); i++) await sleep(10)
 }
 
-// ── Phase 8: the Notes tab ──
-
 /** The keys of the drawn tree in drawing order. */
 export const keysInOrder = (el: unknown): string[] => {
   if (typeof el === 'string') return []
   const o = el as { props?: { key?: string }; children?: unknown[] } | null
   return [...(o?.props?.key ? [o.props.key] : []), ...(o?.children ?? []).flatMap(keysInOrder)]
 }
-
-/** The mounted pane on its Notes tab. */
-export const notesPane = async ($: Engine, columns = 58) => {
-  const ui = await mountPane($, columns)
-  await ui.press({ key: 'tab:notes' })
-  return ui
-}
-
-/** Types `text` into the Notes field and presses Enter. */
-export const saveNote = async (ui: Awaited<ReturnType<typeof notesPane>>, text: string) => {
-  await ui.input({ key: 'note', text, kind: 'change' })
-  await ui.input({ key: 'note', text, kind: 'submit' })
-  await settleAll()
-}
-
-/** The saved notes' texts, as the rows of the Notes tab draw them. */
-export const noteKeys = async (ui: Awaited<ReturnType<typeof notesPane>>, action: string) =>
-  keysInOrder(await ui.drawn()).filter(k => k.startsWith(`note:${action}:`))
 
 // ── Cockpit v3.1, phase 7: English, last-known values, round duration, adaptive bars, processes, context, alert seed ──
 

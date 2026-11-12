@@ -1,30 +1,33 @@
-# Loop extras — rounds read, the cleanup pass, scope-guard exit 1, `/retro`
+# Loop extras — who reads what, the cleanup pass, the scope check, `/retro`
 
-Read when the owner asked a cleanup pass, `scope-guard.js` exited 1, a run is relaunched, or you need to know who
-reads which round.
+Read when the owner asked a cleanup pass, the gate said `red: scope`, a run is relaunched, or you need to know who
+reads what.
 
-## Who reads which round
+## Who reads what (M, L)
 
-Round 1 is read by the whole panel; a later round by the reviewers that raised the open findings plus the watcher (Haiku at
-low; at S that reviewer is the panel's own Sonnet, at high). The first round that would end `OK` after a review fix ran (the cleanup
-pass does not count; never at S) is a final full read, always: reviewer A alone, once, on the WHOLE change since the start head (the
-scope of round 1), every live finding id asked again. Its model and effort follow the summed review-fix churn: up to 30 lines Sonnet at medium, 31-50 Sonnet at high, over 50 (or a fix with no churn number) Opus at medium; when B ran on Opus in the panel, Opus at medium regardless of churn. Its findings loop back to fix and delta review.
+- **Reader A, per block**: Sonnet at high reads each block's delta as soon as its gate is green. An open P1/P2 inside
+  the perimeter gets one fix call and one gate run; what is still open is carried to the final verification and
+  counted in `blocks[].readerA`. S has none; without `verify` no block is read by reader A and a `gaps` line says so. The brief names the gate's `formatOnly` files once: no formatting findings on them.
+- **Final verification**: once, after the last block, the readers `finalReadersFor` picks read the whole diff together
+  with the carried findings: reader B (Sonnet at high; Opus at high at L, with a security or data axis, past 10 files
+  or 600 lines unless mechanical, or with 3+ axes besides `logic`), at L a second Sonnet reader at high, and the
+  specialists the risk names. At M the sole reader B is labelled `whole diff`; its coverage rerun goes to B alone at
+  effort medium.
+- **Verifier**: after each fix round and its gate, one `code-reviewer` marks each finding closed or open and reads the
+  fix delta for new defects: Sonnet at high; Opus at medium with a P1 or a fix over 30 lines.
+- **Arbiter**: a finding the implementer rejects and its raiser keeps goes once to Opus at medium; its ruling stands.
 
-A `scope` finding raised by A alone and not CONFIRMED (M, L), in a round B also answered, blocks nothing and is never fixed: it stays in `minor`; in a round without B (a delta A reads alone, the final read) it blocks as usual.
-
-Coverage: the watcher never counts as a whole reviewer (a Haiku read certifies no file and is never given the never-reviewed list); when files no whole reviewer read are left at that point, the final read goes FIRST and the coverage rerun is skipped (the
-final read covers every file); only a file still unread after it gets the rerun (then a `gap` stall); the rerun goes to A, and B joins it only with a data, money, concurrency, contract or security risk axis. With no final read due (S, or no review fix) the coverage rerun runs as soon as the round would end `OK`.
+A `scope` finding raised by one reader alone and not CONFIRMED (M, L), in a round another reader also answered, blocks nothing and is never fixed: it stays in `minor`. A sole final reader B (M) has no other: its `scope` finding that is not CONFIRMED is a note (soft scope), a CONFIRMED one blocks.
 
 ## The cleanup pass before OK (M, L)
 
 Runs only with `cleanup: true` (the owner asks for it); by default the P3s stay in `minor` for the closing table. A round that would end `OK` with P3 findings inside the perimeter (not a `scope` hunk, not a `clean-code` split proposal, not one the
-change does not cause in a file it did not touch) first runs one fix pass on them, then one review of that delta (the
-watcher, Haiku at low, and reviewer A: a cleanup id closes only on A's explicit `closed` verdict, silence or the watcher never close one); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
+change does not cause in a file it did not touch) first runs one fix pass on them, then one verifier on that delta (a cleanup id closes only on its explicit `closed` verdict, silence never closes one); a second cleanup never runs. The result lists what the pass fixed under `cleaned` once the delta
 review has read it; `minor` keeps the rest, and `outOfScope` the P3s outside the perimeter: all for the closing table.
 
-## Scope check, exit 1
+## Scope check, `red: scope`
 
-The files printed are outside. To revert them: back to step 3 with them as the brief, relaunched as in "A red test after OK" (`references/stall.md`). To keep one the user wants: `perimeter.ps1 -Files` with all entries, then a NEW run with the updated `perimeter.files` (no resolution: there is no stalled round).
+The gate's `outside` files are outside the perimeter. To revert them: back to step 3 with them as the brief, relaunched as in "A red test after OK" (`references/stall.md`). To keep one the user wants: `perimeter.ps1 -Files` with all entries, then a NEW run with the updated `perimeter.files` (no resolution: there is no stalled round).
 
 ## `/retro`
 

@@ -38,102 +38,154 @@ async function dryRun(count, extra = {}, handler = null, noFiles = false) {
   return { out, logs, reviewers, spawned };
 }
 
-test('30 files: 2 whole-change reviewers (A sonnet, B opus) + 1 merger, the count logged before any reviewer runs', async () => {
+test('given a 30-file change at xhigh effort, when the workflow runs, then 2 whole-change reviewers (A sonnet, B opus) + 1 merger are spawned, the count logged before any reviewer runs', async () => {
+  // Given / When
   const { logs, reviewers, spawned } = await dryRun(30, { effort: 'xhigh' });
+
+  // Then
   assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus']);
   assert.equal(spawned.filter((o) => o.agentType !== 'Explore').length, 3, '2 reviewers + the merger');
   assert.ok(logs.some((l) => l === '30 files -> 2 whole-change reviewers (A sonnet, B opus) + 1 merger = 3 agents'), logs.join('\n'));
 });
 
-test('B is opus at any size, with no counting agent when files are given', async () => {
+test('given files of any size, when the workflow runs, then B is opus and no counting agent is spawned', async () => {
   for (const n of [1, 6, 10, 11]) {
+    // Given / When
     const { reviewers, spawned } = await dryRun(n);
+
+    // Then
     assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus'], `${n} files`);
     assert.equal(spawned.filter((o) => o.agentType === 'Explore').length, 0);
   }
 });
 
-test('no files given: one Explore agent lists them', async () => {
+test('given no files, when the workflow runs, then one Explore agent lists them', async () => {
+  // Given / When
   const { reviewers, spawned } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? { files: ['a/x.cs', 'b/y.cs'] } : undefined), true);
+
+  // Then
   assert.equal(spawned.filter((o) => o.agentType === 'Explore').length, 1);
   assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'opus']);
 });
 
-test('100 files are still two reviewers: no split, no refusal', async () => {
+test('given 100 files, when the workflow runs, then there are still two reviewers: no split, no refusal', async () => {
+  // Given / When
   const { reviewers, out } = await dryRun(100, { effort: 'low' });
+
+  // Then
   assert.equal(reviewers.length, 2);
   assert.equal(out, 'REPORT');
 });
 
-test('both reviewers get the same brief with every file, at any effort; modelB overrides B only', async () => {
+test('given any effort and a modelB override, when the workflow runs, then both reviewers get the same brief with every file and modelB overrides B only', async () => {
   for (const effort of ['low', 'xhigh']) {
+    // Given / When
     const { reviewers } = await dryRun(30, { effort, modelB: 'fable' });
+
+    // Then
     assert.deepEqual(reviewers.map((r) => r.model), ['sonnet', 'fable']);
     assert.ok(reviewers.every((r) => r.effort === effort && /f29.cs/.test(r.prompt) && /All the changed files: .*f29.cs/.test(r.prompt)));
     assert.equal(reviewers[0].prompt, reviewers[1].prompt);
     assert.match(reviewers[0].prompt, /Review the WHOLE change/);
   }
+  // Given / When
   const bySonnet = await dryRun(6, { modelB: 'sonnet' });
+
+  // Then
   assert.deepEqual(bySonnet.reviewers.map((r) => r.model), ['sonnet', 'sonnet']);
   assert.ok(bySonnet.logs.some((l) => l === '6 files -> 2 whole-change reviewers (A sonnet, B sonnet, by override) + 1 merger = 3 agents'), bySonnet.logs.join('\n'));
   assert.deepEqual((await dryRun(6, { modelB: 'opus' })).reviewers.map((r) => r.model), ['sonnet', 'opus']);
 });
 
-test('the finding risk enum is high | medium | low', async () => {
+test('given a reviewer run, when the workflow spawns it, then the finding risk enum is high | medium | low', async () => {
+  // Given / When
   const { reviewers } = await dryRun(6);
+
+  // Then
   assert.deepEqual(reviewers[0].schema.properties.findings.items.properties.risk.enum, ['high', 'medium', 'low']);
 });
 
-test('past 60 files the briefs carry the count and the directories, not the list', async () => {
+test('given a change of 61 files, when the workflow runs, then the briefs carry the count and the directories, not the list', async () => {
+  // Given / When
   const { reviewers } = await dryRun(61);
+
+  // Then
   assert.ok(reviewers.every((r) => /The change has 61 files in: src\//.test(r.prompt) && !/All the changed files/.test(r.prompt)));
 });
 
-test('reviewers get the effort; the merger runs on sonnet', async () => {
+test('given an effort of high, when the workflow runs, then the reviewers get the effort and the merger runs on sonnet', async () => {
+  // Given / When
   const { reviewers, spawned } = await dryRun(6, { effort: 'high' });
+
+  // Then
   assert.ok(reviewers.every((r) => r.effort === 'high'));
   assert.equal(spawned.find((o) => o.label === 'merge the reviews into one report').model, 'sonnet');
 });
 
-test('modelB outside the allowed models is refused before any spawn', async () => {
+test('given a modelB outside the allowed models, when the workflow runs, then it is refused before any spawn', async () => {
+  // Given / When
   const { out, spawned } = await dryRun(6, { effort: 'high', modelB: 'gpt' });
+
+  // Then
   assert.match(out, /modelB "gpt" is not one of/);
   assert.equal(spawned.length, 0);
 });
 
-test('a null scope agent is an error message, not "no changed files"', async () => {
+test('given a scope agent that returns null, when the workflow runs, then the result is an error message, not "no changed files"', async () => {
+  // Given / When
   const { out } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? null : undefined), true);
+
+  // Then
   assert.match(out, /scope step failed: pass files or retry/);
 });
 
-test('a rejecting scope agent is the same error', async () => {
+test('given a scope agent that rejects, when the workflow runs, then the result is the same error', async () => {
+  // Given / When
   const { out } = await dryRun(0, {}, (o) => { if (o.label === 'list the files to review') throw new Error('boom'); }, true);
+
+  // Then
   assert.match(out, /scope step failed/);
 });
 
-test('an empty scope answer is still "no changed files"', async () => {
+test('given a scope agent that answers with an empty file list, when the workflow runs, then the result is still "no changed files"', async () => {
+  // Given / When
   const { out } = await dryRun(0, {}, (o) => (o.label === 'list the files to review' ? { files: [] } : undefined), true);
+
+  // Then
   assert.match(out, /no changed files/);
 });
 
-test('a rejecting reviewer is a gap, the merger still runs', async () => {
+test('given reviewers that reject, when the workflow runs, then each is a gap and the merger still runs', async () => {
+  // Given / When
   const { out, spawned } = await dryRun(6, {}, (o) => { if (o.agentType === 'code-reviewer') throw new Error('boom'); });
+
+  // Then
   assert.equal(out, 'REPORT');
   const merge = spawned.find((o) => o.label === 'merge the reviews into one report');
   assert.match(merge.prompt, /BLOCKED/);
 });
 
-test('a null merger returns the raw findings table', async () => {
+test('given a merger that returns null, when the workflow runs, then it returns the raw findings table', async () => {
+  // Given
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
+
+  // When
   const { out } = await dryRun(6, {}, (o) => (o.label === 'merge the reviews into one report' ? null : o.agentType === 'code-reviewer' ? { status: 'ISSUES', findings: [finding] } : undefined));
+
+  // Then
   assert.match(out, /merger returned nothing/);
   assert.ok(out.includes('| 1 | P2 | CONFIRMED | correctness | src/a.cs:3 | Rotto | A+B |'), out);
 });
 
-test('A and B findings on the same anchor reach the merger as one CONFIRMED, checked is capped', async () => {
+test('given A and B findings on the same anchor, when the workflow runs, then they reach the merger as one CONFIRMED and checked is capped', async () => {
+  // Given
   const finding = { title: 'Rotto', anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure: 'x', evidence: 'y' };
+
+  // When
   const { spawned } = await dryRun(6, { effort: 'xhigh' }, (o) => (o.agentType === 'code-reviewer'
     ? { status: 'ISSUES', checked: 'c'.repeat(1000), findings: [finding] } : undefined));
+
+  // Then
   const prompt = spawned.find((o) => o.label === 'merge the reviews into one report').prompt;
   const input = JSON.parse(prompt.slice(prompt.indexOf('Results (JSON):') + 16));
   assert.equal(input.findings.length, 1);

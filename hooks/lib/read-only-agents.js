@@ -7,6 +7,6 @@
 
 'use strict';
 
-const READ_ONLY_AGENTS = new Set(['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']);
+const READ_ONLY_AGENTS = new Set(['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'item-analyst', 'e2e-verifier', 'Plan', 'claude-code-guide', 'statusline-setup']);
 
 module.exports = { READ_ONLY_AGENTS };

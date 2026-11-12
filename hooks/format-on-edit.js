@@ -10,13 +10,18 @@
  * an extension with no formatter is one string comparison and an exit, with no file system access
  * at all. A formatter process is spawned only when the project really configures one.
  *
- * Three deliberate limits:
+ * Four deliberate limits:
  *
  *   - It formats ONLY the file named in the payload. Never the project, never the folder.
  *   - It does nothing at all when the tooling is not configured: no project file above the file,
  *     no .editorconfig, no formatter in the package manifest, no dependencies installed. A hook
  *     that formats with defaults nobody chose is worse than no hook, because it rewrites files the
  *     project deliberately left alone.
+ *   - After an Edit or MultiEdit it keeps the formatter's result only when every line it changed lies
+ *     in the edited region (the lines of each `new_string`, plus one either side). Otherwise, or when
+ *     the region can't be located, the file is restored exactly as the edit left it: a file that
+ *     wasn't clean must not grow formatting hunks around an unrelated edit. A whole-file Write is
+ *     always formatted.
  *   - It never fails the tool call. Every path ends in exit 0, output is swallowed, and a formatter
  *     that is absent, broken or slow is simply skipped.
  *
@@ -120,6 +125,66 @@ function invoke(exe, args, cwd, shown) {
   });
 }
 
+/** The `new_string` of every edit the payload carries (Edit: one, MultiEdit: each), or null for a whole-file Write. */
+function editedStrings(payload) {
+  const input = payload.tool_input;
+  if (payload.tool_name === 'Edit') return [input.new_string];
+  if (payload.tool_name === 'MultiEdit' && Array.isArray(input.edits)) return input.edits.map((e) => e?.new_string);
+  return null;
+}
+
+/** Line numbers of `before` that hold an edit's `new_string`, plus one line either side; null when any edit can't be located. */
+function editedRegion(before, strings) {
+  const lines = new Set();
+  const crlf = before.includes('\r\n');
+  for (const raw of strings) {
+    if (typeof raw !== 'string' || raw === '') return null;
+    // The tool's new_string carries LF; a CRLF file holds it with CRLF.
+    const text = crlf ? raw.replace(/\r?\n/g, '\r\n') : raw;
+    const span = text.replace(/\r?\n$/, '').split('\n').length;
+    const at = before.indexOf(text);
+    // Not found, or found twice: the payload has no offset, so the edit can't be placed.
+    if (at < 0 || before.indexOf(text, at + 1) >= 0) return null;
+    const first = before.slice(0, at).split('\n').length - 1;
+    for (let n = first - 1; n <= first + span; n += 1) lines.add(n);
+  }
+  return lines;
+}
+
+/**
+ * Whether every line the formatter changed lies in `region`: line by line when the count is unchanged, else
+ * the span between the common leading and trailing lines must sit inside it (a formatter that joins or
+ * splits lines in one edit still counts; several edits that change the count restore).
+ */
+function changesStayInside(before, after, region) {
+  const a = before.split('\n');
+  const b = after.split('\n');
+  if (a.length === b.length) return a.every((line, i) => line === b[i] || region.has(i));
+  let head = 0;
+  while (head < a.length && head < b.length && a[head] === b[head]) head += 1;
+  let tail = 0;
+  while (tail < a.length - head && tail < b.length - head && a[a.length - 1 - tail] === b[b.length - 1 - tail]) tail += 1;
+  const end = a.length - tail;
+  if (end <= head) return region.has(head - 1) || region.has(head);
+  for (let i = head; i < end; i += 1) if (!region.has(i)) return false;
+  return true;
+}
+
+/**
+ * Format `file`; after an Edit / MultiEdit keep the result only when the formatter touched nothing
+ * outside the edited lines, else put the file back byte-for-byte as the edit left it.
+ */
+function format(payload, file, exe, args, cwd, shown) {
+  const strings = DRY_RUN ? null : editedStrings(payload);
+  if (!strings) return invoke(exe, args, cwd, shown);
+  const before = fs.readFileSync(file);
+  invoke(exe, args, cwd, shown);
+  const after = fs.readFileSync(file);
+  if (before.equals(after)) return;
+  const region = editedRegion(before.toString('utf8'), strings);
+  if (!region || !changesStayInside(before.toString('utf8'), after.toString('utf8'), region)) fs.writeFileSync(file, before);
+}
+
 /**
  * The project's own prettier, run without a package runner: its bin script under this node (no shell,
  * no `npx` start-up), else the `.bin` shim. Null when it is not installed.
@@ -163,7 +228,7 @@ function run(payload) {
       // `whitespace` is the fast subset: indentation and line endings, no analyzer run. `--folder`
       // formats the project's directory as plain files instead of loading the project through MSBuild
       // (and so restoring it) on every .cs edit: the style still comes from the .editorconfig above.
-      invoke(dotnet, [
+      format(payload, file, dotnet, [
         'format', 'whitespace', project.directory, '--folder', '--include', file, '--verbosity', 'quiet',
       ], project.directory);
       return;
@@ -188,16 +253,21 @@ function run(payload) {
     const prettier = localPrettier(manifest.directory);
     if (!prettier) return;
 
-    invoke(prettier.exe, [...prettier.args, '--write', file], manifest.directory, `prettier --write ${file}`);
+    format(payload, file, prettier.exe, [...prettier.args, '--write', file], manifest.directory, `prettier --write ${file}`);
   } catch {
     // A hook that breaks must not break the edit that triggered it.
   }
 }
 
 // Runs when loaded: a script, or required by `node -e` as settings.json wires it.
+const fire = require('./lib/fire-log').armFire('format-on-edit', 'PostToolUse');
 try {
   const raw = fs.readFileSync(0, 'utf8');
-  if (raw.trim()) run(JSON.parse(raw));
+  if (raw.trim()) {
+    const payload = JSON.parse(raw);
+    fire.sub = require('./lib/fire-log').isSub(payload);
+    run(payload);
+  }
 } catch {
   /* silence */
 }

@@ -1,20 +1,24 @@
 import type { CockpitAgent, CockpitClaudeState, CockpitEvent, CockpitInsights, CockpitSnapshot, CockpitWorkflowRun } from '../types'
 import { usdOf } from './pricing'
 import { baseName, modelFamily } from './shared'
+import { recordLog } from './timeline'
 import { claimsOf } from './work'
 import { activeRun } from './workflow'
 
 /** Every limit a detector compares with, in one place. */
 export const THRESHOLDS = {
-  /** A subagent over this many new tokens, or over this percent of the session's cost. */
-  subagentTokens: 150_000,
+  /**
+   * A subagent over this cost in USD, or over this percent of the session's cost. Not its cumulative tokens: they grow with every call
+   * whatever the context, so a long implementer always crossed them (measured 2026-11: implementer p50 $0.45, p90 $1.37, max $2.07).
+   */
+  subagentUsd: 2,
   subagentCostPct: 40,
-  /** Agent types that only read: Opus on one of them is a waste. */
-  readOnlyAgents: ['Explore', 'investigator', 'code-reviewer', 'ops-analyst', 'db-analyst'],
+  /** Agent types that only read: Opus on one of them is a waste (a reviewer is left out: the kit puts one on Opus on purpose). */
+  readOnlyAgents: ['Explore', 'investigator', 'ops-analyst', 'db-analyst'],
   /** A tool result over this many characters (the insights keep it as characters / 4). */
   resultChars: 20_000,
-  /** The same file read this many times. */
-  rereads: 3,
+  /** The same file read this many times (a read after each edit is normal: three is still work, not waste). */
+  rereads: 4,
   /** The same command failed this many times. */
   failedCommands: 2,
   /** Cache hit under this percent after an idle gap over `idleGapMs`. */
@@ -25,9 +29,9 @@ export const THRESHOLDS = {
   ctxGrowthRounds: 3,
   /** This many done-claim blocks in the session. */
   doneClaims: 2,
-  /** A workflow in a round past this one, or silent for this long. */
-  workflowRound: 3,
-  stallMs: 5 * 60_000,
+  /** A workflow in a round past this one (a review loop's fourth round is still normal), or silent for this long (an implementer often works 5 min unseen). */
+  workflowRound: 4,
+  stallMs: 10 * 60_000,
   /** A permission asked of the person and unanswered for this long. */
   permissionWaitMs: 60_000,
 }
@@ -47,6 +51,28 @@ export type SignalKind =
 /** One thing that looks wrong: its kind, a key that tells two of a kind apart, and the number or name the text names. */
 export type Signal = { kind: SignalKind; key: string; label?: string; n?: number }
 
+/** How much a notification asks of the person: `block` stops the work, `warn` costs money or risks it, `info` is a hint. */
+export type SignalSeverity = 'block' | 'warn' | 'info'
+
+export function signalSeverity(sig: Signal): SignalSeverity {
+  switch (sig.kind) {
+    case 'permissionWait':
+      return 'block'
+    case 'workflow':
+      return sig.label === 'stall' ? 'block' : 'warn'
+    case 'failedCommand':
+    case 'ctxGrowth':
+    case 'heavyAgent':
+    case 'doneClaims':
+      return 'warn'
+    case 'reread':
+    case 'bigResult':
+    case 'opusReadOnly':
+    case 'coldAfterIdle':
+      return 'info'
+  }
+}
+
 /** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
 export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
 
@@ -64,8 +90,9 @@ export function agentCosts(agents: readonly CockpitAgent[], events: readonly Coc
 
 export function detectHeavyAgents(agents: readonly AgentCost[], sessionUsd: number | undefined): Signal[] {
   return agents.flatMap((a): Signal[] => {
-    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * (a.usd ?? 0)) / sessionUsd > THRESHOLDS.subagentCostPct
-    return a.tokens > THRESHOLDS.subagentTokens || isShare ? [{ kind: 'heavyAgent', key: a.id, label: a.type, n: a.tokens }] : []
+    const usd = a.usd ?? 0
+    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * usd) / sessionUsd > THRESHOLDS.subagentCostPct
+    return usd > THRESHOLDS.subagentUsd || isShare ? [{ kind: 'heavyAgent', key: a.id, label: a.type, n: usd }] : []
   })
 }
 
@@ -132,12 +159,35 @@ export function withSignalTimes(s: CockpitSnapshot, at: number): CockpitSnapshot
   return { ...s, signalsAt: Object.fromEntries(ids.map(id => [id, prev[id] ?? at])) }
 }
 
+export const SIGNAL_KINDS: readonly string[] = ['heavyAgent', 'opusReadOnly', 'bigResult', 'reread', 'failedCommand', 'coldAfterIdle', 'ctxGrowth', 'doneClaims', 'workflow', 'permissionWait']
+
+/** The signal a log entry names (`kind:key`, its label and number); none when the entry is not one of a kind known. */
+export function loggedSignal(e: { key?: string; text?: string; n?: number }): Signal | undefined {
+  const [kind, ...rest] = (e.key ?? '').split(':')
+  if (kind === undefined || !SIGNAL_KINDS.includes(kind)) return undefined
+  return { kind: kind as SignalKind, key: rest.join(':'), ...(e.text !== undefined && { label: e.text }), ...(e.n !== undefined && { n: e.n }) }
+}
+
+/** `s` with a session log entry for each signal in force that the log does not hold yet, at the time `signalsAt` gives it (else `at`): a notification is logged once, the first time it holds. `s` itself when there is none. */
+export function withLoggedSignals(s: CockpitSnapshot, at: number): CockpitSnapshot {
+  const logged = new Set((s.sessionLog ?? []).filter(e => e.kind === 'signal').map(e => e.key))
+  const fresh = signalsOf(s).filter(sig => !logged.has(signalId(sig)))
+  if (fresh.length === 0) return s
+  const sessionLog = fresh.reduce<CockpitSnapshot['sessionLog']>(
+    (log, sig) => recordLog(log, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }),
+    s.sessionLog,
+  )
+  return { ...s, sessionLog }
+}
+
 /** Every signal that holds now, from the snapshot alone (no clock, no model); one id only once (the same result read twice is one notification). */
 export function signalsOf(s: CockpitSnapshot): Signal[] {
+  // the model of a workflow run's agent is the flow's choice, so Opus there is no waste; its size is still a cost to see, whoever started it
+  const inRun = new Set([...s.agents.filter(a => a.runId !== undefined).map(a => a.id), ...(s.workflowRun?.agents.map(a => a.id) ?? [])])
   const costs = agentCosts(s.agents, s.events)
   const all = [
     ...detectHeavyAgents(costs, s.cost.usd),
-    ...detectOpusReadOnly(costs),
+    ...detectOpusReadOnly(costs.filter(a => !inRun.has(a.id))),
     ...detectBigResults(s.insights?.biggest),
     ...detectRereads(s.insights?.reads),
     ...detectFailedCommands(s.insights?.failedCmds),

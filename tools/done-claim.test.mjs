@@ -20,9 +20,10 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, stopWithContext, committed } from './done-claim.harness.mjs';
+import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, stopWithContext, committed, HOOK } from './done-claim.harness.mjs';
 
-test('English claim words without proof are blocked; "works" before a qualifier is not a claim', () => {
+test('given English claim words without proof and "works" before a qualifier, when the Stop hook judges an edit turn, then bare claims are blocked and the qualified "works" is not a claim', () => {
+  // Given / When / Then
   assert.match(stop(edited('All tests passes now.')).reason, /"passes"/);
   assert.match(stop(edited('The change is verified.')).reason, /"verified"/);
   assert.match(stop(edited('It works.')).reason, /"works"/);
@@ -38,8 +39,11 @@ test('English claim words without proof are blocked; "works" before a qualifier 
   assert.match(stop(edited('Login works as intended now.')).reason, /"works"/);
 });
 
-test('an edit turn ending "fatto" with no evidence is blocked and logged', () => {
+test('given an edit turn ending "fatto" with no evidence, when the hook runs, then it blocks with the verdict-table reason and logs claim-without-evidence', () => {
+  // Given / When
   const { reason, dir } = stop(edited('Fatto: il totale ora somma le righe.'));
+
+  // Then
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
   assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
@@ -51,25 +55,56 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   assert.equal(JSON.parse(log[0]).rule, 'claim-without-evidence');
 });
 
-test('a shell command ran after the last edit → silent: its output is already in context, and counted', () => {
+test('given a shell command ran after the last edit, when the turn claims fatto, then it is blocked and logged as shell-ran until its output is quoted', () => {
+  // Given / When
   const { reason, dir } = stop([prompt('sistema il bug'), tool('Edit'), result(), tool('Bash'), result(), say('Fatto: il totale ora somma le righe.')]);
-  assert.equal(reason, '');
+
+  // Then
+  assert.match(reason, /"Fatto"/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(JSON.parse(log[0]).rule, 'shell-ran');
-  assert.equal(stop([prompt('x'), tool('Edit'), result(), tool('PowerShell'), result(), say('Done.')]).reason, '');
+  assert.match(stop([prompt('x'), tool('Edit'), result(), tool('PowerShell'), result(), say('Done.')]).reason, /"Done"/);
+  assert.equal(stop([prompt('x'), tool('Edit'), result(), tool('Bash'), result('12 passed'), say('Fatto: `npm test` → 12 passed.')]).reason, '');
 });
 
-test('a shell command that ran BEFORE the last edit proves nothing about it → blocked', () => {
+test('given shell writes that ship or install and read-only shell commands, when the turn says fatto, then the writes arm the turn like an edit and the read-only turn stays silent', () => {
+  // Given / When / Then
+  for (const command of ['git commit -m x', 'git -C C:/repo push -u origin b', 'gh pr merge 5 --squash', 'gh pr create --base main', 'Copy-Item a b -Force']) {
+    assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
+  }
+  for (const command of ['git -C "C:/a b" push', 'pwsh -c "git commit -m x"', 'gh -R o/r pr create', 'gh --repo=o/r pr merge 3']) {
+    assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
+  }
+  for (const command of ['git status', 'git log --oneline -3', 'gh pr view 5', 'git merge-base main HEAD', 'git commit-tree abc', 'echo "git push"', 'grep -rn Copy-Item hooks', "cat > f <<'EOF'\ngit push\nEOF"]) {
+    assert.equal(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, '', command);
+  }
+  // a failed write changed nothing: it does not arm the turn
+  assert.equal(stop([prompt('x'), tool('Bash', { command: 'git push' }), result('Exit code 1\nrejected'), say('Fatto.')]).reason, '');
+});
+
+test('given a shell command that ran before the last edit, when the turn claims fatto, then it is blocked', () => {
+  // Given
   const entries = [prompt('x'), tool('Bash'), result(), tool('Edit'), result(), say('Fatto.')];
+
+  // When / Then
   assert.match(stop(entries).reason, /"Fatto"/);
 });
 
-test('"passa" is not a claim: "passa per il controller" is just a sentence', () => {
+test('given "passa" in a plain sentence and "passano" claims, when the hook judges the text, then only the claims are blocked', () => {
+  // Given / When / Then
   assert.equal(stop(edited('La richiesta passa per il controller e poi per il servizio.')).reason, '');
   assert.match(stop(edited('I test passano.')).reason, /"passano"/);
+  assert.match(stop(edited('Ora i test passano tutti.')).reason, /"passano"/);
+  for (const text of ['I campi passano nel brief del challenger.', 'I valori passano al servizio.', 'Le righe passano per il parser.', 'I token passano attraverso il proxy.']) {
+    assert.equal(stop(edited(text)).reason, '', text);
+  }
+  for (const text of ['I test passano in locale.', 'I test passano in CI.', 'I test passano al 100%.', 'I test passano al primo colpo.', 'I test passano come previsto.', 'Ora passano subito.', 'I test passano per ora.']) {
+    assert.match(stop(edited(text)).reason, /"passano"/, text);
+  }
 });
 
-test('"fatto" as a participle mid-sentence is not a claim; as an opening it is', () => {
+test('given "fatto" as a participle mid-sentence and as an opening, when the hook judges the text, then only the opening is a claim', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Ho aperto la PR: il merge della PR fatto da te resta da verificare in staging.')).reason, '');
   assert.equal(stop(edited('Il controllo fatto in anticipo evita il problema.')).reason, '');
   assert.match(stop(edited('Ho sistemato il totale.\n\n**Fatto** anche il refactor.')).reason, /"Fatto"/);
@@ -77,14 +112,18 @@ test('"fatto" as a participle mid-sentence is not a claim; as an opening it is',
   assert.match(stop(edited('- fatto il cambio di nome')).reason, /"fatto"/);
 });
 
-test('an inline command with its result is evidence; a bare command is not', () => {
+test('given an inline command with its result and a bare command, when the hook judges the claim, then only the one with a result is evidence', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Fatto: `dotnet test` → 42 passed.')).reason, '');
   assert.equal(stop(edited('Fatto: `npm test`: 0 failed')).reason, '');
   assert.match(stop(edited('Fatto, ho cambiato `Order.cs` per il totale.')).reason, /"Fatto"/);
 });
 
-test('a "> **Dettaglio**" block is prose, not evidence', () => {
+test('given a "> **Dettaglio**" block, when the hook judges the claim, then the block is prose, not evidence', () => {
+  // Given
   const detail = '> **Dettaglio**\n> Ho spostato il calcolo nel servizio e aggiornato i chiamanti.';
+
+  // When / Then
   assert.match(stop(edited(`Fatto.\n\n${detail}`)).reason, /"Fatto"/);
   // Real quoted output outside the block still counts.
   assert.equal(stop(edited(`Fatto.\n> Passed!  - Failed: 0, Passed: 42\n\n${detail}`)).reason, '');
@@ -92,78 +131,104 @@ test('a "> **Dettaglio**" block is prose, not evidence', () => {
   assert.match(stop(edited('Done.\n\n> **Detail**\n> Moved the total into the service.')).reason, /"Done"/);
 });
 
-test('a quoted verdict title and table alone are prose, not evidence for a claim', () => {
+test('given a quoted verdict title and table alone, when the hook judges the claim, then they are prose, not evidence', () => {
+  // Given
   const block = '> **Verifica**\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> | - | - | - | - |';
+
+  // When / Then
   assert.match(stop(edited(`Fatto.\n\n${block}`)).reason, /"Fatto"/);
   assert.match(stop(edited('Done.\n\n> **Verification**\n> | Level | Command |')).reason, /"Done"/);
   // Real quoted output beside it still counts.
   assert.equal(stop(edited(`Fatto.\n> 395 pass\n\n${block}`)).reason, '');
 });
 
-test('a section detail, quoted bullet lines, is prose, not evidence', () => {
+test('given a section detail of quoted bullet lines, when the hook judges the claim, then it is prose, not evidence', () => {
+  // Given
   const detail = '**Findings**\n\n| # | Sev |\n| --- | --- |\n| F1 | P2 |\n\n> - **F1**: the id stayed in `notesOpen`; fixed in `saveNote`.\n> - Two review rounds.';
+
+  // When / Then
   assert.match(stop(edited(`Fatto.\n\n${detail}`)).reason, /"Fatto"/);
   // A quoted output line among them still counts.
   assert.equal(stop(edited(`Fatto.\n\n${detail}\n> 395 pass`)).reason, '');
 });
 
-test('English claims are caught too', () => {
+test('given English claim words, when the hook judges an edit turn, then they are caught too', () => {
+  // Given / When / Then
   assert.match(stop(edited('Fixed the null check.')).reason, /"Fixed"/);
   assert.match(stop(edited('All tests passing now.')).reason, /"passing"/);
 });
 
-test('evidence in a fenced block or a quoted line → silent', () => {
+test('given evidence in a fenced block or a quoted line, when the hook judges the claim, then it stays silent', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Fatto.\n```\nPassed!  - Failed: 0, Passed: 42\n```')).reason, '');
   assert.equal(stop(edited('Fatto, `dotnet test`:\n> Passed!  - Failed: 0, Passed: 42')).reason, '');
 });
 
-test('an honest "non verificato" → silent', () => {
+test('given an honest "non verificato", when the hook judges the claim, then it stays silent', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Modifica fatta, non verificato: manca il database locale.')).reason, '');
   assert.equal(stop(edited('Done, but not verified: no test project.')).reason, '');
 });
 
-test('the word only inside inline code or a hyphenated name → silent', () => {
+test('given the claim word only inside inline code or a hyphenated name, when the hook judges the text, then it stays silent', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Ho aggiornato la skill `done` e il riferimento done-check.')).reason, '');
 });
 
-test('a turn that edited nothing → silent', () => {
+test('given a turn that edited nothing, when it says fatto, then the hook stays silent', () => {
+  // Given / When / Then
   assert.equal(stop([prompt('è fatto il deploy?'), tool('Bash'), result(), say('Sì, fatto ieri.')]).reason, '');
 });
 
-test('opt-in off, or stop_hook_active → silent', () => {
+test('given opt-in off or stop_hook_active, when the hook judges a claim, then it stays silent', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Fatto.'), { env: {} }).reason, '');
   assert.equal(stop(edited('Fatto.'), { extra: { stop_hook_active: true } }).reason, '');
 });
 
-test('only the current turn counts: an edit in an earlier turn does not arm it', () => {
+test('given an edit in an earlier turn, when a later turn claims fatto, then the hook stays silent', () => {
+  // Given
   const entries = [prompt('a'), tool('Write'), result(), say('ok'), prompt('e adesso?'), say('Fatto.')];
+
+  // When / Then
   assert.equal(stop(entries).reason, '');
 });
 
-test('the final message is the text after the last tool result', () => {
+test('given a claim word before a tool call and evidence in the final text, when the hook reads the final message, then only the text after the last tool result counts', () => {
+  // Given
   // "fatto" before the tool call is narration; the final text has evidence.
   const entries = [prompt('x'), say('Fatto il piano, ora modifico.'), tool('Edit'), result(), say('```\nok\n```')];
+
+  // When / Then
   assert.equal(stop(entries).reason, '');
 });
 
-test('last_assistant_message wins over the transcript text when present', () => {
+test('given a last_assistant_message and a different transcript text, when the hook runs, then the message wins', () => {
+  // Given / When
   const { reason } = stop(edited('```\nok\n```'), { extra: { last_assistant_message: 'Fatto.' } });
+
+  // Then
   assert.match(reason, /"Fatto"/);
 });
 
-test('missing or unreadable transcript → silent, no log', () => {
+test('given a missing or unreadable transcript, when the hook runs, then it is silent and writes no log', () => {
+  // Given / When
   const { reason, dir } = stop([], { extra: { transcript_path: join(tmpdir(), 'nope', 'missing.jsonl') } });
+
+  // Then
   assert.equal(reason, '');
   assert.ok(!existsSync(join(dir, '.cache', 'done-claim.log')));
 });
 
-test('a bold "**fatto** da te" is the participle; "Fatto in due file." is a claim', () => {
+test('given a bold "fatto" participle and an opening "Fatto in due file", when the hook judges the text, then only the opening is a claim', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Il merge **fatto** da te resta da verificare.')).reason, '');
   assert.equal(stop(edited('**Fatto** da te il merge, ora resta il deploy.')).reason, '');
   assert.match(stop(edited('Fatto in due file: il totale somma le righe.')).reason, /"Fatto"/);
 });
 
-test('"non ho verificato" / "non è stato verificato" are honest; "va verificato" is not a claim', () => {
+test('given "non ho verificato" style negations and "va verificato", when the hook judges the text, then they are honest or not claims, and "e verificato" still claims', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Non ho verificato a schermo: il layout è cambiato.')).reason, '');
   assert.equal(stop(edited('Il totale non è stato verificato, fatto in due file.')).reason, '');
   assert.equal(stop(edited('Non ho ancora verificato il rendering, fatto il resto.')).reason, '');
@@ -171,14 +236,18 @@ test('"non ho verificato" / "non è stato verificato" are honest; "va verificato
   assert.match(stop(edited('Il totale è verificato e il resto torna.')).reason, /"verificato"/);
 });
 
-test('"non è verificato" and "non è ancora stato verificato" are honest', () => {
+test('given "non e verificato" and "non e ancora stato verificato", when the hook judges the text, then both are honest', () => {
+  // Given / When / Then
   assert.equal(stop(edited('Il rendering non è verificato, fatto il resto.')).reason, '');
   assert.equal(stop(edited('Il rendering non è ancora stato verificato, fatto il resto.')).reason, '');
 });
 
-test('a cross-session message is not a turn boundary: the turn ends at the last human prompt only', () => {
+test('given a cross-session message after an edit, when the hook finds the turn start, then it is not a turn boundary and only the last human prompt ends the turn', () => {
+  // Given
   // human prompt -> Edit -> message to a peer -> its reply -> unproven claim: the Edit still arms the hook
   const edit = [prompt('sistema il bug'), tool('Edit'), result()];
+
+  // When / Then
   assert.match(stop([...edit, tool('SendMessage'), result(), peer(), say('Fatto.')]).reason, /"Fatto"/);
   // recognised by the text alone, or by the origin alone
   assert.match(stop([...edit, peer({ isMeta: false, turnOrigin: undefined, origin: undefined }), say('Fatto.')]).reason, /"Fatto"/);
@@ -204,24 +273,45 @@ const repoWithPerimeter = (status) => {
   return repo;
 };
 
-test('a proven verdict table is sent back once while the perimeter is still active on this branch', () => {
+test('given an active perimeter and a proven verdict table, when the hook runs, then it sends the turn back once to close the perimeter and never loops', () => {
+  // Given
   const repo = repoWithPerimeter('active');
   const final = verdict(row('Passed: 48'));
+
+  // When
   const { reason, dir } = stop(edited(final, 'Passed: 48'), { extra: { cwd: repo } });
+
+  // Then
   assert.match(reason, /Close the perimeter with -FindingsLog/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim()).rule, 'perimeter-open');
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
 });
 
-test('the perimeter is read off the disk, no git process: found from a subdirectory with git off the PATH', () => {
+test('given an active perimeter and a progress report with a row still running, when the hook runs, then the open perimeter does not send it back', () => {
+  // Given
+  const repo = repoWithPerimeter('active');
+
+  // When / Then
+  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `impl-review-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
+    assert.equal(stop(edited(verdict(row('Passed: 48'), open), 'Passed: 48'), { extra: { cwd: repo } }).reason, '', open);
+  }
+  // an honest gap that is not "still running" leaves the check on
+  assert.match(stop(edited(verdict(row('Passed: 48'), row('—', 'non verificato: serve staging', 'e2e')), 'Passed: 48'), { extra: { cwd: repo } }).reason, /Close the perimeter/);
+});
+
+test('given an active perimeter and git off the PATH, when the hook runs from a subdirectory, then it reads the perimeter off the disk and asks to close it', () => {
+  // Given
   const repo = repoWithPerimeter('active');
   mkdirSync(join(repo, 'src'));
   const final = verdict(row('Passed: 48'));
   const noGit = { CLAUDE_DONE_CLAIM: '1', PATH: '', Path: '' };
+
+  // When / Then
   assert.match(stop(edited(final, 'Passed: 48'), { env: noGit, extra: { cwd: join(repo, 'src') } }).reason, /Close the perimeter/);
 });
 
-test('a closed perimeter, another branch, no cwd or no verdict table: silent', () => {
+test('given a closed perimeter, another branch, no cwd or no verdict table, when the hook runs, then it stays silent', () => {
+  // Given / When / Then
   const final = verdict(row('Passed: 48'));
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repoWithPerimeter('closed') } }).reason, '');
   const other = repoWithPerimeter('active');
@@ -231,18 +321,24 @@ test('a closed perimeter, another branch, no cwd or no verdict table: silent', (
   assert.equal(stop(edited('Ho letto il codice, nessuna modifica necessaria.'), { extra: { cwd: repoWithPerimeter('active') } }).reason, '');
 });
 
-test('a verdict of only "non verificato" rows still asks to close an active perimeter', () => {
+test('given a verdict of only "non verificato" rows and an active perimeter, when the hook runs, then it still asks to close the perimeter', () => {
+  // Given
   const final = `${head}\n${row('-', 'non verificato: serve staging')}`;
+
+  // When / Then
   assert.match(stop(edited(final), { extra: { cwd: repoWithPerimeter('active') } }).reason, /Close the perimeter/);
 });
 
 // ── Read-only delegates do not arm the hook (#115) ──
 
-test('an Agent or Task of a read-only type does not arm; an editing or untyped one does; Workflow always does', () => {
+test('given Agent or Task delegates of read-only and editing types and a Workflow, when the turn claims verificato, then only editing, untyped and Workflow delegates arm the hook', () => {
+  // Given
   const claim = 'La review è arrivata, ho verificato il punto centrale.';
   const turn = (name, input) => [prompt('x'), tool(name, input), result('launched'), say(claim)];
+
+  // When / Then
   for (const name of ['Agent', 'Task']) {
-    for (const type of ['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']) {
+    for (const type of ['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'item-analyst', 'e2e-verifier', 'Plan', 'claude-code-guide', 'statusline-setup']) {
       assert.equal(stop(turn(name, { subagent_type: type })).reason, '', `${name} ${type}`);
     }
     assert.match(stop(turn(name, { subagent_type: 'implementer' })).reason, /"verificato"/, name);
@@ -253,7 +349,8 @@ test('an Agent or Task of a read-only type does not arm; an editing or untyped o
 
 // ── A quoted claim word is not a claim (#116) ──
 
-test('a claim word inside quotes is mentioned, not claimed; bold or unquoted still claims', () => {
+test('given a claim word inside quotes and a bold or unquoted one, when the hook judges the text, then only the unquoted claim is blocked', () => {
+  // Given / When / Then
   assert.equal(stop(edited('La regola ora dice esplicitamente che "fatto" e "verificato" vanno provati.')).reason, '');
   assert.equal(stop(edited('La regola dice che “fatto” e «verificato» vanno provati.')).reason, '');
   assert.match(stop(edited('Ho aggiornato la regola. **Fatto**')).reason, /"Fatto"/);
@@ -262,8 +359,11 @@ test('a claim word inside quotes is mentioned, not claimed; bold or unquoted sti
 
 // ── One task, one session: the /clear hand-off ───────────────────────────────────────────────────────────
 
-test('a passing verdict in a large context writes the hand-off and asks for /clear', () => {
+test('given a passing verdict in a large context, when the hook runs, then it writes the hand-off and asks for /clear', () => {
+  // Given / When
   const { out, handoff } = stopWithContext(edited(VERDICT, PRINTED), 150_000);
+
+  // Then
   assert.equal(out.decision, undefined);
   assert.match(out.systemMessage, /^Contesto a 150k e task chiuso: \/clear prima del prossimo/);
   assert.deepEqual(handoff.rows, ['unit | fatto']);
@@ -272,20 +372,29 @@ test('a passing verdict in a large context writes the hand-off and asks for /cle
   assert.equal(handoff.tokens, 150_000);
 });
 
-test('a git commit closes the task too: the subject is the hand-off row', () => {
+test('given a git commit turn in a large context, when the hook runs, then the commit subject is the hand-off row and /clear is asked', () => {
+  // Given / When
   const { out, handoff } = stopWithContext(committed, 150_000);
+
+  // Then
   assert.match(out.systemMessage, /\/clear/);
   assert.deepEqual(handoff.rows, ['Add the order list']);
 });
 
-test('a /commit turn with no edit closes the task too', () => {
+test('given a /commit turn with no edit in a large context, when the hook runs, then it closes the task too and asks for /clear', () => {
+  // Given
   const commitOnly = [prompt('/commit'), tool('Bash', { command: 'git commit -m "Add the order list"' }), result('[main abc] Add the order list'), say('Committato.')];
+
+  // When
   const { out, handoff } = stopWithContext(commitOnly, 150_000);
+
+  // Then
   assert.match(out.systemMessage, /\/clear/);
   assert.deepEqual(handoff.rows, ['Add the order list']);
 });
 
-test('a small context, or no snapshot, leaves no hand-off and no message', () => {
+test('given a small context or no snapshot, when the hook runs after a commit, then it leaves no hand-off and no message', () => {
+  // Given / When / Then
   for (const tokens of [50_000, null]) {
     const { out, handoff } = stopWithContext(committed, tokens);
     assert.equal(out, null);
@@ -293,20 +402,51 @@ test('a small context, or no snapshot, leaves no hand-off and no message', () =>
   }
 });
 
-test('a turn that closed nothing (no verdict, no commit) in a large context says nothing', () => {
+test('given a turn that closed nothing in a large context, when the hook runs, then it says nothing and leaves no hand-off', () => {
+  // Given / When
   const { out, handoff } = stopWithContext(edited('Ho cambiato il metodo.'), 150_000);
+
+  // Then
   assert.equal(out, null);
   assert.equal(handoff, null);
 });
 
-test('a blocked verdict never carries the /clear message', () => {
+test('given a turn sent back once (stop_hook_active) that closed a task, when the hook runs, then it is never blocked again but leaves the hand-off', () => {
+  // Given
+  const dir = mkdtempSync(join(tmpdir(), 'done-ho-'));
+  created.push(dir);
+  mkdirSync(join(dir, '.cache'));
+  writeFileSync(join(dir, '.cache', 'context-s.json'), JSON.stringify({ used_tokens: 150_000, at: Date.now() }));
+  const transcript = join(dir, 't.jsonl');
+  writeFileSync(transcript, committed.map((e) => JSON.stringify(e)).join('\n') + '\n');
+
+  // When
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ session_id: 's', transcript_path: transcript, stop_hook_active: true, hook_event_name: 'Stop', cwd: dir }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_DONE_CLAIM: '1', CLAUDE_LARGE_CONTEXT: '', CLAUDE_CONFIG_DIR: dir },
+  });
+
+  // Then
+  assert.equal(r.status, 0, r.stderr);
+  const out = r.stdout ? JSON.parse(r.stdout) : {};
+  assert.equal(out.decision, undefined);
+  assert.match(out.systemMessage ?? '', /\/clear/);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, '.cache', 'handoff.json'), 'utf8')).rows, ['Add the order list']);
+});
+
+test('given a blocked verdict in a large context, when the hook runs, then the /clear message and the hand-off are absent', () => {
+  // Given / When
   const { out, handoff } = stopWithContext(edited(VERDICT, 'something else entirely'), 150_000);
+
+  // Then
   assert.equal(out.decision, 'block');
   assert.equal(out.systemMessage, undefined);
   assert.equal(handoff, null);
 });
 
-test('an English verdict table is judged like the Italian one', () => {
+test('given an English verdict table, when the hook judges it, then it is judged like the Italian one', () => {
+  // Given / When / Then
   const en = '| Level | Command | Deciding line | Status |\n| --- | --- | --- | --- |';
   assert.equal(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`, 'Passed: 48')).reason, '');
   assert.match(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`)).reason, /"done"/);

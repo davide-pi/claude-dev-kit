@@ -5,7 +5,8 @@
  * one missing flag on a long `az` line. As a check they surface exactly when they are about to be
  * broken, and cost nothing otherwise:
  *
- *   - `az repos pr create` without `--work-items` (every PR links its parent backlog item) or
+ *   - `az repos pr create` without `--work-items` unless `--draft true` (a PR links its parent backlog item
+ *     before it leaves draft) or
  *     without `--squash true` and `--delete-source-branch true` (squash + delete, set at creation);
  *   - `az repos pr update` with any `--status` other than `active`/`abandoned`, `--auto-complete`,
  *     `--bypass-policy` (az accepts unique flag prefixes: `--stat`), and `gh pr merge`: ALWAYS, because
@@ -92,8 +93,10 @@ function mergeFlagsMissing(flags) {
 function violations({ verb, flags, text }, command) {
   const out = [];
   if (verb === 'repos pr create') {
-    if (!hasValue(flags, '--work-items')) {
-      out.push('The PR links no work item: add `--work-items <id>` with the parent backlog item (never a Task).');
+    // A draft may open before its item exists (pr-create §2): the item is linked before it leaves draft.
+    const draft = flags.has('--draft') && /^(?:true|yes|on|1)?$/i.test((flags.get('--draft') ?? '').trim());
+    if (!hasValue(flags, '--work-items') && !draft) {
+      out.push('The PR links no work item: add `--work-items <id>` with the parent backlog item (never a Task), or open it with `--draft true` and link the item before it leaves draft.');
     }
     const missing = mergeFlagsMissing(flags);
     if (missing.length) out.push(`The PR is not set to squash and delete its source branch: add ${missing.join(' and ')}.`);
@@ -142,4 +145,4 @@ function checkAlmContract(command) {
   return unique.length ? `${unique.join('\n')}\nConfirm only if this exception is intended.` : null;
 }
 
-module.exports = { checkAlmContract };
+module.exports = { checkAlmContract, parseAzCall };

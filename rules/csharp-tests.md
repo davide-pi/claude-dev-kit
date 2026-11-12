@@ -3,8 +3,8 @@ paths: "**/*Tests*/**/*.cs,**/*.Tests.csproj"
 ---
 # C# tests — house facts
 
-- Copy the nearest sibling test's style: framework, assertion library, fixture shape, naming
-  (`Method_State_Expected` where the repo uses it). Never introduce a second convention.
+- Naming and body: rule `tests`. For the rest copy the nearest sibling test: framework, assertion
+  library, fixture shape.
 - One reason to fail per test; the name says which.
 - No wall clock, randomness, network or shared mutable state: inject the clock, the seed, a fake.
 - An RPC responder or subscriber is tested through its handler method — that is the seam.
@@ -12,4 +12,4 @@ paths: "**/*Tests*/**/*.cs,**/*.Tests.csproj"
 - A bug fix starts with a test that fails for the reported reason, then passes.
 - A hand-written fake beats a mock once the setup outgrows the assertion.
 
-Procedure: skill `dotnet-testing`.
+Procedure: Read `~/.claude/skills/dotnet-testing/SKILL.md`.

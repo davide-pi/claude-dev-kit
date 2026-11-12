@@ -12,6 +12,7 @@ import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
 const HOOK = join(dirname(fileURLToPath(import.meta.url)), '..', 'hooks', 'subagent-lang.js');
+const LARGE_READ = 'A persisted tool output, a transcript or a text file over 256 KB is never read whole: Grep it, or Read it with offset and limit.';
 const created = [];
 process.on('exit', () => {
   for (const dir of created) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
@@ -29,10 +30,21 @@ function run(map, input) {
 test('prints the Lang line for the payload cwd as SubagentStart context', () => {
   const root = join(tmpdir(), 'sal-root');
   const out = run({ lang: { pr: 'it' }, roots: [{ path: root, platform: 'github', lang: { commit: 'fr' } }] }, JSON.stringify({ cwd: join(root, 'x'), hook_event_name: 'SubagentStart' }));
-  assert.deepEqual(out, { hookEventName: 'SubagentStart', additionalContext: 'Lang: commit fr · pr it · prComment en · items en · wiki en' });
+  assert.deepEqual(out, { hookEventName: 'SubagentStart', additionalContext: `Lang: commit fr · pr it · prComment en · items en · wiki en\n${LARGE_READ}` });
 });
 
 test('no map → English everywhere; unparsable input → silent', () => {
-  assert.equal(run(null, JSON.stringify({ cwd: tmpdir() })).additionalContext, 'Lang: commit en · pr en · prComment en · items en · wiki en');
+  assert.equal(run(null, JSON.stringify({ cwd: tmpdir() })).additionalContext, `Lang: commit en · pr en · prComment en · items en · wiki en\n${LARGE_READ}`);
   assert.equal(run(null, '{ nope'), null);
+});
+
+test('given any cwd, when a subagent starts, then the context carries the Lang line and the large-read sentence', () => {
+  // Given
+  const input = JSON.stringify({ cwd: tmpdir(), hook_event_name: 'SubagentStart' });
+  // When
+  const [lang, sentence, ...rest] = run(null, input).additionalContext.split('\n');
+  // Then
+  assert.match(lang, /^Lang: /);
+  assert.equal(sentence, LARGE_READ);
+  assert.deepEqual(rest, []);
 });

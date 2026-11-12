@@ -73,21 +73,30 @@ const pinned = (box, command, options) => {
   return out.updatedInput.command;
 };
 
-test('PowerShell: the command is prefixed with the mapped identity, single-quoted', () => {
+test('given a mapped directory under PowerShell, when an az command runs, then it is prefixed with the mapped identity, single-quoted', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   assert.equal(pinned(box, 'az boards query --wiql "select [System.Id] from workitems"'),
     `$env:AZURE_CONFIG_DIR='${box.azDir}'; az boards query --wiql "select [System.Id] from workitems"`);
   assert.equal(pinned(box, 'az account show --query user.name -o tsv'),
     `$env:AZURE_CONFIG_DIR='${box.azDir}'; az account show --query user.name -o tsv`);
 });
 
-test('Bash: one plain command takes an inline assignment', () => {
+test('given a mapped directory under Bash, when one plain az command runs, then it takes an inline assignment', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   assert.equal(pinned(box, 'az account show', { tool: 'Bash' }), `AZURE_CONFIG_DIR='${box.azDir}' az account show`);
 });
 
-test('only a single command is rewritten: a chained line goes to the permission flow and the manual prefix', () => {
+test('given a chained az line in either shell, when the guard runs it, then it is not rewritten and goes to the permission flow', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   for (const tool of ['Bash', 'PowerShell']) {
     for (const command of [
       'az account show && az boards query --wiql x',
@@ -99,7 +108,8 @@ test('only a single command is rewritten: a chained line goes to the permission 
   }
 });
 
-test('a home with a space or a quote survives both shells (the rewritten line is run for real)', () => {
+test('given a home with a space or a quote, when the rewritten line runs in both shells, then the identity dir survives', () => {
+  // Given / When / Then
   for (const homeName of ['my home', "o'neil"]) {
     const box = sandbox({ homeName });
     const bash = spawnSync('bash', ['-c', 'echo ok'], { encoding: 'utf8' });
@@ -117,22 +127,29 @@ test('a home with a space or a quote survives both shells (the rewritten line is
   }
 });
 
-test('left alone: a command that already chooses its config dir, and `# raw`', () => {
+test('given a command that already chooses its config dir or ends with "# raw", when the guard runs it, then it is left alone', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   assert.equal(guard(box, "$env:AZURE_CONFIG_DIR='C:/other'; az account show"), null);
   assert.equal(guard(box, 'AZURE_CONFIG_DIR=/other az account show', { tool: 'Bash' }), null);
   assert.equal(guard(box, 'az account show # raw'), null);
   assert.equal(guard(box, 'az account show #raw', { tool: 'Bash' }), null);
 });
 
-test('left alone: an unmapped directory, a root with no identity, an identity whose dir is missing', () => {
+test('given an unmapped directory, a root with no identity or an identity whose dir is missing, when the guard runs az, then it is left alone', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   assert.equal(guard(box, 'az account show', { cwd: p('E:\\elsewhere') }), null);
   assert.equal(guard(box, 'az account show', { cwd: p('D:\\work\\gh\\tool') }), null, 'a github root has no identity');
   assert.equal(guard(box, 'az account show', { cwd: p('D:\\work\\ghost\\x') }), null, '~/.azure-absent does not exist');
 });
 
-test('left alone: no map, a malformed map, no settings, no allow list', () => {
+test('given no map, a malformed map, no settings or no allow list, when the guard runs az, then it is left alone', () => {
+  // Given / When / Then
   assert.equal(guard(sandbox({ map: null }), 'az account show'), null);
   const bad = sandbox();
   writeFileSync(join(bad.config, 'workspaces.json'), '{ not json');
@@ -141,8 +158,11 @@ test('left alone: no map, a malformed map, no settings, no allow list', () => {
   assert.equal(guard(sandbox({ settings: { permissions: {} } }), 'az account show'), null);
 });
 
-test('never grants: a command the allow list does not cover is not rewritten, so not auto-allowed', () => {
+test('given commands the allow list does not cover, when the guard runs them, then they are not rewritten, so not auto-allowed', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   for (const command of [
     'az boards work-item update --id 1 --state Done',     // a write: no allow rule
     'az repos pr list --status active',
@@ -156,7 +176,8 @@ test('never grants: a command the allow list does not cover is not rewritten, so
   assert.equal(guard(sandbox({ settings: { permissions: { allow: ['Bash(az account show*)'] } } }), 'az account show'), null);
 });
 
-test('never rewritten: a command that matches a user deny or ask rule, in either tool', () => {
+test('given a command matching a user deny or ask rule in either tool, when the guard runs it, then it is not rewritten while a non-matching one is still pinned', () => {
+  // Given
   const settings = (extra) => ({ permissions: { allow: ALLOW, ...extra } });
   const rules = {
     deny: { PowerShell: 'PowerShell(az boards query --wiql secret*)', Bash: 'Bash(az boards query --wiql secret*)' },
@@ -164,6 +185,8 @@ test('never rewritten: a command that matches a user deny or ask rule, in either
   };
   const hit = { deny: 'az boards query --wiql secret-items', ask: 'az account show --query user' };
   const miss = { deny: 'az boards query --wiql other', ask: 'az account show' };
+
+  // When / Then
   for (const kind of ['deny', 'ask']) {
     for (const tool of ['PowerShell', 'Bash']) {
       const box = sandbox({ settings: settings({ [kind]: [rules[kind][tool]] }) });
@@ -177,8 +200,11 @@ test('never rewritten: a command that matches a user deny or ask rule, in either
   assert.ok(pinned(sandbox({ settings: settings({ deny: ['Bash(az account show*)'] }) }), 'az account show'), 'a Bash rule does not bind PowerShell');
 });
 
-test('never grants: redirection, substitution, a subshell or a backtick keeps the line out', () => {
+test('given redirection, substitution, a subshell or a backtick, when the guard runs az, then the line is kept out', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   for (const command of [
     'az account show > out.json',
     'az account show 2> err.txt',
@@ -192,17 +218,25 @@ test('never grants: redirection, substitution, a subshell or a backtick keeps th
   assert.equal(guard(box, 'az account show `echo hi`', { tool: 'Bash' }), null);
 });
 
-test('a line that merely names az is left alone', () => {
+test('given a line that merely names az, when the guard runs it, then it is left alone', () => {
+  // Given
   const box = sandbox();
+
+  // When / Then
   for (const command of ['echo "az account show"', 'Get-ChildItem az', 'ls /tmp/az']) {
     assert.equal(guard(box, command, { tool: command.startsWith('ls') ? 'Bash' : 'PowerShell' }), null, command);
   }
 });
 
-test('composes with the guards and the output filter: one rewrite, an ask is never rewritten', () => {
+test('given an az chain that asks and a command for the output filter, when the guard runs them, then an ask is never rewritten and the filter still rewrites without an az prefix', () => {
+  // Given
   const box = sandbox();
   // A command that asks (`az account set` is machine-global): the ask wins, nothing is rewritten.
+
+  // When
   const asked = guard(box, 'az account show; az account set --subscription Sub');
+
+  // Then
   assert.equal(asked.permissionDecision, 'ask');
   assert.equal(asked.updatedInput, undefined);
   // The output filter still rewrites what it always did, in a mapped directory, with no az prefix.

@@ -87,7 +87,7 @@ paths: "**/*.ext,**/Folder/**"
 
 - <fact or gotcha, one line, true of every matching file>
 
-Procedure: skill `<name>`.
+Procedure: Read `~/.claude/skills/<name>/SKILL.md`.
 ```
 
 Rule cap: `SKILL.md` § 2. `paths` is one comma-separated **string** (a YAML list was silently ignored). Facts a

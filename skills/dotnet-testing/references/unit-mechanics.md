@@ -5,10 +5,11 @@
 - xUnit creates a new test-class instance per test: constructor = per-test setup. Anything static and
   mutable in a test class is a cross-test channel; do not defeat the per-test instance.
 - Async setup or teardown uses the async lifetime interface, not the constructor.
-- One test class per class under test, named after it. Test names state behaviour and condition:
-  `Rejects_Order_When_Stock_Is_Insufficient`, not `TestPlaceOrder2`.
-- Arrange / act / assert separated by blank lines; an arrange block that needs comments belongs in a
-  builder. A theory with twelve columns is a table nobody maintains: split it.
+- One test class per class under test, named after it. Test names are Given/When/Then:
+  `Given_InsufficientStock_When_OrderIsPlaced_Then_ItIsRejected`, not `TestPlaceOrder2`.
+- Given, When, Then, each opened by its comment (`// Given`, `// When`, `// Then`) and separated by a
+  blank line; a Given block that needs more comments than that belongs in a builder.
+  A theory with twelve columns is a table nobody maintains: split it.
 
 ## Assertions
 
@@ -34,7 +35,7 @@ data behind them.
 
 - Substitute **interfaces you own** or the framework defines; never make a concrete class's methods
   virtual just to be mockable.
-- Arrange only what the path under test reads. Verify an interaction only when it *is* the behaviour
+- Set up in Given only what the path under test reads. Verify an interaction only when it *is* the behaviour
   ("the message was published"); verifying every call copies the implementation and breaks on refactor.
 - Never assert on a substitute of the class under test: extract the part you want to stub.
 - Match arguments on the values that matter, not a whole object.
