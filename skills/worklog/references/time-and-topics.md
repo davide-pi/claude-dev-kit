@@ -77,7 +77,7 @@ Usage as in `SKILL.md` Do.
   - `TOTALE` and `di cui LOGGABILE` (0h and internal rows excluded);
   - `NON FATTURATO`: internal minutes plus what rounding and the 0h rows dropped — said, never hidden;
   - `COPERTURA: <loggabile>h / <target>h - mancano <x>h`, flagged `sotto target` when more than 1h
-    short: the trigger of the gap prompt.
+    short: the trigger of the gap prompt. Above the target is not a finding: no prompt, no scaling.
 - Minutes changed in the Table 1 loop → **re-round**; never correct hours by hand.
 - A re-run of a day already in the audit: coverage counts this run's rows; the GIORNO `LOGGATO` says
   what the board already holds.
