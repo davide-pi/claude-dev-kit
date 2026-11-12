@@ -3,7 +3,7 @@ import { agentLog } from './agents'
 import { isFading } from './anim'
 import { groupDone } from './done-groups'
 import type { DoneEvent, DoneGroup } from './done-groups'
-import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWidth, textCells } from './shared'
+import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWidth, textCells, truncateSpans } from './shared'
 import type { Span } from './shared'
 import { loggedSignal, signalSeverity } from './signals'
 import { t } from './strings'
@@ -187,7 +187,11 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
   // a round has two lines: its time, number and prompt, then its context and model with the figures at the end
   const round = roundHeader(g, s, { time, label, figures: fig, width })
   if (round !== undefined) return { arrow, rest: round.first, ...(round.second.length > 0 && { second: round.second }) }
-  const left = [...time, { ...label, t: label.t.padEnd(LABEL_W) }, ...(after.length > 0 ? [sp(' '), ...after] : [])]
+  // a live run's phase and progress outrank its name: on a narrow pane the name gives way first, down to `flow…`
+  const room = width - 2 - spanWidth(fig) - 1 - spanWidth(time) - (after.length > 0 ? 1 + spanWidth(after) : 0)
+  const name = after.length > 0 && textCells(label.t) > room ? { ...label, t: truncateSpans([label], Math.max(room, 5)).map(x => x.t).join('') } : label
+  const pad = after.length > 0 ? Math.max(textCells(name.t), Math.min(LABEL_W, room)) : LABEL_W
+  const left = [...time, { ...name, t: name.t.padEnd(pad) }, ...(after.length > 0 ? [sp(' '), ...after] : [])]
   return { arrow, rest: pairRow(left, fig, width - 2) }
 }
 
