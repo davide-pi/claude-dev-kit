@@ -47,7 +47,7 @@ Every Agent call passes the requested effort as its `effort` parameter, not only
 "advanced" / "agent `<model>`" from the user: the model table in `references/report-format.md`. The brief
 is built **once**, passed unchanged to A (and B); contents in `references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
 a missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
-`/review-large`, never launch it unasked.
+`/review-pair`, never launch it unasked.
 
 ### Intent — before spawning
 

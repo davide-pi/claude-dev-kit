@@ -29,7 +29,7 @@ Cross-model merge: same anchor and same defect from A and B → `CONFIRMED`, sor
 priority; found by one model only → `PLAUSIBLE`, unless the finding quotes evidence (the line, the
 failing call) that settles it.
 
-A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-large` (two reviewers of the whole change,
+A diff too large for one reviewer (30+ files) → offer the saved workflow `/review-pair` (two reviewers of the whole change,
 A on Sonnet + B on Opus, one merger) and wait for the user's yes; never launch it unasked.
 
 ## Fields (emitted by the agents, values verbatim)
@@ -81,7 +81,7 @@ taken from the code.
 ## Order and tables
 
 The mandatory skeleton — `/code-review` carries a byte-identical copy inline (the
-validator compares them), and so does the `/review-large` merger prompt; edit all together:
+validator compares them), and so does the `/review-pair` merger prompt; edit all together:
 
 ```text
 Order: outcome line → Findings → Problems → Summary → footer (Verdict, Reply), the end. Never inside `> `

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: the P3 cleanup pass, questions, follow-up minors.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: the P3 cleanup pass, questions, follow-up minors.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -10,8 +10,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { snapshot, run, ARGS, CLEAN, review, finding, DONE, read, impl, FAIL, nit, ASK, asking } from './impl-review-loop.harness.mjs';
-import { gate } from './impl-review-loop.harness.mjs';
+import { snapshot, run, ARGS, CLEAN, review, finding, DONE, read, impl, FAIL, nit, ASK, asking } from './dev-loop.harness.mjs';
+import { gate } from './dev-loop.harness.mjs';
 
 const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
 

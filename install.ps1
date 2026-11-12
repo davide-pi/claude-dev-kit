@@ -117,7 +117,8 @@ $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
              'mods/cockpit/tests/cockpit-notes.test.tsx', 'mods/cockpit/tests/cockpit-subagents-cost.test.tsx',
              'mods/cockpit/tests/cockpit-subagents-rows.test.tsx', 'mods/cockpit/tests/cockpit-subagents.test.tsx',
              'mods/cockpit/tests/cockpit-tabs.test.tsx', 'mods/cockpit/tests/cockpit-work-pr.test.tsx',
-             'mods/cockpit/tests/cockpit-work.test.tsx')
+             'mods/cockpit/tests/cockpit-work.test.tsx',
+             'workflows/impl-review-loop.js', 'workflows/review-large.js', 'workflows/audit-repos.js')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'

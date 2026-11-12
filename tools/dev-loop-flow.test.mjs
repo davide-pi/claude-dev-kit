@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: the delivery flow (P-run, P-size, P-weight), implementerModel, cleanup, final read.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: the delivery flow (P-run, P-size, P-weight), implementerModel, cleanup, final read.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './dev-loop.harness.mjs';
 
 // ── delivery flow "two colleagues": P-run, P-size, P-weight, W1-W15 ──────────────────────────────────────────
 const closedIds = (...ids) => ids.map(id => ({ id, status: 'closed' }));
@@ -460,7 +460,7 @@ test('given a soft note, when the verifier of the next round repeats it shifted 
 });
 
 // ── deliver flow v2, tasks 9-10: blocks, the gate, test-first ─────────────────────────────────────────────
-import { gate, tasksOf, reviewLabels } from './impl-review-loop.harness.mjs';
+import { gate, tasksOf, reviewLabels } from './dev-loop.harness.mjs';
 
 const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
 const BLOCK_ARGS = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };

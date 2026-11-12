@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: churn stall, recheck, follow-ups.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: churn stall, recheck, follow-ups.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, DONE, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, nit, decideRound, mergeReviews, readReport, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, recheckReviewers, idsToAsk, notConverging, reviewLabels } from './impl-review-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, CLEAN, review, finding, DONE, manyArgs, manyImpl, read, labels, impl, FAIL, HELPER, plausible, defect, nit, decideRound, mergeReviews, readReport, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, recheckReviewers, idsToAsk, notConverging, reviewLabels } from './dev-loop.harness.mjs';
 
 // ── churn stall, targeted recheck, follow-ups (T9, T11, T12) ─────────────────────────────────────────
 test('decideRound: an id with no verdict this round follows the no-verdict rule, a kept challenge is fixed (F1, F4, F5)', () => {
@@ -507,7 +507,7 @@ test('script: the reviewer prompt names filesReviewed explicitly', async () => {
 });
 
 // ── deliver flow v2, task 12: the final verification reads the whole diff once ───────────────────────────
-import { ARGS_M, tasksOf, gate, isReview } from './impl-review-loop.harness.mjs';
+import { ARGS_M, tasksOf, gate, isReview } from './dev-loop.harness.mjs';
 
 const finals = (calls, round = 1) => calls.filter(c => isReview(c.opts.label, round));
 const verifierCalls = (calls) => calls.filter(c => /^reviewer V · round \d+ · /.test(c.opts.label ?? ''));

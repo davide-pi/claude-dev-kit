@@ -1,5 +1,5 @@
 export const meta = {
-  name: 'impl-review-loop',
+  name: 'dev-loop',
   description: 'Implement a decided scope in blocks (a gate and a reader A per block), verify the whole diff once, fix inside the perimeter and verify each fix until no P1/P2 is open or a finding stalls',
   whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md.',
   phases: [
@@ -11,7 +11,7 @@ export const meta = {
 }
 
 // Contract: args in skills/deliver/references/loop.md; a STALL returns to the caller, which relaunches with resumeFromRunId and every resolution (stall.why names the kind).
-// Everything between the markers is pure and run by tools/impl-review-loop.harness.mjs.
+// Everything between the markers is pure and run by tools/dev-loop.harness.mjs.
 
 // --- pure:begin
 const norm = p => String(p ?? '').replace(/\\/g, '/').replace(/^\.\//, '').toLowerCase().replace(/^\/([a-z])\//, '$1:/')
@@ -530,13 +530,13 @@ const inline = input.inline === true
 const startHead = text(input.start?.head)
 const dirty = strings(input.start?.dirty).flatMap(parseDirty)
 if (!brief || !files.length) {
-  return 'impl-review-loop: args.brief and args.perimeter.files are required, e.g. { brief: "...", perimeter: { files: ["src/Orders/OrdersQuery.cs"], behaviour: "...", exclusions: "..." }, repoRoot: "<git rev-parse --show-toplevel>", start: { head, dirty: [] }, size: "M" }'
+  return 'dev-loop: args.brief and args.perimeter.files are required, e.g. { brief: "...", perimeter: { files: ["src/Orders/OrdersQuery.cs"], behaviour: "...", exclusions: "..." }, repoRoot: "<git rev-parse --show-toplevel>", start: { head, dirty: [] }, size: "M" }'
 }
-if (!repoRoot) return 'impl-review-loop: args.repoRoot is required (the output of `git rev-parse --show-toplevel`): perimeter paths are matched from the repo root.'
-if (inline && !strings(input.changed).length) return 'impl-review-loop: inline: true needs args.changed, the files the session edited.'
+if (!repoRoot) return 'dev-loop: args.repoRoot is required (the output of `git rev-parse --show-toplevel`): perimeter paths are matched from the repo root.'
+if (inline && !strings(input.changed).length) return 'dev-loop: inline: true needs args.changed, the files the session edited.'
 const dirtyInPerimeter = dirty.filter(d => inPerimeter(d, files, repoRoot))
 if (dirtyInPerimeter.length && input.dirtyConfirmed !== true) {
-  return `impl-review-loop: perimeter file(s) already modified before the start: ${dirtyInPerimeter.join(', ')}. Ask the user, then relaunch with dirtyConfirmed: true (or change the perimeter).`
+  return `dev-loop: perimeter file(s) already modified before the start: ${dirtyInPerimeter.join(', ')}. Ask the user, then relaunch with dirtyConfirmed: true (or change the perimeter).`
 }
 const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const risk = riskAxes(input.risk, input.touches)
@@ -545,11 +545,11 @@ const planTasks = (Array.isArray(input.plan?.tasks) ? input.plan.tasks : []).fil
   id: String(t.id).trim(), title: text(t.title), files: strings(t.files), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String), tdd: t.tdd === true, criteria: strings(t.criteria),
 }))
 let blocks
-try { blocks = planTasks.length ? blocksFor(planTasks) : [[{ id: '1', title: brief, files: [], dependsOn: [], tdd: false, criteria: [] }]] } catch (e) { return `impl-review-loop: args.plan: ${e.message}` }
+try { blocks = planTasks.length ? blocksFor(planTasks) : [[{ id: '1', title: brief, files: [], dependsOn: [], tdd: false, criteria: [] }]] } catch (e) { return `dev-loop: args.plan: ${e.message}` }
 const loopSize = sizeFor(givenSize, risk, blocks.length)
 // Only the gate command (built when the implementer runs, not inline) wraps them in single quotes: a literal in PowerShell and bash, `;` and `"` pass.
-if (!inline && /'/.test(text(input.verify))) return 'impl-review-loop: verify command contains a single quote: the gate command wraps it in single quotes.'
-if (!inline && /'/.test(text(input.unit))) return 'impl-review-loop: unit command contains a single quote: the gate command wraps it in single quotes.'
+if (!inline && /'/.test(text(input.verify))) return 'dev-loop: verify command contains a single quote: the gate command wraps it in single quotes.'
+if (!inline && /'/.test(text(input.unit))) return 'dev-loop: unit command contains a single quote: the gate command wraps it in single quotes.'
 // mechanical holds only while the size stays S: a risk axis that lifts it brings back the default models.
 const mechanical = input.mechanical === true && loopSize === 'S'
 const implEffort = ['low', 'medium', 'high', 'xhigh', 'max'].includes(input.implementerEffort) ? input.implementerEffort : mechanical ? 'low' : 'medium'

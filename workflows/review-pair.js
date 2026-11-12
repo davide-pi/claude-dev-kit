@@ -1,5 +1,5 @@
 export const meta = {
-  name: 'review-large',
+  name: 'review-pair',
   description: 'Review a large diff: two reviewers of the whole change, A on Sonnet + B on Opus, one merger, one report in the chat language',
   whenToUse: 'A diff of 30+ files that one reviewer cannot hold; two code-reviewers each read the whole change. args: { range, files?, intent, effort, modelB, repo? }',
   phases: [
@@ -39,8 +39,8 @@ const MERGE_RULE = [
 
 log(`Merge rule, fixed before any agent runs:\n${MERGE_RULE}`)
 
-if (!range) return 'review-large: args.range is required, e.g. { range: "origin/main...HEAD", effort: "xhigh", modelB: "opus" }'
-if (modelOverride && !MODELS.includes(modelOverride)) return `review-large: modelB "${modelOverride}" is not one of ${MODELS.join('/')}.`
+if (!range) return 'review-pair: args.range is required, e.g. { range: "origin/main...HEAD", effort: "xhigh", modelB: "opus" }'
+if (modelOverride && !MODELS.includes(modelOverride)) return `review-pair: modelB "${modelOverride}" is not one of ${MODELS.join('/')}.`
 
 const FILES = {
   type: 'object',
@@ -102,10 +102,10 @@ if (!files) {
     `Run \`${git} diff --name-only ${range} -- ':/' ${EXCLUDE}\` ${repo ? 'on that repository' : 'in the current repository'} and return the repo-relative paths. Read-only: no other git command.`,
     { label: 'list the files to review', phase: 'Scope', agentType: 'Explore', schema: FILES },
   ).catch(() => null)
-  if (!scope) return 'review-large: scope step failed: pass files or retry.'
+  if (!scope) return 'review-pair: scope step failed: pass files or retry.'
   files = scope.files ?? []
 }
-if (!files.length) return `review-large: no changed files in ${range} (generated files excluded).`
+if (!files.length) return `review-pair: no changed files in ${range} (generated files excluded).`
 
 const modelBFinal = modelOverride ?? 'opus'
 if (modelOverride === 'sonnet') log('Reviewer B on sonnet by override: same model as A, no cross-model signal.')
@@ -221,4 +221,4 @@ ${SKELETON}`,
   `Results (JSON):\n${JSON.stringify(mergerInput)}`,
 ].filter(Boolean).join('\n\n'), { label: 'merge the reviews into one report', phase: 'Merge', model: 'sonnet' }).catch(() => null)
 
-return report ?? `review-large: the merger returned nothing (${results.length} worker results, ${gaps} gap(s)); raw findings, unmerged:\n\n${rawTable()}`
+return report ?? `review-pair: the merger returned nothing (${results.length} worker results, ${gaps} gap(s)); raw findings, unmerged:\n\n${rawTable()}`

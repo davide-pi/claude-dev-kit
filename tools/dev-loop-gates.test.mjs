@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: the verify gate, style never blocks, widen, hunk-level scope and rejections.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: the verify gate, style never blocks, widen, hunk-level scope and rejections.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -10,8 +10,8 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './impl-review-loop.harness.mjs';
-import { gate } from './impl-review-loop.harness.mjs';
+import { SOURCE, FILES, f, ROOT, PASS, snapshot, run, ARGS, ARGS_M, review, finding, DONE, read, impl, FAIL, HELPER, plausible, decideRound, mergeReviews, classify, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, isReview } from './dev-loop.harness.mjs';
+import { gate } from './dev-loop.harness.mjs';
 
 // ── the verify gate: delta command, verify finding, gate stalls (T10, T4) ──────────────────────────
 test('deltaCommand: git diff between the two snapshots, the start head when there is no earlier one, nothing without a tree', () => {

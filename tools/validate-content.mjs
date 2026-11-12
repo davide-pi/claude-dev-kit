@@ -108,7 +108,7 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
   // that drifts makes the merger parse several dialects, so every copy must equal it byte for byte:
   //   - the Finding block (fenced) and the one-defect-per-block rule (a paragraph) in the finding-format skill,
   //     which the 3 review agents preload through their `skills:` frontmatter;
-  //   - the report skeleton (fenced) in the code-review skill and the review-large merger.
+  //   - the report skeleton (fenced) in the code-review skill and the review-pair merger.
   {
     const FORMAT = 'skills/code-review/references/report-format.md';
     // a template literal in a .js copy escapes its backticks
@@ -131,7 +131,7 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
       else if (!has(SKILL[0])) fail(rel, `preloads finding-format, but ${SKILL[0]} is missing`);
     }
     fenced(/## Order and tables[\s\S]*?```text\n([\s\S]*?)\n```/, 'report skeleton',
-      ['skills/code-review/SKILL.md', 'workflows/review-large.js']);
+      ['skills/code-review/SKILL.md', 'workflows/review-pair.js']);
   }
 
   // ── 4b. Every skill has triggering cases ─────────────────────────

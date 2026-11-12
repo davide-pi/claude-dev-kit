@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/review-large.js: the panel (two whole-change reviewers) and the cost guard. The saved workflow runs as the body of an
+ * Tests for workflows/review-pair.js: the panel (two whole-change reviewers) and the cost guard. The saved workflow runs as the body of an
  * async function whose parameters are the orchestration primitives, so the test does the same with
  * stubs for `agent`, `pipeline`, `parallel`, `phase` and `log` and counts what would be spawned.
  * Zero dependencies — `node:test` on Node 18+.
@@ -16,7 +16,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'review-large.js'), 'utf8')
+const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'review-pair.js'), 'utf8')
   .replace(/^export /, '');
 const AsyncFunction = (async () => {}).constructor;
 

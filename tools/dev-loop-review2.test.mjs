@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: the review fixes of flow v2 (block reader, carried findings, questions on every
+ * Tests for workflows/dev-loop.js: the review fixes of flow v2 (block reader, carried findings, questions on every
  * implementer call, fix-round gate, quoting, soft scope of a sole final reader).
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run, ARGS, ARGS_M, review, finding, impl, gate, tasksOf, HELPER, reviewLabels } from './impl-review-loop.harness.mjs';
+import { run, ARGS, ARGS_M, review, finding, impl, gate, tasksOf, HELPER, reviewLabels } from './dev-loop.harness.mjs';
 
 const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });

@@ -26,7 +26,7 @@
   },
   "permissions": {
     "allow": [
-      "Workflow(impl-review-loop)",
+      "Workflow(dev-loop)",
       "Read(**)",
       "Grep(**)",
       "PowerShell(tsc --noEmit)",

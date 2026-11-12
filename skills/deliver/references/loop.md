@@ -1,4 +1,4 @@
-# Loop — launching `impl-review-loop`, and what to do with its answer
+# Loop — launching `dev-loop`, and what to do with its answer
 
 Before the loop (M, L): facts first, doubts pass, criteria and challenger: `references/analysis.md`.
 
@@ -17,7 +17,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 
 ## Args
 
-`Workflow` with `name: impl-review-loop` and
+`Workflow` with `name: dev-loop` and
 `{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, plan, unit, testSkill, stuckMinutes, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview, lanes }`
 
 | Arg | Rule |
