@@ -193,3 +193,25 @@ test('given A and B findings on the same anchor, when the workflow runs, then th
   assert.equal(input.findings[0].verdict, 'CONFIRMED');
   assert.ok(input.workers.every((w) => w.checked.length === 300));
 });
+
+test('given a repo path, when the workflow runs, then the scope step, both reviewers and the merger run git with -C on that path', async () => {
+  // Given: a session whose cwd is not the repository
+  const repo = String.raw`D:\work\O'Brien\my kit`;
+  // When
+  const { spawned } = await dryRun(0, { repo }, (o) => (o.label === 'list the files to review' ? { files: ['src/a.cs'] } : undefined), true);
+  // Then: forward slashes in double quotes, so the space and the ' survive bash and PowerShell alike
+  const quoted = `git -C "D:/work/O'Brien/my kit"`;
+  const scope = spawned.find((o) => o.label === 'list the files to review');
+  assert.ok(scope.prompt.includes(`${quoted} diff --name-only`), scope.prompt);
+  for (const o of spawned.filter((x) => x.agentType === 'code-reviewer' || x.label === 'merge the reviews into one report')) {
+    assert.ok(o.prompt.includes(`Repository: ${repo} `), o.label);
+    assert.ok(o.prompt.includes(quoted), o.label);
+  }
+});
+
+test('given no repo path, when the workflow runs, then the prompts keep the plain git of the current repository', async () => {
+  // Given / When
+  const { spawned } = await dryRun(3);
+  // Then
+  assert.ok(spawned.every((o) => !/git -C|Repository:/.test(o.prompt)));
+});

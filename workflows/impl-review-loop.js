@@ -1423,6 +1423,12 @@ while (true) {
   if (!fixed) return stallAgain(round, `the implementer returned nothing on the fix (stopped or failed${why(fixOpts.label)})`)
   // A running or timed-out gate is no red verify to retry: it stalls as the block phase does; a scope red names the files to revert.
   const fixGate = gated ? readGate(fixed.gate) : null
+  // An edited proven test is the owner's call, as in the block phase: no verifier or further round can settle it.
+  if (fixGate?.gate === 'red: tests changed') {
+    takeReport(fixed)
+    return stall(round, { why: 'tests-changed', findings: [], reason: `fix of round ${round}: a test file proven red was edited after the proof${fixGate.test ? ` (${fixGate.test})` : ''}: ${fixGate.line}` },
+      `Ask the user: accept the edited test (run the gate once with --force, which drops the stored proof) or revert the edit. ${RESUME_FRESH}`)
+  }
   if (fixGate && ['gate-running', 'gate-timeout'].includes(gateWhy(fixGate)) && !gateGreen(fixGate)) {
     takeReport(fixed)
     return stallAgain(round, `the gate ${fixGate.gate === 'running' ? 'was still running' : 'timed out'} after the fix of round ${round}: ${fixGate.line}`, { why: gateWhy(fixGate) })
