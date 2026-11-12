@@ -48,6 +48,8 @@ import {
   slowTick,
   startedCost,
 } from './refresh'
+import { PACE_TICK_MS, paceCheck } from './pace'
+import { WORKING_MARGIN_MS } from './session'
 import { paneActions } from './pane-actions'
 import { usdOf } from './pricing'
 import { refreshGit } from './refresh-git'
@@ -94,6 +96,20 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
   }
 }
 
+/**
+ * One look at the usage pace, from the snapshot: open or closed pane alike (the heartbeat tells the chat and the launcher the mod runs).
+ * Idle: no state, `idle`, or a working state older than the working margin (its end event was lost).
+ */
+function pace($: EngineInterface, trigger: 'tick' | 'turn'): void {
+  void Promise.all([read($, snapshot), $.clock.now()])
+    .then(([s, now]) => {
+      const st = s.claudeState
+      const isIdle = st === undefined || st.kind === 'idle' || (st.since !== undefined && now - st.since > WORKING_MARGIN_MS)
+      return paceCheck($, s.sessionId, s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? []), isIdle, trigger)
+    })
+    .catch(() => undefined)
+}
+
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */
@@ -138,6 +154,8 @@ export const register: Register = on => {
     $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
     $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
     $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
+    $.clock.every(PACE_TICK_MS, () => pace($, 'tick'))
+    pace($, 'tick')
     // The pane opens with the session unless cockpit.json says `"autoOpen": false`; `/cockpit` opens it any time.
     if (autoOpen) await open($).catch(() => undefined)
     return next(e)
@@ -566,6 +584,8 @@ export const register: Register = on => {
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
       await refreshGit($)
       await refreshDoneClaims($)
+      // a compaction rejects while the turn runs: it is tried once this hook has let the turn end
+      $.clock.after(0, () => pace($, 'turn'))
     } else {
       await patch($, s => {
         const agents = upsertAgent(s.agents, agentId, now, a => {
