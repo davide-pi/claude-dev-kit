@@ -99,6 +99,16 @@ test('given a fix round whose gate is still running, when it returns, then the l
   assert.deepEqual(reviewLabels(calls, 2), []);
 });
 
+test('given a fix round that edits a proven test, when its gate says red: tests changed, then the loop stalls as tests-changed for the owner and no verifier runs', async () => {
+  // Given / When
+  const { out, calls } = await fixRoundRun(gate('red: tests changed', { test: 'tests/Tax.test.cs' }));
+  // Then
+  assert.equal(out.stall.why, 'tests-changed');
+  assert.match(out.stall.reason, /tests\/Tax\.test\.cs/);
+  assert.match(out.resume, /Ask the user/);
+  assert.deepEqual(reviewLabels(calls, 2), []);
+});
+
 test('given a fix round whose gate times out, when it returns, then the loop stalls with gate-timeout and the fix is not retried', async () => {
   // Given / When
   const { out, calls } = await fixRoundRun(gate('red: timeout', { test: 'Slow' }));

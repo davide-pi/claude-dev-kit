@@ -14,7 +14,7 @@ depth: passed as the `effort` parameter of every Agent call and also written in 
 | `xhigh` | the full two-model pair plus both specialists, told to follow call paths out of the diff |
 | `max` | the same, exhaustive: every touched path, every caller |
 
-A diff of 30+ files goes to the saved workflow `/review-large` on the user's yes: two `code-reviewer`s, A on Sonnet and B on Opus (or the `modelB` arg), each reading the whole change with one brief, then one merger. It never splits the files.
+A diff of 30+ files goes to the saved workflow `/review-large` on the user's yes: two `code-reviewer`s, A on Sonnet and B on Opus (or the `modelB` arg), each reading the whole change with one brief, then one merger. It never splits the files. When the session's folder is not the repository (a worktree elsewhere, a session in `~/.claude`), pass `repo`, its absolute path.
 
 `[focus]` overrides the ladder: `security` → `review-security` alone, `performance` →
 `review-performance` alone, anything else (`completeness`, `clean-code`, a subsystem) → the

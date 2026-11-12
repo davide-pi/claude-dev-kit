@@ -1,7 +1,7 @@
 export const meta = {
   name: 'review-large',
   description: 'Review a large diff: two reviewers of the whole change, A on Sonnet + B on Opus, one merger, one report in the chat language',
-  whenToUse: 'A diff of 30+ files that one reviewer cannot hold; two code-reviewers each read the whole change. args: { range, files?, intent, effort, modelB }',
+  whenToUse: 'A diff of 30+ files that one reviewer cannot hold; two code-reviewers each read the whole change. args: { range, files?, intent, effort, modelB, repo? }',
   phases: [
     { title: 'Scope', detail: 'list the changed files when args.files is absent' },
     { title: 'Review', detail: 'two code-reviewers, A on sonnet and B on opus, both reading the whole change with the same brief' },
@@ -9,7 +9,8 @@ export const meta = {
   ],
 }
 
-// args: a range string, or { range, files?, intent?, effort?, modelB? }.
+// args: a range string, or { range, files?, intent?, effort?, modelB?, repo? }. repo: the repository's absolute path, when the
+// session's folder is not that repository; every git command then runs with -C on it.
 // A is always sonnet, B always opus; modelB overrides B's model. Both read the whole change.
 const input = typeof args === 'string' ? { range: args } : (args ?? {})
 const range = typeof input.range === 'string' ? input.range.trim() : ''
@@ -20,6 +21,10 @@ const modelOverride = typeof input.modelB === 'string' && input.modelB ? input.m
 const intent = typeof input.intent === 'string' && input.intent.trim()
   ? input.intent.trim()
   : 'NOT STATED: report completeness as unjudgeable; never invent the intent.'
+const repo = typeof input.repo === 'string' ? input.repo.trim() : ''
+// Forward slashes in double quotes: one spelling that bash and PowerShell both take, a space or a ' in the path included.
+const git = repo ? `git -C "${repo.replace(/\\/g, '/')}"` : 'git'
+const REPO_LINE = repo ? `Repository: ${repo} (the session's folder is not it): run every git command as \`${git} ...\` and read the files under it.` : ''
 const LIST_ALL_MAX = 60
 const EXCLUDE = `':!*.lock' ':!package-lock.json' ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'`
 
@@ -94,7 +99,7 @@ phase('Scope')
 let files = Array.isArray(input.files) ? input.files.filter(f => typeof f === 'string' && f) : null
 if (!files) {
   const scope = await agent(
-    `Run \`git diff --name-only ${range} -- ':/' ${EXCLUDE}\` in the current repository and return the repo-relative paths. Read-only: no other git command.`,
+    `Run \`${git} diff --name-only ${range} -- ':/' ${EXCLUDE}\` ${repo ? 'on that repository' : 'in the current repository'} and return the repo-relative paths. Read-only: no other git command.`,
     { label: 'list the files to review', phase: 'Scope', agentType: 'Explore', schema: FILES },
   ).catch(() => null)
   if (!scope) return 'review-large: scope step failed: pass files or retry.'
@@ -121,11 +126,12 @@ const allFilesText = files.length <= LIST_ALL_MAX
   : `The change has ${files.length} files in: ${[...new Set(sorted.map(dirOf))].join(', ')}.`
 // One brief for both reviewers: they differ only in model.
 const brief = [
-  `Review the WHOLE change. Scope: \`git diff ${range} -- ${sorted.map(f => `'${f}'`).join(' ')}\`.`,
+  REPO_LINE,
+  `Review the WHOLE change. Scope: \`${git} diff ${range} -- ${sorted.map(f => `'${f}'`).join(' ')}\`.`,
   `Read the ${files.length} changed file(s) in full: per-file defects, and what a single pass misses: a contract or signature changed in one file and used in another, callers left behind, the same rule applied inconsistently across files, missing pieces of the intent. ${allFilesText}`,
   'You are one of two reviewers of the same change: report what you see, do not soften for agreement.',
   ...SHARED,
-].join('\n')
+].filter(Boolean).join('\n')
 
 phase('Review')
 const run = (opts, who) => () => agent(brief, { phase: 'Review', agentType: 'code-reviewer', schema: REVIEW, effort, ...opts })
@@ -209,9 +215,10 @@ const report = await agent([
 ${SKELETON}`,
   IT_LABELS,
   `Intent: ${intent}`,
+  REPO_LINE,
   `Range ${range} · ${files.length} files · effort ${effort} · reviewers: A sonnet, B ${modelBFinal}, each on the whole change.`,
   'Your final text IS the report shown to the user: no preamble, no restated inputs, no JSON.',
   `Results (JSON):\n${JSON.stringify(mergerInput)}`,
-].join('\n\n'), { label: 'merge the reviews into one report', phase: 'Merge', model: 'sonnet' }).catch(() => null)
+].filter(Boolean).join('\n\n'), { label: 'merge the reviews into one report', phase: 'Merge', model: 'sonnet' }).catch(() => null)
 
 return report ?? `review-large: the merger returned nothing (${results.length} worker results, ${gaps} gap(s)); raw findings, unmerged:\n\n${rawTable()}`
