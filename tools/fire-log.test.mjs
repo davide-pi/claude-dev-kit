@@ -255,16 +255,6 @@ test('given a destructive command, when guard-shell asks, then one ask line is l
   assert.equal(onlyLine(config).decision, 'ask');
 });
 
-test('given an e2e-verifier calling browser_login, when edge-cdp denies it, then one deny line is logged for a subagent', () => {
-  // Given
-  const config = temp('fire-cfg-');
-  // When
-  runHook(config, 'edge-cdp.js', { hook_event_name: 'PreToolUse', agent_type: 'e2e-verifier', tool_name: 'x__browser_login', tool_input: {} });
-  // Then
-  const line = onlyLine(config);
-  assert.deepEqual([line.hook, line.decision, line.sub], ['edge-cdp', 'deny', true]);
-});
-
 test('given a WorktreeRemove of a path that is no worktree, when worktree-root fails, then one WorktreeRemove line is logged', () => {
   // Given
   const config = temp('fire-cfg-');

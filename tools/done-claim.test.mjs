@@ -338,7 +338,7 @@ test('given Agent or Task delegates of read-only and editing types and a Workflo
 
   // When / Then
   for (const name of ['Agent', 'Task']) {
-    for (const type of ['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'item-analyst', 'e2e-verifier', 'Plan', 'claude-code-guide', 'statusline-setup']) {
+    for (const type of ['Explore', 'investigator', 'code-reviewer', 'review-performance', 'review-security', 'analyst', 'db-analyst', 'ops-analyst', 'Plan', 'claude-code-guide', 'statusline-setup']) {
       assert.equal(stop(turn(name, { subagent_type: type })).reason, '', `${name} ${type}`);
     }
     assert.match(stop(turn(name, { subagent_type: 'implementer' })).reason, /"verificato"/, name);

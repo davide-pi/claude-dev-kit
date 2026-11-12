@@ -67,5 +67,5 @@ A spike has no loop and no review. The perimeter is the probe itself.
 ## The e2e level
 
 When the proof needs a running local environment, the session writes the steps and the expected result of each,
-hands them to `e2e-verifier` with how to reach the environment, and reads the table it returns. A `fail` row goes
-back to the loop as the brief; `not-run` rows are reported as not verified.
+runs them itself (browser-use for the UI, HTTP calls, read-only data checks) and records pass, fail or not-run per step. A `fail`
+row goes back to the loop as the brief; `not-run` rows are reported as not verified.

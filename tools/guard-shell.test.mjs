@@ -1333,24 +1333,24 @@ test('a read-only agent may still read git; an editing agent or the main session
   rmSync(cwd, { recursive: true, force: true });
 });
 
-test('given agent_type item-analyst, when it runs git commit, then the shell guard denies', () => {
+test('given agent_type analyst, when it runs git commit, then the shell guard denies', () => {
   // Given
-  const payload = { tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'item-analyst' };
+  const payload = { tool_name: 'Bash', tool_input: { command: 'git commit -m x' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'analyst' };
   // When
   const r = evaluate(payload);
   // Then
   assert.equal(r?.decision, 'deny');
-  assert.match(r.reason, /read-only agent \(item-analyst\)/);
+  assert.match(r.reason, /read-only agent \(analyst\)/);
 });
 
-test('given agent_type e2e-verifier, when it runs git push, then the shell guard denies', () => {
+test('given agent_type db-analyst, when it runs git push, then the shell guard denies', () => {
   // Given
-  const payload = { tool_name: 'Bash', tool_input: { command: 'git push' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'e2e-verifier' };
+  const payload = { tool_name: 'Bash', tool_input: { command: 'git push' }, cwd: tmpdir(), agent_id: 'a1', agent_type: 'db-analyst' };
   // When
   const r = evaluate(payload);
   // Then
   assert.equal(r?.decision, 'deny');
-  assert.match(r.reason, /read-only agent \(e2e-verifier\)/);
+  assert.match(r.reason, /read-only agent \(db-analyst\)/);
 });
 
 const TRACKER_WRITES = [
@@ -1369,19 +1369,19 @@ const TRACKER_WRITES = [
   'gh pr -R o/r comment 3 -b x', 'gh api repos/o/r/issues/1/comments -fbody=hi', 'gh api graphql -f query="mutation { addComment(input: {}) { clientMutationId } }"',
 ];
 
-test('given agent_type item-analyst, when it runs a tracker or pull request write, then the shell guard denies and names the agent', () => {
+test('given agent_type analyst, when it runs a tracker or pull request write, then the shell guard denies and names the agent', () => {
   // Given
   const cwd = tmpdir();
   for (const command of TRACKER_WRITES) {
     // When
-    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'item-analyst' });
+    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'analyst' });
     // Then
     assert.equal(r?.decision, 'deny', command);
-    assert.match(r.reason, /read-only agent \(item-analyst\).*return the write to the caller/i, command);
+    assert.match(r.reason, /read-only agent \(analyst\).*return the write to the caller/i, command);
   }
 });
 
-test('given agent_type item-analyst, when it reads the tracker or a pull request, then the shell guard does not deny', () => {
+test('given agent_type analyst, when it reads the tracker or a pull request, then the shell guard does not deny', () => {
   // Given
   const cwd = tmpdir();
   for (const command of ['az boards work-item show --id 5', 'az repos pr list', 'az repos pr show --id 3', 'az devops wiki page show --wiki w --path p',
@@ -1389,7 +1389,7 @@ test('given agent_type item-analyst, when it reads the tracker or a pull request
     'az devops invoke --area wit --resource workitems --route-parameters id=5', 'az rest --url u', 'gh pr -R o/r view 3',
     'gh api graphql -f query="{ repository(owner: \\"o\\", name: \\"r\\") { id } }"']) {
     // When
-    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'item-analyst' });
+    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'analyst' });
     // Then
     assert.notEqual(r?.decision, 'deny', command);
   }
