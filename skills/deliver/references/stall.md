@@ -1,6 +1,6 @@
 # Stall — a run that returned `STALL`: what each one means and how to resume
 
-Read only when `impl-review-loop` returns `status: STALL` (a `question` one included), or after a red test that follows an `OK`.
+Read only when `dev-loop` returns `status: STALL` (a `question` one included), or after a red test that follows an `OK`.
 
 ## Questions: the `question` stall
 

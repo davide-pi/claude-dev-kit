@@ -273,7 +273,7 @@ const IN_PROGRESS = /(?:non verificat\w*|not verified)\b.*\b(?:in corso|ancora|a
 function blockOpenPerimeter(payload, rows, message) {
   if (!rows.length || !perimeterOpen(payload.cwd)) return;
   // A progress report mid-run, not the closing verdict: the perimeter is rightly still active.
-  if (rows.some((r) => IN_PROGRESS.test(r.state) || (/impl-review-loop/.test(r.command) && /non verificat|not verified/i.test(r.state)))) return;
+  if (rows.some((r) => IN_PROGRESS.test(r.state) || (/dev-loop/.test(r.command) && /non verificat|not verified/i.test(r.state)))) return;
   log(payload, 'perimeter-open', 'verdict', message);
   fire.decision = 'block';
   process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));

@@ -11,7 +11,7 @@ request ─► route (CLAUDE.md) ─► plan-work? ─► deliver ─► /commit
                      triage: scenario, size S, risk axes, perimeter, test matrix
                      analysis: plan tasks, challenger, every question asked before the launch
                                                │
-                     impl-review-loop: blocks of up to 4 tasks, each closed by the gate and read by reader A;
+                     dev-loop: blocks of up to 4 tasks, each closed by the gate and read by reader A;
                      final verification; fix rounds, each verified → OK | STALL
                                                │
                      final gate · sweep · tests by level · verdict table · perimeter closed
@@ -22,7 +22,7 @@ request ─► route (CLAUDE.md) ─► plan-work? ─► deliver ─► /commit
 | route | the table in `CLAUDE.md` | nothing |
 | plan, when worth one | `plan-work` | a plan file in `docs/plans/`, ignored by git (below) |
 | triage and perimeter | `deliver` | `<git dir>/deliver/perimeter.md`, per worktree, never committed |
-| implement and review | `impl-review-loop` workflow | the diff; `blocks`, `carried`, `defaultsApplied`, `findingsLog` for the session |
+| implement and review | `dev-loop` workflow | the diff; `blocks`, `carried`, `defaultsApplied`, `findingsLog` for the session |
 | tests and scope | `scripts/gate.mjs` | `<git dir>/deliver/gate.json` and `gate.log`, per worktree, never committed |
 | leftovers | `scripts/sweep.mjs` | the closed process trees; a list of other processes for the owner |
 | close | `scripts/perimeter.ps1 -Close -FindingsLog` | one line in `<git dir>/deliver/findings.jsonl`, read by `session-brief.js` and `/retro` |

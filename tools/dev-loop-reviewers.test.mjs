@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: reviewer fan-out, sizing and the wide-change Opus, coverage of the files read, and snapshots.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: reviewer fan-out, sizing and the wide-change Opus, coverage of the files read, and snapshots.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { f, ROOT, snapshot, run, ARGS, ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, reviewCalls, riskAxes, sizeSignal, isReview, reviewLabels, tasksOf } from './impl-review-loop.harness.mjs';
+import { f, ROOT, snapshot, run, ARGS, ARGS_M, review, finding, MANY, manyArgs, manyImpl, read, impl, defect, unreviewedFiles, reviewersFor, sizeFor, readReport, coverageAction, coverageOwners, reviewCalls, riskAxes, sizeSignal, isReview, reviewLabels, tasksOf } from './dev-loop.harness.mjs';
 
 // An L run: five plan tasks make two blocks, so the final readers are A (sonnet) and B (opus); the scripted implementer answers once per block.
 const largeArgs = (extra = {}) => manyArgs({ plan: { tasks: tasksOf(5) }, ...extra });
@@ -495,7 +495,7 @@ test('given a change past 10 files or 600 changed lines, when the final readers 
 });
 
 // ── deliver flow v2, task 11: reader A reads each block ───────────────────────────────────────────────────
-import { gate } from './impl-review-loop.harness.mjs';
+import { gate } from './dev-loop.harness.mjs';
 
 const readerA = (calls) => calls.filter(c => /^block \d+ · reader A$/.test(c.opts.label ?? ''));
 const implLabels = (calls) => calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label);

@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Tests for workflows/impl-review-loop.js: the round decision, the start point, the loop, the perimeter rule.
- * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/impl-review-loop.harness.mjs.
+ * Tests for workflows/dev-loop.js: the round decision, the start point, the loop, the perimeter rule.
+ * Zero dependencies — `node:test` on Node 18+; the shared harness is tools/dev-loop.harness.mjs.
  *
  *   node --test "tools/*.test.mjs"
  *
@@ -13,7 +13,7 @@ import assert from 'node:assert/strict';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
-import { tasksOf, FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './impl-review-loop.harness.mjs';
+import { tasksOf, FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, read, impl, defect, nit, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, isReview } from './dev-loop.harness.mjs';
 
 test('inPerimeter: file, directory, glob, absolute path under the root, case, anchored at the root', () => {
   assert.ok(inPerimeter('src/Orders/OrdersQuery.cs', FILES));

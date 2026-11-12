@@ -113,10 +113,10 @@ test('given a short deciding line, when the hook compares it with the output, th
 
 test('given a deciding cell joining real output lines or with a trailing note, when the hook judges it, then it is proven piece by piece and one absent piece blocks', () => {
   // Given
-  const out = '# pass 673\n# fail 0\ninstalled workflows/impl-review-loop.js\n"permissionDecision":"deny"\nexplore-exit=0';
+  const out = '# pass 673\n# fail 0\ninstalled workflows/dev-loop.js\n"permissionDecision":"deny"\nexplore-exit=0';
 
   // When / Then
-  for (const line of ['`# pass 673` / `# fail 0`', '`# pass 673`, `# fail 0`', '`installed workflows/impl-review-loop.js` (e gli altri 3)', 'deny / deny / exit 0']) {
+  for (const line of ['`# pass 673` / `# fail 0`', '`# pass 673`, `# fail 0`', '`installed workflows/dev-loop.js` (e gli altri 3)', 'deny / deny / exit 0']) {
     assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
   }
   assert.match(stop(edited(verdict(row('`# pass 673` / `# fail 1`')), '# pass 673\n# fail 0')).reason, /"fatto"/);

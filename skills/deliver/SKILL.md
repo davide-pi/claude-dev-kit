@@ -81,7 +81,7 @@ name it, then ask once: **accept the proxy · prepare the environment · defer**
 
 1. Triage, then the perimeter file and the start point; scenario preparation. Docs only (§2): triage, edit inline, one reviewer, that check, the verdict; no perimeter, start point, loop or `-Close`.
 2. Analysis by size, criteria with proof (`references/analysis.md`); ask what §3 says. S: edit inline now.
-3. Verify pre-check (`references/loop.md`), launch `impl-review-loop` once per coherent request with the plan (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
+3. Verify pre-check (`references/loop.md`), launch `dev-loop` once per coherent request with the plan (`references/loop.md`: args, size S inline, `STALL` and resume, the findings log).
    `OK` → the final gate, then the sweep (`references/loop.md` § After OK): `green` or `skipped: tree unchanged` → step 4; red → relaunch with the gate line as the brief; exit 2 = not checked, never clean. `STALL` → `references/stall.md`.
 4. Run the matrix levels the gate doesn't cover; a failure goes back to step 3 with its output as the brief. M, L: the proof check (assertion lines of each criterion's test).
 5. `perimeter.ps1 -Close -FindingsLog`, then the verdict, then `/commit`, `pr-create` when asked.

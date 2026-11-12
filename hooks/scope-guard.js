@@ -13,7 +13,7 @@
  *
  * Entries are repo-relative: a file, a directory (trailing `/`) or a glob (`*` inside a segment, `**`
  * across segments), anchored at the repository root and matched case-insensitively (the same rule as
- * `workflows/impl-review-loop.js`, which a test holds them to). The perimeter counts only while it says
+ * `workflows/dev-loop.js`, which a test holds them to). The perimeter counts only while it says
  * `status: active` AND its `branch:` is the branch checked out now; `deliver` overwrites the file at
  * each triage and sets `status: closed` at the verdict. No file, a closed or another branch's
  * perimeter or no git repository above the working directory: no active perimeter.

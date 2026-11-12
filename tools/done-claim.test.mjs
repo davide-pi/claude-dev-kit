@@ -292,7 +292,7 @@ test('given an active perimeter and a progress report with a row still running, 
   const repo = repoWithPerimeter('active');
 
   // When / Then
-  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `impl-review-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
+  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `dev-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
     assert.equal(stop(edited(verdict(row('Passed: 48'), open), 'Passed: 48'), { extra: { cwd: repo } }).reason, '', open);
   }
   // an honest gap that is not "still running" leaves the check on

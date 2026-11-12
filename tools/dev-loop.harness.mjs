@@ -1,5 +1,5 @@
 /**
- * Shared harness for the impl-review-loop tests. Two layers. The round-decision logic is a pure block between
+ * Shared harness for the dev-loop tests. Two layers. The round-decision logic is a pure block between
  * `// --- pure:begin` and `// --- pure:end`; the harness extracts it for direct calls. The whole script is then run
  * the way the runtime runs a workflow (the body of an async function) with a scripted `agent`, to see the loop
  * end in OK or STALL and a resume carry on past a stall.
@@ -10,7 +10,7 @@ import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'impl-review-loop.js'), 'utf8');
+const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'dev-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
 const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } =
   new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy }`)();
