@@ -133,7 +133,7 @@ export const fitPair = (left: readonly Span[], right: readonly Span[], width: nu
   spanWidth(left) + 1 + spanWidth(right) <= width ? pairRow(left, right, width) : truncateSpans(left, width)
 
 /**
- * The rows under an agent's row on the Subagents tab once it is expanded: the total tokens, what it was asked, the four counters, then the tool running
+ * The rows under an agent's row in IN PROGRESS once it is expanded: the total tokens, what it was asked, the four counters, then the tool running
  * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
  */
 export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {

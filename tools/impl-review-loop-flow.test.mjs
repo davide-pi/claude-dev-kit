@@ -504,6 +504,17 @@ test('given an implementer whose gate says red: tests changed, when it reports, 
   }
 });
 
+test('given a red gate whose fix edits the proven test, when the fix reports, then the loop stalls as tests-changed for the owner, not as gate-red', async () => {
+  // Given
+  const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }) }), green()];
+  // When
+  const { out, calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  assert.equal(out.stall.why, 'tests-changed');
+  assert.equal(implCalls(calls).length, 2);
+  assert.match(out.resume, /Ask the user/);
+});
+
 test('given a block whose gate comes back red, when the fix call turns it green, then the loop goes on to the next block', async () => {
   // Given
   const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), green(), green()];

@@ -55,7 +55,7 @@ test('pace: Given no pace file for the session, When the ticks and a main turn r
   expect(modLog(log)).toEqual([])
 })
 
-test('pace: Given an armed chat whose window reset, When the tick passes resumeAt with the chat idle, Then the launcher prompt is submitted once and resumedAt written', async ($, on) => {
+test('pace: Given an armed chat whose window reset, When the tick passes resumeAt with the chat idle, Then the resume prompt is submitted once and resumedAt written', async ($, on) => {
   // Given
   resetPaceState()
   const submitted: string[] = []
@@ -126,7 +126,7 @@ test('pace: Given the resume time come with the new window at 60%, When it drops
   expect(submitted.length).toBe(1)
 })
 
-test('pace: Given no pace file and the 5h window at 75%, When the tick runs, Then the mod beats so the chat picks it over the launcher, and nothing compacts', async ($, on) => {
+test('pace: Given no pace file and the 5h window at 75%, When the tick runs, Then the mod beats so the chat sees the mod alive at its 96% band, and nothing compacts', async ($, on) => {
   // Given
   resetPaceState()
   const instructions: (string | undefined)[] = []

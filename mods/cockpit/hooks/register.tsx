@@ -76,7 +76,6 @@ let mainTools: string[] = []
 // The last permission waits that ended, as [from, to]: a tool call takes off its running time only the part of them inside its own span (the wait is counted on its own).
 let waits: { from: number; to: number }[] = []
 const WAITS_KEPT = 50
-/** The error text a Cronologia row keeps. */
 // The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
 const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
 
@@ -97,7 +96,7 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
 }
 
 /**
- * One look at the usage pace, from the snapshot: open or closed pane alike (the heartbeat tells the chat and the launcher the mod runs).
+ * One look at the usage pace, from the snapshot: open or closed pane alike (the heartbeat tells the chat the mod runs).
  * Idle: no state, `idle`, or a working state older than the working margin (its end event was lost).
  */
 function pace($: EngineInterface, trigger: 'tick' | 'turn'): void {

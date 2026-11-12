@@ -162,7 +162,7 @@ export function parsePrCreatedAt(out: string): number | undefined {
   }
 }
 
-// ── The Work tab: the changed files, the diff of one ──
+// ── The changed files and the diff of one ──
 
 /** `git diff --numstat --no-renames -z HEAD --` then the untracked paths -> the changed files; a binary file has `-` counts. */
 export function parseNumstat(out: string, untracked: readonly string[]): CockpitChange[] {

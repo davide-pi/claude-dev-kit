@@ -36,8 +36,8 @@ const finite = (n) => typeof n === "number" && Number.isFinite(n);
 function recordPace(rl, now, writer) {
   if (!rl || typeof rl !== "object") return;
   const file = paceFile();
-  // The status line is a new process at each render: a torn file (the cockpit writes in place) has no last good value
-  // here, and rewriting it from scratch would drop the samples and the cockpit's fields. Skip this render instead.
+  // The status line is a new process at each render: an unreadable file (corrupt, or caught mid-replace on Windows) has
+  // no last good value here, and rewriting it from scratch would drop the samples. Skip this render instead.
   let prev = null;
   try { prev = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) {
     if (e.code !== "ENOENT") return;

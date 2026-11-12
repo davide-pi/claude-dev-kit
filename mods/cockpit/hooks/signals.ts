@@ -76,7 +76,7 @@ export function signalSeverity(sig: Signal): SignalSeverity {
 /** What tells a notification from the others across readings (the pane's expanded row and its seen list hold it). */
 export const signalId = (sig: Signal): string => `${sig.kind}:${sig.key}`
 
-/** An agent with what it cost: the live ones priced from their counters, the finished ones from the Cronologia. */
+/** An agent with what it cost: the live ones priced from their counters, the finished ones from their log entry. */
 export type AgentCost = { id: string; type: string; model?: string; tokens: number; usd?: number }
 
 /** The agents of the session with their cost: live ones from their usage, finished ones (gone from the list) from the agent events. */

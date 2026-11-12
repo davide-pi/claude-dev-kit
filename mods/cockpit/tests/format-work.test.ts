@@ -193,7 +193,7 @@ test('isGithubRemote: ssh and https URLs of github.com, nothing else', () => {
   expect(isGithubRemote('')).toBe(false)
 })
 
-// ── Lavoro: the deliver perimeter check and the done-claim log ──
+// ── In progress: the deliver perimeter check and the done-claim log ──
 
 test('checkPerimeter: the changed files no entry covers, as scope-guard --check lists them', () => {
   const entries = ['src/a.ts', 'src/b/', 'tests/**/Orders*.cs']
@@ -287,7 +287,7 @@ test('parseSavedPrs: the entries of a state file that have a number and a title,
   expect(parseSavedPrs(undefined)).toEqual([])
 })
 
-// ── Cockpit v3, phase 5: the Sistema tab, and the phase 4 follow-ups ──
+// ── Cockpit v3, phase 5: the system numbers, and the phase 4 follow-ups ──
 
 test('safeUrl: only an http(s) address without control characters; anything else is none', () => {
   expect(safeUrl('https://github.com/example/orders/pull/42')).toBe('https://github.com/example/orders/pull/42')

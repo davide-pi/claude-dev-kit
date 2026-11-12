@@ -134,7 +134,7 @@ export type CockpitAlm = { isMapped: boolean; org?: string; project?: string; id
  */
 export type CockpitClaudeState = { kind: 'idle' | 'working' | 'thinking' | 'tool' | 'waiting'; tool?: string; /** `$.clock.now()` when the wait for the person began (`waiting` only). */ since?: number }
 
-/** What an entry of the event ring buffer is about: a finished agent (the Context tab prices it). */
+/** What an entry of the event ring buffer is about: a finished agent (its cost counts in the spend split). */
 export type CockpitEventKind = 'agent'
 
 /** One entry of the event buffer: when, what, and the numbers an agent carries (its cost, model, effort, tokens, duration `ms` and whether it failed; `text` is the agent type, `desc` its spawn description). `key` makes an entry once-only. */
@@ -172,7 +172,7 @@ export type CockpitLogEntry = {
 }
 
 /**
- * What the Insights tab adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
+ * What TREND adds up of the session's main loop, from the events the mod already hears (nothing is asked of the engine
  * for it); per session, not persisted.
  */
 export type CockpitInsights = {
@@ -239,9 +239,9 @@ export type CockpitSnapshot = {
   claudeState?: CockpitClaudeState
   /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
   ctxSamples?: number[]
-  /** The context size at the end of each of the last twenty main turns, newest last: the Context tab's trend line. A shrinking context stays in it (a compaction shows as a drop). */
+  /** The context size at the end of each of the last twenty main turns, newest last: the context trend. A shrinking context stays in it (a compaction shows as a drop). */
   ctxRounds?: number[]
-  /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: the Work tab marks them among the changes. Kept in the session data file. */
+  /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: they tell which checkout is the chat's. Kept in the session data file. */
   edited?: string[]
   /** The top level of the checkout the process's first git read found ('' when it started outside any repo), kept across a /clear or a resume: the PR of its branch is the chat's without an edit. */
   homeRoot?: string
@@ -249,7 +249,7 @@ export type CockpitSnapshot = {
   lastCtx?: { tokens: number; window: number; percent: number }
   /** The rate limits of the status line's cache, drawn with a `~` while the engine reports none; never an alert's input. */
   lastRates?: CockpitRateLimit[]
-  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran: the Insights tab lists them. */
+  /** The skills invoked this session (`skill.prompt`), once each, in the order they first ran. */
   skillsUsed?: string[]
   /** The token count at which auto-compaction runs, read at each session start from `usage({ breakdown: 'summary' })` and kept across /clear and resume (it does not depend on the session); absent when it is off or unread. */
   autoCompactAt?: number
@@ -273,7 +273,7 @@ export type CockpitSnapshot = {
   perimeterCheck?: CockpitPerimeterCheck
   /** The workflow run whose agents the mod saw spawn; cleared by a stop that reports no workflow in flight. */
   workflowRun?: CockpitWorkflowRun
-  /** The last blocks of `done-claim.log` (this session's), newest first; the Insights tab shows this session's three newest. Absent without a readable log. */
+  /** The last blocks of `done-claim.log` (this session's), newest first; the done-claim notification counts this session's. Absent without a readable log. */
   doneClaims?: CockpitDoneClaim[]
   /** The pull requests of this chat, oldest first, at most ten; kept with the session in its data file. Absent without one. */
   prs?: CockpitPr[]
@@ -287,13 +287,13 @@ export type CockpitSnapshot = {
   agentSpend?: Record<string, number>
   /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */
   costTarget?: number
-  /** `$.clock.now()` of the session's first reading: the Costi tab's $/h counts from it. */
+  /** `$.clock.now()` of the session's first reading: a branch's pull request joins the chat only when opened after it. */
   startedAt?: number
-  /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or Lavoro's `log hours`. */
+  /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or `log hours`. */
   confirm?: 'retro' | 'worklog'
-  /** What the Insights tab shows; absent before the first round or tool call. */
+  /** What TREND shows; absent before the first round or tool call. */
   insights?: CockpitInsights
-  /** The agents expanded on the Agents tab (the others show their one line): description, facts, warning, four token counters, tool. */
+  /** The agents expanded in IN PROGRESS (the others show their one line): description, facts, warning, four token counters, tool. */
   agentsOpen?: string[]
   /** The lists shown in full and the rows expanded: `attention`, `inProgress`, `done`, `worklog:days`. */
   openKeys?: string[]

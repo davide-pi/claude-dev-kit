@@ -148,14 +148,17 @@ test('given a lane set-up that fails for one lane, when the loop stalls, then th
   assert.match(out.stall.reason, /--lane-remove deliver-lane\/l1/);
 });
 
-test('given a lane whose implementer edited a proven test, when the loop stops, then the resume keeps the accept-or-revert choice and names the lanes', async () => {
-  // Given
+test('given a lane whose implementer edited a proven test, when the loop stops, then the resume asks accept-or-revert and says to relaunch without lanes, naming the lanes', async () => {
+  // Given: a relaunch makes new lanes from the start tree, so an accept run inside the old lane would be lost
   const changed = () => impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }) });
   // When
   const { out } = await run(lanesArgs(two), [], [changed(), changed()]);
   // Then
   assert.equal(out.stall.why, 'tests-changed');
-  assert.match(out.resume, /--force/);
+  assert.match(out.resume, /accept the edited test or revert it/);
+  assert.match(out.resume, /without lanes/);
+  assert.match(out.resume, /nothing was merged/);
+  assert.ok(!/--force/.test(out.resume));
   assert.match(out.resume, /C:\/lanes\/l1/);
 });
 

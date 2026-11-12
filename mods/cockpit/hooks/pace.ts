@@ -6,7 +6,7 @@ import { configDir } from './store'
 
 // Usage pace, the mod's side (docs/usage-pace.md): the chat arms `pace/<sid>.json` near the account's limit and marks it `ready`;
 // the mod compacts once after a turn, resumes the work after the window's reset, and keeps `pace/<sid>.mod.json` alive so the
-// chat and the closed-chat launcher stand down while it runs. The pure decisions are exported for the tests.
+// chat reads at its 96% band that the mod is alive and creates no resume cron. The pure decisions are exported for the tests.
 
 export type PaceWindow = 'five_hour' | 'seven_day'
 /** The chat's file, as `pace-state.mjs` writes it (times in epoch ms). */
@@ -23,7 +23,7 @@ const RESUME_MAX = 50
 const OTHER_MAX = 98
 /** How often the mod beats and looks at the pace file: well under the 3 minutes that count it alive. */
 export const PACE_TICK_MS = 30_000
-/** The heartbeat runs from this usage of either window, before the chat arms: it picks the mod or the launcher at its 92% band. */
+/** The heartbeat runs from this usage of either window, before the chat arms: the chat decides at its 96% band whether the mod is alive. */
 export const BEAT_FROM_PCT = 70
 
 const isRecord = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)

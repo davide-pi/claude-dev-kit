@@ -21,13 +21,17 @@ const SID = 'abcd1234-0000-4000-8000-000000000002';
 const dirs = [];
 process.on('exit', () => dirs.forEach((d) => rmSync(d, { recursive: true, force: true })));
 
-function run(stdin, pace) {
+// `logFires`: drops NODE_TEST_CONTEXT, which turns the fire log off, so the child writes it in its temp config dir.
+function run(stdin, pace, { logFires = false } = {}) {
   const dir = mkdtempSync(join(tmpdir(), 'pace-hook-'));
   dirs.push(dir);
   if (pace) writeFileSync(join(dir, '.usage-pace.json'), JSON.stringify(pace));
-  const r = spawnSync(process.execPath, [HOOK], { input: stdin, encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir } });
-  return { status: r.status, out: r.stdout };
+  const env = { ...process.env, CLAUDE_CONFIG_DIR: dir };
+  if (logFires) delete env.NODE_TEST_CONTEXT;
+  const r = spawnSync(process.execPath, [HOOK], { input: stdin, encoding: 'utf8', env });
+  return { status: r.status, out: r.stdout, dir };
 }
+const fires = (dir) => readFileSync(join(dir, '.cache', 'hook-fires.log'), 'utf8').trim().split(/\r?\n/).map((l) => JSON.parse(l));
 const live = (p5) => ({
   v: 1, updatedAt: Date.now(),
   five_hour: { pct: p5, resetsAt: Date.now() + 3600_000 }, seven_day: { pct: 5, resetsAt: Date.now() + 86_400_000 },
@@ -216,4 +220,22 @@ test('Given docs/usage-pace.md, When it is read, Then it covers bands, files, re
     assert.ok(doc.includes(word), `doc lacks ${word}`);
   }
   for (const word of ['resume-task.ps1', 'resume-launch.ps1', 'Register-ScheduledTask', 'claude-resume-<id8>']) assert.ok(!doc.includes(word), `doc still names ${word}`);
+});
+
+test('Given 93% fresh data, When an Agent PreToolUse is denied, Then the fire log records the pace hook with its deny', () => {
+  // Given
+  const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Agent', tool_input: { prompt: 'go' } });
+  // When
+  const { dir } = run(payload, live(93), { logFires: true });
+  // Then
+  assert.deepEqual(fires(dir).map(({ hook, event, decision }) => ({ hook, event, decision })), [{ hook: 'pace', event: 'PreToolUse', decision: 'deny' }]);
+});
+
+test('Given no pace data, When a prompt arrives, Then the fire log records the pace hook as silent', () => {
+  // Given
+  const payload = JSON.stringify({ hook_event_name: 'UserPromptSubmit', session_id: SID, prompt: 'x' });
+  // When
+  const { dir } = run(payload, null, { logFires: true });
+  // Then
+  assert.deepEqual(fires(dir).map(({ hook, event, decision }) => ({ hook, event, decision })), [{ hook: 'pace', event: 'UserPromptSubmit', decision: 'silent' }]);
 });

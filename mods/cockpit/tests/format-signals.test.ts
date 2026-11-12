@@ -150,7 +150,7 @@ test('permission waiting over 60 seconds', () => {
   expect(detectPermissionWait(undefined, NOW)).toEqual([])
 })
 
-test('agentCosts: a live agent priced from its counters, a finished one from its Cronologia row, never twice', () => {
+test('agentCosts: a live agent priced from its counters, a finished one from its log entry, never twice', () => {
   const live = { id: 'a1', type: 'implementer', status: 'running' as const, startedAt: 0, tokens: 10, model: 'claude-sonnet-5-5', usage: { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 } }
   const events = [
     { at: 1, kind: 'agent' as const, id: 'a1', text: 'implementer', usd: 99 },
