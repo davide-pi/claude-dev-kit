@@ -371,7 +371,8 @@ const nested = (prefix: string, at: number, icon: string, text: string, right: s
   return left + ' '.repeat(WIDTH - [...left].length - [...right].length) + right
 }
 /** LOG's title: the label, a rule, the totals of every closed node. */
-const logTitle = (c?: readonly number[]) => `LOG ${'─'.repeat(WIDTH - 3 - 2 - counters(c).length)} ${counters(c)}`
+const logTitle = (c?: readonly number[], toggle?: string) =>
+  toggle === undefined ? `LOG ${'─'.repeat(WIDTH - 3 - 2 - counters(c).length)} ${counters(c)}` : `LOG ${'─'.repeat(WIDTH - 3 - 2 - counters(c).length - toggle.length - 1)} ${toggle} ${counters(c)}`
 /** A child row of a group: the tree branch, then time, icon, text, the figures right-aligned (an icon of the private use area is one cell, two UTF-16 units). */
 const child = (at: number, icon: string, text: string, right?: string, isLast = false) => {
   const left = `${isLast ? '└' : '├'} ${clockTime(at)} ${icon} ${text}`
@@ -444,7 +445,7 @@ test('done: given rounds, when drawn, then only the newest is open and each head
   const { rows, ui } = await draw($, on, s, doneBlocks, calls)
   // Then: one day, so no day row
   expect(rows).toEqual([
-    logTitle(),
+    logTitle(undefined, 'open all'),
     node('▾', START_2, 'round   2', figs('', 1.12, 180_000)),
     summary('1 test'),
     child(NOW - 110_000, '󰄬', 'tests passed: npm test', undefined, true),
@@ -480,7 +481,7 @@ test('done: given the newest group closed by a person, when a newer round arrive
   const { rows } = await draw($, on, snap({ sessionLog: newer, groupsOpen }), doneBlocks)
   // Then
   expect(rows).toEqual([
-    logTitle(),
+    logTitle(undefined, 'open all'),
     node('▾', NOW - 40_000, 'round   3', '00m10s'),
     summary('1 commit'),
     child(NOW - 40_000, '●', 'commit def5678', undefined, true),
@@ -510,7 +511,7 @@ test('done: given rounds with no events, when drawn, then they are one row with 
   const { rows, ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
   // Then
   // the label and figures of the run give way to the counters in a narrow pane
-  expect(rows.slice(0, 4)).toEqual([logTitle(), node('▾', NOW - 95_000, 'round   4', '00m05s'), summary('1 commit'), child(NOW - 100_000, '●', 'commit abc1234', undefined, true)])
+  expect(rows.slice(0, 4)).toEqual([logTitle(undefined, 'close all'), node('▾', NOW - 95_000, 'round   4', '00m05s'), summary('1 commit'), child(NOW - 100_000, '●', 'commit abc1234', undefined, true)])
   expect(rows[4]).toMatch(/^- \d\d:\d\d 3 chat-only rounds .*h x0 s x0 o x0 f x0$/)
   expect(await keysOf(ui, /^done:\d/)).toEqual([`done:${NOW - 90_000}`])
 })
@@ -589,10 +590,83 @@ test('done: given groups on two dates, when drawn, then a day row opens the node
   const { rows, ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks, calls)
   const open = await draw($, on, snap({ sessionLog: [...log], groupsOpen: { [`day:log:${older}`]: true } }), doneBlocks)
   // Then
-  expect(rows).toEqual([logTitle(), dayLine('▾', newer), node('▾', NOW - 41_000, 'round   2', '00m01s'), summary('1 commit'), child(NOW - 50_000, '●', 'commit b', undefined, true), dayLine('▸', older)])
+  expect(rows).toEqual([logTitle(undefined, 'open all'), dayLine('▾', newer), node('▾', NOW - 41_000, 'round   2', '00m01s'), summary('1 commit'), child(NOW - 50_000, '●', 'commit b', undefined, true), dayLine('▸', older)])
   expect(open.rows.slice(5)).toEqual([dayLine('▾', older), node('▸', NOW - 89_991_000, 'round   1', '00m01s')])
   await ui.press({ key: `day:log:${newer}` })
   expect(calls).toEqual([`setGroupOpen:day:log:${newer},false`])
+})
+
+const NEWEST = `done:${NOW - 100_000}`
+const OLDER = `done:${NOW - 200_000}`
+
+test('done: Given two closed nodes and only the newest open, When the toggle is pressed, Then both are set open in one call and, drawn so, the toggle reads close all', async ($, on) => {
+  // Given
+  const calls: string[] = []
+  const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT] })
+  // When
+  const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  await ui.press({ key: 'done:all' })
+  const open = await draw($, on, { ...s, groupsOpen: { [NEWEST]: true, [OLDER]: true } }, doneBlocks)
+  // Then
+  expect(rows[0]).toBe(logTitle(undefined, 'open all'))
+  expect(calls).toEqual([`setGroupsOpen:${NEWEST},${OLDER},true`])
+  expect(open.rows[0]).toBe(logTitle(undefined, 'close all'))
+})
+
+test('done: Given every node open, When the toggle is pressed, Then all are set closed in one call and, drawn so, the toggle reads open all', async ($, on) => {
+  // Given
+  const calls: string[] = []
+  const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT], groupsOpen: { [NEWEST]: true, [OLDER]: true } })
+  // When
+  const { rows, ui } = await draw($, on, s, doneBlocks, calls)
+  await ui.press({ key: 'done:all' })
+  const closed = await draw($, on, { ...s, groupsOpen: { [NEWEST]: false, [OLDER]: false } }, doneBlocks)
+  // Then
+  expect(rows[0]).toBe(logTitle(undefined, 'close all'))
+  expect(calls).toEqual([`setGroupsOpen:${NEWEST},${OLDER},false`])
+  expect(closed.rows).toEqual([logTitle(undefined, 'open all'), node('▸', START_2, 'round   2', figs('', 1.12, 180_000)), node('▸', START_1, 'round   1', figs('', 0.44, 60_000))])
+})
+
+test('done: Given nodes on two days, When the toggle is pressed, Then the days are set with the nodes, and a node with no events is left out', async ($, on) => {
+  // Given
+  const calls: string[] = []
+  const log = [
+    { at: NOW - 90_000_000, kind: 'round', ms: 1_000 },
+    { at: NOW - 50_000, kind: 'commit', key: 'b', text: 'b' },
+    { at: NOW - 40_000, kind: 'round', ms: 1_000 },
+  ] as const
+  const [newer, older] = [localDate(NOW - 40_000), localDate(NOW - 90_000_000)]
+  // When
+  const { ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks, calls)
+  await ui.press({ key: 'done:all' })
+  // Then: the older day holds only an empty node, still a day to open
+  expect(calls).toEqual([`setGroupsOpen:day:log:${newer},day:log:${older},done:${NOW - 40_000},true`])
+})
+
+test('done: Given a log of nodes with no events, When drawn, Then there is no toggle', async ($, on) => {
+  // Given
+  const log = [{ at: NOW - 60_000, kind: 'round', ms: 1_000 }, { at: NOW - 30_000, kind: 'round', ms: 1_000 }] as const
+  // When
+  const { ui } = await draw($, on, snap({ sessionLog: [...log] }), doneBlocks)
+  // Then
+  expect(await keysOf(ui, /^done:all$/)).toEqual([])
+})
+
+
+test('done: Given the pane in Italian, When drawn, Then the toggle reads apri tutti, and chiudi tutti once every node is open', async ($, on) => {
+  try {
+    // Given
+    setLang('it')
+    const s = snap({ sessionLog: [...ROUNDS, ROUND_AGENT] })
+    // When
+    const closed = await draw($, on, s, doneBlocks)
+    const open = await draw($, on, { ...s, groupsOpen: { [NEWEST]: true, [OLDER]: true } }, doneBlocks)
+    // Then
+    expect(closed.rows[0]).toBe(logTitle(undefined, 'apri tutti'))
+    expect(open.rows[0]).toBe(logTitle(undefined, 'chiudi tutti'))
+  } finally {
+    setLang('en')
+  }
 })
 
 test('done: given a run and its agents, when drawn, then the run is a node beside the rounds: its agents by round under it, only there, and the round that launched it points to it', async ($, on) => {
@@ -611,7 +685,7 @@ test('done: given a run and its agents, when drawn, then the run is a node besid
   const { rows, ui } = await draw($, on, snap({ sessionLog: [...log], groupsOpen: { 'flow:wf_1': true } }), doneBlocks)
   // Then
   expect(rows).toEqual([
-    logTitle([0, 1, 1, 0]),
+    logTitle([0, 1, 1, 0], 'close all'),
     node('▾', NOW - 190_000, 'round   1', figs('', 0.1, 90_000)),
     summary('1 commit'),
     child(NOW - 160_000, '→', 'flow review'),
@@ -698,7 +772,7 @@ test('page: the section titles and the empty row in Italian', async ($, on) => {
     expect([trend.rows[0], trend.rows[2]]).toEqual([titled('ANDAMENTO'), '▰ princ. 40%  ▰ revi. 25%  ▰ impl. 25%  ▰ Plan 10%'])
     expect((await draw($, on, snap({ agents: [agent('a1', 'implementer')] }), inProgressBlocks)).rows[0]).toBe(titled('IN CORSO'))
     const done = await draw($, on, snap({ sessionLog: [...ROUNDS, ROUND_AGENT], groupsOpen: { [`done:${NOW - 200_000}`]: true } }), doneBlocks)
-    expect(done.rows[0]).toBe(logTitle())
+    expect(done.rows[0]).toBe(logTitle(undefined, 'chiudi tutti'))
     expect(done.rows[1]).toBe(node('▾', START_2, 'giro   2', figs('', 1.12, 180_000)))
     expect(done.rows[2]).toBe(summary('1 test'))
     expect(done.rows[4]).toBe(node('▾', START_1, 'giro   1', figs('', 0.44, 60_000)))

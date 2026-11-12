@@ -34,6 +34,8 @@ export type PaneActions = {
   toggleOpen: (key: string) => void
   /** Gives a FATTO group an explicit state, kept when it is no longer the newest. */
   setGroupOpen: (key: string, isOpen: boolean) => void
+  /** Gives many FATTO groups and days one state in a single write. */
+  setGroupsOpen: (keys: string[], isOpen: boolean) => void
 }
 
 export type Node = RenderElement | false | undefined
