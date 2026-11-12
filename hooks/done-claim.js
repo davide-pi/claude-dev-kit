@@ -27,7 +27,7 @@
  *
  * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table, titled `**Verifica**` / `**Verification**`;
  * the legacy form with `> ` on every line is accepted too, its title and table lines prose, never tool output) is judged row by row
- * instead: a row ending `fatto` or `failed` is proven only when its deciding line (normalised: whitespace
+ * instead: a row ending `fatto`, `fallito` or `failed` is proven only when its deciding line (normalised: whitespace
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
  * A `non verificato` row passes alone and excuses no other row; one unproven row blocks, even after a
@@ -193,7 +193,7 @@ function exitZeroRan(row, shellCommands) {
   return keys.length > 0 && shellCommands.some((c) => keys.some((k) => normalise(c).includes(k)));
 }
 
-/** The rows that claim `fatto` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
+/** The rows that claim `fatto` / `fallito` / `failed` whose deciding line is not in `resultsText` (a placeholder line is never proven). */
 function unprovenRows(rows, resultsText, shellCommands = []) {
   const printed = normalise(resultsText);
   return rows.filter((r) => {

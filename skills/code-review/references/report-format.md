@@ -104,11 +104,11 @@ Already done (done): rows in Findings, `#F<n> · <title>` — `file:line` — re
 Summary · n: after `---`, 3+ items only, columns exactly:
 | # | Item | Severity · Risk · Effort | For you |
 One row per item, same order (`P1 · medium · M`, `ok F1`).
-Footer: Verdict, one line naming each agent, its model and effort (a blocked or missing worker is a gap); then
+Footer: Verdict, criteria covered N of N, each agent, its model and effort (a blocked or missing worker is a gap); then
 `Reply ok F3 F4 …`, the P1s and every P3 + low + S finding; apply nothing before the answer.
 No findings → no sections: "nothing to report, verified: …".
 ```
-At chat it: Findings=Rilievi, Problems=Problemi, Problem=Problema, Advice=Consiglio, To confirm=Da confermare, Severity=Gravità, Risk=Rischio, Completeness=Completezza, points=punti, covered=coperti, Already done=Già fatti, resolved by=risolto da, session=sessione, Summary=Riepilogo, Item=Voce, For you=Da te, Reply=Rispondi, Verdict=Verdetto, Posted=Postato, chat only=solo chat, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".
+At chat it: Findings=Rilievi, Problems=Problemi, Problem=Problema, Advice=Consiglio, To confirm=Da confermare, Severity=Gravità, Risk=Rischio, Completeness=Completezza, points=punti, covered=coperti, criteria=criteri, of=su, Already done=Già fatti, resolved by=risolto da, session=sessione, Summary=Riepilogo, Item=Voce, For you=Da te, Reply=Rispondi, Verdict=Verdetto, Posted=Postato, chat only=solo chat, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".
 
 Rules around the skeleton:
 

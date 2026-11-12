@@ -84,7 +84,7 @@ Already done (done): rows in Findings, `#F<n> · <title>` — `file:line` — re
 Summary · n: after `---`, 3+ items only, columns exactly:
 | # | Item | Severity · Risk · Effort | For you |
 One row per item, same order (`P1 · medium · M`, `ok F1`).
-Footer: Verdict, one line naming each agent, its model and effort (a blocked or missing worker is a gap); then
+Footer: Verdict, criteria covered N of N, each agent, its model and effort (a blocked or missing worker is a gap); then
 `Reply ok F3 F4 …`, the P1s and every P3 + low + S finding; apply nothing before the answer.
 No findings → no sections: "nothing to report, verified: …".
 ```
@@ -117,4 +117,4 @@ and stop.
 - `references/triage.md` — PR or chat, phrasing a question, second passes, verifying a finding.
 - `references/posting.md` — posting per platform, replying, resolving; threads cannot be deleted.
 - `references/report-format.md` — fields; the `finding-format` skill — the verdict line.
-- `references/code-reviewer-passes.md`, `references/review-security-checks.md`, `references/review-performance-checks.md` — the matching agent names the § it needs; not opened from here.
+- `references/code-reviewer-passes.md`, `references/review-security-checks.md`, `references/review-performance-checks.md` — the matching agent names the § it needs.
