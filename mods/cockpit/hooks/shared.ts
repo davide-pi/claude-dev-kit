@@ -90,6 +90,12 @@ export function clockTime(ms: number): string {
   return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
 }
 
+/** The local date of a moment, `2026-11-11`. */
+export function localDate(ms: number): string {
+  const d = new Date(ms)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
 /** Elapsed time in one fixed shape of 6 cells: `00m41s`, `02m14s`, `01h02m`; from 100 hours the days, ` 4d04h`. */
 export function duration(ms: number): string {
   const s = Math.max(0, Math.floor(ms / 1000))
@@ -397,7 +403,7 @@ export function shade(color: string, factor: number): string {
   return `#${[0, 1, 2].map(i => channel(i).toString(16).padStart(2, '0')).join('')}`
 }
 
-/** Context color by fill: green, yellow, red (no orange: too close to red). */
+/** Context color by fill of the window: green, yellow, red. The CTX bar uses it only without a compaction threshold (`ctxScale`). */
 export const ctxColor = (pct: number): string =>
   pct < 40 ? COLORS.green : pct < 80 ? COLORS.yellow : COLORS.red
 

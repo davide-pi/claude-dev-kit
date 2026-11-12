@@ -1,9 +1,8 @@
-import { atom, read, update } from 'claude-code'
+import { atom, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitAgent, CockpitClaudeState, CockpitSnapshot, CockpitTask, CockpitUsage } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitTask, CockpitUsage } from '../types'
 import { addUsage, newTokens } from './agents'
-import { NOTE_MAX, normalizeNewlines } from './session'
 import { adoptSession, writeState } from './session-data'
 import { INITIAL } from './state'
 import { patch } from './store'
@@ -127,32 +126,4 @@ export function createdTask(result: unknown): { id: string; subject: string } | 
 export function toggled<T>(list: readonly T[] | undefined, item: T): T[] | undefined {
   const next = list?.includes(item) ? list.filter(x => x !== item) : [...(list ?? []), item]
   return next.length > 0 ? next : undefined
-}
-
-/**
- * Saves the field's text (`typed`, the text of the field on Enter; else the draft the snapshot holds): a new note at the end of the list,
- * or, when the field was loaded from a note (`noteEditing`) that is still there, that note's text replaced and the note left open, all its lines shown. The field is emptied; a blank text changes nothing.
- */
-export function saveNote(s: CockpitSnapshot, typed?: string): CockpitSnapshot {
-  const text = normalizeNewlines(typed ?? s.noteDraft ?? '').slice(0, NOTE_MAX)
-  if (text.trim() === '') return s
-  const notes = s.notes ?? []
-  const isEdit = notes.some(n => n.id === s.noteEditing)
-  const next = isEdit
-    ? notes.map(n => (n.id === s.noteEditing ? { ...n, text } : n))
-    : [...notes, { id: Math.max(0, ...notes.map(n => n.id)) + 1, text }]
-  // a saved note, new or edited, comes back closed
-  const notesOpen = isEdit && s.noteEditing !== undefined ? s.notesOpen?.filter(id => id !== s.noteEditing) : s.notesOpen
-  return { ...s, notes: next, notesOpen, noteDraft: undefined, noteEditing: undefined }
-}
-
-/**
- * Appends a saved note to the prompt box, after a newline when the box already holds text (D6; a box that cannot be read counts as
- * holding some). The box is only filled, never submitted (D3): the person decides. The note stays in the list, whether the box took the text or not.
- */
-export async function sendNote($: EngineInterface, id: number): Promise<void> {
-  const note = (await read($, snapshot)).notes?.find(n => n.id === id)
-  if (!note) return
-  const box = await $.prompt.read().catch(() => undefined)
-  await $.prompt.fill({ text: `${box?.text === '' ? '' : '\n'}${note.text}`, mode: 'append' })
 }

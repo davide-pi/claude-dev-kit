@@ -17,109 +17,90 @@ const pctAfter = (article: 'il' | 'al', n: number): string => {
 /** What reads the same in both languages: written once, spread into both bundles. */
 const SHARED = {
   cache:'\u{F09D1} ',
-  taskTitle: 'TASK',
-  diffTitle: (file: string) => `diff · ${file}`,
   /** The four counters of an agent's row. */
   tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
 }
 
+/** A heavyAgent saved before it counted dollars holds tokens: no subagent costs this much, so a number this large reads as tokens. */
+const LEGACY_TOKENS = 1000
+
 const EN = {
   ...SHARED,
-  /** Every tab's label, in the bar: text, never an icon alone. */
-  tabs: { agents: 'Agents', context: 'Context', signals: 'Notifications', work: 'Work', notes: 'Notes' },
-  tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Work', notes: 'Notes' },
-  buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', yes: 'yes', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today', refresh: 'refresh', close: 'close', save: 'save' },
+  buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
   confirmLog: 'which hours? sends /worklog',
   confirmRetro: 'which retrospective? sends /retro',
-  confirmNoteDelete: 'delete this note?',
 
   // Header
-  contextDetailsTitle: 'CONTEXT DETAILS',
   noRateData: 'no rate-limit data',
-  turnCost: 'turn',
-  weekPace: 'pace 7d',
-  contextAt: (pct: number) => `󰀦 context at ${pct}%`,
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
   // Agents
-  subagentsTitle: (running: number) => `SUBAGENTS · ${running} running`,
   lastTool: 'last tool ',
   costDetail: { tokens: (n: string) => `tokens ${n}` },
-  historyTitle: 'HISTORY',
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
-  /** The workflow run in one row: its name, phase, round, finished agents out of all of them and what they cost. */
-  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
-    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · round ${round}`} · ${done}/${total} · ${usd}`,
 
   // Notifications
-  signalsTitle: (n: number) => `NOTIFICATIONS · ${n}`,
-  noSignals: 'no notifications',
   signalFields: { why: 'why: ', todo: 'what to do: ' },
   signalText: {
-    heavyAgent: (a: string, n: number) => ({ what: `subagent ${a} weighs ${Math.round(n / 1000)}k tokens or too much of the spend`, why: 'it burns budget and context out of sight', todo: 'check what it does; narrow the task or change the model' }),
+    heavyAgent: (a: string, n: number) => ({ what: `subagent ${a} ${n >= LEGACY_TOKENS ? `weighs ${Math.round(n / 1000)}k tokens` : `costs $${n.toFixed(2)}`} or too much of the spend`, why: 'it burns budget and context out of sight', todo: 'check what it does; narrow the task or change the model' }),
     opusReadOnly: (a: string) => ({ what: `Opus on a read-only agent (${a})`, why: 'Opus costs far more and a read does not need it', todo: 'set model sonnet or haiku for this agent type' }),
     bigResult: (tool: string, chars: number) => ({ what: `${tool} result of ${Math.round(chars / 1000)}k characters`, why: 'it stays in the context every round and swells it', todo: 'limit the output (filter, use head/offset) or compact' }),
     reread: (file: string, n: number) => ({ what: `${file} read ${n} times`, why: 'every read pays again for tokens already spent', todo: 'remember what you need from the file or read only the useful part' }),
     failedCommand: (cmd: string, n: number) => ({ what: `command failed ${n} times: ${cmd}`, why: 'the same error repeats without a change of approach', todo: 'read the error and fix the cause instead of rerunning' }),
     coldAfterIdle: (share: number) => ({ what: `cache at ${share}% after a long pause`, why: 'the cache expired: the round paid for the whole context again', todo: 'with long pauses, compact before resuming' }),
-    ctxGrowth: (n: number) => ({ what: `context +${Math.round(n / 1000)}k in a few rounds`, why: 'it nears compaction and every round costs more', todo: 'find what swelled it (Context) and compact' }),
+    ctxGrowth: (n: number) => ({ what: `context +${Math.round(n / 1000)}k in a few rounds`, why: 'it nears compaction and every round costs more', todo: 'find what swelled it and compact' }),
     doneClaims: (n: number) => ({ what: `${n} done-claim blocks`, why: 'the model says it is done without proof, more than once', todo: 'ask for the proof (command and output) before accepting' }),
-    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow stalled (STALL)', why: 'no agent has done anything for minutes: an event may have been lost', todo: 'check the agents in the Agents tab; stop or rerun' } : { what: `workflow at round ${n}`, why: 'past the third round the work is not converging', todo: 'stop and review the perimeter or the criterion' }),
+    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow stalled (STALL)', why: 'no agent has done anything for minutes: an event may have been lost', todo: 'check the agents under IN PROGRESS; stop or rerun' } : { what: `workflow at round ${n}`, why: 'past the third round the work is not converging', todo: 'stop and review the perimeter or the criterion' }),
     permissionWait: (seconds: number) => ({ what: `permission waiting for ${seconds}s`, why: 'the work is stopped until you answer', todo: 'answer the request in the terminal' }),
   },
 
-  // Costs
-  exact: 'exact',
-  someExact: '~ = estimate',
   /** The toggle of a list cut to its first rows: `n` rows hidden, or shown (press to fold). */
   moreRows: (n: number) => `󰍟 +${n}`,
   lessRows: (n: number) => `󰍝 −${n}`,
-  estimate: 'estimate',
-  worthCompacting: '󰀦 worth compacting',
-  noReading: 'no reading',
-  /** The engine's category names in this language; one not listed shows as the engine names it. */
-  contextCategories: {} as Record<string, string>,
-  refreshIn: (seconds: number) => `refresh ${seconds}s`,
 
   // Work
-  mainTitle: 'IN PROGRESS',
-  tasksDone: (n: number) => ` ${n} done`,
   perimeter: (entries: number) => `deliver perimeter · ${entries} ${plural(entries, 'entry', 'entries')}`,
-  filesTouched: (n: number) => ` · ${n} ${plural(n, 'file', 'files')} touched`,
-  noFileOutside: 'no file outside the perimeter',
   filesOutside: (n: number) => `󰀦 ${n} ${plural(n, 'file', 'files')} outside the perimeter`,
   worklog: {
     pending: 'to log',
     underTarget: 'under target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}d ${what} (${dates})`,
-    title: 'WORKLOG',
-    upToDate: 'worklog up to date',
-    behind: (n: number) => `${n} ${plural(n, 'day', 'days')} behind`,
+    withoutHours: (n: number) => `${n} ${plural(n, 'day', 'days')} without logged hours`,
   },
-  none: 'none',
-  changesTitle: 'CHANGES',
-  editedHere: '󰧞 this chat',
-  noChanges: 'no changes',
-  prTitle: (n: number) => `PR · ${n}`,
-  wiTitle: (n: number) => `WI · ${n}`,
-  /** The pull request groups of the Work tab, by state. */
-  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
-  workItemsTitle: 'work item',
 
-  // Context growth
-  grewTitle: 'WHAT GREW THE CONTEXT',
-
-  // Notes
-  notesTitle: (n: number) => `NOTES · ${n}`,
-  notePlaceholder: 'quick note',
-  noNotes: 'no saved notes',
-
-  // The diff pane
-  nothingToShow: 'nothing to show',
-  diffUnreadable: 'file too big or unreadable',
-  noHunk: 'no hunk to show',
-  diffCut: '… diff cut',
+  // The single page: its four sections
+  page: {
+    attention: 'ATTENTION',
+    trend: 'TREND',
+    inProgress: 'IN PROGRESS',
+    done: 'LOG',
+    nothingToDo: 'nothing to do',
+    spend: 'spend',
+    context: 'context',
+    main: 'main',
+    mainShort: 'main',
+    other: 'other',
+    tasks: (done: number, total: number) => `tasks ${done}/${total}`,
+    events: {
+      round: (n: number) => `round ${String(n).padStart(3)}`,
+      current: 'current round',
+      chatOnly: (n: number) => `${n} chat-only rounds`,
+      summary: {
+        tools: (n: number, top: string) => `${n} ${plural(n, 'tool', 'tools')}: ${top}`,
+        signal: (n: number) => `${n} ${plural(n, 'signal', 'signals')}`,
+        agent: (n: number) => `${n} ${plural(n, 'agent', 'agents')}`,
+        commit: (n: number) => `${n} ${plural(n, 'commit', 'commits')}`,
+        test: (n: number) => `${n} ${plural(n, 'test', 'tests')}`,
+        pr: (n: number) => `${n} PR`,
+        compact: (n: number) => `${n} ${plural(n, 'compaction', 'compactions')}`,
+      },
+      commit: (hash: string) => `commit${hash === '' ? '' : ` ${hash}`}`,
+      test: (cmd: string, isFailed: boolean) => `tests ${isFailed ? 'failed' : 'passed'}: ${cmd}`,
+      compact: (before: string, after: string) => ['compacted', before, after === '' ? '' : `→ ${after}`].filter(Boolean).join(' '),
+      pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
+    },
+  },
 
   // Toasts and the command
   alertContext: (pct: number) => `context at ${pct}%`,
@@ -134,96 +115,74 @@ export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  tabs: { agents: 'Agenti', context: 'Contesto', signals: 'Notifiche', work: 'Lavoro', notes: 'Note' },
-  tabsShort: { agents: 'Agt', context: 'Ctx', signals: 'Notif', work: 'Lav', notes: 'Note' },
-  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', yes: 'sì', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi', refresh: 'aggiorna', close: 'chiudi', save: 'salva' },
+  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
   confirmLog: 'quali ore? invia /worklog',
   confirmRetro: 'quale retrospettiva? invia /retro',
-  confirmNoteDelete: 'eliminare questa nota?',
 
-  contextDetailsTitle: 'DETTAGLI CONTESTO',
   noRateData: 'nessun dato sui limiti',
-  turnCost: 'turno',
-  weekPace: 'ritmo 7d',
-  contextAt: (pct: number) => `󰀦 contesto ${pctAfter('al', pct)}`,
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
-  subagentsTitle: (running: number) => `SUBAGENTI · ${running} in corso`,
   lastTool: 'ultimo tool ',
   costDetail: { tokens: (n: string) => `token ${n}` },
-  historyTitle: 'STORICO',
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
-  workflowRow: (name: string | undefined, phase: string, round: number | undefined, done: number, total: number, usd: string) =>
-    `workflow${name ? ` ${name}` : ''} · ${phase}${round === undefined ? '' : ` · giro ${round}`} · ${done}/${total} · ${usd}`,
 
-  signalsTitle: (n: number) => `NOTIFICHE · ${n}`,
-  noSignals: 'nessuna notifica',
   signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
   signalText: {
-    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} pesa ${Math.round(n / 1000)}k token o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
+    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} ${n >= LEGACY_TOKENS ? `pesa ${Math.round(n / 1000)}k token` : `costa $${n.toFixed(2)}`} o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
     opusReadOnly: (a: string) => ({ what: `Opus su un agente di sola lettura (${a})`, why: 'Opus costa molto di più e una lettura non ne ha bisogno', todo: 'imposta model sonnet o haiku per questo tipo di agente' }),
     bigResult: (tool: string, chars: number) => ({ what: `risultato di ${tool} da ${Math.round(chars / 1000)}k caratteri`, why: 'resta nel contesto a ogni giro e lo gonfia', todo: "limita l'output (filtra, usa head/offset) o compatta" }),
     reread: (file: string, n: number) => ({ what: `${file} letto ${n} volte`, why: 'ogni lettura ripaga token già spesi', todo: 'ricorda cosa serve del file o leggine solo la parte utile' }),
     failedCommand: (cmd: string, n: number) => ({ what: `comando fallito ${n} volte: ${cmd}`, why: 'si ripete lo stesso errore senza cambiare approccio', todo: "leggi l'errore, correggi la causa invece di rilanciare" }),
     coldAfterIdle: (share: number) => ({ what: `cache al ${share}% dopo una pausa lunga`, why: 'la cache è scaduta: il giro ha ripagato tutto il contesto', todo: 'con pause lunghe compatta prima di riprendere' }),
-    ctxGrowth: (n: number) => ({ what: `contesto +${Math.round(n / 1000)}k in pochi giri`, why: 'si avvicina alla compattazione e ogni giro costa di più', todo: 'trova cosa lo ha gonfiato (Contesto) e compatta' }),
+    ctxGrowth: (n: number) => ({ what: `contesto +${Math.round(n / 1000)}k in pochi giri`, why: 'si avvicina alla compattazione e ogni giro costa di più', todo: 'trova cosa lo ha gonfiato e compatta' }),
     doneClaims: (n: number) => ({ what: `${n} blocchi done-claim`, why: 'il modello dichiara finito senza prove, più volte', todo: 'chiedi la prova (comando e output) prima di accettare' }),
-    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow fermo (STALL)', why: 'nessun agente ha fatto nulla da minuti: forse perso un evento', todo: 'controlla gli agenti in Agenti; interrompi o rilancia' } : { what: `workflow al giro ${n}`, why: 'oltre il terzo giro il lavoro non converge', todo: 'fermati e rivedi il perimetro o il criterio' }),
+    workflow: (kind: string, n?: number) => (kind === 'stall' ? { what: 'workflow fermo (STALL)', why: 'nessun agente ha fatto nulla da minuti: forse perso un evento', todo: 'controlla gli agenti in IN CORSO; interrompi o rilancia' } : { what: `workflow al giro ${n}`, why: 'oltre il terzo giro il lavoro non converge', todo: 'fermati e rivedi il perimetro o il criterio' }),
     permissionWait: (seconds: number) => ({ what: `permesso in attesa da ${seconds}s`, why: 'il lavoro è fermo finché non rispondi', todo: 'rispondi alla richiesta nel terminale' }),
   },
 
-  exact: 'esatto',
-  someExact: '~ = stima',
   moreRows: (n: number) => `󰍟 +${n}`,
   lessRows: (n: number) => `󰍝 −${n}`,
-  estimate: 'stima',
-  worthCompacting: '󰀦 conviene compattare',
-  noReading: 'nessuna lettura',
-  contextCategories: {
-    'System prompt': 'Prompt di sistema',
-    'System tools': 'Tool di sistema',
-    'MCP tools': 'Tool MCP',
-    'Custom agents': 'Agenti personalizzati',
-    'Memory files': 'File di memoria',
-    Skills: 'Skill',
-    Messages: 'Messaggi',
-  },
-  refreshIn: (seconds: number) => `aggiorna ${seconds}s`,
 
-  mainTitle: 'IN CORSO',
-  tasksDone: (n: number) => ` ${n} ${plural(n, 'fatto', 'fatti')}`,
   perimeter: (entries: number) => `perimetro deliver · ${entries} ${plural(entries, 'voce', 'voci')}`,
-  filesTouched: (n: number) => ` · ${n} ${plural(n, 'file toccato', 'file toccati')}`,
-  noFileOutside: 'nessun file fuori dal perimetro',
   filesOutside: (n: number) => `󰀦 ${n} file fuori dal perimetro`,
   worklog: {
     pending: 'da registrare',
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
-    title: 'REGISTRO ORE',
-    upToDate: 'worklog in pari',
-    behind: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} indietro`,
+    withoutHours: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} senza ore segnate`,
   },
-  none: 'nessuno',
-  changesTitle: 'MODIFICHE',
-  editedHere: '󰧞 questa chat',
-  noChanges: 'nessuna modifica',
-  prTitle: (n: number) => `PR · ${n}`,
-  wiTitle: (n: number) => `WI · ${n}`,
-  prStates: { open: 'open', draft: 'draft', merged: 'merged', closed: 'closed' },
-  workItemsTitle: 'work item',
 
-  grewTitle: 'COSA HA GONFIATO IL CONTESTO',
-
-
-  notesTitle: (n: number) => `NOTE · ${n}`,
-  notePlaceholder: 'nota rapida',
-  noNotes: 'nessuna nota salvata',
-
-  nothingToShow: 'niente da mostrare',
-  diffUnreadable: 'file troppo grande o illeggibile',
-  noHunk: 'nessun blocco da mostrare',
-  diffCut: '… diff tagliato',
+  page: {
+    attention: 'ATTENZIONE',
+    trend: 'ANDAMENTO',
+    inProgress: 'IN CORSO',
+    done: 'LOG',
+    nothingToDo: 'niente da fare',
+    spend: 'spesa',
+    context: 'contesto',
+    main: 'principale',
+    mainShort: 'princ.',
+    other: 'altro',
+    tasks: (done: number, total: number) => `task ${done}/${total}`,
+    events: {
+      round: (n: number) => `giro ${String(n).padStart(3)}`,
+      current: 'giro in corso',
+      chatOnly: (n: number) => `${n} giri di sola conversazione`,
+      summary: {
+        tools: (n: number, top: string) => `${n} ${plural(n, 'strumento', 'strumenti')}: ${top}`,
+        signal: (n: number) => `${n} ${plural(n, 'segnale', 'segnali')}`,
+        agent: (n: number) => `${n} ${plural(n, 'agente', 'agenti')}`,
+        commit: (n: number) => `${n} commit`,
+        test: (n: number) => `${n} test`,
+        pr: (n: number) => `${n} PR`,
+        compact: (n: number) => `${n} ${plural(n, 'compattazione', 'compattazioni')}`,
+      },
+      commit: (hash: string) => `commit${hash === '' ? '' : ` ${hash}`}`,
+      test: (cmd: string, isFailed: boolean) => `test ${isFailed ? 'falliti' : 'passati'}: ${cmd}`,
+      compact: (before: string, after: string) => ['compattato', before, after === '' ? '' : `→ ${after}`].filter(Boolean).join(' '),
+      pr: (n: string, title: string) => `PR #${n}${title === '' ? '' : ` ${title}`}`,
+    },
+  },
 
   alertContext: (pct: number) => `contesto ${pctAfter('al', pct)}`,
   alertCredits: (left: number) => `crediti 5h: ${left}% residui`,
@@ -256,6 +215,16 @@ export function autoOpenOf(text: string): boolean {
     return (JSON.parse(text) as { autoOpen?: unknown } | null)?.autoOpen !== false
   } catch {
     return true
+  }
+}
+
+/** The `$`/prompt `cockpit.json` aims at (`costTarget`): a positive number; anything else is no target. */
+export function costTargetOf(text: string): number | undefined {
+  try {
+    const target: unknown = (JSON.parse(text) as { costTarget?: unknown } | null)?.costTarget
+    return typeof target === 'number' && Number.isFinite(target) && target > 0 ? target : undefined
+  } catch {
+    return undefined
   }
 }
 

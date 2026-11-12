@@ -1,8 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitTask } from '../types'
-import { addHistory, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitLogEntry, CockpitSnapshot, CockpitTask } from '../types'
+import { addHistory, agentLog, newTokens, settleUsage, stateAfterWait, toHistory, usageOf, withAgentTokens } from './agents'
+import { withLoggedSignals } from './signals'
 import { recordCtxSample, recordRound } from './context'
 import {
   addStepUsage,
@@ -34,6 +35,7 @@ import {
   endTurnCost,
   fastTick,
   measuredCost,
+  withSettledRound,
   mediumTick,
   refreshAlm,
   refreshAutoCompact,
@@ -46,18 +48,19 @@ import {
   slowTick,
   startedCost,
 } from './refresh'
-import { diffActions, paneActions } from './pane-actions'
+import { PACE_TICK_MS, paceCheck } from './pace'
+import { WORKING_MARGIN_MS } from './session'
+import { paneActions } from './pane-actions'
 import { usdOf } from './pricing'
-import { scheduleContextRead } from './refresh-context'
 import { refreshGit } from './refresh-git'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
-import { DIFF_PANE, INITIAL, PANE } from './state'
+import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
-import { recordAgentEvent } from './timeline'
+import { CENT } from './shared'
+import { bashLog, flowUsdIn, lastRoundFlowUsd, nextCompactKey, recordAgentEvent, recordLog, withRoundLastUsd } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
-import { diffView } from './view-work'
-import { addWorkflowAgent, endRun, finishWorkflowAgent, launchedRun, nameRun, touchRun } from './workflow'
+import { addWorkflowAgent, agentRunId, endRun, recordAgentLog, finishWorkflowAgent, launchedRun, logRunChange, nameRun, runIdOf, touchRun } from './workflow'
 import { parseCreatedPr, upsertPr } from './work'
 
 // The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
@@ -93,6 +96,20 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
   }
 }
 
+/**
+ * One look at the usage pace, from the snapshot: open or closed pane alike (the heartbeat tells the chat and the launcher the mod runs).
+ * Idle: no state, `idle`, or a working state older than the working margin (its end event was lost).
+ */
+function pace($: EngineInterface, trigger: 'tick' | 'turn'): void {
+  void Promise.all([read($, snapshot), $.clock.now()])
+    .then(([s, now]) => {
+      const st = s.claudeState
+      const isIdle = st === undefined || st.kind === 'idle' || (st.since !== undefined && now - st.since > WORKING_MARGIN_MS)
+      return paceCheck($, s.sessionId, s.rateLimits.length > 0 ? s.rateLimits : (s.lastRates ?? []), isIdle, trigger)
+    })
+    .catch(() => undefined)
+}
+
 const openPane = ($: EngineInterface) => $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */
@@ -106,7 +123,7 @@ async function open($: EngineInterface) {
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // First: the command registered below is described in the language read here.
-    const autoOpen = await refreshConfig($)
+    const { autoOpen, costTarget } = await refreshConfig($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
@@ -121,6 +138,7 @@ export const register: Register = on => {
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
       isLangRead: true,
+      costTarget,
       startedAt: s.startedAt ?? now,
     }))
     await refreshLastRates($)
@@ -136,6 +154,8 @@ export const register: Register = on => {
     $.clock.every(FAST_MS, () => void fastTick($).catch(() => undefined))
     $.clock.every(MEDIUM_MS, () => void mediumTick($).catch(() => undefined))
     $.clock.every(SLOW_MS, () => void slowTick($).catch(() => undefined))
+    $.clock.every(PACE_TICK_MS, () => pace($, 'tick'))
+    pace($, 'tick')
     // The pane opens with the session unless cockpit.json says `"autoOpen": false`; `/cockpit` opens it any time.
     if (autoOpen) await open($).catch(() => undefined)
     return next(e)
@@ -164,13 +184,13 @@ export const register: Register = on => {
         const own = s.sessionId === e.sessionId ? s : undefined
         const at = await $.clock.now()
         const left = (own?.agents ?? [])
-          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a))
+          .map(a => toHistory(a.status === 'running' ? { ...a, endedAt: at, isInterrupted: true } : a, runIdOf(own?.workflowRun, a.id)))
           .filter((h): h is CockpitHistoryEntry => h !== undefined)
           .sort((a, b) => b.endedAt - a.endedAt)
         const history = addHistory(own?.history, left)
         // The agents still listed leave with the session: a resume starts with none, so their tokens join the count.
         const agentTokens = own && withAgentTokens(own.agentTokens, own.agents)
-        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, tab: own?.tab ?? 'agents', mainTokens: own?.mainTokens, agentTokens }
+        const content = { open: false, at, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null, mainTokens: own?.mainTokens, agentTokens }
         await $.fs.write(`${dir}/.cache/cockpit-${e.sessionId}.json`, JSON.stringify(content))
         // The history takes the running agents as interrupted; a snapshot that is not this session's has nothing of it to write.
         if (own) await $.fs.write(`${dir}/.cache/cockpit-data-${e.sessionId}.json`, JSON.stringify(sessionData(own, history)))
@@ -187,19 +207,6 @@ export const register: Register = on => {
     return { text: opened.isPlaced ? t().commandOpen : t().commandWaiting(opened.reason) }
   })
 
-  // The diff pane: drawn from the snapshot's diff, forgotten when it closes, whoever closed it.
-  on('ui.render', { component: 'Pane', requestId: DIFF_PANE }, async ($, e) => {
-    const ui = $.ui.resolve(e)
-    const s = await read($, snapshot)
-    return diffView(ui, s.diff, e.props.bodyColumns, diffActions($))
-  })
-
-  on('ui.close', { id: DIFF_PANE }, async ($, e, next) => {
-    const closed = await next(e)
-    await patch($, s => ({ ...s, diff: undefined })).catch(() => undefined)
-    return closed
-  })
-
   // Any close, whoever asked for it: the pane stays closed until `/cockpit` or the next session start (autoOpen).
   on('ui.close', { id: PANE }, async ($, e, next) => {
     const closed = await next(e)
@@ -210,19 +217,20 @@ export const register: Register = on => {
   on('session.measure', async ($, e, next) => {
     // another window (a /model) moves where the engine compacts
     let isNewWindow = false
+    const at = await $.clock.now().catch(() => undefined)
     await patch($, s => {
       isNewWindow = s.ctx.window !== undefined && e.context.window !== undefined && s.ctx.window !== e.context.window
-      return {
+      return withLoggedSignals(withSettledRound(s.cost, {
         ...s,
         ctx: { ...s.ctx, tokens: e.context.tokens, window: e.context.window, percent: e.context.percent },
         // the resumed value stands in only until the first live reading: a later compaction reads empty, not old
         lastCtx: e.context.percent !== undefined ? undefined : s.lastCtx,
-        ...withContextReading(s, e.context.tokens),
+        ...withContextReading(s, e.context.tokens, at),
         cost: measuredCost(s.cost, e.cost?.usd, e.changed.includes('cost')),
         rateLimits: e.rateLimits,
         // the old threshold is the old window's: a failed read draws none rather than a wrong one
         ...(isNewWindow && { autoCompactAt: undefined }),
-      }
+      }), at ?? s.now)
     })
     // the measure goes on before the read, and two window changes still read in order
     const out = await next(e)
@@ -237,12 +245,19 @@ export const register: Register = on => {
       mainTools = []
       asks.clear()
       const now = await $.clock.now()
-      await patch($, s => ({
-        ...s,
-        cost: startedCost(s.cost),
-        claudeState: { kind: 'working' },
-        workflowRun: endRun(s.workflowRun, now),
-      }))
+      await patch($, s => {
+        const workflowRun = endRun(s.workflowRun, now)
+        const cost = startedCost(s.cost, lastRoundFlowUsd(s.sessionLog))
+        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun)
+        return {
+          ...s,
+          cost,
+          claudeState: { kind: 'working' },
+          workflowRun,
+          // the header's figure took the flow agents that ended after the round: the round entry takes it too
+          sessionLog: cost.lastUsd !== undefined && cost.lastUsd !== s.cost.lastUsd ? withRoundLastUsd(log, cost.lastUsd) : log,
+        }
+      })
       markClaudeState({ kind: 'working' })
     }
     return next(e)
@@ -368,7 +383,12 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Workflow' }, async ($, e, next) => {
     const ran = await next(e)
     const launched = isOk(ran) ? launchedRun(ran.result) : undefined
-    if (launched) await patch($, s => ({ ...s, workflowRun: nameRun(s.workflowRun, launched) })).catch(() => undefined)
+    if (launched) {
+      await patch($, s => {
+        const workflowRun = nameRun(s.workflowRun, launched)
+        return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun) }
+      }).catch(() => undefined)
+    }
     return ran
   })
 
@@ -417,10 +437,12 @@ export const register: Register = on => {
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
-      await patch($, s => ({
+      await patch($, s => withLoggedSignals({
         ...s,
+        // the round's tool counts, which its log entry takes when it ends
+        roundTools: { ...s.roundTools, [tool]: (s.roundTools?.[tool] ?? 0) + 1 },
         insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), fullArg: toolArgFull(e), tokens: outcome?.tokens, error: outcome?.error }),
-      })).catch(() => undefined)
+      }, ended ?? s.now)).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
@@ -430,10 +452,16 @@ export const register: Register = on => {
   // told by what the command printed.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     const ran = await next(e)
-    if (isOk(ran) && /\bpr\s+create\b/.test(e.command)) {
-      const pr = parseCreatedPr(e.command, bashOutput(ran))
-      if (pr) await patch($, s => ({ ...s, prs: upsertPr(s.prs, pr) })).catch(() => undefined)
-    }
+    const isRan = isOk(ran)
+    const out = bashOutput(ran)
+    const pr = isRan && /\bpr\s+create\b/.test(e.command) ? parseCreatedPr(e.command, out) : undefined
+    const at = await $.clock.now().catch(() => undefined)
+    // The same call feeds the session log: a test run, a commit that exited 0, the PR above.
+    await patch($, s => {
+      // a call the person or a rule refused never ran: it makes no entry
+      const entries = ran.deny !== undefined ? [] : bashLog({ command: e.command, arg: toolArg(e), out, isOk: isRan, at: at ?? s.now, pr })
+      return entries.length === 0 && !pr ? s : { ...s, ...(pr && { prs: upsertPr(s.prs, pr) }), sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
+    }).catch(() => undefined)
     return ran
   })
 
@@ -451,6 +479,7 @@ export const register: Register = on => {
         const from = await $.clock.now()
         asks.set(e.tool_use_id, { from, held })
         await setClaudeState($, { kind: 'waiting', since: from })
+        await patch($, s => withLoggedSignals(s, from))
       }
     } catch {
       // observing must never break the verdict
@@ -470,7 +499,19 @@ export const register: Register = on => {
   on('session.compact', async ($, e, next) => {
     const done = await next(e)
     if (e.agentId === undefined && e.trigger !== 'precompute' && done.skip === undefined) {
-      await patch($, s => ({ ...s, insights: recordCompaction(s.insights, done.tokensBefore ?? s.ctx.tokens) })).catch(() => undefined)
+      const at = await $.clock.now().catch(() => undefined)
+      const after = done.tokensAfter
+      await patch($, s => {
+        const before = done.tokensBefore ?? s.ctx.tokens
+        const insights = recordCompaction(s.insights, before)
+        const logged = { ...s, insights, sessionLog: recordLog(s.sessionLog, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) }) }
+        if (after === undefined) return logged
+        // the size the compaction reports is the context now: drawn at once, and the entry's `after`, not left until the next reading
+        const { window } = s.ctx
+        return { ...logged, ctx: { ...s.ctx, tokens: after, percent: window !== undefined && window > 0 ? (100 * after) / window : undefined }, ...withContextReading(logged, after, at) }
+      }).catch(() => undefined)
+      // no size reported: the engine's own reading, rather than the context before the compaction until the next turn
+      if (after === undefined) await refreshUsage($)
     }
     return done
   })
@@ -480,10 +521,13 @@ export const register: Register = on => {
     if (spawned.agentId !== undefined) {
       const id = spawned.agentId
       const startedAt = await $.clock.now()
-      await patch($, s => ({
+      await patch($, s => {
+        const workflowRun = e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun
+        return {
         ...s,
         // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
-        workflowRun: e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun,
+        workflowRun,
+        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun),
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
@@ -491,10 +535,12 @@ export const register: Register = on => {
           description: e.description,
           requested: e.model,
           model: spawned.model,
+          ...(e.workflow && { runId: e.workflow.runId }),
           // events that outran the spawn keep their status, tokens, effort and start
           startedAt: Math.min(a.startedAt, startedAt),
         })),
-      }))
+        }
+      })
     }
     return spawned
   })
@@ -519,22 +565,27 @@ export const register: Register = on => {
       }
       // The steps already counted their part of the session's tokens: the turn's own total replaces it.
       await patch($, s => {
-        const insights = recordRoundEnd(s.insights, { usd: roundCost(s.cost), ms: e.durationMs, cacheShare, endedAt: now })
-        return {
+        const flowUsd = flowUsdIn(s.sessionLog, now - e.durationMs, now)
+        const usd = roundCost(s.cost, flowUsd)
+        const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
+        return withLoggedSignals({
           ...s,
+          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }) }),
+          roundTools: undefined,
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
-          cost: endTurnCost(s.cost),
-        }
+          cost: endTurnCost(s.cost, flowUsd),
+        }, now)
       })
       await setClaudeState($, { kind: 'idle' })
-      await scheduleContextRead($).catch(() => undefined)
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.
       await refreshGit($)
       await refreshDoneClaims($)
+      // a compaction rejects while the turn runs: it is tried once this hook has let the turn end
+      $.clock.after(0, () => pace($, 'turn'))
     } else {
       await patch($, s => {
         const agents = upsertAgent(s.agents, agentId, now, a => {
@@ -551,10 +602,17 @@ export const register: Register = on => {
           }
         })
         const ended = agents.find(a => a.id === agentId)
+        const entry = ended && agentLog(ended, agentRunId(s.workflowRun, ended))
+        const spent = ended ? usdOf(ended.model, ended.usage) : 0
+        // A turn that ended twice replaces the agent's event: only the change is added to its type.
+        const delta = ended ? spent - (s.events?.find(ev => ev.kind === 'agent' && ev.id === agentId)?.usd ?? 0) : 0
         return {
           ...s,
+          ...(ended && delta !== 0 && { agentSpend: { ...s.agentSpend, [ended.type]: (s.agentSpend?.[ended.type] ?? 0) + delta } }),
           workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
           agents,
+          // the agent is logged as it ends; a turn that ended twice is one entry
+          sessionLog: entry ? recordAgentLog(s.sessionLog, entry) : s.sessionLog,
           events: ended
             ? recordAgentEvent(s.events, { at: now, kind: 'agent', id: ended.id, text: ended.type, desc: ended.description, effort: ended.effort, ms: now - ended.startedAt, isFailed: ended.isFailed, model: ended.model, tokens: ended.tokens, usd: usdOf(ended.model, ended.usage) })
             : s.events,
@@ -577,9 +635,19 @@ export const register: Register = on => {
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {
-      await refreshConfig($)
-      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
+      const { costTarget } = await refreshConfig($)
+      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true, costTarget })).catch(() => undefined))
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
+  })
+
+  // The compact button of a pane where a compaction is due is drawn by a surface module, which can only post: the press runs here.
+  on('ui.message', ($, e, next) => {
+    const { data } = e
+    if (typeof data === 'object' && data !== null && 'action' in data && data.action === 'compact') {
+      paneActions($).compact()
+      return {}
+    }
+    return next(e)
   })
 }

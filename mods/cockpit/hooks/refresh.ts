@@ -2,33 +2,38 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../types'
-import { AGENT_KEEP_MS, addHistory, toHistory, withAgentTokens } from './agents'
-import { withContextReading } from './insights'
+import { AGENT_KEEP_MS, addHistory, agentLog, toHistory, withAgentTokens } from './agents'
+import { settledRoundUsd, withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
-import { parseRateCache, resolveAlm, tabNeeds, worklogDays } from './session'
+import { parseRateCache, resolveAlm, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
 import { isOpen, writeState } from './session-data'
 import { INITIAL } from './state'
 import { CENT } from './shared'
 import { configDir, patch } from './store'
-import { autoOpenOf, langOf, setLang } from './strings'
+import { lastRoundFlowUsd, withRoundUsd } from './timeline'
+import { autoOpenOf, costTargetOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
-import { endRun, expireRun, finishWorkflowAgent } from './workflow'
+import { agentRunId, endRun, recordAgentLog, expireRun, finishWorkflowAgent, logRunChange, silenceRun } from './workflow'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
-/** Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English) and tells whether the pane opens at session start (`autoOpen`, true unless `false`). */
-export async function refreshConfig($: EngineInterface): Promise<boolean> {
+/**
+ * Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English), tells whether
+ * the pane opens at session start (`autoOpen`, true unless `false`) and returns the $/prompt target (`costTarget`) for the caller's
+ * own patch: it writes nothing, so a drawing can call it.
+ */
+export async function refreshConfig($: EngineInterface): Promise<{ autoOpen: boolean; costTarget?: number }> {
   try {
     const dir = await configDir($)
     const text = dir ? await $.fs.read(`${dir}/cockpit.json`) : undefined
     const raw = typeof text === 'string' ? text : ''
     setLang(langOf(raw))
-    return autoOpenOf(raw)
+    return { autoOpen: autoOpenOf(raw), costTarget: costTargetOf(raw) }
   } catch {
     setLang('en')
-    return true
+    return { autoOpen: true }
   }
 }
 
@@ -106,20 +111,23 @@ export async function refreshLastRates($: EngineInterface): Promise<void> {
   }
 }
 
-/** `cost` once a main turn ended: its cost where measured, else the turn waits for the next measure to settle it. */
-export function endTurnCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cost'] {
-  const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
-  return d !== undefined && d >= CENT ? { ...cost, lastUsd: d, pendingUsd: undefined } : { ...cost, pendingUsd: cost.startUsd }
+/** `cost` once a main turn ended: its cost where measured (less the round's flow agents, `flowUsd`), else the turn waits for the next measure to settle it. */
+export function endTurnCost(cost: CockpitSnapshot['cost'], flowUsd = 0): CockpitSnapshot['cost'] {
+  // measured or not is decided on the raw delta: the flow subtraction may take a measured round to 0
+  const raw = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
+  // a turn that just ended is not settled: a flag left by a measure during it would block the next start's correction
+  return raw !== undefined && raw >= CENT ? { ...cost, lastUsd: Math.max(0, raw - flowUsd), pendingUsd: undefined, isSettled: undefined } : { ...cost, pendingUsd: cost.startUsd, isSettled: undefined }
 }
 
 /**
  * `cost` once a main turn starts: it counts from the last reading, and an ended turn measured after its end takes its whole cost
- * (one still waiting for its measure is settled by `measuredCost`).
+ * (one still waiting for its measure is settled by `measuredCost`, and a settled one keeps its cost: the spend after the measure is not
+ * the round's); the flow agents' cost (`flowUsd`) is not the round's.
  */
-export function startedCost(cost: CockpitSnapshot['cost']): CockpitSnapshot['cost'] {
-  const d = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
-  const lastUsd = cost.pendingUsd === undefined && d !== undefined && d >= CENT ? d : cost.lastUsd
-  return { ...cost, startUsd: cost.usd ?? 0, lastUsd }
+export function startedCost(cost: CockpitSnapshot['cost'], flowUsd = 0): CockpitSnapshot['cost'] {
+  const raw = cost.usd !== undefined && cost.startUsd !== undefined ? cost.usd - cost.startUsd : undefined
+  const lastUsd = cost.pendingUsd === undefined && !cost.isSettled && raw !== undefined && raw >= CENT ? Math.max(0, raw - flowUsd) : cost.lastUsd
+  return { ...cost, startUsd: cost.usd ?? 0, lastUsd, isSettled: undefined }
 }
 
 /**
@@ -133,19 +141,50 @@ export function measuredCost(cost: CockpitSnapshot['cost'], usd: number | undefi
   const pending = cost.pendingUsd
   if (pending === undefined || usd === undefined || !isCost) return { ...cost, usd }
   if (usd - pending < CENT) return { ...cost, usd, pendingUsd: undefined }
-  return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined }
+  return { ...cost, usd, startUsd: usd, lastUsd: usd - pending, pendingUsd: undefined, isSettled: true }
+}
+
+/** `next`, a snapshot whose cost was just measured over `before`, with the round that measure settled given its cost in the session log. */
+export function withSettledRound(before: CockpitSnapshot['cost'], next: CockpitSnapshot): CockpitSnapshot {
+  const raw = settledRoundUsd(before, next.cost)
+  if (raw === undefined) return next
+  // the header's last cost and the round's log entry both leave out the flow agents
+  const settled = Math.max(0, raw - lastRoundFlowUsd(next.sessionLog))
+  return { ...next, cost: { ...next.cost, lastUsd: settled }, sessionLog: withRoundUsd(next.sessionLog, raw) }
 }
 
 export async function refreshUsage($: EngineInterface): Promise<void> {
   try {
     const u = await $.session.usage()
-    await patch($, s => ({
+    const at = await $.clock.now()
+    await patch($, s => withSettledRound(s.cost, {
       ...s,
       ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window, percent: u.context.percent },
       lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
-      ...withContextReading(s, u.context.tokens),
+      ...withContextReading(s, u.context.tokens, at),
       cost: measuredCost(s.cost, u.cost?.usd),
       rateLimits: u.rateLimits,
+    }))
+  } catch {
+    // not measured yet
+  }
+}
+
+/**
+ * The tick's reading: the context only. The cost settles a turn and stays with the measures that carry it; the rate limits stay with
+ * session.measure. A reading overtaken by another context write (a measure, the compact hook) is dropped: it is older than the drawn one.
+ */
+export async function refreshContext($: EngineInterface): Promise<void> {
+  try {
+    const before = (await read($, snapshot)).ctx.tokens
+    const u = await $.session.usage()
+    const at = await $.clock.now()
+    if (u.context.tokens === undefined) return
+    await patch($, s => s.ctx.tokens !== before ? s : ({
+      ...s,
+      ctx: { ...s.ctx, tokens: u.context.tokens, window: u.context.window ?? s.ctx.window, percent: u.context.percent },
+      lastCtx: u.context.percent !== undefined ? undefined : s.lastCtx,
+      ...withContextReading(s, u.context.tokens, at),
     }))
   } catch {
     // not measured yet
@@ -200,11 +239,13 @@ async function tickClock($: EngineInterface): Promise<number> {
     })
     // The run's agents that ended here count as finished in it, and a run with none left open is closed.
     const finished = agents.reduce((run, a, i) => (a.status !== s.agents[i]?.status && inRun.has(a.id) ? finishWorkflowAgent(run, a.id, now) : run), s.workflowRun)
-    const workflowRun = endRun(finished, now)
+    const closed = endRun(finished, now)
+    // a run the silence check closed is not a finished one: it is marked, and logged only when a newer run replaces it
+    const workflowRun = isSilent && closed !== finished ? silenceRun(closed) : closed
     const isListed = (a: CockpitAgent) => a.status === 'running' || (a.endedAt !== undefined && now - a.endedAt < AGENT_KEEP_MS)
     const gone = agents.filter(a => !isListed(a))
     const left = gone
-      .map(toHistory)
+      .map(a => toHistory(a, agentRunId(s.workflowRun, a)))
       .filter((h): h is CockpitHistoryEntry => h !== undefined)
       .sort((a, b) => b.endedAt - a.endedAt)
     return {
@@ -213,6 +254,11 @@ async function tickClock($: EngineInterface): Promise<number> {
       workflowRun,
       agents: agents.filter(isListed),
       history: left.length > 0 ? addHistory(s.history, left) : s.history,
+      // an agent that ended without a turn.complete we saw (the engine stopped listing it) is logged here; one already logged is left as it was
+      sessionLog: logRunChange(agents.reduce<CockpitSnapshot['sessionLog']>((log, a) => {
+        const entry = a.status === 'done' ? agentLog(a, agentRunId(s.workflowRun, a)) : undefined
+        return entry ? recordAgentLog(log, entry) : log
+      }, s.sessionLog), s.workflowRun, workflowRun),
       // An agent leaving the list (type `?` ones too: they used tokens) joins the count that the share keeps.
       agentTokens: withAgentTokens(s.agentTokens, gone),
     }
@@ -220,22 +266,19 @@ async function tickClock($: EngineInterface): Promise<number> {
   return now
 }
 
-/** Whether the pane is open and its selected tab asks for the fast tier. */
-async function isFastWanted($: EngineInterface): Promise<boolean> {
-  if (!isOpen) return false
-  const { tab } = await read($, snapshot)
-  return tabNeeds(tab).fast
-}
-
-/** Fast tier (2 s): the elapsed times of a tab that draws them. */
+/** Fast tier (2 s): the elapsed times the page draws, while the pane is open. */
 export async function fastTick($: EngineInterface): Promise<void> {
-  if (await isFastWanted($)) await tickClock($)
+  if (isOpen) await tickClock($)
 }
 
-/** Medium tier (10 s): git (and, with the Work tab, its reads), whatever the tab while the pane is open: the header shows it on every tab. */
+/**
+ * Medium tier (10 s): git and the context while the pane is open: the header shows them. The plain `usage()` costs nothing, and
+ * it is what draws a compaction live, since the harness can skip this mod's `session.compact` hook.
+ */
 export async function mediumTick($: EngineInterface): Promise<void> {
   if (!isOpen) return
   await tickClock($)
+  await refreshContext($)
   await refreshGit($)
 }
 
@@ -248,7 +291,7 @@ export async function refreshOnOpen($: EngineInterface): Promise<void> {
   await refreshDoneClaims($)
 }
 
-/** Slow tier (30 s), whatever the tab: the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
+/** Slow tier (30 s): the state file's heartbeat, the ALM line, git (and the pull request through it), the worklog, the done-claim log. While the pane is closed only the agents' list, and only while one runs. */
 export async function slowTick($: EngineInterface): Promise<void> {
   if (!isOpen) {
     // The status line's badges read the snapshot: while any agent is running, the local list (no model call) keeps the agent badge from staying lit for one that ended unseen;

@@ -1,14 +1,14 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
-import type { CockpitHistoryEntry, CockpitNote, CockpitPr, CockpitSnapshot, CockpitTab } from '../types'
-import { historyTokens, parseHistory } from './agents'
+import type { CockpitHistoryEntry, CockpitLogEntry, CockpitPr, CockpitSnapshot } from '../types'
+import { historyTokens, parseHistory, withHistoryAgents } from './agents'
+import { parseAgentSpend } from './andamento'
 import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
-import { openContext } from './refresh-context'
-import { parseNotes, savedTab } from './session'
 import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
+import { parseLog, parseToolCounts } from './timeline'
 import { agentCounts, taskCounts } from './view-agents'
 import { parseEdited, parseSavedPrs } from './work'
 
@@ -33,7 +33,7 @@ let writeScheduledAt: number | undefined
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the saved notes, the context samples, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the context samples, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
 export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
@@ -43,10 +43,12 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
   return {
     history,
     prs: s.prs ?? [],
-    ...(s.notes !== undefined && { notes: s.notes }),
     ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(s.edited !== undefined && { edited: s.edited }),
+    ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
+    ...(s.roundTools !== undefined && { roundTools: s.roundTools }),
+    ...(s.agentSpend !== undefined && { agentSpend: s.agentSpend }),
     ...(ctx && { ctx }),
     ...(s.startedAt !== undefined && { startedAt: s.startedAt }),
   }
@@ -73,7 +75,6 @@ export async function writeState($: EngineInterface, isForced = false, isHeartbe
       agents: agentCounts(s),
       effort: typeof s.effort === 'string' ? s.effort : null,
       tasks: counts ? { done: counts.done, total: counts.total } : null,
-      tab: s.tab ?? 'agents',
       // the share is a part of the session's tokens: the main loop's and the agents' count survive a reload (the history is cut at 50)
       mainTokens: s.mainTokens,
       agentTokens: s.agentTokens,
@@ -125,23 +126,23 @@ async function readSaved($: EngineInterface, path: string): Promise<Record<strin
 }
 
 type Saved = {
-  tab?: CockpitTab
   history: CockpitHistoryEntry[]
   prs?: CockpitPr[]
   mainTokens?: number
   agentTokens?: number
-  notes?: CockpitNote[]
   ctxSamples?: number[]
   ctxRounds?: number[]
   edited?: string[]
+  sessionLog?: CockpitLogEntry[]
+  roundTools?: Record<string, number>
+  agentSpend?: Record<string, number>
   ctx?: { tokens: number; window: number; percent: number }
   startedAt?: number
 }
 
 /**
- * What an earlier run of session `id` left: in its state file the tab (none for a missing file or an unknown one; the v2 Sessione
- * and Repo tabs map to Subagents and Work) and the tokens of the main loop and of the agents that left the list (a file from before
- * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the notes, the context
+ * What an earlier run of session `id` left: in its state file the tokens of the main loop and of the agents that left the list (a file from before
+ * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the context
  * samples and when the chat began. A state file from before the data file still holds the history and the pull requests: a field the data file does not
  * have is read from there, once (the next write moves it).
  */
@@ -156,15 +157,16 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
     const history = parseHistory(field('history'))
     const prs = parseSavedPrs(field('prs'))
     return {
-      tab: savedTab(state?.tab),
       history,
       prs: prs.length > 0 ? prs : undefined,
       mainTokens: count(state?.mainTokens),
       agentTokens: count(state?.agentTokens) ?? historyTokens(history),
-      notes: parseNotes(data?.notes, data?.note),
       ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       edited: parseEdited(data?.edited),
+      sessionLog: withHistoryAgents(parseLog(data?.sessionLog), history),
+      roundTools: parseToolCounts(data?.roundTools),
+      agentSpend: parseAgentSpend(data?.agentSpend),
       ctx: parseCtx(data?.ctx),
       startedAt: count(data?.startedAt),
     }
@@ -180,17 +182,12 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   agents: [],
   history: [],
   prs: undefined,
-  notes: undefined,
-  noteDraft: undefined,
-  noteEditing: undefined,
   insights: undefined,
   agentsOpen: undefined,
   signalOpen: undefined,
-  seenSignals: undefined,
   signalsAt: undefined,
-  notesOpen: undefined,
   openKeys: undefined,
-  refreshedAt: undefined,
+  groupsOpen: undefined,
   tasks: [],
   cacheShare: undefined,
   mainTokens: undefined,
@@ -200,14 +197,14 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   ctxSamples: undefined,
   ctxRounds: undefined,
   edited: undefined,
+  sessionLog: undefined,
+  roundTools: undefined,
+  agentSpend: undefined,
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
   // the last turn's cost and the one still to measure were this session's turns
-  cost: { ...s.cost, lastUsd: undefined, pendingUsd: undefined },
+  cost: { ...s.cost, lastUsd: undefined, pendingUsd: undefined, isSettled: undefined },
   lastCtx: undefined,
-  context: undefined,
-  contextSeq: undefined,
-  contextStatic: undefined,
   skillsUsed: undefined,
   workflowRun: undefined,
   events: undefined,
@@ -217,7 +214,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
 
 /**
  * Makes the snapshot the session the engine answers now: the same id (a reload, an enable, a respawn) changes nothing;
- * another loads that session's saved tab and history. The id of the session that just ended is skipped (the engine
+ * another loads that session's saved history. The id of the session that just ended is skipped (the engine
  * answers it until it switches), unless `isStart`: a session start of that same id is a resume.
  */
 export async function adoptSession($: EngineInterface, isStart = false): Promise<void> {
@@ -230,7 +227,7 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, tab: saved.tab ?? s.tab, history: saved.history, prs: saved.prs, notes: saved.notes, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 
@@ -238,8 +235,4 @@ export async function setOpen($: EngineInterface, value: boolean): Promise<void>
   isOpen = value
   await adoptSession($).catch(() => undefined)
   await writeState($, true)
-  // The Costi tab is read when it opens: a pane that opens on it (the tab is kept with the session) is the same moment.
-  // The read is not waited for: a slow one must not hold the open (or the close) back.
-  const tab = value ? (await read($, snapshot)).tab : undefined
-  if (tab === 'context') void openContext($).catch(() => undefined)
 }

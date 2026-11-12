@@ -1,15 +1,12 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  TABS,
   WORKING_MARGIN_MS,
   activeAlerts,
   isWorking,
   parseRateCache,
   parseReset,
   resolveAlm,
-  savedTab,
-  tabNeeds,
   weeklyPace,
   worklogDays,
   worklogLabel,
@@ -73,28 +70,6 @@ test('resolveAlm resolves a directory like the workspaces hook: longest root win
   expect(resolveAlm(undefined, '/w')).toBeUndefined()
   expect(resolveAlm({ roots: 'x' }, '/w')).toBeUndefined()
   expect(resolveAlm({}, '/w')).toBeUndefined()
-})
-
-test('tabNeeds: the fast tier is the only one a selected tab asks for (git runs at the medium tier whenever the pane is open)', () => {
-  expect(tabNeeds('agents')).toEqual({ fast: true })
-  expect(tabNeeds('signals')).toEqual({ fast: true })
-  expect(tabNeeds('work')).toEqual({ fast: true })
-  expect(tabNeeds('notes')).toEqual({ fast: false })
-  expect(tabNeeds('context')).toEqual({ fast: true }) // the refresh countdown
-  expect(tabNeeds(undefined)).toEqual({ fast: true })
-})
-
-test('savedTab: the five tabs, and the older ones a state file may still hold mapped to where their content went', () => {
-  expect(TABS).toEqual(['agents', 'context', 'signals', 'work', 'notes'])
-  for (const tab of TABS) expect(savedTab(tab)).toBe(tab)
-  expect(savedTab('session')).toBe('agents')
-  expect(savedTab('history')).toBe('agents')
-  expect(savedTab('repo')).toBe('work')
-  expect(savedTab('system')).toBe('work')
-  expect(savedTab('insights')).toBe('context')
-  expect(savedTab('nope')).toBeUndefined()
-  expect(savedTab(undefined)).toBeUndefined()
-  expect(savedTab(3)).toBeUndefined()
 })
 
 test('activeAlerts: context from 80 %, 5h credits at 10 % left or less, a failed subagent; one entry per cause', () => {

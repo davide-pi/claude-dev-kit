@@ -1,4 +1,4 @@
-import type { CockpitAlm, CockpitNote, CockpitRateLimit, CockpitSnapshot, CockpitTab } from '../types'
+import type { CockpitAlm, CockpitRateLimit, CockpitSnapshot } from '../types'
 import { isRecord, shortDate } from './shared'
 import { t } from './strings'
 
@@ -22,20 +22,6 @@ export function weeklyPace(
   if (remainSec <= 0 || remainSec > windowSec) return undefined
   const target = Math.round((remainSec / windowSec) * 100)
   return { target, delta: remainingPct - target }
-}
-
-/**
- * What a selected tab asks of the clock tiers: `fast` (2 s) for the elapsed times it draws (Ora's, Segnali's wait, Costi's refresh countdown). The medium tier
- * (10 s, git) runs whenever the pane is open, the header shows git on every tab; the slow tier (30 s) runs whatever the tab; none of them
- * while the pane is closed.
- */
-export function tabNeeds(tab: CockpitTab | undefined): { fast: boolean } {
-  switch (tab ?? 'agents') {
-    case 'notes':
-      return { fast: false }
-    default:
-      return { fast: true }
-  }
 }
 
 export type WorklogSnapshot = {
@@ -133,15 +119,6 @@ function projectOf(entry: Record<string, unknown>, firstSubfolder: string): stri
   return typeof entry.project === 'string' && entry.project !== 'ask' && entry.project !== '' ? entry.project : undefined
 }
 
-/** The cockpit's tabs, in the order the bar draws them: Agents, Context, Notifications, Work, Notes. */
-export const TABS: readonly CockpitTab[] = ['agents', 'context', 'signals', 'work', 'notes']
-
-export const isTab = (v: unknown): v is CockpitTab => TABS.some(tab => tab === v)
-
-/** The tab a state file names; the tabs of the older versions went where their content did (Insights to Context, System to Work, History to Agents). */
-export const savedTab = (v: unknown): CockpitTab | undefined =>
-  v === 'session' || v === 'history' ? 'agents' : v === 'repo' || v === 'system' ? 'work' : v === 'insights' ? 'context' : isTab(v) ? v : undefined
-
 // ── Alerts (D4) and the session data file ──
 
 /** The context fill from which the cockpit alerts, and the 5h credits left (percent) at or under which it does. */
@@ -160,28 +137,4 @@ export function activeAlerts(s: CockpitSnapshot): CockpitAlert[] {
   if (five && 100 - five.percentUsed <= ALERT_CREDITS_LEFT_PCT) out.push({ key: 'credits', text: t().alertCredits(Math.max(0, Math.round(100 - five.percentUsed))) })
   for (const a of s.agents) if (a.isFailed === true) out.push({ key: `agent:${a.id}`, text: t().alertSubagent(a.type) })
   return out
-}
-
-/** A note's longest text. */
-export const NOTE_MAX = 2000
-
-/** A note's text with CRLF and lone CR as LF: a paste from Windows or a file keeps its lines, never a stray `\r`. */
-export const normalizeNewlines = (text: string): string => text.replace(/\r\n?/g, '\n')
-
-/**
- * The saved notes out of a parsed data file: the `notes` list (entries with a numeric id and a text, each cut to `NOTE_MAX`; a blank
- * one, a repeated id or anything else is left out). A file from before the list holds one `note` text: that becomes the first entry.
- */
-export function parseNotes(notes: unknown, legacyNote?: unknown): CockpitNote[] | undefined {
-  const list: CockpitNote[] = []
-  if (Array.isArray(notes)) {
-    for (const entry of notes as unknown[]) {
-      const { id, text } = (typeof entry === 'object' && entry !== null ? entry : {}) as { id?: unknown; text?: unknown }
-      if (typeof id !== 'number' || !Number.isSafeInteger(id) || typeof text !== 'string' || text.trim() === '' || list.some(n => n.id === id)) continue
-      list.push({ id, text: normalizeNewlines(text).slice(0, NOTE_MAX) })
-    }
-  } else if (typeof legacyNote === 'string' && legacyNote.trim() !== '') {
-    list.push({ id: 1, text: normalizeNewlines(legacyNote).slice(0, NOTE_MAX) })
-  }
-  return list.length > 0 ? list : undefined
 }

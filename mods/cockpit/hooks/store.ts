@@ -5,7 +5,7 @@ import type { CockpitSnapshot } from '../types'
 import { activeAlerts } from './session'
 import { adoptSession, writeState } from './session-data'
 import { sameSnapshot } from './shared'
-import { withSignalTimes } from './signals'
+import { withLoggedSignals, withSignalTimes } from './signals'
 import { INITIAL } from './state'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -22,7 +22,8 @@ export async function patch($: EngineInterface, next: (s: CockpitSnapshot) => Co
   const at = withSignalTimes(changed, 0) === changed ? undefined : await $.clock.now().catch(() => undefined)
   await update($, snapshot, s => {
     const n = next(s)
-    return withSignalTimes(n, at ?? n.now)
+    // A notification that holds is logged here too, so one that only time makes true (a wait, a stalled run) gets its entry.
+    return withLoggedSignals(withSignalTimes(n, at ?? n.now), at ?? n.now)
   })
   await writeState($)
   await raiseAlerts($)

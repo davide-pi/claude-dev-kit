@@ -81,6 +81,8 @@ export type World = {
   calls?: string[]
   /** True: `session.compact` stands (the conversation compacted) instead of being skipped. */
   compacts?: boolean
+  /** The conversation's size after a compaction that stood (`tokensAfter`); absent, the compaction reports none. */
+  compactAfter?: number
   /** Receives the `instructions` of every `session.compact`. */
   instructions?: (string | undefined)[]
   /** Receives the line of every `command.run` (`/<command> <args>`). */
@@ -344,7 +346,7 @@ export function world(on: On, options: World = {}) {
   on('session.compact', (_, e) => {
     options.calls?.push('compact')
     options.instructions?.push(e.instructions)
-    return options.compacts ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }] } : { skip: 'test' }
+    return options.compacts ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }], ...(options.compactAfter !== undefined && { tokensAfter: options.compactAfter }) } : { skip: 'test' }
   })
   on('command.run', { command: 'worklog' }, (_, e) => {
     options.commands?.push(`/${e.command} ${e.args}`)

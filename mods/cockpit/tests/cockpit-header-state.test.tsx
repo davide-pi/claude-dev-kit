@@ -73,7 +73,7 @@ test('header: a subagent\'s events do not move the Claude state', async ($, on) 
   expect(headerOf((await paneRows($)).rows)[0]).toContain('ready')
 })
 
-test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s for git whatever the tab while the pane is open, slow 30 s always, none while the pane is closed', async ($, on) => {
+test('refresh tiers: fast 2 s while the pane is open, medium 10 s for git while the pane is open, slow 30 s always, none while the pane is closed', async ($, on) => {
   const statusCalls: string[] = []
   const listCalls: string[] = []
   const clock = world(on, { statusCalls, listCalls })
@@ -89,30 +89,28 @@ test('refresh tiers: fast 2 s while a tab with a clock is selected, medium 10 s 
     listCalls.length = 0
   }
   reset()
-  await clock.advance(2000) // t = 6 s: the fast timer ticked once (Subagents has elapsed times)
+  await clock.advance(2000) // t = 6 s: the fast timer ticked once (the page has elapsed times)
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
 
-  await ui.press({ key: 'tab:notes' })
   await settleAll()
   reset()
-  await clock.advance(3000) // t = 9 s: Notes has no clock and git is not due yet
-  expect(listCalls).toHaveLength(0)
+  await clock.advance(3000) // t = 9 s: the fast timer ticked again, git is not due yet
+  expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls).toHaveLength(0)
   await clock.advance(1500) // t = 10.5 s: the medium timer ticked
   await settleAll()
   expect(statusCalls.length).toBeGreaterThanOrEqual(1)
 
-  await ui.press({ key: 'tab:agents' })
   await settleAll()
   reset()
-  await clock.advance(10_000) // t = 20.5 s: the medium timer ticked at 20 s: the header shows git on every tab
+  await clock.advance(10_000) // t = 20.5 s: the medium timer ticked at 20 s: the header shows git
   await settleAll()
   expect(listCalls.length).toBeGreaterThanOrEqual(1)
   expect(statusCalls.length).toBeGreaterThanOrEqual(1)
 
   reset()
-  await clock.advance(10_000) // t = 30.5 s: the slow timer ticked, whatever tab is selected
+  await clock.advance(10_000) // t = 30.5 s: the slow timer ticked
   await settleAll()
   expect(statusCalls.length).toBeGreaterThanOrEqual(1)
   await ui.unmount()

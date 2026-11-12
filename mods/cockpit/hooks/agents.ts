@@ -1,8 +1,9 @@
-import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitSnapshot, CockpitUsage } from '../types'
+import type { CockpitAgent, CockpitClaudeState, CockpitHistoryEntry, CockpitLogEntry, CockpitSnapshot, CockpitUsage } from '../types'
 import { usdOf } from './pricing'
 import { COLORS, isRecord, truncEnd } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
+import { recordLog } from './timeline'
 
 /** How long a finished agent stays listed. */
 export const AGENT_KEEP_MS = 120_000
@@ -88,9 +89,52 @@ export function tokenShare(tokens: number, total: number): string | undefined {
 export const HISTORY_KEEP = 300
 
 /** What the history keeps of a finished agent; undefined for one the mod only saw through its events (type `?`). */
-export function toHistory(a: CockpitAgent): CockpitHistoryEntry | undefined {
+export function toHistory(a: CockpitAgent, runId?: string): CockpitHistoryEntry | undefined {
   if (a.type === '?' || a.endedAt === undefined) return undefined
-  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
+  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(runId !== undefined && { runId }), ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
+}
+
+/** The session log entry of a finished agent (`at` its end, `key` its id); undefined for one the mod only saw through its events (type `?`) or one that has not ended. */
+export function agentLog(a: CockpitAgent, runId?: string): CockpitLogEntry | undefined {
+  if (a.type === '?' || a.endedAt === undefined) return undefined
+  return {
+    at: a.endedAt,
+    kind: 'agent',
+    key: a.id,
+    ...(runId !== undefined && { runId }),
+    text: a.type,
+    ...(a.description !== undefined && a.description !== '' && { desc: a.description }),
+    ms: Math.max(0, a.endedAt - a.startedAt),
+    isFailed: a.isFailed === true,
+    ...(a.model !== undefined && { model: a.model }),
+    ...(a.effort !== undefined && { effort: a.effort }),
+    ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }),
+  }
+}
+
+/**
+ * `log` with an 'agent' entry for each agent of `history`, for a log saved before agents had entries of their own (one-off, at load);
+ * `log` itself when it holds any 'agent' entry or the history is empty. An interrupted agent is left out: it may resume under its id and log its real end.
+ */
+export function withHistoryAgents(log: CockpitLogEntry[] | undefined, history: readonly CockpitHistoryEntry[]): CockpitLogEntry[] | undefined {
+  if (history.length === 0 || (log ?? []).some(e => e.kind === 'agent')) return log
+  return history.filter(h => h.isInterrupted !== true).reduce<CockpitLogEntry[] | undefined>(
+    (l, h) =>
+      recordLog(l, {
+        at: h.endedAt,
+        kind: 'agent',
+        key: h.id,
+        ...(h.runId !== undefined && { runId: h.runId }),
+        text: h.type,
+        ...(h.description !== undefined && h.description !== '' && { desc: h.description }),
+        ms: Math.max(0, h.endedAt - h.startedAt),
+        isFailed: h.isFailed,
+        ...(h.model !== undefined && { model: h.model }),
+        ...(h.effort !== undefined && { effort: h.effort }),
+        ...(h.usd !== undefined && { usd: h.usd }),
+      }),
+    log,
+  )
 }
 
 /** `entries` go in front (newest first), an id already there replaced; the list is cut to `HISTORY_KEEP`. */
@@ -105,7 +149,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
   const out: CockpitHistoryEntry[] = []
   for (const v of value.slice(0, HISTORY_KEEP)) {
     if (!isRecord(v)) continue
-    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description, usd } = v
+    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description, usd, runId } = v
     if (typeof id !== 'string' || typeof type !== 'string' || typeof startedAt !== 'number' || typeof endedAt !== 'number') continue
     out.push({
       id,
@@ -117,6 +161,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
       isFailed: isFailed === true,
       ...((typeof effort === 'string' || typeof effort === 'number') && { effort }),
       ...(typeof description === 'string' && { description }),
+      ...(typeof runId === 'string' && { runId }),
       ...(typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 && { usd }),
       ...(isInterrupted === true && { isInterrupted: true }),
     })
