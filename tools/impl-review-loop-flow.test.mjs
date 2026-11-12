@@ -478,6 +478,32 @@ test('given a plan of five tasks, when the loop runs, then the implementer is ca
   for (const t of ['task-4-title', 'task-5-title']) assert.ok(prompts[1].includes(t) && !prompts[0].includes(t), t);
 });
 
+test('given a plan of two blocks, when block 1 is briefed, then the implementer is told the later blocks are not its own', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { calls } = await run(BLOCK_ARGS, [], impls);
+  // Then
+  const prompts = implCalls(calls).map(c => c.prompt);
+  assert.match(prompts[0], /Do only the tasks of this block: a task of a later block is not yours, even a quick one\./);
+});
+
+test('given an implementer whose gate says red: tests changed, when it reports, then the loop stalls at once for the owner, with no continuation or gate fix', async () => {
+  // Given: only the owner can accept the edited proven test (--force) or have it reverted
+  for (const extra of [{ remaining: ['the owner must accept the edited test'] }, {}]) {
+    const changed = impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }), ...extra });
+    // When
+    const { out, calls } = await run(BLOCK_ARGS, [], [changed, green(), green(), green()]);
+    // Then
+    assert.equal(out.status, 'STALL');
+    assert.equal(out.stall.why, 'tests-changed');
+    assert.equal(implCalls(calls).length, 1);
+    assert.match(out.stall.reason, /tests\/Orders\.test\.cs/);
+    assert.match(out.resume, /Ask the user/);
+    assert.match(out.resume, /--force/);
+  }
+});
+
 test('given a block whose gate comes back red, when the fix call turns it green, then the loop goes on to the next block', async () => {
   // Given
   const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), green(), green()];
