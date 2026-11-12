@@ -54,7 +54,8 @@ function expect(decision, commands, reasonPattern) {
 
 // ── SQL Server ─────────────────────────────────────────────────────────────────────────────────
 
-test('sqlcmd: a dev host or no host passes, a named non-dev host is denied towards db-ro.ps1', () => {
+test('given sqlcmd with a dev host, no host and a named non-dev host, when the guard runs it, then dev or none passes and non-dev is denied towards db-ro.ps1', () => {
+  // Given / When / Then
   expect('approve', [
     'sqlcmd -S localhost,1433 -Q "SELECT 1"',
     'docker exec -i mssql sqlcmd -Q "SELECT 1"',
@@ -68,7 +69,8 @@ test('sqlcmd: a dev host or no host passes, a named non-dev host is denied towar
   ], /db-ro\.ps1/);
 });
 
-test('sqlcmd: LocalDB and the IPv6 loopback are local', () => {
+test('given sqlcmd on LocalDB and the IPv6 loopback, when the guard runs it, then they are local and another IPv6 address is denied', () => {
+  // Given / When / Then
   expect('approve', [
     'sqlcmd -S "(localdb)\\MSSQLLocalDB" -Q "SELECT 1"',
     'sqlcmd -S (localdb)\\MSSQLLocalDB -Q "SELECT 1"',
@@ -80,7 +82,8 @@ test('sqlcmd: LocalDB and the IPv6 loopback are local', () => {
 
 // ── Postgres ───────────────────────────────────────────────────────────────────────────────────
 
-test('psql: the host comes from -h, --host, a URI or a conninfo', () => {
+test('given psql and pg tools with the host in -h, --host, a URI or a conninfo, when the guard runs them, then dev hosts pass and non-dev hosts are denied', () => {
+  // Given / When / Then
   expect('approve', [
     'psql -h localhost -U app -d appdb -c "select 1"',
     'psql --host=127.0.0.1 -At -c "select 1"',
@@ -102,7 +105,8 @@ test('psql: the host comes from -h, --host, a URI or a conninfo', () => {
   ], /db-ro\.ps1/);
 });
 
-test('psql: PGHOST on the line decides when no -h is given; no host at all is the local default', () => {
+test('given PGHOST on the line and no -h or no host, when the guard runs psql, then PGHOST decides and no host is the local default', () => {
+  // Given / When / Then
   expect('approve', [
     'PGHOST=localhost psql -c "select 1"',
     "$env:PGHOST='localhost'; psql -c 'select 1'",
@@ -122,13 +126,15 @@ test('psql: PGHOST on the line decides when no -h is given; no host at all is th
   expect('approve', ['psql -h localhost -c "select * from server where host=\'prod\'"']);
 });
 
-test('psql: --version and --help always pass', () => {
+test('given --version and --help on db clients, when the guard runs them, then they always pass', () => {
+  // Given / When / Then
   expect('approve', ['psql --version', 'psql -V', 'redis-cli --version', 'pg_dump --help']);
 });
 
 // ── Redis ──────────────────────────────────────────────────────────────────────────────────────
 
-test('redis-cli: host from -h or -u; none is 127.0.0.1', () => {
+test('given redis-cli with -h, -u or no host, when the guard runs it, then none is 127.0.0.1 and a non-dev host is denied', () => {
+  // Given / When / Then
   expect('approve', [
     'redis-cli GET user:1',
     'redis-cli -h localhost -p 6379 -n 2 HGETALL session:42',
@@ -142,7 +148,8 @@ test('redis-cli: host from -h or -u; none is 127.0.0.1', () => {
   ], /db-ro\.ps1/);
 });
 
-test('redis-cli on a dev host: no allow-list, the owner writes to a local cache', () => {
+test('given redis-cli on a dev host and a flush, when the guard runs it, then there is no allow-list, the flush asks and a non-dev host stays denied', () => {
+  // Given / When / Then
   expect('approve', [
     'redis-cli SCAN 0 MATCH user:* COUNT 100',
     'redis-cli --scan --pattern "user:*"',
@@ -162,7 +169,8 @@ test('redis-cli on a dev host: no allow-list, the owner writes to a local cache'
 
 // ── Wrappers: docker run|exec, wsl, shells ────────────────────────────────────────────────────
 
-test('inside docker run|exec the client is found, and the container is its own default host', () => {
+test('given a client inside docker run or exec, when the guard runs it, then the client is found and the container is its own default host', () => {
+  // Given / When / Then
   expect('approve', [
     'docker compose exec -T postgres psql -U app -d appdb -c "select 1"',
     'docker exec -it redis redis-cli INFO memory',
@@ -183,7 +191,8 @@ test('inside docker run|exec the client is found, and the container is its own d
 
 // ── A shell flag in any spelling still opens the command string ───────────────────────────────
 
-test('a POSIX shell takes -c clustered with other options (-ec, -xc, -lic, -ce)', () => {
+test('given a POSIX shell taking -c clustered with other options, when the guard runs it, then the inner psql host is read', () => {
+  // Given / When / Then
   const inner = '"psql -h pg-prod.example.com -c \'select 1\'"';
   expect('deny', [
     `bash -ec ${inner}`,
@@ -196,7 +205,8 @@ test('a POSIX shell takes -c clustered with other options (-ec, -xc, -lic, -ce)'
   expect('approve', ['bash -ec "psql -h localhost -c \'select 1\'"', 'bash --login -c "ls"']);
 });
 
-test('PowerShell takes any abbreviation of -Command, found after its other options', () => {
+test('given PowerShell with any abbreviation of -Command after other options, when the guard runs it, then the inner psql host is read', () => {
+  // Given / When / Then
   const inner = '"psql -h pg-prod.example.com -c \'select 1\'"';
   expect('deny', [
     `pwsh -Comm ${inner}`,
@@ -208,12 +218,14 @@ test('PowerShell takes any abbreviation of -Command, found after its other optio
   expect('approve', ['pwsh -NoProfile -ExecutionPolicy Bypass -File build.ps1', 'pwsh -Comm "Get-Date"']);
 });
 
-test('cmd /c, /k and a --long option that merely contains a c', () => {
+test('given cmd /c, /k and a --long option that merely contains a c, when the guard runs them, then cmd is unwrapped and the option is not a command flag', () => {
+  // Given / When / Then
   expect('deny', ['cmd /c psql -h pg-prod.example.com -c "select 1"', 'cmd /s /k "psql -h pg-prod.example.com"'], /db-ro\.ps1/);
   expect('approve', ['bash --noprofile -c "ls"', 'docker exec pg bash --rcfile x -c "ls"']);
 });
 
-test('wsl is unwrapped, with or without -d, -e, --', () => {
+test('given wsl with or without -d, -e, --, when the guard runs it, then it is unwrapped and the host is read', () => {
+  // Given / When / Then
   expect('approve', ['wsl redis-cli -h localhost GET k', 'wsl -d Ubuntu -- psql -h localhost -c "select 1"']);
   expect('deny', [
     'wsl redis-cli -h cache-prod.example.com GET k',
@@ -224,11 +236,13 @@ test('wsl is unwrapped, with or without -d, -e, --', () => {
   expect('approve', ['wsl sudo -u postgres psql -c "select 1"']); // no host: the local socket
 });
 
-test('a deny later on the line is still found', () => {
+test('given a deny later on the line, when the guard runs it, then it is still found', () => {
+  // Given / When / Then
   expect('deny', ['redis-cli KEYS "*" && redis-cli -h cache-prod.example.com GET k'], /db-ro\.ps1/);
 });
 
-test('a tool only named, and db-ro.ps1 itself, pass', () => {
+test('given a tool only named and db-ro.ps1 itself, when the guard runs them, then they pass', () => {
+  // Given / When / Then
   expect('approve', [
     'which psql redis-cli',
     'wsl -e which psql redis-cli',
@@ -238,12 +252,15 @@ test('a tool only named, and db-ro.ps1 itself, pass', () => {
   ]);
 });
 
-test('the db-ro.ps1 allow rules match the one invocation form the agent documents, in both shells', () => {
+test('given the invocation form the agent documents, when the allow rules are matched in both shells, then they cover it', () => {
+  // Given
   const agent = readFileSync(join(ROOT, 'agents', 'db-analyst.md'), 'utf8');
   const invocation = agent.match(/`(pwsh -NoProfile -File \S*db-ro\.ps1 [^`]*)`/)?.[1];
   assert.ok(invocation, 'agents/db-analyst.md documents a db-ro.ps1 invocation');
   const { allow } = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8')).permissions;
   const toRegExp = (glob) => new RegExp(`^${glob.replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '.*')}$`);
+
+  // When / Then
   for (const tool of ['Bash', 'PowerShell']) {
     const globs = allow.filter((r) => r.startsWith(`${tool}(`) && r.includes('db-ro.ps1')).map((r) => r.slice(tool.length + 1, -1));
     assert.ok(globs.length, `${tool} has a db-ro.ps1 allow rule`);
@@ -253,7 +270,8 @@ test('the db-ro.ps1 allow rules match the one invocation form the agent document
 
 // ── mysql / mariadb / usql / mongosh / dotnet ef ───────────────────────────────────────────────
 
-test('mysql and mariadb: a dev host or the local socket passes, a named non-dev host is denied', () => {
+test('given mysql and mariadb with a dev host, the local socket or a named non-dev host, when the guard runs them, then the first two pass and the last is denied', () => {
+  // Given / When / Then
   expect('approve', [
     'mysql -u root -e "SELECT 1"', 'mysql -h localhost -u root', 'mysql -h127.0.0.1 -uroot', 'mariadb --host=host.docker.internal',
     'docker exec -i db mysql -u root -e "SELECT 1"', 'mysql --version', 'mysql -V', 'which mysql',
@@ -265,7 +283,8 @@ test('mysql and mariadb: a dev host or the local socket passes, a named non-dev 
   ], /db-ro\.ps1/);
 });
 
-test('usql and mongosh: the host comes from the URI, `host:port/db` or --host', () => {
+test('given usql and mongosh with the host in a URI, host:port/db or --host, when the guard runs them, then dev hosts pass and non-dev hosts are denied', () => {
+  // Given / When / Then
   expect('approve', [
     'mongosh', 'mongosh mydb', 'mongosh mongodb://localhost:27017/app', 'mongosh --host localhost', 'usql pg://app@localhost/sales', 'usql sqlite:./local.db',
     'mongosh --version', 'usql --version',
@@ -277,7 +296,8 @@ test('usql and mongosh: the host comes from the URI, `host:port/db` or --host', 
   ], /db-ro\.ps1/);
 });
 
-test('dotnet ef --connection at a non-local host is denied; a local one and no connection pass', () => {
+test('given dotnet ef --connection at a local, a non-local host or none, when the guard runs it, then a non-local host is denied and the others pass', () => {
+  // Given / When / Then
   expect('approve', [
     'dotnet ef database update', 'dotnet ef database update --connection "Server=localhost;Database=Sales"',
     'dotnet ef migrations add Init --project src/Data', 'dotnet ef database update --connection "Host=127.0.0.1;Database=sales"',
@@ -292,7 +312,8 @@ test('dotnet ef --connection at a non-local host is denied; a local one and no c
   ], /db-ro\.ps1/);
 });
 
-test('a client behind ssh is read too', () => {
+test('given a client behind ssh, when the guard runs it, then the inner host is read too', () => {
+  // Given / When / Then
   expect('deny', ['ssh host "psql -h prod-pg.example.com"', 'ssh -p 22 host redis-cli -h cache-prod.example.com'], /db-ro\.ps1/);
   expect('approve', ['ssh host "psql -h localhost"', 'ssh host ls']);
 });

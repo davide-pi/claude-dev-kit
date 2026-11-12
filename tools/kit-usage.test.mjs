@@ -44,19 +44,25 @@ function run(dir, ...args) {
   return JSON.parse(r.stdout);
 }
 
-test('a reference read in the period, by the session or by a subagent, from ~/.claude or from a kit checkout, is opened', () => {
+test('given references read in the period, by the session or by a subagent, from ~/.claude or from a kit checkout, when kit-usage runs, then they count as opened', () => {
+  // Given
   const dir = config();
   try {
     writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), `${read(join(dir, 'skills', 'deliver', 'references', 'loop.md'), DAY)}\n`);
     writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1', 'subagents', 'agent-1.jsonl'),
       `${read('C:\\__workspaces\\github\\claude-dev-kit\\skills\\retro\\references\\modes.md', 2 * DAY)}\n`);
+
+    // When
     const out = run(dir, '--days', '30');
+
+    // Then
     assert.deepEqual(out.references.neverOpened, ['deliver/references/stall.md']);
     assert.equal(out.references.total, 3);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('a read older than the period does not count, nor a transcript last written before it', () => {
+test('given a read older than the period and a transcript last written before it, when kit-usage runs, then neither counts', () => {
+  // Given
   const dir = config();
   try {
     const old = join(dir, 'projects', 'C--repo', 'old.jsonl');
@@ -64,22 +70,28 @@ test('a read older than the period does not count, nor a transcript last written
     const past = (Date.now() - 40 * DAY) / 1000;
     utimesSync(old, past, past);
     writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), `${read(join(dir, 'skills', 'deliver', 'references', 'stall.md'), 45 * DAY)}\n`);
+
+    // When / Then
     assert.deepEqual(run(dir, '--days', '30').references.neverOpened, ['deliver/references/loop.md', 'deliver/references/stall.md', 'retro/references/modes.md']);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('done-claim.log: fired rules counted in the period, torn lines skipped', () => {
+test('given a done-claim.log with fired rules and a torn line, when kit-usage runs, then fired rules are counted in the period and torn lines are skipped', () => {
+  // Given
   const dir = config();
   try {
     writeFileSync(join(dir, '.cache', 'done-claim.log'), [
       { at: iso(DAY), rule: 'claim-without-evidence' }, { at: iso(DAY), rule: 'claim-without-evidence' },
       { at: iso(2 * DAY), rule: 'unproven-row' }, { at: iso(40 * DAY), rule: 'unproven-row' },
     ].map((e) => JSON.stringify(e)).join('\n') + '\nnot json\n');
+
+    // When / Then
     assert.deepEqual(run(dir, '--days', '30').doneClaim, { 'claim-without-evidence': 2, 'unproven-row': 1 });
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('hook-errors.log: crashes per hook in the period, with the last message', () => {
+test('given a hook-errors.log with crashes, when kit-usage runs, then crashes are counted per hook in the period, with the last message', () => {
+  // Given
   const dir = config();
   try {
     writeFileSync(join(dir, '.cache', 'hook-errors.log'), [
@@ -88,6 +100,8 @@ test('hook-errors.log: crashes per hook in the period, with the last message', (
       `${iso(DAY)} guard-shell/destructive: TypeError: y is undefined | at g`,
       `${iso(DAY)} secret-scan: RangeError: z`,
     ].join('\n') + '\n');
+
+    // When / Then
     assert.deepEqual(run(dir, '--days', '30').hookErrors, {
       'guard-shell/destructive': { count: 2, last: 'TypeError: y is undefined | at g' },
       'secret-scan': { count: 1, last: 'RangeError: z' },
@@ -95,10 +109,14 @@ test('hook-errors.log: crashes per hook in the period, with the last message', (
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('no logs, no transcripts: empty sections, every reference unopened; the text report names the three sections', () => {
+test('given no logs and no transcripts, when kit-usage runs, then the sections are empty, every reference is unopened, and the text report names the three sections', () => {
+  // Given
   const dir = config();
   try {
+    // When
     const out = run(dir);
+
+    // Then
     assert.equal(out.days, 30, 'default period');
     assert.deepEqual(out.doneClaim, {});
     assert.deepEqual(out.hookErrors, {});

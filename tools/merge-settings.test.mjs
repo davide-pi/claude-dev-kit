@@ -51,32 +51,40 @@ const TEMPLATE = {
   },
 };
 
-test('objects merge deeply, scalars take the overlay, other keys are kept', () => {
+test('given a template and an overlay with nested objects and scalars, when they are merged, then objects merge deeply, scalars take the overlay and other keys are kept', () => {
+  // Given / When
   const merged = mergeSettings(TEMPLATE, { model: 'sonnet', env: { B: '3', C: '4' }, outputStyle: 'terse' });
+  // Then
   assert.equal(merged.model, 'sonnet');
   assert.deepEqual(merged.env, { A: '1', B: '3', C: '4' });
   assert.equal(merged.outputStyle, 'terse');
   assert.deepEqual(merged.permissions, TEMPLATE.permissions);
 });
 
-test('an overlay value of another type replaces the template value', () => {
+test('given an overlay value of another type than the template value, when they are merged, then the overlay value replaces it', () => {
+  // Given / When / Then
   assert.deepEqual(mergeSettings({ env: { A: '1' } }, { env: 'none' }), { env: 'none' });
   assert.deepEqual(mergeSettings({ x: 'a' }, { x: { y: 1 } }), { x: { y: 1 } });
 });
 
-test('arrays of strings are an ordered union, template first, no duplicates', () => {
+test('given string arrays in template and overlay, when they are merged, then the result is an ordered union, template first, with no duplicates', () => {
+  // Given / When
   const merged = mergeSettings(TEMPLATE, { permissions: { allow: ['Bash(my-tool *)', 'Read(**)', 'Bash(ls *)', 'Bash(my-tool *)'] } });
+  // Then
   assert.deepEqual(merged.permissions.allow, ['Read(**)', 'Bash(ls *)', 'Bash(my-tool *)']);
   assert.deepEqual(merged.permissions.deny, ['Bash(rm *)']);
 });
 
-test('any other array is replaced by the overlay', () => {
+test('given arrays that are not plain strings, when they are merged, then the overlay replaces them', () => {
+  // Given / When
   const merged = mergeSettings({ list: [{ a: 1 }, { b: 2 }], mixed: ['x', 1] }, { list: [{ c: 3 }], mixed: ['y'] });
+  // Then
   assert.deepEqual(merged.list, [{ c: 3 }]);
   assert.deepEqual(merged.mixed, ['y']);
 });
 
-test('hooks.<Event>: union by matcher and command, no duplicate hook, a new group is appended', () => {
+test('given overlay hooks sharing or not sharing matchers and commands with the template, when they are merged, then they are a union by matcher and command with no duplicate hook and a new group appended', () => {
+  // Given / When
   const merged = mergeSettings(TEMPLATE, {
     hooks: {
       PostToolUse: [
@@ -87,6 +95,7 @@ test('hooks.<Event>: union by matcher and command, no duplicate hook, a new grou
       SessionStart: [{ hooks: [hook('brief')] }],                                          // new event
     },
   });
+  // Then
   const scripts = (group) => group.hooks.map((h) => h.args[1]);
   assert.equal(merged.hooks.PostToolUse.length, 2);
   assert.deepEqual(scripts(merged.hooks.PostToolUse[0]), ['fmt', 'nudge', 'mine'], 'template order, then the new one');
@@ -96,52 +105,67 @@ test('hooks.<Event>: union by matcher and command, no duplicate hook, a new grou
   assert.deepEqual(scripts(merged.hooks.SessionStart[0]), ['brief']);
 });
 
-test('the same command with other args is another hook', () => {
+test('given the same command with other args in the overlay, when they are merged, then it is another hook', () => {
+  // Given / When
   const merged = mergeSettings(TEMPLATE, { hooks: { Stop: [{ hooks: [hook('other')] }] } });
+  // Then
   assert.equal(merged.hooks.Stop.length, 1);
   assert.deepEqual(merged.hooks.Stop[0].hooks.map((h) => h.args[1]), ['done', 'other']);
 });
 
-test('fallbackModel is a choice: the overlay replaces it, it is not appended', () => {
+test('given a fallbackModel array in both, when they are merged, then the overlay replaces it instead of appending while other string arrays stay a union', () => {
+  // Given / When
   const merged = mergeSettings({ fallbackModel: ['sonnet', 'haiku'], other: ['a'] }, { fallbackModel: ['haiku'], other: ['b'] });
+  // Then
   assert.deepEqual(merged.fallbackModel, ['haiku']);
   assert.deepEqual(merged.other, ['a', 'b'], 'other string arrays stay a union');
   assert.deepEqual(mergeSettings({ fallbackModel: ['sonnet'] }, {}).fallbackModel, ['sonnet']);
 });
 
-test('the same hook in the overlay overrides the template hook other fields', () => {
+test('given the same hook in the overlay with other fields, when they are merged, then the overlay overrides the template hook fields', () => {
+  // Given
   const template = { hooks: { Stop: [{ hooks: [hook('done', { timeout: 5, statusMessage: 'old', onFailure: 'block' })] }] } };
+  // When
   const merged = mergeSettings(template, { hooks: { Stop: [{ hooks: [hook('done', { timeout: 60, statusMessage: 'new' })] }] } });
+  // Then
   assert.equal(merged.hooks.Stop[0].hooks.length, 1);
   assert.deepEqual(merged.hooks.Stop[0].hooks[0], hook('done', { timeout: 60, statusMessage: 'new', onFailure: 'block' }));
 });
 
-test('an overlay key set to null removes it, at any depth', () => {
+test('given an overlay key set to null at any depth, when they are merged, then the key is removed', () => {
+  // Given / When
   const merged = mergeSettings(TEMPLATE, { model: null, env: { A: null }, hooks: { Stop: null }, absent: null });
+  // Then
   assert.ok(!('model' in merged));
   assert.deepEqual(merged.env, { B: '2' });
   assert.deepEqual(Object.keys(merged.hooks), ['PostToolUse']);
   assert.ok(!('absent' in merged));
 });
 
-test('neither input is modified, and the result shares nothing with them', () => {
+test('given a template and an overlay, when they are merged and the result is mutated, then neither input is modified and the result shares nothing with them', () => {
+  // Given
   const template = JSON.parse(JSON.stringify(TEMPLATE));
   const overlay = { permissions: { allow: ['Bash(x *)'] }, hooks: { Stop: [{ hooks: [hook('mine')] }] } };
   const before = JSON.stringify([template, overlay]);
+  // When
   const merged = mergeSettings(template, overlay);
   merged.permissions.deny.push('mutated');
   merged.hooks.Stop[0].hooks.push('mutated');
+  // Then
   assert.equal(JSON.stringify([template, overlay]), before);
 });
 
-test('a template or an overlay that is not an object is refused', () => {
+test('given a template or an overlay that is not an object, when they are merged, then it is refused', () => {
+  // Given / When / Then
   assert.throws(() => mergeSettings([], {}), /JSON objects/);
   assert.throws(() => mergeSettings({}, 'x'), /JSON objects/);
 });
 
-test('diffSettings names what differs: changed (~), missing from live (+), only in live (-)', () => {
+test('given expected and live settings that differ, when diffSettings compares them, then it names what changed (~), is missing from live (+) and is only in live (-)', () => {
+  // Given
   const expected = { model: 'opus', env: { A: '1' }, permissions: { allow: ['a', 'b'] }, gone: 1 };
   const live = { model: 'sonnet', env: { A: '1', Z: '9' }, permissions: { allow: ['a', 'c'] } };
+  // When / Then
   assert.deepEqual(diffSettings(expected, live).sort(), [
     '+ gone', '- env.Z', '~ model', '~ permissions.allow [+ b, - c]',
   ].sort());
@@ -151,9 +175,12 @@ test('diffSettings names what differs: changed (~), missing from live (+), only 
 
 const run = (...args) => spawnSync(process.execPath, [TOOL, ...args], { encoding: 'utf8' });
 
-test('CLI: prints the merge, writes it with --out, and --check passes on its own output', () => {
+test('given a template and an overlay, when the CLI runs plain, with --out and with --check, then it prints the merge, writes it, and --check passes on its own output', () => {
+  // Given
   const box = sandbox({ template: TEMPLATE, overlay: { model: 'sonnet' } });
+  // When
   const printed = run('--template', box.template, '--overlay', box.overlay);
+  // Then
   assert.equal(printed.status, 0, printed.stderr);
   assert.deepEqual(JSON.parse(printed.stdout), mergeSettings(TEMPLATE, { model: 'sonnet' }));
 
@@ -168,29 +195,37 @@ test('CLI: prints the merge, writes it with --out, and --check passes on its own
   assert.equal(checked.stdout, '');
 });
 
-test('CLI: --out is atomic: it goes through <out>.tmp and leaves no temp file behind', () => {
+test('given a stale temp file beside the output, when the CLI runs with --out, then it goes through the temp file and leaves none behind', () => {
+  // Given
   const box = sandbox({ template: TEMPLATE, overlay: { model: 'sonnet' } });
   const out = join(box.dir, 'live.json');
   writeFileSync(out, 'old');
   writeFileSync(`${out}.tmp`, 'stale');
+  // When
   const r = run('--template', box.template, '--overlay', box.overlay, '--out', out);
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.deepEqual(JSON.parse(readFileSync(out, 'utf8')), mergeSettings(TEMPLATE, { model: 'sonnet' }));
   assert.ok(!existsSync(`${out}.tmp`), 'the temp file was renamed away');
 });
 
-test('CLI: --check exits 1 and prints the differing keys when the live file has drifted', () => {
+test('given a live file that has drifted, when the CLI runs with --check, then it exits 1 and prints the differing keys', () => {
+  // Given
   const merged = mergeSettings(TEMPLATE, { model: 'sonnet' });
   const drifted = { ...merged, model: 'opus', permissions: { ...merged.permissions, allow: ['Read(**)'] } };
   delete drifted.env;
   const box = sandbox({ template: TEMPLATE, overlay: { model: 'sonnet' }, live: drifted });
+  // When
   const r = run('--template', box.template, '--overlay', box.overlay, '--check', box.live);
+  // Then
   assert.equal(r.status, 1);
   assert.deepEqual(r.stdout.trim().split('\n').sort(), ['+ env', '~ model', '~ permissions.allow [+ Bash(ls *)]'].sort());
 });
 
-test('CLI: usage errors and unreadable files exit 2 with a message', () => {
+test('given usage errors and unreadable files, when the CLI runs, then it exits 2 with a message', () => {
+  // Given
   const box = sandbox({ template: TEMPLATE, overlay: {}, broken: '{ nope' });
+  // When / Then
   for (const args of [
     [],
     ['--template', box.template],
@@ -205,10 +240,13 @@ test('CLI: usage errors and unreadable files exit 2 with a message', () => {
   }
 });
 
-test('the shipped overlay example merges into the shipped template without touching a template-only key', () => {
+test('given the shipped overlay example and template, when they are merged, then no template-only key is touched', () => {
+  // Given
   const template = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'));
   const example = JSON.parse(readFileSync(join(ROOT, 'settings.overlay.example.json'), 'utf8'));
+  // When
   const merged = mergeSettings(template, example);
+  // Then
   assert.deepEqual(merged.permissions.allow.slice(0, template.permissions.allow.length), template.permissions.allow);
   assert.ok(merged.permissions.allow.length > template.permissions.allow.length, 'the example adds allow rules');
   assert.deepEqual(merged.hooks, template.hooks, 'and no hook');
@@ -230,17 +268,22 @@ function installCheck(settings, overlay) {
   return r.stdout.split('\n').filter((l) => /settings\.json (?:matches|differs|could not|is not compared)|\.\.\.\s+[~+-] /.test(l)).join('\n');
 }
 
-test('install.ps1 -Check: without an overlay settings.json is not compared', { skip: !hasPwsh && 'pwsh 7 not on PATH' }, () => {
+test('given no overlay, when install.ps1 -Check runs, then settings.json is not compared', { skip: !hasPwsh && 'pwsh 7 not on PATH' }, () => {
+  // Given / When
   const line = installCheck({ model: 'whatever' });
+  // Then
   assert.match(line, /settings\.json is not compared/);
 });
 
-test('install.ps1 -Check: with an overlay it compares the live file with template + overlay', { skip: !hasPwsh && 'pwsh 7 not on PATH' }, () => {
+test('given an overlay, when install.ps1 -Check runs, then it compares the live file with template + overlay', { skip: !hasPwsh && 'pwsh 7 not on PATH' }, () => {
+  // Given
   const template = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'));
   const overlay = { model: 'my-model', permissions: { allow: ['Bash(my-tool *)'] } };
   const merged = mergeSettings(template, overlay);
 
+  // When
   const same = installCheck(merged, overlay);
+  // Then
   assert.match(same, /settings\.json matches the template \+ overlay/);
   assert.doesNotMatch(same, /ISSUE|not compared/);
 

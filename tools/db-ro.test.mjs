@@ -83,7 +83,8 @@ async function call(fn, calls, prelude = '', deps = []) {
 const hash = (table) => ({ __hashtable: table });
 const verdicts = (fn, texts, prelude) => call(fn, texts.map((t) => [t]), prelude);
 
-test('Assert-PlainPgSql rejects what turns the read-only session off: SET ROLE, RESET, DISCARD', { skip }, async () => {
+test('given statements that turn the read-only session off, when Assert-PlainPgSql checks them, then each is rejected as input rejected', { skip }, async () => {
+  // Given
   const rejected = [
     'SET default_transaction_read_only = off',
     'SELECT set_config(\'default_transaction_read_only\', \'off\', false)',
@@ -94,13 +95,15 @@ test('Assert-PlainPgSql rejects what turns the read-only session off: SET ROLE, 
     'select 1; discard all',
     'select 1; RESET ALL;',
   ];
+  // When / Then
   (await verdicts('Assert-PlainPgSql', rejected)).forEach((r, i) => {
     assert.equal(r.ok, false, rejected[i]);
     assert.match(r.error, /Input rejected/, rejected[i]);
   });
 });
 
-test('Assert-PlainPgSql keeps plain reads', { skip }, async () => {
+test('given plain reads, when Assert-PlainPgSql checks them, then each is kept', { skip }, async () => {
+  // Given
   const plain = [
     'SELECT 1',
     'select id, name from users where id = 7',
@@ -109,11 +112,14 @@ test('Assert-PlainPgSql keeps plain reads', { skip }, async () => {
     'SELECT * FROM discarded_orders',
     '\\dt',
   ];
+  // When / Then
   (await verdicts('Assert-PlainPgSql', plain)).forEach((r, i) => assert.equal(r.ok, true, plain[i]));
 });
 
-test('Confirm-WriteGrants: without the flag it stops with exit 4 and lists every grant; with it, it warns', { skip }, async () => {
+test('given write grants, when Confirm-WriteGrants runs without the flag, then it stops with exit 4 listing every grant, and with the flag it warns', { skip }, async () => {
+  // Given
   const grants = ['permission SERVER: ALTER ANY LOGIN', 'role membership db_datawriter'];
+  // When / Then
   const [refused] = await call('Confirm-WriteGrants', [['This login on database \'Sales\'', grants]], '$AcceptWriteGrant = $false; $script:WriteGrantsAccepted = $false');
   assert.equal(refused.ok, false);
   assert.match(refused.error, /^\[4\]/);
@@ -127,7 +133,8 @@ test('Confirm-WriteGrants: without the flag it stops with exit 4 and lists every
   assert.match(accepted.value, /ALTER ANY LOGIN/);
 });
 
-test('Assert-ReadStatements (write grants accepted): only plain SELECT / WITH statements pass', { skip }, async () => {
+test('given write grants accepted, when Assert-ReadStatements checks statements, then only plain SELECT / WITH statements pass', { skip }, async () => {
+  // Given
   const plain = [
     'SELECT 1',
     'select top 50 * from dbo.Orders where Id = 7;',
@@ -136,6 +143,7 @@ test('Assert-ReadStatements (write grants accepted): only plain SELECT / WITH st
     '-- delete everything\nSELECT updated_at FROM t',      // a comment, and a column that merely starts with a keyword
     'SELECT 1\nGO\nSELECT 2',
   ];
+  // When / Then
   (await verdicts('Assert-ReadStatements', plain.map((t) => t), '')).forEach((r, i) => assert.equal(r.ok, true, `${plain[i]} -> ${r.error}`));
 
   const refused = [
@@ -166,9 +174,11 @@ function writeRegistry(registry) {
   return path;
 }
 
-test('Expand-Value: envFile first, then environment; unknown name is exit 2', { skip }, async () => {
+test('given an envFile and environment variables, when Expand-Value expands values, then the envFile wins over the environment and an unknown name is exit 2', { skip }, async () => {
+  // Given
   const prelude = "$env:DBRO_T_PROC = 'from-process'; $env:DBRO_T_BOTH = 'from-process'; Remove-Item Env:DBRO_T_MISSING -ErrorAction SilentlyContinue";
   const file = hash({ DBRO_T_BOTH: 'from-file', DBRO_T_FILE: 'host-a', DBRO_T_EMPTY: '' });
+  // When / Then
   const [mid, both, fromProcess, twice, plain, emptyFile, noFile] = await call('Expand-Value', [
     ['${DBRO_T_FILE},1433', file, 'server'],           // mid-string
     ['${DBRO_T_BOTH}', file, 'server'],                // the envFile wins over the process environment
@@ -193,10 +203,13 @@ test('Expand-Value: envFile first, then environment; unknown name is exit 2', { 
   assert.doesNotMatch(unknown.error, /host-a|from-file|from-process/, 'a message names the variable, never a value');
 });
 
-test('Expand-Target: every string and string array expands, other values stay', { skip }, async () => {
+test('given a target block, when Expand-Target runs, then every string and string array expands and other values stay', { skip }, async () => {
+  // Given
   const prelude = "$env:DBRO_T_DB = 'Sales'; $env:DBRO_T_HOST = 'h.example.com'";
   const block = { server: '${DBRO_T_HOST},1433', databases: ['${DBRO_T_DB}', 'Other'], encrypt: true, port: 5, tls: false };
+  // When
   const [r] = await call('Expand-Target', [[block, hash({}), 'prod/sql']], prelude, ['Expand-Value']);
+  // Then
   assert.deepEqual(r.value, { server: 'h.example.com,1433', databases: ['Sales', 'Other'], encrypt: true, port: 5, tls: false });
 });
 
@@ -216,7 +229,8 @@ const resolve = (registry, ...args) => {
   return call('Resolve-Target', args.map((a) => [...a, path]), '', ['Get-RegistryHelp', 'ConvertTo-PlainPath']);
 };
 
-test('Resolve-Target: by name, by longest root, single-engine default, ambiguous engine, rabbit refused, old shape refused', { skip }, async () => {
+test('given a registry of projects, when Resolve-Target resolves, then it picks by name, longest root and single-engine default and refuses an ambiguous engine, rabbit and the old shape', { skip }, async () => {
+  // Given
   const registry = {
     devHosts: ['sqlserver'],
     projects: {
@@ -226,6 +240,7 @@ test('Resolve-Target: by name, by longest root, single-engine default, ambiguous
   };
 
   // by name (case-insensitive) and by path
+  // When / Then
   const [byName, byPath, deep, second, sqlKey] = await resolve(registry,
     ['prod', 'sql', 'SHOP', 'C:\\elsewhere'],
     ['prod', 'sqlserver', 'C:\\ws\\shop\\src\\api', 'C:\\elsewhere'],
@@ -290,7 +305,8 @@ test('Resolve-Target: by name, by longest root, single-engine default, ambiguous
   assert.match(notJson.error, /^\[2\].*not valid JSON/);
 });
 
-test('ConvertFrom-PgUrl: user, encoded password, default port, query sslmode, IPv6 host; non-postgres scheme is exit 2', { skip }, async () => {
+test('given postgres urls, when ConvertFrom-PgUrl parses them, then user, encoded password, default port, sslmode and IPv6 host come out and a non-postgres scheme is exit 2', { skip }, async () => {
+  // Given / When
   const [full, plainUrl, ipv6, noDb, upper] = await verdicts('ConvertFrom-PgUrl', [
     'postgres://app:p%40ss%3Aw%2Frd%23@example.com:6543/orders%20db?sslmode=require&application_name=x',
     'postgresql://reader@example.com/orders',
@@ -298,6 +314,7 @@ test('ConvertFrom-PgUrl: user, encoded password, default port, query sslmode, IP
     'postgres://u:pwd@example.com',
     'POSTGRES://u:pwd@example.com/db?SSLMODE=verify-full',
   ]);
+  // Then
   assert.deepEqual(full.value, { Host: 'example.com', Port: '6543', User: 'app', Secret: 'p@ss:w/rd#', Database: 'orders db', SslMode: 'require' });
   assert.deepEqual(plainUrl.value, { Host: 'example.com', Port: '5432', User: 'reader', Secret: null, Database: 'orders', SslMode: null });
   assert.deepEqual(ipv6.value, { Host: '::1', Port: '5433', User: 'u', Secret: 'pwd', Database: 'db', SslMode: null });
@@ -318,13 +335,16 @@ test('ConvertFrom-PgUrl: user, encoded password, default port, query sslmode, IP
   });
 });
 
-test('Merge-PgUrl: the url fills in what the block does not set; explicit keys win', { skip }, async () => {
+test('given blocks with and without a url, when Merge-PgUrl merges, then the url fills in what the block does not set and explicit keys win', { skip }, async () => {
+  // Given
   const url = 'postgres://u:urlpwd@example.com:6000/urldb?sslmode=require';
+  // When
   const [bare, explicit, noUrl] = await call('Merge-PgUrl', [
     [{ url }],
     [{ url, server: 'own.example.com:5432', user: 'own', password: 'ownpwd', databases: ['owndb'], sslmode: 'prefer' }],
     [{ server: 'h:5432', user: 'x' }],
   ], '', ['ConvertFrom-PgUrl']);
+  // Then
   assert.deepEqual(bare.value, { url, server: 'example.com:6000', user: 'u', password: 'urlpwd', databases: ['urldb'], sslmode: 'require' });
   assert.deepEqual(explicit.value, { url, server: 'own.example.com:5432', user: 'own', password: 'ownpwd', databases: ['owndb'], sslmode: 'prefer' });
   assert.deepEqual(noUrl.value, { server: 'h:5432', user: 'x' });
@@ -334,8 +354,10 @@ test('Merge-PgUrl: the url fills in what the block does not set; explicit keys w
 
 // ---- readOnly: false ----------------------------------------------------------------------------
 
-test('readOnly false: allowed on dev hosts, exit 2 on any other host', { skip }, async () => {
+test('given hosts and a dev-host list, when Assert-DevHostForWrite checks them, then dev hosts are allowed and any other host is exit 2', { skip }, async () => {
+  // Given
   const dev = ['sqlserver', 'postgres'];
+  // When
   const [loopback, composeName, caseFree, prod, lookalike, empty] = await call('Assert-DevHostForWrite', [
     ['localhost', ['localhost', '127.0.0.1']],
     ['sqlserver', dev],
@@ -344,6 +366,7 @@ test('readOnly false: allowed on dev hosts, exit 2 on any other host', { skip },
     ['localhost.example.com', ['localhost']],
     ['db.example.com', []],
   ]);
+  // Then
   assert.equal(loopback.ok, true);
   assert.equal(composeName.ok, true);
   assert.equal(caseFree.ok, true);
@@ -353,9 +376,11 @@ test('readOnly false: allowed on dev hosts, exit 2 on any other host', { skip },
   }
 });
 
-test('readOnly false keeps the escape filters: `\\! ls`, `:!! dir`, a Redis option are rejected', { skip }, async () => {
+test('given readOnly false, when escape-style input reaches the filters, then backslash, sqlcmd and Redis option escapes are rejected while the read-only-setting check is skipped', { skip }, async () => {
+  // Given
   // Postgres: the backslash check runs with ReadOnly false; only the read-only-setting check is skipped.
   const pg = [['\\! ls', false], ['select 1\n\\copy t to \'/tmp/x\'', false], ['\\o /tmp/x', false], ['\\c other', false]];
+  // When / Then
   (await call('Assert-PlainPgSql', pg)).forEach((r, i) => {
     assert.equal(r.ok, false, pg[i][0]);
     assert.match(r.error, /backslash/);
@@ -392,14 +417,17 @@ test('readOnly false keeps the escape filters: `\\! ls`, `:!! dir`, a Redis opti
   });
 });
 
-test('Get-ReadOnlyLabel: NO(local) in write mode, verified otherwise', { skip }, async () => {
+test('given write mode or not, when Get-ReadOnlyLabel runs, then it says NO(local) in write mode and verified otherwise', { skip }, async () => {
+  // Given / When
   const [local] = await call('Get-ReadOnlyLabel', [[]], '$script:WriteMode = $true; $script:WriteGrantsAccepted = $false');
+  // Then
   assert.equal(local.value, 'NO(local)');
   const [proven] = await call('Get-ReadOnlyLabel', [[]], '$script:WriteMode = $false; $script:WriteGrantsAccepted = $false');
   assert.equal(proven.value, 'verified');
 });
 
-test('Split-Server: sqlserver host without instance, port or IPv6 brackets', { skip }, async () => {
+test('given sqlserver server strings, when Split-Server runs, then the host comes out without instance, port or IPv6 brackets', { skip }, async () => {
+  // Given / When
   const [plain, tcp, v6, v6Port, v6Bare] = await call('Split-Server', [
     ['sqlserver', 'db.example.com,1433', null],
     ['sqlserver', 'tcp:db.example.com\\inst,1433', null],
@@ -407,6 +435,7 @@ test('Split-Server: sqlserver host without instance, port or IPv6 brackets', { s
     ['sqlserver', '[2001:db8::1],1433', null],
     ['sqlserver', '::1', null],
   ]);
+  // Then
   assert.equal(plain.value.Host, 'db.example.com');
   assert.equal(tcp.value.Host, 'db.example.com');
   assert.equal(v6.value.Host, '::1');
@@ -414,9 +443,12 @@ test('Split-Server: sqlserver host without instance, port or IPv6 brackets', { s
   assert.equal(v6Bare.value.Host, '::1');
 });
 
-test('Assert-PgDatabaseName: = and a postgres:// prefix are exit 2, plain names pass', { skip }, async () => {
+test('given database names, when Assert-PgDatabaseName checks them, then = and a postgres:// prefix are exit 2 and plain names pass', { skip }, async () => {
+  // Given
   const names = ['host=other.example.com dbname=x', 'a=b', 'postgres://u@h/db', 'PostgreSQL://h/db', 'sales', 'my-db_2'];
+  // When
   const results = await call('Assert-PgDatabaseName', names.map((n) => [n]));
+  // Then
   for (const i of [0, 1, 2, 3]) {
     assert.equal(results[i].ok, false, names[i]);
     assert.match(results[i].error, /^\[2\].*connection string/);
@@ -426,13 +458,16 @@ test('Assert-PgDatabaseName: = and a postgres:// prefix are exit 2, plain names 
   assert.equal(results[5].ok, true);
 });
 
-test('Get-RawDatabaseList: the registry strings as written, never expanded values', { skip }, async () => {
+test('given registry strings holding a variable, when Get-RawDatabaseList runs, then it returns the strings as written, never expanded values', { skip }, async () => {
+  // Given
   const prelude = "$env:DBRO_T_DB = 'resolved-value'";
+  // When
   const [raw, none, redis] = await call('Get-RawDatabaseList', [
     [{ databases: ['${DBRO_T_DB}', 'Other'] }, 'sqlserver'],
     [{ url: 'x' }, 'postgres'],
     [{ server: 'h' }, 'redis'],
   ], prelude, ['Get-Setting']);
+  // Then
   assert.equal(raw.value, '${DBRO_T_DB}, Other');
   assert.doesNotMatch(none.value, /x/);
   assert.equal(redis.value, '0');
@@ -462,7 +497,8 @@ const ENDPOINTS = {
 };
 const CANARY = 'canary-Secret-4711';
 
-test('db-ro.ps1: readOnly false on a non-dev host is exit 2 before any client runs, and no secret is printed', { skip }, async () => {
+test('given readOnly false on a non-dev host, when the script runs, then it is exit 2 before any client runs and no secret is printed', { skip }, async () => {
+  // Given / When / Then
   for (const engine of ['sql', 'postgres', 'redis']) {
     const registry = { projects: { p: { root: 'C:\\p', local: { readOnly: false, [engine]: ENDPOINTS[engine]('db.example.com') } } } };
     const r = await run(registry, ['-Env', 'local', '-Project', 'p', '-Query', engine === 'redis' ? 'SET a b' : 'select 1'], { DBRO_T_PWD: CANARY });
@@ -472,12 +508,14 @@ test('db-ro.ps1: readOnly false on a non-dev host is exit 2 before any client ru
   }
 });
 
-test('db-ro.ps1: escape filters hold on a dev host with readOnly false', { skip }, async () => {
+test('given readOnly false on a dev host, when an escape query runs, then the script is exit 2 with the matching reason and no secret is printed', { skip }, async () => {
+  // Given
   const cases = [
     ['sql', ':!! dir', /sqlcmd command|shell escape/],
     ['postgres', '\\! ls', /backslash/],
     ['redis', '-h other.example.com PING', /command name/],
   ];
+  // When / Then
   for (const [engine, query, expected] of cases) {
     const registry = { projects: { p: { root: 'C:\\p', local: { readOnly: false, [engine]: ENDPOINTS[engine]('localhost') } } } };
     const r = await run(registry, ['-Env', 'local', '-Project', 'p', '-Query', query], { DBRO_T_PWD: CANARY });
@@ -487,7 +525,8 @@ test('db-ro.ps1: escape filters hold on a dev host with readOnly false', { skip 
   }
 });
 
-test('db-ro.ps1: no -Registry parameter, and no home folder or variable moves the registry', { skip }, async () => {
+test('given a hostile registry in a fake home and a -Registry argument, when the script runs, then neither moves the registry and the write is still refused', { skip }, async () => {
+  // Given
   // The registry the script reads sits at <dir>/db-targets.json: read-only on a non-dev host. A hostile file in a
   // fake home (USERPROFILE, HOME) declares that host a dev host with readOnly false: it must not be read.
   // `SET a b` is refused by the Redis read allow-list before any connection; write mode would not refuse it.
@@ -497,7 +536,9 @@ test('db-ro.ps1: no -Registry parameter, and no home folder or variable moves th
   mkdirSync(join(home, '.claude'));
   writeFileSync(join(home, '.claude', 'db-targets.json'), JSON.stringify(hostile));
   const args = ['-Env', 'local', '-Project', 'p', '-Query', 'SET a b'];
+  // When
   const moved = await run(real, args, { USERPROFILE: home, HOME: home, DBRO_T_PWD: CANARY });
+  // Then
   assert.equal(moved.status, 2, moved.err);
   assert.match(moved.err, /not a read command/);
   assert.doesNotMatch(moved.err, /write access is only for dev hosts/);
@@ -513,10 +554,13 @@ test('db-ro.ps1: no -Registry parameter, and no home folder or variable moves th
   assert.doesNotMatch(named.err, /write access is only for dev hosts/);
 });
 
-test('db-ro.ps1: a missing envFile is skipped and the values come from the environment', { skip }, async () => {
+test('given a missing envFile, when the script runs, then it is skipped with a note and the values come from the environment, and an unset name is exit 2', { skip }, async () => {
+  // Given
   // `SET a b` is refused by the Redis read allow-list after the values are expanded: reaching it proves the run went on.
   const registry = { projects: { p: { root: 'C:\\p', envFile: '~/db-ro-no-such-dir/none.env', prod: { redis: ENDPOINTS.redis('db.example.com') } } } };
+  // When
   const r = await run(registry, ['-Env', 'prod', '-Project', 'p', '-Query', 'SET a b'], { DBRO_T_PWD: CANARY });
+  // Then
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /envFile of project 'p' not found, using the environment only/);
   assert.match(r.err, /not a read command/);
@@ -528,26 +572,33 @@ test('db-ro.ps1: a missing envFile is skipped and the values come from the envir
   assert.match(unset.err, /\$\{DBRO_T_PWD\}, which is not set/);
 });
 
-test('db-ro.ps1: the ~ of envFile is the profile folder, never HOME or USERPROFILE', { skip: skip || (process.platform !== 'win32' && 'off Windows the profile folder is $HOME') }, async () => {
+test('given a fake home holding a dotenv, when the script resolves the envFile tilde, then it uses the profile folder and the write on a non-dev host is refused', { skip: skip || (process.platform !== 'win32' && 'off Windows the profile folder is $HOME') }, async () => {
+  // Given
   // A dotenv in a fake home turns the host into a dev host; read, it would unlock write mode. The real profile has no
   // such file, so the host comes from the process environment and the write is refused.
   const home = mkdtempSync(join(tmpdir(), 'db-ro-envhome-'));
   writeFileSync(join(home, 'db-ro-fake.env'), 'DBRO_T_HOST=localhost\n');
   const registry = { projects: { p: { root: 'C:\\p', envFile: '~/db-ro-fake.env', local: { readOnly: false, redis: { server: '${DBRO_T_HOST}:6379' } } } } };
+  // When
   const r = await run(registry, ['-Env', 'local', '-Project', 'p', '-Query', 'SET a b'], { USERPROFILE: home, HOME: home, DBRO_T_HOST: 'db.example.com' });
+  // Then
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /write access is only for dev hosts/);
 });
 
-test('db-ro.ps1: a database error lists the registry strings as written, never a resolved value', { skip }, async () => {
+test('given a registry whose database is a variable, when a database error occurs, then it lists the registry strings as written, never a resolved value', { skip }, async () => {
+  // Given
   const registry = { projects: { p: { root: 'C:\\p', prod: { sql: { server: 'db.example.com,1433', user: 'u', password: 'x', databases: ['${DBRO_T_SECRET_DB}'] } } } } };
+  // When
   const r = await run(registry, ['-Env', 'prod', '-Project', 'p', '-Db', 'zzz', '-Query', 'select 1'], { DBRO_T_SECRET_DB: CANARY });
+  // Then
   assert.equal(r.status, 2, r.err);
   assert.match(r.err, /Allowed: \$\{DBRO_T_SECRET_DB\}/);
   assert.ok(!(r.out + r.err).includes(CANARY), 'the resolved value reached the output');
 });
 
-test('db-ro.ps1: a Postgres database name that is a connection string is exit 2 before any client runs', { skip }, async () => {
+test('given a Postgres database name that is a connection string, when the script runs, then it is exit 2 before any client runs', { skip }, async () => {
+  // Given / When / Then
   for (const name of ['host=other.example.com', 'postgres://u@example.com/db']) {
     const registry = { projects: { p: { root: 'C:\\p', prod: { postgres: { server: 'db.example.com', user: 'u', password: '${DBRO_T_PWD}', databases: [name] } } } } };
     const r = await run(registry, ['-Env', 'prod', '-Project', 'p', '-Query', 'select 1'], { DBRO_T_PWD: CANARY });
@@ -557,8 +608,10 @@ test('db-ro.ps1: a Postgres database name that is a connection string is exit 2 
   }
 });
 
-test('db-ro.ps1: an old-shape registry is exit 2 pointing at the example; an unset ${NAME} names the variable only', { skip }, async () => {
+test('given an old-shape registry or an unset variable, when the script runs, then it is exit 2 pointing at the example or naming the variable only', { skip }, async () => {
+  // Given / When
   const old = await run({ targets: { 'C:\\p': { prod: { server: 'h' } } } }, ['-Env', 'prod', '-Probe']);
+  // Then
   assert.equal(old.status, 2);
   assert.match(old.err, /old 'targets' shape.*db-targets\.example\.json/);
 

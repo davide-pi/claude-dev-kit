@@ -15,15 +15,19 @@ import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, notification } from './done-claim.harness.mjs';
 
-test('a deliver verdict block whose "fatto" row quotes a line the turn printed is evidence → silent', () => {
+test('given a verdict block whose "fatto" row quotes a line the turn printed, when the hook judges it, then it is evidence and stays silent', () => {
+  // Given / When / Then
   assert.equal(stop(edited(`Fatto.\n\n${VERDICT}\nReview: giro 2, 0 P1/P2 aperti.`, PRINTED)).reason, '');
   const both = VERDICT.replace('| e2e | - | - | non verificato: serve staging |', '| e2e | npm run e2e | 3 failed | failed |');
   assert.equal(stop(edited(`Fatto.\n\n${both}`.replace(/\n/g, '\r\n'), `${PRINTED}\n3 failed`)).reason, '');
 });
 
-test('a quoted titled verdict block is judged row by row like the plain table', () => {
+test('given a quoted titled verdict block, when the hook judges it, then it is judged row by row like the plain table', () => {
+  // Given
   const quoted = (title, rowLine) => `Fatto.\n\n> **${title}**\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> ${rowLine}`;
   const proven = '| unit | `node --test` | # fail 0 | fatto |';
+
+  // When / Then
   assert.match(stop(edited(quoted('Verifica', proven), 'ok')).reason, /"# fail 0"/);
   assert.equal(stop(edited(quoted('Verifica', proven), '# tests 5\n# fail 0')).reason, '');
   assert.equal(stop(edited(quoted('Verification', proven).replace('Livello | Comando | Riga che decide | Stato', 'Level | Command | Deciding line | Status'), '# fail 0')).reason, '');
@@ -31,23 +35,32 @@ test('a quoted titled verdict block is judged row by row like the plain table', 
   assert.equal(stop(edited(`Fatto.\n\n| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n${proven}`, '# fail 0')).reason, '');
 });
 
-test('a verdict block with no filled row, or a placeholder row, is not evidence → blocked', () => {
+test('given a verdict block with no filled row or a placeholder row, when the hook judges it, then it is not evidence and is blocked', () => {
+  // Given
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+
+  // When / Then
   assert.match(stop(edited(`Fatto.\n\n${head}`)).reason, /"Fatto"/);
   assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | - | - | fatto |`)).reason, /"fatto"/);
   assert.match(stop(edited(`Fatto.\n\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
 });
 
-test('a verdict row counts only inside the verdict table, with a deciding cell that looks like output', () => {
+test('given verdict rows in and outside the verdict table, when the hook judges them, then a row counts only inside the table with a deciding cell that looks like output', () => {
+  // Given
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+
+  // When / Then
   assert.match(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | tutto bene | fatto |`)).reason, /"fatto"/);
   assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | exit 0 | fatto |`, 'exit 0')).reason, '');
   // a row that sits in another table, after prose, is not the verdict's
   assert.match(stop(edited(`Fatto.\n\n${head}\n\nAltro:\n| unit | dotnet test | Passed: 48 | fatto |`)).reason, /"Fatto"/);
 });
 
-test('a verdict row whose deciding cell says verde / green / succeeded is proven when the turn printed it, like an inline result', () => {
+test('given a deciding cell saying verde, green or succeeded, when the turn printed it, then the row is proven like an inline result', () => {
+  // Given
   const head = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |';
+
+  // When / Then
   for (const word of ['verde', 'green', 'Build succeeded', 'PASSED']) {
     assert.equal(stop(edited(`Fatto.\n\n${head}\n| unit | dotnet test | ${word} | fatto |`, word)).reason, '', word);
   }
@@ -57,8 +70,11 @@ test('a verdict row whose deciding cell says verde / green / succeeded is proven
 
 // ── Per-row proof against what the turn printed (T17) ──
 
-test('a "fatto" row whose deciding line the turn never printed is blocked; the line printed by the tool is silent', () => {
+test('given a "fatto" row whose deciding line the turn never printed, when the hook judges it, then it is blocked and the printed line is silent', () => {
+  // Given
   const claim = verdict(row('Passed: 48, Failed: 0'));
+
+  // When / Then
   assert.match(stop(edited(claim, 'ok')).reason, /"fatto"/);
   assert.equal(stop(edited(claim, 'Total tests: 48\nPassed: 48, Failed: 0\nDone')).reason, '');
   // normalised: case, runs of whitespace, backticks and backslashes do not matter
@@ -75,8 +91,11 @@ test('given a "fallito" row whose deciding line the turn never printed, when the
   assert.equal(stop(edited(claim, 'Total: 48\n3 failed, 45 passed')).reason, '');
 });
 
-test('an escaped pipe in a cell is cell text: the deciding line is read from the right column', () => {
+test('given an escaped pipe in a cell, when the hook reads the deciding line, then it comes from the right column and is not cut short', () => {
+  // Given
   const piped = verdict(row('Passed: 48').replace('dotnet test', 'dotnet test \\| tail -1'));
+
+  // When / Then
   assert.equal(stop(edited(piped, 'Passed: 48')).reason, '');
   assert.match(stop(edited(piped, 'tail -1')).reason, /"fatto"/);
   // a pipe inside the deciding line is not cut short: the fragment before it is not enough
@@ -85,14 +104,18 @@ test('an escaped pipe in a cell is cell text: the deciding line is read from the
   assert.match(stop(edited(inside, 'a')).reason, /"fatto"/);
 });
 
-test('a short deciding line is proven by whole words only', () => {
+test('given a short deciding line, when the hook compares it with the output, then only whole words prove it', () => {
+  // Given / When / Then
   assert.match(stop(edited(verdict(row('ok')), 'token book')).reason, /"fatto"/);
   assert.equal(stop(edited(verdict(row('ok')), 'build: ok.')).reason, '');
   assert.match(stop(edited(verdict(row('exit 0')), 'exit 10')).reason, /"fatto"/);
 });
 
-test('a deciding cell joining real output lines, or with a trailing note, is proven piece by piece; one absent piece blocks', () => {
+test('given a deciding cell joining real output lines or with a trailing note, when the hook judges it, then it is proven piece by piece and one absent piece blocks', () => {
+  // Given
   const out = '# pass 673\n# fail 0\ninstalled workflows/impl-review-loop.js\n"permissionDecision":"deny"\nexplore-exit=0';
+
+  // When / Then
   for (const line of ['`# pass 673` / `# fail 0`', '`# pass 673`, `# fail 0`', '`installed workflows/impl-review-loop.js` (e gli altri 3)', 'deny / deny / exit 0']) {
     assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
   }
@@ -100,20 +123,27 @@ test('a deciding cell joining real output lines, or with a trailing note, is pro
   assert.match(stop(edited(verdict(row('deny / ok')), '"permissionDecision":"deny"')).reason, /"fatto"/);
 });
 
-test('a placeholder deciding line ("-", empty) is never proven, whatever the results hold', () => {
+test('given a placeholder deciding line ("-", empty), when the hook judges it, then it is never proven whatever the results hold', () => {
+  // Given / When / Then
   assert.match(stop(edited(verdict(row('-')), 'a - b')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('')), 'anything')).reason, /"fatto"/);
 });
 
-test('a "non verificato" row does not excuse a "fatto" row without proof; alone it passes', () => {
+test('given a "non verificato" row beside a "fatto" row, when the hook judges the table, then it does not excuse an unproven "fatto" row and alone it passes', () => {
+  // Given
   const unproven = verdict(row('Passed: 48, Failed: 0'), row('-', 'non verificato: serve staging', 'e2e'));
+
+  // When / Then
   assert.match(stop(edited(unproven, 'ok')).reason, /"fatto"/);
   assert.equal(stop(edited(unproven, 'Passed: 48, Failed: 0')).reason, '');
   assert.equal(stop(edited(`Fatto in parte.\n\n${head}\n${row('-', 'non verificato: serve staging', 'e2e')}`)).reason, '');
 });
 
-test('one unproven row blocks even when the other rows are proven, and even after a shell command ran', () => {
+test('given one unproven row among proven ones, when the hook judges the table, then it blocks, also after a shell command ran, and logs unproven-row', () => {
+  // Given
   const two = verdict(row('Passed: 48, Failed: 0'), row('3 passed', 'fatto', 'e2e'));
+
+  // When / Then
   assert.match(stop(edited(two, 'Passed: 48, Failed: 0')).reason, /"fatto"/);
   const shell = [prompt('x'), tool('Edit'), result(), tool('Bash'), result('Passed: 48, Failed: 0'), say(two)];
   const { reason, dir } = stop(shell);
@@ -124,17 +154,23 @@ test('one unproven row blocks even when the other rows are proven, and even afte
   assert.equal(stop([...shell.slice(0, 4), result('Passed: 48, Failed: 0\n3 passed'), say(two)]).reason, '');
 });
 
-test('a Workflow-only turn with a verdict row whose deciding line is not in any tool_result is blocked; the line inside the Workflow result (JSON-escaped) is silent', () => {
+test('given a Workflow-only turn with a verdict row, when the deciding line is in no tool_result, then it is blocked, and silent when the JSON-escaped Workflow result holds it', () => {
+  // Given
   const claim = verdict(row('Passed: "48", Failed: 0'));
+
+  // When / Then
   assert.match(stop([prompt('rifattorizza'), tool('Workflow'), result(JSON.stringify({ summary: 'ok' })), say(claim)]).reason, /"fatto"/);
   const printed = JSON.stringify({ verify: { output: 'Passed: "48", Failed: 0' } });
   assert.ok(printed.includes('\\"48\\"'));
   assert.equal(stop([prompt('rifattorizza'), tool('Workflow'), result(printed), say(claim)]).reason, '');
 });
 
-test('a Workflow result that arrives as a task-notification entry is the turn\'s result, not a new prompt', () => {
+test('given a Workflow result arriving as a task-notification entry, when the hook judges the verdict, then it is the turn result, not a new prompt', () => {
+  // Given
   const claim = verdict(row('Passed: 48, Failed: 0'));
   const ran = (body, extra) => [prompt('rifattorizza'), tool('Workflow'), result('Workflow started in background'), say('Lancio il workflow.'), notification(body, extra), say(claim)];
+
+  // When / Then
   assert.equal(stop(ran(JSON.stringify({ verify: 'Passed: 48, Failed: 0' }))).reason, '');
   assert.match(stop(ran(JSON.stringify({ verify: 'Passed: 1, Failed: 9' }))).reason, /"fatto"/);
   // recognised by its text alone, with no origin
@@ -144,16 +180,22 @@ test('a Workflow result that arrives as a task-notification entry is the turn\'s
   assert.equal(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ verify: 'Passed: 48, Failed: 0' })), say(claim)]).reason, '');
 });
 
-test('a `"status":"OK"` row is proven by a Workflow notification, string or text-block content; a different status still blocks', () => {
+test('given a "status OK" row, when a Workflow notification carries it as string or text-block content, then it is proven and a different status still blocks', () => {
+  // Given
   const claim = verdict(row('`"status":"OK"`'));
   const asBlocks = (body) => ({ ...notification(body), message: { role: 'user', content: [{ type: 'text', text: notification(body).message.content }] } });
+
+  // When / Then
   assert.equal(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ status: 'OK', rounds: 2 })), say(claim)]).reason, '');
   assert.equal(stop([prompt('x'), tool('Workflow'), asBlocks(JSON.stringify({ status: 'OK' })), say(claim)]).reason, '');
   assert.match(stop([prompt('x'), tool('Workflow'), notification(JSON.stringify({ status: 'STALL' })), say(claim)]).reason, /"fatto"/);
 });
 
-test('a cell of backticked fragments joined by / or + is proven when each fragment is printed; a paraphrase stays blocked', () => {
+test('given a cell of backticked fragments joined by / or +, when each fragment is printed, then it is proven and a paraphrase stays blocked', () => {
+  // Given
   const out = 'Tests 390 passed (390)\nFailed 0 failed';
+
+  // When / Then
   for (const line of ['`390 pass` / `0 fail`', '`390 pass` + `0 fail`']) assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
   assert.match(stop(edited(verdict(row('`390 pass` / `2 fail`')), out)).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('`390 pass` e `0 fail`')), out)).reason, /"fatto"/);
@@ -161,9 +203,12 @@ test('a cell of backticked fragments joined by / or + is proven when each fragme
   assert.match(stop(edited(verdict(row('lettura del sorgente di `x.ts`')), 'caps-checked')).reason, /"fatto"/);
 });
 
-test('an Agent or Task hand-back (notification or cross-session message) carries the proof; the delegate alone arms the hook', () => {
+test('given an Agent or Task delegate, when a hand-back carries the proof, then the row is proven and the delegate alone arms the hook', () => {
+  // Given
   const claim = verdict(row('Passed: 48, Failed: 0'));
   const handBack = peer({ message: { role: 'user', content: '<cross-session-message from="uds:x" from-name="agent">\nPassed: 48, Failed: 0\n</cross-session-message>' } });
+
+  // When / Then
   for (const name of ['Agent', 'Task']) {
     assert.equal(stop([prompt('x'), tool(name), result('launched'), handBack, say(claim)]).reason, '', name);
     assert.match(stop([prompt('x'), tool(name), result('launched'), say(claim)]).reason, /"fatto"/, name);
@@ -173,14 +218,18 @@ test('an Agent or Task hand-back (notification or cross-session message) carries
   assert.equal(stop([prompt('x'), tool('Read'), result(), say(claim)]).reason, '');
 });
 
-test('a delegate counts as an edit for ordering: a claim without a table is blocked whether a shell command ran after it or before', () => {
+test('given a Workflow delegate and a shell command in either order, when the turn claims fatto without a table, then it is blocked', () => {
+  // Given / When / Then
   assert.match(stop([prompt('x'), tool('Workflow'), result(), tool('Bash'), result(), say('Fatto.')]).reason, /"Fatto"/);
   assert.match(stop([prompt('x'), tool('Bash'), result(), tool('Workflow'), result(), say('Fatto.')]).reason, /"Fatto"/);
 });
 
-test('a turn longer than 512 KB is read back to its start: a proof past the old tail is found, an absent one blocks', () => {
+test('given a turn longer than 512 KB, when the hook reads it back to its start, then a proof past the old tail is found and an absent one blocks', () => {
+  // Given
   const filler = Array.from({ length: 8 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 800 KB: the prompt is beyond the 512 KB chunk
   const claim = say(verdict(row('Passed: 48, Failed: 0')));
+
+  // When / Then
   // the proof printed right after the prompt, 800 KB before the end: found, nothing blocked, nothing logged as cut
   const proven = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
   assert.equal(proven.reason, '');
@@ -194,10 +243,15 @@ test('a turn longer than 512 KB is read back to its start: a proof past the old 
   assert.match(stop([prompt('x'), tool('Edit'), result('ok'), claim]).reason, /"fatto"/);
 });
 
-test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table is asked for again, logged as tail-cut', () => {
+test('given a turn whose start is beyond the 8 MB cap, when the hook judges the verdict, then it fails closed and logs tail-cut', () => {
+  // Given
   const filler = Array.from({ length: 90 }, () => [tool('Read'), result('x'.repeat(100 * 1024))]).flat();   // 9 MB
   const claim = say(verdict(row('Passed: 48, Failed: 0')));
+
+  // When
   const { reason, dir } = stop([prompt('x'), tool('Edit'), result('Passed: 48, Failed: 0'), ...filler, claim]);
+
+  // Then
   assert.match(reason, /too long/);
   assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n')[0]).rule, 'tail-cut');
@@ -208,21 +262,30 @@ test('a turn whose start is beyond the 8 MB cap fails closed: the verdict table 
   assert.equal(stop([prompt('x'), tool('Edit'), result('ok'), ...filler, say(verdict(row('-', 'non verificato: serve staging')))]).reason, '');
 });
 
-test('a verdict table whose deciding line the turn printed is the accepted evidence', () => {
+test('given a verdict table whose deciding line the turn printed, when the hook judges it, then it is the accepted evidence', () => {
+  // Given
   const table = ['Fatto.', '', '| Livello | Comando | Riga che decide | Stato |', '| --- | --- | --- | --- |', '| test | `node --test` | 42 passed | fatto |'].join('\n');
+
+  // When / Then
   assert.equal(stop(edited(table, '42 passed')).reason, '');
 });
 
-test('a later human prompt ends the turn a delegate armed', () => {
+test('given a delegate that armed the turn, when a later human prompt arrives, then it ends that turn', () => {
+  // Given
   const claim = verdict(row('Passed: 48, Failed: 0'));
+
+  // When / Then
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), say(claim)]).reason, '');
   assert.equal(stop([prompt('x'), tool('Workflow'), result(), say('ok'), prompt('e adesso?'), tool('Agent'), notification('Passed: 48, Failed: 0'), say(claim)]).reason, '');
 });
 
 // ── Verdict-row parser: separators, ellipsis, quotes, exit 0 (#114) ──
 
-test('a deciding cell joined by " · " or an ellipsis is proven piece by piece', () => {
+test('given a deciding cell joined by a middle dot or an ellipsis, when the hook judges it, then it is proven piece by piece', () => {
+  // Given
   const hash = 'd7c6d87db8ea51eaa2715129949ae6979c7a33be';
+
+  // When / Then
   assert.equal(stop(edited(verdict(row(`\`completed\` · \`succeeded\` · \`${hash}\``)), `status completed\nsucceeded\n${hash}`)).reason, '');
   assert.equal(stop(edited(verdict(row('`queued=4106 … distinctIds=111`')), 'queued=4106 total\nfound distinctIds=111')).reason, '');
   assert.equal(stop(edited(verdict(row('`queued=4106 ... distinctIds=111`')), 'queued=4106 total\nfound distinctIds=111')).reason, '');
@@ -231,29 +294,37 @@ test('a deciding cell joined by " · " or an ellipsis is proven piece by piece',
   assert.match(stop(edited(verdict(row(threads)), 'PR 2815 thread 16860: comment id=2 status=fixed')).reason, /"fatto"/);
 });
 
-test('an ellipsis inside a piece is elided text: each fragment must be printed', () => {
+test('given an ellipsis inside a piece, when the hook judges the row, then each fragment must be printed', () => {
+  // Given
   const line = '`ModuleV3SportsState -> ...\bin\Release\ModuleV3.Sports.State.dll`';
   const out = 'ModuleV3SportsState -> C:\repo\bin\Release\ModuleV3.Sports.State.dll';
+
+  // When / Then
   assert.equal(stop(edited(verdict(row(line)), out)).reason, '');
   assert.match(stop(edited(verdict(row(line)), 'ModuleV3SportsState -> C:\repo\bin\Release\Other.dll')).reason, /"fatto"/);
 });
 
-test('quotes do not matter when comparing a deciding cell with the output', () => {
+test('given quotes in a deciding cell, when the hook compares it with the output, then they do not matter', () => {
+  // Given / When / Then
   assert.equal(stop(edited(verdict(row('"File created successfully"')), 'File created successfully')).reason, '');
   assert.equal(stop(edited(verdict(row('`status: OK`, `open: []`')), '{"status": "OK", "open": []}')).reason, '');
   assert.match(stop(edited(verdict(row('`status: OK`, `open: []`')), '{"status": "OK", "open": [1]}')).reason, /"fatto"/);
 });
 
-test('an "exit 0" piece is dropped when other pieces exist, never proof alone', () => {
+test('given an "exit 0" piece beside other pieces, when the hook judges the row, then it is dropped and never proof alone', () => {
+  // Given
   const line = '`ModuleV3SportsState -> ...\ModuleV3.Sports.State.dll`, exit 0';
   const out = 'ModuleV3SportsState -> C:\repo\bin\ModuleV3.Sports.State.dll';
+
+  // When / Then
   assert.equal(stop(edited(verdict(row(line)), out)).reason, '');
   assert.equal(stop(edited(verdict(row('`# pass 3`, exit=0')), '# pass 3')).reason, '');
   assert.equal(stop(edited(verdict(row('`# pass 3`, exit code 0')), '# pass 3')).reason, '');
   assert.match(stop(edited(verdict(row('exit 0')), 'built')).reason, /"fatto"/);
 });
 
-test('rows that must stay unproven', () => {
+test('given rows that look like proof, when the hook judges them, then they stay unproven', () => {
+  // Given / When / Then
   assert.match(stop(edited(verdict(row('file creati')), 'created 3 files')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('nessun output, quindi nessun giorno in sospeso')), 'ok')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('copied 62, nessun DIFF')), 'copied 62')).reason, /"fatto"/);
@@ -263,45 +334,62 @@ test('rows that must stay unproven', () => {
 
 // ── Real output quoted loosely: false positives from the retro of 2026-10-27 ──
 
-test('a "$(...)" inside a value is output, not a gloss to strip', () => {
+test('given a "$(...)" inside a value, when the hook judges the row, then it is output, not a gloss to strip', () => {
+  // Given
   const out = 'Server=$(SHARED.SqlServer);Database=$(FRONTIERAAPI.Database);user id=$(SHARED.SqlUser);';
+
+  // When / Then
   assert.equal(stop(edited(verdict(row('`Server=$(SHARED.SqlServer);Database=$(FRONTIERAAPI.Database);...`')), out)).reason, '');
   assert.match(stop(edited(verdict(row('`Server=$(OTHER.SqlServer);...`')), out)).reason, /"fatto"/);
 });
 
-test('one word left once the gloss is stripped is proven as a whole word, never a short token', () => {
+test('given one word left once the gloss is stripped, when the hook judges the row, then it is proven as a whole word, never a short token', () => {
+  // Given / When / Then
   assert.equal(stop(edited(verdict(row('`IDENTICO` (17,8 s)')), 'righe nuove 8 base 8 IDENTICO')).reason, '');
   assert.equal(stop(edited(verdict(row('`written:` … (14 entries, branch x)')), 'written: C:\\repo\\perimeter.md (14 entries)')).reason, '');
   assert.match(stop(edited(verdict(row('`IDENTICO` (17,8 s)')), 'DIVERSO')).reason, /"fatto"/);
 });
 
-test('an empty JSON array or object printed alone is proof; other punctuation is not', () => {
+test('given an empty JSON array printed alone or other punctuation, when the hook judges the row, then only the empty array is proof', () => {
+  // Given / When / Then
   assert.equal(stop(edited(verdict(row('`[]`')), 'succeeded\n[]\n')).reason, '');
   assert.match(stop(edited(verdict(row('`[]`')), '[1]')).reason, /"fatto"/);
 });
 
-test('pieces joined by the Italian " e " are proven piece by piece', () => {
+test('given pieces joined by the Italian " e ", when the hook judges the row, then they are proven piece by piece', () => {
+  // Given
   const out = 'wwwroot\\appsettings.Production.json  True\nx.runtimeconfig.json  False';
+
+  // When / Then
   assert.equal(stop(edited(verdict(row('`wwwroot\\appsettings.Production.json  True` e `x.runtimeconfig.json  False`')), out)).reason, '');
   assert.match(stop(edited(verdict(row('`wwwroot\\appsettings.Production.json  True` e `x.runtimeconfig.json  True`')), out)).reason, /"fatto"/);
 });
 
-test('"exit 0" alone is proven only by a shell call that ran the cited command after the last edit', () => {
+test('given "exit 0" alone as the deciding cell, when the hook judges the row, then it is proven only by a shell call that ran the cited command after the last edit', () => {
+  // Given
   const shell = (command) => [prompt('x'), tool('Edit'), result('ok'), tool('PowerShell', { command }), result(''), say(verdict('| build | MSBuild `SportsAndWalletApi.vbproj` | exit code 0 | fatto |'))];
+
+  // When / Then
   assert.equal(stop(shell('& msbuild .\\SportsAndWalletApi.vbproj /t:Build')).reason, '');
   assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
 });
 
-test('"exit 0" with a Comando cell without backticks needs the whole cell in the shell call, not its first word', () => {
+test('given "exit 0" with a Comando cell without backticks, when the hook judges the row, then the whole cell must be in the shell call, not its first word', () => {
+  // Given
   const shell = (command) => [prompt('x'), tool('Edit'), result('ok'), tool('PowerShell', { command }), result(''), say(verdict('| build | dotnet build Orders.sln | exit 0 | fatto |'))];
+
+  // When / Then
   assert.equal(stop(shell('dotnet build Orders.sln -c Release')).reason, '');
   assert.match(stop(shell('dotnet test Other.csproj')).reason, /"fatto"/);
 });
 
-test('"exit 0" is not proven by a shell call that failed', () => {
+test('given a failed shell call, when the hook judges an "exit 0" row, then it is not proven by that call', () => {
+  // Given
   const call = (id, command) => ({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'tool_use', id, name: 'PowerShell', input: { command } }] } });
   const done = (id, text, isError) => ({ type: 'user', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text, ...(isError ? { is_error: true } : {}) }] } });
   const turn = (...mid) => [prompt('x'), tool('Edit'), result('ok'), ...mid, say(verdict('| build | MSBuild `X.vbproj` | exit code 0 | fatto |'))];
+
+  // When / Then
   assert.match(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1\nerror', true))).reason, /"fatto"/);
   assert.match(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1\nerror'))).reason, /"fatto"/);
   assert.equal(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1', true), call('b', 'msbuild X.vbproj'), done('b', ''))).reason, '');

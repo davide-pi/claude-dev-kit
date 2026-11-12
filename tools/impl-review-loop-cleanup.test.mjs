@@ -11,6 +11,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { snapshot, run, ARGS, CLEAN, review, finding, DONE, read, impl, FAIL, nit, ASK, asking } from './impl-review-loop.harness.mjs';
+import { gate } from './impl-review-loop.harness.mjs';
 
 const closed = (...ids) => ids.map(id => ({ id, status: 'closed' }));
 
@@ -57,7 +58,7 @@ test('script: no cleanup for a finding outside the perimeter or a change-unrelat
   assert.equal(none.out.status, 'OK');
   assert.equal(none.calls.filter(c => c.opts.agentType === 'implementer').length, 1);
   assert.equal(none.out.minor.length, 1);
-  const red = await run({ ...CLEAN, verify: 'node --test' }, [review([], [nit(1)]), review([]), review([])], [impl(), impl({ verify: FAIL }), impl()]);
+  const red = await run({ ...CLEAN, verify: 'node --test' }, [review([], [nit(1)]), review([]), review([])], [impl({ gate: gate('green', { tree: '' }) }), impl({ verify: FAIL }), impl()]);
   assert.equal(red.out.status, 'STALL');                                                         // the verify was green, the cleanup turned it red
   assert.equal(red.out.stall.why, 'green-to-red');
 });

@@ -40,7 +40,8 @@ function filter(text, mode = 'test') {
   return { out: r.stdout, status: r.status };
 }
 
-test('plain test and log commands are rewritten through the filter, allowed', () => {
+test('given plain test and log commands, when the guard sees them, then they are rewritten through the filter and allowed', () => {
+  // Given
   for (const [command, mode] of [
     ['dotnet test', 'test'],
     ['dotnet test --filter "FullyQualifiedName~Orders" -f net8.0', 'test'],
@@ -51,15 +52,19 @@ test('plain test and log commands are rewritten through the filter, allowed', ()
     ['dotnet build', 'build'],
     ['dotnet build src/Orders.sln -c Release --no-restore', 'build'],
   ]) {
+    // When
     const out = guard(command);
+    // Then
     assert.equal(out?.permissionDecision, 'allow', command);
     assert.equal(out.updatedInput.command,
       `set -o pipefail; ${command} 2>&1 | node "${FILTER.replace(/\\/g, '/')}" --filter ${mode}`, command);
   }
 });
 
-test('PowerShell records the command exit code before the pipe and exits with it', () => {
+test('given dotnet test in PowerShell, when the guard rewrites it, then the command exit code is recorded before the pipe and used to exit', () => {
+  // Given / When
   const out = guard('dotnet test', 'PowerShell');
+  // Then
   assert.match(out.updatedInput.command, /^\$global:__rc = 0; & \{ dotnet test 2>&1; \$global:__rc = \$LASTEXITCODE \} \| node ".*output-filter\.js" --filter test; if \(\$global:__rc\) \{ exit \$global:__rc \}/);
   assert.doesNotMatch(out.updatedInput.command, /pipefail/);
 });
@@ -83,8 +88,10 @@ function runRewritten(shimExit) {
   }
 }
 
-test('PowerShell: a failing dotnet keeps its exit code through the filter, a passing one stays 0', { skip: skipShim }, () => {
+test('given a dotnet shim that fails or passes, when the rewritten PowerShell line runs, then a failing dotnet keeps its exit code through the filter and a passing one stays 0', { skip: skipShim }, () => {
+  // Given / When
   const red = runRewritten(3);
+  // Then
   assert.equal(red.status, 3, red.out);
   assert.match(red.out, /Passed!/);
   assert.equal(runRewritten(0).status, 0);
@@ -118,9 +125,12 @@ function runLine(shell, command, exitCode) {
 
 for (const [shell, skip] of [['pwsh', !hasPwsh && 'pwsh 7 not on PATH'], ['bash', !hasBash && 'no usable bash on PATH']]) {
   for (const command of ['dotnet test', 'dotnet build']) {
-    test(`${shell}: the rewritten "${command}" runs, filters the long output and keeps the exit code`, { skip }, () => {
+    test(`given the rewritten "${command}" in ${shell}, when it runs with long output, then it filters the output and keeps the exit code`, { skip }, () => {
+      // Given
       for (const exitCode of [0, 3]) {
+        // When
         const r = runLine(shell, command, exitCode);
+        // Then
         assert.match(r.out, /^\[output-filter\] \d+ of 81 lines/, `${shell} exit ${exitCode}: ${r.out}${r.err}`);
         assert.match(r.out, /Passed!/);
         assert.doesNotMatch(r.out, /Restored project 40\b/, 'the noise is dropped');
@@ -130,9 +140,11 @@ for (const [shell, skip] of [['pwsh', !hasPwsh && 'pwsh 7 not on PATH'], ['bash'
   }
 }
 
-test('a trailing comment keeps the command out of the rewrite: it would swallow the closing brace or the pipe', () => {
+test('given a command with a trailing comment, when the guard sees it, then it is not rewritten because it would swallow the closing brace or the pipe, while a # inside quotes is no comment', () => {
+  // Given
   // Rewritten, `& { dotnet test # note 2>&1; … }` is a parse error in PowerShell and, in Bash, ends the
   // pipe inside the comment. Left alone, the command runs as typed. A `#` inside quotes is no comment.
+  // When / Then
   for (const command of ['dotnet test # note', 'dotnet test #note', 'dotnet build # x', 'npm test -- --run # why', 'dotnet test\t# tab']) {
     for (const tool of ['Bash', 'PowerShell']) assert.equal(guard(command, tool), null, `${tool}: ${command}`);
   }
@@ -141,13 +153,16 @@ test('a trailing comment keeps the command out of the rewrite: it would swallow 
   }
 });
 
-test('the rest of the tool input is preserved', () => {
+test('given a command with a description and a timeout, when the guard rewrites it, then the rest of the tool input is preserved', () => {
+  // Given / When
   const out = guard('npm test', 'Bash', { description: 'Run tests', timeout: 600000 });
+  // Then
   assert.equal(out.updatedInput.description, 'Run tests');
   assert.equal(out.updatedInput.timeout, 600000);
 });
 
-test('never rewritten: opt-out, compound lines, help, listings, watch and follow', () => {
+test('given opt-out, compound lines, help, listings, watch and follow commands, when the guard sees them, then they are never rewritten', () => {
+  // Given
   for (const command of [
     'dotnet test # raw',
     'dotnet test #raw',
@@ -170,23 +185,29 @@ test('never rewritten: opt-out, compound lines, help, listings, watch and follow
     'dotnet publish',
     'npm install',
   ]) {
+    // When / Then
     assert.equal(guard(command), null, command);
   }
 });
 
-test('a command that asks is not rewritten', () => {
+test('given a command that asks, when the guard sees it, then it is not rewritten', () => {
+  // Given / When / Then
   // Destructive check fires on the volume removal: ask wins, no allow, no rewrite.
   assert.equal(guard('docker compose down -v && dotnet test').permissionDecision, 'ask');
 });
 
-test('short output passes through untouched', () => {
+test('given short output, when the filter runs, then it passes through untouched', () => {
+  // Given
   const text = 'Passed!  - Failed: 0, Passed: 3, Skipped: 0, Total: 3\n';
+  // When
   const { out, status } = filter(text);
+  // Then
   assert.equal(out, text);
   assert.equal(status, 0);
 });
 
-test('long dotnet output keeps the failure block and the summary, exits 1', () => {
+test('given long dotnet output with a failure, when the filter runs, then it keeps the failure block and the summary and exits 1', () => {
+  // Given
   const noise = Array.from({ length: 200 }, (_, i) => `  Restored project ${i} -> bin/Debug/net8.0/P${i}.dll`);
   const text = [
     ...noise.slice(0, 100),
@@ -198,7 +219,9 @@ test('long dotnet output keeps the failure block and the summary, exits 1', () =
     ...noise.slice(100),
     'Failed!  - Failed: 1, Passed: 41, Skipped: 0, Total: 42, Duration: 2 s',
   ].join('\n');
+  // When
   const { out, status } = filter(text);
+  // Then
   assert.equal(status, 1);
   assert.match(out, /^\[output-filter\] \d+ of 206 lines/);
   assert.match(out, /Failed Orders\.Tests\.Total_is_sum/);
@@ -209,17 +232,21 @@ test('long dotnet output keeps the failure block and the summary, exits 1', () =
   assert.ok(out.split('\n').length < 60, 'most of the noise is gone');
 });
 
-test('long green run keeps the summary, exits 0', () => {
+test('given a long green run, when the filter runs, then it keeps the summary and exits 0', () => {
+  // Given
   const text = [
     ...Array.from({ length: 150 }, (_, i) => `  build step ${i}`),
     'Passed!  - Failed: 0, Passed: 42, Skipped: 0, Total: 42, Duration: 2 s',
   ].join('\n');
+  // When
   const { out, status } = filter(text);
+  // Then
   assert.equal(status, 0);
   assert.match(out, /Passed!  - Failed: 0, Passed: 42/);
 });
 
-test('vitest summary with failures exits 1', () => {
+test('given a vitest summary with failures, when the filter runs, then it exits 1', () => {
+  // Given
   const text = [
     ...Array.from({ length: 80 }, (_, i) => ` ✓ src/ok${i}.spec.ts (3 tests) 4ms`),
     ' FAIL  src/cart.spec.ts > cart > totals',
@@ -227,21 +254,26 @@ test('vitest summary with failures exits 1', () => {
     ' Test Files  1 failed | 80 passed (81)',
     '      Tests  1 failed | 242 passed (243)',
   ].join('\n');
+  // When
   const { out, status } = filter(text);
+  // Then
   assert.equal(status, 1);
   assert.match(out, /FAIL {2}src\/cart\.spec\.ts/);
   assert.match(out, /Tests {2}1 failed/);
   assert.doesNotMatch(out, /ok10\.spec/);
 });
 
-test('logs mode keeps errors with context and the tail, always exits 0', () => {
+test('given logs output with an error, when the filter runs in logs mode, then it keeps errors with context and the tail and always exits 0', () => {
+  // Given
   const text = [
     ...Array.from({ length: 100 }, (_, i) => `api-1  | info: request ${i} 200`),
     'api-1  | fail: Microsoft.AspNetCore.Server[13] Unhandled exception',
     'api-1  |    at Orders.Api.Handler.Run() in /src/Handler.cs:line 7',
     ...Array.from({ length: 100 }, (_, i) => `api-1  | info: request ${100 + i} 200`),
   ].join('\n');
+  // When
   const { out, status } = filter(text, 'logs');
+  // Then
   assert.equal(status, 0);
   assert.match(out, /Unhandled exception/);
   assert.match(out, /Handler\.cs:line 7/);
@@ -273,8 +305,10 @@ const failedBuild = [
   'Time Elapsed 00:00:12.34',
 ].join('\n');
 
-test('a failing build keeps each distinct error and warning once with its count, and the summary; exits 1', () => {
+test('given a failing multi-target build, when the filter runs in build mode, then it keeps each distinct error and warning once with its count and the summary and exits 1', () => {
+  // Given / When
   const { out, status } = filter(failedBuild, 'build');
+  // Then
   assert.equal(status, 1);
   assert.match(out, /^\[output-filter\] \d+ of \d+ lines/);
   const lines = out.split('\n');
@@ -291,7 +325,8 @@ test('a failing build keeps each distinct error and warning once with its count,
   assert.ok(lines.length < 25, 'most of the noise is gone');
 });
 
-test('a green build with warnings keeps the warnings once and the summary, exits 0', () => {
+test('given a green build with warnings, when the filter runs in build mode, then it keeps the warnings once and the summary and exits 0', () => {
+  // Given
   const text = [
     ...restore,
     ...TFMS.map((tfm) => warning(1, tfm)),
@@ -303,24 +338,32 @@ test('a green build with warnings keeps the warnings once and the summary, exits
     '',
     'Time Elapsed 00:00:03.10',
   ].join('\n');
+  // When
   const { out, status } = filter(text, 'build');
+  // Then
   assert.equal(status, 0);
   assert.equal(out.split('\n').filter((l) => /warning CS8618/.test(l)).length, 1);
   assert.match(out, /^Build succeeded\./m);
   assert.match(out, /0 Error\(s\)/);
 });
 
-test('a build that never reaches a verdict keeps its tail, and an error in it still exits 1', () => {
+test('given a build that never reaches a verdict, when the filter runs in build mode, then it keeps its tail and an error in it still exits 1', () => {
+  // Given
   const text = [...restore, error('net8.0'), ...restore.slice(0, 20), 'Unhandled exception: out of memory'].join('\n');
+  // When
   const { out, status } = filter(text, 'build');
+  // Then
   assert.equal(status, 1);
   assert.match(out, /error CS0103/);
   assert.match(out, /Unhandled exception: out of memory/);
 });
 
-test('a build whose output is short passes through untouched', () => {
+test('given a build whose output is short, when the filter runs in build mode, then it passes through untouched', () => {
+  // Given
   const text = 'Build succeeded.\n    0 Warning(s)\n    0 Error(s)\n\nTime Elapsed 00:00:01.20\n';
+  // When
   const { out, status } = filter(text, 'build');
+  // Then
   assert.equal(out, text);
   assert.equal(status, 0);
 });

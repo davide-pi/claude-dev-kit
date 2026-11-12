@@ -44,13 +44,18 @@ const repoWith = (name) => {
   return { repo, head: git(repo, 'rev-parse', 'HEAD') };
 };
 
-test('snapshot.ps1: a new untracked file and an edit appear in files; the real index is unchanged; churn counts the lines since -Since', { skip }, () => {
+test('given a new untracked file and an edit, when snapshot.ps1 runs, then both appear in files, the real index is unchanged, and churn counts the lines since -Since', { skip }, () => {
+  // Given
   const { repo, head } = repoWith('main');
   writeFileSync(join(repo, 'a.txt'), 'one\nTWO\nthree\nfour\n');        // -two +TWO +three +four = 4
   writeFileSync(join(repo, 'new.txt'), 'x\ny\n');                        // untracked, +2
   const indexBefore = readFileSync(join(repo, '.git', 'index'));
   const statusBefore = git(repo, 'status', '--porcelain');
+
+  // When
   const out = json(snapshot(repo, '-Since', head, '-Start', head));
+
+  // Then
   assert.deepEqual([...out.files].sort(), ['a.txt', 'new.txt']);
   assert.equal(out.churn, 6);
   assert.deepEqual(Object.keys(out), ['tree', 'files', 'churn', 'big']);
@@ -64,16 +69,27 @@ test('snapshot.ps1: a new untracked file and an edit appear in files; the real i
   assert.equal(snapshot(repo, '-Since', head).stdout.trim().split('\n').length, 1);   // one JSON line
 });
 
-test('snapshot.ps1: -Since a previous tree counts only the lines since it, files stay against -Start; -Dirty entries are dropped', { skip }, () => {
+test('given a previous tree and changes since it, when snapshot.ps1 runs with -Since that tree, then it counts only the lines since it, files stay against -Start, and -Dirty entries are dropped', { skip }, () => {
+  // Given
   const { repo, head } = repoWith('main2');
   writeFileSync(join(repo, 'a.txt'), 'one\ntwo\nthree\n');             // +1
+
+  // When
   const first = json(snapshot(repo, '-Since', head, '-Start', head));
+
+  // Then
   assert.equal(first.churn, 1);
+
+  // Given
   mkdirSync(join(repo, 'user'));
   writeFileSync(join(repo, 'user', 'mine.txt'), 'm\n');
   writeFileSync(join(repo, 'b.txt'), 'bee\nbee2\nbee3\n');              // +2 since the first tree
+
+  // When
   const second = json(snapshot(repo, '-Since', first.tree, '-Start', head, '-Dirty', 'user/,nothing.txt'));
-  assert.equal(second.churn, 3);                                         // b.txt +2 and user/mine.txt +1, counted since -Since
+
+  // Then
+  assert.equal(second.churn, 3);                                        // b.txt +2 and user/mine.txt +1, counted since -Since
   assert.deepEqual([...second.files].sort(), ['a.txt', 'b.txt']);        // user/ is the user's own work
   const exact = json(snapshot(repo, '-Since', first.tree, '-Start', head, '-Dirty', 'b.txt, user\\mine.txt'));
   assert.deepEqual(exact.files, ['a.txt']);
@@ -81,24 +97,38 @@ test('snapshot.ps1: -Since a previous tree counts only the lines since it, files
   assert.equal(json(snapshot(repo, '-Since', first.tree)).files.length, 3);   // -Start defaults to HEAD
 });
 
-test('snapshot.ps1: ignored files stay out, a file with a non-ASCII name is listed, a linked worktree works', { skip }, () => {
+test('given an ignored file, a non-ASCII file name and a linked worktree, when snapshot.ps1 runs, then ignored files stay out, the non-ASCII name is listed, and the worktree works', { skip }, () => {
+  // Given
   const { repo, head } = repoWith('main3');
   writeFileSync(join(repo, '.gitignore'), 'skip.log\n');
   writeFileSync(join(repo, 'skip.log'), 'noise\n');
   writeFileSync(join(repo, 'città.txt'), 'x\n');
+
+  // When
   const out = json(snapshot(repo, '-Since', head));
+
+  // Then
   assert.deepEqual([...out.files].sort(), ['.gitignore', 'città.txt']);
+
+  // Given
   const wt = join(sandbox, 'wt');
   git(repo, 'worktree', 'add', '-b', 'feat/x', wt);
   writeFileSync(join(wt, 'only-here.txt'), 'x\n');
+
+  // When
   const inWt = json(snapshot(wt, '-Since', head));
+
+  // Then
   assert.deepEqual(inWt.files, ['only-here.txt']);
   assert.ok(!existsSync(join(repo, '.git', 'deliver', 'snap.index')));
   assert.ok(!existsSync(join(git(wt, 'rev-parse', '--absolute-git-dir'), 'deliver', 'snap.index')));
 });
 
-test('snapshot.ps1: usage errors exit 2: no -Since, outside a repository, an unknown revision', { skip }, () => {
+test('given no -Since, a directory outside a repository or an unknown revision, when snapshot.ps1 runs, then it exits 2', { skip }, () => {
+  // Given
   const { repo, head } = repoWith('main4');
+
+  // When / Then
   assert.equal(snapshot(repo).status, 2);
   assert.equal(snapshot(repo, '-Since', 'no-such-rev').status, 2);
   assert.equal(snapshot(repo, '-Since', head, '-Start', 'no-such-rev').status, 2);
@@ -108,7 +138,8 @@ test('snapshot.ps1: usage errors exit 2: no -Since, outside a repository, an unk
 
 const lines = (n) => Array.from({ length: n }, (_, i) => `l${i}`).join('\n') + '\n';
 
-test('snapshot.ps1: big lists a changed file past 600 lines, or 200+ lines at the start grown by 30%; small, binary and dirty files stay out', { skip }, () => {
+test('given changed files of various sizes, when snapshot.ps1 runs, then big lists a file past 600 lines, or 200+ lines at the start grown by 30%, and small, binary and dirty files stay out', { skip }, () => {
+  // Given
   const { repo } = repoWith('big');
   writeFileSync(join(repo, 'mid.txt'), lines(200));
   writeFileSync(join(repo, 'steady.txt'), lines(200));
@@ -123,7 +154,11 @@ test('snapshot.ps1: big lists a changed file past 600 lines, or 200+ lines at th
   writeFileSync(join(repo, 'small-new.txt'), lines(600));                 // new, exactly 600: not past
   writeFileSync(join(repo, 'a.txt'), 'one\ntwo\nthree\nfour\nfive\n');    // a tiny file grew a lot: under 200 at the start
   writeFileSync(join(repo, 'blob.bin'), Buffer.alloc(5000, 0));
+
+  // When
   const out = json(snapshot(repo, '-Since', start, '-Start', start));
+
+  // Then
   const byFile = Object.fromEntries(out.big.map((b) => [b.file, b]));
   assert.deepEqual(Object.keys(byFile).sort(), ['brand-new.txt', 'huge.txt', 'mid.txt']);
   assert.deepEqual(byFile['mid.txt'], { file: 'mid.txt', start: 200, now: 260 });
@@ -133,8 +168,11 @@ test('snapshot.ps1: big lists a changed file past 600 lines, or 200+ lines at th
   assert.deepEqual(json(snapshot(repo, '-Since', start, '-Start', start, '-Dirty', 'mid.txt,huge.txt,brand-new.txt')).big, []);
 });
 
-test('snapshot.ps1: a moved file lists both its old and its new path', { skip }, () => {
+test('given a moved file, when snapshot.ps1 runs, then it lists both its old and its new path', { skip }, () => {
+  // Given
   const { repo, head } = repoWith('main5');
   renameSync(join(repo, 'a.txt'), join(repo, 'moved.txt'));             // an exact rename: git would fold it into one path
+
+  // When / Then
   assert.deepEqual([...json(snapshot(repo, '-Since', head, '-Start', head)).files].sort(), ['a.txt', 'moved.txt']);
 });

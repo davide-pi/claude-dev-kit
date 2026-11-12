@@ -1,8 +1,8 @@
 /**
- * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`, and
- * `node ~/.claude/hooks/scope-guard.js --check`).
+ * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`,
+ * `node ~/.claude/scripts/gate.mjs` and `node ~/.claude/hooks/scope-guard.js --check`).
  *
- * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter, snapshot and
+ * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter, snapshot, gate and
  * scope-guard calls) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
  * with an allowlist grammar, not a blacklist: both shells run code in places a list of known
  * constructs misses (PowerShell argument mode evaluates `(…)`, `@(…)`, `$x.Method()`; Bash runs
@@ -17,6 +17,13 @@
  * switch waives the read-only proof of a credential that holds write grants, so any argument that
  * starts with `-a` (the only db-ro parameter starting with `a`) asks, quoted or not: the shell strips
  * the quotes before pwsh binds it. A `-amount` inside a longer quoted query is data, not a token start.
+ * And one on `gate.mjs`: the value of `--test` and `--unit` runs through a shell (cmd on Windows, sh elsewhere), so
+ * it passes only when it starts with a known test runner (`dotnet test`, `node --test`, `npx vitest`, `vitest`,
+ * `npx jest`, `jest`, `npm test`, `npm run test`, `pnpm test`, `pnpm run test`, `yarn test`) and holds none of
+ * `& | < > ^ % $`, a backtick, parentheses or a newline; a `;` is allowed only inside double quotes. Off
+ * Windows a backslash or a single quote asks too (sh quoting could hide a `;`), and so does any option that
+ * loads code from the command line (`--import`, `--require`, `--loader`, `--eval`, a `data:` URL…): test
+ * files from the repository are fine, inline code is not.
  *
  * Pure text analysis, no I/O.
  *
@@ -27,7 +34,25 @@
 
 const { splitSegments } = require('./shell-parse');
 
-const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](perimeter|snapshot|db-ro)\.ps1|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
+const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
+/** The gate runs `--test` / `--unit` through a shell: only a known test runner passes, with no shell operator. */
+const TEST_RUNNER = /^(?:dotnet\s+test|node\s+--test|npx\s+vitest|vitest|npx\s+jest|jest|npm\s+test|npm\s+run\s+test|pnpm\s+test|pnpm\s+run\s+test|yarn\s+test)(?=\s|$)/;
+const TEST_COMMAND_DANGER = /[&|<>^%$`()\r\n]/;
+/** sh (not cmd) honours `\"` and single quotes inside the value, which would defeat the `;` rule below. */
+const POSIX_QUOTE_DANGER = /[\\']/;
+/** Options that load code from the command line rather than from the repository's test files. */
+const CODE_LOADING = /(?:^|\s)--test-adapter-path(?=[\s=]|$)|\b(?:data|https?|file):/i;
+/** Node's own: `-r` and `-e` mean runtime and environment to `dotnet test`. A module path given to a reporter or config is repo code, like the test files. */
+const NODE_CODE_LOADING = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader|-e|--eval|-p|--print|-pe|-ep)(?=[\s=]|$)/;
+
+/** True when the gate may run this `--test` / `--unit` value without a prompt. */
+function isPlainTestCommand(value) {
+  const command = value.trim();
+  if (process.platform !== 'win32' && POSIX_QUOTE_DANGER.test(command)) return false;
+  if (/^node\s/.test(command) && NODE_CODE_LOADING.test(command)) return false;
+  return TEST_RUNNER.test(command) && !TEST_COMMAND_DANGER.test(command) && !CODE_LOADING.test(command)
+    && !command.replace(/"[^"]*"/g, '').includes(';');
+}
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
 const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
 const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
@@ -70,11 +95,11 @@ function tokenize(text) {
 
 /** The confirmation reason when an allowed script is called with a risky argument, else null. */
 function checkScriptArgs(command) {
-  if (!/\.claude[\\/](?:scripts[\\/](?:perimeter|snapshot|db-ro)\.ps1|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
+  if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|gate\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
-    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : 'scope-guard.js';
+    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? 'gate.mjs' : 'scope-guard.js';
     let tail = segment.trim().slice(match[0].length);
     if (match[1]) { // the script path was itself quoted: the next character closes it
       if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;
@@ -88,6 +113,14 @@ function checkScriptArgs(command) {
     if (script === 'db-ro.ps1' && tokens.some((t) => ABBREVIATED_GRANT_SWITCH.test(t))) {
       return 'This db-ro.ps1 call carries -AcceptWriteGrant (or an abbreviation that could): '
         + 'accepting a credential with write grants needs your explicit consent. Confirm?';
+    }
+    if (script === 'gate.mjs') {
+      for (let i = 0; i < tokens.length - 1; i++) {
+        if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
+          return `The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `
+            + 'npm/pnpm/yarn test) or holds a shell operator, and the gate runs it through a shell. Confirm?';
+        }
+      }
     }
   }
   return null;

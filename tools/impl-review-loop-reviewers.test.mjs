@@ -427,3 +427,93 @@ test('wide: past 10 files or 600 changed lines reviewer B of M is opus, never a 
   assert.deepEqual(reviewersFor('S', [], false, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:high']);
   assert.deepEqual(reviewersFor('S', [], true, true).map((r) => `${r.model}:${r.effort}`), ['sonnet:low']);
 });
+
+// ── deliver flow v2, task 11: reader A reads each block ───────────────────────────────────────────────────
+import { gate } from './impl-review-loop.harness.mjs';
+
+const readerA = (calls) => calls.filter(c => /^block \d+ · reader A$/.test(c.opts.label ?? ''));
+const implLabels = (calls) => calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label);
+const BLOCK = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+const greenImpl = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
+
+test('given a block whose gate is green, when it ends, then reader A reads that block\'s delta on sonnet at high', async () => {
+  // Given
+  const impls = [greenImpl()];
+  // When
+  const { calls } = await run(BLOCK, [review([]), review([])], impls);
+  // Then
+  const [a] = readerA(calls);
+  assert.deepEqual([a.opts.agentType, a.opts.model, a.opts.effort], ['code-reviewer', 'sonnet', 'high']);
+  assert.ok(a.prompt.includes('git diff abc123 tr1'));
+});
+
+test('given reader A raises a P2 inside the perimeter, when the block closes, then one fix call and one gate run follow', async () => {
+  // Given
+  const raised = review([], [finding({ title: 'tax rounds the wrong way' })]);
+  const impls = [greenImpl(), greenImpl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 2 }, gate: gate('green', { tree: 'tr2' }) })];
+  // When
+  const { out, calls } = await run(BLOCK, [raised, review([])], impls);
+  // Then
+  assert.deepEqual(implLabels(calls), ['implement the change', 'implement the change (reader A fix)']);
+  const fix = calls.filter(c => c.opts.agentType === 'implementer')[1].prompt;
+  assert.ok(fix.includes('tax rounds the wrong way') && fix.includes('node ~/.claude/scripts/gate.mjs --root \'C:/repo\' --head abc123'));
+  assert.deepEqual(out.blocks[0].readerA, { raised: 1, fixed: 1, carried: 0 });
+});
+
+test('given a finding still open after the in-block fix, when the final verification starts, then it is handed over as carried', async () => {
+  // Given
+  const raised = review([], [finding({ title: 'carried-title-xyz' })]);
+  const rejects = greenImpl({ rejected: [{ id: 'A1.1', reason: 'it is not a defect', kind: 'wrong' }] });
+  // When
+  const { out, calls } = await run(BLOCK, [raised, review([])], [greenImpl(), rejects]);
+  // Then
+  const [round1] = calls.filter(c => isReview(c.opts.label, 1));
+  assert.ok(round1.prompt.includes('carried-title-xyz'));
+  assert.deepEqual(out.blocks[0].readerA, { raised: 1, fixed: 0, carried: 1 });
+});
+
+test('given a format-only file, when reader A is briefed, then the brief says not to raise formatting findings on it', async () => {
+  // Given
+  const impls = [impl({ gate: gate('green', { tree: 'tr1', formatOnly: ['src/Orders/Fmt.cs'] }) })];
+  // When
+  const { calls } = await run(BLOCK, [review([]), review([])], impls);
+  // Then
+  const [a] = readerA(calls);
+  assert.ok(a.prompt.includes('src/Orders/Fmt.cs') && /do not raise formatting findings/i.test(a.prompt));
+});
+
+// ── review round: carried findings reach the result, P3 is kept, a red gate after reader A's fix stalls ───
+test('given reader A findings that stay open, when the loop ends, then the result lists each as carried with its reason', async () => {
+  // Given
+  const raised = review([], [finding({ title: 'carried-title-xyz' }), finding({ title: 'elsewhere-title', path: 'src/Other/Helper.cs', line: 9 })]);
+  const rejects = greenImpl({ rejected: [{ id: 'A1.1', reason: 'it is not a defect', kind: 'wrong' }] });
+  // When
+  const { out } = await run(BLOCK, [raised, review([])], [greenImpl(), rejects]);
+  // Then
+  assert.deepEqual(out.carried, [
+    { block: 1, id: 'A1.2', priority: 'P2', title: 'elsewhere-title', file: 'src/Other/Helper.cs', why: 'outside perimeter' },
+    { block: 1, id: 'A1.1', priority: 'P2', title: 'carried-title-xyz', file: 'src/Orders/OrdersQuery.cs', why: 'rejected' },
+  ]);
+});
+
+test('given reader A raises a P3 inside the perimeter, when the block closes, then it is a minor finding and no fix call runs', async () => {
+  // Given
+  const raised = review([], [finding({ priority: 'P3', title: 'minor-naming-note' })]);
+  // When
+  const { out, calls } = await run(BLOCK, [raised, review([])], [greenImpl()]);
+  // Then
+  assert.deepEqual(out.minor.map(m => m.title), ['minor-naming-note']);
+  assert.equal(calls.filter(c => c.opts.agentType === 'implementer').length, 1);
+});
+
+test('given reader A fix whose gate comes back red, when the block closes, then the loop stalls with gate-red and the gate line', async () => {
+  // Given
+  const raised = review([], [finding({ title: 'tax rounds the wrong way' })]);
+  const red = greenImpl({ gate: gate('red', { test: 'TaxTests.Round fails' }) });
+  // When
+  const { out } = await run(BLOCK, [raised], [greenImpl(), red]);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'gate-red');
+  assert.match(out.stall.reason, /TaxTests\.Round fails/);
+});

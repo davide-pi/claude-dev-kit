@@ -42,67 +42,86 @@ const SKILL = ['skills', 'demo', 'SKILL.md'].join('/');
 const settingsWith = (hooks) => JSON.stringify({ hooks });
 const hookCmd = [{ type: 'command', command: 'node', args: ['$env:CLAUDE_HOOKS/guard.js'] }];
 
-test('the base kit validates clean and reports listed vs hidden descriptions', () => {
+test('given the base kit, when the validator runs, then it validates clean and reports listed vs hidden descriptions', () => {
+  // Given / When
   const { code, out } = run();
+  // Then
   assert.equal(code, 0, out);
   assert.match(out, /descriptions: listed \d+ \/ 8000 chars \(2 agents and skills\), hidden \d+ chars \(1 skills/);
 });
 
-test('bin/ and obj/ directories are build output: never scanned', () => {
+test('given build output under bin/ and obj/, when the validator runs, then it never scans them', () => {
+  // Given / When
   const { code, out } = run((write) => {
     write('src/obj/Debug/x.json', '{"path": "C:\\\\Users\\\\someone\\\\x"');
     write('src/bin/y.js', "require('./gone')\n");
   });
+  // Then
   assert.equal(code, 0, out);
 });
 
-test('the workflows listing is counted, and warned about past its cap', () => {
+test('given a workflow whose listing passes the cap, when the validator runs, then the listing is counted and warned about', () => {
+  // Given / When
   const { code, out } = run((write) => write('workflows/big.js', `export const meta = {\n  name: 'big',\n  description: 'x',\n  whenToUse: '${'y'.repeat(1300)}',\n}\n`));
+  // Then
   assert.equal(code, 0, out);
   assert.match(out, /workflows listed: 1301 \/ 1200 chars/);
   assert.match(out, /WARN[\s\S]*workflows: description \+ whenToUse total 1301/);
 });
 
-test('the workflows listing counts double-quoted and template strings too', () => {
+test('given a workflow with double-quoted and template strings, when the validator runs, then the listing counts them too', () => {
+  // Given / When
   const { code, out } = run((write) => write('workflows/quoted.js', `export const meta = {\n  name: 'quoted',\n  description: "it's x",\n  whenToUse: \`${'y'.repeat(10)}\`,\n}\n`));
+  // Then
   assert.equal(code, 0, out);
   assert.match(out, /workflows listed: 16 \/ 1200 chars/);
 });
 
-test('a relative require that does not resolve fails, in hooks, hooks/lib and tools', () => {
+test('given a relative require that does not resolve in hooks, hooks/lib or tools, when the validator runs, then it fails', () => {
+  // Given
   for (const [rel, text] of [
     ['hooks/guard.js', "require('./lib/missing.js')\n"],
     ['hooks/lib/util.js', "const x = require('../nope')\n"],
     [['tools', 't.mjs'].join('/'), "import x from './gone.mjs'\n"],
   ]) {
+    // When
     const { code, out } = run((write) => write(rel, text));
+    // Then
     assert.equal(code, 1, rel);
     assert.match(out, new RegExp(`${rel.replace('.', '\\.')}:1: requires .* which does not resolve`));
   }
 });
 
-test('an unknown hook event fails', () => {
+test('given an unknown hook event, when the validator runs, then it fails', () => {
+  // Given / When
   const { code, out } = run((write) => write('settings.json', settingsWith({ PreToolUs: [{ matcher: 'Bash', hooks: hookCmd }] })));
+  // Then
   assert.equal(code, 1);
   assert.match(out, /hook event 'PreToolUs' is not a known event/);
 });
 
-test('a hook matcher that is not a regex fails; "*" and a missing matcher do not', () => {
+test('given a hook matcher that is not a regex, or "*" or a missing matcher, when the validator runs, then the bad one fails and the others do not', () => {
+  // Given / When
   const bad = run((write) => write('settings.json', settingsWith({ PreToolUse: [{ matcher: '(Bash', hooks: hookCmd }] })));
+  // Then
   assert.equal(bad.code, 1);
   assert.match(bad.out, /hook matcher '\(Bash' is not a valid regex/);
   const good = run((write) => write('settings.json', settingsWith({ PreToolUse: [{ matcher: '*', hooks: hookCmd }, { hooks: hookCmd }] })));
   assert.equal(good.code, 0, good.out);
 });
 
-test('an agent tool that is not a real tool name fails; mcp__ prefixes pass', () => {
+test('given an agent tool that is not a real tool name, when the validator runs, then it fails while mcp__ prefixes pass', () => {
+  // Given / When
   const { code, out } = run((write, read) => write(AGENT, read(AGENT).replace('LSP,', 'Bashh, LSP,')));
+  // Then
   assert.equal(code, 1);
   assert.match(out, /tool 'Bashh' is not a known tool name/);
 });
 
-test('a workflow agentType must be an agent or a built-in; model must be allowed', () => {
+test('given a workflow agentType or model, when the validator runs, then the agentType must be an agent or a built-in and the model must be allowed', () => {
+  // Given / When
   const type = run((write) => write('workflows/w.js', "export const meta = { name: 'w' }\nawait agent('x', { agentType: 'ghost' })\n"));
+  // Then
   assert.equal(type.code, 1);
   assert.match(type.out, /agentType 'ghost' is neither agents\/ghost\.md nor a built-in agent/);
   const builtin = run((write) => write('workflows/w.js', "export const meta = { name: 'w' }\nawait agent('x', { agentType: 'Explore', model: 'haiku' })\n"));
@@ -112,17 +131,22 @@ test('a workflow agentType must be an agent or a built-in; model must be allowed
   assert.match(model.out, /model 'gpt-9' is not one of/);
 });
 
-test('agent body line cap: front matter is not counted, the 111th body line fails', () => {
+test('given an agent body of 110 or 111 lines, when the validator runs, then front matter is not counted and the 111th body line fails', () => {
+  // Given
   const agent = (n) => (write, read) => write(AGENT, `${read(AGENT).split('\n---\n')[0]}\n---\n${'x\n'.repeat(n)}`);
+  // When
   const ok = run(agent(110));
+  // Then
   assert.doesNotMatch(ok.out, /line cap for a subagent body/, ok.out);
   const over = run(agent(111));
   assert.equal(over.code, 1);
   assert.match(over.out, /agents\/helper\.md: 111 lines against the 110-line cap for a subagent body/);
 });
 
-test('byte caps: output style, SKILL.md and agents fail over the cap, CLAUDE.md only warns', () => {
+test('given files over their byte caps, when the validator runs, then output style, SKILL.md and agents fail and CLAUDE.md only warns', () => {
+  // Given / When
   const style = run((write) => write('output-styles/s.md', `# s\n${'x'.repeat(3100)}\n`));
+  // Then
   assert.equal(style.code, 1);
   assert.match(style.out, /output-styles\/s\.md: \d+ bytes against the 3000-byte cap/);
   const skill = run((write, read) => write(SKILL, `${read(SKILL)}\n${('x'.repeat(99) + '\n').repeat(75)}`));
@@ -140,9 +164,12 @@ test('byte caps: output style, SKILL.md and agents fail over the cap, CLAUDE.md 
   assert.match(claude.out, /CLAUDE\.md: \d+ bytes against the 2750-byte cap/);
 });
 
-test('a skill table template fails past 8 columns or with ~; outside a markdown fence it does not', () => {
+test('given a skill table template, when the validator runs, then it fails past 8 columns or with ~ inside a markdown fence and not outside one', () => {
+  // Given
   const template = (row) => `\n\`\`\`markdown\n${row}\n\`\`\`\n`;
+  // When
   const wide = run((write, read) => write(SKILL, read(SKILL) + template(`|${' a |'.repeat(9)}`)));
+  // Then
   assert.equal(wide.code, 1);
   assert.match(wide.out, /skills\/demo\/SKILL\.md:\d+: table template has 9 columns/);
   const tilde = run((write, read) => write(SKILL, read(SKILL) + template('| 1 | ~2h | ~3m |')));
@@ -152,9 +179,12 @@ test('a skill table template fails past 8 columns or with ~; outside a markdown 
   assert.equal(prose.code, 0, prose.out);
 });
 
-test('the listed description budget fails over 8000 chars; hidden skills do not count', () => {
+test('given descriptions over the listed budget, when the validator runs, then it fails over 8000 chars and hidden skills do not count', () => {
+  // Given
   const longAgent = (read) => read(AGENT).replace(/description: >-\n.*\n/, `description: ${'Use when words. '.repeat(540)}\n`);
+  // When
   const over = run((write, read) => write(AGENT, longAgent(read)));
+  // Then
   assert.equal(over.code, 1);
   assert.match(over.out, /listed skills \+ agents total \d+ chars against a budget of 8000/);
   const word = 'x'.repeat(70);
@@ -164,16 +194,21 @@ test('the listed description budget fails over 8000 chars; hidden skills do not 
   assert.match(perDescription.out, /description is \d+ chars; keep it under 1536/);
 });
 
-test('skill bodies are counted in words, listed apart from paths-gated and user-invoked ones', () => {
+test('given the base kit, when the validator runs, then skill bodies are counted in words, listed apart from paths-gated and user-invoked ones', () => {
+  // Given / When
   const { code, out } = run();
+  // Then
   assert.equal(code, 0, out);
   assert.match(out, /skill bodies: listed \d+ words \(\d+ skills\), hidden \d+ words \(\d+ skills\); largest: /);
 });
 
-test('a SessionStart hook injecting more than 1500 bytes warns; a short one does not', () => {
+test('given SessionStart hooks injecting more or fewer than 1500 bytes, when the validator runs, then the big one warns and the short one does not', () => {
+  // Given
   const settings = (file) => JSON.stringify({ hooks: { SessionStart: [{ hooks: [{ type: 'command', command: 'node', args: ['-e', `require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/${file}')`] }] }] } });
   const emit = (n) => `process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'SessionStart', additionalContext: 'x'.repeat(${n}) } }))\n`;
+  // When
   const big = run((write) => { write('hooks/brief.js', emit(1600)); write('settings.json', settings('brief.js')); });
+  // Then
   assert.equal(big.code, 0, big.out);
   assert.match(big.out, /SessionStart hooks inject 1600 bytes .*over the 1500-byte cap/);
   const small = run((write) => { write('hooks/brief.js', emit(200)); write('settings.json', settings('brief.js')); });
@@ -182,14 +217,17 @@ test('a SessionStart hook injecting more than 1500 bytes warns; a short one does
   assert.match(small.out, /session start: 200 bytes injected/);
 });
 
-test('a 12-word passage shared by two assets warns; 11 words or a byte-identical contract copy do not', () => {
+test('given a passage shared by two assets, when the validator runs, then 12 words warn while 11 words or a byte-identical contract copy do not', () => {
+  // Given
   const twelve = 'the cache key carries the tenant id so two tenants never share one entry';
   const words = twelve.split(' ');
   const rule = (text) => `---\npaths: "**/*.cs"\n---\n# r\n\n- ${text}\n`;
+  // When
   const dup = run((write, read) => {
     write(SKILL, `${read(SKILL)}\n${twelve}.\n`);
     write('rules/r.md', rule(`${twelve}.`));
   });
+  // Then
   assert.equal(dup.code, 0, dup.out);
   assert.match(dup.out, /rules\/r\.md:6: shares a 1\d-word passage with skills\/demo\/SKILL\.md:\d+ "the cache key carries/);
   const eleven = words.slice(0, 11).join(' ');
@@ -208,13 +246,16 @@ test('a 12-word passage shared by two assets warns; 11 words or a byte-identical
   assert.doesNotMatch(exempt.out, /shares a \d+-word passage/);
 });
 
-test('duplicates count only between files that can share a context', () => {
+test('given duplicated passages in different asset pairs, when the validator runs, then they count only between files that can share a context', () => {
+  // Given
   const twelve = 'the cache key carries the tenant id so two tenants never share one entry';
   const agent = (name, extra = '', body = '') => `---\nname: ${name}\ndescription: >-\n  Use when a fixture needs the ${name} agent to return a short answer for the caller.\ntools: Read\nmodel: sonnet\n${extra}---\n\n# ${name}\n\n**Contract.** An answer · never edits · English.\n\n${body}\n\n## Output\n\nOne line.\n`;
   const rule = `---\npaths: "**/*.cs"\n---\n# r\n\n- ${twelve}.\n`;
   const shared = /shares a \d+-word passage/;
   const [A, B] = ['a', 'b'].map((n) => ['agents', `${n}.md`].join('/'));
+  // When
   const agents = run((write) => { write(A, agent('a', '', `${twelve}.`)); write(B, agent('b', '', `${twelve}.`)); });
+  // Then
   assert.doesNotMatch(agents.out, shared, 'two agents never share a context');
   const skill = run((write, read) => { write(SKILL, `${read(SKILL)}\n${twelve}.\n`); write(A, agent('a', '', `${twelve}.`)); });
   assert.doesNotMatch(skill.out, shared, 'an agent and a main-session skill do not share a context');
@@ -226,8 +267,10 @@ test('duplicates count only between files that can share a context', () => {
   assert.doesNotMatch(omitted.out, shared, 'omitClaudeMd keeps CLAUDE.md and rules out of the agent');
 });
 
-test('an asset naming Italian as an output language fails; the bare word passes', () => {
+test('given an asset naming Italian as an output language, when the validator runs, then it fails while the bare word passes', () => {
+  // Given / When
   const bad = run((write, read) => write(SKILL, `${read(SKILL)}\nReply in Italian.\n`));
+  // Then
   assert.equal(bad.code, 1);
   assert.match(bad.out, /skills\/demo\/SKILL\.md:\d+: names Italian as an output language/);
   const wrapped = run((write, read) => write(AGENT, `${read(AGENT)}\nreport in\nItalian, paths verbatim.\n`));

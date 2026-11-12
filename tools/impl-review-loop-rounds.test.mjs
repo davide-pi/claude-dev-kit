@@ -226,7 +226,7 @@ test('script: a coverage rerun after a fix that closed F1 is not a fix round: it
 
 test('script: a fix round that closes one finding and a verify that turned green are progress, never a stall', async () => {
   const noVerdict = (n) => review([], [reviewsNew(n).found[0]]);
-  const { out } = await run({ ...ARGS, verify: 'node --test' }, [review([], [finding()]), noVerdict(2), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [impl({ verify: FAIL }), impl(), impl()]);
+  const { out } = await run(ARGS, [review([], [finding()]), noVerdict(2), review([{ id: 'F1', status: 'closed' }, { id: 'F2', status: 'closed' }])], [impl({ verify: FAIL }), impl(), impl()]);
   assert.equal(out.status, 'OK');                                              // V1 sent with F1: round 2's F1 got no verdict, yet the green verify is progress
   assert.deepEqual(out.roundLog.map(r => r.toFix), [['V1', 'F1'], ['F2'], []]);
 });
@@ -250,7 +250,7 @@ test('script: every STALL carries the finding history', async () => {
   assert.deepEqual(noReviewer.out.stall.history, []);
   const stalled = await run(ARGS, [review([], [finding()]), review([{ id: 'F1', status: 'open' }])]);
   assert.equal(stalled.out.stall.history[0].id, 'F1');
-  const red = await run({ ...ARGS, verify: 'node --test' }, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL })]);
+  const red = await run(ARGS, [review([])], [impl({ verify: FAIL }), impl({ verify: FAIL })]);
   assert.deepEqual(red.out.stall.history.map(h => h.id), ['V1']);
   assert.equal(red.out.status === 'STALL' && Array.isArray(red.out.stall.history), true);
 });

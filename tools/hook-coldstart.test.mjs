@@ -69,7 +69,8 @@ const payload = ({ event, tool }, cwd) => JSON.stringify({
   tool_name: tool, tool_input: { command: 'echo coldstart', file_path: join(cwd, 'x.txt') }, source: 'startup',
 });
 
-test('every wired node hook starts within the machine baseline plus COLDSTART_NODE_MS', { skip: SKIP }, async () => {
+test('given every node hook wired in settings.json, when each is started cold, then it starts within the machine baseline plus COLDSTART_NODE_MS', { skip: SKIP }, async () => {
+  // Given
   const work = mkdtempSync(join(tmpdir(), 'hook-coldstart-'));
   const config = join(work, 'config');
   const cwd = join(work, 'cwd');
@@ -92,6 +93,8 @@ test('every wired node hook starts within the machine baseline plus COLDSTART_NO
     const baseline = measureBaseline();
     const hooks = wiredHooks();
     assert.ok(hooks.length > 0, 'no node hook found in settings.json');
+
+    // When
     const slow = [];
     for (const hook of hooks) {
       const input = payload(hook, cwd);
@@ -103,7 +106,9 @@ test('every wired node hook starts within the machine baseline plus COLDSTART_NO
       if (ms > limit) { limit = measureBaseline() + NODE_MS; ms = measure(); }
       if (ms > limit) slow.push(`${hook.name} ${Math.round(ms)} ms > ${Math.round(limit)}`);
     }
-    assert.deepEqual(slow, [], `slow hooks (median of ${RUNS}; threshold = node baseline + ${NODE_MS} ms): ${slow.join(', ')}`);
+
+    // Then
+    assert.deepEqual(slow, [],`slow hooks (median of ${RUNS}; threshold = node baseline + ${NODE_MS} ms): ${slow.join(', ')}`);
   } finally {
     server.close();
     rmSync(work, { recursive: true, force: true });
@@ -112,10 +117,15 @@ test('every wired node hook starts within the machine baseline plus COLDSTART_NO
 
 const hasPwsh = !SKIP && spawnSync('pwsh', ['-NoProfile', '-Command', 'exit'], { stdio: 'ignore', windowsHide: true }).status === 0;
 
-test('the pwsh floor every pwsh hook pays stays under COLDSTART_PWSH_MS', { skip: SKIP || !hasPwsh }, () => {
+test('given a bare pwsh start, when it is measured, then the floor every pwsh hook pays stays under COLDSTART_PWSH_MS', { skip: SKIP || !hasPwsh }, () => {
+  // Given
   const args = ['-NoProfile', '-NonInteractive', '-Command', 'exit'];
   const measure = () => median(Array.from({ length: RUNS }, () => timed('pwsh', args, {})));
+
+  // When
   let ms = measure();
   if (ms > PWSH_MS) ms = measure();  // a load spike from parallel test files: fail only when slow twice
+
+  // Then
   assert.ok(ms <= PWSH_MS, `pwsh start: median ${Math.round(ms)} ms over the threshold ${PWSH_MS} ms`);
 });

@@ -26,39 +26,52 @@ const run = (input) => {
 const spawn = (tool_input) => run({ hook_event_name: 'PreToolUse', tool_name: 'Agent', tool_input });
 const decision = (out) => JSON.parse(out).hookSpecificOutput;
 
-test('no subagent_type is denied', () => {
+test('given a spawn with no subagent_type, when the guard runs, then it is denied', () => {
+  // Given / When
   const d = decision(spawn({ prompt: 'x' }));
+
+  // Then
   assert.equal(d.permissionDecision, 'deny');
   assert.match(d.permissionDecisionReason, /Name the agent type/);
 });
 
-test('Plan without a model is denied', () => {
+test('given a Plan spawn without a model, when the guard runs, then it is denied', () => {
+  // Given / When
   const d = decision(spawn({ subagent_type: 'Plan', prompt: 'x' }));
+
+  // Then
   assert.equal(d.permissionDecision, 'deny');
   assert.match(d.permissionDecisionReason, /Plan needs a model/);
 });
 
-test('general-purpose and claude without a model pass in silence: CLAUDE_CODE_SUBAGENT_MODEL covers them', () => {
+test('given general-purpose and claude spawns without a model, when the guard runs, then they pass in silence: CLAUDE_CODE_SUBAGENT_MODEL covers them', () => {
   for (const subagent_type of ['general-purpose', 'claude']) {
+    // Given / When / Then
     assert.equal(spawn({ subagent_type, prompt: 'x' }), '');
   }
 });
 
-test('general-purpose with a model passes in silence', () => {
+test('given a general-purpose spawn with a model, when the guard runs, then it passes in silence', () => {
+  // Given / When / Then
   assert.equal(spawn({ subagent_type: 'general-purpose', model: 'sonnet', prompt: 'x' }), '');
 });
 
-test('a kit agent passes in silence', () => {
+test('given a kit agent spawn, when the guard runs, then it passes in silence', () => {
+  // Given / When / Then
   assert.equal(spawn({ subagent_type: 'implementer', prompt: 'x' }), '');
   assert.equal(spawn({ subagent_type: 'Plan', model: 'sonnet', prompt: 'x' }), '');
 });
 
-test('the Plan deny names the L challenger exception', () => {
+test('given a Plan spawn without a model, when the guard denies it, then the reason names the L challenger exception', () => {
+  // Given / When / Then
   assert.match(decision(spawn({ subagent_type: 'Plan', prompt: 'x' })).permissionDecisionReason, /Plan needs a model: sonnet \(opus only for the L challenger, deliver analysis\.md\)\./);
 });
 
-test('effort max is denied unless the description or prompt says owner asked', () => {
+test('given effort max, when the guard runs, then it is denied unless the description or prompt says owner asked', () => {
+  // Given / When
   const d = decision(spawn({ subagent_type: 'analyst', effort: 'max', prompt: 'x' }));
+
+  // Then
   assert.equal(d.permissionDecision, 'deny');
   assert.match(d.permissionDecisionReason, /effort max only when the owner asked for it/);
   assert.equal(decision(spawn({ subagent_type: 'analyst', effort: 'MAX', prompt: 'x' })).permissionDecision, 'deny');
@@ -67,14 +80,18 @@ test('effort max is denied unless the description or prompt says owner asked', (
   assert.equal(spawn({ subagent_type: 'analyst', effort: 'high', prompt: 'x' }), '');
 });
 
-test('a fork is denied unless the prompt states parent context:', () => {
+test('given a fork spawn, when the guard runs, then it is denied unless the prompt states parent context:', () => {
+  // Given / When
   const d = decision(spawn({ subagent_type: 'fork', prompt: 'x' }));
+
+  // Then
   assert.equal(d.permissionDecision, 'deny');
   assert.match(d.permissionDecisionReason, /a fork only when the parent context is needed/);
   assert.equal(spawn({ subagent_type: 'fork', prompt: 'parent context: the open diff' }), '');
 });
 
-test('malformed or empty input is silent', () => {
+test('given malformed or empty input, when the guard runs, then it is silent', () => {
+  // Given / When / Then
   assert.equal(run('not json'), '');
   assert.equal(run(''), '');
   assert.equal(run('{"tool_input":"x"}'), '');

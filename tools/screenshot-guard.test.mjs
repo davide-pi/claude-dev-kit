@@ -23,15 +23,19 @@ const run = (input) => {
 };
 const call = (tool_name, tool_input) => run(JSON.stringify({ hook_event_name: 'PreToolUse', tool_name, tool_input }));
 
-test('a screenshot with no max_dim is denied, pointing at max_dim', () => {
+test('given a screenshot call with no max_dim, when the guard runs, then it is denied, pointing at max_dim', () => {
   for (const input of [{}, { full: true }]) {
+    // Given / When
     const d = call(SHOT, input);
+
+    // Then
     assert.equal(d?.permissionDecision, 'deny');
     assert.match(d.permissionDecisionReason, /max_dim: 1280/);
   }
 });
 
-test('a screenshot with max_dim, another browser-use tool or a bad payload pass', () => {
+test('given a screenshot with max_dim, another browser-use tool or a bad payload, when the guard runs, then they pass', () => {
+  // Given / When / Then
   assert.equal(call(SHOT, { max_dim: 1280 }), null);
   assert.equal(call(SHOT, { max_dim: 1800, full: true }), null);
   assert.equal(call('mcp__plugin_browser-use_browser-use__browser_exec', { code: 'x' }), null);

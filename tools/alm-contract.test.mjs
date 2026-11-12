@@ -39,27 +39,35 @@ const FULL_PR = 'az repos pr create --org https://dev.azure.com/<org> --project 
   + '--source-branch feature/x --target-branch main --title "Titolo" --work-items 4211 '
   + '--squash true --delete-source-branch true';
 
-test('a compliant PR create passes', () => {
+test('given compliant PR create commands, when the guard runs them, then they pass', () => {
+  // Given / When / Then
   assert.equal(run(FULL_PR).decision, 'approve');
   assert.equal(run(FULL_PR.replace('--squash true', '--squash')).decision, 'approve', 'bare boolean flag');
   assert.equal(run(FULL_PR.replace('--work-items 4211', '--work-items=4211')).decision, 'approve');
 });
 
-test('PR create without --work-items asks', () => {
+test('given a PR create without --work-items, when the guard runs it, then it asks naming --work-items', () => {
+  // Given / When
   const { decision, reason } = run(FULL_PR.replace(' --work-items 4211', ''));
+
+  // Then
   assert.equal(decision, 'ask');
   assert.match(reason, /--work-items/);
   assert.doesNotMatch(reason, /squash/);
   assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft false`).decision, 'ask');
 });
 
-test('a draft PR create may open before its work item exists', () => {
+test('given a draft PR create without a work item, when the guard runs it, then it may open, but an unreadable draft value still asks', () => {
+  // Given / When / Then
   assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft true`).decision, 'approve');
   assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft $draft`).decision, 'ask', 'an unreadable value is no draft');
 });
 
-test('PR create without squash or delete asks, naming what is missing', () => {
+test('given a PR create without squash or delete, when the guard runs it, then it asks naming what is missing', () => {
+  // Given / When
   let r = run(FULL_PR.replace(' --squash true', ''));
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /--squash true/);
   r = run(FULL_PR.replace('--delete-source-branch true', '--delete-source-branch false'));
@@ -67,15 +75,21 @@ test('PR create without squash or delete asks, naming what is missing', () => {
   assert.match(r.reason, /--delete-source-branch true/);
 });
 
-test('multi-line PR create (bash \\ and PowerShell backtick) keeps the later flags', () => {
+test('given a multi-line PR create (bash line continuation and PowerShell backtick), when the guard runs it, then the later flags are kept and it passes', () => {
+  // Given
   const bash = 'az repos pr create --title "T" \\\n  --work-items 4211 \\\n  --squash true --delete-source-branch true';
   const pwsh = 'az repos pr create --title "T" `\n  --work-items 4211 `\n  --squash true --delete-source-branch true';
+
+  // When / Then
   assert.equal(run(bash).decision, 'approve');
   assert.equal(run(pwsh, 'PowerShell').decision, 'approve');
 });
 
-test('completing a PR always asks, naming the missing flags when there are any; other updates pass', () => {
+test('given az repos pr update completing a PR, when the guard runs it, then it always asks, naming the missing flags, and other updates pass', () => {
+  // Given / When
   let r = run('az repos pr update --id 12 --status completed');
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /completes the PR/);
   assert.match(r.reason, /--squash true/);
@@ -89,7 +103,8 @@ test('completing a PR always asks, naming the missing flags when there are any; 
   assert.equal(run('az repos pr update --id 12 --auto-complete false').decision, 'approve');
 });
 
-test('gh pr merge asks, in any shell and chain; the other gh pr verbs pass', () => {
+test('given gh pr merge in any shell and chain and the other gh pr verbs, when the guard runs them, then merge asks and the others pass', () => {
+  // Given / When / Then
   for (const command of ['gh pr merge 12 --squash', 'gh pr merge --admin --squash --delete-branch', 'git push && gh pr merge 12']) {
     const r = run(command);
     assert.equal(r.decision, 'ask', command);
@@ -101,48 +116,65 @@ test('gh pr merge asks, in any shell and chain; the other gh pr verbs pass', () 
   }
 });
 
-test('work-item create without --assigned-to asks; with it passes', () => {
+test('given a work-item create with and without --assigned-to, when the guard runs it, then it asks without and passes with', () => {
+  // Given
   const base = 'az boards work-item create --type Task --title "Analisi" --project P';
+
+  // When
   const r = run(base);
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /--assigned-to/);
   assert.equal(run(`${base} --assigned-to someone@example.com`).decision, 'approve');
   assert.equal(run(`${base} --assigned-to ""`).decision, 'ask', 'empty assignee');
 });
 
-test('CompletedWork written outside worklog-push.ps1 asks', () => {
+test('given CompletedWork written outside worklog-push.ps1, when the guard runs it, then it asks', () => {
+  // Given
   const write = 'az boards work-item update --id 7 --fields "Microsoft.VSTS.Scheduling.CompletedWork=3"';
+
+  // When
   const r = run(write);
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /CompletedWork/);
   assert.equal(run('az boards work-item update --id 7 --fields "System.Title=x"').decision, 'approve');
 });
 
-test('CompletedWork through worklog-push.ps1, or only read, passes', () => {
+test('given CompletedWork written through worklog-push.ps1 or only read, when the guard runs it, then it passes', () => {
+  // Given / When / Then
   assert.equal(run('pwsh -NoProfile -File ~/.claude/skills/worklog/worklog-push.ps1 -Id 7 -CompletedWork 3').decision, 'approve');
   assert.equal(run('az boards query --wiql "SELECT [Microsoft.VSTS.Scheduling.CompletedWork] FROM WorkItems"').decision, 'approve');
   assert.equal(run('az boards work-item show --id 7 --fields Microsoft.VSTS.Scheduling.CompletedWork').decision, 'approve');
 });
 
-test('az devops configure --defaults asks; listing the config passes', () => {
+test('given az devops configure --defaults and --list, when the guard runs them, then the defaults ask and the listing passes', () => {
+  // Given / When / Then
   assert.equal(run('az devops configure --defaults organization=https://dev.azure.com/<org>').decision, 'ask');
   assert.equal(run('az devops configure -d project=P').decision, 'ask');
   assert.equal(run('az devops configure --list').decision, 'approve');
 });
 
-test('chained commands are checked per segment', () => {
+test('given chained commands with a non-compliant PR create, when the guard runs them, then each segment is checked and it asks', () => {
+  // Given / When
   const r = run(`git push -u origin feature/x && az repos pr create --title "T" --squash true --delete-source-branch true`);
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /--work-items/);
 });
 
-test('unrelated az and non-az commands pass untouched', () => {
+test('given unrelated az and non-az commands, when the guard runs them, then they pass untouched', () => {
+  // Given / When / Then
   for (const command of ['az repos pr list --status active', 'az account show', 'echo "az repos pr create"', 'ls -la']) {
     assert.equal(run(command).decision, 'approve', command);
   }
 });
 
-test('az accepts unique flag prefixes and unreadable values: none of them slips past the completion ask', () => {
+test('given az flag prefixes and unreadable values, when the guard runs a PR update, then none slips past the completion ask', () => {
+  // Given / When / Then
   for (const command of [
     'az repos pr update --id 12 --stat completed',
     'az repos pr update --id 12 --status=completed',
@@ -160,15 +192,19 @@ test('az accepts unique flag prefixes and unreadable values: none of them slips 
   }
 });
 
-test('a PR created to complete on its own asks, with or without the other flags', () => {
+test('given a PR created to complete on its own, when the guard runs it, then it asks with or without the other flags', () => {
+  // Given / When
   const r = run(`${FULL_PR} --auto-complete true`);
+
+  // Then
   assert.equal(r.decision, 'ask');
   assert.match(r.reason, /complete on its own/);
   assert.equal(run(`${FULL_PR} --auto true`).decision, 'ask', 'unique prefix');
   assert.equal(run(`${FULL_PR} --auto-complete false`).decision, 'approve');
 });
 
-test('an az or gh write nested in a shell wrapper is read like a bare one', () => {
+test('given an az or gh write nested in a shell wrapper, when the guard runs it, then it is read like a bare one', () => {
+  // Given / When / Then
   assert.equal(run('pwsh -NoProfile -c "az repos pr update --id 12 --status completed"').decision, 'ask');
   assert.equal(run("bash -c 'az repos pr update --id 12 --status completed'", 'Bash').decision, 'ask');
   assert.equal(run('pwsh -c "gh pr merge 12 --squash"').decision, 'ask');

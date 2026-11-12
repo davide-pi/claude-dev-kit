@@ -32,25 +32,36 @@ const perimeter = (cwd, ...args) => spawnSync('pwsh', ['-NoProfile', '-File', SC
 const sandbox = realpathSync(mkdtempSync(join(tmpdir(), 'perim-')));
 process.on('exit', () => { try { rmSync(sandbox, { recursive: true, force: true }); } catch { /* tmp */ } });
 
-test('writes the perimeter in the git dir, bound to the branch; -Close keeps the entries and closes it', { skip }, () => {
+test('given a repo on a branch, when files are given and then -Close, then the perimeter is written in the git dir bound to the branch and -Close keeps the entries and closes it', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
+
+  // When
   const r = perimeter(repo, '-Files', 'src/a.cs,src/Dto/, tests/**/A*.cs');
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   const file = join(repo, '.git', 'deliver', 'perimeter.md');
   const bytes = readFileSync(file);
   assert.notDeepEqual([...bytes.subarray(0, 3)], [0xef, 0xbb, 0xbf]);          // no BOM
   assert.match(bytes.toString('utf8'), /^branch: trunk\nstatus: active\nopened: \d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ\n- src\/a\.cs\n- src\/Dto\/\n- tests\/\*\*\/A\*\.cs\n$/);
+
+  // When / Then
   assert.equal(perimeter(repo, '-Close', '-NoFindings').status, 0);
   assert.match(readFileSync(file, 'utf8'), /^branch: trunk\nstatus: closed\nopened: \S+\n- src\/a\.cs\n- src\/Dto\/\n- tests\/\*\*\/A\*\.cs\n$/);
   assert.ok(!existsSync(join(repo, '.git', 'deliver', 'findings.jsonl')), '-NoFindings writes no log line');
-  // a new triage overwrites it
+
+  // When: a new triage overwrites it
   perimeter(repo, '-Files', 'only.cs');
+
+  // Then
   assert.match(readFileSync(file, 'utf8'), /^branch: trunk\nstatus: active\nopened: \S+\n- only\.cs\n$/);
 });
 
-test('-Close -FindingsLog appends one line (the log plus at, run, minutes, tokens) and closes; without it or -NoFindings exit 2, nothing closed', { skip }, () => {
+test('given an open perimeter, when -Close runs with -FindingsLog, then it appends one line (the log plus at, run, minutes, tokens) and closes; without it or -NoFindings it exits 2, nothing closed', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main4');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
@@ -58,15 +69,25 @@ test('-Close -FindingsLog appends one line (the log plus at, run, minutes, token
   const lines = join(repo, '.git', 'deliver', 'findings.jsonl');
   perimeter(repo, '-Files', 'a.cs');
   writeFileSync(file, readFileSync(file, 'utf8').replace(/opened: \S+/, 'opened: 2020-01-01T00:00:00Z'));
+
+  // When
   const bare = perimeter(repo, '-Close');
+
+  // Then
   assert.equal(bare.status, 2);
   assert.match(bare.stderr, /-FindingsLog/);
   assert.match(readFileSync(file, 'utf8'), /status: active/);
   assert.equal(perimeter(repo, '-Close', '-FindingsLog', 'not json').status, 2);
   assert.equal(perimeter(repo, '-Close', '-FindingsLog', '[1]').status, 2);
   assert.match(readFileSync(file, 'utf8'), /status: active/);
+
+  // Given
   const log = '{"size":"M","rounds":2,"findings":[{"category":"correctness","priority":"P2","path":"src/a.cs","closed":true}]}';
+
+  // When
   const r = perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-7', '-Tokens', '123456');
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   assert.match(readFileSync(file, 'utf8'), /status: closed/);
   const written = readFileSync(lines, 'utf8');
@@ -78,21 +99,29 @@ test('-Close -FindingsLog appends one line (the log plus at, run, minutes, token
   assert.equal(entry.tokens, 123456);
   assert.match(entry.at, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$/);
   assert.ok(entry.minutes > 1000000, `minutes since 2020: ${entry.minutes}`);
-  // no -Run, no -Tokens: those keys are absent; an empty findings array stays an array
+
+  // Given: no -Run, no -Tokens: those keys are absent; an empty findings array stays an array
   perimeter(repo, '-Files', 'a.cs');
+
+  // When
   perimeter(repo, '-Close', '-FindingsLog', '{"size":"S","rounds":1,"findings":[]}');
+
+  // Then
   const second = JSON.parse(readFileSync(lines, 'utf8').trim().split('\n')[1]);
   assert.deepEqual(second.findings, []);
   assert.ok(!('run' in second) && !('tokens' in second));
 });
 
-test('-Close twice with the same -Run appends one line; another run id appends again', { skip }, () => {
+test('given an open perimeter, when -Close runs twice with the same -Run and once with another, then the same run id appends one line and the other run id appends again', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main4b');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
   const lines = join(repo, '.git', 'deliver', 'findings.jsonl');
   perimeter(repo, '-Files', 'a.cs');
   const log = '{"size":"S","rounds":1,"findings":[]}';
+
+  // When / Then
   assert.equal(perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-9').status, 0);
   assert.equal(perimeter(repo, '-Close', '-FindingsLog', log, '-Run', 'run-9').status, 0);
   assert.equal(readFileSync(lines, 'utf8').trim().split('\n').length, 1);
@@ -100,7 +129,8 @@ test('-Close twice with the same -Run appends one line; another run id appends a
   assert.equal(readFileSync(lines, 'utf8').trim().split('\n').length, 2);
 });
 
-test('-LogRun appends a line and keeps the perimeter active; minutes count from the previous logged run; -Close then needs a run logged since opened', { skip }, () => {
+test('given an open perimeter, when -LogRun runs, then it appends a line and keeps the perimeter active, minutes count from the previous logged run, and -Close then needs a run logged since opened', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main5');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
@@ -108,10 +138,16 @@ test('-LogRun appends a line and keeps the perimeter active; minutes count from 
   const lines = join(repo, '.git', 'deliver', 'findings.jsonl');
   perimeter(repo, '-Files', 'a.cs');
   writeFileSync(file, readFileSync(file, 'utf8').replace(/opened: \S+/, 'opened: 2020-01-01T00:00:00Z'));
+
+  // When / Then
   assert.equal(perimeter(repo, '-Close').status, 2);                       // nothing logged yet
   assert.equal(perimeter(repo, '-LogRun', 'nope').status, 2);
   assert.equal(perimeter(repo, '-LogRun', '{"size":"S"}', '-Close').status, 2);
+
+  // When
   const first = perimeter(repo, '-LogRun', '{"size":"M","rounds":2,"findings":[]}', '-Run', 'r1', '-Tokens', '10');
+
+  // Then
   assert.equal(first.status, 0, first.stderr);
   assert.match(readFileSync(file, 'utf8'), /status: active/);
   const one = JSON.parse(readFileSync(lines, 'utf8').trim());
@@ -124,32 +160,47 @@ test('-LogRun appends a line and keeps the perimeter active; minutes count from 
   assert.equal(perimeter(repo, '-Close').status, 0);                       // a run was logged since opened
   assert.match(readFileSync(file, 'utf8'), /status: closed/);
   assert.equal(readFileSync(lines, 'utf8').trim().split('\n').length, 2);
-  // a new triage restarts: the old lines are older than the new opened, so -Close needs a new run again
+
+  // Given: a new triage restarts: the old lines are older than the new opened, so -Close needs a new run again
   perimeter(repo, '-Files', 'a.cs');
   writeFileSync(file, readFileSync(file, 'utf8').replace(/opened: \S+/, 'opened: 2999-01-01T00:00:00Z'));
+
+  // When / Then
   assert.equal(perimeter(repo, '-Close').status, 2);
 });
 
-test('in a linked worktree the file goes to that worktree\'s git dir, with its own branch', { skip }, () => {
+test('given a linked worktree, when files are given in it, then the file goes to that worktree\'s git dir, with its own branch', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main2');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
   const wt = join(sandbox, 'wt');
   git(repo, 'worktree', 'add', '-b', 'feat/x', wt);
+
+  // When
   const r = perimeter(wt, '-Files', 'src/a.cs');
+
+  // Then
   assert.equal(r.status, 0, r.stderr);
   const gitDir = git(wt, 'rev-parse', '--absolute-git-dir');
   assert.match(readFileSync(join(gitDir, 'deliver', 'perimeter.md'), 'utf8'), /^branch: feat\/x\nstatus: active\nopened: \S+\n- src\/a\.cs\n$/);
   assert.ok(!existsSync(join(repo, '.git', 'deliver', 'perimeter.md')));
 });
 
-test('usage errors exit 2: no entries, outside a repository, detached HEAD, nothing to close', { skip }, () => {
+test('given no entries, a directory outside a repository, a detached HEAD or nothing to close, when the perimeter script runs, then it exits 2', { skip }, () => {
+  // Given
   const repo = join(sandbox, 'main3');
   git(sandbox, 'init', '-b', 'trunk', repo);
   git(repo, 'commit', '--allow-empty', '-m', 'init');
+
+  // When / Then
   assert.equal(perimeter(repo).status, 2);
   assert.equal(perimeter(repo, '-Close').status, 2);
   assert.equal(perimeter(join(sandbox), '-Files', 'a.cs').status, 2);
+
+  // Given
   git(repo, 'checkout', '--detach');
+
+  // When / Then
   assert.equal(perimeter(repo, '-Files', 'a.cs').status, 2);
 });

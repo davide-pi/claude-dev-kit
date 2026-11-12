@@ -38,8 +38,11 @@ async function dryRun(args, handler = null) {
 
 const repos = (n) => Array.from({ length: n }, (_, i) => `C:\\ws\\r${i}`);
 
-test('the question is required', async () => {
+test('given no question, when the workflow runs, then it says the question is required and spawns nothing', async () => {
+  // Given / When
   const { out, spawned } = await dryRun({ repos: repos(2) });
+
+  // Then
   assert.match(out, /args\.question is required/);
   assert.equal(spawned.length, 0);
 });
@@ -59,45 +62,73 @@ test('given a list of repos, when the per-repo agents are spawned, then each run
   }
 });
 
-test('above 12 repositories it refuses and asks for explicit repos', async () => {
+test('given 13 repositories, when the workflow runs, then it refuses and asks for explicit repos', async () => {
+  // Given / When
   const { out, spawned } = await dryRun({ question: 'q', repos: repos(13) });
+
+  // Then
   assert.match(out, /above the cap of 12: pass repos explicitly/);
   assert.equal(spawned.length, 0);
 });
 
-test('duplicate repos are audited once', async () => {
+test('given duplicate repos, when the workflow runs, then each is audited once', async () => {
+  // Given / When
   const { spawned } = await dryRun({ question: 'q', repos: ['C:\\ws\\a', 'C:\\ws\\a\\', 'C:\\ws\\b'] });
+
+  // Then
   assert.equal(spawned.length, 2);
 });
 
-test('a null Discover is an error, an empty one is "no git repository"', async () => {
+test('given a Discover step that returns null, rejects or finds nothing, when the workflow runs, then null and rejection are an error and an empty list is "no git repository"', async () => {
+  // Given / When
   const failed = await dryRun({ question: 'q' }, (o) => (o.label === 'find the repositories' ? null : undefined));
+
+  // Then
   assert.match(failed.out, /discovery step failed: pass repos explicitly or retry/);
+
+  // Given / When
   const rejected = await dryRun({ question: 'q' }, (o) => { if (o.label === 'find the repositories') throw new Error('boom'); });
+
+  // Then
   assert.match(rejected.out, /discovery step failed/);
+
+  // Given / When
   const empty = await dryRun({ question: 'q' }, (o) => (o.label === 'find the repositories' ? { repos: [] } : undefined));
+
+  // Then
   assert.match(empty.out, /no git repository found/);
 });
 
-test('the same basename is disambiguated with the parent folder', async () => {
+test('given two repos with the same basename, when the workflow runs, then they are disambiguated with the parent folder', async () => {
+  // Given / When
   const { spawned, out } = await dryRun({ question: 'q', repos: ['C:\\ws\\x\\api', 'C:\\ws\\y\\api', 'C:\\ws\\web'] });
+
+  // Then
   assert.deepEqual(spawned.map((o) => o.label).sort(), ['web', 'x/api', 'y/api']);
   assert.match(out, /x\/api/);
 });
 
-test('a rejecting or null auditor is a gap, never clean', async () => {
+test('given one auditor that rejects and one that returns null, when the workflow runs, then each is a gap, never clean', async () => {
+  // Given / When
   const { out } = await dryRun({ question: 'q', repos: ['C:\\ws\\a', 'C:\\ws\\b'] },
     (o) => { if (o.label === 'a') throw new Error('boom'); return o.label === 'b' ? null : undefined; });
+
+  // Then
   assert.match(out, /Verificati senza rilievi\*\* \(0\)/);
   assert.match(out, /Lacune, non verificati\*\* \(2\)/);
 });
 
-test('hits are ranked by P1 count and evidence-less hits are dropped', async () => {
+test('given hits across repos, one without evidence, when the workflow runs, then repos are ranked by P1 count and evidence-less hits are dropped', async () => {
+  // Given
   const hit = (priority, evidence = 'line') => ({ location: 'a.cs:1', what: 'x', priority, evidence });
+
+  // When
   const { out } = await dryRun({ question: 'q', repos: ['C:\\ws\\low', 'C:\\ws\\high'] }, (o) => ({
     status: 'ISSUES', checked: 'c',
     hits: o.label === 'high' ? [hit('P1'), hit('P3', '')] : [hit('P3')],
   }));
+
+  // Then
   assert.ok(out.indexOf('| 1 | high |') > -1 && out.indexOf('| 2 | low |') > -1, out);
   assert.match(out, /Scartati 1 rilievi/);
 });

@@ -70,13 +70,15 @@ const accountKey = `${LONG}${LONG}==`;
 
 // ── True positives ────────────────────────────────────────────────────────────────────────────
 
-test('a provider token', () => {
+test('given content holding a provider token, when the hook scans it, then each is denied as a provider token', () => {
+  // Given / When / Then
   blocks(`const client = new Client("${providerToken}");`, /provider token/);
   blocks(`GH_TOKEN: ${patToken}`, /provider token/);
   blocks(`slackWebhookToken = "${slackToken}"`, /provider token/);
 });
 
-test('a cloud access key', () => {
+test('given content holding cloud access keys, when the hook scans it, then each is denied with its cloud-key reason', () => {
+  // Given / When / Then
   blocks(`aws_access_key_id = ${accessKeyId}`, /cloud access key id/);
   blocks(`  "GoogleMapsKey": "${cloudKey}"`, /cloud API key/);
   blocks(`AccountKey=${accountKey};EndpointSuffix=core.windows.net`, /cloud access key in a connection string/);
@@ -84,11 +86,13 @@ test('a cloud access key', () => {
   blocks(`ClientSecret=${LONG}`, /cloud access key in a connection string/);
 });
 
-test('an API-key-shaped provider secret', () => {
+test('given an API-key-shaped provider secret, when the hook scans it, then it is denied as an API-key-shaped string', () => {
+  // Given / When / Then
   blocks(`ANTHROPIC_API_KEY=${apiKey}`, /API-key-shaped string/);
 });
 
-test('a connection string carrying a password', () => {
+test('given a connection string carrying a password, when the hook scans it, then it is denied as a password in a connection string', () => {
+  // Given / When / Then
   blocks(
     '"Default": "Server=localhost,1433;Database=Sales;User Id=sa;Password=Str0ngLocalPass;"',
     /password in a connection string/,
@@ -96,18 +100,22 @@ test('a connection string carrying a password', () => {
   blocks('ConnectionStrings__Default=Host=db;Username=app;Pwd=Str0ngLocalPass', /password in a connection string/);
 });
 
-test('a private key block', () => {
+test('given a private key block, when the hook scans it, then it is denied as a private key block', () => {
+  // Given / When / Then
   blocks('-----BEGIN RSA PRIVATE KEY-----\nMIIEowIBAAKCAQEA\n-----END RSA PRIVATE KEY-----', /private key block/);
   blocks('-----BEGIN PRIVATE KEY-----', /private key block/);
   blocks('-----BEGIN OPENSSH PRIVATE KEY-----', /private key block/);
 });
 
-test('a signed token', () => {
+test('given a bearer JWT, when the hook scans it, then it is denied as a signed token', () => {
+  // Given / When / Then
   blocks(`Authorization: Bearer ${jwt}`, /signed token/);
 });
 
-test('an Edit is scanned on the text it introduces, not the text it removes', () => {
+test('given an Edit, when the hook scans it, then only the introduced text counts: a new secret is denied and a removed one is approved', () => {
+  // Given / When
   const { decision, reason } = edit(`var token = "${providerToken}";`);
+  // Then
   assert.equal(decision, 'deny');
   assert.match(reason, /provider token/);
   // The removed text is never the hook's business: taking a secret *out* must always be allowed.
@@ -123,56 +131,69 @@ test('an Edit is scanned on the text it introduces, not the text it removes', ()
   );
 });
 
-test('a MultiEdit is scanned on every edits[].new_string, never on old_string', () => {
+test('given a MultiEdit, when the hook scans it, then every new_string is checked and old_string never is', () => {
+  // Given
   const multi = (edits) => runRaw(JSON.stringify({
     tool_name: 'MultiEdit',
     tool_input: { file_path: 'src/App/Program.cs', edits },
   }));
+  // When
   const { decision, reason } = multi([
     { old_string: 'a', new_string: 'var a = 1;' },
     { old_string: 'b', new_string: `var token = "${providerToken}";` },
   ]);
+  // Then
   assert.equal(decision, 'deny');
   assert.match(reason, /provider token/);
   assert.equal(multi([{ old_string: `var token = "${providerToken}";`, new_string: 'var token = Read();' }]).decision, 'approve');
 });
 
-test('settings.json runs it on Write|Edit|MultiEdit|NotebookEdit and blocks when the script cannot run', () => {
+test('given settings.json, when the secret-scan hook entry is read, then it runs on Write|Edit|MultiEdit|NotebookEdit and blocks when the script cannot run', () => {
+  // Given
   const settings = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8'));
+  // When
   const hook = settings.hooks.PreToolUse
     .flatMap((g) => (g.hooks ?? []).map((h) => ({ matcher: g.matcher, ...h })))
     .find((h) => (h.args ?? []).join(' ').includes('secret-scan.js'));
+  // Then
   assert.equal(hook?.matcher, 'Write|Edit|MultiEdit|NotebookEdit');
   assert.equal(hook.onFailure, 'block');
   assert.ok(!(hook.args ?? []).join(' ').includes('catch'), 'no fail-open wrapper around the require');
 });
 
-test('a password in a URL', () => {
+test('given content with a password in a URL, when the hook scans it, then it is denied as a password in a URL', () => {
+  // Given / When / Then
   blocks(`DATABASE_URL=postgres://app:${PW}@db.internal:5432/sales`, /password in a URL/);
   blocks(`"repo": "https://deploy:${PW}@dev.azure.com/org/_git/repo"`, /password in a URL/);
 });
 
-test('a quoted secret in YAML or JSON', () => {
+test('given a quoted secret in YAML or JSON, when the hook scans it, then it is denied as a quoted secret value', () => {
+  // Given / When / Then
   blocks(`"password": "${PW}"`, /quoted secret value/);
   blocks(`  api_key: "${PW}"`, /quoted secret value/);
   blocks(`client_secret: '${PW}'`, /quoted secret value/);
   blocks(`{ "token": "${PW}" }`, /quoted secret value/);
 });
 
-test('a NotebookEdit is scanned on new_source', () => {
+test('given a NotebookEdit, when the hook scans it, then new_source is checked: a secret is denied naming the notebook and clean source is approved', () => {
+  // Given
   const notebook = (new_source) => runRaw(JSON.stringify({
     tool_name: 'NotebookEdit',
     tool_input: { notebook_path: 'analysis.ipynb', new_source },
   }));
+  // When
   const { decision, reason } = notebook(`client = Client("${providerToken}")`);
+  // Then
   assert.equal(decision, 'deny');
   assert.match(reason, /provider token/);
   assert.match(reason, /analysis\.ipynb/);
   assert.equal(notebook('import pandas as pd').decision, 'approve');
 });
 
-test('the message names the pattern and the line, and never echoes the whole secret', () => {
+test('given a write with a secret on line 3, when the hook denies it, then the message names the pattern and the line and never echoes the whole secret', () => {
+  // Given / When
   const { reason } = write(`# header\n# notes\nAPI_TOKEN=${providerToken}\n`);
+  // Then
   assert.match(reason, /line 3:/);
   assert.match(reason, /provider token/);
   assert.ok(!reason.includes(providerToken), 'the credential itself must not be echoed in full');
@@ -181,7 +202,8 @@ test('the message names the pattern and the line, and never echoes the whole sec
 
 // ── False positives: the half that decides whether the hook is bearable ───────────────────────
 
-test('a placeholder is not a credential', () => {
+test('given placeholder values, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   allows('"Default": "Server=localhost;Database=Sales;User Id=sa;Password=<your-password>;"');
   allows('Password=changeme');
   allows('Password=CHANGE_ME');
@@ -193,14 +215,16 @@ test('a placeholder is not a credential', () => {
   allows('"Password": ""');
 });
 
-test('an example value is not a credential', () => {
+test('given example values, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   allows('# Password=examplePassword123 (copy this file to appsettings.Development.json)');
   allows('Password=sample-password-value');
   allows('AccountKey=exampleAccountKeyValueGoesHere');
   allows('# e.g. Password=myPasswordSample', 'docs/setup.md');
 });
 
-test('a variable reference is not a credential', () => {
+test('given variable references instead of values, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   allows('$connection = "Server=db;Password=$env:DB_PASSWORD;"');
   allows('ConnectionStrings__Default=Server=db;Password=${DB_PASSWORD}');
   allows('connection = f"Host=db;Password={db_password}"');
@@ -213,7 +237,8 @@ test('a variable reference is not a credential', () => {
   allows('password: {{ .Values.db.password }}');
 });
 
-test('a detection pattern is not the thing it detects', () => {
+test('given detection patterns and grep recipes, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   // The exact shapes a scanner, a test and a grep recipe must be free to contain.
   allows('const LEAK = /\\b(?:password|pwd)\\s*=\\s*[^;\'"\\s|]{3,}/gi;');
   allows('grep -rn "Password=" ./src');
@@ -222,7 +247,8 @@ test('a detection pattern is not the thing it detects', () => {
   allows(`const fixture = "AKIA" + "${'ABCDEFGHIJKLMNOP'}";`);
 });
 
-test('a URL or a key with a reference, a mask or a short or empty value is not a credential', () => {
+test('given URLs and keys with a reference, a mask or a short or empty value, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   allows('DATABASE_URL=postgres://app:${DB_PASSWORD}@db.internal:5432/sales');
   allows('DATABASE_URL=postgres://app:$DB_PASSWORD@db.internal/sales');
   allows('DATABASE_URL=postgres://app:<password>@db.internal/sales');
@@ -239,8 +265,10 @@ test('a URL or a key with a reference, a mask or a short or empty value is not a
   allows('password: secretValue123');
 });
 
-test('a scanner file is skipped whole, or the hook would lock itself', () => {
+test('given a scanner file path, when the hook scans a token written to it, then it is approved while the same content in a normal file is denied', () => {
+  // Given
   const scanners = ['hooks/secret-scan.js', 'tools/secret-scan.test.mjs', 'tools/validate.mjs'];
+  // When / Then
   for (const file of scanners) {
     assert.equal(write(`const token = "${providerToken}";`, file).decision, 'approve', file);
   }
@@ -248,7 +276,8 @@ test('a scanner file is skipped whole, or the hook would lock itself', () => {
   assert.equal(write(`const token = "${providerToken}";`, 'src/App/Client.cs').decision, 'deny');
 });
 
-test('ordinary content stays silent', () => {
+test('given ordinary content, when the hook scans it, then it is approved', () => {
+  // Given
   const quiet = [
     '"Default": "Server=localhost,1433;Database=Sales;Trusted_Connection=True;TrustServerCertificate=True"',
     'public async Task<IActionResult> GetOrders(CancellationToken ct) => Ok(await _svc.List(ct));',
@@ -257,10 +286,12 @@ test('ordinary content stays silent', () => {
     'const id = "3fa85f64-5717-4562-b3fc-2c963f66afa6";',
     '## Setup\n\nRun `docker compose up -d`, then `dotnet ef database update`.',
   ];
+  // When / Then
   for (const content of quiet) allows(content);
 });
 
-test('anything unusable lets the write through rather than blocking the work', () => {
+test('given unusable input, when the hook runs, then the write is let through', () => {
+  // Given / When / Then
   assert.equal(runRaw('').decision, 'approve');
   assert.equal(runRaw('not json at all').decision, 'approve');
   assert.equal(runRaw('{}').decision, 'approve');
@@ -270,7 +301,8 @@ test('anything unusable lets the write through rather than blocking the work', (
 
 // ── Env-style names, YAML scalars, PowerShell variables, masked tokens, narrower exemptions ────
 
-test('an environment-style name with a prefix is read like the bare one', () => {
+test('given prefixed environment-style names holding a secret, when the hook scans them, then they are denied like the bare name', () => {
+  // Given / When / Then
   blocks(`DB_PASSWORD=${PW}`, /password in a connection string/);
   blocks(`MYSQL_ROOT_PASSWORD=${PW}`, /password in a connection string/);
   blocks(`AZURE_CLIENT_SECRET=${LONG}`, /cloud access key in a connection string/);
@@ -279,7 +311,8 @@ test('an environment-style name with a prefix is read like the bare one', () => 
   blocks(`  "db_password": "${PW}"`, /quoted secret value/);
 });
 
-test('an unquoted YAML scalar is a credential in a YAML file, not in code', () => {
+test('given an unquoted YAML scalar, when the hook scans it, then it is denied in a YAML file and approved in code or when it is a placeholder', () => {
+  // Given / When / Then
   for (const file of ['config/app.yml', 'deploy/values.yaml']) blocks(`  password: ${PW}`, /unquoted secret value in YAML/, file);
   blocks(`db:\n  db_password: ${PW}\n`, /in YAML/, 'compose.yml');
   allows(`  password: ${PW}`, 'src/App/Program.cs');
@@ -289,7 +322,8 @@ test('an unquoted YAML scalar is a credential in a YAML file, not in code', () =
   allows('  tokenUrl: https://login.example.com/oauth2/token', 'config/app.yml');
 });
 
-test('a PowerShell variable holding a literal secret is a credential', () => {
+test('given a PowerShell variable assigned a literal, when the hook scans it, then a secret literal is denied and references and non-secrets are approved', () => {
+  // Given / When / Then
   blocks(`$pw = "${PW}"`, /secret literal assigned to a variable/, 'scripts/deploy.ps1');
   blocks(`$dbPassword = '${PW}'`, /assigned to a variable/, 'scripts/deploy.ps1');
   blocks(`$env:X = 1; $apiToken = "${LONG}"`, /assigned to a variable/, 'scripts/deploy.ps1');
@@ -299,13 +333,15 @@ test('a PowerShell variable holding a literal secret is a credential', () => {
   ]) allows(line, 'scripts/deploy.ps1');
 });
 
-test('`$` is a hole only as an interpolation: a password may contain it', () => {
+test('given a password containing a dollar sign, when the hook scans it, then it is denied unless the dollar sign is an interpolation', () => {
+  // Given / When / Then
   blocks('Password=Pa$$w0rd9', /password in a connection string/);
   blocks('Password=Abc$def99', /password in a connection string/);
   for (const value of ['${DB_PASSWORD}', '$(Get-Secret db)', '$env:DB_PASSWORD', '$DB_PASSWORD', '$dbPassword']) allows(`Password=${value}`);
 });
 
-test('a provider token is caught on a line that looks like a pattern; the pattern itself is not', () => {
+test('given lines that look like a pattern, when the hook scans them, then a provider token on them is denied and the pattern itself is approved', () => {
+  // Given / When / Then
   blocks(`grep -rn "x" . # ${providerToken}`, /provider token/);
   blocks(`const re = /\bfoo\b/; const t = "${providerToken}";`, /provider token/);
   blocks(`rg -n "${accessKeyId}" .`, /cloud access key id/);
@@ -316,14 +352,16 @@ test('a provider token is caught on a line that looks like a pattern; the patter
   blocks(`Password=${PW} # not a grep`, /password in a connection string/);
 });
 
-test('a masked token or a bracketed hint is not a credential', () => {
+test('given masked tokens and bracketed hints, when the hook scans them, then they are approved', () => {
+  // Given / When / Then
   for (const line of [
     'token = "ghp_xxxxxxxxxxxx"', 'GH_TOKEN=ghp_************', 'key: AKIAXXXXXXXXXXXXXXXX', 'AWS_KEY=AKIA0000000000000000',
     'Authorization: Bearer <your password>', 'Password=<your password>', '"password": "<your password>"', 'xoxb-0000-0000-xxxxxxxx',
   ]) allows(line);
 });
 
-test('the scanner exemption covers code files only', () => {
+test('given a token written to a scanner path, when the hook scans it, then code files are approved and other file types are denied', () => {
+  // Given / When / Then
   // Paths are assembled: validate.mjs would otherwise want each of them to exist.
   const at = (dir, name) => `${dir}/${name}`;
   for (const file of [at('hooks', 'secret-scan.js'), at('tools', 'leak-check.mjs'), at('tools', 'scan-secrets.ps1'), at('tools', 'secret-scan.test.mjs')]) {
@@ -334,7 +372,8 @@ test('the scanner exemption covers code files only', () => {
   }
 });
 
-test('a cmdlet, a default dev account or an obvious fixture in a test file is not a credential', () => {
+test('given a cmdlet, a default dev account or an obvious test fixture, when the hook scans it, then they are approved while the same value elsewhere or a real-looking one in a test file is denied', () => {
+  // Given / When / Then
   // A PowerShell cmdlet is a call: `Password=Read-Host -AsSecureString`.
   allows('$cred = Password=Read-Host -AsSecureString', 'docs/certificate.md');
   // `guest` is RabbitMQ's built-in local account, documented everywhere.
