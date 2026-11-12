@@ -7,8 +7,11 @@ import { activeRun } from './workflow'
 
 /** Every limit a detector compares with, in one place. */
 export const THRESHOLDS = {
-  /** A subagent over this many new tokens, or over this percent of the session's cost. */
-  subagentTokens: 150_000,
+  /**
+   * A subagent over this cost in USD, or over this percent of the session's cost. Not its cumulative tokens: they grow with every call
+   * whatever the context, so a long implementer always crossed them (measured 2026-11: implementer p50 $0.45, p90 $1.37, max $2.07).
+   */
+  subagentUsd: 2,
   subagentCostPct: 40,
   /** Agent types that only read: Opus on one of them is a waste (a reviewer is left out: the kit puts one on Opus on purpose). */
   readOnlyAgents: ['Explore', 'investigator', 'ops-analyst', 'db-analyst'],
@@ -87,8 +90,9 @@ export function agentCosts(agents: readonly CockpitAgent[], events: readonly Coc
 
 export function detectHeavyAgents(agents: readonly AgentCost[], sessionUsd: number | undefined): Signal[] {
   return agents.flatMap((a): Signal[] => {
-    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * (a.usd ?? 0)) / sessionUsd > THRESHOLDS.subagentCostPct
-    return a.tokens > THRESHOLDS.subagentTokens || isShare ? [{ kind: 'heavyAgent', key: a.id, label: a.type, n: a.tokens }] : []
+    const usd = a.usd ?? 0
+    const isShare = sessionUsd !== undefined && sessionUsd > 0 && (100 * usd) / sessionUsd > THRESHOLDS.subagentCostPct
+    return usd > THRESHOLDS.subagentUsd || isShare ? [{ kind: 'heavyAgent', key: a.id, label: a.type, n: usd }] : []
   })
 }
 

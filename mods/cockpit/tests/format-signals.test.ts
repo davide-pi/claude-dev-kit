@@ -19,18 +19,46 @@ import {
 } from '../hooks/signals'
 import { emptyInsights } from '../hooks/insights'
 import { INITIAL } from '../hooks/state'
+import { setLang, t } from '../hooks/strings'
 import { NOW } from './format-fixtures'
 
 const agent = (id: string, type: string, tokens: number, usd: number, model = 'claude-sonnet-5-5') => ({ id, type, model, tokens, usd })
+/** 1M input tokens on Opus: $4, over the per-agent limit. */
+const OPUS_4_USD = { input: 1_000_000, output: 0, cacheRead: 0, cacheWrite: 0 }
 
-test('heavy agent: over 150k tokens, or over 40% of the session cost; at the limit it holds', () => {
-  expect(detectHeavyAgents([agent('a1', 'implementer', 150_000, 1)], 100)).toEqual([])
-  expect(detectHeavyAgents([agent('a1', 'implementer', 150_001, 1)], 100)).toEqual([{ kind: 'heavyAgent', key: 'a1', label: 'implementer', n: 150_001 }])
-  expect(detectHeavyAgents([agent('a2', 'reviewer', 1000, 40)], 100)).toEqual([])
-  expect(detectHeavyAgents([agent('a2', 'reviewer', 1000, 41)], 100)).toHaveLength(1)
-  // no session cost yet: only the tokens speak
-  expect(detectHeavyAgents([agent('a3', 'x', 1000, 5)], undefined)).toEqual([])
-  expect(detectHeavyAgents([agent('a3', 'x', 1000, 5)], 0)).toEqual([])
+test('heavyAgent: given an agent over $2 or over 40% of the session cost, when detected, then it fires with its cost; at either limit it holds', () => {
+  // Given / When / Then: the absolute cost
+  expect(detectHeavyAgents([agent('a1', 'implementer', 900_000, 2)], 100)).toEqual([])
+  expect(detectHeavyAgents([agent('a1', 'implementer', 1000, 2.01)], 100)).toEqual([{ kind: 'heavyAgent', key: 'a1', label: 'implementer', n: 2.01 }])
+  // the share of the session
+  expect(detectHeavyAgents([agent('a2', 'reviewer', 1000, 0.4)], 1)).toEqual([])
+  expect(detectHeavyAgents([agent('a2', 'reviewer', 1000, 0.41)], 1)).toHaveLength(1)
+  // no session cost yet: only the absolute cost speaks
+  expect(detectHeavyAgents([agent('a3', 'x', 1000, 1.5)], undefined)).toEqual([])
+  expect(detectHeavyAgents([agent('a3', 'x', 1000, 1.5)], 0)).toEqual([])
+  expect(detectHeavyAgents([agent('a3', 'x', 1000, 2.5)], undefined)).toHaveLength(1)
+})
+
+test('heavyAgent text: given a signal of $2.5, when written in English and Italian, then both name the cost in dollars with two decimals', () => {
+  // Given
+  const usd = 2.5
+  // When
+  setLang('it')
+  const it = t().signalText.heavyAgent('implementer', usd).what
+  setLang('en')
+  const en = t().signalText.heavyAgent('implementer', usd).what
+  // Then
+  expect(en).toBe('subagent implementer costs $2.50 or too much of the spend')
+  expect(it).toBe('il subagent implementer costa $2.50 o troppa parte della spesa')
+})
+
+test('heavyAgent: given an agent with many cumulative tokens but no cost, when detected, then it does not fire', () => {
+  // Given
+  const unpriced = { id: 'a4', type: 'implementer', tokens: 2_000_000 }
+  // When
+  const signals = detectHeavyAgents([unpriced], 100)
+  // Then
+  expect(signals).toEqual([])
 })
 
 test('opus on a read-only agent type: Explore and the other readers; Opus on a writer or a reviewer, or a reader on Sonnet, is fine', () => {
@@ -152,13 +180,13 @@ test('signalsOf: every detector from the snapshot alone; a quiet snapshot has no
     ...INITIAL,
     now: NOW + 2 * 60_000,
     cost: { usd: 10 },
-    agents: [{ id: 'a1', type: 'Explore', status: 'running' as const, startedAt: 0, tokens: 200_000, model: 'claude-opus-5-5' }],
+    agents: [{ id: 'a1', type: 'Explore', status: 'running' as const, startedAt: 0, tokens: 200_000, model: 'claude-opus-5-5', usage: OPUS_4_USD }],
     insights: { ...emptyInsights(), rounds: 3, reads: { '/w/a.ts': 4 }, failedCmds: { 'npm test': 2 } },
     ctxRounds: [10_000, 20_000, 30_000, 140_000],
     claudeState: { kind: 'waiting' as const, since: NOW },
   }
   expect(signalsOf(s).map(x => x.kind)).toEqual(['heavyAgent', 'opusReadOnly', 'reread', 'failedCommand', 'ctxGrowth', 'permissionWait'])
-  expect(Object.keys(THRESHOLDS)).toEqual(expect.arrayContaining(['subagentTokens', 'resultChars', 'rereads', 'failedCommands', 'coldCachePct', 'idleGapMs', 'ctxGrowth', 'doneClaims', 'workflowRound', 'permissionWaitMs']))
+  expect(Object.keys(THRESHOLDS)).toEqual(expect.arrayContaining(['subagentUsd', 'subagentCostPct','resultChars', 'rereads', 'failedCommands', 'coldCachePct', 'idleGapMs', 'ctxGrowth', 'doneClaims', 'workflowRound', 'permissionWaitMs']))
 })
 
 test('signalSeverity: a permission wait and a workflow stall block; failed command, context growth, heavy agent, workflow round and done claims warn; the rest is info', () => {
@@ -168,9 +196,9 @@ test('signalSeverity: a permission wait and a workflow stall block; failed comma
   expect([sev('reread'), sev('bigResult'), sev('opusReadOnly'), sev('coldAfterIdle')]).toEqual(['info', 'info', 'info', 'info'])
 })
 
-test('signalsOf: given agents of a workflow run on Opus and over the token limit, when read, then they raise heavyAgent but not opusReadOnly; the same agents outside a run raise both', () => {
+test('signalsOf: given agents of a workflow run on Opus and over the cost limit, when read, then they raise heavyAgent but not opusReadOnly; the same agents outside a run raise both', () => {
   // Given
-  const heavyOpus = (id: string, runId?: string) => ({ id, type: 'Explore', model: 'claude-opus-5-5', tokens: 200_000, status: 'running' as const, startedAt: 0, ...(runId !== undefined && { runId }) })
+  const heavyOpus = (id: string, runId?: string) => ({ id, type: 'Explore', model: 'claude-opus-5-5', tokens: 200_000, usage: OPUS_4_USD, status: 'running' as const, startedAt: 0, ...(runId !== undefined && { runId }) })
   const run = { runId: 'w1', agents: [{ id: 'a2', isDone: false }] }
   const inFlow = { ...INITIAL, now: NOW, agents: [heavyOpus('a1', 'w1')], workflowRun: run }
   const listedOnly = { ...INITIAL, now: NOW, agents: [heavyOpus('a2')], workflowRun: run }
