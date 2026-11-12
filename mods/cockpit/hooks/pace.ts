@@ -87,6 +87,9 @@ export const compactInstructions = (checkpoint: string): string =>
 export const resumePrompt = (checkpoint: string): string =>
   `The usage window has reset. Read the checkpoint at ${checkpoint} and check the real state (git status, the perimeter, the last gate) before you continue. When the work is finished, run pace-state.mjs --done for this session.`
 
+/** Whether `text` is a resume prompt the mod sent: the person did not type it. */
+export const isResumePrompt = (text: string): boolean => text.startsWith(resumePrompt('').split(' at ')[0] ?? '')
+
 // ── The effects: files, compaction, prompt ──
 
 // Per arming (its `armedAt`): the compactions vetoed, whether it compacted or resumed (so a mod file that failed to write never repeats either),

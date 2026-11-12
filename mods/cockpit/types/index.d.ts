@@ -169,6 +169,20 @@ export type CockpitLogEntry = {
   n?: number
   severity?: 'block' | 'warn' | 'info'
   tools?: Record<string, number>
+  /** `round`: the person's first prompt line (whitespace collapsed, at most 120 chars; a slash command `/name`). */
+  prompt?: string
+  /** `round`: the files the main loop edited. */
+  files?: string[]
+  /** `round`: the context percent at its end. */
+  ctxPct?: number
+  /** `round`: the chat marker the round's link scrolls to. */
+  anchor?: string
+  /** `round`: the permission waits (count, total ms, the newest ten). */
+  waits?: { n: number; ms: number; list?: { tool: string; ms: number }[] }
+  /** `round`: the main loop's failed tool calls (count, the newest ten with their error text). */
+  fails?: { n: number; list?: { tool: string; text: string }[] }
+  /** `commit`, `test`, `pr`: the id of the flow agent that made it; none for the main loop. `runId` then names its flow. */
+  agent?: string
 }
 
 /**
@@ -283,6 +297,15 @@ export type CockpitSnapshot = {
   sessionLog?: CockpitLogEntry[]
   /** The main loop's tool calls since the last round ended, by tool name: the next round entry takes them. Kept in the session data file. */
   roundTools?: Record<string, number>
+  /** The open round's first prompt line, the files the main loop edited, its failed calls and its permission waits: the next round entry takes them. Kept in the session data file. */
+  roundPrompt?: string
+  /** The chat marker placed when the open round began (a `$.ui.place` request id): the next round entry takes it as its `anchor`. */
+  roundAnchor?: string
+  roundFiles?: string[]
+  roundFails?: { n: number; list?: { tool: string; text: string }[] }
+  roundWaits?: { n: number; ms: number; list?: { tool: string; ms: number }[] }
+  /** The number of the last round that ended: the next round entry is this plus one. Kept in the session data file. */
+  roundSeq?: number
   /** The USD each agent type's finished agents cost, summed when each ended (the agent history is capped); kept in the session data file. */
   agentSpend?: Record<string, number>
   /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */

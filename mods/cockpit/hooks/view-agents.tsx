@@ -1,7 +1,7 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, FAMILY_SHORT, abbrevTokens, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
-import type { ModelFamily, Span } from './shared'
+import { COLORS, abbrevTokens, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
+import type { Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
 import { effortSpans } from './view-header'
@@ -128,10 +128,6 @@ export function pairRow(left: readonly Span[], right: readonly Span[], width: nu
   return [...l, sp(' '.repeat(width - spanWidth(l) - rightW)), ...right]
 }
 
-/** `left` and `right` as `pairRow` lays them when both fit `width`; the left alone, cut, when they do not. */
-export const fitPair = (left: readonly Span[], right: readonly Span[], width: number): Span[] =>
-  spanWidth(left) + 1 + spanWidth(right) <= width ? pairRow(left, right, width) : truncateSpans(left, width)
-
 /**
  * The rows under an agent's row in IN PROGRESS once it is expanded: the total tokens, what it was asked, the four counters, then the tool running
  * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
@@ -165,23 +161,4 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
 function wrapped(indent: string, label: readonly Span[], text: string, style: (t: string) => Span, width: number): Span[][] {
   const labelW = spanWidth(label)
   return wrapCells(text, Math.max(4, width - indent.length - labelW)).map((l, i) => [sp(indent), ...(i === 0 ? label : [sp(' '.repeat(labelW))]), style(l)])
-}
-
-/** Cheapest first (pricing.ts). */
-const COUNT_ORDER: { family: ModelFamily; color: string }[] = [
-  { family: 'haiku', color: COLORS.green },
-  { family: 'sonnet', color: COLORS.blue },
-  { family: 'opus', color: COLORS.amber },
-  { family: 'fable', color: COLORS.lavender },
-]
-
-export function modelCounts(list: readonly CockpitAgent[]): Span[] {
-  const out: Span[] = []
-  for (const { family, color } of COUNT_ORDER) {
-    const label = FAMILY_SHORT[family]
-    const n = list.filter(a => modelFamily(a.model) === family).length
-    if (out.length) out.push(sp(' '))
-    out.push(n > 0 ? sp(`${label} ×${n}`, color) : dim(`${label} ×0`))
-  }
-  return out
 }

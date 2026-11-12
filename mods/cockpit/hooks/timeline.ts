@@ -74,19 +74,45 @@ export function parseToolCounts(value: unknown): Record<string, number> | undefi
   return counts.length > 0 ? Object.fromEntries(counts) : undefined
 }
 
+/** The entries a round keeps of its waits and failed calls: the newest ten. */
+export const ROUND_LIST_KEEP = 10
+
+const isRecordOf = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
+
+/** The permission waits a round entry keeps (count, total ms, the newest ten); none for anything else. */
+export function parseWaits(value: unknown): CockpitLogEntry['waits'] {
+  if (!isRecordOf(value) || !isNum(value.n) || !isNum(value.ms)) return undefined
+  const list = Array.isArray(value.list)
+    ? value.list.flatMap((w: unknown) => (isRecordOf(w) && typeof w.tool === 'string' && isNum(w.ms) ? [{ tool: w.tool, ms: w.ms }] : [])).slice(-ROUND_LIST_KEEP)
+    : []
+  return { n: value.n, ms: value.ms, ...(list.length > 0 && { list }) }
+}
+
+/** The failed tool calls a round entry keeps (count, the newest ten with their error text); none for anything else. */
+export function parseFails(value: unknown): CockpitLogEntry['fails'] {
+  if (!isRecordOf(value) || !isNum(value.n)) return undefined
+  const list = Array.isArray(value.list)
+    ? value.list.flatMap((f: unknown) => (isRecordOf(f) && typeof f.tool === 'string' && typeof f.text === 'string' ? [{ tool: f.tool, text: f.text }] : [])).slice(-ROUND_LIST_KEEP)
+    : []
+  return { n: value.n, ...(list.length > 0 && { list }) }
+}
+
 /** The session log a data file keeps: the entries with a time and a known kind (the other fields only when they have their type), the newest `SESSION_LOG_KEEP`; none for anything else. */
 export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
   if (!Array.isArray(value)) return undefined
   const entries = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
-    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc } = v as Record<string, unknown>
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc, prompt, files, ctxPct, anchor, waits, fails, agent } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
     const counts = parseToolCounts(tools)
+    const parsedWaits = parseWaits(waits)
+    const parsedFails = parseFails(fails)
     return [{
       at,
       kind: kind as CockpitLogEntry['kind'],
       ...(typeof key === 'string' && { key }),
       ...(typeof runId === 'string' && { runId }),
+      ...(typeof agent === 'string' && { agent }),
       ...(typeof text === 'string' && { text }),
       ...(typeof desc === 'string' && { desc }),
       ...(isNum(usd) && { usd }),
@@ -99,6 +125,12 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
       ...(isNum(n) && { n }),
       ...(typeof severity === 'string' && SEVERITIES.includes(severity) && { severity: severity as CockpitLogEntry['severity'] }),
       ...(counts && { tools: counts }),
+      ...(typeof prompt === 'string' && { prompt }),
+      ...(Array.isArray(files) && files.every(f => typeof f === 'string') && { files: files as string[] }),
+      ...(isNum(ctxPct) && { ctxPct }),
+      ...(typeof anchor === 'string' && { anchor }),
+      ...(parsedWaits && { waits: parsedWaits }),
+      ...(parsedFails && { fails: parsedFails }),
     }]
   }).slice(-SESSION_LOG_KEEP)
   return entries.length > 0 ? entries : undefined
@@ -133,14 +165,22 @@ export const isCommitCommand = (cmd: string): boolean => COMMIT_COMMAND.test(cmd
  * The log entries a Bash call makes: a test run (ok or failed), a `git commit` that exited 0 (by its short hash), a pull request that was created (by its number).
  * A chain makes one entry per part, in this order; a failed commit or PR create makes none.
  */
-export function bashLog(call: { command: string; arg?: string; out: string; isOk: boolean; at: number; pr?: { number: number; title: string } }): CockpitLogEntry[] {
-  const hash = call.isOk && isCommitCommand(call.command) ? commitHash(call.out) : undefined
+export function bashLog(call: { command: string; arg?: string; out: string; isOk: boolean; at: number; pr?: { number: number; title: string }; flow?: { agent: string; runId: string } }): CockpitLogEntry[] {
+  const commit = call.isOk && isCommitCommand(call.command) ? commitInfo(call.out) : undefined
+  // a flow agent's call is its flow's: the entry names the agent and the run
+  const by = call.flow ? { runId: call.flow.runId, agent: call.flow.agent } : {}
   return [
-    ...(isTestCommand(call.command) ? [{ at: call.at, kind: 'test' as const, ...(call.arg !== undefined && { text: call.arg }), isFailed: !call.isOk }] : []),
-    ...(call.isOk && isCommitCommand(call.command) ? [{ at: call.at, kind: 'commit' as const, ...(hash !== undefined && { key: hash, text: hash }) }] : []),
-    ...(call.isOk && call.pr ? [{ at: call.at, kind: 'pr' as const, key: String(call.pr.number), text: call.pr.title }] : []),
+    ...(isTestCommand(call.command) ? [{ at: call.at, kind: 'test' as const, ...(call.arg !== undefined && { text: call.arg }), isFailed: !call.isOk, ...by }] : []),
+    ...(call.isOk && isCommitCommand(call.command) ? [{ at: call.at, kind: 'commit' as const, ...(commit !== undefined && { key: commit.hash, text: commit.subject === '' ? commit.hash : commit.subject }), ...by }] : []),
+    ...(call.isOk && call.pr ? [{ at: call.at, kind: 'pr' as const, key: String(call.pr.number), text: call.pr.title, ...by }] : []),
   ]
 }
 
-/** The short hash `git commit` prints (`[branch abc1234] subject`); none when the output has no such line. */
-export const commitHash = (out: string): string | undefined => /\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\]/.exec(out)?.[1]
+/** The short hash and the subject `git commit` prints (`[branch abc1234] subject`); none when the output has no such line. */
+export function commitInfo(out: string): { hash: string; subject: string } | undefined {
+  const found = /\[[^\]\s]+(?: \(root-commit\))? ([0-9a-f]{7,40})\][ \t]*([^\r\n]*)/.exec(out)
+  return found?.[1] === undefined ? undefined : { hash: found[1], subject: (found[2] ?? '').trim() }
+}
+
+/** The short hash `git commit` prints; none when the output has no such line. */
+export const commitHash = (out: string): string | undefined => commitInfo(out)?.hash

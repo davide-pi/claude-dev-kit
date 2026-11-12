@@ -34,6 +34,8 @@ export type PaneActions = {
   toggleOpen: (key: string) => void
   /** Gives a FATTO group an explicit state, kept when it is no longer the newest. */
   setGroupOpen: (key: string, isOpen: boolean) => void
+  /** Scrolls the chat to a round's marker (`anchor`); a refusal hides the link for the session. */
+  scrollTo: (anchor: string) => void
   /** Gives many FATTO groups and days one state in a single write. */
   setGroupsOpen: (keys: string[], isOpen: boolean) => void
 }

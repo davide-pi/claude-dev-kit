@@ -333,7 +333,7 @@ test('PR: one created in the session (gh pr create) is kept in the data file and
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter" --body "x"' })
   await $.tool.call({ tool: 'Bash', command: 'git status' }) // not a create: nothing
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).some(r => /^[├└] \d\d:\d\d ◆ PR #42 Add filter/.test(r))).toBe(true)
+  expect(rowTexts(await ui.drawn()).some(r => /^[├└] \d\d:\d\d \u{F04C2} PR #42 Add filter/u.test(r))).toBe(true)
   await ui.unmount()
   expect(await saved(clock, writes)).toEqual([{ number: 42, title: 'Add filter', url: GH_CREATED }])
 })

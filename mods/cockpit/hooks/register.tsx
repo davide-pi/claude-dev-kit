@@ -48,20 +48,22 @@ import {
   slowTick,
   startedCost,
 } from './refresh'
-import { PACE_TICK_MS, paceCheck } from './pace'
+import { PACE_TICK_MS, isResumePrompt, paceCheck } from './pace'
+import { nextRoundNumber, promptTitle, roundFields, withRoundFail, withRoundFile, withRoundPrompt, withRoundWait } from './round-capture'
 import { WORKING_MARGIN_MS } from './session'
 import { paneActions } from './pane-actions'
 import { usdOf } from './pricing'
 import { refreshGit } from './refresh-git'
 import { SESSION_ID, adoptSession, isOpen, sessionData, setOpen, withoutSession, writeState } from './session-data'
 import { INITIAL, PANE } from './state'
+import { markerRound, placeMarker } from './round-anchor'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { CENT } from './shared'
 import { bashLog, flowUsdIn, lastRoundFlowUsd, nextCompactKey, recordAgentEvent, recordLog, withRoundLastUsd } from './timeline'
 import { PANE_MAX_COLUMNS, paneView } from './view'
 import { addWorkflowAgent, agentRunId, endRun, recordAgentLog, finishWorkflowAgent, launchedRun, logRunChange, nameRun, runIdOf, touchRun } from './workflow'
-import { parseCreatedPr, upsertPr } from './work'
+import { editedPathOf, parseCreatedPr, upsertPr } from './work'
 
 // The clock tiers: fast for elapsed times, medium for git, slow for what moves rarely (and the state file's heartbeat).
 const FAST_MS = 2000
@@ -77,7 +79,7 @@ let mainTools: string[] = []
 let waits: { from: number; to: number }[] = []
 const WAITS_KEPT = 50
 // The asks a person has to answer, by the id of the tool call that raised them: from the `tool.check` verdict to the end of that call.
-const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined }>()
+const asks = new Map<string, { from: number; held: CockpitClaudeState | undefined; tool: string }>()
 
 const waitOverlap = (list: readonly { from: number; to: number }[], from: number, to: number): number =>
   list.reduce((sum, w) => sum + Math.max(0, Math.min(to, w.to) - Math.max(from, w.from)), 0)
@@ -91,7 +93,7 @@ async function endAsk($: EngineInterface, id: string): Promise<void> {
   const waitTo = await $.clock.now().catch(() => undefined)
   if (waitTo !== undefined) {
     waits = [...waits, { from: ask.from, to: waitTo }].slice(-WAITS_KEPT)
-    await patch($, s => ({ ...s, insights: recordWait(s.insights, waitTo - ask.from) })).catch(() => undefined)
+    await patch($, s => withRoundWait({ ...s, insights: recordWait(s.insights, waitTo - ask.from) }, ask.tool, waitTo - ask.from)).catch(() => undefined)
   }
 }
 
@@ -436,12 +438,17 @@ export const register: Register = on => {
       // The call is listed once it ended, with how it ended (an error, a refusal or a throw is a failure).
       const ended = await $.clock.now().catch(() => undefined)
       const ms = at !== undefined && ended !== undefined ? ended - at - waitOverlap(waits, at, ended) : 0
-      await patch($, s => withLoggedSignals({
-        ...s,
-        // the round's tool counts, which its log entry takes when it ends
-        roundTools: { ...s.roundTools, [tool]: (s.roundTools?.[tool] ?? 0) + 1 },
-        insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), fullArg: toolArgFull(e), tokens: outcome?.tokens, error: outcome?.error }),
-      }, ended ?? s.now)).catch(() => undefined)
+      const edited = isSuccess ? editedPathOf(e) : undefined
+      await patch($, s => {
+        // the round's tool counts, files and failures, which its log entry takes when it ends
+        const counted = {
+          ...s,
+          roundTools: { ...s.roundTools, [tool]: (s.roundTools?.[tool] ?? 0) + 1 },
+          insights: recordToolCall(s.insights, { tool, isOk: isSuccess, ms, readPath: readPathOf(e), arg: toolArg(e), fullArg: toolArgFull(e), tokens: outcome?.tokens, error: outcome?.error }),
+        }
+        const noted = edited === undefined ? counted : withRoundFile(counted, edited)
+        return withLoggedSignals(isSuccess ? noted : withRoundFail(noted, tool, outcome?.error ?? ''), ended ?? s.now)
+      }).catch(() => undefined)
       const last = mainTools.at(-1)
       await setClaudeState($, last === undefined ? { kind: 'working' } : { kind: 'tool', tool: last }, held => held?.kind === 'tool')
     }
@@ -457,8 +464,12 @@ export const register: Register = on => {
     const at = await $.clock.now().catch(() => undefined)
     // The same call feeds the session log: a test run, a commit that exited 0, the PR above.
     await patch($, s => {
+      // a flow agent's call belongs to its flow, only when the run it works in is known
+      const agent = e.agentId === undefined ? undefined : s.agents.find(a => a.id === e.agentId)
+      const runId = e.agentId === undefined ? undefined : agent ? agentRunId(s.workflowRun, agent) : runIdOf(s.workflowRun, e.agentId)
+      const flow = e.agentId !== undefined && runId !== undefined ? { agent: e.agentId, runId } : undefined
       // a call the person or a rule refused never ran: it makes no entry
-      const entries = ran.deny !== undefined ? [] : bashLog({ command: e.command, arg: toolArg(e), out, isOk: isRan, at: at ?? s.now, pr })
+      const entries = ran.deny !== undefined ? [] : bashLog({ command: e.command, arg: toolArg(e), out, isOk: isRan, at: at ?? s.now, pr, ...(flow && { flow }) })
       return entries.length === 0 && !pr ? s : { ...s, ...(pr && { prs: upsertPr(s.prs, pr) }), sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
     }).catch(() => undefined)
     return ran
@@ -476,7 +487,7 @@ export const register: Register = on => {
       if (verdict.decision === 'ask' && e.approver === 'person' && e.agentId === undefined && e.tool_use_id !== undefined) {
         const held = readClaudeState()
         const from = await $.clock.now()
-        asks.set(e.tool_use_id, { from, held })
+        asks.set(e.tool_use_id, { from, held, tool: e.tool })
         await setClaudeState($, { kind: 'waiting', since: from })
         await patch($, s => withLoggedSignals(s, from))
       }
@@ -544,6 +555,25 @@ export const register: Register = on => {
     return spawned
   })
 
+  // The first prompt of a round titles it. A gating event: it passes through untouched, whatever the write does.
+  on('prompt.submit', async ($, e, next) => {
+    try {
+      if (e.isMeta !== true && !isResumePrompt(e.text)) {
+        const title = promptTitle(e)
+        const before = await read($, snapshot)
+        // the round's first prompt places its chat marker; a refused place leaves the round without a link
+        const anchor = before.roundPrompt === undefined && title !== '' ? await placeMarker($, nextRoundNumber(before)).catch(() => undefined) : undefined
+        await patch($, s => {
+          const titled = withRoundPrompt(s, title)
+          return anchor !== undefined && titled !== s && s.roundAnchor === undefined ? { ...titled, roundAnchor: anchor } : titled
+        })
+      }
+    } catch {
+      // observing must never break the submit
+    }
+    return next(e)
+  })
+
   on('turn.complete', async ($, e, next) => {
     const agentId = e.agentId
     const usage = e.usage
@@ -567,10 +597,17 @@ export const register: Register = on => {
         const flowUsd = flowUsdIn(s.sessionLog, now - e.durationMs, now)
         const usd = roundCost(s.cost, flowUsd)
         const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
+        const round = nextRoundNumber(s)
         return withLoggedSignals({
           ...s,
-          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }) }),
+          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', n: round, ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }), ...roundFields(s) }),
           roundTools: undefined,
+          roundPrompt: undefined,
+          roundAnchor: undefined,
+          roundFiles: undefined,
+          roundFails: undefined,
+          roundWaits: undefined,
+          roundSeq: round,
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.
@@ -619,6 +656,14 @@ export const register: Register = on => {
       })
     }
     return next(e)
+  })
+
+  // The marker a round's first prompt placed in the chat: a dim rule with the round's label, which its link scrolls to.
+  on('ui.render', { component: 'Placed' }, ($, e, next) => {
+    const n = e.props.plugin === 'cockpit' ? markerRound(e.props.id) : undefined
+    if (n === undefined) return next(e)
+    const { Text } = $.ui.resolve(e)
+    return <Text dimColor>{`── ${t().page.events.round(n)} ──`}</Text>
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

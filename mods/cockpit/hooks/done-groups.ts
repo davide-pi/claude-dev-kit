@@ -3,7 +3,7 @@ import type { CockpitLogEntry } from '../types'
 export type DoneEvent = {
   at: number
   kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' | 'launch'
-  /** The workflow run an agent belongs to: it is listed under that run's node, not under a round. */
+  /** The workflow run an agent, commit, test or PR belongs to: it is listed under that run's node, not under a round. */
   runId?: string
 }
 
@@ -11,8 +11,12 @@ export type DoneEvent = {
 export type DoneGroup<E extends DoneEvent> = {
   /** The key the group toggles under: `done:<at>`, `done:current` for the open round, `flow:<runId>` for a run. */
   key: string
-  /** The round's 1-based number in the log; none for the open round, a merged run and a flow. */
+  /** The round's number (the entry's `n`, else its 1-based place in the log); none for the open round, a merged run and a flow. */
   round?: number
+  /** The round's log entry: what its header and summary read (prompt, files, waits, fails, context, model); none for the open round, a merged run and a flow. */
+  entry?: CockpitLogEntry
+  /** The context percent the round gained or lost on the one before; none without both readings or when a compaction came between. */
+  ctxDelta?: number
   /** When the round ended (the merged run: its newest round); the open round: its newest event; a flow: its end. */
   at: number
   ms?: number
@@ -36,7 +40,7 @@ export type DoneGroup<E extends DoneEvent> = {
 export function groupDone<E extends DoneEvent>(events: readonly E[], log: readonly CockpitLogEntry[], openFlow?: CockpitLogEntry): DoneGroup<E>[] {
   const rounds = log.filter(e => e.kind === 'round').sort((a, b) => a.at - b.at)
   const newestFirst = [...events].sort((a, b) => b.at - a.at)
-  const ofRounds = newestFirst.filter(e => !(e.kind === 'agent' && e.runId !== undefined))
+  const ofRounds = newestFirst.filter(e => e.runId === undefined)
   const bucket = (from: number, to: number) => ofRounds.filter(e => e.at > from && e.at <= to)
 
   const groups: DoneGroup<E>[] = []
@@ -53,8 +57,23 @@ export function groupDone<E extends DoneEvent>(events: readonly E[], log: readon
   }
   rounds.forEach((r, i) => {
     const own = bucket(rounds[i - 1]?.at ?? -Infinity, r.at)
-    const group: DoneGroup<E> = { key: `done:${r.at}`, round: i + 1, at: r.at, events: own, ...(r.ms !== undefined && { ms: r.ms }), ...(r.usd !== undefined && { usd: r.usd }), ...(r.tools !== undefined && { tools: r.tools }) }
-    if (own.length === 0) run.push(group)
+    const prev = rounds[i - 1]
+    const isCompacted = prev !== undefined && log.some(c => c.kind === 'compact' && c.at > prev.at && c.at <= r.at)
+    const ctxDelta = prev?.ctxPct !== undefined && r.ctxPct !== undefined && !isCompacted ? r.ctxPct - prev.ctxPct : undefined
+    const group: DoneGroup<E> = {
+      key: `done:${r.at}`,
+      round: r.n ?? i + 1,
+      entry: r,
+      at: r.at,
+      events: own,
+      ...(ctxDelta !== undefined && { ctxDelta }),
+      ...(r.ms !== undefined && { ms: r.ms }),
+      ...(r.usd !== undefined && { usd: r.usd }),
+      ...(r.tools !== undefined && { tools: r.tools }),
+    }
+    // a round that holds a prompt, files, waits, failures or tools is a node of its own; only a bare one merges
+    const isBare = own.length === 0 && r.prompt === undefined && !(r.files?.length) && r.waits === undefined && r.fails === undefined && !Object.keys(r.tools ?? {}).length
+    if (isBare) run.push(group)
     else {
       flush()
       groups.push(group)
@@ -71,7 +90,7 @@ export function groupDone<E extends DoneEvent>(events: readonly E[], log: readon
           {
             key: `flow:${f.key}`,
             at: f.at,
-            events: newestFirst.filter(e => e.kind === 'agent' && e.runId === f.key),
+            events: newestFirst.filter(e => e.runId === f.key),
             ...(f.ms !== undefined && { ms: f.ms }),
             ...(f.usd !== undefined && { usd: f.usd }),
             flow: { runId: f.key, ...(f.text !== undefined && { name: f.text }), isFailed: f.isFailed === true, isLive: f === openFlow },
