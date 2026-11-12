@@ -56,14 +56,28 @@ names, resolved type names and CSV headers stay English.
 Desktop, mobile or both, and whether behaviour differs, is settled once **per project**: use it if
 known (memory, docs), else ask once and record it. It shapes a User Story's criteria and an
 Impediment's or TECH's Description where there is a UI — never a Bug. Why the two are never assumed
-identical: `references/acceptance-criteria.md`.
+identical: that assumption is the commonest source of criteria that turn out ambiguous in test.
+
+### 5. Criteria content — User Story and Bug only
+- Coverage grid, run silently, never printed: (1) happy path, (2) negative and error cases, (3) boundary
+  (empty list, wrapping text, min/max, zero or many), (4) cross-cutting: device matrix per the platform
+  datum, interface states (disabled, empty, error, hover/focus), conformance to the mock — cite the frame,
+  use testable attributes (colour, shape, casing, spacing, order), never "il più X possibile" — and no
+  regression nearby. Families 2-4 are the ones that come back as bugs in test.
+- Uncovered pertinent family, or doubt it is pertinent: one chat note on the first proposal only, outside
+  the block (*"Non ho previsto AC per i casi limite: è voluto o li integriamo?"*).
+- Distinct cases → `Scenario 1 – [titolo]`; otherwise `AC01`, `AC02`. Each criterion is `Dato che` /
+  `Quando` / `Allora`, optional `E` lines for an extra condition or outcome.
+- Desktop and mobile differing (User Story only, never Bug): same item, never one item per platform;
+  label right after the title, `AC02 (Desktop)`, `Scenario 2 – [titolo] (Mobile)`; unlabelled holds for
+  both, labelled and unlabelled mix freely.
 
 ## Do
 
 1. Classify (§1); unclear → ask. Write title and body in the role's shape (`references/item-formats.md`), plain functional prose in the items language.
 2. Deliver and stop: Story or Bug → ask whether to write the criteria; Impediment or TECH → ask
    for confirmation, offering nothing more.
-3. On a yes: the `Criteri di accettazione` block (`references/acceptance-criteria.md`), the four
+3. On a yes: the `Criteri di accettazione` block (§ 5): the four
    coverage families as the grid, per-platform labels where behaviour differs.
 4. Hand it over paste-ready; creation is `azdo-cli`, after the owner confirms the item table,
    assigned to the owner and read back after create. A bulk file only on a genuine
@@ -84,7 +98,5 @@ Set-Clipboard -Value (Get-Content .\item-body.txt -Raw)    # paste-ready handove
 
 - `references/item-formats.md` — before writing any body: the four roles in full, title rules, what
   each must not contain, the Impediment signal, a worked example each.
-- `references/acceptance-criteria.md` — once criteria are confirmed: coverage families, one-shot
-  signalling, `Scenario N` / `AC01`, per-platform labels, format and examples.
 - `references/csv-import.md` — only for a requested bulk-import file: headers per role, the Bug
   column mapping, quoting.

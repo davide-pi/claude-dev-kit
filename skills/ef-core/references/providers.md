@@ -50,7 +50,7 @@ porting and Npgsql specifics live in `sql-server`.
   column), so a shared model needs a provider check when built (`modelling.md`).
 - Unique-constraint, foreign-key and deadlock errors have different codes per provider. Never match on
   the message (localized, unstable): match the provider's error number in one place and map it to a
-  domain result (`dotnet-backend`, `errors-and-config.md`).
+  domain result (`dotnet-backend`, Failure section).
 - Pool exhaustion from an undisposed context looks like a slow database; the fix is almost never
   raising the pool size.
 
