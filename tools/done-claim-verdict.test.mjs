@@ -198,7 +198,7 @@ test('given a cell of backticked fragments joined by / or +, when each fragment 
   // When / Then
   for (const line of ['`390 pass` / `0 fail`', '`390 pass` + `0 fail`']) assert.equal(stop(edited(verdict(row(line)), out)).reason, '', line);
   assert.match(stop(edited(verdict(row('`390 pass` / `2 fail`')), out)).reason, /"fatto"/);
-  assert.match(stop(edited(verdict(row('`390 pass` e `0 fail`')), out)).reason, /"fatto"/);
+  assert.equal(stop(edited(verdict(row('`390 pass` e `0 fail`')), out)).reason, '');   // prose between fragments is ignored
   assert.match(stop(edited(verdict(row('nessuna riga `OVER`')), 'caps-checked')).reason, /"fatto"/);
   assert.match(stop(edited(verdict(row('lettura del sorgente di `x.ts`')), 'caps-checked')).reason, /"fatto"/);
 });
@@ -395,3 +395,83 @@ test('given a failed shell call, when the hook judges an "exit 0" row, then it i
   assert.equal(stop(turn(call('a', 'msbuild X.vbproj'), done('a', 'Exit code 1', true), call('b', 'msbuild X.vbproj'), done('b', ''))).reason, '');
 });
 
+
+// ── Backticked fragments are the proof; prose around them is ignored (false-positive replay) ──
+
+const proven = (line, out) => stop(edited(verdict(row(line)), out)).reason === '';
+
+test('given a deciding cell with backticked fragments and prose around them, when the fragments are printed, then the prose is ignored', () => {
+  // Given
+  const cases = [
+    ['`exit=0` su tutti, rami remoti obsoleti rimossi', 'exit=0'],
+    ['`0`: `CLAUDE.md` non è escluso', 'CLAUDE.md'],
+    ["rosso: `expected: 'ask' actual: 'approve'`; dopo la correzione: `# pass 96` `# fail 0`", "expected: 'ask' actual: 'approve'\n# pass 96\n# fail 0"],
+    ["`before ['777']` → `after ['0']`", "before ['777']\nafter ['0']"],
+  ];
+
+  // When / Then
+  for (const [line, out] of cases) assert.ok(proven(line, out), line);
+});
+
+test('given a cell with backticks, when one fragment was never printed or only a previous turn printed it, then it stays blocked', () => {
+  // Given
+  const line = '`# pass 1090` `# fail 0`';
+  const old = [prompt('before'), tool('Bash'), result('# pass 5'), prompt('sistema il bug'), tool('Edit'), result('ok'), say(verdict(row('`# pass 5`')))];
+
+  // When / Then
+  assert.match(stop(edited(verdict(row(line)), '# pass 1089\n# fail 0')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('rosso: `abc def` dopo: `# fail 0`')), '# fail 0')).reason, /"fatto"/);
+  assert.match(stop(old).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('`0` · `0` · `0`')), '0')).reason, /"fatto"/);
+  assert.match(stop(edited(verdict(row('tutto ok senza output')), 'altro')).reason, /"fatto"/);
+});
+
+test('given fragments joined by spaces, a gloss with parentheses inside backticks, a multiplier or an ellipsis, when they are printed, then the row is proven', () => {
+  // Given / When / Then
+  assert.ok(proven('`# pass 821` `# fail 0`', '# pass 821\n# fail 0'), 'space');
+  assert.ok(proven('`# pass 821`; `# fail 0`', '# pass 821\n# fail 0'), 'semicolon');
+  assert.ok(proven('`- [deleted] (none) -> origin/x`', '- [deleted] (none) -> origin/x'), 'parentheses');
+  assert.ok(proven('`Passed!` ×3', 'Passed!\nPassed!\nPassed!'), 'multiplier');
+  assert.ok(proven('`417a7fc5 Mostra giocatore...` / `084f807 Tronca match...`', '417a7fc5 Mostra giocatore di casa\n084f807 Tronca match lunghi'), 'ellipsis per span');
+  assert.ok(proven('`417a7fc5 Mostra giocatore... / 084f807 Tronca match...`', '417a7fc5 Mostra giocatore di casa\n084f807 Tronca match lunghi'), 'ellipsis in one span');
+  assert.ok(proven('`foo(a) ... b]`', 'foo(a) xx\nxx b'), 'unmatched closer trimmed');
+});
+
+test('given output with ANSI colour codes, when the hook compares a plain deciding line, then the codes do not matter', () => {
+  // Given
+  const out = '\u001b[1mTests\u001b[22m  485 passed (485)';
+
+  // When / Then
+  assert.ok(proven('`Tests  485 passed (485)`', out));
+  assert.ok(proven('Tests  485 passed (485)', out));
+});
+
+test('given a fragment with no qualifying piece, when the output lacks the rest of the cell, then it is never proof', () => {
+  // Given / When / Then
+  assert.ok(!proven('tutto verde `ok…`', 'zzz'));
+  assert.ok(!proven('tutto verde `a ... b`', 'zzz'));
+  assert.ok(!proven('tutto verde `...`', 'zzz'));
+  assert.ok(!proven('tutto verde `}}}`', 'zzz'));
+});
+
+test('given a lone single-word fragment, when the output only holds a longer word, then it is blocked and the whole word proves it', () => {
+  // Given / When / Then
+  assert.ok(!proven('`deny`', 'denylist'));
+  assert.ok(proven('`deny`', 'decision: deny'));
+  assert.ok(proven('`deny` `# pass 3`', 'deny\n# pass 3'));
+});
+
+test('given a fragment ending in a digit, when the output continues with a decimal or a percent, then it is not proof', () => {
+  // Given / When / Then
+  assert.ok(!proven('`# pass 5`', '# pass 5.5'));
+  assert.ok(!proven('`# pass 5`', '# pass 5%'));
+  assert.ok(proven('`# pass 5`', '# pass 5.'));
+});
+
+test('given output with cursor and erase escape codes, when the hook compares a plain deciding line, then the codes do not matter', () => {
+  // Given
+  const out = '\u001b[2K\u001b[1GTests 485 passed (485)';
+
+  // When / Then
+  assert.ok(proven('`Tests 485 passed (485)`', out));
+});
