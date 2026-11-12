@@ -132,8 +132,8 @@ const VERDICT_HEAD = /^[ \t]*(?:>[ \t]*)?\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*
 /** A row's state that claims a result (`fatto`, `fallito` and their English forms) and so needs proof (`non verificato: …` / `not verified: …` do not). */
 const PROOF_STATE = /^(?:fatto|done|fallito|failed)$/i;
 
-/** Lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
-const normalise = (text) => text.replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
+/** ANSI escape codes dropped, lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
+const normalise = (text) => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
 /** The rows of the verdict table(s) in `message`: `{ level, command, line, state }`, the cells as written. */
 function verdictRows(message) {
@@ -176,14 +176,45 @@ function piecesPrinted(line, printed) {
   return pieces.length > 0 && pieces.every((p) => (elided ? looseText.includes(p) : printedAsWords(looseText, p)));
 }
 
+/** Unmatched closers (`}` `]` `)`) and joiner characters at a piece's edges are not part of the output line. */
+function trimPiece(piece) {
+  const edges = /^[\s/,;·+]+|[\s/,;·+]+$/g;
+  const count = (text, ch) => text.split(ch).length - 1;
+  let p = piece.replace(edges, '');
+  for (let again = true; again;) {
+    again = false;
+    if (/^[}\])]/.test(p)) { p = p.slice(1); again = true; }
+    else if ([['}', '{'], [']', '['], [')', '(']].some(([close, open]) => p.endsWith(close) && count(p, close) > count(p, open))) { p = p.slice(0, -1); again = true; }
+    p = p.replace(edges, '');
+  }
+  return p;
+}
+
 /**
- * A cell made only of backticked fragments joined by ` / ` or ` + ` (`390 pass` / `0 fail`): proven when each fragment (3+ chars)
- * is printed, as the start of a word, so `390 pass` is read in "390 passed". One fragment alone is never judged this way.
+ * A cell holding backticked fragments is judged on those fragments alone (the prose, labels, arrows and multipliers around them
+ * are ignored): each of 3+ chars must be printed, as the start of a word (so `390 pass` is read in "390 passed"; a fragment ending
+ * in a digit also ends there), and an elided fragment piece by piece. Null when no fragment is long enough: the whole cell is judged.
  */
-function fragmentsPrinted(rawLine, printed) {
-  const spans = [...rawLine.matchAll(/`([^`]+)`/g)].map((m) => normalise(m[1]));
-  if (spans.length < 2 || !/^\u0000(?:\s+[/+]\s+\u0000)+$/.test(rawLine.trim().replace(/`[^`]+`/g, '\u0000'))) return false;
-  return spans.every((s) => s.length >= 3 && new RegExp(`(?<![\\p{L}\\p{N}])${s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'u').test(printed));
+function fragmentsPrinted(rawLine, printed, exitRan) {
+  const loose = (s) => s.replace(/["']/g, '').replace(/[=:]/g, ' ').replace(/\s+/g, ' ').trim();
+  const looseText = loose(printed);
+  const escape = (p) => p.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  // A span with no piece of 3+ chars left (`ok…`, `...`, `}}}`) proves nothing and is not judged.
+  const spans = [...rawLine.matchAll(/`([^`]+)`/g)].map((m) => loose(normalise(m[1]))).map((span) => ({
+    span,
+    elided: /…|\.{3}/.test(span),
+    pieces: span.split(/\s*(?:…|\.{3})\s*/).map((p) => loose(trimPiece(p))).filter((p) => p.length >= 3),
+  })).filter((s) => s.span.length >= 3 && s.pieces.length > 0);
+  if (!spans.length) return null;
+  const real = spans.filter((s) => !EXIT_ZERO.test(s.span));
+  if (!real.length && exitRan) return true;
+  return (real.length ? real : spans).every(({ elided, pieces }) => pieces.every((p) => {
+    // An elided piece may start or end inside a word: substring, not word start.
+    if (elided) return looseText.includes(p);
+    // A lone word is a whole word ("deny" is not "denylist"); a phrase may end inside its last word ("390 pass" in "390 passed").
+    if (/^\p{L}+$/u.test(p)) return printedAsWords(looseText, p);
+    return new RegExp(`(?<![\\p{L}\\p{N}])${escape(p)}${/\d$/.test(p) ? '(?!\\p{N}|\\.\\p{N}|%)' : ''}`, 'u').test(looseText);
+  }));
 }
 
 /** A bare `exit 0` prints nothing: proven when a shell call after the last edit ran the row's command (a backticked span, else the whole cell). */
@@ -203,7 +234,9 @@ function unprovenRows(rows, resultsText, shellCommands = []) {
     if (/^(?:\[\]|\{\})$/.test(line)) return !new RegExp(`(?:^|\\s)${line.replace(/[[\]{}]/g, '\\$&')}(?:\\s|$)`).test(printed);
     if (!/[\p{L}\p{N}]/u.test(line)) return true;
     if (EXIT_ZERO.test(line.replace(/=/g, ' ')) && exitZeroRan(r, shellCommands)) return false;
-    return !printedAsWords(printed, line) && !piecesPrinted(line, printed) && !fragmentsPrinted(r.line, printed);
+    const byFragments = fragmentsPrinted(r.line, printed, exitZeroRan(r, shellCommands));
+    if (byFragments !== null) return !byFragments;
+    return !printedAsWords(printed, line) && !piecesPrinted(line, printed);
   });
 }
 
