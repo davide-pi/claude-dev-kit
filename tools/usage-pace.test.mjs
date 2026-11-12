@@ -93,7 +93,7 @@ test('Given 92% told at 93%, When the next tool sees 98.5%, Then the 98 notice c
   // When
   const out = plan(pre('Bash'), ctx(dir, pace(98.5)));
   // Then
-  assert.match(text(out), /-Check/);
+  assert.match(text(out), /Update the checkpoint file/);
   assert.match(text(out), /--ready --session/);
   assert.doesNotMatch(text(out), /--arm --session/);
   assert.match(text(out), /Close the step in hand/);
@@ -108,9 +108,21 @@ test('Given the 92 and 96 notices, When they are told, Then each says how to dis
   // Then
   for (const t of [a, b]) {
     assert.match(t, /--done --session/);
-    assert.match(t, /-Remove/);
     assert.match(t, /CronDelete/);
   }
+});
+
+test('Given the 92, 96 and 98 notices and a resume, When they are told, Then none asks for a Windows scheduled task', () => {
+  // Given: the owner wants no Windows tasks; a closed chat stays closed with its checkpoint on disk
+  const dirs3 = [world(), world(), world()];
+  const armedDir = world();
+  mkdirSync(join(armedDir, '.cache', 'pace'), { recursive: true });
+  writeFileSync(join(armedDir, '.cache', 'pace', `${SID}.json`), JSON.stringify({ v: 1, sessionId: SID, checkpoint: '/x/resume.md', ready: true }));
+  // When
+  const told = [93, 96.5, 98.5].map((p, i) => text(plan(pre('Bash'), ctx(dirs3[i], pace(p)))));
+  told.push(text(plan({ hook_event_name: 'SessionStart', session_id: SID, source: 'resume' }, ctx(armedDir, null))));
+  // Then
+  for (const t of told) assert.doesNotMatch(t, /resume-task|resume task|scheduled task|Windows task/i);
 });
 
 test('Given 92%, When a tool runs, Then the notice leaves the CronCreate choice to 96, where the mod has had time to beat', () => {

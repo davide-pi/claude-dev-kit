@@ -37,13 +37,12 @@ Pace files and checkpoints under `.cache/resume/` are pruned after 7 days; so ar
 | --- | --- |
 | 70 | notice only: projection and reset time |
 | 85 | fewer parallel agents, smaller models where they are enough |
-| 92 | `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), create the resume task (`resume-task.ps1`), start no new flow, ask running flows for their state and write the checkpoint |
-| 96 | verify the resume task exists (create it when missing), update the checkpoint, `pace-state.mjs --ready`; with no live mod `CronCreate` a one-shot at `resumeAt`, with one `CronDelete` any it has (decided here, not at 92: the mod beats every 30 s only once the pace file exists, so right after `--arm` it can look dead); the mod compacts after the turn, else the chat asks the owner to run `/compact` |
+| 92 | `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), start no new flow, ask running flows for their state and write the checkpoint |
+| 96 | update the checkpoint, `pace-state.mjs --ready`; with no live mod `CronCreate` a one-shot at `resumeAt`, with one `CronDelete` any it has (decided here, not at 92: the mod beats every 30 s only once the pace file exists, so right after `--arm` it can look dead); the mod compacts after the turn, else the chat asks the owner to run `/compact` |
 | 98 | close the step in hand, stop the flows cleanly, last checkpoint update, stop; a subagent closes its step and reports its state |
 
 Notices at 92 and 96 go to the main loop only; subagents hear 70, 85 and 98. A jump over bands sends one notice, the
-highest band's, which carries first the actions of a skipped 92 (arm the resume) and 96 (check the task, `--ready`,
-compaction). The 92 and 96 notices also say how to disarm when the work ends before the limit. The brake: in the main
+highest band's, which carries first the actions of a skipped 92 (arm the resume) and 96 (`--ready`, compaction). The 92 and 96 notices also say how to disarm when the work ends before the limit. The brake: in the main
 loop, from 92% on either window, a new `Agent`, `Task` or `Workflow` is denied unless its prompt or args contain
 `pace: owner asked` or `pace: finish`. Data older than 10 minutes, or a window past its reset, lifts it. Flows inside a
 workflow never pass the hook; they hear the 98 notice on their own tool calls.
@@ -53,23 +52,9 @@ workflow never pass the hook; they hear the 98 notice on their own tool calls.
 - Open chat with the cockpit mod: the mod compacts once on `ready`, then resumes at `resumeAt` (window under 50%, the
   other under 98%; else 10 minutes later).
 - Open chat without the mod: `CronCreate` at `resumeAt`, made at 96.
-- Closed chat: the Windows task `claude-resume-<id8>` runs `resume-launch.ps1`, which deletes its own task first, opens
-  nothing when the chat lives (a `sessions/<pid>.json` with the session id, a live pid and a matching process start) or
-  the mod is alive. When the chat was not compacted since it was armed (no `compactedAt` at or after `armedAt`, in the
-  pace file or the mod file) it runs `claude -p --resume <sid> /compact` first (up to 15 minutes, best effort), then
-  starts a new Windows Terminal window with `claude --resume <sid>` and the resume prompt, and exits.
+- Closed chat: nothing reopens it; the kit creates no Windows scheduled task (the owner's choice). Reopen it with
+  `claude --resume <sid>`: the `SessionStart` hook names the checkpoint.
 - After `resume` or `compact`, `hooks/pace.js` names the checkpoint and says: verify the real state (git status, the
   perimeter, the last gate) first. `PreCompact` prints the path first, so the summary keeps it.
-- When the work is finished, or ends before the limit: `pace-state.mjs --done`, `resume-task.ps1 -Remove`, and
+- When the work is finished, or ends before the limit: `pace-state.mjs --done` and
   `CronDelete` of the resume prompt when one was created.
-
-## Windows tasks
-
-Root folder, one `Register-ScheduledTask` call, once trigger at `resumeAt`, `EndBoundary` = `resumeAt` + 6 h,
-`DeleteExpiredTaskAfter` 0, `StartWhenAvailable`, allowed on battery. A `resumeAt` more than 6 hours past is refused
-(arm again). Creating a task first sweeps the `claude-resume-*` tasks past their `EndBoundary` or whose pace file is
-gone or done (`-Sweep` does the same alone); then the cap is 5: at 5 live `claude-resume-*` tasks a new one is refused
-with a message, and no other chat's live task is removed. The count and the registration hold the named mutex
-`Local\claude-resume-task`, so chats crossing 92% together cannot overshoot the cap. The tests use `-DryRun` (or
-`-TasksJson`, which implies it) and set `CLAUDE_PACE_NO_SCHEDULER`, which makes both scripts stop before any scheduler
-call: they never register or remove a task.

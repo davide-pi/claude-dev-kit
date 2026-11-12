@@ -109,7 +109,8 @@ $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
              'hooks/edit-nudge.js', 'hooks/context-nudge.js', 'hooks/nudges.js',
              'agents/test-writer.md',  # retired-ok: named on purpose, the repo no longer has it
              'hooks/az-identity.js', 'scripts/sql-ro.ps1',
-             'mods/cockpit/hooks/format.ts', 'mods/cockpit/tests/cockpit.test.tsx', 'mods/cockpit/tests/format.test.ts')
+             'mods/cockpit/hooks/format.ts', 'mods/cockpit/tests/cockpit.test.tsx', 'mods/cockpit/tests/format.test.ts',
+             'scripts/resume-task.ps1', 'scripts/resume-launch.ps1')
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'

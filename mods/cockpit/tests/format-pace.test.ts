@@ -97,5 +97,5 @@ test('compactInstructions and resumePrompt: Given the checkpoint, When written, 
   const text = compactInstructions(path)
   // Then
   expect(text.startsWith(`Checkpoint: ${path}`)).toBe(true)
-  expect(resumePrompt(path)).toBe(`The usage window has reset. Read the checkpoint at ${path} and check the real state (git status, the perimeter, the last gate) before you continue. When the work is finished, remove the resume task.`)
+  expect(resumePrompt(path)).toBe(`The usage window has reset. Read the checkpoint at ${path} and check the real state (git status, the perimeter, the last gate) before you continue. When the work is finished, run pace-state.mjs --done for this session.`)
 })
