@@ -4,7 +4,7 @@ import { resetPaceState } from '../hooks/pace'
 import { settleAll } from './cockpit-fixtures'
 import { NOW, world } from './cockpit-world'
 
-const CHECKPOINT = 'C:/repo/.git/deliver/resume-s-1.md'
+const CHECKPOINT = '/repo/.git/deliver/resume-s-1.md'
 const paceFile = (over: object = {}) => JSON.stringify({ v: 1, sessionId: 's-1', window: 'five_hour', resetsAt: NOW + 60_000, resumeAt: NOW + 120_000, checkpoint: CHECKPOINT, ready: true, armedAt: NOW - 60_000, ...over })
 /** The chat's file under both separators: the engine hands the path in the platform's own. */
 const armed = (text: string) => ({ 'pace/s-1.json': text, 'pace\\s-1.json': text })

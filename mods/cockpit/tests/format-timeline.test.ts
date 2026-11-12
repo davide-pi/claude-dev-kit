@@ -48,7 +48,7 @@ test('parseLog: given a data file written before rounds carried a cost, when rea
 })
 
 test('isTestCommand: a test run by the common runners, alone or in a chain; not a command that only mentions test', () => {
-  for (const cmd of ['npm test', 'npm run test -- --bail', 'pnpm test', 'yarn test', 'dotnet test src/A.sln', 'pytest -q', 'claude plugin test mods/cockpit', 'node --test tools/x.test.mjs', 'go test ./...', 'cargo test', 'npx vitest run', 'cd app && npm test']) {
+  for (const cmd of ['npm test', 'npm run test -- --bail', 'pnpm test', 'yarn test', 'dotnet test src/A.sln', 'pytest -q', 'claude plugin test mods/cockpit', 'node --test tools/usage-pace.test.mjs', 'go test ./...', 'cargo test', 'npx vitest run', 'cd app && npm test']) {
     expect(isTestCommand(cmd)).toBe(true)
   }
   for (const cmd of ['ls', 'git commit -m "add a test"', 'echo test', 'npm install', 'cat tests.md', 'git status']) {

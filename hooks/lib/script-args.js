@@ -158,7 +158,7 @@ function checkScriptArgs(command, tool) {
         note('gate.mjs is called with --supervise or --run, its internal flags: the foreground starts the supervisor itself, never through the shell tool. Confirm?');
       }
       if (tokens.includes('--lane-remove')) {
-        return 'gate.mjs --lane-remove force-removes lane worktrees and deletes their branches: unmerged lane work is lost. Confirm?';
+        note('gate.mjs --lane-remove force-removes lane worktrees and deletes their branches: unmerged lane work is lost. Confirm?');
       }
       for (let i = 0; i < tokens.length - 1; i++) {
         if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
