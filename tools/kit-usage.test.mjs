@@ -44,13 +44,18 @@ function run(dir, ...args) {
   return JSON.parse(r.stdout);
 }
 
-test('given references read in the period, by the session or by a subagent, from ~/.claude or from a kit checkout, when kit-usage runs, then they count as opened', () => {
+const shell = (name, command, msAgo) => JSON.stringify({
+  type: 'assistant', timestamp: iso(msAgo),
+  message: { role: 'assistant', content: [{ type: 'tool_use', id: 't', name, input: { command } }] },
+});
+
+test('given references read in the period, by the session or by a subagent, from ~/.claude, when kit-usage runs, then they count as opened', () => {
   // Given
   const dir = config();
   try {
     writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), `${read(join(dir, 'skills', 'deliver', 'references', 'loop.md'), DAY)}\n`);
     writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1', 'subagents', 'agent-1.jsonl'),
-      `${read('C:\\__workspaces\\github\\claude-dev-kit\\skills\\retro\\references\\modes.md', 2 * DAY)}\n`);
+      `${read('D:\\home\\.claude\\skills\\retro\\references\\modes.md', 2 * DAY)}\n`);
 
     // When
     const out = run(dir, '--days', '30');
@@ -58,6 +63,60 @@ test('given references read in the period, by the session or by a subagent, from
     // Then
     assert.deepEqual(out.references.neverOpened, ['deliver/references/stall.md']);
     assert.equal(out.references.total, 3);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('given a Bash cat and a PowerShell Get-Content of references, with either slash direction and ~/.claude, when kit-usage runs, then they count as opened', () => {
+  // Given
+  const dir = config();
+  try {
+    writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), [
+      shell('Bash', 'cat ~/.claude/skills/deliver/references/loop.md | head -20', DAY),
+      shell('PowerShell', 'Get-Content "D:\\home\\.claude\\Skills\\Retro\\References\\Modes.md" -TotalCount 5', DAY),
+    ].join('\n') + '\n');
+
+    // When
+    const out = run(dir, '--days', '30');
+
+    // Then
+    assert.deepEqual(out.references.neverOpened, ['deliver/references/stall.md']);
+    assert.deepEqual(out.references.worktreeOnly, []);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('given reads of a kit worktree or checkout copy, through Read or a shell, when kit-usage runs, then they do not count as opened and are reported as worktree hits', () => {
+  // Given
+  const dir = config();
+  try {
+    writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), [
+      read('C:\\__workspaces\\github\\claude-dev-kit\\skills\\retro\\references\\modes.md', DAY),
+      shell('Bash', 'sed -n 1,40p /c/__workspaces/cl-wt/claude-dev-kit-usage/skills/deliver/references/loop.md', DAY),
+    ].join('\n') + '\n');
+
+    // When
+    const out = run(dir, '--days', '30');
+
+    // Then
+    assert.deepEqual(out.references.neverOpened, ['deliver/references/loop.md', 'deliver/references/stall.md', 'retro/references/modes.md']);
+    assert.deepEqual(out.references.worktreeOnly, ['deliver/references/loop.md', 'retro/references/modes.md']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('given a reference read from both the installed copy and a worktree, when kit-usage runs, then it counts as opened and is not listed as worktree only', () => {
+  // Given
+  const dir = config();
+  try {
+    writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), [
+      shell('Bash', 'cat /c/__workspaces/github/claude-dev-kit/skills/deliver/references/loop.md', DAY),
+      shell('Bash', `cat ${join(dir, 'skills', 'deliver', 'references', 'loop.md').replace(/\\/g, '/')}`, DAY),
+    ].join('\n') + '\n');
+
+    // When
+    const out = run(dir, '--days', '30');
+
+    // Then
+    assert.ok(!out.references.neverOpened.includes('deliver/references/loop.md'));
+    assert.deepEqual(out.references.worktreeOnly, []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
@@ -123,5 +182,44 @@ test('given no logs and no transcripts, when kit-usage runs, then the sections a
     assert.equal(out.references.neverOpened.length, 3);
     const text = spawnSync(process.execPath, [SCRIPT, '--config', dir], { encoding: 'utf8' }).stdout;
     for (const heading of [/references never opened/i, /done-claim/i, /hook errors/i]) assert.match(text, heading);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('given a relative skills path in a command run from a kit worktree, or a command naming a kit copy elsewhere, when kit-usage runs, then it is a worktree hit and not a use', () => {
+  // Given
+  const dir = config();
+  try {
+    const inWorktree = JSON.parse(shell('Bash', 'cat skills/deliver/references/loop.md', DAY));
+    inWorktree.cwd = 'C:\__workspaces\cl-wt\claude-dev-kit-x';
+    writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), [
+      JSON.stringify(inWorktree),
+      shell('Bash', 'git -C C:/__workspaces/cl-wt/claude-dev-kit-x status; cat skills/retro/references/modes.md', DAY),
+    ].join('\n') + '\n');
+
+    // When
+    const out = run(dir, '--days', '30');
+
+    // Then
+    assert.equal(out.references.neverOpened.length, 3);
+    assert.deepEqual(out.references.worktreeOnly, ['deliver/references/loop.md', 'retro/references/modes.md']);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('given git add, git show and grep -l commands naming a reference, when kit-usage runs, then they do not count as a use', () => {
+  // Given
+  const dir = config();
+  try {
+    writeFileSync(join(dir, 'projects', 'C--repo', 'sess-1.jsonl'), [
+      shell('Bash', 'git add skills/deliver/references/loop.md', DAY),
+      shell('Bash', 'git show HEAD:skills/deliver/references/stall.md', DAY),
+      shell('Bash', 'grep -l foo ~/.claude/skills/retro/references/modes.md', DAY),
+    ].join('\n') + '\n');
+
+    // When
+    const out = run(dir, '--days', '30');
+
+    // Then
+    assert.equal(out.references.neverOpened.length, 3);
+    assert.deepEqual(out.references.worktreeOnly, []);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });

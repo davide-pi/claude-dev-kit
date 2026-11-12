@@ -5,9 +5,11 @@
  *
  *   node scripts/kit-usage.mjs [--days N (default 30)] [--config <dir> (default CLAUDE_CONFIG_DIR or ~/.claude)] [--json]
  *
- * - References: every file in the references directory of each skill under <config>/skills, minus those a Read
- *   tool call opened in the period (any .jsonl under <config>/projects, subagent transcripts included; a path ending with
- *   `skills/<skill>/references/<file>` counts, from `~/.claude` or from a kit checkout). Transcripts last written
+ * - References: every file in the references directory of each skill under <config>/skills, minus those opened in the
+ *   period (any .jsonl under <config>/projects, subagent transcripts included): a Read of the path, or a Bash/PowerShell
+ *   read (`cat`, `Get-Content`, `head`, `sed -n`, …; not `git add` or `grep -l`) containing `skills/<skill>/references/<file>`, either slash direction, any
+ *   case, `~/.claude` or absolute. A path through a `claude-dev-kit` copy (checkout or worktree, or a command run or aimed there) is an audit or an edit,
+ *   not a use: it is listed apart as `worktreeOnly` and never hides an unused reference. Transcripts last written
  *   before the period are skipped and the rest are streamed line by line: they can be tens of MB.
  * - `<config>/.cache/done-claim.log`: JSON lines `{ at, rule, … }`, counted per rule; torn lines are skipped.
  * - `<config>/.cache/hook-errors.log`: lines `<ISO> <hook>: <message>` (hooks/lib/cache.js `logError`), counted per
@@ -68,36 +70,54 @@ function listReferences(config) {
   return out.sort();
 }
 
-/** The references a Read opened at or after `since`, as keys of `references` (matched case-insensitively). */
+/** A shell command that reads a file; `git add`, `git show`, `grep -l` and the like do not use a reference. */
+const READ_VERB = /(^|[\s;|&(])(cat|type|gc|get-content|head|tail|less|more|bat|nl|sed\s+-n)\s/i;
+
+const REF_PATH = /skills[\\/]+([^\\/\s"'`]+)[\\/]+references[\\/]+([^\s"'`;|&)<>,]+)/gi;
+
+/**
+ * The reference paths in `text` (a file_path or a shell command), as `{ ref, worktree }`: `ref` a key of `lookup`
+ * (lower-cased `skill/references/file` → reference), `worktree` when the path before `skills/` goes through a
+ * `claude-dev-kit` copy, i.e. an audit or an edit and not a use.
+ */
+function referenceHits(text, lookup, inKitCopy = false) {
+  const hits = [];
+  for (const m of text.matchAll(REF_PATH)) {
+    const ref = lookup.get(`${m[1]}/references/${m[2].replace(/[\\/]+/g, '/')}`.toLowerCase());
+    if (!ref) continue;
+    const head = text.slice(0, m.index);
+    const root = head.slice(Math.max(head.lastIndexOf(' '), head.lastIndexOf('"'), head.lastIndexOf("'"), head.lastIndexOf('`')) + 1);
+    hits.push({ ref, worktree: inKitCopy || root.toLowerCase().includes('claude-dev-kit') });
+  }
+  return hits;
+}
+
+/** The references opened (a Read, or a Bash/PowerShell command naming their path) at or after `since`: installed copies in `used`, worktree copies in `worktree`. */
 async function openedReferences(config, references, since) {
-  const suffixes = references.map((r) => ({ ref: r, suffix: `skills/${r}`.toLowerCase() }));
-  const opened = new Set();
-  const matchOf = new Map();
-  const match = (file) => {
-    if (!matchOf.has(file)) {
-      const lower = file.replace(/\\/g, '/').toLowerCase();
-      matchOf.set(file, suffixes.find((s) => lower.endsWith(s.suffix))?.ref ?? null);
-    }
-    return matchOf.get(file);
-  };
+  const lookup = new Map(references.map((r) => [r.toLowerCase(), r]));
+  const used = new Set();
+  const worktree = new Set();
   const transcripts = walk(join(config, 'projects'), (n) => n.endsWith('.jsonl'))
     .filter((f) => { try { return statSync(f).mtimeMs >= since; } catch { return false; } });
   for (const file of transcripts) {
     const lines = createInterface({ input: createReadStream(file, { encoding: 'utf8' }), crlfDelay: Infinity });
     for await (const line of lines) {
-      if (!line.includes('"Read"') || !line.includes('references')) continue;
+      if (!line.includes('"tool_use"') || !/references/i.test(line)) continue;
       let entry;
       try { entry = JSON.parse(line); } catch { continue; }
       const at = Date.parse(entry.timestamp);
       if (!(at >= since) || !Array.isArray(entry.message?.content)) continue;
       for (const block of entry.message.content) {
-        if (block?.type !== 'tool_use' || block.name !== 'Read' || typeof block.input?.file_path !== 'string') continue;
-        const ref = match(block.input.file_path);
-        if (ref) opened.add(ref);
+        if (block?.type !== 'tool_use') continue;
+        const isShell = block.name === 'Bash' || block.name === 'PowerShell';
+        const text = block.name === 'Read' ? block.input?.file_path : isShell ? block.input?.command : null;
+        if (typeof text !== 'string' || (isShell && !READ_VERB.test(text))) continue;
+        const inKitCopy = isShell && /claude-dev-kit/i.test(`${entry.cwd ?? ''} ${text}`);
+        for (const hit of referenceHits(text, lookup, inKitCopy)) (hit.worktree ? worktree : used).add(hit.ref);
       }
     }
   }
-  return opened;
+  return { used, worktree };
 }
 
 function readLines(file) {
@@ -130,6 +150,10 @@ function hookErrors(file, since) {
 function textReport(r) {
   const out = [`References never opened in the last ${r.days} days (${r.references.neverOpened.length} of ${r.references.total}):`];
   out.push(...(r.references.neverOpened.length ? r.references.neverOpened.map((x) => `  ${x}`) : ['  none']));
+  if (r.references.worktreeOnly.length) {
+    out.push('', 'Opened only through a kit worktree or checkout (audits, not uses):');
+    out.push(...r.references.worktreeOnly.map((x) => `  ${x}`));
+  }
   out.push('', `done-claim rules fired in the last ${r.days} days:`);
   const rules = Object.entries(r.doneClaim).sort((a, b) => b[1] - a[1]);
   out.push(...(rules.length ? rules.map(([k, n]) => `  ${k}: ${n}`) : ['  none']));
@@ -142,10 +166,14 @@ function textReport(r) {
 const { days, config, json } = parseArgs(process.argv.slice(2));
 const since = Date.now() - days * DAY_MS;
 const all = listReferences(config);
-const opened = await openedReferences(config, all, since);
+const { used, worktree } = await openedReferences(config, all, since);
 const report = {
   days,
-  references: { total: all.length, neverOpened: all.filter((r) => !opened.has(r)) },
+  references: {
+    total: all.length,
+    neverOpened: all.filter((r) => !used.has(r)),
+    worktreeOnly: all.filter((r) => worktree.has(r) && !used.has(r)),
+  },
   doneClaim: doneClaimCounts(join(config, '.cache', 'done-claim.log'), since),
   hookErrors: hookErrors(join(config, '.cache', 'hook-errors.log'), since),
 };
