@@ -126,6 +126,29 @@ test('the brief names the branch, the last commit, the upstream and the work ite
   assert.equal(lines[3], 'work item #4211 (from the branch name)');
 });
 
+const HOOK_LOG_LINE = 'hook log: 6 days recorded: run scripts/hook-fires.mjs, decide, then --delete';
+
+test('given a closed hook log, when a session starts, then the brief carries the hook-log line', () => {
+  // Given
+  const cfg = temp('brief-cfg-');
+  mkdirSync(join(cfg, '.cache'), { recursive: true });
+  const days = ['2020-01-01', '2020-01-02', '2020-01-03', '2020-01-04', '2020-01-05', '2020-01-06'];
+  writeFileSync(join(cfg, '.cache', 'hook-fires.log'), days.map((day) => JSON.stringify({ day, hook: 'guard-shell', event: 'PreToolUse', decision: 'silent', sub: false })).join('\n') + '\n');
+  // When
+  const lines = run(repo({ object: 'Add the order list projection' }), cfg);
+  // Then
+  assert.ok(lines.includes(HOOK_LOG_LINE), lines.join(' | '));
+});
+
+test('given no hook log, when a session starts, then the brief has no hook-log line', () => {
+  // Given
+  const cfg = temp('brief-cfg-');
+  // When
+  const lines = run(repo({ object: 'Add the order list projection' }), cfg);
+  // Then
+  assert.ok(!lines.some((l) => l.startsWith('hook log:')), lines.join(' | '));
+});
+
 test('a PR left in the cache by an older version is ignored: there is no PR line', () => {
   const cfg = temp('brief-cfg-');
   const root = repo({ object: 'Add the order list projection' });

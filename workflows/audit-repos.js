@@ -102,7 +102,7 @@ const answers = await pipeline(repos, repo => agent(prompt(repo), {
   label: shortName(repo),
   phase: 'Audit',
   agentType: 'Explore',
-  model: 'haiku',
+  model: 'sonnet',
   effort,
   schema: AUDIT,
 }).then(r => settle(r, repo), () => settle(null, repo)))

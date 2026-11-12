@@ -195,9 +195,14 @@ function run(payload) {
 }
 
 // Runs when loaded: a script, or required by `node -e` as settings.json wires it.
+const fire = require('./lib/fire-log').armFire('format-on-edit', 'PostToolUse');
 try {
   const raw = fs.readFileSync(0, 'utf8');
-  if (raw.trim()) run(JSON.parse(raw));
+  if (raw.trim()) {
+    const payload = JSON.parse(raw);
+    fire.sub = require('./lib/fire-log').isSub(payload);
+    run(payload);
+  }
 } catch {
   /* silence */
 }

@@ -14,7 +14,7 @@
 const { deny, readPayload } = require('./lib/decision');
 
 try {
-  const payload = readPayload();
+  const payload = readPayload('screenshot-guard');
   if (/browser_screenshot$/.test(payload?.tool_name || '') && payload.tool_input?.max_dim == null) {
     deny('Pass `max_dim: 1280` (add `full: true` only when the page below the fold matters): a full-resolution ' +
       'screenshot can weigh several MB, and every later turn re-reads it.');

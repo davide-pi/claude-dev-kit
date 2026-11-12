@@ -11,13 +11,23 @@
 'use strict';
 
 const fs = require('fs');
+const { armFire, isSub } = require('./fire-log');
 
-/** No output => the normal permission flow applies. */
-function approve() {
+/** The fire record `readPayload(hook)` armed: the decision protocol below sets its decision, the process exit writes the line. */
+let fire = null;
+
+/**
+ * No output => the normal permission flow applies. With `context`, only `additionalContext` is printed,
+ * never a decision: the user's ask and deny rules still apply.
+ */
+function approve(context) {
+  if (fire && context) fire.decision = 'context';
+  if (context) process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', additionalContext: context } }));
   process.exit(0);
 }
 
 function decide(permissionDecision, reason) {
+  if (fire) fire.decision = permissionDecision;
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
@@ -38,22 +48,33 @@ const deny = (reason) => decide('deny', reason);
  * Run the tool with a rewritten input. The harness applies `updatedInput` only together with a
  * decision, so this allows: callers rewrite only commands the permission list already allows.
  */
-function rewrite(updatedInput) {
+function rewrite(updatedInput, context) {
+  if (fire) fire.decision = 'rewrite';
   process.stdout.write(JSON.stringify({
     hookSpecificOutput: {
       hookEventName: 'PreToolUse',
       permissionDecision: 'allow',
       updatedInput,
+      ...(context && { additionalContext: context }),
     },
   }));
   process.exit(0);
 }
 
-/** The hook payload from stdin, or null when there is nothing usable to read. */
-function readPayload() {
+/**
+ * The hook payload from stdin, or null when there is nothing usable to read. Given the hook's name, it also
+ * arms the fire log: one line for this process, whatever path the hook then takes (silence included).
+ */
+function readPayload(hook) {
+  if (hook) fire = armFire(hook, 'PreToolUse');
   const raw = fs.readFileSync(0, 'utf8');
   if (!raw.trim()) return null;
-  return JSON.parse(raw);
+  const payload = JSON.parse(raw);
+  if (fire) {
+    fire.event = payload?.hook_event_name || fire.event;
+    fire.sub = isSub(payload);
+  }
+  return payload;
 }
 
 module.exports = { approve, requestConfirmation, deny, rewrite, readPayload };
