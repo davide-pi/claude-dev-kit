@@ -27,7 +27,7 @@ const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     // First: the command registered below is described in the language read here.
-    const { autoOpen, costTarget } = await refreshConfig($)
+    const { autoOpen } = await refreshConfig($)
     const now = await $.clock.now()
     const forced = await $.env.get('CLAUDE_CODE_SUBAGENT_MODEL')
     const model = await $.session.model().catch(() => undefined)
@@ -42,7 +42,6 @@ export const register: Register = on => {
       effort: s.effort ?? (typeof effort === 'string' ? effort : undefined),
       isSubagentModelForced: Boolean(forced),
       isLangRead: true,
-      costTarget,
       startedAt: s.startedAt ?? now,
     }))
     await refreshLastRates($)
@@ -167,8 +166,8 @@ export const register: Register = on => {
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {
-      const { costTarget } = await refreshConfig($)
-      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true, costTarget })).catch(() => undefined))
+      await refreshConfig($)
+      $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })

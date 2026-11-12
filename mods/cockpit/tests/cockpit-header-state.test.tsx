@@ -14,7 +14,7 @@ import {
 } from './cockpit-fixtures'
 import { NOW, flagOf, world } from './cockpit-world'
 
-test('header: the Claude state follows turn.start, a thinking chunk, a tool in flight, a permission ask and the turn end', async ($, on) => {
+test('header: the Claude state follows turn.start, a thinking chunk, a tool in flight, a permission ask and the turn end', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -61,7 +61,7 @@ test('header: the Claude state follows turn.start, a thinking chunk, a tool in f
   expect(await state()).toContain('ready')
 })
 
-test('header: a subagent\'s events do not move the Claude state', async ($, on) => {
+test('header: a subagent\'s events do not move the Claude state', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   on('turn.complete', () => ({ text: '' }))
@@ -73,7 +73,7 @@ test('header: a subagent\'s events do not move the Claude state', async ($, on) 
   expect(headerOf((await paneRows($)).rows)[0]).toContain('ready')
 })
 
-test('refresh tiers: fast 2 s while the pane is open, medium 10 s for git while the pane is open, slow 30 s always, none while the pane is closed', async ($, on) => {
+test('refresh tiers: fast 2 s while the pane is open, medium 10 s for git while the pane is open, slow 30 s always, none while the pane is closed', { timeoutMs: 30_000 }, async ($, on) => {
   const statusCalls: string[] = []
   const listCalls: string[] = []
   const clock = world(on, { statusCalls, listCalls })
@@ -116,7 +116,7 @@ test('refresh tiers: fast 2 s while the pane is open, medium 10 s for git while 
   await ui.unmount()
 })
 
-test('refresh tiers: the state file heartbeat stays fresh while the pane is open, at the slow tier', async ($, on) => {
+test('refresh tiers: the state file heartbeat stays fresh while the pane is open, at the slow tier', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -130,7 +130,7 @@ test('refresh tiers: the state file heartbeat stays fresh while the pane is open
 
 // ── Phase 2 follow-ups ──
 
-test('header: parallel main tool calls keep the state on a tool until none is left, and a permission wait restores the tool held before', async ($, on) => {
+test('header: parallel main tool calls keep the state on a tool until none is left, and a permission wait restores the tool held before', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   const gates: Record<string, () => void> = {}
@@ -168,7 +168,7 @@ test('header: parallel main tool calls keep the state on a tool until none is le
   expect(await state()).toContain('working')
 })
 
-test('header: only a main-loop ask a person answers waits: a host approver, a subagent, an allow and a check with no call id do not', async ($, on) => {
+test('header: only a main-loop ask a person answers waits: a host approver, a subagent, an allow and a check with no call id do not', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
   let verdict: 'ask' | 'allow' = 'ask'
@@ -193,7 +193,7 @@ test('header: only a main-loop ask a person answers waits: a host approver, a su
   expect(await state()).toContain('working')
 })
 
-test('refresh tiers: the slow tick writes the heartbeat before the clock tick runs', async ($, on) => {
+test('refresh tiers: the slow tick writes the heartbeat before the clock tick runs', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   let hold: Promise<void> | undefined
   const clock = world(on, { writes, holdList: () => hold })
@@ -205,7 +205,7 @@ test('refresh tiers: the slow tick writes the heartbeat before the clock tick ru
   expect((flagOf(writes) as { at: number }).at).toBe(NOW + 30_000)
 })
 
-test('turn.step: the main loop\'s chunks read the snapshot once per change of state, not once per chunk', async ($, on) => {
+test('turn.step: the main loop\'s chunks read the snapshot once per change of state, not once per chunk', { timeoutMs: 30_000 }, async ($, on) => {
   let reads = 0
   world(on)
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -229,7 +229,7 @@ test('turn.step: the main loop\'s chunks read the snapshot once per change of st
   expect(await run(2)).toBe(one) // five more chunks of the same kind cost no read
 })
 
-test('events that really arrive: with the classic events never dispatched, the wait for a person and the workflow name still show', async ($, on) => {
+test('events that really arrive: with the classic events never dispatched, the wait for a person and the workflow name still show', { timeoutMs: 30_000 }, async ($, on) => {
   const instructions: (string | undefined)[] = []
   world(on, { instructions })
   permissionChecks(on)

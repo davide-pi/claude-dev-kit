@@ -2,7 +2,6 @@ import { expect, test } from 'claude-code/testing'
 
 import { andamento, spendSplit } from '../hooks/andamento'
 import { INITIAL } from '../hooks/state'
-import { costTargetOf } from '../hooks/strings'
 import type { CockpitAgent, CockpitSnapshot } from '../types'
 
 const snap = (over: Partial<CockpitSnapshot>): CockpitSnapshot => ({ ...INITIAL, ...over })
@@ -41,14 +40,4 @@ test('andamento: a compact is due from 75% of the autocompact threshold, not at 
   expect(at(190_000)).toBe(true)
   expect(at(undefined)).toBe(false)
   expect(andamento(snap({ ctx: { tokens: 190_000 } })).isCompactDue).toBe(false)
-})
-
-test('costTargetOf: the positive number cockpit.json names; anything else is no target', () => {
-  expect(costTargetOf('{"costTarget":1.5}')).toBe(1.5)
-  expect(costTargetOf('{"costTarget":"1.5"}')).toBeUndefined()
-  expect(costTargetOf('{"costTarget":0}')).toBeUndefined()
-  expect(costTargetOf('{"costTarget":-2}')).toBeUndefined()
-  expect(costTargetOf('{"lang":"it"}')).toBeUndefined()
-  expect(costTargetOf('{ "costTarget": ')).toBeUndefined()
-  expect(costTargetOf('')).toBeUndefined()
 })

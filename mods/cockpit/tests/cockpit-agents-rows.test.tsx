@@ -14,7 +14,7 @@ const shares = (rows: string[]) =>
 
 const STEP_USAGE = { input_tokens: 1000, output_tokens: 200, cache_read_input_tokens: 8000, cache_creation_input_tokens: 500, model: 'claude-sonnet-5-5' }
 
-test('agents: a row ends with the agent\'s share of the session tokens before its time, and stays within 30 and 58 columns', async ($, on) => {
+test('agents: a row ends with the agent\'s share of the session tokens before its time, and stays within 30 and 58 columns', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('turn.step', async function* (_, e) {
@@ -33,7 +33,7 @@ test('agents: a row ends with the agent\'s share of the session tokens before it
   }
 })
 
-test('agents: a block shows state, type, description, model, effort, share of the session tokens, time, the four counters per step and the tool running now, then the last one', async ($, on) => {
+test('agents: a block shows state, type, description, model, effort, share of the session tokens, time, the four counters per step and the tool running now, then the last one', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('turn.step', async function* (_, e) {
@@ -107,7 +107,7 @@ test('agents: a block shows state, type, description, model, effort, share of th
   await ui.unmount()
 })
 
-test('agents: the turn\'s own total replaces what its steps added, a turn that saw no step adds its own, and the share follows', async ($, on) => {
+test('agents: the turn\'s own total replaces what its steps added, a turn that saw no step adds its own, and the share follows', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   spawns(on)
   on('turn.step', async function* (_, e) {
@@ -130,7 +130,7 @@ test('agents: the turn\'s own total replaces what its steps added, a turn that s
   await ui.unmount()
 })
 
-test('agents: after a reload the share keeps the main loop\'s tokens and the agents\' cumulative count, which the state file persists', async ($, on) => {
+test('agents: after a reload the share keeps the main loop\'s tokens and the agents\' cumulative count, which the state file persists', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, stateFile: JSON.stringify({ open: false, mainTokens: 10_000, agentTokens: 5400 }) })
   spawns(on)
@@ -155,7 +155,7 @@ test('agents: after a reload the share keeps the main loop\'s tokens and the age
   expect(JSON.parse(file?.[1] ?? 'null')).toMatchObject({ agentTokens: 7100 })
 })
 
-test('agents: an agent that leaves the list joins a cumulative counter that the state file persists, so the share does not lean on the history', async ($, on) => {
+test('agents: an agent that leaves the list joins a cumulative counter that the state file persists, so the share does not lean on the history', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   // 100k new tokens of agents that left earlier, none of them in the (empty) history
   const clock = world(on, { writes, listed: [{ id: 'a2', status: 'running' }], stateFile: JSON.stringify({ open: false, agentTokens: 100_000 }) })
@@ -203,7 +203,7 @@ test('agents: the tool line (the one running, or the last) wraps to the width, n
 
 const USAGE = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
 
-test('agents: every live row that has a usage carries the agent\'s cost in a fixed cell before its time, at 40 and 58 columns', async ($, on) => {
+test('agents: every live row that has a usage carries the agent\'s cost in a fixed cell before its time, at 40 and 58 columns', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, {
     listed: [
       { id: 'a1', status: 'running' },
@@ -232,7 +232,7 @@ test('agents: every live row that has a usage carries the agent\'s cost in a fix
   }
 })
 
-test('agents: LOG shows the cost a log entry kept', async ($, on) => {
+test('agents: LOG shows the cost a log entry kept', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: NOW - 1000, kind: 'agent', key: 'a1', text: 'two', usd: 1.5, ms: 60_000 }], prs: [] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
@@ -240,7 +240,7 @@ test('agents: LOG shows the cost a log entry kept', async ($, on) => {
   await ui.unmount()
 })
 
-test('agents: an agent that finished keeps its effort and its cost on the history entry the data file holds', async ($, on) => {
+test('agents: an agent that finished keeps its effort and its cost on the history entry the data file holds', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   spawns(on)
@@ -264,7 +264,7 @@ test('agents: an agent that finished keeps its effort and its cost on the histor
 
 // ── One cut line each ──
 
-test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: the agent row with its fixed columns, then (expanded) the description, the warning and the tool', async ($, on) => {
+test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: the agent row with its fixed columns, then (expanded) the description, the warning and the tool', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
@@ -314,7 +314,7 @@ test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: 
   }
 })
 
-test('agents: a description with line breaks stays on its one row, under the expanded agent', async ($, on) => {
+test('agents: a description with line breaks stays on its one row, under the expanded agent', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

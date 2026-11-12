@@ -23,6 +23,8 @@ const RESUME_MAX = 50
 const OTHER_MAX = 98
 /** How often the mod beats and looks at the pace file: well under the 3 minutes that count it alive. */
 export const PACE_TICK_MS = 30_000
+/** How long a check waits on a compaction before it lets the heartbeat and the ticks go on; the compaction's outcome still counts when it lands. */
+export const COMPACT_WAIT_MS = 120_000
 /** The heartbeat runs from this usage of either window, before the chat arms: the chat decides at its 96% band whether the mod is alive. */
 export const BEAT_FROM_PCT = 70
 
@@ -99,6 +101,10 @@ let tries = { armedAt: 0, n: 0, isCompacted: false, isResumed: false }
 let notBefore = 0
 let isBusy = false
 let held: ModFile = {}
+// the session the state above belongs to: another session starts it over, so one chat's times never reach another's mod file
+let forSession: string | undefined
+// a compaction still running past COMPACT_WAIT_MS: no second one starts until it lands
+let isCompacting = false
 
 /** Back to a fresh start: the tests run one engine after another in one module. */
 export function resetPaceState(): void {
@@ -106,6 +112,8 @@ export function resetPaceState(): void {
   notBefore = 0
   isBusy = false
   held = {}
+  forSession = undefined
+  isCompacting = false
 }
 
 async function paths($: EngineInterface, sid: string): Promise<{ pace: string; mod: string } | undefined> {
@@ -146,7 +154,12 @@ async function writeMod($: EngineInterface, path: string, change: ModFile): Prom
  * turn or on an idle tick; the resume when due, on a tick. A closed pane at low usage, unarmed, writes nothing.
  */
 export async function paceCheck($: EngineInterface, sessionId: string | undefined, rates: readonly CockpitRateLimit[], isIdle: boolean, trigger: 'tick' | 'turn'): Promise<void> {
-  if (!sessionId || isBusy) return
+  if (!sessionId) return
+  if (sessionId !== forSession) {
+    resetPaceState()
+    forSession = sessionId
+  }
+  if (isBusy) return
   isBusy = true
   try {
     const p = await paths($, sessionId)
@@ -162,14 +175,25 @@ export async function paceCheck($: EngineInterface, sessionId: string | undefine
       tries = { armedAt: pace.armedAt, n: 0, isCompacted: false, isResumed: false }
       notBefore = 0
     }
-    if ((trigger === 'turn' || isIdle) && !tries.isCompacted && isCompactDue(pace, mod, tries.n)) {
+    if ((trigger === 'turn' || isIdle) && !tries.isCompacted && !isCompacting && isCompactDue(pace, mod, tries.n)) {
       // a veto (`skip`) is a try; a turn still running (a reject) is none: the next turn's end or idle tick tries again
-      const outcome = await $.session.compact({ instructions: compactInstructions(pace.checkpoint) }).then(r => (r?.skip ? 'veto' : 'done'), () => 'busy')
-      if (outcome === 'veto') tries = { ...tries, n: tries.n + 1 }
-      if (outcome === 'done') {
-        tries = { ...tries, isCompacted: true }
-        await writeMod($, p.mod, { compactedAt: await $.clock.now() })
+      const armedAt = pace.armedAt
+      const mine = forSession
+      const settle = async (outcome: 'veto' | 'done' | 'busy'): Promise<void> => {
+        isCompacting = false
+        if (forSession !== mine || tries.armedAt !== armedAt) return
+        if (outcome === 'veto') tries = { ...tries, n: tries.n + 1 }
+        if (outcome === 'done') {
+          tries = { ...tries, isCompacted: true }
+          await writeMod($, p.mod, { compactedAt: await $.clock.now() })
+        }
       }
+      isCompacting = true
+      const compacting = $.session.compact({ instructions: compactInstructions(pace.checkpoint) }).then(r => (r?.skip ? 'veto' : 'done') as const, () => 'busy' as const)
+      // a compaction that never lands must not hold the check: past the wait the heartbeat and the ticks go on, and its outcome counts when it lands
+      const outcome = await Promise.race([compacting, new Promise<'slow'>(resolve => $.clock.after(COMPACT_WAIT_MS, () => resolve('slow')))])
+      if (outcome === 'slow') void compacting.then(settle).catch(() => undefined)
+      else await settle(outcome)
       return
     }
     if (trigger !== 'tick' || now < notBefore || tries.isResumed) return

@@ -81,6 +81,7 @@ export function attentionBlocks(k: Kit): Block[] {
     lines.push(1)
   }
 
+  const actionRows = rows.length
   const rest = signals.filter(sig => signalSeverity(sig) !== 'block')
   if (new Set(rest.map(dayOf)).size < 2) rest.forEach(add)
   else {
@@ -91,6 +92,12 @@ export function attentionBlocks(k: Kit): Block[] {
       lines.push(1)
       if (isOpen) rest.filter(sig => dayOf(sig) === date).forEach(add)
     })
+  }
+
+  // a thin rule closes the last action row when notifications follow; it is part of that row, so the collapse keeps it with it, and it costs no line of the budget
+  const last = rows[actionRows - 1]
+  if (last !== undefined && rows.length > actionRows) {
+    rows[actionRows - 1] = [...last, line(ui, [sp('─'.repeat(k.width), COLORS.rule)])]
   }
 
   if (rows.length === 0) return [[title(S.page.attention), line(ui, [sp('✓ ', COLORS.green), dim(S.page.nothingToDo)])]]

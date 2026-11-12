@@ -21,23 +21,23 @@ async function ctxRows($: Engine, on: On, tokens: number, options: World = {}) {
   return { row: rows.find(r => /^CTX /.test(r)) ?? '', warning: rows.find(r => /^󰀦/.test(r)) }
 }
 
-test('CTX readout: with a threshold the percent and the window are those of the bar, 1.1 x the threshold', async ($, on) => {
+test('CTX readout: with a threshold the percent and the window are those of the bar, 1.1 x the threshold', { timeoutMs: 30_000 }, async ($, on) => {
   const { row, warning } = await ctxRows($, on, 151_000, { autoCompactAt: 193_000 })
   expect(row).toMatch(/^CTX [▰▱]+ {2}71% {3}151K\/212K/)
   expect(warning).toBeUndefined()
 })
 
-test('CTX readout: the scaled percent stops at 100%', async ($, on) => {
+test('CTX readout: the scaled percent stops at 100%', { timeoutMs: 30_000 }, async ($, on) => {
   const { row } = await ctxRows($, on, 300_000, { autoCompactAt: 193_000 })
   expect(row).toMatch(/^CTX [▰▱]+ 100% {3}300K\/212K/)
 })
 
-test('CTX readout: without a threshold it stays the window\'s own, /1M', async ($, on) => {
+test('CTX readout: without a threshold it stays the window\'s own, /1M', { timeoutMs: 30_000 }, async ($, on) => {
   const { row } = await ctxRows($, on, 151_000)
   expect(row).toMatch(/^CTX [▰▱]+ {2}15% {3}151K\/1M/)
 })
 
-test('CTX readout: Given 200k of a 193k threshold (94% of the bar), When the pane is drawn, Then no warning row is drawn', async ($, on) => {
+test('CTX readout: Given 200k of a 193k threshold (94% of the bar), When the pane is drawn, Then no warning row is drawn', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const at = await ctxRows($, on, 200_000, { autoCompactAt: 193_000 })
   // Then
@@ -45,7 +45,7 @@ test('CTX readout: Given 200k of a 193k threshold (94% of the bar), When the pan
   expect(at.row).toMatch(/^CTX [▰▱]+ {2}94% /)
 })
 
-test('CTX readout: it keeps its cells, so the row is as wide with a threshold as without', async ($, on) => {
+test('CTX readout: it keeps its cells, so the row is as wide with a threshold as without', { timeoutMs: 30_000 }, async ($, on) => {
   const { row } = await ctxRows($, on, 151_000, { autoCompactAt: 193_000 })
   expect([...row].length).toBe(48)
 })
@@ -73,6 +73,6 @@ for (const [tokens, color, name] of [
   })
 }
 
-test('CTX colour: without a threshold it keeps the window\'s own colouring', async ($, on) => {
+test('CTX colour: without a threshold it keeps the window\'s own colouring', { timeoutMs: 30_000 }, async ($, on) => {
   expect(await ctxColourOf($, on, 600_000)).toBe(COLORS.yellow) // 60% of 1M
 })

@@ -226,16 +226,6 @@ export function autoOpenOf(text: string): boolean {
   }
 }
 
-/** The `$`/prompt `cockpit.json` aims at (`costTarget`): a positive number; anything else is no target. */
-export function costTargetOf(text: string): number | undefined {
-  try {
-    const target: unknown = (JSON.parse(text) as { costTarget?: unknown } | null)?.costTarget
-    return typeof target === 'number' && Number.isFinite(target) && target > 0 ? target : undefined
-  } catch {
-    return undefined
-  }
-}
-
 export const setLang = (lang: Lang): void => {
   current = BUNDLES[lang]
 }

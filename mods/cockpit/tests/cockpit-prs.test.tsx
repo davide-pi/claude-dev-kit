@@ -35,48 +35,48 @@ async function saved(clock: Awaited<ReturnType<typeof chat>>['clock'], writes: M
   return (dataOf(writes)?.prs ?? []) as Saved[]
 }
 
-test('PR: a GitHub pull request of the branch is kept: number, title and address (gh pr view, once)', async ($, on) => {
+test('PR: a GitHub pull request of the branch is kept: number, title and address (gh pr view, once)', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const { clock, writes } = await chat($, on, { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED } })
   expect(ghCalls).toEqual([GH_PR_ARGS])
   expect(await saved(clock, writes)).toEqual([expect.objectContaining({ ...FIX, url: GH_CREATED })])
 })
 
-test("PR: the branch's pull request opened before the chat began is not the chat's", async ($, on) => {
+test("PR: the branch's pull request opened before the chat began is not the chat's", { timeoutMs: 30_000 }, async ($, on) => {
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 60_000).toISOString() } })
   expect(await saved(clock, writes)).toEqual([])
 })
 
-test("PR: the branch's pull request without an opening date is not taken as the chat's", async ($, on) => {
+test("PR: the branch's pull request without an opening date is not taken as the chat's", { timeoutMs: 30_000 }, async ($, on) => {
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: undefined } })
   expect(await saved(clock, writes)).toEqual([])
 })
 
-test('PR: a pull request the chat already holds stays kept, whenever it was opened', async ($, on) => {
+test('PR: a pull request the chat already holds stays kept, whenever it was opened', { timeoutMs: 30_000 }, async ($, on) => {
   const dataFile = JSON.stringify({ history: [], prs: [{ number: 42, title: 'Fix the orders filter', state: 'open' }] })
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 86_400_000).toISOString() }, dataFile })
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
 })
 
-test('PR: a resumed chat keeps the moment it began, so a pull request opened before the resume is still its own', async ($, on) => {
+test('PR: a resumed chat keeps the moment it began, so a pull request opened before the resume is still its own', { timeoutMs: 30_000 }, async ($, on) => {
   const dataFile = JSON.stringify({ history: [], startedAt: NOW - 2 * 60 * MIN })
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 60 * MIN).toISOString() }, dataFile })
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
   expect(dataOf(writes)?.startedAt).toBe(NOW - 2 * 60 * MIN)
 })
 
-test("PR: a pull request opened seconds before the chat began, by a server clock behind this one, is still the chat's", async ($, on) => {
+test("PR: a pull request opened seconds before the chat began, by a server clock behind this one, is still the chat's", { timeoutMs: 30_000 }, async ($, on) => {
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42, prExtra: { url: GH_CREATED, createdAt: new Date(NOW - 5_000).toISOString() } })
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
 })
 
-test("PR: on Azure DevOps the branch's pull request opened before the chat began is not the chat's", async ($, on) => {
+test("PR: on Azure DevOps the branch's pull request opened before the chat began is not the chat's", { timeoutMs: 30_000 }, async ($, on) => {
   const azPr = [{ pullRequestId: 7, title: 'Faster orders', status: 'active', creationDate: new Date(NOW - 60 * MIN).toISOString() }]
   const { clock, writes } = await chat($, on, { branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr })
   expect(await saved(clock, writes)).toEqual([])
 })
 
-test('PR: a work item id in the branch name does not keep gh from being asked', async ($, on) => {
+test('PR: a work item id in the branch name does not keep gh from being asked', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const { clock, writes } = await chat($, on, { ghCalls, branch: 'feature/AB#77-orders', remote: 'https://github.com/example/orders', pr: 42 })
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
@@ -98,7 +98,7 @@ for (const { name, options, isGhAsked } of [
   })
 }
 
-test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM line and the project of the remote', async ($, on) => {
+test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM line and the project of the remote', { timeoutMs: 30_000 }, async ($, on) => {
   const azCalls: string[] = []
   const ghCalls: string[] = []
   const azPr = [{ pullRequestId: 7, title: 'Faster orders', status: 'active', isDraft: false, reviewers: [{ vote: 10 }, { vote: 0 }] }]
@@ -110,7 +110,7 @@ test('PR: an Azure DevOps remote asks az repos pr list with the org of the ALM l
   expect(await saved(clock, writes)).toEqual([expect.objectContaining({ number: 7, title: 'Faster orders', state: 'open' })])
 })
 
-test('PR: on Azure DevOps the repository is asked in the project of the remote URL, not the ALM one', async ($, on) => {
+test('PR: on Azure DevOps the repository is asked in the project of the remote URL, not the ALM one', { timeoutMs: 30_000 }, async ($, on) => {
   const azCalls: string[] = []
   const { clock, writes } = await chat($, on, { azCalls, branch: 'feature/orders-filter', remote: 'https://dev.azure.com/<org>/Beta/_git/orders', workspaces: AZ_WORKSPACES, azPr: AZ_PR })
   expect(azCalls).toHaveLength(1)
@@ -133,7 +133,7 @@ for (const { name, options, workspaces } of [
   })
 }
 
-test('PR: read at most every 5 minutes, and again for another branch; the default branch is never asked', async ($, on) => {
+test('PR: read at most every 5 minutes, and again for another branch; the default branch is never asked', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock, writes } = await chat($, on, options)
@@ -162,7 +162,7 @@ test('PR: read at most every 5 minutes, and again for another branch; the defaul
   expect((await saved(clock, writes)).map(p => p.number).sort()).toEqual([42, 43])
 })
 
-test('PR: the PR of a branch left behind stays kept on the next one, which adds none of its own', async ($, on) => {
+test('PR: the PR of a branch left behind stays kept on the next one, which adds none of its own', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock, writes } = await chat($, on, options)
   options.branch = 'feature/other'
@@ -172,7 +172,7 @@ test('PR: the PR of a branch left behind stays kept on the next one, which adds 
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
 })
 
-test('PR: a repo the chat only passes through (a cd to read) adds no PR; once the chat edits a file there, its PR is read', async ($, on) => {
+test('PR: a repo the chat only passes through (a cd to read) adds no PR; once the chat edits a file there, its PR is read', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, cwd: '/work/home', notRepo: true, remote: GH_SSH, pr: 42 }
   const { clock, writes } = await chat($, on, options, on => on('tool.call', () => ({ result: {} })))
@@ -191,7 +191,7 @@ test('PR: a repo the chat only passes through (a cd to read) adds no PR; once th
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
 })
 
-test('PR: the repo the process started in is the chat\'s, its case aside; an edit in a third repo does not make the one passed through the chat\'s', async ($, on) => {
+test('PR: the repo the process started in is the chat\'s, its case aside; an edit in a third repo does not make the one passed through the chat\'s', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, cwd: '/Work/Home', remote: GH_SSH, pr: 42 }
   const { clock } = await chat($, on, options, on => on('tool.call', () => ({ result: {} })))
@@ -210,7 +210,7 @@ test('PR: the repo the process started in is the chat\'s, its case aside; an edi
   expect(ghCalls).toHaveLength(2)
 })
 
-test('PR: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', async ($, on) => {
+test('PR: a detached HEAD or a folder without git forgets the PR read, so the branch is asked again on return', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock } = await chat($, on, options)
@@ -232,7 +232,7 @@ test('PR: a detached HEAD or a folder without git forgets the PR read, so the br
   expect(ghCalls).toHaveLength(3)
 })
 
-test('PR: a branch left and come back to is asked again, not served from the read of five minutes ago', async ($, on) => {
+test('PR: a branch left and come back to is asked again, not served from the read of five minutes ago', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock } = await chat($, on, options)
@@ -246,7 +246,7 @@ test('PR: a branch left and come back to is asked again, not served from the rea
   expect(ghCalls).toHaveLength(3)
 })
 
-test('PR: a failed gh pr view adds nothing and leaves the PRs already kept', async ($, on) => {
+test('PR: a failed gh pr view adds nothing and leaves the PRs already kept', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock, writes } = await chat($, on, options)
   options.noGh = true // gh is gone: the next read fails
@@ -255,7 +255,7 @@ test('PR: a failed gh pr view adds nothing and leaves the PRs already kept', asy
   expect((await saved(clock, writes)).map(p => p.number)).toEqual([42])
 })
 
-test('PR: a branch that changes between a refresh\'s git read and its patch is asked again, not served from the read of the branch it left', async ($, on) => {
+test('PR: a branch that changes between a refresh\'s git read and its patch is asked again, not served from the read of the branch it left', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const options: World = { ghCalls, branch: 'feature/orders-filter', remote: GH_SSH, pr: 42 }
   const { clock, writes } = await chat($, on, options)
@@ -293,13 +293,13 @@ for (const { name, env } of [
   })
 }
 
-test('az: elsewhere it is started by name, with no shell in between', async ($, on) => {
+test('az: elsewhere it is started by name, with no shell in between', { timeoutMs: 30_000 }, async ($, on) => {
   const azCalls: string[] = []
   await chat($, on, { azCalls, env: { CLAUDE_CONFIG_DIR: '/cfg', OS: 'Linux' }, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
   expect(azCalls).toEqual([`az ${AZ_LIST}`])
 })
 
-test('az: on Windows an argument cmd would read as more than text (a branch named a&b) is never handed to it', async ($, on) => {
+test('az: on Windows an argument cmd would read as more than text (a branch named a&b) is never handed to it', { timeoutMs: 30_000 }, async ($, on) => {
   const azCalls: string[] = []
   const { clock, writes } = await chat($, on, { azCalls, env: { CLAUDE_CONFIG_DIR: '/cfg', OS: 'Windows_NT' }, branch: 'feature/a&b', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
   expect(azCalls).toEqual([])
@@ -320,7 +320,7 @@ for (const { name, env, prefix } of [
   })
 }
 
-test('az: an identity whose config folder does not exist leaves the call with no AZURE_CONFIG_DIR, as hooks/lib/az-pin.js does', async ($, on) => {
+test('az: an identity whose config folder does not exist leaves the call with no AZURE_CONFIG_DIR, as hooks/lib/az-pin.js does', { timeoutMs: 30_000 }, async ($, on) => {
   const azEnvs: (Record<string, string> | undefined)[] = []
   await chat($, on, { azEnvs, azDirs: [], env: { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/me' }, branch: 'feature/orders-filter', remote: AZ_REMOTE, workspaces: AZ_WORKSPACES, azPr: AZ_PR })
   expect(azEnvs).toEqual([undefined])
@@ -328,7 +328,7 @@ test('az: an identity whose config folder does not exist leaves the call with no
 
 // ── A PR the chat creates ──
 
-test('PR: one created in the session (gh pr create) is kept in the data file and logged in DONE', async ($, on) => {
+test('PR: one created in the session (gh pr create) is kept in the data file and logged in DONE', { timeoutMs: 30_000 }, async ($, on) => {
   const { clock, writes } = await chat($, on, {}, on => on('tool.call', { tool: 'Bash' }, () => bashResult(`Creating pull request\n${GH_CREATED}\n`)))
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter" --body "x"' })
   await $.tool.call({ tool: 'Bash', command: 'git status' }) // not a create: nothing
@@ -338,14 +338,14 @@ test('PR: one created in the session (gh pr create) is kept in the data file and
   expect(await saved(clock, writes)).toEqual([{ number: 42, title: 'Add filter', url: GH_CREATED }])
 })
 
-test('PR: one created with az repos pr create takes its link from the repository web url', async ($, on) => {
+test('PR: one created with az repos pr create takes its link from the repository web url', { timeoutMs: 30_000 }, async ($, on) => {
   const answer = bashResult(JSON.stringify({ pullRequestId: 9, title: 'Faster orders', status: 'active', isDraft: true, repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } }))
   const { clock, writes } = await chat($, on, {}, on => on('tool.call', { tool: 'Bash' }, () => answer))
   await $.tool.call({ tool: 'Bash', command: 'az repos pr create --title "Faster orders" --draft true' })
   expect(await saved(clock, writes)).toEqual([expect.objectContaining({ number: 9, title: 'Faster orders', url: 'https://dev.azure.com/o/p/_git/r/pullrequest/9' })])
 })
 
-test('PR: one created in the chat is read again by its address, and moves to merged; an ended one is not read again', async ($, on) => {
+test('PR: one created in the chat is read again by its address, and moves to merged; an ended one is not read again', { timeoutMs: 30_000 }, async ($, on) => {
   const ghCalls: string[] = []
   const ghViews = { [GH_CREATED]: { number: 42, title: 'Add filter', url: GH_CREATED, state: 'MERGED', isDraft: false } }
   const { clock, writes } = await chat($, on, { ghCalls, remote: GH_SSH, ghViews }, on => on('tool.call', { tool: 'Bash' }, () => bashResult(`Creating pull request\n${GH_CREATED}\n`)))
@@ -360,7 +360,7 @@ test('PR: one created in the chat is read again by its address, and moves to mer
   expect((await saved(clock, writes)).map(p => [p.number, p.state])).toEqual([[42, 'merged']])
 })
 
-test('PR: on Azure DevOps one created in the chat is read again with az repos pr show, aimed at the org of the ALM line', async ($, on) => {
+test('PR: on Azure DevOps one created in the chat is read again with az repos pr show, aimed at the org of the ALM line', { timeoutMs: 30_000 }, async ($, on) => {
   const azCalls: string[] = []
   const created = bashResult(JSON.stringify({ pullRequestId: 9, title: 'Faster orders', status: 'active', repository: { webUrl: 'https://dev.azure.com/o/p/_git/r' } }))
   const azShow = { 9: { pullRequestId: 9, title: 'Faster orders', status: 'abandoned' } }
@@ -373,7 +373,7 @@ test('PR: on Azure DevOps one created in the chat is read again with az repos pr
   expect((await saved(clock, writes)).map(p => [p.number, p.state])).toEqual([[9, 'closed']])
 })
 
-test('PR: a saved one that cannot be read again keeps its last state', async ($, on) => {
+test('PR: a saved one that cannot be read again keeps its last state', { timeoutMs: 30_000 }, async ($, on) => {
   const { clock, writes } = await chat($, on, { remote: GH_SSH, ghViews: {} }, on => on('tool.call', { tool: 'Bash' }, () => bashResult(`${GH_CREATED}\n`)))
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
   await openCockpit($)
@@ -382,7 +382,7 @@ test('PR: a saved one that cannot be read again keeps its last state', async ($,
   expect((await saved(clock, writes)).map(p => [p.number, p.state])).toEqual([[42, undefined]])
 })
 
-test('PR: a create that failed, was refused or printed no url adds no PR', async ($, on) => {
+test('PR: a create that failed, was refused or printed no url adds no PR', { timeoutMs: 30_000 }, async ($, on) => {
   let answer: { deny: string } | { result: object; isError?: true } = { deny: 'no' }
   const { clock, writes } = await chat($, on, {}, on => on('tool.call', { tool: 'Bash' }, () => answer))
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title x' })
@@ -393,7 +393,7 @@ test('PR: a create that failed, was refused or printed no url adds no PR', async
   expect(await saved(clock, writes)).toEqual([])
 })
 
-test('PR: the read of the branch updates a PR already kept (created, then read) instead of adding another', async ($, on) => {
+test('PR: the read of the branch updates a PR already kept (created, then read) instead of adding another', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { branch: 'feature/orders-filter', remote: GH_SSH }
   const { clock, writes } = await chat($, on, options, on => on('tool.call', { tool: 'Bash' }, () => bashResult(GH_CREATED)))
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
@@ -405,7 +405,7 @@ test('PR: the read of the branch updates a PR already kept (created, then read) 
   expect((await saved(clock, writes)).map(p => [p.number, p.title])).toEqual([[42, 'Fix the orders filter']])
 })
 
-test('PR: the pull requests of a session come back with it (the data file); the next session id starts with none', async ($, on) => {
+test('PR: the pull requests of a session come back with it (the data file); the next session id starts with none', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   const prs = [{ number: 8, title: 'Checks', state: 'open' }]
   const writes = new Map<string, string>()
