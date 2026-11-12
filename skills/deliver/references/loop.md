@@ -66,7 +66,7 @@ Criteria with proof (step 2): per criterion, the proof and what it asserts: an a
 (browser screenshot, HTTP call, read-only query, CLI output; UI or legacy code with no tests, never "it compiles"); else "the owner tests". The matrix runs on the final
 code, after the review: a fix can change what a proof proved. Proof check (M, L, before the verdict): read only the
 assertion lines of each criterion's test (and the hunks behind `defaults` and any ledger contradiction); a proof that
-cannot fail on the old code is `not verified`. The verdict ends with "Local test: proposal <who/what>" (chat `it`: "Test locale: proposta <chi/cosa>"); the owner decides.
+cannot fail on the old code is `not verified`. The verdict carries a Problems item "Local test: proposal <who/what>" (chat `it`: "Test locale: proposta <chi/cosa>"); the owner decides.
 
 ## After OK: the mechanical scope check
 
@@ -105,7 +105,7 @@ run, on an `OK` or a `STALL` the owner gives up on: never on a resume (the resum
 findings). Before a relaunch WITHOUT `resumeFromRunId` (a red test after `OK`, scope-guard exit 1: a new run with empty
 state) `-LogRun` the previous run; the perimeter stays active. The last run of the change closes it. `/retro`: `references/loop-extras.md`.
 
-`defaults` ([{ choice, alternative, path }]) go in the verdict under "Defaults chosen" (chat `it`: "Default scelti"); read the hunks behind them in the
+`defaults` ([{ choice, alternative, path }]) go in the verdict as Decisions items tagged `— default` (below); read the hunks behind them in the
 proof check. A file that grew past 600 lines (or 200+ and grew 30%) comes back in `outOfScope` as a `growth` split
 proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding and no reviewer is asked for it.
 
@@ -116,8 +116,16 @@ proves a `fatto` / `failed` row only when its deciding line is found in what the
 output only, copied (`# pass 760`, or `` `True` / `True` `` for several), never a comment: counts and remarks ("6 files",
 "all equal") go in the command cell. S gets two or three lines. Then:
 
-Review: round 2, 0 open P1/P2. Gaps: <gaps, or none>. Residual risks: <list, or none>. Defaults chosen: <defaults, or none>. Local test: proposal <who/what>.
-Chat `it`: `giro`, `P1/P2 aperti`, `Gap`, `nessuno`, `Rischi residui`, `Default scelti`, `Test locale: proposta`.
+Review: round 2, 0 open P1/P2. (chat `it`: `giro`, `P1/P2 aperti`.) Then sections by type, only the non-empty, each after `---`
+with the title `**<Section> · <n>**` (one item alone: no title, no `---`), never inside `> ` or a code fence; ids stable:
 
-Close with everything outside the perimeter (`outOfScope` with `noticed`, `scope-revert` and growth proposals,
-`minor`, open questions) in the standing change-scope table, `#` stable; the user picks.
+| Section (chat `it`) | Id | Holds |
+| --- | --- | --- |
+| Decisions (`Decisioni`) | #D | each default chosen, head `**#D1 · <choice> (alternative <alt>)** — default`; open questions the owner must answer, blocking first |
+| Problems (`Problemi`) | #I | gaps (a level or reviewer not run, with the reason), residual risks, the local-test proposal (who/what); by Severity |
+| Proposals (`Proposte`) | #P | everything outside the perimeter (`outOfScope` with `noticed`, `scope-revert` and growth proposals, `minor`); by Risk; the user picks |
+
+Item: head `**#I1 · <title>** — file:line` (file:line in code font), then one-line bullets (Context, Advice, axes); a decision or P1 item one axis per line
+(`Severity **P1** — why`), any other all axes on one line (`Severity P2: why · Risk low: why · Effort S: why`); `none` → omit the section.
+With 3+ items close with `| # | Item | Severity · Risk · Effort | For you |` (`Voce`, `Gravità`, `Rischio`, `Da te`), then `Reply …` and
+`Questions pending: #D2` lines (`Rispondi …`, `Domande in attesa: #D2`).

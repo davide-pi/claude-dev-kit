@@ -72,7 +72,7 @@ does not make reachable; generic advice with no specific defect.
 ## Output
 
 Finding blocks as the preloaded `finding-format` skill gives them (the block, one defect per block, the verdict line);
-two failures on one line are two blocks.
+two failures on one line are two blocks; `risk` and `effort` each end with a one-line why.
 
 Every block has `category: security`. Here **P1** is any CONFIRMED reachable vulnerability, **P2** before release, **P3** hardening; `failure`
 is the attack path (who sends what, through which code, gaining what), `evidence` the source, the sink

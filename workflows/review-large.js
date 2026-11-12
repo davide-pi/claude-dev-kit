@@ -58,7 +58,9 @@ const FINDING = {
     status: { type: 'string', enum: ['todo', 'done'] },
     priority: { type: 'string', enum: ['P1', 'P2', 'P3'] },
     risk: { type: 'string', enum: ['high', 'medium', 'low'] },
+    riskWhy: { type: 'string', description: 'one line: why this risk' },
     effort: { type: 'string', enum: ['S', 'M', 'L'] },
+    effortWhy: { type: 'string', description: 'one line: why this effort' },
     causedByChange: { type: 'boolean' },
     failure: { type: 'string' },
     evidence: { type: 'string' },
@@ -112,7 +114,7 @@ const SHARED = [
   `Intent (acceptance criteria verbatim): ${intent}`,
   `Effort: ${effort}.`,
   'Status: PASS (nothing wrong; `checked` names the passes run and what you read), ISSUES (findings), BLOCKED (you could not review; `blockedReason`).',
-  'Values verbatim: CONFIRMED/PLAUSIBLE, P1|P2|P3, high|medium|low, S|M|L, category slugs. title and failure in the chat language, forAuthor in the prComment language, as the Lang: line gives it.',
+  'Values verbatim: CONFIRMED/PLAUSIBLE, P1|P2|P3, high|medium|low, S|M|L, category slugs. riskWhy and effortWhy: one line each. title, failure, riskWhy and effortWhy in the chat language, forAuthor in the prComment language, as the Lang: line gives it.',
 ]
 const allFilesText = files.length <= LIST_ALL_MAX
   ? `All the changed files: ${sorted.join(', ')}.`
@@ -173,27 +175,31 @@ const rawTable = () => [
 
 // Mandatory report skeleton: byte-identical to the one in skills/code-review/references/report-format.md
 // (tools/validate.mjs compares them). Inline because the merger does not read the kit.
-const SKELETON = `Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
-Verdict at most one short question.
+const SKELETON = `Order: outcome line → Findings → Problems → Summary → footer (Verdict, Reply), the end. Never inside \`> \`
+or a code fence.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
    corrections once in Verdict.
-Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Improvements" block, one line each.
-Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
-To do (status: todo), columns exactly:
-| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
-Already done (status: done, one line each), columns exactly:
-| # | Category | Location | Finding | Resolved by |
-Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
-thread or "session". Findings posted on a PR add a "Posted" column to both tables.
-Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
-Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nothing to report, verified: …".`
+Findings (todo): after \`---\`, title \`**Findings · n**\` (a single one: no title, no \`---\`), one block each,
+P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; \`#F<n>\` = finding number:
+**#F<n> · <title>** — \`file:line\`
+- Problem: what breaks and the scenario, one line
+- Advice: the minimal fix, one line
+- P1: one axis per line: \`- Severity **P1** — why\`, then Risk and Effort the same way
+- P2, P3: one line: Severity P2: why · Risk low: why · Effort S: why
+- To confirm: only a PLAUSIBLE finding (CONFIRMED writes nothing): what settles it
+- Posted: only on a PR, thread or "chat only"
+Problems · n (\`#I\`): after \`---\`; every Completeness gap (N points, covered N: partial, missing, wrong, scope creep) is one item, same shape.
+Already done (done): rows in Findings, \`#F<n> · <title>\` — \`file:line\` — resolved by commit, thread or "session".
+Summary · n: after \`---\`, 3+ items only, columns exactly:
+| # | Item | Severity · Risk · Effort | For you |
+One row per item, same order (\`P1 · medium · M\`, \`ok F1\`).
+Footer: Verdict, criteria covered N of N, each agent, its model and effort (a blocked or missing worker is a gap); then
+\`Reply ok F3 F4 …\`, the P1s and every P3 + low + S finding; apply nothing before the answer.
+No findings → no sections: "nothing to report, verified: …".`
 // At chat it: equivalents of the skeleton labels, outside the byte-compared skeleton.
-const IT_LABELS = `At chat it: Findings=Rilievi, Improvements=Miglioramenti, Completeness=Completezza, points=punti, covered=coperti, To do=Da fare, Already done=Già fatti, Quick fixes=Fix rapidi, Verdict=Verdetto, Priority=Priorità, Category=Categoria, Location=Posizione, Finding=Rilievo, Risk=Rischio, Effort=Sforzo, Resolved by=Risolto da, session=sessione, Posted=Postato, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".`
+const IT_LABELS = `At chat it: Findings=Rilievi, Problems=Problemi, Problem=Problema, Advice=Consiglio, To confirm=Da confermare, Severity=Gravità, Risk=Rischio, Completeness=Completezza, points=punti, covered=coperti, criteria=criteri, of=su, Already done=Già fatti, resolved by=risolto da, session=sessione, Summary=Riepilogo, Item=Voce, For you=Da te, Reply=Rispondi, Verdict=Verdetto, Posted=Postato, chat only=solo chat, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato". Why lines: Risk = riskWhy, Effort = effortWhy, Severity = the finding failure, condensed.`
 
 phase('Merge')
 const report = await agent([

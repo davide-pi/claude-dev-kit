@@ -13,8 +13,8 @@
 1. Ask only before the irreversible: data, deploy, money, deletes. Else the approach in one line, then go;
    a shared contract (API, event, schema) -> agree the interface first.
 2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
-3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly, never the
-   `az devops configure` default. No line, unmapped, or an added dir -> ask.
+3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly on every call.
+   No line, unmapped, or an added dir -> ask.
 4. Fan-out searches, wide reads -> `Explore`. Briefs ask for concise reports.
 5. Reviews (`/code-review`, ad-hoc) run in subagents; `/security-review` only when I name it.
 
@@ -22,28 +22,23 @@ Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks
 
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
-dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
-each, then stop.
-
-| # | Proposal | Reason | Risk |
-| --- | --- | --- | --- |
-
-Rows `#P1`, `#P2`, stable all conversation. Risk: **high** behaviour, data, contract; **medium** local
-logic, testable; **low** cosmetic.
+dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: a `#P`
+item (output style) with recommendation, Risk and Effort, each with its why, then stop. Risk: `high` behaviour,
+data, contract; `medium` local logic, testable; `low` cosmetic.
 
 ## Language
 - Chat: `language` setting (unset: English), agent reports too.
 - Commit, pr, prComment, items, wiki: each per `Lang:` (none: en).
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
-  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
-- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
+  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`, `alto|medio|basso`.
+- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>` `fallito`
 
 ## Done means verified
-Never claim done, fixed, passing, verified without a command run this turn (reading isn't proof).
-A main-session reply after an edit, commit, push or install opens with a `**Verification**` line, plain
+Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
+isn't proof). A main-session reply after an edit, commit, push or install puts a `**Verification**` line right after the bold outcome line, plain
 `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
 ## Tools, no prompts
-Program first (`git -C <path> log`; `cd X && ...` prompts). Read a file once, not after an edit.
+`git -C <path>`, never `cd X && ...` (it prompts). Batch independent calls; read a file once, not after an edit.

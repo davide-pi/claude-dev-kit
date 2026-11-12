@@ -12,4 +12,4 @@ paths: "**/Migrations/**/*.cs,**/*ModelSnapshot.cs"
 - A migration applied anywhere shared is history: fix forward with a new migration.
 - Deploys consume the idempotent script (the `migration.sql` artifact), not `database update`.
 
-Procedure: skill `ef-core`.
+Procedure: Read `~/.claude/skills/ef-core/SKILL.md`.

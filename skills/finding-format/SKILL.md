@@ -33,8 +33,8 @@ before `done`, P1 → P3, `CONFIRMED` before `PLAUSIBLE`. ≤ 12 lines each, no 
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: high | medium | low         (todo only)
-- effort: S | M | L                 (todo only)
+- risk: high | medium | low — <why, one line>   (todo only)
+- effort: S | M | L — <why, one line>           (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>

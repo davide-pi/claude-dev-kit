@@ -41,6 +41,8 @@ A recommendation answers one question; it is never a redesign of the plan.
 | `header` | `D<n> <topic>`, ≤ 12 characters — the number survives into the summary |
 | `options` | 2–4 real alternatives; the recommended one **first**, label ending `(Recommended)` (at chat `it`: `(Consigliata)`), `description` = the reason in one line; the others' trade-offs in theirs |
 
+A blocking choice always goes to `AskUserQuestion`, self-contained: the question names the context and the advice, each option's
+`description` carries its why, Risk and Effort, so the box reads on its own without the chat above it.
 Up to 4 questions per call; a bigger frontier is several calls in the same round. An open question (a number, a name) still gets 2–4 plausible values.
 Phrase each question so the recommended option is the affirmative one. Tool unavailable → numbered
 questions in chat, recommended answer first, so a "yes" (in the chat language) accepts it.

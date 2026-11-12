@@ -12,4 +12,4 @@ paths: "**/.pipelines/**,**/azure-pipelines*.y*ml,**/.github/workflows/*.y*ml,**
 - No test stage in a tree with no tests.
 - A red run is diagnosed before any YAML edit: the failing step's log via `azdo-cli`, then `debug-systematic`.
 
-Procedure: skill `pipeline`.
+Procedure: Read `~/.claude/skills/pipeline/SKILL.md`.
