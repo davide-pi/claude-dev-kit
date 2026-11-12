@@ -366,6 +366,8 @@
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close*)",
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -LogRun *)",
       "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "PowerShell(node ~/.claude/scripts/pace-state.mjs *)",
+      "PowerShell(pwsh -NoProfile -File ~/.claude/scripts/resume-task.ps1 *)",
       "PowerShell(node ~/.claude/hooks/scope-guard.js --check *)",
       "PowerShell(node ~/.claude/scripts/gate.mjs *)",
       "PowerShell(node ~/.claude/scripts/sweep.mjs *)",
@@ -440,6 +442,8 @@
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close*)",
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -LogRun *)",
       "Bash(pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1 -Since *)",
+      "Bash(node ~/.claude/scripts/pace-state.mjs *)",
+      "Bash(pwsh -NoProfile -File ~/.claude/scripts/resume-task.ps1 *)",
       "Bash(node ~/.claude/hooks/scope-guard.js --check *)",
       "Bash(node ~/.claude/scripts/gate.mjs *)",
       "Bash(node ~/.claude/scripts/sweep.mjs *)",
@@ -678,7 +682,51 @@
   "model": "opus",
   "fallbackModel": ["sonnet", "haiku"],
   "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      }
+    ],
     "PreToolUse": [
+      {
+        "matcher": "Bash|PowerShell|Agent|Task|Workflow",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "Agent|Task",
         "hooks": [
@@ -788,6 +836,20 @@
       }
     ],
     "SessionStart": [
+      {
+        "matcher": "resume|compact",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/pace.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 5
+          }
+        ]
+      },
       {
         "matcher": "startup|resume|clear|compact",
         "hooks": [

@@ -15,6 +15,7 @@
 const path = require("node:path");
 const { C, R, termWidth, visibleWidth, truncateAnsi } = require(path.join(__dirname, "statusline", "ansi.js"));
 const { gitInfo, worktreeInfo } = require(path.join(__dirname, "statusline", "git.js"));
+const { recordPace } = require(path.join(__dirname, "statusline", "pace.js"));
 const {
   GIT_CACHE_MS, WORKTREE_CACHE_MS, cachedByCwd, saveContextSnapshot, pruneCache,
   saveRateLimitCache, reconcileCached, readSettings, readCockpit,
@@ -36,6 +37,8 @@ process.stdin.on("end", () => {
   const cwd = data.cwd || data.workspace?.current_dir || process.cwd();
   saveContextSnapshot(data.session_id, data.context_window, data.prompt_cache);
   pruneCache(data.session_id);
+  // Shared usage-pace file: written before the cockpit early return, an error never changes the line.
+  try { recordPace(data.rate_limits, Date.now(), "statusline"); } catch { /* the line goes on */ }
 
   // The cockpit pane carries all of this while it is open: the line stays empty.
   const cockpit = readCockpit(data.session_id);
