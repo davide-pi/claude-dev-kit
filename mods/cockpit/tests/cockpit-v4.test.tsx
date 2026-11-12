@@ -129,7 +129,7 @@ test('IN PROGRESS: the workflow run is a node with its name, phase and agents do
   await askPerson($, 'c1')
   await clock.advance(7000)
   await settleAll()
-  const { rows } = await paneRows($, 58)
+  const { rows } = await paneRows($, 64)
   const run = rows.findIndex(r => /^[▾▸-] \d\d:\d\d flow release-notes/.test(r))
   expect(run).toBeGreaterThan(-1)
   expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)

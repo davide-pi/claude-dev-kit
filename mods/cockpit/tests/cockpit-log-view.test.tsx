@@ -345,3 +345,21 @@ test('Given a flow launched in round 3 whose agents are still working in round 5
   expect(under.some(r => /→ flow wf_1/.test(r))).toBe(true)
   expect(rows.filter(r => /→ flow wf_1/.test(r))).toHaveLength(1)
 })
+
+test('Given a live flow whose name and progress do not fit a narrow pane, When drawn, Then the name is cut with an ellipsis and the progress stays whole', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on, { dataFile: JSON.stringify({ history: [], prs: [], sessionLog: [] }) })
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 0)
+  await clock.advance(10_000)
+  await settleAll()
+  // When
+  const ui = await mountPane($, 54)
+  const rows = await textOf(ui)
+  await ui.unmount()
+  // Then
+  const flowRow = rows.find(r => /^[▾▸-] \d\d:\d\d fl/.test(r)) ?? ''
+  expect(flowRow).toMatch(/· 0\/1/)
+  expect(flowRow).toMatch(/flow [^·]*… +· step 0 · 0\/1/)
+})
