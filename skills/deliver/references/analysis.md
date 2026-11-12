@@ -14,6 +14,7 @@ computes the size from them. A task is `{ id, title, files, dependsOn, tdd, crit
 the code it touches and its behaviour can be written as criteria; layout, config, a migration or a mechanical batch is
 not. Pass `unit` (the unit-test command) and `testSkill` too, or no block is test-first. The cut is by count only:
 order the tasks so those on the same files are adjacent, and make each atomic (it needs no other task except ones done before it).
+A design choice the plan leaves open goes into the loop args as `design` (one line).
 
 **Scout.** One `Explore` agent (Sonnet, medium) only when the analysis would pass about 30 file reads; its summary
 replaces them.
@@ -41,7 +42,8 @@ never asks the user; budget ~12 tool calls over both messages. One agent, two me
 2. **Attack** (`SendMessage` to the same agent; if it cannot be resumed, a second spawn given its 3 blind lines): our
    approach and criteria. It attacks from every angle, each one a row or "none": the premise (the request read wrong,
    the cause elsewhere); a simpler way, or code that already does it; a pre-mortem ("two weeks on it failed: why?");
-   the blast radius and the way back; a criterion no test can prove, or one without its error path.
+   the blast radius and the way back; a criterion no test can prove, or one without its error path; a design choice the
+   approach settles, checked against the ladder in `~/.claude/skills/principles/SKILL.md` (read it when the approach adds a type, an abstraction or a layer).
 3. **Output**, at most 15 lines: `blind way: equivalent | simpler (why, file:line) | worse`; then one row per objection,
    the heaviest first, `# | Weight | Objection | Evidence | Fix`, weight `blocking` | `minor`, evidence a `file:line`
    it read or the request's words (it drops an objection with neither); then a verdict, a proposal the owner decides:

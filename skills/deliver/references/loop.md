@@ -18,7 +18,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 ## Args
 
 `Workflow` with `name: dev-loop` and
-`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, plan, unit, testSkill, stuckMinutes, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, preview, lanes }`
+`{ brief, request, decisions, perimeter: { files, behaviour, exclusions }, repoRoot, start: { head, dirty }, plan, unit, testSkill, stuckMinutes, size, risk, mechanical, implementerEffort, implementerModel, cleanup, verify, stackSkill, design, preview, lanes }`
 
 | Arg | Rule |
 | --- | --- |
@@ -28,6 +28,7 @@ dirty → ask the user (continue on top of their edit, or change the perimeter);
 | `testSkill` | the test skill the test-first call reads (`dotnet-testing`) |
 | `stuckMinutes` | default 5, passed to the gate; 0 turns the stuck check off for a command known to be quiet |
 | `decisions` | the owner's decisions that touch the perimeter, one line each, in their words: every agent gets them; an edit that contradicts one is a `question` |
+| `design` | one line naming a design choice the plan leaves open ("share or duplicate the mapping in OrdersQuery"): the implementer brief then says to read `principles` first, settle it with the ladder and list it under `defaults` with the rung as the reason; cleanup and fix passes do not get it. Omit when the plan settles everything |
 | `preview` | M, L with an owner-visible output: what to show (page, endpoint, report). The run stops after the implementer with a `question` stall; show a screenshot or sample and ask: "ok" goes on, anything else is a direction for one more implementer pass. The verdict carries a final screenshot of the same surface |
 | `perimeter.files` | repo-relative paths, `dir/` or globs: the same entries as the perimeter file |
 | `size` | `S` from the triage, or omit. M and L are computed from the blocks (no plan: one block, M); a passed `M` or `L` that disagrees is one `gaps` line. The file count never changes it, and every reader reads the whole change (never a split); more files than S implies (2+) is one `gaps` line. Mechanical batches (rename, move, config, generated) with tests are S |

@@ -584,6 +584,21 @@ test('given a stack skill and a test skill, when the briefs are built, then both
   assert.ok(!code.includes('Stack skill to load first') && !tests.includes('Load the skill'));
 });
 
+test('given a design arg, when the implementer brief is built, then it names the principles skill and the choice; without it, no principles line', async () => {
+  // Given
+  const design = 'share or duplicate the mapping in OrdersQuery';
+  const withDesign = { ...ARGS_M, verify: 'node --test x', design };
+  const without = { ...ARGS_M, verify: 'node --test x' };
+  // When
+  const a = await run(withDesign, [review([])], [green()]);
+  const b = await run(without, [review([])], [green()]);
+  // Then
+  const [promptA] = implCalls(a.calls).map(c => c.prompt);
+  const [promptB] = implCalls(b.calls).map(c => c.prompt);
+  assert.ok(promptA.includes(`Read ~/.claude/skills/principles/SKILL.md first: the plan leaves a design choice open — ${design}. Settle it with the ladder and list it under \`defaults\` (choice, alternative, the rung as the reason).`));
+  assert.ok(!promptB.includes('skills/principles/SKILL.md'));
+});
+
 const TDD_ARGS = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u', testSkill: 'dotnet-testing', plan: { tasks: [{ ...tasksOf(1)[0], tdd: true, criteria: ['the total adds the tax'] }] } };
 
 test('given a block with a tdd task and a unit command, when it runs, then a tests-first call precedes the code call', async () => {
