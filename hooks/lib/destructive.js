@@ -229,11 +229,15 @@ const has = (re) => (scan) => re.test(scan);
 const all = (...tests) => (...args) => tests.every((t) => t(...args));
 
 /** The command a segment runs, after `sudo`, `xargs`, `env VAR=x` and their options. */
+/** Shell keywords that open a condition or a body: the command is the word after them. */
+const SHELL_KEYWORDS = new Set(['if', 'elif', 'then', 'else', 'while', 'until', 'do', '{', '!']);
 function effectiveCommand(segment) {
   const tokens = segment.trim().split(/\s+/);
   const wrappers = ['sudo', 'xargs', 'env', 'command', 'nohup', 'time', 'exec'];
   let i = 0;
-  while (i < tokens.length && (/^[A-Za-z_]\w*=/.test(tokens[i]) || wrappers.includes(tokens[i].toLowerCase()))) {
+  while (i < tokens.length) {
+    if (SHELL_KEYWORDS.has(tokens[i])) { i += 1; continue; }
+    if (!(/^[A-Za-z_]\w*=/.test(tokens[i]) || wrappers.includes(tokens[i].toLowerCase()))) break;
     i += 1;
     while (i < tokens.length && tokens[i].startsWith('-')) i += 1;
   }
@@ -468,7 +472,7 @@ function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefi
 }
 
 /** `git [-c k=v] <verb> …`: the verb is the first word after git and its options, never a word inside a message. */
-const GIT_VERB = /\bgit\s+(?:(?:-[cC]\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(checkout|restore|clean|reset|branch|update-ref|filter-branch|gc)(?![\w-])/i;
+const GIT_VERB = /\bgit\s+(?:(?:-[cC]\s+\S+|--(?:git-dir|work-tree|namespace|exec-path|config-env|super-prefix)\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(checkout|restore|clean|reset|branch|update-ref|filter-branch|gc)(?![\w-])/i;
 function gitCall(text) {
   const m = GIT_VERB.exec(text);
   return m ? { verb: m[1].toLowerCase(), rest: text.slice(m.index + m[0].length) } : null;
