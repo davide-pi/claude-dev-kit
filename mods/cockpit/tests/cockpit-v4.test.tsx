@@ -130,7 +130,7 @@ test('IN PROGRESS: the workflow run is a node with its name, phase and agents do
   await clock.advance(7000)
   await settleAll()
   const { rows } = await paneRows($, 58)
-  const run = rows.findIndex(r => /^[▾▸] \d\d:\d\d flow relea /.test(r))
+  const run = rows.findIndex(r => /^[▾▸-] \d\d:\d\d flow relea /.test(r))
   expect(run).toBeGreaterThan(-1)
   expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)
   release('rm x')

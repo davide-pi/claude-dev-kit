@@ -328,7 +328,7 @@ test('in progress: a perimeter with nothing outside reads as kept; the open work
   })
   const { rows } = await draw($, on, s, inProgressBlocks)
   expect(rows.slice(0, 5)).toEqual([titled('IN PROGRESS'), '󰄰 tasks 0/1', '󰄬 deliver perimeter · 1 entry', node('▾', undefined, 'current round'), child(NOW, '→', 'flow review', undefined, true)])
-  expect(rows[5]).toMatch(/^▸ \d\d:\d\d flow revie .*· x.*h x0 s x0 o x0 f x0$/)
+  expect(rows[5]).toMatch(/^- \d\d:\d\d flow revie .*· x.*h x0 s x0 o x0 f x0$/)
 })
 
 test('in progress: at most five rows, the rest behind the toggle', async ($, on) => {
@@ -393,8 +393,8 @@ test('done: given events after the newest round, when drawn, then LOG holds the 
   // When
   const closed = await draw($, on, s, doneBlocks)
   const open = await draw($, on, s, inProgressBlocks)
-  // Then: a round with nothing in it is a plain row, under the start time
-  expect(closed.rows).toEqual([logTitle(), node('▸', NOW - 194_000, 'round   1', figs('', 0.38, 134_000))])
+  // Then: a round with nothing in it is a plain row with a dash, not an arrow that opens nothing
+  expect(closed.rows).toEqual([logTitle(), node('-', NOW - 194_000, 'round   1', figs('', 0.38, 134_000))])
   expect(open.rows).toEqual([
     titled('IN PROGRESS'),
     node('▾', undefined, 'current round', '', [0, 1, 0, 0]),
@@ -503,7 +503,7 @@ test('done: given the session total, when drawn, then each header and each agent
   expect(noCost.rows[1]).not.toContain('%')
 })
 
-test('done: given rounds with no events, when drawn, then they are one row that does not toggle; a round without a cost prints none', async ($, on) => {
+test('done: given rounds with no events, when drawn, then they are one row with a dash, not a toggle arrow; a round without a cost prints none', async ($, on) => {
   // Given
   const log = [{ at: NOW - 300_000, kind: 'round', usd: 0.1 }, { at: NOW - 250_000, kind: 'round', usd: 0.1 }, { at: NOW - 200_000, kind: 'round', usd: 0.11 }, { at: NOW - 100_000, kind: 'commit', key: 'abc1234', text: 'abc1234' }, { at: NOW - 90_000, kind: 'round', ms: 5_000 }] as const
   // When
@@ -511,7 +511,7 @@ test('done: given rounds with no events, when drawn, then they are one row that 
   // Then
   // the label and figures of the run give way to the counters in a narrow pane
   expect(rows.slice(0, 4)).toEqual([logTitle(), node('▾', NOW - 95_000, 'round   4', '00m05s'), summary('1 commit'), child(NOW - 100_000, '●', 'commit abc1234', undefined, true)])
-  expect(rows[4]).toMatch(/^▸ \d\d:\d\d 3 chat-only rounds .*h x0 s x0 o x0 f x0$/)
+  expect(rows[4]).toMatch(/^- \d\d:\d\d 3 chat-only rounds .*h x0 s x0 o x0 f x0$/)
   expect(await keysOf(ui, /^done:\d/)).toEqual([`done:${NOW - 90_000}`])
 })
 
