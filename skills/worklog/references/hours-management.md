@@ -25,8 +25,8 @@ Rules:
 - Hours **come from the user**, never invented to reach the target; a declared row says `dichiarato`.
 - The user may answer "nessuna, va bene così" → the day closes at what it has; the reminder flags it
   again only if more than 1h short — offer the `target` row for the real day instead.
-- Overtime above the target is legitimate when the user declares it: mark the row `overtime: true`
-  in the push file.
+- Hours above the target are fine (parallel sessions sum up): log them as the engine measured them,
+  rounded per topic (`time-and-topics.md` § Rounding), never scaled down to the target and never ask about them; `overtime: true` in the push file is an optional note.
 
 ## The fixed structure
 
