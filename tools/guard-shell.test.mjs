@@ -1396,11 +1396,32 @@ test('a searcher with a substitution is not skipped', () => {
 
 // ── More actions with no undo ──────────────────────────────────────────────────────────────────
 
+test('given a recursive delete inside an if, a loop or a braced group, when the guard reads it, then it asks', () => {
+  // Given
+  const commands = [
+    'if true; then rm -rf /etc; fi', 'for i in 1; do rm -rf /etc; done', 'true && { rm -rf /etc; }',
+    'while false; do :; done; if ! rm -rf /etc; then echo x; fi', 'if true; then :; else sudo rm -rf /etc; fi',
+  ];
+
+  for (const command of commands) {
+    // When
+    const { decision } = runShell(command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+  approves('if true; then echo ok; fi');
+});
+
 test('git reset --hard asks with options before the verb', () => {
   asks('git reset --hard', /hard reset/);
   asks('git -C . reset --hard HEAD~3', /hard reset/);
   asks('git -c x=1 reset --hard');
   asks('git --no-pager reset --hard origin/main');
+  asks('git --git-dir /x reset --hard', /hard reset/);
+  asks('git --work-tree /x clean -fd');
+  asks('git --git-dir /x --work-tree /y branch -f main HEAD~2', /branch/);
+  approves('git --git-dir /x reset --soft HEAD~1');
   approves('git reset --soft HEAD~1');
   approves('git reset HEAD file.txt');
   approves('git -C . reset --mixed HEAD~1');
