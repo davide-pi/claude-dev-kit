@@ -28,7 +28,8 @@ import { fileURLToPath } from 'node:url';
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, 'scripts', 'resume-task.ps1');
 const hasPwsh = spawnSync('pwsh', ['-NoProfile', '-Command', '$PSVersionTable.PSVersion.Major'], { encoding: 'utf8' }).status === 0;
-const skip = hasPwsh ? false : 'pwsh 7 not on PATH';
+// The scheduler and the Windows Terminal launch exist on Windows only.
+const skip = process.platform !== 'win32' ? 'Windows only' : hasPwsh ? false : 'pwsh 7 not on PATH';
 
 const HOUR = 3600_000;
 const SID = '4ee9b1db-a8d6-4424-9eac-cf3c928abb54';

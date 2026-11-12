@@ -18,7 +18,8 @@ const path = require('path');
 const { expandSegments, stripWrappers, baseName, withoutBodies } = require('./shell-parse');
 
 /** True when a `browser-use` program sits in a PATH directory or in `~/.local/bin`. */
-const extensions = (pathExt) => ['', ...String(pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean), '.ps1'];
+// Lower-case too: PATHEXT is upper-case while a case-sensitive file system holds browser-use.exe.
+const extensions = (pathExt) => ['', ...String(pathExt ?? '.COM;.EXE;.BAT;.CMD').split(';').filter(Boolean).flatMap((e) => [e, e.toLowerCase()]), '.ps1'];
 
 function installed(pathEnv, pathExt, home) {
   const dirs = String(pathEnv ?? '').split(path.delimiter).map((d) => d.trim().replace(/^"(.*)"$/, '$1')).filter(Boolean);
