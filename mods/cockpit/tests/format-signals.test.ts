@@ -52,6 +52,19 @@ test('heavyAgent text: given a signal of $2.5, when written in English and Itali
   expect(it).toBe('il subagent implementer costa $2.50 o troppa parte della spesa')
 })
 
+test('heavyAgent text: given a signal saved before the dollars, holding 200000 tokens, when written, then it reads 200k tokens, never $200000.00', () => {
+  // Given
+  const tokens = 200_000
+  // When
+  setLang('it')
+  const it = t().signalText.heavyAgent('implementer', tokens).what
+  setLang('en')
+  const en = t().signalText.heavyAgent('implementer', tokens).what
+  // Then
+  expect(en).toBe('subagent implementer weighs 200k tokens or too much of the spend')
+  expect(it).toBe('il subagent implementer pesa 200k token o troppa parte della spesa')
+})
+
 test('heavyAgent: given an agent with many cumulative tokens but no cost, when detected, then it does not fire', () => {
   // Given
   const unpriced = { id: 'a4', type: 'implementer', tokens: 2_000_000 }

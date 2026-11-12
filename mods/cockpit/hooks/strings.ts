@@ -21,6 +21,9 @@ const SHARED = {
   tokenLabels: { input: 'in ', output: '  out ', cacheRead: '  cr ', cacheWrite: '  cw ' },
 }
 
+/** A heavyAgent saved before it counted dollars holds tokens: no subagent costs this much, so a number this large reads as tokens. */
+const LEGACY_TOKENS = 1000
+
 const EN = {
   ...SHARED,
   buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
@@ -40,7 +43,7 @@ const EN = {
   // Notifications
   signalFields: { why: 'why: ', todo: 'what to do: ' },
   signalText: {
-    heavyAgent: (a: string, n: number) => ({ what: `subagent ${a} costs $${n.toFixed(2)} or too much of the spend`, why: 'it burns budget and context out of sight', todo: 'check what it does; narrow the task or change the model' }),
+    heavyAgent: (a: string, n: number) => ({ what: `subagent ${a} ${n >= LEGACY_TOKENS ? `weighs ${Math.round(n / 1000)}k tokens` : `costs $${n.toFixed(2)}`} or too much of the spend`, why: 'it burns budget and context out of sight', todo: 'check what it does; narrow the task or change the model' }),
     opusReadOnly: (a: string) => ({ what: `Opus on a read-only agent (${a})`, why: 'Opus costs far more and a read does not need it', todo: 'set model sonnet or haiku for this agent type' }),
     bigResult: (tool: string, chars: number) => ({ what: `${tool} result of ${Math.round(chars / 1000)}k characters`, why: 'it stays in the context every round and swells it', todo: 'limit the output (filter, use head/offset) or compact' }),
     reread: (file: string, n: number) => ({ what: `${file} read ${n} times`, why: 'every read pays again for tokens already spent', todo: 'remember what you need from the file or read only the useful part' }),
@@ -125,7 +128,7 @@ const IT: Strings = {
 
   signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
   signalText: {
-    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} costa $${n.toFixed(2)} o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
+    heavyAgent: (a: string, n: number) => ({ what: `il subagent ${a} ${n >= LEGACY_TOKENS ? `pesa ${Math.round(n / 1000)}k token` : `costa $${n.toFixed(2)}`} o troppa parte della spesa`, why: 'consuma budget e contesto senza che lo si veda', todo: 'verifica cosa fa; restringi il compito o cambia modello' }),
     opusReadOnly: (a: string) => ({ what: `Opus su un agente di sola lettura (${a})`, why: 'Opus costa molto di più e una lettura non ne ha bisogno', todo: 'imposta model sonnet o haiku per questo tipo di agente' }),
     bigResult: (tool: string, chars: number) => ({ what: `risultato di ${tool} da ${Math.round(chars / 1000)}k caratteri`, why: 'resta nel contesto a ogni giro e lo gonfia', todo: "limita l'output (filtra, usa head/offset) o compatta" }),
     reread: (file: string, n: number) => ({ what: `${file} letto ${n} volte`, why: 'ogni lettura ripaga token già spesi', todo: 'ricorda cosa serve del file o leggine solo la parte utile' }),
