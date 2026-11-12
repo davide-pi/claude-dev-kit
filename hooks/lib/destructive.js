@@ -9,7 +9,9 @@
  * No subprocess and, but for one case, no file system access: it is text analysis, so the common case
  * (a line with none of the danger words) is one regex and nothing else. The one case: a recursive delete
  * whose every operand sits in Claude's own temp folder (`<tmp>/claude/<proj>/<session>/…`) passes, after an
- * lstat per path component to refuse a symbolic link or junction.
+ * lstat per path component to refuse a symbolic link or junction. Relative operands count after a `cd` /
+ * `Set-Location` into that folder (a literal, or a variable assigned one earlier on the line), and
+ * `Remove-Item` only when no link sits inside the tree it would recurse into.
  *
  * The interesting half of the problem is the false positives. Four of them are worth naming,
  * because each one would have trained the user to click through the prompt:
@@ -326,21 +328,143 @@ function isThrowawayPath(operand, sessionId) {
   }
 }
 
+const CD_COMMANDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl']);
+const BASH_CD = new Set(['cd', 'pushd']);
+const PLAIN_CD = new Set(['cd']);
+// Variables that change how the shell splits words, finds folders or commands, or where it is.
+const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BASH_ENV|ENV|GLOBIGNORE)$/i;
+const stripQuotes = (s) => /^(["'])(.*)\1$/.exec(s)?.[2] ?? s;
+// The only forms each shell reads as an assignment of a literal: Bash `name=value`, PowerShell `$name = 'value'`.
+const BASH_ASSIGNMENT = /^([A-Za-z_]\w*)=(?:"([^"$`\\\s]*)"|'([^'\s]*)'|([^"'$`\\\s]*))$/;
+const PS_ASSIGNMENT = /^\$([A-Za-z_]\w*)\s*=\s*(?:"([^"$`\s]*)"|'([^'\s]*)')$/;
+
+/** `[name, value]` when `text` is a plain literal assignment in `shell` (a PowerShell name is case-insensitive), else null. */
+function parseAssignment(text, shell) {
+  const m = shell === 'bash' ? BASH_ASSIGNMENT.exec(text) : shell === 'powershell' ? PS_ASSIGNMENT.exec(text) : null;
+  return m ? [shell === 'powershell' ? m[1].toLowerCase() : m[1], m[2] ?? m[3] ?? m[4] ?? ''] : null;
+}
+
+/**
+ * `text` with the variables it can resolve replaced: the literals this line assigned earlier, and on Windows
+ * the temp folder as the shell spells it (Bash `$TEMP`, `${TEMP}`; PowerShell `$env:TEMP`; where the shell is
+ * unknown, none). Others stay, and a path holding one is not a plain path.
+ */
+function expandVars(text, vars, shell) {
+  const tmp = process.platform === 'win32' ? os.tmpdir().replace(/\\/g, '/').replace(/\/+$/, '') : null;
+  return text.replace(/\$(?:\{(\w+)\}|(env:)?(\w+))/gi, (match, braced, env, bare) => {
+    const name = braced ?? bare;
+    if (shell === 'powershell') {
+      if (env) return tmp && /^(?:temp|tmp)$/i.test(name) ? tmp : match;
+      return vars.get(name.toLowerCase()) ?? match;
+    }
+    if (shell === 'bash' && !env) return vars.get(name) ?? (tmp && /^(?:TEMP|TMP)$/.test(name) ? tmp : match);
+    return match;
+  });
+}
+
+/** A plain literal path from one token, variables resolved and quotes removed, else null. */
+function literalPath(raw, vars, shell) {
+  if (/^'/.test(raw) && raw.includes('$')) return null; // single quotes: no expansion
+  const value = stripQuotes(expandVars(raw, vars, shell));
+  return value && !NOT_PLAIN.test(value) ? value : null;
+}
+
+/**
+ * Where `cd` / `Set-Location` / `pushd` leaves the shell: an existing folder at or below a Claude temp
+ * session folder, else null. A `cd` that fails changes nothing, and `;` runs the delete anyway, hence the stat.
+ */
+function changeDir(text, command, cwd, vars, shell, sessionId) {
+  const tokens = text.trim().split(/\s+/);
+  const pathFlag = shell === 'powershell' && tokens.length === 3 && PATH_FLAG.test(tokens[1]);
+  if (tokens.length !== 2 && !pathFlag) return null;
+  const raw = tokens[tokens.length - 1];
+  const value = literalPath(raw, vars, shell);
+  // Bash eats the backslashes of an unquoted path: only PowerShell and quotes keep them.
+  if (value === null || (value.includes('\\') && !/^["']/.test(raw) && command !== 'set-location' && command !== 'sl')) return null;
+  const path = value.replace(/\\/g, '/').replace(/\/+$/, '');
+  const target = /^[a-z]:\//i.test(path) || path.startsWith('/') ? path : cwd && `${cwd}/${path.replace(/^(?:\.\/)+/, '')}`;
+  if (!target || !isThrowawayPath(`${target}/x`, sessionId)) return null;
+  try { return fs.statSync(target).isDirectory() ? target : null; } catch { return null; }
+}
+
+/**
+ * The working folder and variables in force after the segments that precede a delete, or null when any of
+ * them is not a delete, a `cd`, or an assignment of a plain value: it could make a link or run anything.
+ */
+function priorState(steps, finalSep, shell, sessionId) {
+  const vars = new Map();
+  let cwd = null;
+  // `&`, `|` and `||` around a `cd` or an assignment: it runs in the background, in a pipe, or maybe not at all.
+  const chained = (sep) => !/[&|]/.test(sep.replace(/&&/g, ''));
+  const cdCommands = shell === 'powershell' ? CD_COMMANDS : shell === 'bash' ? BASH_CD : PLAIN_CD;
+  const seps = [...steps.slice(1).map((s) => s.sep), finalSep];
+  let deleted = false;
+  for (let i = 0; i < steps.length; i += 1) {
+    const text = steps[i].text.trim();
+    const assignment = parseAssignment(text, shell);
+    const command = assignment ? '' : effectiveCommand(text);
+    if (assignment || CD_COMMANDS.has(command)) {
+      if (!chained(steps[i].sep) || !chained(seps[i])) return null;
+    }
+    if (assignment) {
+      if (RESERVED_VARS.test(assignment[0])) return null;
+      const value = literalPath(assignment[1], vars, shell);
+      if (value === null) return null;
+      vars.set(assignment[0], value);
+    } else if (CD_COMMANDS.has(command)) {
+      // A spelling this shell does not know fails, and `;` runs the delete in the real folder.
+      cwd = cdCommands.has(command) ? changeDir(text, command, cwd, vars, shell, sessionId) : null;
+      // An earlier delete may remove the target (or fail and skip the `cd`): only an unbroken `&&` chain
+      // from the `cd` to the final delete keeps that delete from running elsewhere.
+      if (deleted && seps.slice(i).some((sep) => sep.trim() !== '&&')) cwd = null;
+    } else if (DELETERS.has(command)) deleted = true;
+    else return null;
+  }
+  return { vars, cwd };
+}
+
+/** The operand as an absolute path: relative ones resolve against the folder a `cd` set, else null. */
+function absolutize(operand, cwd) {
+  const path = operand.replace(/\\/g, '/');
+  return /^[a-z]:\//i.test(path) || path.startsWith('/') ? path : cwd && `${cwd}/${path.replace(/^(?:\.\/)+/, '')}`;
+}
+
+/** True when a symbolic link or junction (or too much to look through) sits anywhere under `root`. */
+function holdsLink(root, budget = { left: 20000 }) {
+  let entries;
+  try { entries = fs.readdirSync(root, { withFileTypes: true }); } catch (error) { return error?.code !== 'ENOENT' && error?.code !== 'ENOTDIR'; }
+  for (const entry of entries) {
+    budget.left -= 1;
+    if (entry.isSymbolicLink() || budget.left < 0) return true;
+    if (entry.isDirectory() && holdsLink(`${root}/${entry.name}`, budget)) return true;
+  }
+  return false;
+}
+
 /** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. Not one aimed only at Claude's own temp folders. */
-function deletesRecursively(scan, keep, segment, piped, whole = segment, sessionId = undefined) {
+function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefined) {
   const command = effectiveCommand(segment);
   if (!DELETERS.has(command)) return false;
   const recursive = command === 'rm'
     ? /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep)
     : /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
   if (!recursive) return false;
-  // Windows PowerShell 5.1 `Remove-Item -Recurse` can follow a junction inside the tree: never exempt.
-  if (command === 'remove-item' || command === 'ri') return true;
   // The hook reads every segment before any runs: a link made earlier on the same line (by any tool or
-  // interpreter) is not on disk yet. So the exemption holds only when every command on the line is a delete.
-  if (LINK_CREATOR.test(whole) || !splitSegments(whole).every((s) => DELETERS.has(effectiveCommand(s)))) return true;
-  const operands = deleteOperands(segment, command);
-  return !(operands && operands.every((operand) => isThrowawayPath(operand, sessionId)));
+  // interpreter) is not on disk yet. So the exemption holds only when every segment before the delete is a
+  // delete, a `cd` or an assignment (what comes after cannot touch it). A nested text (`bash -c "…"`) is not
+  // one of the line's segments: its surroundings are unknown.
+  if (!line || /'[^']*\$/.test(segment)) return true;
+  const state = priorState(line.steps, line.sep, line.shell, sessionId);
+  if (!state || LINK_CREATOR.test([...line.steps.map((s) => s.text), segment].join(' '))) return true;
+  const operands = deleteOperands(expandVars(segment, state.vars, line.shell), command);
+  if (!operands) return true;
+  // Windows PowerShell 5.1 `Remove-Item -Recurse` can follow a junction inside the tree, and there `rm`, `del`,
+  // `rd`, `rmdir` and `erase` are its aliases: on Windows look for one first.
+  const mayFollowLinks = process.platform === 'win32' || command === 'remove-item' || command === 'ri';
+  return !operands.every((operand) => {
+    const target = absolutize(operand, state.cwd);
+    return target && isThrowawayPath(target, sessionId) && !(mayFollowLinks && holdsLink(target));
+  });
 }
 
 /** `git [-c k=v] <verb> …`: the verb is the first word after git and its options, never a word inside a message. */
@@ -350,23 +474,6 @@ function gitCall(text) {
   return m ? { verb: m[1].toLowerCase(), rest: text.slice(m.index + m[0].length) } : null;
 }
 const flagCluster = (letter) => new RegExp(`(?<![-\\w])-[a-zA-Z]*${letter}[a-zA-Z]*(?![\\w-])`);
-
-/** `git checkout -- <path>`, `git checkout .`, `git checkout -f`: the working tree is overwritten from the index or a commit. */
-function checkoutDiscards(scan, keep) {
-  const call = gitCall(keep);
-  if (call?.verb !== 'checkout') return false;
-  return /(?<!\S)--(?!\S)\s*\S/.test(call.rest) || /(?<!\S)\.(?!\S)/.test(call.rest)
-    || flagCluster('f').test(call.rest) || /(?<![-\w])--force(?![\w-])/.test(call.rest);
-}
-
-/** `git restore` writes the working tree unless it is only `--staged` (an unstage). */
-function restoreDiscards(scan, keep) {
-  const call = gitCall(keep);
-  if (call?.verb !== 'restore') return false;
-  const staged = /(?<![-\w])--staged(?![\w-])/.test(call.rest) || flagCluster('S').test(call.rest);
-  const worktree = /(?<![-\w])--worktree(?![\w-])/.test(call.rest) || flagCluster('W').test(call.rest);
-  return !staged || worktree;
-}
 
 /** `git clean` that really deletes: forced and not a dry run (`-n` anywhere in a cluster). */
 function cleanDeletes(scan, keep) {
@@ -381,12 +488,16 @@ function resetsHard(scan, keep) {
   return call?.verb === 'reset' && /(?<![-\w])--hard(?![\w-])/.test(call.rest);
 }
 
-/** `git branch` that moves, renames, copies over or deletes a branch (any branch, merged or not). */
+/**
+ * `git branch` that moves, renames or copies over a branch. A local delete, forced or not, passes: the owner's
+ * choice for unattended work, the reflog keeps its commits.
+ */
 function branchRewrites(scan, keep) {
   const call = gitCall(keep);
   if (call?.verb !== 'branch') return false;
-  return /(?<!\S)-[a-zA-Z]*[fmMdD][a-zA-Z]*(?![\w-])/.test(call.rest)
-    || /(?<!\S)--(?:force|delete|move)(?![\w-])/.test(call.rest);
+  const moves = /(?<!\S)-[a-zA-Z]*[mMcC][a-zA-Z]*(?![\w-])/.test(call.rest) || /(?<!\S)--(?:move|copy)(?![\w-])/.test(call.rest);
+  const deletes = /(?<!\S)-[a-zA-Z]*[dD][a-zA-Z]*(?![\w-])/.test(call.rest) || /(?<!\S)--delete(?![\w-])/.test(call.rest);
+  return moves || (!deletes && (flagCluster('f').test(call.rest) || /(?<!\S)--force(?![\w-])/.test(call.rest)));
 }
 
 /** `git update-ref -d`, `git filter-branch`, `git gc --prune=now`: refs or objects with no way back. */
@@ -516,28 +627,16 @@ const RULES = [
     test: rewritesHistory,
     reason: 'This deletes a ref or prunes objects (update-ref -d, filter-branch, gc --prune=now): git has no undo for it. Confirm?',
   },
-  {
-    // Case-sensitive: `-D` force-deletes, `-d` refuses to delete an unmerged branch.
-    test: all(
-      has(/\bbranch\b/),
-      (scan) => /(?<![-\w])-[a-zA-Z]*D[a-zA-Z]*(?![\w-])/.test(scan)
-        || (/--delete\b/.test(scan) && /(?<![-\w])(?:--force|-f)(?![\w-])/.test(scan)),
-    ),
-    reason: 'This force-deletes a branch, unmerged commits included. If the branch was never '
-      + 'pushed, those commits are only in the reflog. Confirm?',
-  },
+  // A local branch delete (`-D` included), a forced worktree removal and a checkout or restore that discards
+  // files pass: the owner's choice for unattended work.
   {
     test: branchRewrites,
-    reason: 'This moves, renames or deletes a branch. Commits only that branch reached are left in the reflog. Confirm?',
+    reason: 'This moves or renames a branch. Commits only that branch reached are left in the reflog. Confirm?',
   },
   {
     test: all(has(/\bgit\b/i), has(/\bstash\s+(?:drop|clear)\b/i)),
     reason: 'This drops stashed work. A stash has no branch and no remote: once dropped, it is only '
       + 'recoverable from an unreachable commit until git collects it. Confirm?',
-  },
-  {
-    test: all(has(/\bworktree\s+remove\b/i), has(/(?<![-\w])(?:--force|-f+)(?![\w-])/)),
-    reason: 'This force-removes a worktree, uncommitted and untracked changes included. Confirm?',
   },
   {
     // Every way `git push` removes or overwrites a remote ref: a flag in any cluster (`-fu`), a `+ref`
@@ -563,14 +662,6 @@ const RULES = [
     reason: 'This find deletes every file it matches (`-delete`, `-exec rm`), and there is no recycle bin for it. Confirm?',
   },
   {
-    test: checkoutDiscards,
-    reason: 'This checkout overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
-  },
-  {
-    test: restoreDiscards,
-    reason: 'This restore overwrites files in the working tree: uncommitted changes in them are lost. Confirm?',
-  },
-  {
     test: cleanDeletes,
     reason: 'This git clean deletes untracked files for good, and they are in no commit. Confirm?',
   },
@@ -586,10 +677,15 @@ const RULES = [
 ];
 
 /** The reason for the first action with no undo in one command string (a whole line or a nested one), else null. */
-function checkText(command, whole = command, sessionId = undefined) {
+function checkText(command, whole = command, sessionId = undefined, shell = undefined) {
   let at = 0;
+  const steps = [];
   for (const segment of splitSegments(command)) {
-    at = command.indexOf(segment, at);
+    const start = command.indexOf(segment, at);
+    // What the delete rule needs of the line: the segments before this one with their separators (null when nested).
+    const line = command === whole ? { steps: steps.slice(), sep: command.slice(at, start), shell } : null;
+    steps.push({ text: segment, sep: command.slice(at, start) });
+    at = start;
     const before = command.slice(0, at).trimEnd();
     const piped = before.endsWith('|') && !before.endsWith('||');
     at += segment.length;
@@ -602,18 +698,19 @@ function checkText(command, whole = command, sessionId = undefined) {
     // The preparation may have blanked the only occurrence (a comment, a path, a read-only query).
     if (!isDangerous(scan) && !isDangerous(keep)) continue;
 
-    const rule = RULES.find((r) => r.test(scan, keep, segment, piped, whole, sessionId));
+    const rule = RULES.find((r) => r.test(scan, keep, segment, piped, line, sessionId));
     if (rule) return rule.reason;
   }
   return null;
 }
 
-/** The confirmation reason for the first action with no undo in `command`, nested wrappers included, else null. */
-function checkDestructive(command, sessionId = undefined) {
+/** The confirmation reason for the first action with no undo in `command` (run by the `Bash` or `PowerShell` tool), nested wrappers included, else null. */
+function checkDestructive(command, sessionId = undefined, toolName = undefined) {
   // Fast path: nothing here can be one of the rules.
   if (!isDangerous(command)) return null;
+  const shell = { bash: 'bash', powershell: 'powershell' }[String(toolName).toLowerCase()];
   for (const text of expandTexts(command)) {
-    const reason = checkText(text, command, sessionId);
+    const reason = checkText(text, command, sessionId, shell);
     if (reason) return reason;
   }
   return null;

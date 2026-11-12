@@ -569,7 +569,13 @@
       "PowerShell(sqlcmd *)",
       "Bash(sqlcmd *)",
       "PowerShell(git branch -D*)",
-      "Bash(git branch -D*)"
+      "Bash(git branch -D*)",
+      "PowerShell(git worktree remove *)",
+      "Bash(git worktree remove *)",
+      "PowerShell(git checkout -- *)",
+      "Bash(git checkout -- *)",
+      "PowerShell(git restore *)",
+      "Bash(git restore *)"
     ],
     "deny": [
       "Read(**/.env)",
@@ -670,8 +676,7 @@
       "$defaults",
       "Any command that writes to a database not on localhost",
       "git push to the default branch",
-      "Deleting a branch, worktree, volume or cloud resource",
-      "Editing files under ~/.claude without the user's explicit request this turn, except memory, plans, jobs and worklog"
+      "Deleting a remote branch, a volume or a cloud resource"
     ],
     "hard_deny": [
       "$defaults"

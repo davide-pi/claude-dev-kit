@@ -132,7 +132,7 @@ function evaluate(payload) {
   const scriptArgs = safely('script-args', () => checkScriptArgs(command, payload.tool_name));
   const reasons = [
     safely('default-branch', () => checkDefaultBranch(command, payload.cwd)),
-    safely('destructive', () => checkDestructive(command, payload.session_id)),
+    safely('destructive', () => checkDestructive(command, payload.session_id, payload.tool_name)),
     safely('alm-contract', () => checkAlmContract(command)),
     safely('docker-cp', () => checkDockerCp(command, payload.cwd)),
     scriptArgs?.reason,
