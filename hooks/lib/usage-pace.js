@@ -76,9 +76,12 @@ function noticeText(band, key, w, ctx) {
     ? `, burning ${w.burn.toFixed(1)}%/h${w.etaAt ? `, 98% around ${resetLabel(w.etaAt, ctx.now)}` : ''}`
     : '';
   const sid = ctx.sid;
-  const cron = ctx.modAlive ? 'The cockpit mod is alive: do not call CronCreate. ' : 'Then CronCreate a one-shot prompt at resumeAt to resume from the checkpoint. ';
-  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt and the checkpoint path), then \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid}\`. ${cron}`;
-  const at96 = `Check the resume task exists (\`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid} -Check\`; create it when missing), update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. `
+  // Decided at 96, not at 92: right after --arm the mod's aliveAt can be up to 30 s stale, so a 92 check would see no mod and resume twice.
+  const cron = ctx.modAlive
+    ? 'The cockpit mod is alive: it resumes the chat, so CronDelete a resume prompt you created and create none. '
+    : 'Then CronCreate a one-shot prompt at resumeAt (the --arm output gives its cron) to resume from the checkpoint. ';
+  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt and the checkpoint path), then \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid}\`. `;
+  const at96 = `Check the resume task exists (\`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid} -Check\`; create it when missing), update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. ${cron}`
     + (ctx.modAlive ? 'The cockpit mod compacts after your turn. ' : 'Then ask the owner to run /compact. ');
   const disarm = `If the work finishes before the limit: \`node ${PACE_STATE} --done --session ${sid}\`, \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid} -Remove\`, and CronDelete the resume prompt if you created one.`;
   // A jump past a band between two hook calls: the skipped band's actions were never told, so the notice carries them first.

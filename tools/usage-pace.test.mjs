@@ -113,17 +113,27 @@ test('Given the 92 and 96 notices, When they are told, Then each says how to dis
   }
 });
 
-test('Given 92% and a live mod, When a tool runs, Then the notice forbids CronCreate; with no mod it asks for it', () => {
+test('Given 92%, When a tool runs, Then the notice leaves the CronCreate choice to 96, where the mod has had time to beat', () => {
+  // Given: no mod beat yet, as right after --arm
+  const none = world();
+  // When
+  const t = text(plan(pre('Bash'), ctx(none, pace(93))));
+  // Then
+  assert.doesNotMatch(t, /CronCreate a one-shot/);
+});
+
+test('Given 96% and a live mod, When a tool runs, Then the notice drops any resume prompt; with no mod it asks for one', () => {
   // Given
   const live = world(), none = world();
   mkdirSync(join(live, '.cache', 'pace'), { recursive: true });
   writeFileSync(join(live, '.cache', 'pace', `${SID}.mod.json`), JSON.stringify({ v: 1, aliveAt: NOW - MIN }));
   // When
-  const a = plan(pre('Bash'), ctx(live, pace(93)));
-  const b = plan(pre('Bash'), ctx(none, pace(93)));
+  const a = text(plan(pre('Bash'), ctx(live, pace(96.5))));
+  const b = text(plan(pre('Bash'), ctx(none, pace(96.5))));
   // Then
-  assert.match(text(a), /do not call CronCreate/);
-  assert.match(text(b), /CronCreate a one-shot/);
+  assert.match(a, /CronDelete a resume prompt you created and create none/);
+  assert.doesNotMatch(a, /CronCreate a one-shot/);
+  assert.match(b, /CronCreate a one-shot/);
 });
 
 test('Given 96% with and without a live mod, When a tool runs, Then it names the mod or asks for /compact', () => {

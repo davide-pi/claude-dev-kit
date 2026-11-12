@@ -37,8 +37,8 @@ Pace files and checkpoints under `.cache/resume/` are pruned after 7 days; so ar
 | --- | --- |
 | 70 | notice only: projection and reset time |
 | 85 | fewer parallel agents, smaller models where they are enough |
-| 92 | `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), create the resume task (`resume-task.ps1`), start no new flow, ask running flows for their state and write the checkpoint; with no live mod, `CronCreate` a one-shot at `resumeAt` |
-| 96 | verify the resume task exists (create it when missing), update the checkpoint, `pace-state.mjs --ready`; the mod compacts after the turn, else the chat asks the owner to run `/compact` |
+| 92 | `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), create the resume task (`resume-task.ps1`), start no new flow, ask running flows for their state and write the checkpoint |
+| 96 | verify the resume task exists (create it when missing), update the checkpoint, `pace-state.mjs --ready`; with no live mod `CronCreate` a one-shot at `resumeAt`, with one `CronDelete` any it has (decided here, not at 92: the mod beats every 30 s only once the pace file exists, so right after `--arm` it can look dead); the mod compacts after the turn, else the chat asks the owner to run `/compact` |
 | 98 | close the step in hand, stop the flows cleanly, last checkpoint update, stop; a subagent closes its step and reports its state |
 
 Notices at 92 and 96 go to the main loop only; subagents hear 70, 85 and 98. A jump over bands sends one notice, the
@@ -52,7 +52,7 @@ workflow never pass the hook; they hear the 98 notice on their own tool calls.
 
 - Open chat with the cockpit mod: the mod compacts once on `ready`, then resumes at `resumeAt` (window under 50%, the
   other under 98%; else 10 minutes later).
-- Open chat without the mod: `CronCreate` at `resumeAt`.
+- Open chat without the mod: `CronCreate` at `resumeAt`, made at 96.
 - Closed chat: the Windows task `claude-resume-<id8>` runs `resume-launch.ps1`, which deletes its own task first, opens
   nothing when the chat lives (a `sessions/<pid>.json` with the session id, a live pid and a matching process start) or
   the mod is alive. When the chat was not compacted since it was armed (no `compactedAt` at or after `armedAt`, in the
