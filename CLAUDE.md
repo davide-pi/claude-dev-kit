@@ -32,13 +32,13 @@ data, contract; `medium` local logic, testable; `low` cosmetic.
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
   type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`, `alto|medio|basso`.
-- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>` `fallito`
+- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `✓ fatto` `? non verificato: <motivo>` `✗ fallito`
 
 ## Done means verified
 Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
 isn't proof). A main-session reply after an edit, commit, push or install puts a `**Verification**` line right after the bold outcome line, plain
-`Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
-(Command: how to check), `failed` (quoted).
+`Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `✓ done`, `? not verified: <reason>`
+(Command: how to check), `✗ failed` (quoted).
 
 ## Tools, no prompts
 `git -C <path>`, never `cd X && ...` (it prompts). Batch independent calls; read a file once, not after an edit.
