@@ -111,7 +111,8 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
   //   - the report skeleton (fenced) in the code-review skill and the review-large merger.
   {
     const FORMAT = 'skills/code-review/references/report-format.md';
-    const norm = (rel) => read(rel).replace(/\r\n/g, '\n');
+    // a template literal in a .js copy escapes its backticks
+    const norm = (rel) => read(rel).replace(/\r\n/g, '\n').replace(rel.endsWith('.js') ? /\\`/g : /^$/g, '`');
     const fenced = (patterns, label, copies) => {
       const canonical = has(FORMAT) ? norm(FORMAT).match(patterns)?.[1] : null;
       if (!canonical) { fail(FORMAT, `no canonical ${label}`); return; }

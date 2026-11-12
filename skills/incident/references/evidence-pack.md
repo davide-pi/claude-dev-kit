@@ -60,18 +60,17 @@ these sections, ≤ 40 lines in all:
 
 ## Synthesis — the shape shown to the user
 
-```text
-## Timeline
-<ts UTC> · <source> · <fact>   (merged, oldest first)
-## Gaps
-<Not found and Blocked from every pack; what is still unknown>
-## Path
-<UI → API → bus → DB, each hop file:line or log line; unconfirmed hops marked>
-## Hypotheses
-1. <cause> — predicts: <what must also be true> — probe: <the command that decides it>
-2. …
-## Next
-<the probe to run first, and who runs it>
-```
+First a bold outcome line (symptom, scale, the advice). Then one section per type present, each
+under `---` and a `**<Section> · <n>**` title (a lone item: bare), never in `> ` or a code fence:
+Decisions `#D` (containment the owner must approve: advice, Severity/Risk/Effort axes, one per line, bold value + why),
+Hypotheses `#H` (most likely first), Problems `#I` (Not found and Blocked from every pack; what is still unknown, by Severity).
 
-At chat `it`: Timeline=Cronologia, Gaps=Lacune, Path=Percorso, Hypotheses=Ipotesi, Next=Prossimo passo.
+A hypothesis is the block `**#H1 · <cause>** — likely | less likely` with the bullets Proof (`<ts UTC> · <source> · <fact>`) and
+To confirm (the probe that decides it, read-only, and who runs it); a problem is `**#I1 · <gap>**` with a `Severity P2: <why>` bullet.
+3+ items: close with `| # | Item | Severity · Risk · Effort | For you |`, then `Reply …` and `Questions pending: …`. The timeline
+(`<ts UTC> · <source> · <fact>`, merged, oldest first) and the path (UI → API → bus → DB, each hop file:line or log line,
+unconfirmed hops marked) only on request: `+timeline`, `+path`.
+
+At chat `it`: Decisions=Decisioni, Hypotheses=Ipotesi, Problems=Problemi, Proof=Prova, To confirm=Da confermare, likely=probabile,
+less likely=meno probabile, Severity=Gravità, Item=Voce, For you=Da te, Reply=Rispondi, Questions pending=Domande in attesa,
++timeline=+cronologia, +path=+percorso.

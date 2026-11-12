@@ -8,7 +8,7 @@ argument-hint: "[scope] [effort] [focus]"
 
 # code-review — a change or PR reviewed by subagents, reported in chat
 
-**Contract.** Findings, completeness and the To do / Already done tables in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in the chat language; `file:line`, field values and code verbatim.
+**Contract.** Findings, completeness and a summary in chat · posts tagged questions on a PR only under the posting gate; never approves, merges, votes or edits a PR, never edits, stages, commits or builds · report in the chat language; `file:line`, field values and code verbatim.
 
 Arguments: `$ARGUMENTS`
 
@@ -43,12 +43,11 @@ Not for: quality-only cleanup across the change (`/simplify`); fixing what a rev
 | focus `security` / `performance` | that specialist alone — a focus overrides the effort |
 | any other focus | `code-reviewer` alone, told the axis |
 
-Every Agent call passes the requested effort as its `effort` parameter, never only in the brief text.
+Every Agent call passes the requested effort as its `effort` parameter, not only in the brief.
 "advanced" / "agent `<model>`" from the user: the model table in `references/report-format.md`. The brief
-is built **once** and passed to A (and B, from `xhigh`) unchanged; its contents are in
-`references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
+is built **once**, passed unchanged to A (and B); contents in `references/effort-and-fanout.md`. Never review inline unless no subagent can be spawned — then say so;
 a missing specialist or second model is a degraded review, named in the verdict. 30+ files → offer
-`/review-large` (two whole-change reviewers, A on Sonnet + B on Opus), never launch it unasked.
+`/review-large`, never launch it unasked.
 
 ### Intent — before spawning
 
@@ -62,32 +61,32 @@ Same defect at the same anchor from A and B → `CONFIRMED`; one model only → 
 
 ### Report
 
-One merged report in the chat language, in exactly this skeleton (English labels; at chat `it` read the
-equivalents on the `At chat it:` line after the skeleton in `references/report-format.md` first, with the field meanings):
+One merged report in the chat language, exactly this skeleton; at chat `it` read the `At chat it:` line in `references/report-format.md`:
 
 ```text
-Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
-Verdict at most one short question.
+Order: outcome line → Findings → Completeness → Already done → Summary → Verdict. Summary table last;
+after Verdict at most one short question. Never inside `> ` or a code fence.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
    corrections once in Verdict.
-Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Improvements" block, one line each.
+Findings (todo): after `---`, title `**Findings · n**` (a single one: no title, no `---`), one block each,
+P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; `#F<n>` = finding number:
+**#F<n> · <title>** — `file:line` — CONFIRMED | PLAUSIBLE
+- Problem: what breaks and the scenario, one line
+- Advice: the minimal fix, one line
+- P1: one axis per line: `- Severity **P1** — why`, then Risk and Effort the same way
+- P2, P3: one line: Severity P2: why · Risk low: why · Effort S: why
+- To confirm: only for PLAUSIBLE, what settles it
 Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
-To do (status: todo), columns exactly:
-| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
-Already done (status: done, one line each), columns exactly:
-| # | Category | Location | Finding | Resolved by |
-Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
-thread or "session". Findings posted on a PR add a "Posted" column to both tables.
-Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
+Already done (done): after `---`, one line each: `#F<n> · <title>` — `file:line` — resolved by commit, thread or "session".
+Summary · n: after `---`, 3+ findings only, columns exactly:
+| # | Item | Severity · Risk · Effort | For you |
+One row per finding, same order (`P1 · medium · M`, `ok F1`).
+Quick fixes: the closing `Reply ok F3 F4 …` line names the P1s and every P3 + low + S finding; apply nothing before the answer.
 Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nothing to report, verified: …".
+No findings → no sections: "nothing to report, verified: …".
 ```
-
-Close with one line offering the P1s and "ok" for the quick fixes. Apply nothing until the user answers.
 
 ## Do
 

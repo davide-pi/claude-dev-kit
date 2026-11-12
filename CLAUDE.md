@@ -22,26 +22,21 @@ Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks
 
 ## Change scope
 The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
-dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: one row
-each, then stop.
-
-| # | Proposal | Reason | Risk |
-| --- | --- | --- | --- |
-
-Rows `#P1`, `#P2`, stable all conversation. Risk: **high** behaviour, data, contract; **medium** local
-logic, testable; **low** cosmetic.
+dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: a `#P`
+item (output style) with recommendation, Risk and Effort, each with its why, then stop. Risk: `high` behaviour,
+data, contract; `medium` local logic, testable; `low` cosmetic.
 
 ## Language
 - Chat: `language` setting (unset: English), agent reports too.
 - Commit, pr, prComment, items, wiki: each per `Lang:` (none: en).
 - English: code, comments, tests, tech docs, `CLAUDE.md`, plans, specs, kit assets.
 - Verbatim: identifiers, commands, SQL, tool output, `file:line`, branches, `AB#<id>`, `Fixes #<n>`, ADO
-  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
-- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
+  type/state/field names, `[Claude AI Review]`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`, `alto|medio|basso`.
+- Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>` `fallito`
 
 ## Done means verified
 Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
-isn't proof). A main-session reply after an edit, commit, push or install opens with a `**Verification**` line, plain
+isn't proof). A main-session reply after an edit, commit, push or install puts a `**Verification**` line right after the bold outcome line, plain
 `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 

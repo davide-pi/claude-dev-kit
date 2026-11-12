@@ -64,7 +64,7 @@ Rules:
 
 ### 3. Synthesis — main session
 
-From the packs only (`references/evidence-pack.md` § Synthesis):
+From the packs only (`references/evidence-pack.md` § Synthesis; built in full, shown by sections, timeline and path only on request):
 1. **Timeline**: one list, joined on timestamp (normalised to UTC) and correlation id.
 2. **Gaps first**: every *Not found* and *Blocked*, before any hypothesis; an empty result is not a healthy one.
 3. **Path**: UI → API → bus → DB as the packs confirm it, the unconfirmed hops marked.

@@ -1,8 +1,8 @@
-# Review report format — the summary tables go last
+# Review report format — the summary table goes last
 
 Shared by `/code-review`, the built-in `/review` and `/security-review`, ad-hoc
-reviews and merged runs. The user reads the table first, then scrolls up to the rows that matter,
-so every report **ends** with the summary tables, after all the detail.
+reviews and merged runs. The user reads the table first, then scrolls up to the blocks that matter,
+so every report **ends** with the summary table, after all the detail.
 
 ## Who reviews, on which model
 
@@ -39,7 +39,7 @@ A on Sonnet + B on Opus, one merger) and wait for the user's yes; never launch i
 | `priority` — impact if not fixed | **P1** blocks the merge (CONFIRMED security, data loss, crash, broken contract) · **P2** before release · **P3** improvement |
 | `risk` — what applying the fix can break | `high` behaviour, data or a public contract · `medium` localized logic, verifiable by tests · `low` cosmetic |
 | `effort` | **S** minutes, one place · **M** a few files · **L** design change or migration |
-| `status` | `todo` → **To do**; `done` → **Already done** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
+| `status` | `todo` → **Findings**; `done` → **Already done** (fixed by a later commit in scope, a PR thread resolved **with a fix**, or this session; by-design threads are dropped) |
 
 ## Finding block — what every reviewer agent returns
 
@@ -53,8 +53,8 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 - category: correctness | regression | security | completeness | concurrency | performance | api-contract | convention | clean-code | duplication | scope
 - status: todo | done
 - priority: P1 | P2 | P3            (todo only)
-- risk: high | medium | low         (todo only)
-- effort: S | M | L                 (todo only)
+- risk: high | medium | low — <why, one line>   (todo only)
+- effort: S | M | L — <why, one line>           (todo only)
 - causedByChange: true              (optional: a defect outside the perimeter that this change causes)
 - failure: <inputs/state → wrong outcome, the attack path, the cost and its scale, or the intent point with no code>
 - evidence: <file:line read, blame, quoted rule or intent line; CONFIRMED quotes the failing line(s) verbatim>
@@ -67,7 +67,7 @@ their reports without reading three prompts. Order: `todo` before `done`, P1 →
 | `CONFIRMED` / `PLAUSIBLE` | failing path traced in the code, and `evidence` quotes the line(s) that fail, verbatim (a paraphrase is `PLAUSIBLE`) / depends on what the reviewer cannot see (caller, gateway, runtime config, scale) — say what would settle it |
 | `anchor` | no leading slash; the line number of the **working-tree file** after the change (`right`; Read it, or `git show HEAD:<path>` for a committed range), pre-change for a deleted line (`left`); never the diff file's own line numbers — its hunk header `@@ -a,b +c,d @@` gives the start; a missing piece anchors where it belongs |
 | `status: done` | only with a visible fix: a later commit in range, or a thread resolved **with a fix**; by-design is not a finding |
-| `priority`, `risk`, `effort` | the values of the Fields table above, verbatim in every agent |
+| `priority`, `risk`, `effort` | the values of the Fields table above, verbatim in every agent; `risk` and `effort` each end with a one-line why the reviewer writes (what breaks, how much work) |
 
 **One defect per block — hard rule.** A title that needs "and", "also" or `(a) … (b) …` is two blocks,
 each with its own anchor, priority and fix. Wrong: `### 3. null check mancante e cache mai invalidata`.
@@ -84,46 +84,36 @@ The mandatory skeleton — `/code-review` carries a byte-identical copy inline (
 validator compares them), and so does the `/review-large` merger prompt; edit all together:
 
 ```text
-Order: Findings → Completeness → To do → Already done → Quick fixes → Verdict. Tables last; after
-Verdict at most one short question.
+Order: outcome line → Findings → Completeness → Already done → Summary → Verdict. Summary table last;
+after Verdict at most one short question. Never inside `> ` or a code fence.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
    corrections once in Verdict.
-Findings: a full block per P1/P2 todo (what breaks, scenario, file:line, minimal fix), one defect per
-block; the P3s under one "Improvements" block, one line each.
+Findings (todo): after `---`, title `**Findings · n**` (a single one: no title, no `---`), one block each,
+P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; `#F<n>` = finding number:
+**#F<n> · <title>** — `file:line` — CONFIRMED | PLAUSIBLE
+- Problem: what breaks and the scenario, one line
+- Advice: the minimal fix, one line
+- P1: one axis per line: `- Severity **P1** — why`, then Risk and Effort the same way
+- P2, P3: one line: Severity P2: why · Risk low: why · Effort S: why
+- To confirm: only for PLAUSIBLE, what settles it
 Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
-To do (status: todo), columns exactly:
-| # | Priority | Category | Location | Finding | Verdict | Risk | Effort |
-Already done (status: done, one line each), columns exactly:
-| # | Category | Location | Finding | Resolved by |
-Sort: P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; rows keep the finding
-numbers; every finding gets a row. Location = file:line, Finding ~80 chars, Resolved by = commit,
-thread or "session". Findings posted on a PR add a "Posted" column to both tables.
-Quick fixes: #n, #n — every P3 + low + S finding, one "ok" applies them.
+Already done (done): after `---`, one line each: `#F<n> · <title>` — `file:line` — resolved by commit, thread or "session".
+Summary · n: after `---`, 3+ findings only, columns exactly:
+| # | Item | Severity · Risk · Effort | For you |
+One row per finding, same order (`P1 · medium · M`, `ok F1`).
+Quick fixes: the closing `Reply ok F3 F4 …` line names the P1s and every P3 + low + S finding; apply nothing before the answer.
 Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
-No findings → no tables: "nothing to report, verified: …".
+No findings → no sections: "nothing to report, verified: …".
 ```
-At chat it: Findings=Rilievi, Improvements=Miglioramenti, Completeness=Completezza, points=punti, covered=coperti, To do=Da fare, Already done=Già fatti, Quick fixes=Fix rapidi, Verdict=Verdetto, Priority=Priorità, Category=Categoria, Location=Posizione, Finding=Rilievo, Risk=Rischio, Effort=Sforzo, Resolved by=Risolto da, session=sessione, Posted=Postato, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".
+At chat it: Findings=Rilievi, Problem=Problema, Advice=Consiglio, To confirm=Da confermare, Severity=Gravità, Risk=Rischio, Completeness=Completezza, points=punti, covered=coperti, Already done=Già fatti, resolved by=risolto da, session=sessione, Summary=Riepilogo, Item=Voce, For you=Da te, Reply=Rispondi, Quick fixes=Fix rapidi, Verdict=Verdetto, Posted=Postato, chat only=solo chat, high|medium|low=alto|medio|basso, "nothing to report, verified"="nulla da segnalare, verificato".
 
-The same rules, in full:
+Rules around the skeleton:
 
-0. **Blocks, top to bottom**: **Findings** (the findings that matter first: a full block per P1 and
-   P2 `todo` — what breaks, the scenario, `file:line`, the minimal fix; the P3s grouped under one
-   `Improvements` block, one line each; `done` one line) · **Completeness** (`N points — covered N`, each
-   partial, missing or wrong point, scope creep) · the tables · `Verdict` naming each agent that
-   ran, its model and effort, and any worker that was blocked or missing (a gap, never a pass).
-
-1. **Sort**: P1 → P3, `CONFIRMED` before `PLAUSIBLE`, `clean-code` last within its priority. Rows
-   keep the findings' numbers (`#3` = block `3.`). A `done` finding is one line.
-2. **To do** columns: `#`, `Priority`, `Category`, `Location` (`file:line`), `Finding` (~80
-   chars), `Verdict`, `Risk`, `Effort`.
-3. **Already done** columns: `#`, `Category`, `Location`, `Finding`, `Resolved by` (commit, thread,
-   "session"). Add `Posted` to both when findings went onto a PR.
-4. **Quick fixes**: one line with the `#` of every P3 + `low` + `S` finding, approvable with one "ok".
-5. Every finding gets a row. After the tables: at most a one-line verdict and one short question.
-6. No findings → no table; say what was verified.
-7. Headers and section names exactly as written above (fixed kit vocabulary, English); at chat `it` the
-   `At chat it:` line right after the skeleton gives the equivalents (`risk` included: `high|medium|low`
-   shown as `alto|medio|basso`). Statements, `Finding` text and the closing question in the chat language;
-   verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, category slugs, `P1|P2|P3`, `S|M|L`.
+- **Why lines**: `Risk` and `Effort` carry the reviewer's `risk` / `effort` why; `Severity`'s why is the
+  block's `failure`, condensed. Always the word `Severity` (it: `Gravità`) before a severity code.
+- Headers and section names exactly as written above (fixed kit vocabulary, English); at chat `it` the
+  `At chat it:` line right after the skeleton gives the equivalents. Statements, why lines and the closing
+  question in the chat language; verbatim: `file:line`, `CONFIRMED`/`PLAUSIBLE`, `P1|P2|P3`, `S|M|L`.
+- A `done` finding is one line; no findings → no sections, say what was verified.

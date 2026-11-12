@@ -73,7 +73,7 @@ correctness problems (the generalist's) unless cost is the point.
 ## Output
 
 Finding blocks as the preloaded `finding-format` skill gives them (the block, one defect per block, the verdict line);
-two failures on one line are two blocks.
+two failures on one line are two blocks; `risk` and `effort` each end with a one-line why.
 
 Every block has `category: performance`, P1 → P3 by cost × frequency. Here **P1** is unbounded cost on a hot path; `failure` is the cost, the
 scale at which it bites and how often the path runs; `evidence` the loop and the per-item call, the
