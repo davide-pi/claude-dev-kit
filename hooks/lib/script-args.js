@@ -42,6 +42,19 @@ const { splitSegments } = require('./shell-parse');
 const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate|sweep)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** The gate runs `--test` / `--unit` through a shell: only a known test runner passes, with no shell operator. */
 const TEST_RUNNER = /^(?:dotnet\s+test|node\s+--test|npx\s+vitest|vitest|npx\s+jest|jest|npm\s+test|npm\s+run\s+test|pnpm\s+test|pnpm\s+run\s+test|yarn\s+test)(?=\s|$)/;
+/** A relative path inside the repo: no option, root, drive, ~, backslash or `..` segment. */
+const REPO_PATH = String.raw`(?![-/~\\])(?![\w-]*:)(?!(?:\S*/)?\.\.(?:/|\s|$))[\w.-]+(?:/[\w.-]+)*`;
+/**
+ * Besides the test runners, the build and lint steps the loops gate on, each as its whole grammar: any other option asks.
+ * A repo script run by node is repo code, like the tests; never one of the kit's own scripts (case-blind: Windows).
+ */
+const BUILD_AND_LINT = [
+  String.raw`^dotnet\s+build(?:\s+(?:${REPO_PATH}|-v:[a-z]+|--verbosity\s+[a-z]+|-c\s+\w+|--configuration\s+\w+|--no-restore|-?-nologo|[-/]p:NuGetAudit=false))*$`,
+  String.raw`^node\s+(?!\S*(?:gate|sweep|scope-guard)\.[cm]?js)${REPO_PATH}\.[cm]?js(?:\s+[\w.=/-]+)*$`,
+  String.raw`^claude\s+plugin\s+test(?:\s+${REPO_PATH})?$`,
+  // npm reads an abbreviated option as its own config (`--prefi`): the script's flags only, and only after `--`.
+  String.raw`^npm\s+--prefix\s+${REPO_PATH}\s+(?:run\s+)?test(?:\s+--(?:\s+--(?:watch(?:=(?:true|false))?|no-watch|no-coverage|run|silent))*)?$`,
+].map((source) => new RegExp(source, 'i'));
 const TEST_COMMAND_DANGER = /[&|<>^%$`()\r\n]/;
 /** sh (not cmd) honours `\"` and single quotes inside the value, which would defeat the `;` rule below. */
 const POSIX_QUOTE_DANGER = /[\\']/;
@@ -51,23 +64,27 @@ const CODE_LOADING = /(?:^|\s)--test-adapter-path(?=[\s=]|$)|\b(?:data|https?|fi
 const NODE_CODE_LOADING = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader|-e|--eval|-p|--print|-pe|-ep)(?=[\s=]|$)/;
 
 /** `dotnet test` options that run inline code: MSBuild properties and targets, environment (DOTNET_STARTUP_HOOKS). */
-const DOTNET_CODE_LOADING = /(?:^|\s)(?:(?:-{1,2}|\/)(?:p|property|t|target)(?=[:=\s]|$)|(?:-e|--environment)(?=[:=\s]|$))/i;
+const DOTNET_CODE_LOADING = /(?:^|\s)(?:(?:-{1,2}|\/)(?:p|property|t|target|rp|restoreproperty)(?=[:=\s]|$)|(?:-{1,2}|\/)(?:l|logger|dl|distributedlogger)[:=\s](?:"[^"]*(?:,|\.dll)[^"]*"|'[^']*(?:,|\.dll)[^']*'|\S*(?:,|\.dll))|(?:-{1,2}|\/)(?:bl|binarylogger|fl\d?|filelogger\d?|flp\d?|fileloggerparameters\d?|dfl|distributedfilelogger|dflp|distributedfileloggerparameters|pp|preprocess|profileevaluation|getresultoutputfile)(?=[:=\s]|$)|(?:-e|--environment)(?=[:=\s]|$)|@)/i;
+/** The one MSBuild property the builds pass that loads no code: it only turns the NuGet audit off. */
+const DOTNET_AUDIT_OFF = /(?<=\s)[-/]p(?:roperty)?:NuGetAudit=false(?=\s|$)/gi;
 /** The npm family's options that pick the shell or the node flags the script runs with. */
 const PACKAGE_RUNNER_CODE_LOADING = /(?:^|\s)--(?:script-shell|node-options)(?=[\s=]|$)/;
 
 /** True when the gate may run this `--test` / `--unit` value without a prompt. */
 function isPlainTestCommand(value) {
   const command = value.trim();
-  if (/^dotnet\s/.test(command) && DOTNET_CODE_LOADING.test(command)) return false;
+  if (/^dotnet\s/.test(command) && DOTNET_CODE_LOADING.test(command.replace(DOTNET_AUDIT_OFF, ' '))) return false;
   if (/^(?:npm|pnpm|yarn)\s/.test(command) && PACKAGE_RUNNER_CODE_LOADING.test(command)) return false;
   if (process.platform !== 'win32' && POSIX_QUOTE_DANGER.test(command)) return false;
   if (/^node\s/.test(command) && NODE_CODE_LOADING.test(command)) return false;
-  return TEST_RUNNER.test(command) && !TEST_COMMAND_DANGER.test(command) && !CODE_LOADING.test(command)
+  return (TEST_RUNNER.test(command) || BUILD_AND_LINT.some((runner) => runner.test(command))) && !TEST_COMMAND_DANGER.test(command) && !CODE_LOADING.test(command)
     && !command.replace(/"[^"]*"/g, '').includes(';');
 }
 /** PowerShell takes an en dash, an em dash or a horizontal bar as a parameter prefix too. */
 const ABBREVIATED_GRANT_SWITCH = /^[-–—―]a/i;
 const UNQUOTED_DANGER = /[$(){}<>@\\`%;&|]/;
+/** A merge of streams or a null sink (`2>&1`, `2>/dev/null` in Bash, `2>$null`): it writes no file and runs no code. */
+const SAFE_REDIRECT = /(?<=\s)(?:[12*]?>&[12]|[12*]?>\s*(?:\/dev\/null|\$null))(?=\s|$|[;|])/g;
 const NON_ASCII_PRINTABLE = /[^\x21-\x7e]/;
 /** PowerShell reads these as quote characters; the tokenizer below knows only ' and ". */
 const TYPOGRAPHIC_QUOTE = /[‘’‚‛“”„]/;
@@ -121,6 +138,23 @@ function tokenize(text, posix) {
 const ask = (reason) => ({ decision: 'ask', reason });
 
 /**
+ * The command with SAFE_REDIRECT dropped from its unquoted text only: inside quotes it is data the checks still read.
+ * Matched on a copy with every quoted span masked, so a redirect glued to a quoted word (`>&1"out.txt"`) stays.
+ */
+function dropSafeRedirects(command, tool) {
+  const masked = command.replace(/'[^']*'|"[^"]*"/g, (quoted) => 'q'.repeat(quoted.length));
+  let kept = '';
+  let from = 0;
+  for (const match of masked.matchAll(SAFE_REDIRECT)) {
+    // `/dev/null` is a null sink in Bash only: PowerShell writes a file at that path.
+    if (tool !== 'Bash' && match[0].includes('/dev/null')) continue;
+    kept += `${command.slice(from, match.index)} `;
+    from = match.index + match[0].length;
+  }
+  return kept + command.slice(from);
+}
+
+/**
  * `{ decision, reason }` when an allowed script is called with a risky argument, else null. A quoting
  * risk that a re-quote fixes is a deny with the hint; every other risk asks.
  */
@@ -130,7 +164,8 @@ function checkScriptArgs(command, tool) {
   const asks = [];
   let denial = null;
   const note = (reason) => { if (!asks.includes(reason)) asks.push(reason); };
-  for (const segment of splitSegments(command)) {
+  // Dropped before the split, which would cut `2>&1` at its `&`.
+  for (const segment of splitSegments(dropSafeRedirects(command, tool))) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
     const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? `${match[3].toLowerCase()}.mjs` : 'scope-guard.js';

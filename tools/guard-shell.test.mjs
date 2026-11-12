@@ -756,7 +756,7 @@ test('an allowed script called with an unquoted or double-quoted code construct 
 
 test('given an unquoted redirection in an allowed script call, when the guard reads it, then it asks instead of denying with a re-quote hint', () => {
   // Given
-  const commands = [`${PERIMETER} -Files <x`, `${DB} -Env prod -Query 'SELECT 1' 2>&1`, `${PERIMETER} -Close > out.txt`];
+  const commands = [`${PERIMETER} -Files <x`, `${DB} -Env prod -Query 'SELECT 1' 2>&1 > out.txt`, `${PERIMETER} -Close > out.txt`];
 
   for (const command of commands) {
     for (const tool of BOTH) {
@@ -767,6 +767,36 @@ test('given an unquoted redirection in an allowed script call, when the guard re
       assert.equal(decision, 'ask', `${tool}: ${command}`);
       assert.match(reason, /a redirection/, command);
     }
+  }
+});
+
+test('given an allowed script call ending in a stream merge or a null sink, when the guard reads it, then it lets the call through without asking', () => {
+  // Given: the redirections the sessions add to read the output, none of them writes a file or runs code
+  const commands = [
+    `${PERIMETER} -Close -FindingsLog 'x.log' 2>&1`, `${DB} -Env stg -Query 'SELECT 1' 2>&1`,
+    `${SNAPSHOT} -Take 2>$null`, `${PERIMETER} -Files 'a.cs' *>&1`,
+  ];
+  // `/dev/null` is a null sink in Bash only: in PowerShell it is a file path.
+  const bashOnly = [`node ~/.claude/scripts/gate.mjs --root 'C:/w' 2>/dev/null`, `${PERIMETER} -Files 'a.cs' >/dev/null 2>&1`];
+  for (const command of bashOnly) {
+    assert.equal(runTool('Bash', command).decision, 'approve', command);
+    assert.notEqual(runTool('PowerShell', command).decision, 'approve', command);
+  }
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+  // A null sink inside double quotes is data: its `$` is still denied.
+  for (const tool of BOTH) assert.equal(runTool(tool, `${PERIMETER} -Close "a 2>$null "`).decision, 'deny', tool);
+  // A redirect glued to a quoted word names a file: it is never let through.
+  for (const command of [`${PERIMETER} -Close >&1"out.txt"`, `${PERIMETER} -Close >&1'out.txt'`, `${PERIMETER} -Close 2>/dev/null"x"`]) {
+    for (const tool of BOTH) assert.notEqual(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
   }
 });
 
@@ -968,6 +998,78 @@ test('given gate.mjs called with a known test runner, when the guard reads it, t
 
       // Then
       assert.equal(result.decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with the build, lint and package runners the loops use, when the guard reads it, then it approves in both shells', () => {
+  // Given: the --test values seen most in a week of runs besides the plain test runners
+  const commands = [
+    `${GATE} --test 'dotnet build src/App.slnx -v:m -p:NuGetAudit=false'`,
+    `${GATE} --test 'node tools/validate.mjs'`,
+    `${GATE} --test 'claude plugin test mods/cockpit'`,
+    `${GATE} --test 'npm --prefix src/WebApi/ClientApp test -- --watch=false --no-coverage'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with those runners carrying inline code, when the guard reads it, then it still asks', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'dotnet build -p:Foo=1'`,
+    `${GATE} --test 'dotnet build -p:NuGetAudit=false -t:Evil'`,
+    `${GATE} --test 'node -e "x" tools/validate.mjs'`,
+    `${GATE} --test 'node --import data:x tools/validate.mjs'`,
+    `${GATE} --test 'npm --prefix x test --script-shell calc.exe'`,
+    `${GATE} --test 'claude plugin test x && calc'`,
+    `${GATE} --test 'claude plugin test ../evil'`,
+    `${GATE} --test 'claude plugin test --x'`,
+    `${GATE} --test 'node ~/.claude/scripts/gate.mjs --lane-remove'`,
+    `${GATE} --test 'node src/gate.mjs --run'`,
+    `${GATE} --test 'node //host/share/x.js'`,
+    `${GATE} --test 'node ../../x.js'`,
+    `${GATE} --test 'node C:/x.js'`,
+    `${GATE} --test 'npm --prefix ../../x test'`,
+    `${GATE} --test 'npm --prefix //host/share test'`,
+    `${GATE} --test 'dotnet build -l:X,y.dll'`,
+    `${GATE} --test 'dotnet build -logger:X,y.dll'`,
+    `${GATE} --test 'dotnet build -rp:A=b'`,
+    `${GATE} --test 'dotnet build @x.rsp'`,
+    `${GATE} --test 'node scripts/Gate.mjs --lane-remove'`,
+    `${GATE} --test 'node scripts/SWEEP.mjs'`,
+    `${GATE} --test 'npm --prefix x test --prefix //host/share'`,
+    `${GATE} --test 'npm --prefix x test --userconfig ../evil'`,
+    `${GATE} --test 'dotnet build -l:"X y.dll"'`,
+    `${GATE} --test 'dotnet build -l:X'`,
+    `${GATE} --test 'dotnet build -bl:C:/x/y.binlog'`,
+    `${GATE} --test 'dotnet build -fl -flp:logfile=C:/x/y.txt'`,
+    `${GATE} --test 'dotnet build -pp:C:/x/y.txt'`,
+    `${GATE} --test 'dotnet test -l:"X y.dll"'`,
+    `${GATE} --test 'dotnet test -bl:C:/x/y.binlog'`,
+    `${GATE} --test 'dotnet test -dfl -dflp:logfile=C:/x/y.txt'`,
+    `${GATE} --test 'npm --prefix x test --prefi=../../y'`,
+    `${GATE} --test 'npm --prefix x test --logs-dir=//host/share'`,
+    `${GATE} --test 'npm --prefix x test --cache=../../evil'`,
+    `${GATE} --test 'npm --prefix x test --watch=false'`,
+    `${GATE} --test 'npm --prefix x test -- ../../y'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
     }
   }
 });
