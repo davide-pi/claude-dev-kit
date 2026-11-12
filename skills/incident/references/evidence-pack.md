@@ -63,7 +63,7 @@ these sections, ≤ 40 lines in all:
 First a bold outcome line (symptom, scale, the advice). Then one section per type present, each
 under `---` and a `**<Section> · <n>**` title (a lone item: bare), never in `> ` or a code fence:
 Decisions `#D` (containment the owner must approve: advice, Severity/Risk/Effort axes, one per line, bold value + why),
-Hypotheses `#H` (most likely first), Problems `#I` (Not found and Blocked from every pack; what is still unknown, by Severity).
+Problems `#I` (Not found and Blocked from every pack; what is still unknown, by Severity), Hypotheses `#H` (most likely first).
 
 A hypothesis is the block `**#H1 · <cause>** — likely | less likely` with the bullets Proof (`<ts UTC> · <source> · <fact>`) and
 To confirm (the probe that decides it, read-only, and who runs it); a problem is `**#I1 · <gap>**` with a `Severity P2: <why>` bullet.
@@ -71,6 +71,6 @@ To confirm (the probe that decides it, read-only, and who runs it); a problem is
 (`<ts UTC> · <source> · <fact>`, merged, oldest first) and the path (UI → API → bus → DB, each hop file:line or log line,
 unconfirmed hops marked) only on request: `+timeline`, `+path`.
 
-At chat `it`: Decisions=Decisioni, Hypotheses=Ipotesi, Problems=Problemi, Proof=Prova, To confirm=Da confermare, likely=probabile,
+At chat `it`: Decisions=Decisioni, Problems=Problemi, Hypotheses=Ipotesi, Proof=Prova, To confirm=Da confermare, likely=probabile,
 less likely=meno probabile, Severity=Gravità, Item=Voce, For you=Da te, Reply=Rispondi, Questions pending=Domande in attesa,
 +timeline=+cronologia, +path=+percorso.

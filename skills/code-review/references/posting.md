@@ -73,9 +73,9 @@ In this order, so the table is what is still on screen when the report ends:
    `At chat it:` line after its skeleton, plus yes=sì. Only text posted on the PR follows the
    prComment language.
 
-4. **Quick fixes** and **Verdict** — one line each:
-   `N findings (X to do, Y already done · P1: N · X posted) · security: N · completeness: N` (at `it`:
-   `N rilievi (X da fare, Y già fatti · P1: N · X postati) · security: N · completezza: N`), plus
-   which agents ran at which effort, and which interface posted. Nothing after it.
+4. **Footer** — the Verdict line, then the `Reply` line, per the skeleton; nothing after it. The Verdict:
+   `N findings (X open, Y already done · P1: N · X posted) · security: N · completeness: N` (at `it`:
+   `N rilievi (X aperti, Y già fatti · P1: N · X postati) · security: N · completezza: N`), plus
+   which agents ran at which effort, and which interface posted.
 
 No findings at all → say exactly that, list what was verified, and **skip the table**.

@@ -64,27 +64,28 @@ Same defect at the same anchor from A and B → `CONFIRMED`; one model only → 
 One merged report in the chat language, exactly this skeleton; at chat `it` read the `At chat it:` line in `references/report-format.md`:
 
 ```text
-Order: outcome line → Findings → Completeness → Already done → Summary → Verdict. Summary table last;
-after Verdict at most one short question. Never inside `> ` or a code fence.
+Order: outcome line → Findings → Problems → Summary → footer (Verdict, Reply), the end. Never inside `> `
+or a code fence.
 Merge checklist, done by whoever writes the report (reviewer blocks are input, not output):
 1. A block naming more than one defect → split it, one block per defect; renumber, keep each one's evidence.
 2. Every file:line → Grep/Read the quoted code in the working tree and correct the line; note the
    corrections once in Verdict.
 Findings (todo): after `---`, title `**Findings · n**` (a single one: no title, no `---`), one block each,
 P1 → P3, CONFIRMED before PLAUSIBLE, clean-code last within its priority; `#F<n>` = finding number:
-**#F<n> · <title>** — `file:line` — CONFIRMED | PLAUSIBLE
+**#F<n> · <title>** — `file:line`
 - Problem: what breaks and the scenario, one line
 - Advice: the minimal fix, one line
 - P1: one axis per line: `- Severity **P1** — why`, then Risk and Effort the same way
 - P2, P3: one line: Severity P2: why · Risk low: why · Effort S: why
-- To confirm: only for PLAUSIBLE, what settles it
-Completeness: N points — covered N, then each partial, missing or wrong point, and scope creep.
-Already done (done): after `---`, one line each: `#F<n> · <title>` — `file:line` — resolved by commit, thread or "session".
-Summary · n: after `---`, 3+ findings only, columns exactly:
+- To confirm: only a PLAUSIBLE finding (CONFIRMED writes nothing): what settles it
+- Posted: only on a PR, thread or "chat only"
+Problems · n (`#I`): after `---`; every Completeness gap (N points, covered N: partial, missing, wrong, scope creep) is one item, same shape.
+Already done (done): rows in Findings, `#F<n> · <title>` — `file:line` — resolved by commit, thread or "session".
+Summary · n: after `---`, 3+ items only, columns exactly:
 | # | Item | Severity · Risk · Effort | For you |
-One row per finding, same order (`P1 · medium · M`, `ok F1`).
-Quick fixes: the closing `Reply ok F3 F4 …` line names the P1s and every P3 + low + S finding; apply nothing before the answer.
-Verdict: one line naming each agent, its model and effort; a blocked or missing worker is a gap.
+One row per item, same order (`P1 · medium · M`, `ok F1`).
+Footer: Verdict, one line naming each agent, its model and effort (a blocked or missing worker is a gap); then
+`Reply ok F3 F4 …`, the P1s and every P3 + low + S finding; apply nothing before the answer.
 No findings → no sections: "nothing to report, verified: …".
 ```
 

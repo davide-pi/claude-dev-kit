@@ -112,7 +112,7 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
   {
     const FORMAT = 'skills/code-review/references/report-format.md';
     // a template literal in a .js copy escapes its backticks
-    const norm = (rel) => read(rel).replace(/\r\n/g, '\n').replace(rel.endsWith('.js') ? /\\`/g : /^$/g, '`');
+    const norm = (rel) => { const s = read(rel).replace(/\r\n/g, '\n'); return rel.endsWith('.js') ? s.replace(/\\`/g, '`') : s; };
     const fenced = (patterns, label, copies) => {
       const canonical = has(FORMAT) ? norm(FORMAT).match(patterns)?.[1] : null;
       if (!canonical) { fail(FORMAT, `no canonical ${label}`); return; }
