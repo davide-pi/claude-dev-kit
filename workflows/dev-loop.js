@@ -595,6 +595,7 @@ const snapshotText = since => [
 // The implementer has no tool budget (its run is task-sized).
 const writerTail = (budget, cleaning = false, root = repoRoot, since = lastTree) => [
   input.stackSkill ? `Read ~/.claude/skills/${input.stackSkill}/SKILL.md first (the stack skill).` : '',
+  !cleaning && text(input.design) ? `Read ~/.claude/skills/principles/SKILL.md first: the plan leaves a design choice open — ${text(input.design)}. Settle it with the ladder and list it under \`defaults\` (choice, alternative, the rung as the reason).` : '',
   input.verify ? `Verify with: ${input.verify}` : '',
   cleaning ? '' : 'Questions: a behaviour choice the owner would see (a contract, a default, an error policy) is not yours to make and not to guess: list it under `questions` as { text, default: what you would do, why }, and do the rest of the scope. An internal choice (naming, structure) is yours, not a question.',
   cleaning ? '' : 'Defaults: a non-trivial choice the brief did not state (a name or order the owner will see, a limit, a format) goes under `defaults` as { choice, alternative, path }: no question, no stall, the owner reads the list in the verdict. Only the weighty ones (what the owner sees or uses, a contract, data, a cost or risk, an owner decision) are `questions`; the rest of your choices are not reported.',
