@@ -188,12 +188,13 @@ function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
   return { label: sp(g.isCurrent ? E.current : g.chatOnly !== undefined ? E.chatOnly(g.chatOnly) : E.round(g.round ?? 0)), after: [] }
 }
 
-/** The header of a node: toggle arrow, start time (not the open round's), label, length, cost and share of the session's cost, the model counters at the row's end. */
+/** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, length, cost and share of the session's cost, the model counters at the row's end. */
 function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[] } {
   const { width, s } = k
   const { label, after } = nodeLabel(g, tree)
   const left = [...(g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]), { ...label, t: padCells(label.t, LABEL_W) }, ...(figures(g.usd, g.ms, s.cost.usd).length > 0 ? [sp(' '), ...figures(g.usd, g.ms, s.cost.usd)] : []), ...after]
-  return { arrow: sp(isOpen ? '▾ ' : '▸ '), rest: pairRow(left, counterSpans(countModels(g.events), tree.widths, tree.isShort), width - 2) }
+  // a node with nothing under it opens nothing: a dash, not an arrow
+  return { arrow: sp(g.events.length === 0 ? '- ' : isOpen ? '▾ ' : '▸ '), rest: pairRow(left, counterSpans(countModels(g.events), tree.widths, tree.isShort), width - 2) }
 }
 
 /** An event row at `prefix`'s depth: time, icon, text, an agent also its model and figures at the end. */
