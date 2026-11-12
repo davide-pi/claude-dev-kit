@@ -785,6 +785,16 @@ const result = extra => withHistory({
 })
 
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
+// A run with no second call (a continuation, the preview pass): a question the policy would not answer alone stalls for the
+// owner, unless the resolution already answers it; the rest stay notes, as before.
+const questionsOrStall = (qs, at, label, resolution) => {
+  const answered = readAnswers(resolution)
+  const pending = qs.filter(q => questionPolicy(q) !== 'default' && !answered.some(a => plain(a.text) === plain(q.text)))
+  addQuestionNotes(qs.filter(q => !pending.includes(q)))
+  return pending.length
+    ? questionStall(at, pending, `${label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH))
+    : null
+}
 const CONTINUE = "Your first run's edits are already in the tree: continue from them, do not start over, and list in `files` only the files you change in this run."
 const answersBlock = answers => `The owner answered your questions: apply each answer. ${CONTINUE}\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
 const defaultsBlock = list => `Your reversible questions are answered with your own defaults (the owner can change them later): apply each. ${CONTINUE}\n${list.map(q => `- ${q.text} -> ${q.default}`).join('\n')}`
@@ -886,7 +896,8 @@ const runBlocks = async (items, total, lane) => {
         'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
         left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
       ].filter(Boolean).join('\n')), { ...implOpts, label }), gated)
-      if (next) addQuestionNotes(next.questions)
+      const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
+      if (nextStall) return nextStall
       impl = next ?? impl
     }
     if (!impl || impl.remaining.length) {
@@ -1101,7 +1112,8 @@ if (!inline) {
       const again = readReport(await ask([brief, answersBlock([said]), decisionsText, perimeterTextFor(files), dirtyText, ...gateLines(), ...writerTail()].filter(Boolean).join('\n\n'),
         { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }), gated)
       if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
-      addQuestionNotes(again.questions)
+      const previewStall = questionsOrStall(again.questions, 0, 'implement the change (preview feedback)', resolution0)
+      if (previewStall) return previewStall
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
     }

@@ -783,3 +783,24 @@ test('given a finished run, when it returns, then the result lists each block wi
   assert.deepEqual(out.blocks, [{ id: 1, tasks: ['1'], gate: gate('green', { tree: 'tr1' }), readerA: { raised: 0, fixed: 0, carried: 0 } }]);
   assert.deepEqual(out.defaultsApplied, []);
 });
+
+// ── #P5: the question policy also covers the continuations and the preview pass ───────────────────────
+test('given a continuation that raises a data-axis question, when the loop reads it, then it stalls with the question instead of a note', async () => {
+  // Given: the first run stops early, its continuation asks a question the policy never answers alone
+  const questions = askOf({ reversible: true, axis: 'data' });
+  // When
+  const { out } = await run(ARGS, [review([])], [impl({ remaining: ['task 2'] }), impl({ questions })]);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'question');
+  assert.equal(out.stall.questions[0].text, 'Which sort order?');
+});
+
+test('given a continuation that raises a reversible logic question, when the loop reads it, then the run goes on and the question is a note', async () => {
+  // Given
+  const questions = askOf({ reversible: true, axis: 'logic' });
+  // When
+  const { out } = await run(ARGS, [review([])], [impl({ remaining: ['task 2'] }), impl({ questions })]);
+  // Then
+  assert.equal(out.status, 'OK');
+});
