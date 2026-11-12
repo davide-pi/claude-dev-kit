@@ -54,7 +54,7 @@ test('a kit agent passes in silence', () => {
 });
 
 test('the Plan deny names the L challenger exception', () => {
-  assert.match(decision(spawn({ subagent_type: 'Plan', prompt: 'x' })).permissionDecisionReason, /Plan needs a model: sonnet \(opus only for the L challenger, deliver loop\.md\)\./);
+  assert.match(decision(spawn({ subagent_type: 'Plan', prompt: 'x' })).permissionDecisionReason, /Plan needs a model: sonnet \(opus only for the L challenger, deliver analysis\.md\)\./);
 });
 
 test('effort max is denied unless the description or prompt says owner asked', () => {

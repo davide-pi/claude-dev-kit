@@ -50,6 +50,12 @@ test('PR create without --work-items asks', () => {
   assert.equal(decision, 'ask');
   assert.match(reason, /--work-items/);
   assert.doesNotMatch(reason, /squash/);
+  assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft false`).decision, 'ask');
+});
+
+test('a draft PR create may open before its work item exists', () => {
+  assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft true`).decision, 'approve');
+  assert.equal(run(`${FULL_PR.replace(' --work-items 4211', '')} --draft $draft`).decision, 'ask', 'an unreadable value is no draft');
 });
 
 test('PR create without squash or delete asks, naming what is missing', () => {

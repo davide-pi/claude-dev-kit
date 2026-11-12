@@ -40,10 +40,10 @@ logic, testable; **low** cosmetic.
 - Chat `it`: `Verifica` `Livello|Comando|Riga che decide|Stato` `fatto` `non verificato: <motivo>`, `#|Proposta|Motivo|Rischio` alto|medio|basso
 
 ## Done means verified
-Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
-isn't proof). A main-session edit reply opens with a `**Verification**` line, plain
+Never claim done, fixed, passing, verified without a command run this turn (reading isn't proof).
+A main-session reply after an edit, commit, push or install opens with a `**Verification**` line, plain
 `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `done`, `not verified: <reason>`
 (Command: how to check), `failed` (quoted).
 
 ## Tools, no prompts
-Program first (`git -C <path> log`; `cd X && ...` prompts). Batch independent tool calls; read a file once, not after an edit.
+Program first (`git -C <path> log`; `cd X && ...` prompts). Read a file once, not after an edit.

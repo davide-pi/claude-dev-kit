@@ -4,21 +4,21 @@
  *
  * "Done means verified" is the standing rule most often broken in the letter: the reply says
  * "fatto" / "fixed" / "passing" and the command that would prove it is nowhere in the message. This
- * tier costs no tokens — it is a regex over the final message, run only when the turn edited a file
- * (Edit, Write, MultiEdit, NotebookEdit): a question answered with "sì, è fatto" is not a claim
- * about a change made now.
+ * tier costs no tokens — it is a regex over the final message, run only when the turn changed something
+ * (an edit, an editing delegate, a shell write: below): a question answered with "sì, è fatto" is not a
+ * claim about a change made now.
  *
  * Fires when ALL hold:
  *   - `CLAUDE_DONE_CLAIM=1` (set in the kit's settings.json; anything else and the hook exits at once);
- *   - not `stop_hook_active` (it already sent the turn back once: never loop);
+ *   - not `stop_hook_active` (it already sent the turn back once: never loop; the hand-off is still written);
  *   - the turn since the last human prompt used an editing tool, or delegated (`Workflow`, or an `Agent` / `Task`
  *     that is not a read-only type such as Explore or a reviewer: an editing delegate counts as an edit, its work
- *     is a change made now). The turn ends at the last genuine human
+ *     is a change made now), or ran a shell write that ships or installs (`git commit` / `push` / `merge`,
+ *     `gh pr create` / `merge`, `Copy-Item`): a commit, a merge or an install claimed done is a change made now too.
+ *     A shell command run after the last edit excuses nothing: its output must still be quoted in the message. The turn ends at the last genuine human
  *     prompt only: a workflow result or an agent hand-back arrives as a user entry holding a
  *     `<task-notification>` (or a cross-session message after a delegate), not as a `tool_result` block, and
  *     belongs to the turn, whether or not a delegate ran before it;
- *   - no Bash / PowerShell tool ran after the last edit: when one did, its output is already in the
- *     context and asking for a rerun would only cost a turn (the log notes it as `shell-ran`);
  *   - the final message has a claim word (fatto, done, fixed, passing, verificato, …) outside
  *     inline code;
  *   - and no evidence in the message itself: no fenced block, no `> ` quoted output line (a
@@ -75,12 +75,32 @@ const { findGitDir, currentBranch, readRef, commonDir } = require('./lib/git-dir
 const { contextTokens, LARGE_CONTEXT } = require('./lib/context-size');
 const { tailEntries, blocks, entryText, isNotification, isPeerMessage, isPrompt } = require('./lib/session-turn');
 const { READ_ONLY_AGENTS } = require('./lib/read-only-agents');
+const { expandSegments, stripWrappers, baseName, withoutBodies } = require('./lib/shell-parse');
+const { parseGitCall } = require('./lib/default-branch');
 
 const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
 const LOG = path.join(CONFIG_DIR, '.cache', 'done-claim.log');
 const HANDOFF = path.join(CONFIG_DIR, '.cache', 'handoff.json');
 const EDIT_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
 const SHELL_TOOLS = new Set(['Bash', 'PowerShell']);
+/** Shell commands that ship or install a change: they arm the turn as an edit does. */
+const GIT_WRITES = new Set(['commit', 'push', 'merge']);
+const COPY_ITEM = new Set(['copy-item', 'cpi']);
+
+/** True when a command of the line (wrappers skipped, read token by token) is a commit, push, merge, PR create or merge, or a Copy-Item. */
+function isShellWrite(command) {
+  return expandSegments(withoutBodies(command)).some((tokens) => {
+    const t = stripWrappers(tokens);
+    const name = t.length ? baseName(t[0]) : '';
+    if (name === 'git') return GIT_WRITES.has(parseGitCall(t)?.subcommand);
+    if (name === 'gh') {
+      const a = t.slice(1);
+      while (a.length && /^-/.test(a[0])) a.splice(0, /^(?:-R|--repo)$/.test(a[0]) ? 2 : 1);   // global options: `-R o/r`, `--repo=o/r`
+      return a[0] === 'pr' && (a[1] === 'create' || a[1] === 'merge');
+    }
+    return COPY_ITEM.has(name);
+  });
+}
 /** Tools that hand work to a workflow or an agent: they arm the hook like an edit and their results come back as notifications. */
 const DELEGATE_TOOLS = new Set(['Workflow', 'Agent', 'Task']);
 /** A quoted span (straight, curly or guillemets, same line, short): a word mentioned, not claimed. */
@@ -92,7 +112,7 @@ const EXIT_ZERO = /^exit(?: code)? 0$/;
 // only opening a sentence, a line or a bold span ("Fatto: …", "**Fatto**") and not as a participle
 // ("il merge fatto da te", "**fatto** da te"); the other words claim wherever they stand. English `works`
 // is no claim before a qualifier ("it works for X", "works with Y"); `passes` claims only at a clause end or before "now" ("passes the token to X" is prose), `verified` not after "be".
-const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
+const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano(?!\s+(?:nel\w*|nell'|nei|negli|all[aeo']?|ai|agli|alle|al\s+(?!\d|prim)|per\s+(?:il|la|lo|i|le|gli|l')|attraverso|dal\w*|dai|dagli)\b)|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
 const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|(?:not|n't)\s+(?:\w+\s+){0,2}(?:verified|tested|run)\b|to be (?:verified|tested)|no longer\s+(?:works|passes)|\bun(?:verified|tested)|non verificabile/i;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Detail**` (chat `it`: `Dettaglio`) block: the quoted lines that follow it are depth for the reader, not output. */
@@ -243,8 +263,13 @@ function perimeterOpen(cwd) {
 }
 
 /** A verdict table with the perimeter still active: the findings log was not written; send the turn back once. */
+/** A row left open because the work is still running: the loop itself, or a check deferred to the end of the cycle. */
+const IN_PROGRESS = /(?:non verificat\w*|not verified)\b.*\b(?:in corso|ancora|a fine ciclo|running|in progress|still|end of the cycle)\b/i;
+
 function blockOpenPerimeter(payload, rows, message) {
   if (!rows.length || !perimeterOpen(payload.cwd)) return;
+  // A progress report mid-run, not the closing verdict: the perimeter is rightly still active.
+  if (rows.some((r) => IN_PROGRESS.test(r.state) || (/impl-review-loop/.test(r.command) && /non verificat|not verified/i.test(r.state)))) return;
   log(payload, 'perimeter-open', 'verdict', message);
   process.stdout.write(JSON.stringify({ decision: 'block', reason: 'Close the perimeter with -FindingsLog before the verdict (perimeter.ps1 -Close -FindingsLog <json>, or -NoFindings if the loop did not run), then rewrite the verdict.' }));
   process.exit(0);
@@ -298,7 +323,10 @@ function readTurn(entries, truncated = false) {
     for (const b of [...blocks(entry)].reverse()) {
       if (b?.type !== 'tool_use' || armed) continue;
       if (EDIT_TOOLS.has(b.name) || (DELEGATE_TOOLS.has(b.name) && !(b.name !== 'Workflow' && READ_ONLY_AGENTS.has(b.input?.subagent_type)))) armed = true;
-      else if (SHELL_TOOLS.has(b.name)) {
+      else if (SHELL_TOOLS.has(b.name) && typeof b.input?.command === 'string' && !failed.has(b.id) && isShellWrite(b.input.command)) {
+        armed = true;
+        shellCommands.push(b.input.command);
+      } else if (SHELL_TOOLS.has(b.name)) {
         shellAfterEdit = true;
         if (typeof b.input?.command === 'string' && !failed.has(b.id)) shellCommands.push(b.input.command);
       }
@@ -340,12 +368,14 @@ function log(payload, rule, word, message, excerpt) {
 try {
   if (process.env.CLAUDE_DONE_CLAIM !== '1') allow();
   const payload = JSON.parse(fs.readFileSync(0, 'utf8') || '{}');
-  if (payload.stop_hook_active === true || typeof payload.transcript_path !== 'string') allow();
+  if (typeof payload.transcript_path !== 'string') allow();
 
   const { entries, truncated } = tailEntries(payload.transcript_path);
   const turn = readTurn(entries, truncated);
   const message = typeof payload.last_assistant_message === 'string' ? payload.last_assistant_message : turn.text;
   const rows = verdictRows(message);
+  // Sent back once already: never again, but a turn that closed a task still leaves the hand-off.
+  if (payload.stop_hook_active === true) allowWith(payload, turn, rows);
   const claimsRows = rows.some((r) => PROOF_STATE.test(r.state));
   // A turn cut before its start may have edited in the part not read: a verdict table claiming results is judged anyway.
   // An unarmed turn can still close a task (a `/commit` with no edit): it may leave the hand-off.
@@ -371,6 +401,7 @@ try {
     process.stdout.write(JSON.stringify({
       decision: 'block',
       reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
+        + 'The deciding cell holds copied output only: move any comment or count ("su tutti e 6", "6 files") to the command cell. '
         + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the state of that row.',
     }));
     process.exit(0);
@@ -379,11 +410,8 @@ try {
   const word = unprovenClaim(message);
   if (!word) { blockOpenPerimeter(payload, rows, message); allowWith(payload, turn, rows); }
 
-  if (turn.shellAfterEdit) {
-    log(payload, 'shell-ran', word, message);    // counted, not blocked: the output is already in context
-    allowWith(payload, turn, rows);
-  }
-  log(payload, 'claim-without-evidence', word, message);
+  // A shell run after the edit is no proof by itself: the rule wants its output in the message (the log tells the two apart).
+  log(payload, turn.shellAfterEdit ? 'shell-ran' : 'claim-without-evidence', word, message);
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `

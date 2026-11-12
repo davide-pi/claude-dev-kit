@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, stopWithContext, committed } from './done-claim.harness.mjs';
+import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, stopWithContext, committed, HOOK } from './done-claim.harness.mjs';
 
 test('English claim words without proof are blocked; "works" before a qualifier is not a claim', () => {
   assert.match(stop(edited('All tests passes now.')).reason, /"passes"/);
@@ -51,12 +51,27 @@ test('an edit turn ending "fatto" with no evidence is blocked and logged', () =>
   assert.equal(JSON.parse(log[0]).rule, 'claim-without-evidence');
 });
 
-test('a shell command ran after the last edit → silent: its output is already in context, and counted', () => {
+test('a shell command ran after the last edit excuses no claim: blocked until its output is quoted, logged as shell-ran', () => {
   const { reason, dir } = stop([prompt('sistema il bug'), tool('Edit'), result(), tool('Bash'), result(), say('Fatto: il totale ora somma le righe.')]);
-  assert.equal(reason, '');
+  assert.match(reason, /"Fatto"/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
   assert.equal(JSON.parse(log[0]).rule, 'shell-ran');
-  assert.equal(stop([prompt('x'), tool('Edit'), result(), tool('PowerShell'), result(), say('Done.')]).reason, '');
+  assert.match(stop([prompt('x'), tool('Edit'), result(), tool('PowerShell'), result(), say('Done.')]).reason, /"Done"/);
+  assert.equal(stop([prompt('x'), tool('Edit'), result(), tool('Bash'), result('12 passed'), say('Fatto: `npm test` → 12 passed.')]).reason, '');
+});
+
+test('a shell write that ships or installs arms the turn like an edit; a read-only shell turn stays unarmed', () => {
+  for (const command of ['git commit -m x', 'git -C C:/repo push -u origin b', 'gh pr merge 5 --squash', 'gh pr create --base main', 'Copy-Item a b -Force']) {
+    assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
+  }
+  for (const command of ['git -C "C:/a b" push', 'pwsh -c "git commit -m x"', 'gh -R o/r pr create', 'gh --repo=o/r pr merge 3']) {
+    assert.match(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, /"Fatto"/, command);
+  }
+  for (const command of ['git status', 'git log --oneline -3', 'gh pr view 5', 'git merge-base main HEAD', 'git commit-tree abc', 'echo "git push"', 'grep -rn Copy-Item hooks', "cat > f <<'EOF'\ngit push\nEOF"]) {
+    assert.equal(stop([prompt('x'), tool('Bash', { command }), result(), say('Fatto.')]).reason, '', command);
+  }
+  // a failed write changed nothing: it does not arm the turn
+  assert.equal(stop([prompt('x'), tool('Bash', { command: 'git push' }), result('Exit code 1\nrejected'), say('Fatto.')]).reason, '');
 });
 
 test('a shell command that ran BEFORE the last edit proves nothing about it → blocked', () => {
@@ -67,6 +82,13 @@ test('a shell command that ran BEFORE the last edit proves nothing about it → 
 test('"passa" is not a claim: "passa per il controller" is just a sentence', () => {
   assert.equal(stop(edited('La richiesta passa per il controller e poi per il servizio.')).reason, '');
   assert.match(stop(edited('I test passano.')).reason, /"passano"/);
+  assert.match(stop(edited('Ora i test passano tutti.')).reason, /"passano"/);
+  for (const text of ['I campi passano nel brief del challenger.', 'I valori passano al servizio.', 'Le righe passano per il parser.', 'I token passano attraverso il proxy.']) {
+    assert.equal(stop(edited(text)).reason, '', text);
+  }
+  for (const text of ['I test passano in locale.', 'I test passano in CI.', 'I test passano al 100%.', 'I test passano al primo colpo.', 'I test passano come previsto.', 'Ora passano subito.', 'I test passano per ora.']) {
+    assert.match(stop(edited(text)).reason, /"passano"/, text);
+  }
 });
 
 test('"fatto" as a participle mid-sentence is not a claim; as an opening it is', () => {
@@ -213,6 +235,15 @@ test('a proven verdict table is sent back once while the perimeter is still acti
   assert.equal(stop(edited(final, 'Passed: 48'), { extra: { cwd: repo, stop_hook_active: true } }).reason, '');   // never loops
 });
 
+test('a progress report mid-run (a row still running) is not the closing verdict: the open perimeter does not send it back', () => {
+  const repo = repoWithPerimeter('active');
+  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `impl-review-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
+    assert.equal(stop(edited(verdict(row('Passed: 48'), open), 'Passed: 48'), { extra: { cwd: repo } }).reason, '', open);
+  }
+  // an honest gap that is not "still running" leaves the check on
+  assert.match(stop(edited(verdict(row('Passed: 48'), row('—', 'non verificato: serve staging', 'e2e')), 'Passed: 48'), { extra: { cwd: repo } }).reason, /Close the perimeter/);
+});
+
 test('the perimeter is read off the disk, no git process: found from a subdirectory with git off the PATH', () => {
   const repo = repoWithPerimeter('active');
   mkdirSync(join(repo, 'src'));
@@ -297,6 +328,25 @@ test('a turn that closed nothing (no verdict, no commit) in a large context says
   const { out, handoff } = stopWithContext(edited('Ho cambiato il metodo.'), 150_000);
   assert.equal(out, null);
   assert.equal(handoff, null);
+});
+
+test('a turn sent back once (stop_hook_active) is never blocked again, but a closed task still leaves the hand-off', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'done-ho-'));
+  created.push(dir);
+  mkdirSync(join(dir, '.cache'));
+  writeFileSync(join(dir, '.cache', 'context-s.json'), JSON.stringify({ used_tokens: 150_000, at: Date.now() }));
+  const transcript = join(dir, 't.jsonl');
+  writeFileSync(transcript, committed.map((e) => JSON.stringify(e)).join('\n') + '\n');
+  const r = spawnSync(process.execPath, [HOOK], {
+    input: JSON.stringify({ session_id: 's', transcript_path: transcript, stop_hook_active: true, hook_event_name: 'Stop', cwd: dir }),
+    encoding: 'utf8',
+    env: { ...process.env, CLAUDE_DONE_CLAIM: '1', CLAUDE_LARGE_CONTEXT: '', CLAUDE_CONFIG_DIR: dir },
+  });
+  assert.equal(r.status, 0, r.stderr);
+  const out = r.stdout ? JSON.parse(r.stdout) : {};
+  assert.equal(out.decision, undefined);
+  assert.match(out.systemMessage ?? '', /\/clear/);
+  assert.deepEqual(JSON.parse(readFileSync(join(dir, '.cache', 'handoff.json'), 'utf8')).rows, ['Add the order list']);
 });
 
 test('a blocked verdict never carries the /clear message', () => {

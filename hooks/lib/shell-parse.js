@@ -279,6 +279,27 @@ function walk(command) {
   return out;
 }
 
+const HEREDOC = /(?<!<)<<(?!<)-?\s*['"]?([A-Za-z_][\w-]*)['"]?/;   // `<<<` is a here-string of one word, no body
+const HERE_STRING_OPEN = /@['"]\s*$/;
+const HERE_STRING_CLOSE = /^['"]@/;
+
+/** The command without heredoc and here-string bodies: the line that opens one is kept, its body and closer dropped. */
+function withoutBodies(command) {
+  const kept = [];
+  let close = null;
+  for (const line of command.split(/\r?\n/)) {
+    if (close) {
+      if (close(line)) close = null;
+      continue;
+    }
+    kept.push(line);
+    const heredoc = HEREDOC.exec(line);
+    if (heredoc) close = (l) => l.trim() === heredoc[1];
+    else if (HERE_STRING_OPEN.test(line)) close = (l) => HERE_STRING_CLOSE.test(l);
+  }
+  return kept.join('\n');
+}
+
 /** Every command of a line as a token list, wrapper and substitution contents included. */
 const expandSegments = (command) => walk(command).filter((e) => e.tokens).map((e) => e.tokens);
 
@@ -287,5 +308,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies,
 };

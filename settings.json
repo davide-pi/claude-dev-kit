@@ -691,6 +691,20 @@
         ]
       },
       {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/read-guard.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10
+          }
+        ]
+      },
+      {
         "matcher": "mcp__plugin_browser-use_browser-use__.*",
         "hooks": [
           {
@@ -702,6 +716,20 @@
             ],
             "timeout": 30,
             "statusMessage": "Checking Edge's CDP port for browser-use..."
+          }
+        ]
+      },
+      {
+        "matcher": "mcp__plugin_browser-use_browser-use__browser_screenshot",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node",
+            "args": [
+              "-e",
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/screenshot-guard.js')}catch{process.exit(0)}"
+            ],
+            "timeout": 10
           }
         ]
       },
