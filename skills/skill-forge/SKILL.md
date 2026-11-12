@@ -61,6 +61,15 @@ needed.
 `paths:` hides a skill until a matching file is read. Budget ~8 k characters listed, 1,536 per description,
 overflow drops silently: `references/frontmatter-and-budget.md`.
 
+### 4. Descriptions and wording
+- Misfire: only the term, noun or one language misses sloppy phrasing; add symptom, verb, typed words. An
+  everywhere-verb or no neighbour boundary over-fires: qualify, name the exclusion. Widen a situation,
+  never a synonym per miss.
+- Eval: a natural MUST (no description keyword), a look-alike MUST NOT, a same-domain question MUST NOT;
+  a failing case is a description bug; re-run MUST NOT first after widening.
+- Wording: a pointer front-loads its trigger, one per branch; a step ends on a checkable done; the
+  target behaviour, not a prohibition; delete a no-op sentence whole. (Wording adapted from `mattpocock/skills`, MIT, (c) 2026 Matt Pocock.)
+
 ## Do
 
 ```powershell
@@ -79,7 +88,7 @@ asset row · each new test or hook seen failing once: a check never seen failing
 ## Traps
 
 1. Never fires → the description summarises contents → rewrite it around situations and the words
-   the user types (`references/description-craft.md`).
+   the user types (§ 4).
 2. A user-invoked skill fires unasked → the flag is missing or the description lacks `/<name>` →
    add both; the validator checks them.
 3. A reference nobody opens → no `## References` line names its condition → add the line, or merge
@@ -90,7 +99,3 @@ asset row · each new test or hook seen failing once: a check never seen failing
 - `references/frontmatter-and-budget.md` — a frontmatter field or the listing budget is in question: effect and rule per field, byte caps.
 - `references/asset-templates.md` — writing a new asset: skeletons for auto, user-invoked and fork
   skills, rule, agent, hook; the eval section; the README row; the finish checklist.
-- `references/description-craft.md` — a skill misfires or never fires, or a description is being
-  written: the shape, false-negative and false-positive patterns, the eval cases.
-- `references/writing-for-agents.md` — wording any asset: pointers, completion criteria, leading
-  words, positive phrasing, pruning no-ops.

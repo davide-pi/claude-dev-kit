@@ -38,7 +38,7 @@ written above, even though every value under them is in the items language.
 
 For the User Story role the two content columns line up with the body one to one: `Description`
 takes the `Come … / voglio … / così da …` block, `Acceptance criteria` takes the whole
-`Criteri di accettazione` block, clean, exactly as `acceptance-criteria.md` produces it.
+`Criteri di accettazione` block, clean, exactly as `SKILL.md` § 5 defines it.
 
 For a **Bug** they do not line up, because the mandated body has two parts
 (`Comportamento attuale` / `Comportamento atteso`) and the CSV has three content columns. The

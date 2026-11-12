@@ -41,9 +41,9 @@ absent, and why no `invoke` route could be verified — before treating it as on
 
 | Looks like a gap | The CLI route | Where |
 | --- | --- | --- |
-| A project's work item types and their states | `invoke --area wit --resource workItemTypes` / `workItemTypeStates` | `work-item-roles.md` |
-| Reading a work item's discussion (`--discussion` only writes) | `invoke --area wit --resource comments` | `boards-catalogue.md` |
-| A pipeline run's step logs | `invoke --area build --resource Timeline`, then `logs` | `pipelines-catalogue.md` |
+| A project's work item types and their states | `invoke --area wit --resource workItemTypes` / `workItemTypeStates` | `catalogue.md` § Discovering |
+| Reading a work item's discussion (`--discussion` only writes) | `invoke --area wit --resource comments` | `catalogue.md` § Reading |
+| A pipeline run's step logs | `invoke --area build --resource Timeline`, then `logs` | `catalogue.md` § Pipelines |
 | PR comment threads: read, post, reply, resolve | `invoke --area git --resource pullRequestThreads` (and `pullRequestThreadComments`); the MCP PR-thread tools are accepted only when an inline anchor's thread context cannot be verified | `repos-and-prs.md` |
 | Attaching a file or an image to a work item | two REST calls with the current `az login` token — no PAT | `workitem-content.md` |
 | Wiki page writes, and listing a wiki's page tree | REST (the write verbs corrupt accents; there is no `list` verb) | `wiki-rest.md` |

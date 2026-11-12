@@ -78,11 +78,15 @@ for topics and decisions; open a transcript only for a missing detail.
 1. A lunch break counted as work → a permission prompt left pending looks like a long tool call →
    show the long waits, drop them in the Table 1 loop.
 2. Default-branch work vanishes → no branch topic → split it from the digest, say it is an estimate.
+3. `CLAUDE` exceeds the clock → it is **summed** across parallel sessions; `TU` is counted once (the
+   user's minutes minus every session's busy time), `TOTALE` = both inside the day window, the rest
+   goes to `FUORI`. A resume joins its original session, a fork stays separate; only some resumes leave a
+   `continued-in` line and creation time is unreliable after copy, sync or restore, so a fork's head can land on the wrong file. Full model: the
+   `.DESCRIPTION` header of `worklog.ps1`.
 
 ## References
 
 - `time-and-topics.md` — Phases 1-3: the period, the engine's output, topics and rounding.
-- `engine.md` — the hours or spans look wrong: how the engine counts CLAUDE, TU and FUORI.
 - `scoping.md` — a scoped run.
 - `tables.md` — Phases 4 and 6: the tables, link format, the recap.
 - `hours-management.md` — an under-target day, or management hours.

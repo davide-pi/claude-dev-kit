@@ -19,6 +19,6 @@ Listed descriptions (agents, and skills with neither `disable-model-invocation` 
 window in characters, with a per-description limit (`SKILL.md` § 2 and § 3); on overflow the
 least-invoked descriptions drop **silently**. Measure with `/doctor` (listing cost), `/skill-doctor`
 (never-invoked skills) and `/usage` (per-asset attribution). A skill nobody triggers has a
-description bug, not a body bug: `references/description-craft.md`.
+description bug, not a body bug: `SKILL.md` § 4.
 
 Line and byte caps: `SKILL.md` § 2 Caps row, the only copy. `code-reviewer` has a larger byte cap: it runs the security and cost passes itself when no specialist sits beside it.

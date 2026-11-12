@@ -27,13 +27,13 @@ not scope a query reliably: every WIQL repeats `WHERE [System.TeamProject] = '<p
 | Task | Group | Catalogue |
 | --- | --- | --- |
 | Org level: projects, users, raw REST | `az devops` | `references/auth-and-config.md` |
-| Work items, queries, areas, iterations | `az boards` | `references/boards-catalogue.md` |
-| Which type name fills a role here | `az devops invoke` | `references/work-item-roles.md` |
+| Work items, queries, areas, iterations | `az boards` | `references/catalogue.md` § WIQL, Creating |
+| Which type name fills a role here | `az devops invoke` | `references/catalogue.md` § Type roles |
 | Fields, attachments, inline images | `az boards` + REST | `references/workitem-content.md` |
 | Read one item in full, list my active items | `az boards` + REST | `references/item-read.md` |
 | Wiki tree, read, create, update | `az devops wiki` + REST | `references/wiki-rest.md` |
 | Repos, PRs, refs, branch policies | `az repos` | `references/repos-and-prs.md` |
-| Pipelines, runs, variables, logs | `az pipelines` | `references/pipelines-catalogue.md` |
+| Pipelines, runs, variables, logs | `az pipelines` | `references/catalogue.md` § Pipelines |
 
 `az devops invoke` reaches any REST route with the current login — it is still the CLI. For a call
 with no verb at all, the bearer token of `az login` drives plain REST (resource id in `## Do`).
@@ -51,11 +51,11 @@ permission: before the call, say in one line which capability and which CLI rout
 Type names come from the process template and are case-sensitive; the technical-activity type is
 often custom. **Before any `--type`, WIQL predicate or confirmation table that names a type, list the
 project's types** (`invoke --area wit --resource workItemTypes`) and use a name only as returned. The
-role table in `references/work-item-roles.md` is a hypothesis to confirm. `Issue` is the *analysis*
+role table in `references/catalogue.md` § Type roles is a hypothesis to confirm. `Issue` is the *analysis*
 role on Agile and the *backlog item* on Basic. No type fills a role → say so and ask; never
-substitute the nearest. Only the time role (`Task`) carries hours; a PR links the item above a Task
-(`references/work-item-roles.md` §5–6). **No create before the owner approves the item table**
-(`references/boards-catalogue.md` § Creating and updating).
+substitute the nearest. Only the time role (`Task`) carries hours; a PR links the item above a Task,
+never the Task. **No create before the owner approves the item table** (`references/catalogue.md` §
+Creating and updating). WIQL is flat only; `workItemTypes` decides what exists, a WIQL dedupe only what's in use.
 
 ### 5. Verify before typing
 
@@ -64,7 +64,7 @@ substitute the nearest. Only the time role (`Task`) carries hours; a PR links th
 | Does this verb exist? | `az <group> --help` — `Commands:` and `Subgroups:` |
 | Does this flag exist, which values? | `az <group> <verb> --help` — enums print as `Allowed values:` |
 | What does the response contain? | the read verb once with `-o json`, then `--query` |
-| Does this type have that field? | `references/work-item-roles.md` §1, then `references/workitem-content.md` §1 |
+| Does this type have that field? | `references/catalogue.md` § Discovering, then `references/workitem-content.md` §1 |
 
 ### 6. Authentication triage
 
@@ -94,11 +94,9 @@ completed`: the reference of each action, read before it.
 ## References
 
 - `references/auth-and-config.md` — any auth or "not found" failure.
-- `references/boards-catalogue.md` — before any WIQL or work item write.
-- `references/work-item-roles.md` — before naming a type.
+- `references/catalogue.md` — before any WIQL, work item write, type name or pipeline call.
 - `references/workitem-content.md` — before writing any field.
 - `references/item-read.md` — reading one item in full, or listing the owner's active items.
 - `references/wiki-rest.md` — before any wiki write.
 - `references/repos-and-prs.md` — anything on a repository or a PR.
-- `references/pipelines-catalogue.md` — anything on a pipeline.
 - `references/mcp-fallback.md` — only once the CLI is exhausted.

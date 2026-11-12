@@ -41,7 +41,7 @@ Consequences, each a real incident shape:
 
 | Counter in the message | Means | Go to |
 | --- | --- | --- |
-| `WORKER` busy above min | thread-pool starvation from sync-over-async | `async-concurrency.md` |
+| `WORKER` busy above min | thread-pool starvation from sync-over-async | `dotnet-backend` Trap 6 |
 | large `qs=` | head-of-line blocking behind a big value | split or shrink the value |
 | large `in=` | payload size on the way back | narrower reads |
 | `mgr=` not `Inactive` | the multiplexer is reconnecting | the network or the server, not the code |

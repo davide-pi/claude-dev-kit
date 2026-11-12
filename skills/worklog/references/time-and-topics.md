@@ -25,7 +25,7 @@ subagents — and never touches Azure DevOps. Two kinds of minutes: `CLAUDE` (Cl
 across sessions) and `TU` (the user writing and reading, counted once). `TOTALE` = `CLAUDE` + `TU`
 inside 08:00-20:00 (`-DayStart`, `-DayEnd`); minutes outside go to `FUORI`, never dropped. A minute
 goes to the topic (project + branch) the session's events say at that moment and to its local **day**.
-Counting rules: `engine.md`.
+Counting rules: Trap 3 in `SKILL.md`, the full model in the `worklog.ps1` header.
 
 Stdout, the authoritative numbers:
 

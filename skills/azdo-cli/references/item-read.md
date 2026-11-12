@@ -48,7 +48,7 @@ az boards query --org https://dev.azure.com/<org> --project <project> -o table -
 ```
 
 The comments invoke fails → the MCP work-item tool per `references/mcp-fallback.md` (behind a prompt),
-and the report says which path produced the discussion. The `api-version` that works: `boards-catalogue.md`.
+and the report says which path produced the discussion. The `api-version` that works: `catalogue.md` § Reading.
 
 ## Traps
 
