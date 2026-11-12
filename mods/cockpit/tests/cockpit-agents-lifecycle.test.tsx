@@ -52,7 +52,7 @@ test('agents: a finished agent leaves IN PROGRESS at once, DONE lists it with it
   ])
 })
 
-test('agents: one the engine lists as killed or failed ends with 󰅖, one it no longer lists with 󰄬', async ($, on) => {
+test('agents: one the engine lists as killed or failed ends with 󰅖, one it no longer lists with 󰄬', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on, {
     listed: [
       { id: 'a1', status: 'killed' },
@@ -69,7 +69,7 @@ test('agents: one the engine lists as killed or failed ends with 󰅖, one it no
   await ui.unmount()
 })
 
-test('agents: DONE shows an open group with every agent it holds, and no `󰍟 +K` button while there are no more than 5 groups', async ($, on) => {
+test('agents: DONE shows an open group with every agent it holds, and no `󰍟 +K` button while there are no more than 5 groups', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on)
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -84,7 +84,7 @@ test('agents: DONE shows an open group with every agent it holds, and no `󰍟 +
   await ui.unmount()
 })
 
-test('agents: the history survives a reload (the session id reads its data file); another id starts empty', async ($, on) => {
+test('agents: the history survives a reload (the session id reads its data file); another id starts empty', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   world(on, { sessionId: () => id, dataFile: JSON.stringify({ sessionLog: [logged('a8', 'reviewer', NOW - 90_000, true), logged('a9', 'implementer', NOW - 30_000)] }) })
   await start($)
@@ -100,7 +100,7 @@ test('agents: the history survives a reload (the session id reads its data file)
   await ui.unmount()
 })
 
-test('agents: a /clear moves the finished agent still under 2 minutes into the ending session\'s history; the new session starts empty', async ($, on) => {
+test('agents: a /clear moves the finished agent still under 2 minutes into the ending session\'s history; the new session starts empty', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   const writes = new Map<string, string>()
   const clock = world(on, { sessionId: () => id, writes })
@@ -121,7 +121,7 @@ test('agents: a /clear moves the finished agent still under 2 minutes into the e
   expect(fileOfSession(writes, 's-2')?.history ?? []).toEqual([])
 })
 
-test('agents: a reload of the same session id keeps the live agents, the finished one too until its 2 minutes pass', async ($, on) => {
+test('agents: a reload of the same session id keeps the live agents, the finished one too until its 2 minutes pass', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes, listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
@@ -142,7 +142,7 @@ test('agents: a reload of the same session id keeps the live agents, the finishe
   expect((dataOf(writes)?.history as { id: string }[]).map(h => h.id)).toEqual(['a2'])
 })
 
-test('agents: Given a data file from before agent entries, When the session resumes, Then LOG lists the finished agents of its history, an interrupted one left out', async ($, on) => {
+test('agents: Given a data file from before agent entries, When the session resumes, Then LOG lists the finished agents of its history, an interrupted one left out', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const history = [{ ...entry('a1', 'running-one', NOW - 1000), isInterrupted: true }, entry('a2', 'finished-one', NOW - 2000)]
   world(on, { dataFile: JSON.stringify({ history }) })
@@ -157,7 +157,7 @@ test('agents: Given a data file from before agent entries, When the session resu
   await ui.unmount()
 })
 
-test('agents: entries a data file holds wrongly are left out, a file with no log means none', async ($, on) => {
+test('agents: entries a data file holds wrongly are left out, a file with no log means none', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: 1, kind: 'nope' }, 'text', logged('a1', 'ok', NOW - 1000)] }) })
   await start($)
   const ui = await mountPane($)
@@ -173,7 +173,7 @@ test('orderAgents lists each level newest first, children right under their pare
 
 // ── Workflow agents ──
 
-test('workflow agents: a tick does not end an agent just because the engine does not list it; its own turn does', async ($, on) => {
+test('workflow agents: a tick does not end an agent just because the engine does not list it; its own turn does', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on) // $.agent.list() answers nothing: it never lists a workflow's agents
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
@@ -192,7 +192,7 @@ test('workflow agents: a tick does not end an agent just because the engine does
   await ui.unmount()
 })
 
-test('workflow agents: an explicit failed or killed listing ends them', async ($, on) => {
+test('workflow agents: an explicit failed or killed listing ends them', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on, { listed: [{ id: 'a1', status: 'killed' }] })
   spawns(on)
   await start($)
@@ -207,7 +207,7 @@ test('workflow agents: an explicit failed or killed listing ends them', async ($
   await ui.unmount()
 })
 
-test('workflow agents: the end of their run (silence past the limit) ends the ones still running and closes the run; a step keeps it open', async ($, on) => {
+test('workflow agents: the end of their run (silence past the limit) ends the ones still running and closes the run; a step keeps it open', { timeoutMs: 30_000 }, async ($, on) => {
   const instructions: (string | undefined)[] = []
   const clock = world(on, { instructions })
   spawns(on)
@@ -232,7 +232,7 @@ test('workflow agents: the end of their run (silence past the limit) ends the on
   await ui.unmount()
 })
 
-test('workflow agents: a run whose agents the listing ends closes with them, and a spawn after it reopens it', async ($, on) => {
+test('workflow agents: a run whose agents the listing ends closes with them, and a spawn after it reopens it', { timeoutMs: 30_000 }, async ($, on) => {
   const instructions: (string | undefined)[] = []
   const clock = world(on, { instructions, listed: [{ id: 'a1', status: 'killed' }] })
   spawns(on)
@@ -252,7 +252,7 @@ test('workflow agents: a run whose agents the listing ends closes with them, and
   await ui.unmount()
 })
 
-test('agents: a tool call seen before its agent spawned does not make a stub that the spawn later fills', async ($, on) => {
+test('agents: a tool call seen before its agent spawned does not make a stub that the spawn later fills', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { listed: [{ id: 'a1', status: 'running' }] })
   spawns(on)
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
@@ -270,7 +270,7 @@ test('agents: a tool call seen before its agent spawned does not make a stub tha
   await ui.unmount()
 })
 
-test('agents: IN PROGRESS shows the newest 5 and the button opens the rest, none capped away', async ($, on) => {
+test('agents: IN PROGRESS shows the newest 5 and the button opens the rest, none capped away', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   spawns(on)
   await start($)

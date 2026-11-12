@@ -251,8 +251,6 @@ export type CockpitSnapshot = {
   agentTokens?: number
   /** The main loop's state for the header's icon; absent before any event (read as idle). */
   claudeState?: CockpitClaudeState
-  /** The context size (`ctx.tokens`) at the end of the last main turns, newest last, at most six; a shrinking context starts it over. The autocompact forecast's input. */
-  ctxSamples?: number[]
   /** The context size at the end of each of the last twenty main turns, newest last: the context trend. A shrinking context stays in it (a compaction shows as a drop). */
   ctxRounds?: number[]
   /** The absolute paths (forward slashes) this chat edited, main loop or subagents, in the order first edited: they tell which checkout is the chat's. Kept in the session data file. */
@@ -308,8 +306,6 @@ export type CockpitSnapshot = {
   roundSeq?: number
   /** The USD each agent type's finished agents cost, summed when each ended (the agent history is capped); kept in the session data file. */
   agentSpend?: Record<string, number>
-  /** The `$`/prompt the person aims at, from `cockpit.json` `costTarget`; absent without a positive one. */
-  costTarget?: number
   /** `$.clock.now()` of the session's first reading: a branch's pull request joins the chat only when opened after it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or `log hours`. */

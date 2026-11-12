@@ -149,7 +149,8 @@ function buildTree(k: Kit): Tree {
   const flowLog = isReopened ? log.filter(e => !(e.kind === 'flow' && e.key === run?.runId)) : log
   if (run !== undefined && !flowLog.some(e => e.kind === 'flow' && e.key === run.runId)) {
     const mine = all.filter(e => e.kind === 'agent' && e.runId === run.runId)
-    const starts = mine.map(e => e.at - (e.ms ?? 0))
+    // the run's start counts its working agents too: the launch row stays under the round that launched it
+    const starts = [...mine.map(e => e.at - (e.ms ?? 0)), ...running.filter(e => e.runId === run.runId).map(e => e.start ?? e.at)]
     const at = run.lastAt ?? s.now
     openFlow = { at, kind: 'flow', key: run.runId, usd: mine.reduce((n, e) => n + (e.usd ?? 0), 0), ...(run.name !== undefined && { text: run.name }), ...(starts.length > 0 && { ms: Math.max(0, at - Math.min(...starts)) }) }
     const progress = [run.phase ?? '—', `${run.agents.filter(a => a.isDone).length}/${run.agents.length}`].join(' · ')
@@ -163,12 +164,12 @@ function buildTree(k: Kit): Tree {
   return { live, closed, detail }
 }
 
-/** The label of a node, cut to its cell so the figures keep their columns; the detail a live run adds goes after the figures. */
+/** The label of a node, whole (the row cuts it with … only when the pane is too narrow, the figures keep their columns); the detail a live run adds goes after it. */
 function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
   const E = t().page.events
   if (g.flow !== undefined) {
     const live = tree.detail.get(g.key)
-    const text = `flow ${g.flow.name ?? g.flow.runId}`.slice(0, LABEL_W)
+    const text = `flow ${g.flow.name ?? g.flow.runId}`
     const label = live?.isSilent ? sp(text, COLORS.amber) : g.flow.isFailed ? sp(text, COLORS.red) : sp(text)
     return { label, after: live === undefined ? [] : [sp(' '), live.isSilent ? sp(`· ${live.text}`, COLORS.amber) : dim(`· ${live.text}`)] }
   }

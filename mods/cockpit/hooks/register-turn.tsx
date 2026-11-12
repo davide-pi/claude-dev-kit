@@ -2,7 +2,7 @@ import { atom, read } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import { agentLog, newTokens, settleUsage, usageOf } from './agents'
-import { recordCtxSample, recordRound } from './context'
+import { recordRound } from './context'
 import { addStepUsage, markClaudeState, setClaudeState, upsertAgent } from './events'
 import { recordCompaction, recordRoundEnd, roundCost, withContextReading } from './insights'
 import { isResumePrompt } from './pace'
@@ -168,12 +168,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
       if (usage && total > 0) {
         cacheShare = Math.round((100 * usage.cache_read_input_tokens) / total)
         const share = cacheShare
-        // The turn's usage sums every request of the turn: the context size is the engine's last reading, whose growth the autocompact forecast averages.
-        await patch($, s => ({
-          ...s,
-          cacheShare: share,
-          ctxSamples: s.ctx.tokens ? recordCtxSample(s.ctxSamples, s.ctx.tokens) : s.ctxSamples,
-        }))
+        await patch($, s => ({ ...s, cacheShare: share }))
       }
       // The steps already counted their part of the session's tokens: the turn's own total replaces it.
       await patch($, s => {

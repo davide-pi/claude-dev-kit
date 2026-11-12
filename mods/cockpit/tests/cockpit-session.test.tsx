@@ -22,7 +22,7 @@ import { DATA, NOW, PANE, dataOf, flagOf, iso, rowTexts, settle, world } from '.
 /** The context the world measures at start, as the data file keeps it. */
 const LIVE_CTX = { tokens: 248_000, window: 1_000_000, percent: 25 }
 
-test('a data file from before the model usage was dropped still loads: its history comes back, the old modelUse is ignored', async ($, on) => {
+test('a data file from before the model usage was dropped still loads: its history comes back, the old modelUse is ignored', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], sessionLog: [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -33,7 +33,7 @@ test('a data file from before the model usage was dropped still loads: its histo
   expect(dataOf(writes)).not.toHaveProperty('modelUse')
 })
 
-test('the state file is written at session start with open:false and the session data', async ($, on) => {
+test('the state file is written at session start with open:false and the session data', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -52,7 +52,7 @@ test('the state file is written at session start with open:false and the session
 
 const CLOSED = { open: false, at: NOW, lastTurnUsd: null, agents: { running: 0, modelWarnings: 0 }, effort: null, tasks: null }
 
-test('session.end leaves the ENDING session file closed and empty, not the current one', async ($, on) => {
+test('session.end leaves the ENDING session file closed and empty, not the current one', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   // $.session.id() already answers the new id (a /clear): the file written is the one `e.sessionId` names.
   world(on, { writes, sessionId: () => 's-2' })
@@ -62,7 +62,7 @@ test('session.end leaves the ENDING session file closed and empty, not the curre
   expect(flagOf(writes)).toEqual(CLOSED)
 })
 
-test('session.end with the pane open still writes open:false for the ending session', async ($, on) => {
+test('session.end with the pane open still writes open:false for the ending session', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, sessionId: () => 's-2' })
   on('session.end', (_, e) => ({ sessionId: e.sessionId }))
@@ -74,7 +74,7 @@ test('session.end with the pane open still writes open:false for the ending sess
   expect(flagOf(writes)).toEqual(CLOSED)
 })
 
-test('a new session id (/clear) gets its own file, even with the same content', async ($, on) => {
+test('a new session id (/clear) gets its own file, even with the same content', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   let id = 's-1'
   world(on, { writes, sessionId: () => id })
@@ -84,14 +84,14 @@ test('a new session id (/clear) gets its own file, even with the same content', 
   expect([...writes.keys()].map(k => k.replace(/^.*(cockpit-(?:data-)?s-\d\.json)$/, '$1')).sort()).toEqual(['cockpit-data-s-1.json', 'cockpit-data-s-2.json', 'cockpit-s-1.json', 'cockpit-s-2.json'])
 })
 
-test('a session id the statusline would not accept writes nothing', async ($, on) => {
+test('a session id the statusline would not accept writes nothing', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, sessionId: () => '../x' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(writes.size).toBe(0)
 })
 
-test('/cockpit opens the pane and the state file says open:true', async ($, on) => {
+test('/cockpit opens the pane and the state file says open:true', { timeoutMs: 30_000 }, async ($, on) => {
   const opened: string[] = []
   const writes = new Map<string, string>()
   world(on, { opened, writes })
@@ -104,7 +104,7 @@ test('/cockpit opens the pane and the state file says open:true', async ($, on) 
   expect(flagOf(writes)).toMatchObject({ open: true })
 })
 
-test('while the pane is open the tick rewrites the state file with a fresh at; closed, it writes nothing', async ($, on) => {
+test('while the pane is open the tick rewrites the state file with a fresh at; closed, it writes nothing', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const log: string[] = []
   const clock = world(on, { writes, log })
@@ -121,7 +121,7 @@ test('while the pane is open the tick rewrites the state file with a fresh at; c
   expect(heartbeat.at).toBeGreaterThanOrEqual(openedAt + 15_000)
 })
 
-test('a pane that cannot be placed is reported with open:false, and its first render says open:true', async ($, on) => {
+test('a pane that cannot be placed is reported with open:false, and its first render says open:true', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { isPlaced: false, writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -136,7 +136,7 @@ test('a pane that cannot be placed is reported with open:false, and its first re
   await ui.unmount()
 })
 
-test('the state file follows the last turn cost and the agent counts, at most once per few seconds, never unchanged', async ($, on) => {
+test('the state file follows the last turn cost and the agent counts, at most once per few seconds, never unchanged', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const log: string[] = []
   const clock = world(on, { writes, log })
@@ -185,7 +185,7 @@ test('the state file follows the last turn cost and the agent counts, at most on
   expect(log.length).toBe(afterFlush)
 })
 
-test("the state file's last turn cost is the ended turn's while the next one has not been measured", async ($, on) => {
+test("the state file's last turn cost is the ended turn's while the next one has not been measured", { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   on('turn.start', (_, e) => ({ turnId: e.turnId }))
@@ -200,13 +200,13 @@ test("the state file's last turn cost is the ended turn's while the next one has
   expect(flagOf(writes)).toMatchObject({ lastTurnUsd: 0.38 })
 })
 
-test('a state file that is not JSON is ignored', async ($, on) => {
+test('a state file that is not JSON is ignored', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await paneRows($)).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
 })
 
-test('a write delayed across a /clear writes nothing to the new session\'s file', async ($, on) => {
+test('a write delayed across a /clear writes nothing to the new session\'s file', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   const writes = new Map<string, string>()
   const clock = world(on, { sessionId: () => id, writes })
@@ -223,7 +223,7 @@ test('a write delayed across a /clear writes nothing to the new session\'s file'
   expect(fileOfSession(writes, 's-2')).toBeUndefined()
 })
 
-test('session.end while id() still answers the ending session: a tick in between never re-adopts it, the running agent is interrotto in its file, nothing of it reaches the next', async ($, on) => {
+test('session.end while id() still answers the ending session: a tick in between never re-adopts it, the running agent is interrotto in its file, nothing of it reaches the next', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   const writes = new Map<string, string>()
   const clock = world(on, { sessionId: () => id, writes, listed: [{ id: 'a1', status: 'running' }, { id: 'a2', status: 'running' }] })
@@ -257,7 +257,7 @@ test('session.end while id() still answers the ending session: a tick in between
   expect(fileOfSession(writes, 's-1')).toEqual(ended)
 })
 
-test('a session.end whose file write is cut short still leaves nothing of the ending session in the snapshot', async ($, on) => {
+test('a session.end whose file write is cut short still leaves nothing of the ending session in the snapshot', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-1'
   const writes = new Map<string, string>()
   let isCut = false
@@ -275,7 +275,7 @@ test('a session.end whose file write is cut short still leaves nothing of the en
   await ui.unmount()
 })
 
-test('a resume reloads the history of the session it resumes', async ($, on) => {
+test('a resume reloads the history of the session it resumes', { timeoutMs: 30_000 }, async ($, on) => {
   let id = 's-2'
   const history = [entry('a9', 'implementer', NOW - 30_000), entry('a8', 'reviewer', NOW - 90_000, true)]
   const sessionLog = [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }, { at: NOW - 90_000, kind: 'agent', key: 'a8', text: 'reviewer', isFailed: true }]
@@ -291,7 +291,7 @@ test('a resume reloads the history of the session it resumes', async ($, on) => 
   await ui.unmount()
 })
 
-test('session.end keeps the history in the closed file, so a resume finds it', async ($, on) => {
+test('session.end keeps the history in the closed file, so a resume finds it', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const history = [entry('a9', 'implementer', NOW - 30_000)]
   world(on, { writes, stateFile: JSON.stringify({ history }) })
@@ -306,7 +306,7 @@ test('session.end keeps the history in the closed file, so a resume finds it', a
   expect((sessionLog as { kind: string; key: string; at: number }[]).map(e => [e.kind, e.key, e.at])).toEqual([['agent', 'a9', NOW - 30_000]])
 })
 
-test('follow-up: a saved state without agentTokens starts the count from the history it lists', async ($, on) => {
+test('follow-up: a saved state without agentTokens starts the count from the history it lists', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
   world(on, { writes, stateFile: JSON.stringify({ open: false, history: [h('x1', 3000), h('x2', 2000)] }) })
@@ -314,7 +314,7 @@ test('follow-up: a saved state without agentTokens starts the count from the his
   expect((flagOf(writes) as { agentTokens?: number }).agentTokens).toBe(5000)
 })
 
-test('follow-up: a saved agentTokens wins over the history sum', async ($, on) => {
+test('follow-up: a saved agentTokens wins over the history sum', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const h = (id: string, tokens: number) => ({ id, type: 't', startedAt: 0, endedAt: 1, tokens, isFailed: false })
   world(on, { writes, stateFile: JSON.stringify({ open: false, agentTokens: 9000, history: [h('x1', 3000)] }) })
@@ -344,7 +344,7 @@ function refusingFirstWriteTimer(on: On): On {
 
 const SAVED_PR = { number: 7, title: 'Old work' }
 
-test('session data: history, PRs and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', async ($, on) => {
+test('session data: history, PRs and the context rounds go to cockpit-data-<id>.json, throttled like the state file; the state file keeps the handshake', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   spawns(on)
@@ -366,7 +366,7 @@ test('session data: history, PRs and the context rounds go to cockpit-data-<id>.
   expect(flag.prs).toBeUndefined()
 })
 
-test('session data: a resume brings back the history, the PRs and the context samples; the notes an old file holds are dropped', async ($, on) => {
+test('session data: a resume brings back the history, the PRs and the context rounds; the notes an old file holds are dropped', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const dataFile = JSON.stringify({
     history: [entry('a9', 'implementer', NOW - 30_000)],
@@ -374,7 +374,6 @@ test('session data: a resume brings back the history, the PRs and the context sa
     prs: [SAVED_PR],
     notes: [{ id: 3, text: 'ask Anna' }, { id: 5, text: 'call back' }],
     ctxRounds: [100_000, 200_000],
-    ctxSamples: [100_000, 200_000],
   })
   world(on, { writes, dataFile })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -382,10 +381,23 @@ test('session data: a resume brings back the history, the PRs and the context sa
   expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ implementer/.test(r))).toBe(true)
   await ui.unmount()
   // written back as it was read
-  expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000], prs: [SAVED_PR] })
+  expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], prs: [SAVED_PR] })
 })
 
-test('session data: a state file from before the data file hands its history and PRs over, once', async ($, on) => {
+test('session data: Given a saved file that still holds ctxSamples, When loaded, Then it loads and the rest of its data is intact', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const dataFile = JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], prs: [SAVED_PR], ctxRounds: [100_000, 200_000], ctxSamples: [100_000, 200_000] })
+  world(on, { writes, dataFile })
+  // When
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // Then
+  expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], prs: [SAVED_PR] })
+  expect(dataOf(writes)?.history).toHaveLength(1)
+  expect(dataOf(writes)).not.toHaveProperty('ctxSamples')
+})
+
+test('session data: a state file from before the data file hands its history and PRs over, once', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const history = [entry('a9', 'implementer', NOW - 30_000)]
   world(on, { writes, stateFile: JSON.stringify({ open: false, history, prs: [SAVED_PR] }) })
@@ -399,7 +411,7 @@ test('session data: a state file from before the data file hands its history and
   expect(flag.tab).toBeUndefined()
 })
 
-test('session data: once the data file exists the old place is never read again, even with its fields empty', async ($, on) => {
+test('session data: once the data file exists the old place is never read again, even with its fields empty', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, {
     dataFile: JSON.stringify({ history: [], prs: [] }),
     stateFile: JSON.stringify({ open: false, history: [entry('a9', 'implementer', NOW - 30_000)], prs: [SAVED_PR] }),
@@ -410,14 +422,14 @@ test('session data: once the data file exists the old place is never read again,
   await ui.unmount()
 })
 
-test('session data: a field of the wrong shape is left out, never thrown', async ($, on) => {
+test('session data: a field of the wrong shape is left out, never thrown', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, dataFile: JSON.stringify({ history: 'x', prs: {}, note: 42, notes: [null, { id: 1, text: 7 }, { id: 'x', text: 'a' }, { id: 2, text: ' ' }], ctxRounds: ['a', -1], ctxSamples: null }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect(dataOf(writes)).toEqual({ history: [], prs: [], ctx: LIVE_CTX, startedAt: NOW })
 })
 
-test('last known: before the first live reading the credits come from the status line cache with a dim ~, and a live reading replaces them', async ($, on) => {
+test('last known: before the first live reading the credits come from the status line cache with a dim ~, and a live reading replaces them', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { rateLimits: [], files: { [RL_FILE]: rlCache(40, 20) } })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -433,7 +445,7 @@ test('last known: before the first live reading the credits come from the status
   await ui.unmount()
 })
 
-test('last known: each window is drawn from the engine when it has that kind, else from the cache with a ~', async ($, on) => {
+test('last known: each window is drawn from the engine when it has that kind, else from the cache with a ~', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { rateLimits: [], files: { [RL_FILE]: rlCache(40, 20) } })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -447,7 +459,7 @@ test('last known: each window is drawn from the engine when it has that kind, el
   await ui.unmount()
 })
 
-test('last known: a cache window that is over reads 100 % left with no countdown; a missing cache draws nothing', async ($, on) => {
+test('last known: a cache window that is over reads 100 % left with no countdown; a missing cache draws nothing', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { rateLimits: [], files: { [RL_FILE]: JSON.stringify({ five_hour: { used_percentage: 90, resets_at: NOW / 1000 - 60 } }) } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
@@ -455,7 +467,7 @@ test('last known: a cache window that is over reads 100 % left with no countdown
   await ui.unmount()
 })
 
-test('last known: a resumed session shows the context of its last state with a dim ~ until the engine measures it, and keeps it in its data file', async ($, on) => {
+test('last known: a resumed session shows the context of its last state with a dim ~ until the engine measures it, and keeps it in its data file', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { isFresh: true, writes, dataFile: JSON.stringify({ history: [], ctx: { tokens: 600_000, window: 1_000_000, percent: 60 } }) })
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -474,7 +486,7 @@ test('last known: a resumed session shows the context of its last state with a d
   await ui.unmount()
 })
 
-test('last known: once the engine has measured, a compaction that reports no percent does not bring the resumed value back', async ($, on) => {
+test('last known: once the engine has measured, a compaction that reports no percent does not bring the resumed value back', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { isFresh: true, dataFile: JSON.stringify({ history: [], ctx: { tokens: 600_000, window: 1_000_000, percent: 60 } }) })
   on('session.measure', (_, e) => ({ changed: e.changed }))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

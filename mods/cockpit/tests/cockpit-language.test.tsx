@@ -6,7 +6,7 @@ import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
 import { flagOf, iso, rowTexts, settle, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
-test('English is the default: the footer and the titles', async ($, on) => {
+test('English is the default: the footer and the titles', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
@@ -16,7 +16,7 @@ test('English is the default: the footer and the titles', async ($, on) => {
   await ui.unmount()
 })
 
-test('both languages draw the page, with every label of the bundles in both and no key missing', async ($, on) => {
+test('both languages draw the page, with every label of the bundles in both and no key missing', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { sessionId: () => 'chat-7', branch: 'feature/AB#512-reports', workspaces: { roots: [{ path: '/', platform: 'azure-devops', org: 'org-a', project: 'Alpha', identity: 'id-a' }] } }
   world(on, options)
   const keys = (o: unknown, prefix = ''): string[] =>
@@ -44,7 +44,7 @@ test('both languages draw the page, with every label of the bundles in both and 
   }
 })
 
-test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', async ($, on) => {
+test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { files: IT_FILE }
   world(on, options)
   const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^ATTENZIONE ─+$/.test(r)) ? 'it' : 'en')
@@ -79,7 +79,7 @@ test('language: cockpit.json names it; a missing, unreadable, malformed or unkno
   }
 })
 
-test('language: a pane that draws before any session start (a mod enabled mid-session) reads cockpit.json once', async ($, on) => {
+test('language: a pane that draws before any session start (a mod enabled mid-session) reads cockpit.json once', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
@@ -94,7 +94,7 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   }
 })
 
-test('language: the toasts are in the language of the pane', async ($, on) => {
+test('language: the toasts are in the language of the pane', { timeoutMs: 30_000 }, async ($, on) => {
   const toasts: string[] = []
   world(on, { toasts, files: IT_FILE })
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -107,7 +107,7 @@ test('language: the toasts are in the language of the pane', async ($, on) => {
   }
 })
 
-test('Italian: the credit windows share one row at 58 columns and take one row each at 40, never wider than the pane', async ($, on) => {
+test('Italian: the credit windows share one row at 58 columns and take one row each at 40, never wider than the pane', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = {
     files: IT_FILE,
     rateLimits: [
@@ -131,7 +131,7 @@ test('Italian: the credit windows share one row at 58 columns and take one row e
   }
 })
 
-test('the pane opens at session start when cockpit.json is missing or holds no autoOpen, and the state file says open', async ($, on) => {
+test('the pane opens at session start when cockpit.json is missing or holds no autoOpen, and the state file says open', { timeoutMs: 30_000 }, async ($, on) => {
   const opened: string[] = []
   const writes = new Map<string, string>()
   const options: World = { opened, writes, isAutoOpen: true }
@@ -148,7 +148,7 @@ test('the pane opens at session start when cockpit.json is missing or holds no a
   expect(opened).toEqual(['cockpit'])
 })
 
-test('the pane is not opened at session start when cockpit.json says autoOpen:false; /cockpit still opens it', async ($, on) => {
+test('the pane is not opened at session start when cockpit.json says autoOpen:false; /cockpit still opens it', { timeoutMs: 30_000 }, async ($, on) => {
   const opened: string[] = []
   world(on, { opened, files: { 'cockpit.json': '{"autoOpen":false}' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

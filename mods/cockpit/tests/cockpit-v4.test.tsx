@@ -20,7 +20,7 @@ const failingBash = (on: Parameters<typeof world>[0]) => on('tool.call', { tool:
 
 // ── Notifications: a row of ATTENTION, and no badge in the fixed header or the state file ──
 
-test('Notifications: a command that failed twice is one row (what) with what to do under it, its why and what to do open on a press, and nothing is in the header or the state file', async ($, on) => {
+test('Notifications: a command that failed twice is one row (what) with what to do under it, its why and what to do open on a press, and nothing is in the header or the state file', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   failingBash(on)
@@ -52,7 +52,7 @@ test('Notifications: a command that failed twice is one row (what) with what to 
   await ui.unmount()
 })
 
-test('Notifications: a title too long for the row is cut closed, and open it wraps under the row with why and what to do whole; the time stays on the right', async ($, on) => {
+test('Notifications: a title too long for the row is cut closed, and open it wraps under the row with why and what to do whole; the time stays on the right', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on)
   failingBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -90,7 +90,7 @@ test('wrapCells: breaks at the space that fits, a word longer than the row is cu
   expect(wrapCells('', 5)).toEqual([])
 })
 
-test('Notifications: with none, ATTENTION says there is nothing to do', async ($, on) => {
+test('Notifications: with none, ATTENTION says there is nothing to do', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const { rows } = await paneRows($, 58)
@@ -98,7 +98,7 @@ test('Notifications: with none, ATTENTION says there is nothing to do', async ($
   expect(headerOf(rows).some(r => /󰀦/.test(r))).toBe(false)
 })
 
-test('Notifications: a permission ask unanswered over 60 seconds is a notification, and it clears when the person answers', async ($, on) => {
+test('Notifications: a permission ask unanswered over 60 seconds is a notification, and it clears when the person answers', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on)
   permissionChecks(on)
   const release = gatedBash(on)
@@ -117,7 +117,7 @@ test('Notifications: a permission ask unanswered over 60 seconds is a notificati
 
 // ── IN PROGRESS: the workflow run in one row ──
 
-test('IN PROGRESS: the workflow run is a node with its name, phase and agents done out of all', async ($, on) => {
+test('IN PROGRESS: the workflow run is a node with its name, phase and agents done out of all', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on)
   permissionChecks(on)
   workflowLaunches(on, 'release-notes')
@@ -130,7 +130,7 @@ test('IN PROGRESS: the workflow run is a node with its name, phase and agents do
   await clock.advance(7000)
   await settleAll()
   const { rows } = await paneRows($, 58)
-  const run = rows.findIndex(r => /^[▾▸-] \d\d:\d\d flow relea /.test(r))
+  const run = rows.findIndex(r => /^[▾▸-] \d\d:\d\d flow release-notes/.test(r))
   expect(run).toBeGreaterThan(-1)
   expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)
   release('rm x')

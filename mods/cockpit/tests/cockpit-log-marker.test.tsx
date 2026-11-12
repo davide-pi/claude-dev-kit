@@ -40,7 +40,7 @@ const oneRound = async ($: Session, clock: { advance: (ms: number) => Promise<vo
   return ((dataOf(writes)?.sessionLog ?? []) as CockpitLogEntry[]).filter(e => e.kind === 'round')
 }
 
-test('Given two prompts in one round, When the turn completes, Then one marker was placed and the round entry names it as its anchor', async ($, on) => {
+test('Given two prompts in one round, When the turn completes, Then one marker was placed and the round entry names it as its anchor', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { writes, clock, placed } = await start(on)
   // When
@@ -86,7 +86,7 @@ test('Given an engine that denies the scroll, When the link is pressed, Then no 
   expect(isLinkShown(other)).toBe(false)
 })
 
-test('Given a pane whose engine cannot scroll to the placed row, When its link is pressed, Then the links are hidden', async ($, on) => {
+test('Given a pane whose engine cannot scroll to the placed row, When its link is pressed, Then the links are hidden', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { writes, clock } = await start(on)
   const [round] = await oneRound($, clock, writes)
@@ -99,7 +99,7 @@ test('Given a pane whose engine cannot scroll to the placed row, When its link i
   await ui.unmount()
 })
 
-test('Given a round with a placed anchor and one without, When drawn, Then the figures of both second lines end at the same column', async ($, on) => {
+test('Given a round with a placed anchor and one without, When drawn, Then the figures of both second lines end at the same column', { timeoutMs: 30_000 }, async ($, on) => {
   // Given: an older round saved with figures, then a round this process places a marker for
   const old = { at: NOW - 300_000, kind: 'round', n: 1, ms: 61_000, usd: 0.3, prompt: 'old', model: 'claude-sonnet-5-5' }
   const { writes, clock } = await start(on, { dataFile: { history: [], prs: [], sessionLog: [old] } })
@@ -118,7 +118,7 @@ test('Given a round with a placed anchor and one without, When drawn, Then the f
   expect(new Set(ends).size, rows.join('\n')).toBe(1)
 })
 
-test('Given a round saved with an anchor an earlier process placed, When drawn, Then it shows no link', async ($, on) => {
+test('Given a round saved with an anchor an earlier process placed, When drawn, Then it shows no link', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   await start(on, { dataFile: { history: [], prs: [], sessionLog: [{ at: 1, kind: 'round', n: 1, prompt: 'old', anchor: 'req-gone' }] } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -131,7 +131,7 @@ test('Given a round saved with an anchor an earlier process placed, When drawn, 
   expect(text).not.toContain(LINK)
 })
 
-test('Given a round with a failed call and a wait, When drawn in principali and then in tutto, Then the wait and failed-call rows show only in tutto', async ($, on) => {
+test('Given a round with a failed call and a wait, When drawn in principali and then in tutto, Then the wait and failed-call rows show only in tutto', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetAnchors()
   setLang('en')

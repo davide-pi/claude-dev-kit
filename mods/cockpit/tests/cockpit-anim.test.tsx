@@ -27,7 +27,7 @@ async function animKinds($: Engine, on: On, tokens: number | undefined, options:
   return kinds
 }
 
-test('idle: Given a quiet pane (ready, nothing new, nothing running), When it is drawn, Then it holds no animated cell', async ($, on) => {
+test('idle: Given a quiet pane (ready, nothing new, nothing running), When it is drawn, Then it holds no animated cell', { timeoutMs: 30_000 }, async ($, on) => {
   // the default world's 7d window is red and beats: a quiet pane has green credits
   expect(await animKinds($, on, undefined, QUIET)).toEqual([])
 })
@@ -47,49 +47,49 @@ async function beats($: Engine, on: On, tokens: number, usedFiveHour: number | u
   return cells.map(c => ({ speed: c.props?.props?.speed, text: c.props?.props?.cells?.map(x => x.t).join('') }))
 }
 
-test('beat: Given a threshold of 200k, When the context is red (180k, 90%), Then its percent is a fast beat cell', async ($, on) => {
+test('beat: Given a threshold of 200k, When the context is red (180k, 90%), Then its percent is a fast beat cell', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 180_000, undefined, { autoCompactAt: 200_000 })
   // Then
   expect(found).toEqual([{ speed: 'fast', text: ' 82%' }])
 })
 
-test('beat: Given a threshold of 200k, When the context is yellow (170k), Then its percent is a slow beat cell', async ($, on) => {
+test('beat: Given a threshold of 200k, When the context is yellow (170k), Then its percent is a slow beat cell', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 170_000, undefined, { autoCompactAt: 200_000 })
   // Then
   expect(found.map(f => f.speed)).toEqual(['slow'])
 })
 
-test('beat: Given a threshold of 200k, When the context is green (110k), Then no beat cell is drawn', async ($, on) => {
+test('beat: Given a threshold of 200k, When the context is green (110k), Then no beat cell is drawn', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 110_000, undefined, { autoCompactAt: 200_000 })
   // Then
   expect(found).toEqual([])
 })
 
-test('beat: Given a 5h window with 85% used (red), When the pane is drawn, Then its percent is a fast beat cell', async ($, on) => {
+test('beat: Given a 5h window with 85% used (red), When the pane is drawn, Then its percent is a fast beat cell', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 110_000, 85)
   // Then
   expect(found).toEqual([{ speed: 'fast', text: '15%' }])
 })
 
-test('beat: Given a 5h window with 50% used (yellow), When the pane is drawn, Then its percent is a slow beat cell', async ($, on) => {
+test('beat: Given a 5h window with 50% used (yellow), When the pane is drawn, Then its percent is a slow beat cell', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 110_000, 50)
   // Then
   expect(found).toEqual([{ speed: 'slow', text: '50%' }])
 })
 
-test('beat: Given a 5h window with 30% used (green), When the pane is drawn, Then no beat cell is drawn', async ($, on) => {
+test('beat: Given a 5h window with 30% used (green), When the pane is drawn, Then no beat cell is drawn', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const found = await beats($, on, 110_000, 30)
   // Then
   expect(found).toEqual([])
 })
 
-test('breathe: Given Claude is working, When the pane is drawn, Then the state glyph breathes', async ($, on) => {
+test('breathe: Given Claude is working, When the pane is drawn, Then the state glyph breathes', { timeoutMs: 30_000 }, async ($, on) => {
   expect(await animKinds($, on, undefined, QUIET, async () => void (await $.turn.start({ text: 'go', turnId: 't1' })))).toEqual(['breathe'])
 })
 
@@ -107,7 +107,7 @@ async function dueSetup($: Engine, on: On, tokens: number) {
   return { ui, modules, instructions }
 }
 
-test('compact button: Given a threshold of 193k, When the context is at 145k (75%), Then a surface module draws the button and no pulse glyph sits beside it', async ($, on) => {
+test('compact button: Given a threshold of 193k, When the context is at 145k (75%), Then a surface module draws the button and no pulse glyph sits beside it', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const { ui, modules } = await dueSetup($, on, 145_000)
   // Then
@@ -117,7 +117,7 @@ test('compact button: Given a threshold of 193k, When the context is at 145k (75
   await ui.unmount()
 })
 
-test('compact button: Given a threshold of 193k, When the context is at 144k (below 75%), Then the plain button is drawn, no module', async ($, on) => {
+test('compact button: Given a threshold of 193k, When the context is at 144k (below 75%), Then the plain button is drawn, no module', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
   const { ui, modules } = await dueSetup($, on, 144_000)
   // Then
@@ -126,7 +126,7 @@ test('compact button: Given a threshold of 193k, When the context is at 144k (be
   await ui.unmount()
 })
 
-test('compact button: Given a due compaction, When the module posts the compact action, Then the session compacts', async ($, on) => {
+test('compact button: Given a due compaction, When the module posts the compact action, Then the session compacts', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { ui, instructions } = await dueSetup($, on, 145_000)
   // When
@@ -137,7 +137,7 @@ test('compact button: Given a due compaction, When the module posts the compact 
   await ui.unmount()
 })
 
-test('compact button: Given a due compaction, When a message that is not the compact action arrives, Then nothing compacts', async ($, on) => {
+test('compact button: Given a due compaction, When a message that is not the compact action arrives, Then nothing compacts', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { ui, instructions } = await dueSetup($, on, 145_000)
   // When

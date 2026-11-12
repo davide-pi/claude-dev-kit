@@ -1,11 +1,8 @@
 import { expect, test } from 'claude-code/testing'
 
 import {
-  autocompactForecast,
   compactInstructions,
-  ctxGrowth,
   parseCtx,
-  recordCtxSample,
   recordRound,
 } from '../hooks/context'
 
@@ -66,40 +63,12 @@ test('compactInstructions: each part is optional, and long titles never push it 
   expect(text.startsWith(KEEP)).toBe(true)
 })
 
-test('recordCtxSample: keeps the last six readings and starts over when the context shrinks (a compaction)', () => {
-  expect(recordCtxSample(undefined, 100)).toEqual([100])
-  expect(recordCtxSample([100, 200], 300)).toEqual([100, 200, 300])
-  expect(recordCtxSample([1, 2, 3, 4, 5, 6], 7)).toEqual([2, 3, 4, 5, 6, 7])
-  expect(recordCtxSample([100, 200, 300], 50)).toEqual([50])
-})
-
-test('autocompactForecast: requests left from the average growth; absent without two readings, a threshold or growth', () => {
-  // growth 10k per turn, 60k left to the threshold
-  expect(autocompactForecast([100_000, 110_000, 120_000], 180_000)).toBe(6)
-  expect(autocompactForecast([100_000, 110_000, 121_000], 180_000)).toBe(6)
-  expect(autocompactForecast([100_000], 180_000)).toBeUndefined()
-  expect(autocompactForecast(undefined, 180_000)).toBeUndefined()
-  expect(autocompactForecast([100_000, 110_000], undefined)).toBeUndefined()
-  expect(autocompactForecast([110_000, 110_000], 180_000)).toBeUndefined()
-  // past the threshold already
-  expect(autocompactForecast([170_000, 190_000], 180_000)).toBe(0)
-  expect(autocompactForecast([100_000, 110_000], 150_000)).toBe(4)
-})
-
 test('recordRound keeps the last twenty main-turn contexts, and a shrinking context stays in the series', () => {
   const rounds = Array.from({ length: 25 }, (_, i) => i + 1).reduce<number[]>((all, n) => recordRound(all, n * 1000), [])
   expect(rounds).toHaveLength(20)
   expect(rounds[0]).toBe(6000)
   expect(rounds.at(-1)).toBe(25_000)
   expect(recordRound([200_000], 40_000)).toEqual([200_000, 40_000])
-})
-
-test('ctxGrowth: the average growth per turn of the samples; none with fewer than two or a context that does not grow', () => {
-  expect(ctxGrowth([100_000, 106_000, 112_000])).toBe(6000)
-  expect(ctxGrowth([100_000])).toBeUndefined()
-  expect(ctxGrowth(undefined)).toBeUndefined()
-  expect(ctxGrowth([100_000, 100_000])).toBeUndefined()
-  expect(ctxGrowth([120_000, 100_000])).toBeUndefined()
 })
 
 test('parseCtx: the context a data file keeps, or none when any number is missing or wrong', () => {

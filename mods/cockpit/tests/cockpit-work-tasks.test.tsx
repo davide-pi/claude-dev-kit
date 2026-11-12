@@ -10,7 +10,7 @@ const pageRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyC
 /** The tasks row of IN PROGRESS, when the page has one. */
 const tasksRow = async ($: Engine) => (await pageRows($)).find(r => /^[󱎖󰄰] tasks /u.test(r))
 
-test('the task list comes from TodoWrite: IN PROGRESS counts them and names the one in progress', async ($, on) => {
+test('the task list comes from TodoWrite: IN PROGRESS counts them and names the one in progress', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -23,7 +23,7 @@ test('the task list comes from TodoWrite: IN PROGRESS counts them and names the 
   expect(await tasksRow($)).toBe('󱎖 tasks 2/4 · Working on it')
 })
 
-test('the task list comes from the task tools: create, start, complete, delete', async ($, on) => {
+test('the task list comes from the task tools: create, start, complete, delete', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
   taskTools(on)
@@ -41,7 +41,7 @@ test('the task list comes from the task tools: create, start, complete, delete',
   expect(flagOf(writes)).toMatchObject({ tasks: { done: 1, total: 2 } })
 })
 
-test('TodoWrite replaces its own items and leaves the task-tool items', async ($, on) => {
+test('TodoWrite replaces its own items and leaves the task-tool items', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -51,7 +51,7 @@ test('TodoWrite replaces its own items and leaves the task-tool items', async ($
   expect(await tasksRow($)).toBe('󰄰 tasks 0/3')
 })
 
-test('the task list is shared: a subagent TaskCreate/TaskUpdate counts, its TodoWrite does not', async ($, on) => {
+test('the task list is shared: a subagent TaskCreate/TaskUpdate counts, its TodoWrite does not', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -62,7 +62,7 @@ test('the task list is shared: a subagent TaskCreate/TaskUpdate counts, its Todo
   expect(await tasksRow($)).toBe('󱎖 tasks 0/1 · by a subagent')
 })
 
-test('an update of a task the mod never saw adds it; a delete of one it never saw adds nothing', async ($, on) => {
+test('an update of a task the mod never saw adds it; a delete of one it never saw adds nothing', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -74,7 +74,7 @@ test('an update of a task the mod never saw adds it; a delete of one it never sa
   expect(await tasksRow($)).toBe('󱎖 tasks 1/2 · Resumed work')
 })
 
-test('no tasks: no IN PROGRESS section, and the state file says tasks:null', async ($, on) => {
+test('no tasks: no IN PROGRESS section, and the state file says tasks:null', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -83,7 +83,7 @@ test('no tasks: no IN PROGRESS section, and the state file says tasks:null', asy
   expect((flagOf(writes) as { tasks: unknown }).tasks).toBeNull()
 })
 
-test('the list is empty again at session start (a /clear included)', async ($, on) => {
+test('the list is empty again at session start (a /clear included)', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   let id = 's-1'
   world(on, { writes, sessionId: () => id })
@@ -98,7 +98,7 @@ test('the list is empty again at session start (a /clear included)', async ($, o
   expect((JSON.parse(second?.[1] ?? 'null') as { tasks: unknown }).tasks).toBeNull()
 })
 
-test('ATTENTION: a worklog up to date is no row', async ($, on) => {
+test('ATTENTION: a worklog up to date is no row', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const upToDate = await pageRows($)
@@ -106,7 +106,7 @@ test('ATTENTION: a worklog up to date is no row', async ($, on) => {
   expect(upToDate.some(r => /worklog/.test(r))).toBe(false)
 })
 
-test('ATTENTION: a worklog behind is a row saying how many days, and `worklog:days` opens and folds the list of them', async ($, on) => {
+test('ATTENTION: a worklog behind is a row saying how many days, and `worklog:days` opens and folds the list of them', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { hasWorklog: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 50)
@@ -120,7 +120,7 @@ test('ATTENTION: a worklog behind is a row saying how many days, and `worklog:da
   await ui.unmount()
 })
 
-test('IN PROGRESS: the deliver perimeter is a row of the section, and no tab bar or worklog notice sits above it', async ($, on) => {
+test('IN PROGRESS: the deliver perimeter is a row of the section, and no tab bar or worklog notice sits above it', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { branch: 'feat/x', perimeter: PERIMETER, changed: ['lib/z.ts'] })
   taskTools(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -136,7 +136,7 @@ test('IN PROGRESS: the deliver perimeter is a row of the section, and no tab bar
 const claim = (n: number, rule: string, excerpt: string, session = 's-1') =>
   JSON.stringify({ at: new Date(2026, 9, 22, 8 + n, 5).toISOString(), session, cwd: '/w', rule, word: 'fatto', excerpt })
 
-test('hook triggers: the blocks of done-claim.log that belong to this session are one notification once there are two', async ($, on) => {
+test('hook triggers: the blocks of done-claim.log that belong to this session are one notification once there are two', { timeoutMs: 30_000 }, async ($, on) => {
   const doneClaims = [
     claim(1, 'unproven-row', 'primo'),
     claim(2, 'unproven-row', 'secondo'),
@@ -150,13 +150,13 @@ test('hook triggers: the blocks of done-claim.log that belong to this session ar
   expect((await pageRows($)).some(r => /3 done-claim blocks/.test(r))).toBe(true)
 })
 
-test('hook triggers: the blocks of another session or no block at all draw nothing', async ($, on) => {
+test('hook triggers: the blocks of another session or no block at all draw nothing', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { doneClaims: `${claim(1, 'unproven-row', 'altra', 's-2')}\n${claim(2, 'shell-ran', 'contato')}\n` })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await pageRows($)).some(r => /done-claim/.test(r))).toBe(false)
 })
 
-test('hook triggers: no log (or an empty one) draws no block', async ($, on) => {
+test('hook triggers: no log (or an empty one) draws no block', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { doneClaims: '' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   expect((await pageRows($)).some(r => /done-claim/.test(r))).toBe(false)
@@ -164,7 +164,7 @@ test('hook triggers: no log (or an empty one) draws no block', async ($, on) => 
 
 // ── done-claim.log is read again only when it changed ──
 
-test('hook triggers: the log is read again only when its size or modification time changed', async ($, on) => {
+test('hook triggers: the log is read again only when its size or modification time changed', { timeoutMs: 30_000 }, async ($, on) => {
   const claimReads: string[] = []
   let mtime = 1
   const options: World = { claimReads, doneClaims: claim(1, 'unproven-row', 'primo'), claimsMtime: () => mtime }

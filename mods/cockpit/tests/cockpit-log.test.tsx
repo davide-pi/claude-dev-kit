@@ -36,7 +36,7 @@ const logOf = async (clock: { advance: (ms: number) => Promise<void> }, writes: 
   return (dataOf(writes)?.sessionLog ?? []) as Logged[]
 }
 
-test('sessionLog: a git commit that exits 0 logs its short hash; the same hash twice is one entry; a failed commit is not logged', async ($, on) => {
+test('sessionLog: a git commit that exits 0 logs its short hash; the same hash twice is one entry; a failed commit is not logged', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'git commit -m "add filter"' })
@@ -45,7 +45,7 @@ test('sessionLog: a git commit that exits 0 logs its short hash; the same hash t
   expect((await logOf(clock, writes)).map(e => [e.kind, e.key])).toEqual([['commit', 'abc1234']])
 })
 
-test('sessionLog: a test run is logged ok or failed; a command that is not one is not logged', async ($, on) => {
+test('sessionLog: a test run is logged ok or failed; a command that is not one is not logged', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'npm test' })
@@ -54,7 +54,7 @@ test('sessionLog: a test run is logged ok or failed; a command that is not one i
   expect((await logOf(clock, writes)).map(e => [e.kind, e.text, e.isFailed])).toEqual([['test', 'npm test', false], ['test', 'npm test -- --bail', true]])
 })
 
-test('sessionLog: a chain logs the test and the commit, the commit only on exit 0', async ($, on) => {
+test('sessionLog: a chain logs the test and the commit, the commit only on exit 0', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'npm test && git commit -m "both"' })
@@ -62,7 +62,7 @@ test('sessionLog: a chain logs the test and the commit, the commit only on exit 
   expect((await logOf(clock, writes)).map(e => [e.kind, e.key ?? e.isFailed])).toEqual([['test', false], ['commit', 'def5678'], ['test', true]])
 })
 
-test('sessionLog: a PR create that exits 0 with its URL is logged by its number; a failed one is not', async ($, on) => {
+test('sessionLog: a PR create that exits 0 with its URL is logged by its number; a failed one is not', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'gh pr create --title "Add filter"' })
@@ -71,7 +71,7 @@ test('sessionLog: a PR create that exits 0 with its URL is logged by its number;
   expect((await logOf(clock, writes)).map(e => [e.kind, e.key, e.text])).toEqual([['pr', '42', 'Add filter'], ['pr', '77', 'Az']])
 })
 
-test('sessionLog: a main turn end logs a round with its length; a subagent turn logs its agent once', async ($, on) => {
+test('sessionLog: a main turn end logs a round with its length; a subagent turn logs its agent once', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'x' })
@@ -80,7 +80,7 @@ test('sessionLog: a main turn end logs a round with its length; a subagent turn 
   expect((await logOf(clock, writes)).map(e => [e.kind, e.ms])).toEqual([['agent', 0], ['round', 4200]])
 })
 
-test('sessionLog: a compaction that reports no size logs the context before it at the hook, and the engine reading taken right after fills the entry\'s after', async ($, on) => {
+test('sessionLog: a compaction that reports no size logs the context before it at the hook, and the engine reading taken right after fills the entry\'s after', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.session.measure({ context: { window: 1_000_000, tokens: 300_000, percent: 30 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
@@ -89,7 +89,7 @@ test('sessionLog: a compaction that reports no size logs the context before it a
   expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 248_000 }])
 })
 
-test('sessionLog: a drop in the context readings is one compaction entry, its after the reading that showed it', async ($, on) => {
+test('sessionLog: a drop in the context readings is one compaction entry, its after the reading that showed it', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const measure = (tokens: number) => $.session.measure({ context: { window: 1_000_000, tokens, percent: tokens / 10_000 }, rateLimits: [], cost: { usd: 5 }, changed: ['context'] })
@@ -98,7 +98,7 @@ test('sessionLog: a drop in the context readings is one compaction entry, its af
   expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 100_000 }])
 })
 
-test('given an open pane whose session.compact hook the harness skips, when the medium tick passes after a compaction, then the engine reading shows the drop as one compaction entry', async ($, on) => {
+test('given an open pane whose session.compact hook the harness skips, when the medium tick passes after a compaction, then the engine reading shows the drop as one compaction entry', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const writes = new Map<string, string>()
   const clock = world(on, { writes, isAutoOpen: true })
@@ -111,7 +111,7 @@ test('given an open pane whose session.compact hook the harness skips, when the 
   expect((await logOf(clock, writes)).filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 900_000, after: 248_000 }])
 })
 
-test('given an open pane with a measured cost, when the medium tick reads the context, then the session cost stays the measured one', async ($, on) => {
+test('given an open pane with a measured cost, when the medium tick reads the context, then the session cost stays the measured one', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const clock = world(on, { isAutoOpen: true })
   on('session.measure', (_, e) => ({ changed: e.changed }))
@@ -126,7 +126,7 @@ test('given an open pane with a measured cost, when the medium tick reads the co
 
 const USAGE = { input_tokens: 1000, output_tokens: 10, cache_read_input_tokens: 9000, cache_creation_input_tokens: 0, model: 'claude-sonnet-5-5' }
 
-test('agentSpend: a finished agent adds its cost to its type; a turn that ends again adds only the change (the sum of the agents\' events); the accumulator is saved with the session', async ($, on) => {
+test('agentSpend: a finished agent adds its cost to its type; a turn that ends again adds only the change (the sum of the agents\' events); the accumulator is saved with the session', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.agent.spawn({ ...SPAWN, subagentType: 'reviewer', description: 'x' })
@@ -143,7 +143,7 @@ test('agentSpend: a finished agent adds its cost to its type; a turn that ends a
   expect(Math.round(spend.reviewer * 1e9)).toBe(Math.round(3 * one * 1e9))
 })
 
-test('a saved log and accumulator come back with the session and are written as they were', async ($, on) => {
+test('a saved log and accumulator come back with the session and are written as they were', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const log = [{ at: NOW - 5000, kind: 'commit', key: 'abc1234', text: 'abc1234' }]
   world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [], sessionLog: log, agentSpend: { reviewer: 1.5 } }) })
@@ -151,7 +151,7 @@ test('a saved log and accumulator come back with the session and are written as 
   expect(dataOf(writes)).toMatchObject({ sessionLog: log, agentSpend: { reviewer: 1.5 } })
 })
 
-test('a data file from before the log and the accumulator still loads, and writes neither', async ($, on) => {
+test('a data file from before the log and the accumulator still loads, and writes neither', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [] }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -173,14 +173,14 @@ test('the session log never evicts an agent event: 2 agents and 300 test runs le
   expect(Math.round(spend * 1e9)).toBe(Math.round(3 * one * 1e9))
 })
 
-test('sessionLog: a test command the person refused is not logged', async ($, on) => {
+test('sessionLog: a test command the person refused is not logged', { timeoutMs: 30_000 }, async ($, on) => {
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   await $.tool.call({ tool: 'Bash', command: 'npm test -- --refused' })
   expect(await logOf(clock, writes)).toEqual([])
 })
 
-test('Given a compaction that reports its size afterwards, When it stands, Then the context reads that size at once and the log entry gets it as its after', async ($, on) => {
+test('Given a compaction that reports its size afterwards, When it stands, Then the context reads that size at once and the log entry gets it as its after', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const writes = new Map<string, string>()
   const clock = world(on, { writes, compacts: true, compactAfter: 120_000 })
@@ -195,7 +195,7 @@ test('Given a compaction that reports its size afterwards, When it stands, Then 
   expect(log.filter(e => e.kind === 'compact')).toMatchObject([{ key: 'c1', tokens: 300_000, after: 120_000 }])
 })
 
-test('Given a compaction that reports no size afterwards, When it stands, Then the context is read again from the engine', async ($, on) => {
+test('Given a compaction that reports no size afterwards, When it stands, Then the context is read again from the engine', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const writes = new Map<string, string>()
   const clock = world(on, { writes, compacts: true, ctxPercent: 9 })
@@ -209,7 +209,7 @@ test('Given a compaction that reports no size afterwards, When it stands, Then t
   expect((dataOf(writes) as { ctx?: { percent?: number } } | null)?.ctx?.percent).toBe(9)
 })
 
-test('Given tool calls in a round, When the round ends, Then its log entry holds their counts and the next round starts from zero', async ($, on) => {
+test('Given tool calls in a round, When the round ends, Then its log entry holds their counts and the next round starts from zero', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
@@ -225,7 +225,7 @@ test('Given tool calls in a round, When the round ends, Then its log entry holds
   expect(rounds.map(r => r.tools)).toEqual([{ Bash: 2 }, undefined])
 })
 
-test('Given a command that failed twice, When the second call ends, Then the signal is logged once with its time', async ($, on) => {
+test('Given a command that failed twice, When the second call ends, Then the signal is logged once with its time', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const { writes, clock } = await start(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })

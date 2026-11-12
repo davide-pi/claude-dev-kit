@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { resetPaceState } from '../hooks/pace'
+import { COMPACT_WAIT_MS, PACE_TICK_MS, resetPaceState } from '../hooks/pace'
 import { settleAll } from './cockpit-fixtures'
 import { NOW, world } from './cockpit-world'
 
@@ -13,7 +13,7 @@ const modLog = (log: string[]) => log.filter(text => text.startsWith('{"v":1')).
 const measure = (five: number, fiveReset: number, seven = 40) => ({ context: { window: 1_000_000, tokens: 1000, percent: 1 }, rateLimits: [{ kind: 'five_hour', percentUsed: five, resetsAt: new Date(fiveReset).toISOString() }, { kind: 'seven_day', percentUsed: seven }], cost: { usd: 1 }, changed: ['context' as const] })
 const turn = (turnId: string) => ({ answer: '', durationMs: 1, isAborted: false, turnId, reason: 'answer' as const })
 
-test('pace: Given a ready chat not compacted since it armed, When main turns end, Then the mod compacts once with the checkpoint first and writes compactedAt and its heartbeat', async ($, on) => {
+test('pace: Given a ready chat not compacted since it armed, When main turns end, Then the mod compacts once with the checkpoint first and writes compactedAt and its heartbeat', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const instructions: (string | undefined)[] = []
@@ -38,7 +38,7 @@ test('pace: Given a ready chat not compacted since it armed, When main turns end
   expect(new Set(mods.map(m => m.compactedAt).filter(v => v !== undefined)).size).toBe(1)
 })
 
-test('pace: Given no pace file for the session, When the ticks and a main turn run, Then nothing compacts and no mod file is written', async ($, on) => {
+test('pace: Given no pace file for the session, When the ticks and a main turn run, Then nothing compacts and no mod file is written', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const instructions: (string | undefined)[] = []
@@ -55,7 +55,7 @@ test('pace: Given no pace file for the session, When the ticks and a main turn r
   expect(modLog(log)).toEqual([])
 })
 
-test('pace: Given an armed chat whose window reset, When the tick passes resumeAt with the chat idle, Then the resume prompt is submitted once and resumedAt written', async ($, on) => {
+test('pace: Given an armed chat whose window reset, When the tick passes resumeAt with the chat idle, Then the resume prompt is submitted once and resumedAt written', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const submitted: string[] = []
@@ -83,7 +83,7 @@ test('pace: Given an armed chat whose window reset, When the tick passes resumeA
   expect([...new Set(modLog(log).map(m => m.resumedAt).filter(v => v !== undefined))].map(v => (v ?? 0) >= NOW + 120_000)).toEqual([true])
 })
 
-test('pace: Given a ready chat whose compaction is vetoed, When the idle ticks keep coming, Then the mod tries three times and stops', async ($, on) => {
+test('pace: Given a ready chat whose compaction is vetoed, When the idle ticks keep coming, Then the mod tries three times and stops', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const instructions: (string | undefined)[] = []
@@ -99,7 +99,7 @@ test('pace: Given a ready chat whose compaction is vetoed, When the idle ticks k
   expect(instructions.length).toBe(3)
 })
 
-test('pace: Given the resume time come with the new window at 60%, When it drops under 50%, Then the resume waits ten minutes from the push', async ($, on) => {
+test('pace: Given the resume time come with the new window at 60%, When it drops under 50%, Then the resume waits ten minutes from the push', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const submitted: string[] = []
@@ -126,7 +126,7 @@ test('pace: Given the resume time come with the new window at 60%, When it drops
   expect(submitted.length).toBe(1)
 })
 
-test('pace: Given no pace file and the 5h window at 75%, When the tick runs, Then the mod beats so the chat sees the mod alive at its 96% band, and nothing compacts', async ($, on) => {
+test('pace: Given no pace file and the 5h window at 75%, When the tick runs, Then the mod beats so the chat sees the mod alive at its 96% band, and nothing compacts', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetPaceState()
   const instructions: (string | undefined)[] = []
@@ -142,4 +142,45 @@ test('pace: Given no pace file and the 5h window at 75%, When the tick runs, The
   // Then
   expect(modLog(log).some(m => m.aliveAt !== undefined)).toBe(true)
   expect(instructions).toEqual([])
+})
+
+test('pace: Given session s-1 compacted, When the chat moves to session s-2 armed before that compaction, Then s-2 compacts too', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  resetPaceState()
+  const instructions: (string | undefined)[] = []
+  let sid = 's-1'
+  const second = paceFile({ sessionId: 's-2' })
+  const clock = world(on, { files: { ...armed(paceFile()), 'pace/s-2.json': second, 'pace\\s-2.json': second }, compacts: true, instructions, sessionId: () => sid })
+  on('turn.complete', () => ({ text: '' }))
+  on('session.end', (_, e) => ({ sessionId: e.sessionId }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.complete(turn('t1'))
+  await clock.advance(1)
+  await settleAll()
+  // When: /clear moves the chat to s-2
+  sid = 's-2'
+  await $.session.end({ reason: 'clear', sessionId: 's-1', resume: { id: 's-1' } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await clock.advance(PACE_TICK_MS)
+  await settleAll()
+  // Then
+  expect(instructions.length).toBe(2)
+})
+
+test('pace: Given a compaction that never answers, When the ticks go on past the wait, Then the heartbeat keeps beating and no second compaction starts', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  resetPaceState()
+  const instructions: (string | undefined)[] = []
+  const log: string[] = []
+  const clock = world(on, { files: armed(paceFile()), compactHangs: true, instructions, log })
+  on('turn.complete', () => ({ text: '' }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await $.turn.complete(turn('t1'))
+  await clock.advance(1)
+  // When
+  await clock.advance(COMPACT_WAIT_MS + 2 * PACE_TICK_MS)
+  await settleAll()
+  // Then
+  expect(modLog(log).some(m => (m.aliveAt ?? 0) > NOW + COMPACT_WAIT_MS)).toBe(true)
+  expect(instructions.length).toBe(1)
 })

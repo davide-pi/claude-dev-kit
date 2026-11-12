@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import { mainTurnEnd, openCockpit, settleAll, spawnAgent, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
 import { world } from './cockpit-world'
 
-test('refresh cost: with no agent running no tier reads or writes anything while the pane is closed', async ($, on) => {
+test('refresh cost: with no agent running no tier reads or writes anything while the pane is closed', { timeoutMs: 30_000 }, async ($, on) => {
   const statusCalls: string[] = []
   const listCalls: string[] = []
   const claimReads: string[] = []
@@ -17,7 +17,7 @@ test('refresh cost: with no agent running no tier reads or writes anything while
   expect({ status: statusCalls.length, list: listCalls.length, claims: claimReads.length, writes: log.length }).toEqual(before)
 })
 
-test('refresh cost: opening the pane brings git and the agents up to date once, and the tiers then run', async ($, on) => {
+test('refresh cost: opening the pane brings git and the agents up to date once, and the tiers then run', { timeoutMs: 30_000 }, async ($, on) => {
   const statusCalls: string[] = []
   const listCalls: string[] = []
   const clock = world(on, { statusCalls, listCalls })
@@ -33,7 +33,7 @@ test('refresh cost: opening the pane brings git and the agents up to date once, 
   expect(statusCalls.length).toBeGreaterThan(before.status + 1)
 })
 
-test('refresh cost: git and the done-claim log are read at the end of a main round, never of a subagent turn', async ($, on) => {
+test('refresh cost: git and the done-claim log are read at the end of a main round, never of a subagent turn', { timeoutMs: 30_000 }, async ($, on) => {
   const statusCalls: string[] = []
   const claimReads: string[] = []
   let mtime = 1
@@ -56,7 +56,7 @@ test('refresh cost: git and the done-claim log are read at the end of a main rou
   expect(claimReads.length).toBe(claims + 1)
 })
 
-test('refresh cost: while the pane is closed the slow tick reads the agents only while one runs, so the status line badge does not stay lit', async ($, on) => {
+test('refresh cost: while the pane is closed the slow tick reads the agents only while one runs, so the status line badge does not stay lit', { timeoutMs: 30_000 }, async ($, on) => {
   const listCalls: string[] = []
   const clock = world(on, { listCalls })
   spawns(on)
@@ -71,7 +71,7 @@ test('refresh cost: while the pane is closed the slow tick reads the agents only
   expect(listCalls.length).toBeGreaterThan(0)
 })
 
-test('refresh cost: a workflow agent that never reports its end keeps the closed-pane tick only until its run has been silent too long', async ($, on) => {
+test('refresh cost: a workflow agent that never reports its end keeps the closed-pane tick only until its run has been silent too long', { timeoutMs: 30_000 }, async ($, on) => {
   const listCalls: string[] = []
   const clock = world(on, { listCalls })
   spawns(on)

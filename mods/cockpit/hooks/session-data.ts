@@ -4,7 +4,7 @@ import type { EngineInterface } from 'claude-code'
 import type { CockpitHistoryEntry, CockpitLogEntry, CockpitPr, CockpitSnapshot } from '../types'
 import { historyTokens, parseHistory, withHistoryAgents } from './agents'
 import { parseAgentSpend } from './andamento'
-import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
+import { ROUNDS_KEEP, parseCounts, parseCtx } from './context'
 import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
@@ -33,7 +33,7 @@ let writeScheduledAt: number | undefined
 
 /**
  * What survives a resume: the session data file `<configDir>/.cache/cockpit-data-<sessionId>.json` holds the agent history, the
- * chat's pull requests, the context samples, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
+ * chat's pull requests, the context rounds, the files the chat edited, the last measured context and when the chat began; the statusline's pruning keeps it while the session's transcript
  * exists. `history` is the one the file is written with (the session's end adds its running agents).
  */
 export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistoryEntry[] = s.history ?? []) => {
@@ -43,7 +43,6 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
   return {
     history,
     prs: s.prs ?? [],
-    ...(s.ctxSamples !== undefined && { ctxSamples: s.ctxSamples }),
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(s.edited !== undefined && { edited: s.edited }),
     ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
@@ -136,7 +135,6 @@ type Saved = {
   prs?: CockpitPr[]
   mainTokens?: number
   agentTokens?: number
-  ctxSamples?: number[]
   ctxRounds?: number[]
   edited?: string[]
   sessionLog?: CockpitLogEntry[]
@@ -155,7 +153,7 @@ type Saved = {
 /**
  * What an earlier run of session `id` left: in its state file the tokens of the main loop and of the agents that left the list (a file from before
  * that count: the history's sum); in its session data file the agent history, the chat's pull requests, the context
- * samples and when the chat began. A state file from before the data file still holds the history and the pull requests: a field the data file does not
+ * rounds and when the chat began. A state file from before the data file still holds the history and the pull requests: a field the data file does not
  * have is read from there, once (the next write moves it).
  */
 async function savedState($: EngineInterface, id: string): Promise<Saved> {
@@ -173,7 +171,6 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       prs: prs.length > 0 ? prs : undefined,
       mainTokens: count(state?.mainTokens),
       agentTokens: count(state?.agentTokens) ?? historyTokens(history),
-      ctxSamples: parseCounts(data?.ctxSamples, CTX_SAMPLES_KEEP),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       edited: parseEdited(data?.edited),
       sessionLog: withHistoryAgents(parseLog(data?.sessionLog), history),
@@ -212,7 +209,6 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   mainStepTokens: undefined,
   agentTokens: undefined,
   claudeState: undefined,
-  ctxSamples: undefined,
   ctxRounds: undefined,
   edited: undefined,
   sessionLog: undefined,
@@ -251,7 +247,7 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 

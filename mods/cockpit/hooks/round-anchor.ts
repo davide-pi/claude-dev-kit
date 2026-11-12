@@ -14,10 +14,13 @@ const placed = new Set<string>()
 // The first refused scroll hides every link for the session: the surface cannot reach a placed row.
 let isDenied = false
 
-/** Places the marker of round `n` in the chat; its request id, or none when no surface draws it. */
+/** How long the prompt waits on a marker: past it the round goes without a link, the prompt never waits on the chat surface. */
+export const PLACE_WAIT_MS = 2_000
+
+/** Places the marker of round `n` in the chat; its request id, or none when no surface draws it or it does not answer within PLACE_WAIT_MS. */
 export async function placeMarker($: EngineInterface, n: number): Promise<string | undefined> {
-  const result = await $.ui.place({ id: markerId(n) })
-  if (!result.isPlaced) return undefined
+  const result = await Promise.race([$.ui.place({ id: markerId(n) }), new Promise<undefined>(resolve => $.clock.after(PLACE_WAIT_MS, () => resolve(undefined)))])
+  if (result === undefined || !result.isPlaced) return undefined
   placed.add(result.requestId)
   return result.requestId
 }

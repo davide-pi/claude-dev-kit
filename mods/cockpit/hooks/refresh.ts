@@ -12,7 +12,7 @@ import { INITIAL } from './state'
 import { CENT } from './shared'
 import { configDir, patch } from './store'
 import { lastRoundFlowUsd, withRoundUsd } from './timeline'
-import { autoOpenOf, costTargetOf, langOf, setLang } from './strings'
+import { autoOpenOf, langOf, setLang } from './strings'
 import { parseDoneClaims } from './work'
 import { agentRunId, endRun, recordAgentLog, expireRun, finishWorkflowAgent, logRunChange, silenceRun } from './workflow'
 
@@ -21,16 +21,15 @@ const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
 /**
  * Reads `<config dir>/cockpit.json`: sets the language of the pane's texts (a missing or unreadable file is English), tells whether
- * the pane opens at session start (`autoOpen`, true unless `false`) and returns the $/prompt target (`costTarget`) for the caller's
- * own patch: it writes nothing, so a drawing can call it.
+ * the pane opens at session start (`autoOpen`, true unless `false`): it writes nothing, so a drawing can call it.
  */
-export async function refreshConfig($: EngineInterface): Promise<{ autoOpen: boolean; costTarget?: number }> {
+export async function refreshConfig($: EngineInterface): Promise<{ autoOpen: boolean }> {
   try {
     const dir = await configDir($)
     const text = dir ? await $.fs.read(`${dir}/cockpit.json`) : undefined
     const raw = typeof text === 'string' ? text : ''
     setLang(langOf(raw))
-    return { autoOpen: autoOpenOf(raw), costTarget: costTargetOf(raw) }
+    return { autoOpen: autoOpenOf(raw) }
   } catch {
     setLang('en')
     return { autoOpen: true }

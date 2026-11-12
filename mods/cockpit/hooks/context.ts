@@ -1,34 +1,6 @@
 import type { CockpitSnapshot, CockpitTask } from '../types'
 import { COLORS, ctxColor, isCount, isRecord, truncEnd } from './shared'
 
-// ── Context growth and the autocompact forecast ──
-
-export const CTX_SAMPLES_KEEP = 6
-
-/** `samples` with this main turn's context size added: the last six kept, and a context that shrank (a compaction) starts over. */
-export function recordCtxSample(samples: readonly number[] | undefined, tokens: number): number[] {
-  const last = samples?.at(-1)
-  const kept = last !== undefined && tokens < last ? [] : (samples ?? [])
-  return [...kept, tokens].slice(-CTX_SAMPLES_KEEP)
-}
-
-/**
- * Requests left before auto-compaction at `threshold`: the room left from the last reading over the average growth per
- * turn. Absent with fewer than two readings, no threshold (auto-compaction off) or a context that does not grow.
- */
-export function autocompactForecast(samples: readonly number[] | undefined, threshold: number | undefined): number | undefined {
-  const growth = ctxGrowth(samples)
-  const last = samples?.at(-1)
-  return growth === undefined || last === undefined || threshold === undefined ? undefined : Math.max(0, Math.ceil((threshold - last) / growth))
-}
-
-/** The average growth of the context per main turn over `samples`; absent with fewer than two readings or a context that does not grow. */
-export function ctxGrowth(samples: readonly number[] | undefined): number | undefined {
-  if (samples === undefined || samples.length < 2) return undefined
-  const growth = ((samples.at(-1) ?? 0) - (samples[0] ?? 0)) / (samples.length - 1)
-  return growth > 0 ? growth : undefined
-}
-
 // ── Rounds and the CTX bar's scale ──
 
 /** Main turns the context rounds keep. */
@@ -108,7 +80,7 @@ export function compactInstructions(s: Pick<CockpitSnapshot, 'tasks' | 'perimete
   return out
 }
 
-/** The numbers of a saved list (the context samples, the rounds): the last `keep` finite non-negative ones; none for anything that is not a list. */
+/** The numbers of a saved list (the context rounds): the last `keep` finite non-negative ones; none for anything that is not a list. */
 export function parseCounts(value: unknown, keep: number): number[] | undefined {
   if (!Array.isArray(value)) return undefined
   const counts = value.filter((v): v is number => typeof v === 'number' && Number.isFinite(v) && v >= 0).slice(-keep)
