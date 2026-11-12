@@ -148,6 +148,17 @@ test('given a lane set-up that fails for one lane, when the loop stalls, then th
   assert.match(out.stall.reason, /--lane-remove deliver-lane\/l1/);
 });
 
+test('given a lane whose implementer edited a proven test, when the loop stops, then the resume keeps the accept-or-revert choice and names the lanes', async () => {
+  // Given
+  const changed = () => impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }) });
+  // When
+  const { out } = await run(lanesArgs(two), [], [changed(), changed()]);
+  // Then
+  assert.equal(out.stall.why, 'tests-changed');
+  assert.match(out.resume, /--force/);
+  assert.match(out.resume, /C:\/lanes\/l1/);
+});
+
 test('given a lane that stalls, when the loop stops, then the reason names every worktree and branch left behind and the resume does not say the edits are kept in the tree', async () => {
   // Given
   const stuck = () => impl({ gate: gate('red: timeout', { test: 'slow test' }) });

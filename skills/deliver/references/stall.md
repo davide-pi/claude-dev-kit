@@ -47,6 +47,7 @@ round restarts its count, `retry` does not.
 | `still-open` | a finding is still open after its fix: `accept`, `guidance` with a direction, or `retry` |
 | `reappeared` | a finding closed earlier is open again (also under a new id, a shifted line or a reworded title): same as `still-open` |
 | `no-verdict` | two rounds in a row without a reviewer verdict on the same id (one round is not a stall: only that id is asked again, and listed under `gaps`): same as `still-open` |
+| `tests-changed` | the gate said `red: tests changed`: the implementer edited a test file proven red. Stops at once, no continuation: ask the user to accept the edit (run the gate once with `--force`) or revert it, then relaunch WITHOUT `resumeFromRunId` |
 | `incomplete` | the implementer did not finish after 4 continuations (`stall.reason` names what is left and the files already changed): relaunch WITHOUT `resumeFromRunId`, with a smaller scope (split the plan into phases) or a higher `implementerEffort` |
 | `gap` | no reviewer read `stall.files`, or a specialist returned nothing: relaunch with the same resolutions (that reviewer runs again), or name the gap in the verdict |
 | `widen` | a P1/P2 outside the perimeter in a file the change touched or causes: on the user's yes write the widened list (old and new entries) with `perimeter.ps1 -Files` and resume with `{ round, widen: [the new entries] }` (it applies from that round on); else `accept` it as out of scope |
@@ -55,7 +56,7 @@ round restarts its count, `retry` does not.
 
 **Lane stalls** (`lanes: true`): any stall raised while the lanes run (a lane's `gate-red`, `incomplete`, `question`, ...) keeps its own `why`, but its reason ends with the worktree path and branch of every lane, and `resume` says to ask the user: nothing is merged (no partial merge of the green lanes). Remove the lanes with `node ~/.claude/scripts/gate.mjs --root <repoRoot> --lane-remove deliver-lane/<name> ...` (force: unmerged work in them is lost), then relaunch WITHOUT `resumeFromRunId`. A merge that went through but could not remove a worktree or branch is no stall: the verdict has a `gaps` line naming them.
 
-**Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `incomplete`), from round 0 or a fix round: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
+**Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `tests-changed`, `incomplete`), from round 0 or a fix round: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
 
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
 cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report or a non-empty `remaining` is continued (twice at most), never reviewed partial. A red implementer verify at round 0 is no stall: it

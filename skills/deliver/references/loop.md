@@ -93,7 +93,7 @@ one JSON object; `gate` says:
 | `green` | tests passed, nothing outside the perimeter: go on to the matrix |
 | `skipped: tree unchanged` | the last green stands for this tree, command and scope check: same as `green` |
 | `red`, `red: timeout` | the tests failed, or stalled twice: relaunch with the gate line as the brief (`references/stall.md`) |
-| `red: tests changed` | a test file proven red was edited after the proof: rerun with `--force`, which drops the stored proof |
+| `red: tests changed` | a test file proven red was edited after the proof: in a loop run, `STALL tests-changed` at once; the user accepts it (rerun with `--force`, which drops the stored proof) or reverts it |
 | `red: scope` | `outside` lists the files: `references/loop-extras.md` |
 | exit 2 | not checked (bad arguments, no repository, no active perimeter): never read it as clean. Write the perimeter file and run again |
 | exit 3, `running` | output still growing: run it again with `--root <repoRoot> --wait` |

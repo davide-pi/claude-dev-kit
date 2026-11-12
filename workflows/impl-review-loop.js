@@ -849,7 +849,7 @@ const runBlocks = async (items, total, lane) => {
     const optsFor = label => ({ label, phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION })
     const implOpts = optsFor(base)
     const tasksText = planTasks.length
-      ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}`
+      ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}${total > 1 ? '\nDo only the tasks of this block: a task of a later block is not yours, even a quick one.' : ''}`
       : ''
     const budgetLine = `Budget: about ${stepBudget(block.length)} turns. At that point stop widening: run the gate and report what is left.`
     const buildImpl = (extra, tail = gateLines(root, !!lane)) => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree)].filter(Boolean).join('\n\n')
@@ -884,6 +884,16 @@ const runBlocks = async (items, total, lane) => {
     const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0, gated, bid)
     if (asked0.stall) return asked0.stall
     let impl = asked0.report
+    // An edited proven test is the owner's call (accept it with --force or revert it): no continuation or fix can settle it.
+    const testsChanged = report => {
+      const tg = readGate(report?.gate)
+      if (tg?.gate !== 'red: tests changed') return null
+      takeReport(report, !!lane)
+      return stall(0, { why: 'tests-changed', findings: [], reason: `block ${bid}: a test file proven red was edited after the proof${tg.test ? ` (${tg.test})` : ''}: ${tg.line}` },
+        `Ask the user: accept the edited test (run the gate once with --force, which drops the stored proof) or revert the edit. ${RESUME_FRESH}`)
+    }
+    const changedStall = testsChanged(impl)
+    if (changedStall) return changedStall
     // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
     let continuations = 0
     // The implementer stops itself at 30 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
@@ -899,6 +909,8 @@ const runBlocks = async (items, total, lane) => {
       const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
       if (nextStall) return nextStall
       impl = next ?? impl
+      const nextChanged = testsChanged(next)
+      if (nextChanged) return nextChanged
     }
     if (!impl || impl.remaining.length) {
       // A report lists its own files; only a missing one needs the probe.
@@ -1054,7 +1066,7 @@ const runLanes = async groups => {
     return {
       ...stalled,
       stall: { ...stalled.stall, reason: [stalled.stall.reason, note].filter(Boolean).join('; ') },
-      resume: stalled.stall.why === 'question' ? `${stalled.resume} ${note}` : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
+      resume: ['question', 'tests-changed'].includes(stalled.stall.why) ?`${stalled.resume} ${note}` : `Ask the user for a direction. ${note}. Relaunch WITHOUT resumeFromRunId, with the direction in brief or without lanes: nothing was merged, and each lane's work stays in its worktree until it is removed.`,
     }
   }
   blockLog.sort((a, b) => a.id - b.id)
