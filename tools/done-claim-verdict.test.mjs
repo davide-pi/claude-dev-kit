@@ -475,3 +475,32 @@ test('given output with cursor and erase escape codes, when the hook compares a 
   // When / Then
   assert.ok(proven('`Tests 485 passed (485)`', out));
 });
+
+test('given a state cell prefixed by a status symbol, when the hook judges the row, then the symbol is ignored and the word decides', () => {
+  // Given
+  const table = (state) => `Fatto.\n\n| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n| unit | \`node --test\` | # fail 0 | ${state} |`;
+
+  // When / Then
+  assert.match(stop(edited(table('✓ fatto'), 'ok')).reason, /"# fail 0"/);
+  assert.equal(stop(edited(table('✓ fatto'), '# tests 5\n# fail 0')).reason, '');
+  assert.match(stop(edited(table('✗ fallito'), 'ok')).reason, /"# fail 0"/);
+  assert.equal(stop(edited(table('? non verificato: serve staging'), 'ok')).reason, '');
+});
+
+test('given a bare or variant status symbol, when the hook judges the row, then it reads as the claim it shows', () => {
+  // Given
+  const table = (state) => `Fatto.\n\n| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n| unit | \`node --test\` | # fail 0 | ${state} |`;
+
+  // When / Then
+  for (const state of ['✓', '✗', '✔ fatto', '✅ fatto', '✓\uFE0F fatto']) assert.match(stop(edited(table(state), 'ok')).reason, /"# fail 0"/, state);
+  assert.equal(stop(edited(table('✓'), '# fail 0')).reason, '');
+});
+
+test('given a reply with a diff preview block, when it claims done without proof, then the block does not exempt the claim', () => {
+  // Given
+  const message = 'Fatto: filtro corretto.\n\n```diff\n- vecchio\n+ nuovo\n```';
+
+  // When / Then
+  assert.notEqual(stop(edited(message, 'ok')).reason, '');
+  assert.equal(stop(edited('Domanda: applico questo?\n\n```diff\n- vecchio\n+ nuovo\n```', 'ok')).reason, '');
+});

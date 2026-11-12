@@ -117,6 +117,8 @@ const EXIT_ZERO = /^exit(?: code)? 0$/;
 // is no claim before a qualifier ("it works for X", "works with Y"); `passes` claims only at a clause end or before "now" ("passes the token to X" is prose), `verified` not after "be".
 const CLAIM = /(?<![\w-])(?:(?<=^|[.!?:;\n][ \t]*|\*\*|[-*•][ \t]+)(fatt[oaie])(?![\w-])(?!(?:\*\*)?\s+(?:da|che|per|con)\b)|(done|fixed|passano(?!\s+(?:nel\w*|nell'|nei|negli|all[aeo']?|ai|agli|alle|al\s+(?!\d|prim)|per\s+(?:il|la|lo|i|le|gli|l')|attraverso|dal\w*|dai|dagli)\b)|passing|passes(?=\s*(?:[.!:,;]|$)|\s+now\b)|works(?!\s+(?:for|with|on|in|when|if|as(?!\s+(?:expected|intended|designed)\b)|at|by|from)\b)|(?<!\bbe\s+)verified|(?<!\b(?:va|da|sarà)\s+)verificat[oaie])(?![\w-]))/i;
 const HONEST = /non\s+(?:(?:ancora|ho|è|stato)\s+)*(?:verificat|testat|fatt|eseguit)|not\s+(?:yet\s+)?(?:verified|tested|done|run)|(?:not|n't)\s+(?:\w+\s+){0,2}(?:verified|tested|run)\b|to be (?:verified|tested)|no longer\s+(?:works|passes)|\bun(?:verified|tested)|non verificabile/i;
+/** A before→after ```diff block (the style's change preview): neither a claim nor an exemption. */
+const DIFF_FENCE = /^[ \t]*```diff[^\n]*\n[\s\S]*?^[ \t]*```[ \t]*$/gm;
 const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 /** A `> **Detail**` (chat `it`: `Dettaglio`) block: the quoted lines that follow it are depth for the reader, not output. */
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
@@ -135,7 +137,17 @@ const PROOF_STATE = /^(?:fatto|done|fallito|failed)$/i;
 /** ANSI escape codes dropped, lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
 const normalise = (text) => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** The rows of the verdict table(s) in `message`: `{ level, command, line, state }`, the cells as written. */
+/** A state cell without markup and its leading status symbols; a bare ✓ reads `fatto`, a bare ✗ `fallito`. */
+function stateOf(cell) {
+  const raw = cell.replace(/[*_`]/g, '').trim();
+  const symbols = raw.match(/^[\s✓✔✅✗✘❌?️]+/u)?.[0] ?? '';
+  const word = raw.slice(symbols.length).trim();
+  if (word) return word;
+  if (/[✓✔✅]/u.test(symbols)) return 'fatto';
+  return /[✗✘❌]/u.test(symbols) ? 'fallito' : '';
+}
+
+/** The rows of the verdict table(s) in `message`: `{ level, command, line, state }`, the cells as written (state: `stateOf`). */
 function verdictRows(message) {
   const lines = message.split(/\r?\n/);
   const rows = [];
@@ -145,7 +157,7 @@ function verdictRows(message) {
       // An escaped pipe (`\|`) is cell text, not a separator.
       const cells = lines[j].trim().replace(/^>[ \t]*/, '').replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
       if (cells.length < 4 || cells.every((c) => /^:?-+:?$/.test(c))) continue;
-      rows.push({ level: cells[0], command: cells[1], line: cells[2], state: cells[cells.length - 1].replace(/[*_`]/g, '').trim() });
+      rows.push({ level: cells[0], command: cells[1], line: cells[2], state: stateOf(cells[cells.length - 1]) });
     }
   }
   return rows;
@@ -380,8 +392,9 @@ function readTurn(entries, truncated = false) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  if (FENCE_OR_QUOTE.test(message.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, '').replace(VERDICT_TITLE, '').replace(QUOTED_TABLE_LINE, ''))) return null;
-  const prose = message.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
+  const body = message.replace(DIFF_FENCE, ' ');
+  if (FENCE_OR_QUOTE.test(body.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, '').replace(VERDICT_TITLE, '').replace(QUOTED_TABLE_LINE, ''))) return null;
+  const prose = body.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
   const found = prose.match(CLAIM);
   return found ? found[1] ?? found[2] : null;
 }
