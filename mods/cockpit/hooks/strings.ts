@@ -75,6 +75,8 @@ const EN = {
     trend: 'TREND',
     inProgress: 'IN PROGRESS',
     done: 'LOG',
+    /** The LOG title's toggle: opens every node, or closes them all once none is closed. */
+    toggleAll: { open: 'open all', close: 'close all' },
     nothingToDo: 'nothing to do',
     spend: 'spend',
     context: 'context',
@@ -157,6 +159,7 @@ const IT: Strings = {
     trend: 'ANDAMENTO',
     inProgress: 'IN CORSO',
     done: 'LOG',
+    toggleAll: { open: 'apri tutti', close: 'chiudi tutti' },
     nothingToDo: 'niente da fare',
     spend: 'spesa',
     context: 'contesto',

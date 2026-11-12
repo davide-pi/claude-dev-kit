@@ -295,10 +295,12 @@ export function doneBlocks(k: Kit): Block[] {
   const isDays = days.length > 1
   const seen = new Set<string>()
   const rows: Block[] = []
+  const dayOpen = (date: string) => !isDays || (s.groupsOpen?.[`day:log:${date}`] ?? days[0] === date)
+  const nodeOpen = (g: G, gi: number) => g.events.length > 0 && (s.groupsOpen?.[g.key] ?? gi === 0)
   closed.forEach((g, gi) => {
     const date = localDate(g.at)
     const dayKey = `day:log:${date}`
-    const isDayOpen = !isDays || (s.groupsOpen?.[dayKey] ?? days[0] === date)
+    const isDayOpen = dayOpen(date)
     const first = isDays && !seen.has(date)
     seen.add(date)
     const dayHead: Block[] = first ? [dayRow(k, dayKey, date, isDayOpen, counterSpans(sumCounts(closed.flatMap((x, i) => (localDate(startOf(x)) === date ? [counts[i] ?? []] : []))), tree.widths, tree.isShort))] : []
@@ -306,15 +308,38 @@ export function doneBlocks(k: Kit): Block[] {
       if (first) rows.push(dayHead)
       return
     }
-    const isOpen = g.events.length > 0 && (s.groupsOpen?.[g.key] ?? gi === 0)
+    const isOpen = nodeOpen(g, gi)
     const isNewest = gi === 0 && ui.Client !== undefined && isFading(g.at, s.now)
     rows.push([...dayHead, nodeBlock(k, tree, g, isOpen, isNewest)])
   })
 
   const counters = counterSpans(total, tree.widths, tree.isShort)
   const label = S.page.done
-  const rule = '─'.repeat(Math.max(0, width - textCells(label) - 2 - spanWidth(counters)))
-  const title = line(ui, [sp(label, COLORS.title, true), sp(' '), sp(rule, COLORS.rule), sp(' '), ...counters])
+  // every day and every node that holds something; the toggle closes them once none is closed
+  const keys = [...(isDays ? days.map(d => `day:log:${d}`) : []), ...closed.flatMap(g => (g.events.length > 0 ? [g.key] : []))]
+  const isAllOpen = days.every(dayOpen) && closed.every((g, gi) => g.events.length === 0 || nodeOpen(g, gi))
+  const toggleLabel = isAllOpen ? S.page.toggleAll.close : S.page.toggleAll.open
+  // no node holds anything: nothing to open, so no toggle (day rows alone do not count)
+  const hasToggle = closed.some(g => g.events.length > 0)
+  const toggle = hasToggle ? [sp(toggleLabel, COLORS.blue), sp(' ')] : []
+  // a narrow pane drops the counters before it cuts the toggle
+  const fixed = textCells(label) + 2 + spanWidth(toggle)
+  const shown = fixed + spanWidth(counters) <= width ? counters : []
+  const rule = '─'.repeat(Math.max(0, width - fixed - spanWidth(shown)))
+  const head = [sp(label, COLORS.title, true), sp(' '), sp(rule, COLORS.rule), sp(' ')]
+  const { Box, Button, Text } = ui
+  const title: Block =
+    !hasToggle
+      ? [line(ui, [...head, ...shown])]
+      : [
+          <Box>
+            <Text wrap="truncate">{spanNodes(ui, head)}</Text>
+            <Button key="done:all" plain onPress={() => actions.setGroupsOpen(keys, !isAllOpen)}>
+              <Text wrap="truncate">{spanNodes(ui, toggle)}</Text>
+            </Button>
+            <Text wrap="truncate">{spanNodes(ui, shown)}</Text>
+          </Box>,
+        ]
   return [[title, collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
 }
 
