@@ -3,26 +3,24 @@ import { agentLog } from './agents'
 import { isFading } from './anim'
 import { groupDone } from './done-groups'
 import type { DoneEvent, DoneGroup } from './done-groups'
-import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, modelFamily, padCells, shortModel, spanWidth, textCells } from './shared'
+import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWidth, textCells } from './shared'
 import type { Span } from './shared'
 import { loggedSignal, signalSeverity } from './signals'
 import { t } from './strings'
 import { agentIcon, pairRow, visibleAgents } from './view-agents'
+import type { CockpitAgent } from '../types'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
 import type { Block, Kit } from './view-kit'
+import { ALL_KEY, LABEL_W, detailRows, filesText, isAllShown, isExpandable, isMainEntry, linkAnchor, modelSpans, roundHeader, summarySpans } from './view-log-round'
 import { activeRun, agentRunId, roundOf } from './workflow'
 
 /** LOG shows this many nodes (an open one with its whole subtree); the rest sits behind its toggle. */
 const DONE_ROWS = 5
-/** A round's tools in the summary: the top three. */
-const TOP_TOOLS = 3
-/** The cells of a cost share (`100%`), of a cost, and of a node's label. */
-const SHARE_W = 4
+/** The cells of the three figure slots at a row's end: a length (`01m00s`), a cost, a cost share (`100%`). */
+const DURATION_W = 6
 const COST_W = 7
-const LABEL_W = 10
-/** The cells of a node row left of its model counters: arrow, time, label, duration, cost, share. */
-const LEFT_W = 40
+const SHARE_W = 4
 
 type G = DoneGroup<DoneEntry>
 
@@ -30,10 +28,15 @@ type G = DoneGroup<DoneEntry>
 type DoneEntry = DoneEvent & {
   icon: Span
   text: string
+  /** An agent's id: the commit, test or PR it made names it in `agent`. */
+  key?: string
+  /** The flow agent that made a commit, test or PR: the row sits under it. */
+  agent?: string
   /** An agent's spawn label, which names its loop round under a flow. */
   desc?: string
-  /** Dim, after the text. */
-  detail?: string
+  effort?: string | number
+  /** An agent that still runs: its icon spins. */
+  isRunning?: boolean
   /** The time the row shows, when it is not `at`. */
   start?: number
   usd?: number
@@ -41,25 +44,39 @@ type DoneEntry = DoneEvent & {
   model?: string
 }
 
-/** `son5.5·high`: the short model and the effort, whichever there is. */
-const modelEffort = (model: string | undefined, effort: string | number | undefined): string =>
-  [shortModel(model).replace(' ', ''), effort === undefined ? '' : String(effort)].filter(Boolean).join('·')
-
 /** The row of an agent entry. */
 function agentEntry(e: CockpitLogEntry): DoneEntry {
-  const detail = modelEffort(e.model, e.effort)
   const icon = agentIcon({ id: e.key ?? '', type: '', startedAt: 0, tokens: 0, status: 'done', isFailed: e.isFailed === true })
   return {
     at: e.at,
     kind: 'agent',
     icon,
+    ...(e.key !== undefined && { key: e.key }),
     text: e.text ?? '?',
     ...(e.desc !== undefined && { desc: e.desc }),
     ...(e.runId !== undefined && { runId: e.runId }),
     ...(e.model !== undefined && { model: e.model }),
-    ...(detail !== '' && { detail }),
+    ...(e.effort !== undefined && { effort: e.effort }),
     ...(e.ms !== undefined && { ms: e.ms, start: e.at - e.ms }),
     ...(e.usd !== undefined && { usd: e.usd }),
+  }
+}
+
+/** The row of an agent that still runs, listed under its flow: its icon and the time it has run. */
+function liveAgentEntry(a: CockpitAgent, runId: string, now: number): DoneEntry {
+  return {
+    at: now,
+    kind: 'agent',
+    icon: agentIcon(a),
+    isRunning: true,
+    key: a.id,
+    text: a.type,
+    runId,
+    ...(a.description !== undefined && a.description !== '' && { desc: a.description }),
+    ...(a.model !== undefined && { model: a.model }),
+    ...(a.effort !== undefined && { effort: a.effort }),
+    start: a.startedAt,
+    ms: Math.max(0, now - a.startedAt),
   }
 }
 
@@ -78,53 +95,23 @@ function logEntry(e: CockpitLogEntry): DoneEntry | undefined {
       return { at: e.at, kind: 'signal', icon: sp(signalIcon(sig), SEVERITY_COLORS[e.severity ?? signalSeverity(sig)]), text: signalText(sig).what }
     }
     case 'commit':
-      return { at: e.at, kind: 'commit', icon: sp('●', COLORS.green), text: E.commit(e.text ?? e.key ?? '') }
+      return { at: e.at, kind: 'commit', icon: sp('󰜘', COLORS.green), text: E.commit(e.key ?? e.text ?? '', e.text ?? ''), ...(e.runId !== undefined && { runId: e.runId }), ...(e.agent !== undefined && { agent: e.agent }) }
     case 'test':
-      return { at: e.at, kind: 'test', icon: e.isFailed ? sp('󰅖', COLORS.red) : sp('󰄬', COLORS.green), text: E.test(e.text ?? '', e.isFailed === true) }
+      return { at: e.at, kind: 'test', icon: e.isFailed ? sp('󰤒', COLORS.red) : sp('󰙨', COLORS.green), text: E.test(e.text ?? '', e.isFailed === true), ...(e.runId !== undefined && { runId: e.runId }), ...(e.agent !== undefined && { agent: e.agent }) }
     case 'compact':
       return { at: e.at, kind: 'compact', icon: sp('◇', COLORS.blue), text: E.compact(e.tokens === undefined ? '' : abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
     case 'pr':
-      return { at: e.at, kind: 'pr', icon: sp('◆', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? '') }
+      return { at: e.at, kind: 'pr', icon: sp('󰓂', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? ''), ...(e.runId !== undefined && { runId: e.runId }), ...(e.agent !== undefined && { agent: e.agent }) }
   }
-}
-
-/** What a group holds by kind (`2 agents · 1 commit`), then its tool calls (`34 tools: Read 20 · Bash 9 · Edit 5`, the top three); empty when it holds nothing. */
-function doneSummary(g: G): string {
-  const S = t().page.events.summary
-  const kinds = (['agent', 'signal', 'commit', 'test', 'pr', 'compact'] as const).flatMap(kind => {
-    const n = g.events.filter(e => e.kind === kind).length
-    return n > 0 ? [S[kind](n)] : []
-  })
-  const tools = Object.entries(g.tools ?? {}).sort((a, b) => b[1] - a[1])
-  const total = tools.reduce((n, [, count]) => n + count, 0)
-  const top = tools.slice(0, TOP_TOOLS).map(([name, count]) => `${name} ${count}`).join(' · ')
-  return [...kinds, ...(total > 0 ? [S.tools(total, top)] : [])].join(' · ')
-}
-
-// ── Model counters ──
-
-const FAMILIES = ['haiku', 'sonnet', 'opus', 'fable'] as const
-const LONG_NAMES = ['hai', 'son', 'op', 'fab']
-const SHORT_NAMES = ['h', 's', 'o', 'f']
-type Counts = number[]
-
-/** The agents of `events` by model family; an agent with no model or a model of no family is not counted. */
-const countModels = (events: readonly DoneEntry[]): Counts => FAMILIES.map(f => events.filter(e => e.kind === 'agent' && modelFamily(e.model) === f).length)
-const sumCounts = (list: readonly Counts[]): Counts => FAMILIES.map((_, i) => list.reduce((n, c) => n + (c[i] ?? 0), 0))
-
-/** `hai x0 son x2 op x10 fab x3` (short: `h x0 s x2 o x10 f x3`), each number as wide as the widest of its column. */
-function counterSpans(counts: Counts, widths: readonly number[], isShort: boolean): Span[] {
-  const names = isShort ? SHORT_NAMES : LONG_NAMES
-  return [dim(names.map((name, i) => `${name} x${String(counts[i] ?? 0).padStart(widths[i] ?? 1)}`).join(' '))]
 }
 
 // ── The tree ──
 
-/** The figures of a node or an agent, dim: its length, its cost, its share of the session's cost; a cell with no data is left out. */
+/** The figures of a node or an agent, dim, in three fixed slots (length, cost, share of the session's cost) so every row's columns line up; a missing value is blank; none at all, no figures. */
 function figures(usd: number | undefined, ms: number | undefined, sessionUsd: number | undefined): Span[] {
+  if (usd === undefined && ms === undefined) return []
   const share = usd !== undefined && sessionUsd !== undefined && sessionUsd > 0 ? `${Math.round((usd / sessionUsd) * 100)}%` : ''
-  const cells = [...(ms !== undefined ? [duration(ms)] : usd !== undefined ? [' '.repeat(6)] : []), ...(usd === undefined ? [] : [costCell(usd, COST_W)]), ...(share === '' ? [] : [share.padStart(SHARE_W)])]
-  return cells.flatMap((c, i) => [...(i > 0 ? [sp(' ')] : []), dim(c)])
+  return [dim(ms === undefined ? ' '.repeat(DURATION_W) : duration(ms)), sp(' '), dim(usd === undefined ? ' '.repeat(COST_W) : costCell(usd, COST_W)), sp(' '), dim(share.padStart(SHARE_W))]
 }
 
 /** When a node began: its end less its length; the open round and a merged run only know their `at`. */
@@ -135,20 +122,23 @@ type Tree = {
   live: G[]
   /** The closed nodes (LOG), newest first. */
   closed: G[]
-  widths: number[]
-  isShort: boolean
   /** What a live run's node shows after its name. */
   detail: Map<string, { text: string; isSilent: boolean }>
 }
 
 function buildTree(k: Kit): Tree {
-  const { s, width } = k
+  const { s } = k
   const log = s.sessionLog ?? []
   // An agent that just finished is logged as it ends; one still listed and not yet in the log shows once all the same.
   const logged = new Set(log.filter(e => e.kind === 'agent').map(e => e.key))
   const pending = visibleAgents(s).filter(a => a.status === 'done' && !logged.has(a.id)).flatMap(a => agentLog(a, agentRunId(s.workflowRun, a)) ?? [])
   const all = [...log, ...pending]
-  const entries = all.flatMap(e => logEntry(e) ?? [])
+  // a flow agent still running is an event of its flow, so a flow whose agents all run can open
+  const running = visibleAgents(s).filter(a => a.status === 'running').flatMap(a => {
+    const runId = agentRunId(s.workflowRun, a)
+    return runId === undefined ? [] : [liveAgentEntry(a, runId, s.now)]
+  })
+  const entries = [...all.filter(e => isAllShown(s) || isMainEntry(e)).flatMap(e => logEntry(e) ?? []), ...running]
 
   // the run not logged yet (open, or closed by silence) is a node of IN CORSO
   const run = s.workflowRun
@@ -170,10 +160,7 @@ function buildTree(k: Kit): Tree {
   const groups = groupDone([...entries, ...launches], flowLog, openFlow)
   const live = groups.filter(g => g.isCurrent === true || g.flow?.isLive === true)
   const closed = groups.filter(g => !live.includes(g))
-  const counts = groups.map(g => countModels(g.events))
-  const widths = FAMILIES.map((_, i) => Math.max(1, ...[...counts, sumCounts(counts)].map(c => String(c[i] ?? 0).length)))
-  const fullWidth = LONG_NAMES.reduce((n, name, i) => n + name.length + 2 + (widths[i] ?? 1), 0) + 3
-  return { live, closed, widths, isShort: width - 2 < LEFT_W + 1 + fullWidth, detail }
+  return { live, closed, detail }
 }
 
 /** The label of a node, cut to its cell so the figures keep their columns; the detail a live run adds goes after the figures. */
@@ -188,45 +175,89 @@ function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
   return { label: sp(g.isCurrent ? E.current : g.chatOnly !== undefined ? E.chatOnly(g.chatOnly) : E.round(g.round ?? 0)), after: [] }
 }
 
-/** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, length, cost and share of the session's cost, the model counters at the row's end. */
-function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[] } {
+/** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, and at the row's end the figures (length, cost, share of the session's cost). */
+function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; second?: Span[] } {
   const { width, s } = k
   const { label, after } = nodeLabel(g, tree)
-  const left = [...(g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]), { ...label, t: padCells(label.t, LABEL_W) }, ...(figures(g.usd, g.ms, s.cost.usd).length > 0 ? [sp(' '), ...figures(g.usd, g.ms, s.cost.usd)] : []), ...after]
+  const time = g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]
+  const fig = figures(g.usd, g.ms, s.cost.usd)
   // a node with nothing under it opens nothing: a dash, not an arrow
-  return { arrow: sp(g.events.length === 0 ? '- ' : isOpen ? '▾ ' : '▸ '), rest: pairRow(left, counterSpans(countModels(g.events), tree.widths, tree.isShort), width - 2) }
+  const arrow = sp(!isExpandable(g, s) ? '- ' : isOpen ? '▾ ' : '▸ ')
+  // a round has two lines: its time, number and prompt, then its context and model with the figures at the end
+  const round = roundHeader(g, s, { time, label, figures: fig, width })
+  if (round !== undefined) return { arrow, rest: round.first, ...(round.second.length > 0 && { second: round.second }) }
+  const left = [...time, { ...label, t: label.t.padEnd(LABEL_W) }, ...(after.length > 0 ? [sp(' '), ...after] : [])]
+  return { arrow, rest: pairRow(left, fig, width - 2) }
 }
 
 /** An event row at `prefix`'s depth: time, icon, text, an agent also its model and figures at the end. */
 function eventRow(k: Kit, e: DoneEntry, prefix: string): Block {
-  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(e.detail === undefined ? [] : [sp(' '), dim(e.detail)])]
-  return line(k.ui, [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))])
+  const { ui } = k
+  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : [])]
+  const spans = [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))]
+  // a running agent's icon spins: it leaves the line for an animated cell between the time and the rest
+  const at = 3
+  if (e.isRunning === true && ui.Client !== undefined && e.key !== undefined && spans[at]?.t === e.icon.t && spans[at + 1]?.t === ' ') {
+    const { Box } = ui
+    return (
+      <Box>
+        {line(ui, spans.slice(0, at))}
+        {animCell(ui, `anim:log:${e.key}`, 'spin', spans.slice(at, at + 2))}
+        {line(ui, spans.slice(at + 2))}
+      </Box>
+    )
+  }
+  return line(ui, spans)
 }
 
 /** The rows under an open node: a round's summary and events; a run's agents, by the round their label names where it names one. */
-function nodeChildren(k: Kit, tree: Tree, g: G): Block[] {
+function nodeChildren(k: Kit, g: G): Block[] {
   const { ui, width } = k
-  const summary = g.flow === undefined ? doneSummary(g) : ''
-  const head: Block[] = summary === '' ? [] : [[line(ui, [sp('├ ', COLORS.rule), dim(summary)])]]
+  const summary = g.flow === undefined ? summarySpans(g, k.s) : []
+  const files = g.flow === undefined ? filesText(g, k.s) : undefined
+  const head: Block[] = [
+    ...(summary.length === 0 ? [] : [[line(ui, [sp('├ ', COLORS.rule), ...summary])]]),
+    ...(files === undefined ? [] : [[line(ui, [sp('├ ', COLORS.rule), dim(files)])]]),
+    ...detailRows(g, k.s).map(row => [line(ui, [sp('├ ', COLORS.rule), ...row])]),
+  ]
+  // a commit, test or PR a flow agent made sits under that agent's row
+  const agentIds = new Set(g.flow === undefined ? [] : g.events.flatMap(e => (e.kind === 'agent' && e.key !== undefined ? [e.key] : [])))
   const byRound = new Map<number, DoneEntry[]>()
   const flat: DoneEntry[] = []
-  for (const e of g.events) {
+  for (const e of g.events.filter(x => x.agent === undefined || !agentIds.has(x.agent))) {
     const n = g.flow !== undefined && e.kind === 'agent' ? roundOf(e.desc ?? e.text) : undefined
     if (n === undefined) flat.push(e)
     else byRound.set(n, [...(byRound.get(n) ?? []), e])
   }
-  const items: ((isLast: boolean) => Block[])[] = [
+  // a flow lists its agents in the order they started
+  if (g.flow !== undefined) flat.sort((a, b) => (a.start ?? a.at) - (b.start ?? b.at))
+  /** The row of `e` at `base`'s depth, then what it made. */
+  const rowWithKids = (e: DoneEntry, base: string, isLast: boolean): Block[] => {
+    const kids = g.events.filter(x => x.agent !== undefined && x.agent === e.key).sort((a, b) => a.at - b.at)
+    return [eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`), ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
+  }
+  const highest = Math.max(...byRound.keys())
+  const items:((isLast: boolean) => Block[])[] = [
     ...[...byRound.entries()].sort((a, b) => b[0] - a[0]).map(([n, evs]) => (isLast: boolean): Block[] => {
       const costs = evs.flatMap(e => (e.usd === undefined ? [] : [e.usd]))
       const starts = evs.map(e => e.start ?? e.at)
       const ms = Math.max(...evs.map(e => e.at)) - Math.min(...starts)
-      const left = [sp(`R${n}`), ...(figures(costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : undefined, ms, k.s.cost.usd).length > 0 ? [sp(' ')] : []), ...figures(costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : undefined, ms, k.s.cost.usd)]
+      const fig = figures(costs.length > 0 ? costs.reduce((a, b) => a + b, 0) : undefined, ms, k.s.cost.usd)
+      const key = `${g.key}:R${n}`
+      // in a live run the highest round is the one at work and opens alone; a finished run opens them all, until a person gives a state
+      const isOpen = k.s.groupsOpen?.[key] ?? (g.flow?.isLive !== true || n === highest)
+      const { Button, Text } = ui
+      const ordered = [...evs].sort((a, b) => (a.start ?? a.at) - (b.start ?? b.at))
       return [
-        line(ui, [sp(isLast ? '└ ' : '├ ', COLORS.rule), ...pairRow(left, counterSpans(countModels(evs), tree.widths, tree.isShort), width - 2)]),
-        ...evs.map((e, i) => eventRow(k, e, `${isLast ? '  ' : '│ '}${i === evs.length - 1 ? '└ ' : '├ '}`)),
+        [
+          <Button key={key} plain onPress={() => k.actions.setGroupOpen(key, !isOpen)}>
+            <Text wrap="truncate">{spanNodes(ui, [sp(isLast ? '└ ' : '├ ', COLORS.rule), ...pairRow([sp(isOpen ? '▾ ' : '▸ '), sp(`R${n}`)], fig, width - 2)])}</Text>
+          </Button>,
+        ],
+        ...(isOpen ? ordered.flatMap((e, i) => rowWithKids(e, isLast ? '  ' : '│ ', i === ordered.length - 1)) : []),
       ]
     }),
-    ...flat.map(e => (isLast: boolean): Block[] => [eventRow(k, e, isLast ? '└ ' : '├ ')]),
+    ...flat.map(e => (isLast: boolean): Block[] => rowWithKids(e, '', isLast)),
   ]
   return [...head, ...items.flatMap((item, i) => item(i === items.length - 1))]
 }
@@ -235,10 +266,10 @@ function nodeChildren(k: Kit, tree: Tree, g: G): Block[] {
 function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean): Block {
   const { ui, actions } = k
   const { Box, Button, Text } = ui
-  const { arrow, rest } = nodeHeader(k, tree, g, isOpen)
+  const { arrow, rest, second } = nodeHeader(k, tree, g, isOpen)
   const toggle = () => actions.setGroupOpen(g.key, !isOpen)
   let header: Block
-  if (g.events.length === 0) header = [line(ui, [arrow, ...rest])]
+  if (!isExpandable(g, k.s)) header = [line(ui, [arrow, ...rest])]
   else if (isNewest) {
     header = [
       <Box>
@@ -255,7 +286,24 @@ function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean)
       </Button>,
     ]
   }
-  return [header, ...(isOpen ? nodeChildren(k, tree, g) : [])]
+  const anchor = linkAnchor(g, k.s)
+  // the link sits in front of the second line, a button of its own (2 cells, where the line's indent is): it scrolls the chat to the round's marker
+  const link: Block =
+    second === undefined
+      ? []
+      : anchor === undefined
+        ? [[line(ui, second)]]
+        : [
+            [
+              <Box>
+                <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
+                  <Text wrap="truncate">{spanNodes(ui, [sp('\u{F0337}', COLORS.blue), sp(' ')])}</Text>
+                </Button>
+                <Text wrap="truncate">{spanNodes(ui, second)}</Text>
+              </Box>,
+            ],
+          ]
+  return [header, ...link, ...(isOpen ? nodeChildren(k, g) : [])]
 }
 
 /** A day's row: a toggle (arrow, date) with `right` at the row's end. */
@@ -272,38 +320,35 @@ export function dayRow(k: Kit, key: string, date: string, isOpen: boolean, right
 /** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it. */
 export function liveBlocks(k: Kit): Block[] {
   const tree = buildTree(k)
-  return tree.live.map(g => nodeBlock(k, tree, g, g.events.length > 0 && (k.s.groupsOpen?.[g.key] ?? true), false))
+  return tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false))
 }
 
 /**
  * The session log: the closed nodes (main rounds and workflow runs) newest first, each a toggle row (start time, label, length, cost, its share of the
- * session's cost, model counters) over its children in a tree; the newest is open until a person gives it a state, which stays. Under a day row
+ * session's cost) over its children in a tree; the newest is open until a person gives it a state, which stays. Under a day row
  * (`2026-11-11`, a toggle, newest day open) when the nodes span two or more local days. The nodes count, not their lines: the newest five, the rest
  * behind the toggle.
  */
 export function doneBlocks(k: Kit): Block[] {
   const { ui, s, width, actions } = k
-  const S = t()
   const tree = buildTree(k)
   const { closed } = tree
   if (closed.length === 0) return []
 
-  const counts = closed.map(g => countModels(g.events))
-  const total = sumCounts(counts)
   // a node's day is its end's, the time the nodes are sorted by, so each day's nodes stay together
   const days = [...new Set(closed.map(g => localDate(g.at)))]
   const isDays = days.length > 1
   const seen = new Set<string>()
   const rows: Block[] = []
   const dayOpen = (date: string) => !isDays || (s.groupsOpen?.[`day:log:${date}`] ?? days[0] === date)
-  const nodeOpen = (g: G, gi: number) => g.events.length > 0 && (s.groupsOpen?.[g.key] ?? gi === 0)
+  const nodeOpen = (g: G, gi: number) => isExpandable(g, s) && (s.groupsOpen?.[g.key] ?? gi === 0)
   closed.forEach((g, gi) => {
     const date = localDate(g.at)
     const dayKey = `day:log:${date}`
     const isDayOpen = dayOpen(date)
     const first = isDays && !seen.has(date)
     seen.add(date)
-    const dayHead: Block[] = first ? [dayRow(k, dayKey, date, isDayOpen, counterSpans(sumCounts(closed.flatMap((x, i) => (localDate(startOf(x)) === date ? [counts[i] ?? []] : []))), tree.widths, tree.isShort))] : []
+    const dayHead: Block[] = first ? [dayRow(k, dayKey, date, isDayOpen, [])] : []
     if (!isDayOpen) {
       if (first) rows.push(dayHead)
       return
@@ -313,34 +358,31 @@ export function doneBlocks(k: Kit): Block[] {
     rows.push([...dayHead, nodeBlock(k, tree, g, isOpen, isNewest)])
   })
 
-  const counters = counterSpans(total, tree.widths, tree.isShort)
-  const label = S.page.done
+  const label = t().page.done
   // every day and every node that holds something; the toggle closes them once none is closed
-  const keys = [...(isDays ? days.map(d => `day:log:${d}`) : []), ...closed.flatMap(g => (g.events.length > 0 ? [g.key] : []))]
-  const isAllOpen = days.every(dayOpen) && closed.every((g, gi) => g.events.length === 0 || nodeOpen(g, gi))
-  const toggleLabel = isAllOpen ? S.page.toggleAll.close : S.page.toggleAll.open
-  // no node holds anything: nothing to open, so no toggle (day rows alone do not count)
-  const hasToggle = closed.some(g => g.events.length > 0)
-  const toggle = hasToggle ? [sp(toggleLabel, COLORS.blue), sp(' ')] : []
-  // a narrow pane drops the counters before it cuts the toggle
-  const fixed = textCells(label) + 2 + spanWidth(toggle)
-  const shown = fixed + spanWidth(counters) <= width ? counters : []
-  const rule = '─'.repeat(Math.max(0, width - fixed - spanWidth(shown)))
+  const keys = [...(isDays ? days.map(d => `day:log:${d}`) : []), ...closed.flatMap(g => (isExpandable(g, s) ? [g.key] : []))]
+  const isAllOpen = days.every(dayOpen) && closed.every((g, gi) => !isExpandable(g, s) || nodeOpen(g, gi))
+  // no node holds anything: nothing to open, so no open/close toggle (day rows alone do not count)
+  const hasToggle = closed.some(g => isExpandable(g, s))
+  const isAll = isAllShown(s)
+  const toggle = hasToggle ? [sp(isAllOpen ? '\u{F0AA7}' : '\u{F0AB5}', COLORS.blue), sp(' ')] : []
+  const filter = [sp(isAll ? '\u{F0233}' : '\u{F14F0}', COLORS.blue), sp(' ')]
+  const fixed = textCells(label) + 2 + spanWidth(toggle) + spanWidth(filter)
+  const rule = '─'.repeat(Math.max(0, width - fixed))
   const head = [sp(label, COLORS.title, true), sp(' '), sp(rule, COLORS.rule), sp(' ')]
   const { Box, Button, Text } = ui
-  const title: Block =
-    !hasToggle
-      ? [line(ui, [...head, ...shown])]
-      : [
-          <Box>
-            <Text wrap="truncate">{spanNodes(ui, head)}</Text>
-            <Button key="done:all" plain onPress={() => actions.setGroupsOpen(keys, !isAllOpen)}>
-              <Text wrap="truncate">{spanNodes(ui, toggle)}</Text>
-            </Button>
-            <Text wrap="truncate">{spanNodes(ui, shown)}</Text>
-          </Box>,
-        ]
+  const title: Block = [
+    <Box>
+      <Text wrap="truncate">{spanNodes(ui, head)}</Text>
+      {hasToggle && (
+        <Button key="done:all" plain onPress={() => actions.setGroupsOpen(keys, !isAllOpen)}>
+          <Text wrap="truncate">{spanNodes(ui, toggle)}</Text>
+        </Button>
+      )}
+      <Button key="log:all" plain onPress={() => actions.toggleOpen(ALL_KEY)}>
+        <Text wrap="truncate">{spanNodes(ui, filter)}</Text>
+      </Button>
+    </Box>,
+  ]
   return [[title, collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
 }
-
-

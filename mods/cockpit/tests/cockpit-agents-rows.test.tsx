@@ -1,7 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { spanText, spanWidth, textCells } from '../hooks/shared'
-import { modelCounts, subagentDetails } from '../hooks/view-agents'
+import { subagentDetails } from '../hooks/view-agents'
 import { MIN, SPAWN, entry, mountPane, openCockpit, settleAll, spawnAgent, spawns } from './cockpit-fixtures'
 import { NOW, dataOf, flagOf, rowTexts, world } from './cockpit-world'
 
@@ -197,12 +197,6 @@ test('agents: the tool line (the one running, or the last) wraps to the width, n
   }
   // a short one is left whole
   expect(spanText(subagentDetails({ ...agent, lastTool: 'Read' }, '  ', 30)[1] ?? [])).toBe('  last tool Read')
-})
-
-test('agents: the model counts run cheapest first: hai, son, opu, fab', () => {
-  const agent = (id: string, model: string) => ({ id, type: 't', status: 'running' as const, startedAt: 0, tokens: 0, model })
-  const counts = spanText(modelCounts([agent('a1', 'claude-opus-5-5'), agent('a2', 'claude-haiku-5-5'), agent('a3', 'claude-haiku-5-5')]))
-  expect(counts).toBe('hai ×2 son ×0 opu ×1 fab ×0')
 })
 
 // ── Cost ──

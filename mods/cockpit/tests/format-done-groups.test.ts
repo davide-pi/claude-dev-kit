@@ -72,3 +72,49 @@ test('groupDone: given a round without a cost, when grouped, then the group has 
   expect(merged[0]).toMatchObject({ chatOnly: 2, usd: 0.3 })
   expect(groupDone([], [round(1), round(2)])[0]?.usd).toBeUndefined()
 })
+
+test('groupDone: Given rounds with a prompt, files, waits, fails or tools but no events, When grouped, Then each is its own node and only the bare rounds merge', () => {
+  // Given
+  const log = [
+    round(100, { prompt: 'a' }),
+    round(200, { files: ['a.ts'] }),
+    round(300, { waits: { n: 1, ms: 5 } }),
+    round(400, { fails: { n: 1 } }),
+    round(500, { tools: { Bash: 1 } }),
+    round(600),
+    round(700),
+  ]
+  // When
+  const groups = groupDone([], log)
+  // Then
+  expect(groups.map(g => [g.key, g.chatOnly])).toEqual([['done:700', 2], ['done:500', undefined], ['done:400', undefined], ['done:300', undefined], ['done:200', undefined], ['done:100', undefined]])
+})
+
+test('groupDone: Given round entries with n, When grouped, Then the group round is n, not the position in the log', () => {
+  // Given
+  const log = [round(100, { n: 41 }), round(200, { n: 42 })]
+  // When
+  const groups = groupDone([ev(90), ev(190)], log)
+  // Then
+  expect(groups.map(g => g.round)).toEqual([42, 41])
+})
+
+test('groupDone: Given a commit with the runId of a flow, When grouped, Then it sits under that flow node and not under the main round', () => {
+  // Given
+  const log = [round(200, { n: 3 }), { at: 160, kind: 'flow' as const, key: 'wf_1' }]
+  const events: DoneEvent[] = [{ at: 150, kind: 'commit', runId: 'wf_1' }, { at: 140, kind: 'agent', runId: 'wf_1' }, ev(130)]
+  // When
+  const groups = groupDone(events, log)
+  // Then
+  expect(groups.find(g => g.flow?.runId === 'wf_1')?.events.map(e => e.kind)).toEqual(['commit', 'agent'])
+  expect(groups.find(g => g.round === 3)?.events.map(e => e.at)).toEqual([130])
+})
+
+test('groupDone: Given a live flow whose agents all run and appear as agent events, When grouped, Then the flow node has events', () => {
+  // Given
+  const open: CockpitLogEntry = { at: 500, kind: 'flow', key: 'wf_9' }
+  // When
+  const groups = groupDone([{ at: 490, kind: 'agent', runId: 'wf_9' }], [], open)
+  // Then
+  expect(groups.find(g => g.flow?.isLive)?.events).toHaveLength(1)
+})

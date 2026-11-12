@@ -8,7 +8,7 @@ import { CTX_SAMPLES_KEEP, ROUNDS_KEEP, parseCounts, parseCtx } from './context'
 import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
-import { parseLog, parseToolCounts } from './timeline'
+import { parseFails, parseLog, parseToolCounts, parseWaits } from './timeline'
 import { agentCounts, taskCounts } from './view-agents'
 import { parseEdited, parseSavedPrs } from './work'
 
@@ -48,6 +48,12 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
     ...(s.edited !== undefined && { edited: s.edited }),
     ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
     ...(s.roundTools !== undefined && { roundTools: s.roundTools }),
+    ...(s.roundPrompt !== undefined && { roundPrompt: s.roundPrompt }),
+    ...(s.roundAnchor !== undefined && { roundAnchor: s.roundAnchor }),
+    ...(s.roundFiles !== undefined && { roundFiles: s.roundFiles }),
+    ...(s.roundFails !== undefined && { roundFails: s.roundFails }),
+    ...(s.roundWaits !== undefined && { roundWaits: s.roundWaits }),
+    ...(s.roundSeq !== undefined && { roundSeq: s.roundSeq }),
     ...(s.agentSpend !== undefined && { agentSpend: s.agentSpend }),
     ...(ctx && { ctx }),
     ...(s.startedAt !== undefined && { startedAt: s.startedAt }),
@@ -135,6 +141,12 @@ type Saved = {
   edited?: string[]
   sessionLog?: CockpitLogEntry[]
   roundTools?: Record<string, number>
+  roundPrompt?: string
+  roundAnchor?: string
+  roundFiles?: string[]
+  roundFails?: CockpitSnapshot['roundFails']
+  roundWaits?: CockpitSnapshot['roundWaits']
+  roundSeq?: number
   agentSpend?: Record<string, number>
   ctx?: { tokens: number; window: number; percent: number }
   startedAt?: number
@@ -166,6 +178,12 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       edited: parseEdited(data?.edited),
       sessionLog: withHistoryAgents(parseLog(data?.sessionLog), history),
       roundTools: parseToolCounts(data?.roundTools),
+      roundPrompt: typeof data?.roundPrompt === 'string' && data.roundPrompt !== '' ? data.roundPrompt : undefined,
+      roundAnchor: typeof data?.roundAnchor === 'string' && data.roundAnchor !== '' ? data.roundAnchor : undefined,
+      roundFiles: Array.isArray(data?.roundFiles) && data.roundFiles.every(f => typeof f === 'string') && data.roundFiles.length > 0 ? data.roundFiles : undefined,
+      roundFails: parseFails(data?.roundFails),
+      roundWaits: parseWaits(data?.roundWaits),
+      roundSeq: count(data?.roundSeq),
       agentSpend: parseAgentSpend(data?.agentSpend),
       ctx: parseCtx(data?.ctx),
       startedAt: count(data?.startedAt),
@@ -199,6 +217,12 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   edited: undefined,
   sessionLog: undefined,
   roundTools: undefined,
+  roundPrompt: undefined,
+  roundAnchor: undefined,
+  roundFiles: undefined,
+  roundFails: undefined,
+  roundWaits: undefined,
+  roundSeq: undefined,
   agentSpend: undefined,
   // the window is the next session's own: nothing of this one's reading is left to pass for it
   ctx: {},
@@ -227,7 +251,7 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxSamples: saved.ctxSamples, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 

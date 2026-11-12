@@ -4,6 +4,7 @@ import type { EngineInterface } from 'claude-code'
 import { compactInstructions } from './context'
 import { toggled } from './events'
 import { INITIAL } from './state'
+import { scrollToAnchor } from './round-anchor'
 import { patch } from './store'
 import type { PaneActions } from './view'
 import { activeRun } from './workflow'
@@ -37,6 +38,7 @@ export function paneActions($: EngineInterface): PaneActions {
     toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
     toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
     toggleOpen: key => void patch($, s => ({ ...s, openKeys: toggled(s.openKeys, key) })).catch(() => undefined),
+    scrollTo: anchor => void scrollToAnchor($, anchor).catch(() => undefined),
     setGroupOpen: (key, isOpen) => void patch($, s => ({ ...s, groupsOpen: { ...s.groupsOpen, [key]: isOpen } })).catch(() => undefined),
     setGroupsOpen: (keys, isOpen) => void patch($, s => ({ ...s, groupsOpen: { ...s.groupsOpen, ...Object.fromEntries(keys.map(key => [key, isOpen])) } })).catch(() => undefined),
   }

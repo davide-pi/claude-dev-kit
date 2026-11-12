@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { CockpitLogEntry } from '../types'
 import { roundCost } from '../hooks/insights'
 import { endTurnCost, measuredCost, startedCost, withSettledRound } from '../hooks/refresh'
-import { SESSION_LOG_KEEP, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
+import { SESSION_LOG_KEEP, bashLog, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
 
 test('recordLog: the newest 300 stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -207,4 +207,45 @@ test('round cost: given a measured round whose flow agent ended after it, when t
   // Then
   expect(Math.round(100 * (started.lastUsd ?? 1))).toBe(0)
   expect(out?.find(e => e.kind === 'round')?.usd).toBe(started.lastUsd)
+})
+
+test('bashLog: Given a git commit output with a subject, When logged, Then the commit entry has the hash as key and the subject as text', () => {
+  // Given
+  const out = '[feat/x abc1234] fix the parser\n 1 file changed, 2 insertions(+)'
+  // When
+  const entries = bashLog({ command: 'git commit -m "fix the parser"', out, isOk: true, at: 7 })
+  // Then
+  expect(entries).toEqual([{ at: 7, kind: 'commit', key: 'abc1234', text: 'fix the parser' }])
+})
+
+test('parseLog: Given a round entry with every new field, When it is saved and parsed, Then each field comes back equal and the lists keep at most ten', () => {
+  // Given
+  const round: CockpitLogEntry = {
+    at: 9,
+    kind: 'round',
+    n: 12,
+    prompt: 'fix the parser',
+    files: ['a.ts', 'b.ts'],
+    ctxPct: 42,
+    model: 'claude-opus-5-5',
+    effort: 'high',
+    anchor: 'req-1',
+    waits: { n: 1, ms: 70_000, list: [{ tool: 'Bash', ms: 70_000 }] },
+    fails: { n: 1, list: [{ tool: 'Read', text: 'no such file' }] },
+  }
+  const many = Array.from({ length: 12 }, (_, i) => ({ tool: 'Bash', ms: i }))
+  // When
+  const parsed = parseLog(JSON.parse(JSON.stringify([round, { at: 10, kind: 'round', waits: { n: 12, ms: 5, list: many } }])))
+  // Then
+  expect(parsed?.[0]).toEqual(round)
+  expect(parsed?.[1]?.waits?.list?.length).toBeLessThanOrEqual(10)
+})
+
+test('parseLog: Given a round entry with malformed new fields, When parsed, Then each bad field is dropped and the rest stays', () => {
+  // Given
+  const bad = { at: 9, kind: 'round', ms: 5, prompt: 7, files: 'a.ts', ctxPct: 'high', anchor: 3, waits: { n: 'x' }, fails: [1], agent: 4 }
+  // When
+  const parsed = parseLog([bad, { at: 11, kind: 'commit', key: 'abc', agent: 'a1', runId: 'wf_1' }])
+  // Then
+  expect(parsed).toEqual([{ at: 9, kind: 'round', ms: 5 }, { at: 11, kind: 'commit', key: 'abc', runId: 'wf_1', agent: 'a1' }])
 })

@@ -188,7 +188,7 @@ test('workflow agents: a tick does not end an agent just because the engine does
   await clock.advance(30_000)
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^implementer/)
-  expect(await doneAgents(ui)).toEqual(['󰄬 implementer'])
+  expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰄬 implementer'])
   await ui.unmount()
 })
 
@@ -203,7 +203,7 @@ test('workflow agents: an explicit failed or killed listing ends them', async ($
   const ui = await mountPane($)
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^implementer/)
-  expect(await doneAgents(ui)).toEqual(['󰅖 implementer'])
+  expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰅖 implementer'])
   await ui.unmount()
 })
 
