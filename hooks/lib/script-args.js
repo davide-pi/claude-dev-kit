@@ -1,6 +1,6 @@
 /**
  * Check: the arguments of the kit's own allowed scripts (`perimeter.ps1`, `snapshot.ps1`, `db-ro.ps1`,
- * `node ~/.claude/scripts/gate.mjs` and `node ~/.claude/hooks/scope-guard.js --check`).
+ * `node ~/.claude/scripts/gate.mjs`, `node ~/.claude/scripts/sweep.mjs` and `node ~/.claude/hooks/scope-guard.js --check`).
  *
  * settings.json allows `pwsh -NoProfile -File ~/.claude/scripts/db-ro.ps1 *` (and the perimeter, snapshot, gate and
  * scope-guard calls) by prefix, so whatever follows the prefix is approved without a prompt. The tail is read
@@ -12,8 +12,10 @@
  *   - double-quoted text without `$` or a backtick (both shells expand there);
  *   - unquoted text without any of `$ ( ) @ { } < > \ ; & |`, `%` or a backtick.
  *
- * Anything else asks, as does an unbalanced quote and a typographic quote (PowerShell reads those
- * as quotes, the tokenizer here would not). Plus one rule on `db-ro.ps1`: its `-AcceptWriteGrant`
+ * An unquoted `$ ( ) @ { } \ ; & | %` or backtick, and a `$` or backtick inside double quotes, are
+ * denied with a hint (wrap the value in single quotes): a re-quote fixes them. An unquoted `<` or `>` (a
+ * redirection, which no re-quote fixes), an unbalanced quote, a typographic quote (PowerShell reads those as
+ * quotes, the tokenizer here would not) and a non-ASCII character ask. Plus one rule on `db-ro.ps1`: its `-AcceptWriteGrant`
  * switch waives the read-only proof of a credential that holds write grants, so any argument that
  * starts with `-a` (the only db-ro parameter starting with `a`) asks, quoted or not: the shell strips
  * the quotes before pwsh binds it. A `-amount` inside a longer quoted query is data, not a token start.
@@ -23,7 +25,10 @@
  * `& | < > ^ % $`, a backtick, parentheses or a newline; a `;` is allowed only inside double quotes. Off
  * Windows a backslash or a single quote asks too (sh quoting could hide a `;`), and so does any option that
  * loads code from the command line (`--import`, `--require`, `--loader`, `--eval`, a `data:` URL…): test
- * files from the repository are fine, inline code is not.
+ * files from the repository are fine, inline code is not. The same goes for `dotnet test` MSBuild properties and
+ * targets (`-p:`, `-t:`) and `-e` / `--environment`, and for `--script-shell` / `--node-options` of npm, pnpm and yarn.
+ * A gate.mjs call with `--supervise` or `--run` (the internal supervisor flags) asks. Under Bash a backslash inside
+ * double quotes asks too: it is an escape there that this tokenizer would not follow.
  *
  * Pure text analysis, no I/O.
  *
@@ -34,7 +39,7 @@
 
 const { splitSegments } = require('./shell-parse');
 
-const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
+const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate|sweep)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** The gate runs `--test` / `--unit` through a shell: only a known test runner passes, with no shell operator. */
 const TEST_RUNNER = /^(?:dotnet\s+test|node\s+--test|npx\s+vitest|vitest|npx\s+jest|jest|npm\s+test|npm\s+run\s+test|pnpm\s+test|pnpm\s+run\s+test|yarn\s+test)(?=\s|$)/;
 const TEST_COMMAND_DANGER = /[&|<>^%$`()\r\n]/;
@@ -45,9 +50,16 @@ const CODE_LOADING = /(?:^|\s)--test-adapter-path(?=[\s=]|$)|\b(?:data|https?|fi
 /** Node's own: `-r` and `-e` mean runtime and environment to `dotnet test`. A module path given to a reporter or config is repo code, like the test files. */
 const NODE_CODE_LOADING = /(?:^|\s)(?:--import|--require|-r|--loader|--experimental-loader|-e|--eval|-p|--print|-pe|-ep)(?=[\s=]|$)/;
 
+/** `dotnet test` options that run inline code: MSBuild properties and targets, environment (DOTNET_STARTUP_HOOKS). */
+const DOTNET_CODE_LOADING = /(?:^|\s)(?:(?:-{1,2}|\/)(?:p|property|t|target)(?=[:=\s]|$)|(?:-e|--environment)(?=[:=\s]|$))/i;
+/** The npm family's options that pick the shell or the node flags the script runs with. */
+const PACKAGE_RUNNER_CODE_LOADING = /(?:^|\s)--(?:script-shell|node-options)(?=[\s=]|$)/;
+
 /** True when the gate may run this `--test` / `--unit` value without a prompt. */
 function isPlainTestCommand(value) {
   const command = value.trim();
+  if (/^dotnet\s/.test(command) && DOTNET_CODE_LOADING.test(command)) return false;
+  if (/^(?:npm|pnpm|yarn)\s/.test(command) && PACKAGE_RUNNER_CODE_LOADING.test(command)) return false;
   if (process.platform !== 'win32' && POSIX_QUOTE_DANGER.test(command)) return false;
   if (/^node\s/.test(command) && NODE_CODE_LOADING.test(command)) return false;
   return TEST_RUNNER.test(command) && !TEST_COMMAND_DANGER.test(command) && !CODE_LOADING.test(command)
@@ -64,66 +76,98 @@ const TYPOGRAPHIC_QUOTE = /[‘’‚‛“”„]/;
  * Walks the argument text with quotes honoured. Returns the tokens (split on unquoted whitespace,
  * quotes stripped), or the reason it must ask.
  */
-function tokenize(text) {
-  if (TYPOGRAPHIC_QUOTE.test(text)) return { risk: 'a typographic quote that PowerShell reads as a quote' };
+function tokenize(text, posix) {
+  // Every risk is remembered and the scan goes on, the risky character kept as data: a deny later in the
+  // text wins over an ask, and the tokens still reach the -AcceptWriteGrant and gate checks.
+  let risk = TYPOGRAPHIC_QUOTE.test(text) ? 'a typographic quote that PowerShell reads as a quote' : null;
+  let denyRisk = null;
   const tokens = [];
   let token = null;
   let quote = null;
   for (const c of text) {
     if (quote) {
       if (c === quote) quote = null;
-      else if (quote === '"' && (c === '$' || c === '`')) return { risk: `a ${c === '$' ? '$' : 'backtick'} inside double quotes` };
-      else token += c;
+      else {
+        if (quote === '"' && (c === '$' || c === '`')) denyRisk ??= `a ${c === '$' ? '$' : 'backtick'} inside double quotes`;
+        // An escape in Bash this tokenizer does not follow: what comes after may sit outside the quotes there.
+        else if (quote === '"' && c === '\\' && posix) risk ??= 'a backslash inside double quotes (an escape in Bash)';
+        token += c;
+      }
     } else if (c === '"' || c === "'") {
       quote = c;
       token ??= '';
     } else if (c === ' ' || c === '\t') {
       if (token) { tokens.push(token); token = null; }
+    } else if (c === '<' || c === '>') {
+      // A redirection (`2>&1`, `> out.txt`) is meant as one: a re-quote hint would not fix it, so it asks.
+      risk ??= `an unquoted ${c} (a redirection)`;
+      token = (token ?? '') + c;
     } else if (UNQUOTED_DANGER.test(c)) {
-      return { risk: `an unquoted ${c === '`' ? 'backtick' : c}` };
+      denyRisk ??= `an unquoted ${c === '`' ? 'backtick' : c}`;
+      token = (token ?? '') + c;
     } else if (NON_ASCII_PRINTABLE.test(c)) {
       // PowerShell also splits on Unicode spaces (U+00A0, U+2000-U+200A, ...): this tokenizer does not.
-      return { risk: 'an unquoted character outside printable ASCII' };
+      risk ??= 'an unquoted character outside printable ASCII';
+      token = (token ?? '') + c;
     } else {
       token = (token ?? '') + c;
     }
   }
-  if (quote) return { risk: 'an unbalanced quote' };
+  if (quote) risk ??= 'an unbalanced quote';
   if (token) tokens.push(token);
-  return { tokens };
+  return { tokens, risk, denyRisk };
 }
 
-/** The confirmation reason when an allowed script is called with a risky argument, else null. */
-function checkScriptArgs(command) {
-  if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|gate\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
+const ask = (reason) => ({ decision: 'ask', reason });
+
+/**
+ * `{ decision, reason }` when an allowed script is called with a risky argument, else null. A quoting
+ * risk that a re-quote fixes is a deny with the hint; every other risk asks.
+ */
+function checkScriptArgs(command, tool) {
+  if (!/\.claude[\\/](?:scripts[\\/](?:(?:perimeter|snapshot|db-ro)\.ps1|(?:gate|sweep)\.mjs)|hooks[\\/]scope-guard\.js)/i.test(command)) return null;
+  // Every segment is read: every ask reason is kept, a deny anywhere wins (the ask reasons ride along).
+  const asks = [];
+  let denial = null;
+  const note = (reason) => { if (!asks.includes(reason)) asks.push(reason); };
   for (const segment of splitSegments(command)) {
     const match = SCRIPT.exec(segment.trim());
     if (!match) continue;
-    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? 'gate.mjs' : 'scope-guard.js';
+    const script = match[2] ? `${match[2].toLowerCase()}.ps1` : match[3] ? `${match[3].toLowerCase()}.mjs` : 'scope-guard.js';
     let tail = segment.trim().slice(match[0].length);
     if (match[1]) { // the script path was itself quoted: the next character closes it
-      if (tail[0] !== match[1]) return `The path of ${script} is quoted in a way the check cannot follow. Confirm?`;
-      tail = tail.slice(1);
+      // Still tokenized as it stands: a substitution or a grant switch in the tail must not hide behind this ask.
+      if (tail[0] !== match[1]) note(`The path of ${script} is quoted in a way the check cannot follow. Confirm?`);
+      else tail = tail.slice(1);
     }
-    const { tokens, risk } = tokenize(tail);
+    const { tokens, risk, denyRisk } = tokenize(tail, tool === 'Bash');
+    if (denyRisk) {
+      denial ??= `The arguments of ${script} hold ${denyRisk}: it could run code before the script starts, outside the allowed call. `
+        + 'Wrap the value in single quotes, doubling any single quote inside it.';
+    }
     if (risk) {
-      return `The arguments of ${script} hold ${risk}: it could run code before the script starts, `
-        + 'outside the allowed call. Quote text in single quotes. Confirm?';
+      note(`The arguments of ${script} hold ${risk}: it could run code before the script starts, `
+        + 'outside the allowed call. Quote text in single quotes. Confirm?');
     }
     if (script === 'db-ro.ps1' && tokens.some((t) => ABBREVIATED_GRANT_SWITCH.test(t))) {
-      return 'This db-ro.ps1 call carries -AcceptWriteGrant (or an abbreviation that could): '
-        + 'accepting a credential with write grants needs your explicit consent. Confirm?';
+      note('This db-ro.ps1 call carries -AcceptWriteGrant (or an abbreviation that could): '
+        + 'accepting a credential with write grants needs your explicit consent. Confirm?');
     }
     if (script === 'gate.mjs') {
+      if (tokens.some((t) => t === '--supervise' || t === '--run')) {
+        note('gate.mjs is called with --supervise or --run, its internal flags: the foreground starts the supervisor itself, never through the shell tool. Confirm?');
+      }
       for (let i = 0; i < tokens.length - 1; i++) {
         if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
-          return `The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `
-            + 'npm/pnpm/yarn test) or holds a shell operator, and the gate runs it through a shell. Confirm?';
+          note(`The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `
+            + 'npm/pnpm/yarn test) or holds a shell operator, and the gate runs it through a shell. Confirm?');
+          break;
         }
       }
     }
   }
-  return null;
+  if (denial) return { decision: 'deny', reason: [denial, ...asks].join('\n\n') };
+  return asks.length ? ask(asks.join('\n\n')) : null;
 }
 
 module.exports = { checkScriptArgs };

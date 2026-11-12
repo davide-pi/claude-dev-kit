@@ -1,11 +1,12 @@
 export const meta = {
   name: 'impl-review-loop',
-  description: 'Implement a decided scope (or review one the session already made), review it by size, fix inside the perimeter and re-review the delta until no P1/P2 is open or a finding stalls',
+  description: 'Implement a decided scope in blocks (a gate and a reader A per block), verify the whole diff once, fix inside the perimeter and verify each fix until no P1/P2 is open or a finding stalls',
   whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
-    { title: 'Review', detail: 'reviewers by size, each previous finding marked closed or open, new ones listed apart' },
-    { title: 'Fix', detail: 'the implementer fixes the open P1/P2 inside the perimeter only; the delta is re-reviewed' },
+    { title: 'Block review', detail: 'reader A reads each block after its green gate; open P1/P2 get one in-block fix' },
+    { title: 'Final verification', detail: 'the final readers read the whole diff once, with the carried findings; a verifier checks each fix round' },
+    { title: 'Fix', detail: 'the implementer fixes the open P1/P2 inside the perimeter only' },
   ],
 }
 
@@ -70,9 +71,9 @@ const WIDE_LINES = 600
 // At M, B also runs on opus when the change is not wide but its risk includes security or data, mechanical or not.
 const OPUS_AXES = ['security', 'data']
 const reviewersFor = (size, touches = [], mechanical = false, wide = false) => {
-  const code = (key, model, effort, delta = false) => ({ key, agentType: 'code-reviewer', model, effort, whole: true, ...(delta && { delta }) })
+  const code = (key, model, effort) => ({ key, agentType: 'code-reviewer', model, effort, whole: true })
   const bOpus = size === 'L' || (wide && !mechanical) || (size === 'M' && touches.some(x => OPUS_AXES.includes(x)))
-  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high', !mechanical)] : [code('A', 'sonnet', 'high'), code('B', bOpus ? 'opus' : 'sonnet', 'high')]
+  const list = size === 'S' ? [code('A', 'sonnet', mechanical ? 'low' : 'high')] : [code('A', 'sonnet', 'high'), code('B', bOpus ? 'opus' : 'sonnet', 'high')]
   const specialist = (key, agentType) => (size !== 'S' && touches.includes(key) ? [{ key, agentType, model: 'sonnet', effort: key === 'performance' ? 'medium' : 'high' }] : [])
   return [...list, ...specialist('security', 'review-security'), ...specialist('performance', 'review-performance')]
 }
@@ -217,8 +218,13 @@ const unreviewedFiles = (answers, reviewers, pending = [], root = '', changed = 
 
 const coverageAction = ({ unread = [], retried = false } = {}) => (!unread.length ? 'ok' : retried ? 'stall' : 'rerun')
 
-// The rerun goes to A; B joins it only for a risk axis other than logic and performance. Never the watcher.
-const coverageOwners = (unread, reviewers, axes = []) => (unread.length ? reviewers.filter(r => r.whole && (r.key === 'A' || (r.key === 'B' && axes.some(x => FLOOR_M.includes(x))))).map(r => r.key) : [])
+// The rerun goes to A; B joins it only for a risk axis other than logic and performance, and takes it alone when A is no final reader (M).
+const coverageOwners = (unread, reviewers, axes = []) => {
+  if (!unread.length) return []
+  const whole = reviewers.filter(r => r.whole)
+  if (!whole.some(r => r.key === 'A')) return whole.filter(r => r.key === 'B').map(r => r.key)
+  return whole.filter(r => r.key === 'A' || (r.key === 'B' && axes.some(x => FLOOR_M.includes(x)))).map(r => r.key)
+}
 
 // At M and L a scope finding raised by A alone and not CONFIRMED stays a note: it blocks nothing and is never sent to a fix.
 // Only in a round B answered too: without B "no other reviewer found it" is not established.
@@ -298,17 +304,6 @@ const routeQuestions = ({ questions = [], resolutions = [], round = 0 } = {}) =>
   return { pending, answered }
 }
 
-const WATCHER = { key: 'S', agentType: 'code-reviewer', model: 'haiku', effort: 'low', whole: false }   // a Haiku read never certifies coverage
-// The final read (reviewer A alone) always follows a review fix at M/L; its model and effort grow with the summed review-fix churn (no churn number counts as the top tier).
-const FINAL_READ_SONNET_MEDIUM_MAX = 30
-const FINAL_READ_SONNET_HIGH_MAX = 50
-const deltaReviewers = (everyone, finders = []) => {
-  const has = new Set(everyone.map(r => r.key))
-  const wanted = new Set(finders.filter(k => has.has(k)))
-  const sonnet = everyone.find(r => r.delta)
-  const list = everyone.filter(r => wanted.has(r.key) || r === sonnet)
-  return sonnet ? list : [...list, WATCHER]
-}
 const findersOf = (finding, reviews, root) => (Array.isArray(reviews) ? reviews : []).filter(r => (r?.found ?? []).some(g => sameFinding(g, finding, root))).map(r => r.key)
 
 // A file the snapshot reports as big becomes a P3 split proposal, once per path, never a finding to fix.
@@ -582,6 +577,13 @@ const arr = (items, description) => ({ type: 'array', items, ...(description ? {
 const obj = (required, properties) => ({ type: 'object', required, properties })
 const QUESTION = obj(['text', 'default', 'why'], { text: str(), default: str('what you would do if not told otherwise'), why: str() })
 
+const IMPL_QUESTION = obj(['text', 'default', 'why', 'reversible', 'axis'], {
+  text: str(), default: str('what you would do if not told otherwise'), why: str(),
+  reversible: { type: 'boolean', description: 'true when the owner can change the choice later at a small cost' },
+  axis: { type: 'string', enum: RISKS, description: 'the risk axis the choice belongs to; data, contract, money and security always stop the run' },
+})
+const ARBITRATION = obj(['previous'], { previous: arr(obj(['id', 'status'], { id: str(), status: { type: 'string', enum: ['closed', 'open'] }, note: str() }), 'one entry for EVERY finding id you were given: closed = the finding is withdrawn, open = it stands') })
+
 const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 'rejected', 'noticed'], {
   scope: str(),
   files: arr(str('absolute or repo-relative path of a file you changed')),
@@ -598,7 +600,7 @@ const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 
   notVerified: str(),
   remaining: arr(str(), 'tasks or parts of the brief not done yet, one line each; empty when the work is complete'),
   openQuestions: arr(str('a guess you had to make and its alternative, one line (out-of-perimeter proposals go under noticed)')),
-  questions: arr(QUESTION, 'a behaviour choice the owner would see (never an internal one), left undecided: the run stops before review until it is answered'),
+  questions: arr(IMPL_QUESTION, 'a behaviour choice the owner would see (never an internal one), left undecided: a reversible one with a default on a logic, concurrency or performance axis is answered with its default, any other stops the run before review until it is answered'),
   defaults: arr(obj(['choice', 'alternative', 'path'], { choice: str(), alternative: str(), path: str() }), 'non-trivial choices the brief did not state, with the alternative: the owner reads them in the verdict (no stall)'),
 })
 
@@ -636,11 +638,11 @@ let lastFix = null, lastTree = '', lastDelta = '', lastDeltaBase = ''
 let rejectionCounts = {}, challenged = {}, skipped = [], silent = {}
 let unread = [], missing = new Set(), coverageRetried = false, cleanupDone = false, cleanupSent = []
 let fixChurns = [], openCounts = [], afterFix = false
-let churnMissing = false   // a review fix with no churn number takes the final read to the top tier
-let nextRound = { only: null, coverage: false, final: false }
-let finalReading = false, finalReadDone = false, finalTier = null
+let nextRound = { only: null, coverage: false }
+const arbitrated = new Set(), defaultsApplied = []   // an id goes to the arbiter once; the defaults the loop answered for the implementer
+let lastFixP1 = false, lastFixLines = Infinity   // the last review fix, for the verifier's tier (an unknown size counts as large)
 let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
-let reviewFixed = false, bigFiles = []   // reviewFixed: a review fix ran (a cleanup pass is none)
+let bigFiles = []
 
 const ask = async (prompt, opts) => {
   try { return await agent(prompt, opts) } catch (e) {
@@ -726,6 +728,7 @@ const result = extra => withHistory({
   roundLog: rounds,
   defaults,
   blocks: blockLog,
+  defaultsApplied,
   carried: carriedFindings.map(c => ({ block: c.block, id: c.id, priority: c.priority, title: c.title, file: c.path, why: c.why })),
   findingsLog: { size: rounds.length ? rounds[rounds.length - 1].size : loopSize, rounds: round, findings: findingsLog({ known, tracked, cleaned }) },
   ...(previewText ? { preview: previewText } : {}),
@@ -733,9 +736,11 @@ const result = extra => withHistory({
 })
 
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
-const answersBlock = answers => `The owner answered your questions: apply each answer. Your first run's edits are already in the tree: continue from them, do not start over, and list in \`files\` only the files you change in this run.\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
+const CONTINUE = "Your first run's edits are already in the tree: continue from them, do not start over, and list in `files` only the files you change in this run."
+const answersBlock = answers => `The owner answered your questions: apply each answer. ${CONTINUE}\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
+const defaultsBlock = list => `Your reversible questions are answered with your own defaults (the owner can change them later): apply each. ${CONTINUE}\n${list.map(q => `- ${q.text} -> ${q.default}`).join('\n')}`
 // The first run is not a report: its tree stays the next -Since, so the delta keeps both runs.
-const askWithQuestions = async (build, opts, at, resolution, gatedRun = false) => {
+const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, blockId = null) => {
   const first = readReport(await ask(build(''), opts), gatedRun)
   if (!first?.questions.length) return { report: first }
   // The P3 cleanup never stops the run for the owner.
@@ -744,12 +749,15 @@ const askWithQuestions = async (build, opts, at, resolution, gatedRun = false) =
     return { report: { ...first, questions: [] } }
   }
   const answers = readAnswers(resolution).filter(a => first.questions.some(q => plain(q.text) === plain(a.text)))
-  const pending = first.questions.filter(q => !answers.some(a => plain(a.text) === plain(q.text)))
+  const open = first.questions.filter(q => !answers.some(a => plain(a.text) === plain(q.text)))
+  const auto = open.filter(q => questionPolicy(q) === 'default')
+  const pending = open.filter(q => !auto.includes(q))
   if (pending.length) {
     return { stall: questionStall(at, pending, `${opts.label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH)) }
   }
   takeSide(first)
-  const second = readReport(await ask(build(answersBlock(answers)), { ...opts, label: `${opts.label} (answers)` }), gatedRun)
+  auto.forEach(q => defaultsApplied.push({ block: blockId, question: q.text, default: String(q.default).trim() }))
+  const second = readReport(await ask(build([answers.length ? answersBlock(answers) : '', auto.length ? defaultsBlock(auto) : ''].filter(Boolean).join('\n\n')), { ...opts, label: `${opts.label} (answers)` }), gatedRun)
   addQuestionNotes(second?.questions ?? [])
   if (!second) return { report: second }
   // First-run rejections stay in the report (the ids count as rejected) but are no CHALLENGE when the second run changed their file.
@@ -776,6 +784,7 @@ if (!inline) {
   let blockTree = ''   // the previous block's tree: the base of the next block's delta
   for (const [bi, block] of blocks.entries()) {
     const bid = bi + 1
+    phase('Implement')
     const base = blocks.length === 1 ? 'implement the change' : `implement block ${bid}`
     const optsFor = label => ({ label, phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION })
     const implOpts = optsFor(base)
@@ -809,7 +818,7 @@ if (!inline) {
       }
       if (!proven) gaps.push(`block ${bid}: red not proven`)
     }
-    const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0, gated)
+    const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0, gated, bid)
     if (asked0.stall) return asked0.stall
     let impl = asked0.report
     // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
@@ -871,6 +880,7 @@ if (!inline) {
     // An unchanged tree is an empty delta: nothing to read.
     if (gateGreen(g) && g.tree && g.tree !== blockTree) {
       // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried.
+      phase('Block review')
       const readLabel = `block ${bid} · reader A`
       const read = await ask([
         `Review block ${bid} of ${blocks.length} (tasks ${entry.tasks.join(', ')}): its delta is \`${deltaCommand(blockTree, g.tree, startHead)}\` (the trees are snapshots of the working tree, untracked files included): run it first, then judge the code as it is now.`,
@@ -882,7 +892,7 @@ if (!inline) {
         'PREVIOUS FINDINGS: none (the first read of this block): return `previous` as an empty list.',
         `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output and list under filesReviewed every file you actually read.`,
         budgetText(reviewCalls(changed.size)),
-      ].filter(Boolean).join('\n\n'), { label: readLabel, phase: 'Review', agentType: blockReader.agentType, model: blockReader.model, effort: blockReader.effort, schema: REVIEW })
+      ].filter(Boolean).join('\n\n'), { label: readLabel, phase: 'Block review', agentType: blockReader.agentType, model: blockReader.model, effort: blockReader.effort, schema: REVIEW })
       if (!read) gaps.push(`block ${bid}: reader A returned nothing${why(readLabel)}`)
       else {
         takeDefaults(readReport(read))
@@ -914,7 +924,7 @@ if (!inline) {
           if (Number.isFinite(fixed.snapshot?.churn)) changeLines += fixed.snapshot.churn
           if (stallAfter) return verifyStall(0, stallAfter)
           const rejectedIds = new Set(fixed.rejected.map(r => r.id))
-          carried.push(...inside.filter(x => rejectedIds.has(x.id)).map(x => ({ ...x, block: bid, why: 'rejected' })))
+          carried.push(...inside.filter(x => rejectedIds.has(x.id)).map(x => ({ ...x, block: bid, why: 'rejected', rejection: fixed.rejected.find(r => r.id === x.id) })))
           entry.readerA.fixed = inside.length - inside.filter(x => rejectedIds.has(x.id)).length
           entry.gate = after.line
           g = after
@@ -949,7 +959,20 @@ if (!inline) {
   }
 }
 
-const everyId = () => idsToAsk({ tracked, known, lastFixFiles: lastFix?.files ?? [], skipped, root: repoRoot, all: finalReading })
+// The findings reader A left open are tracked like any other: the final readers mark each closed or open, and one still open blocks the OK.
+const outsideCarried = new Set()
+for (const c of carriedFindings) {
+  const { block: _block, why: reason, rejection, ...carriedFinding } = c
+  known[c.id] = carriedFinding
+  tracked[c.id] = { status: 'open' }
+  raisedBy[c.id] = ['A']
+  if (reason === 'outside perimeter') outsideCarried.add(c.id)
+  if (rejection) {
+    rejectionCounts[c.id] = 1
+    challenged[c.id] = { reason: String(rejection.reason ?? ''), count: 1, notReproduced: isNotReproduced(rejection) }
+  }
+}
+const everyId = () => idsToAsk({ tracked, known, lastFixFiles: lastFix?.files ?? [], skipped, root: repoRoot })
 const anchor = id => `${known[id].path}${known[id].line ? `:${known[id].line}` : ''}`
 const previousBlock = () => {
   const mineIds = everyId()
@@ -969,9 +992,6 @@ const previousBlock = () => {
   }
   return `PREVIOUS FINDINGS (give a verdict, closed or open, for EVERY id listed; a closed one that is back is open; an id you skip is asked again):\n${list.join('\n')}${cleanupLine}`
 }
-const carriedBlock = () => (carriedFindings.length
-  ? `KNOWN FINDINGS carried from the block readers (P1/P2 left open by the in-block fix: known already, so never raise them again as new; say in \`checked\` whether each one still holds):\n${carriedFindings.map(c => `- ${c.id} [${c.priority}] ${c.path}${c.line ? `:${c.line}` : ''} - ${c.title}: ${c.failure}`).join('\n')}`
-  : '')
 const challengeBlock = () => {
   const list = Object.keys(challenged).map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the fixer's reason: ${challenged[id].reason}`)
   return list.length
@@ -991,11 +1011,9 @@ const reviewersForRound = () => {
   const wasWide = wide
   wide = wide || (!mechanical && (expected.length > WIDE_FILES || changeLines > WIDE_LINES))
   if (wide && !wasWide) log(`wide change (${expected.length > WIDE_FILES ? `${expected.length} files, more than ${WIDE_FILES}` : `${changeLines} changed lines, more than ${WIDE_LINES}`}): ${size === 'M' ? 'reviewer B runs on opus' : `the ${size} panel is unchanged`}`)
-  const reviewers = reviewersFor(size, risk, mechanical, wide)
-  return { size, list: reviewers, expected }
+  return { size, list: finalReadersFor(size, risk, mechanical, wide), expected }
 }
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit()}`
-const scopeOfFinal = () => `FINAL FULL READ: judge every previous finding id against the code as it is now.\n${scopeOfChange()}`
 const scopeOfDelta = () => {
   if (!lastFix) return scopeOfChange()
   return `Review the changes since ${lastDeltaBase || startHead || 'HEAD'}${lastDelta ? `: \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first` : ''}. Judge each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit()}`
@@ -1004,32 +1022,29 @@ const scopeOfDelta = () => {
 const scopeOfReview = r => {
   if (missing.has(r.key) && !r.whole) return scopeOfChange()
   const full = r.whole ? unread : []
-  return (finalReading ? scopeOfFinal() : scopeOfDelta()) + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
+  return scopeOfDelta() + (full.length ? `\nThese files have never been reviewed: review them IN FULL, as changed since ${startHead ? `commit ${startHead}` : 'the start'}, not just the delta: ${full.join(', ')}.` : '')
 }
 
 while (true) {
   round += 1
-  phase('Review')
+  phase('Final verification')
   const { size, list: everyone, expected } = reviewersForRound()
-  const { only, coverage, final } = nextRound
-  nextRound = { only: null, coverage: false, final: false }
-  finalReading = final
-  const finders = [...new Set(Object.keys(tracked).filter(id => tracked[id].status === 'open').flatMap(id => raisedBy[id] ?? []))]
-  const picked = only ? [...everyone, WATCHER].filter(r => only.includes(r.key))
-    : final ? everyone.filter(r => r.key === 'A')
-    : round === 1 ? everyone
-    : deltaReviewers(everyone, cleanupSent.length ? ['A', ...missing] : [...finders, ...missing])   // the cleanup delta: A reads it beside the watcher; only A's explicit closed verdict closes an id
+  const { only, coverage } = nextRound
+  nextRound = { only: null, coverage: false }
+  // Round 1 is the final readers on the whole diff; after a fix round one verifier reads the fix delta (a cleanup pass too).
+  const verifier = { key: 'V', ...verifierFor({ hasP1: lastFixP1, maxFixLines: lastFixLines }), whole: false }   // a verifier read never certifies coverage
+  const picked = only ? [...everyone, verifier].filter(r => only.includes(r.key)) : round === 1 ? everyone : [verifier]
   const reviewers = picked.length ? picked : everyone
   // What the owner reads in the agent list: which reviewer, its round, then its job; never the model or effort.
-  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === WATCHER.key ? 'check the fixes' : r.key === 'B' ? 'second opinion' : 'code')
-  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}${final ? ', final read' : ''}`
+  const roleOf = r => (r.agentType === 'review-security' ? 'security' : r.agentType === 'review-performance' ? 'performance' : r.key === 'V' ? 'verify the fixes' : r.key === 'B' ? 'second opinion' : 'code')
+  const labelOf = r => `reviewer ${r.key} · round ${round}${roleOf(r) === r.key ? '' : ` · ${roleOf(r)}`}`
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, everyId()]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
   const answers = await parallel(reviewers.map(r => () => ask([
     scopeOfReview(r),
     `Intent: ${brief}`,
-    round === 1 || final ? requestText : '',
+    round === 1 ? requestText : '',
     decisionsText,
     answersText(round),
     ownerQuestionsText,
@@ -1038,26 +1053,26 @@ while (true) {
     dirtyText,
     'Perimeter rule: any hunk the brief does not require, even inside a perimeter file, is a finding with category "scope" (priority P2; CONFIRMED only with the file:line of the hunk and the brief line it departs from, or the absence of any), and so is every changed line outside the perimeter in the files the change touched; except in a file already modified before the start (reported as a normal finding, never "scope"). A defect in a file the change did not touch is a normal finding; it is reported, not fixed. A P1/P2 defect outside the perimeter that this change causes: set causedByChange to true.',
     mechanical ? 'This change is declared MECHANICAL (rename, move, split, config, generated) and was made by a small model: any hunk that alters behaviour (a condition, a value, a call, an order) is a P2 finding, category "scope", title "non meccanico".' : '',
-    `Effort: ${final ? finalTier.effort : r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
+    `Effort: ${r.effort}. ${size !== 'S' && r.key.startsWith('A') ? 'You may be one of two reviewers with this same brief: do not soften for agreement.' : ''}`,
     previousBlock(),
-    round === 1 || final ? carriedBlock() : '',
+    r.key === 'V' ? 'You are the VERIFIER of the last fix round: mark every previous finding closed or open from the code as it is now, and read the fix delta for defects the fix introduced (new findings apart). Nothing else.' : '',
     challengeBlock(),
     'Questions: return one only when the answer changes behaviour, a public contract, data or security; an obvious choice you decide yourself and list under `defaults` as { choice, alternative, path }: never a question.',
     `${RULES} Report only P1/P2/P3 findings with a concrete failure; return the structured output: a verdict for every previous id, the new findings apart, and under filesReviewed list every file you actually read.`,
     budgetText(reviewCalls(expected.length)),
-  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Review', agentType: r.agentType, model: final ? finalTier.model : r.model, effort: final ? finalTier.effort : r.effort, schema: REVIEW })))
+  ].filter(Boolean).join('\n\n'), { label: labelOf(r), phase: 'Final verification', agentType: r.agentType, model: r.model, effort: r.effort, schema: REVIEW })))
   const alive = answers.map((a, i) => (a ? { ...readReport(a), key: reviewers[i].key } : null)).filter(Boolean)
   alive.forEach(takeDefaults)
   answers.forEach((a, i) => { if (!a) gaps.push(`round ${round}: reviewer ${reviewers[i].key} returned nothing${why(labelOf(reviewers[i]))}`) })
   // A round with no whole reviewer owes no coverage: those files were read by a whole reviewer before.
-  const owedNow = round === 1 || final ? expected : only || !reviewers.some(r => r.whole) ? [] : (lastFix?.files ?? [])
+  const owedNow = round === 1 ? expected : only || !reviewers.some(r => r.whole) ? [] : (lastFix?.files ?? [])
   const wasUnread = new Set(unread.map(f => rel(f, repoRoot)))
   unread = unreviewedFiles(answers, reviewers, unread, repoRoot, owedNow)
   unread.filter(f => !wasUnread.has(rel(f, repoRoot))).forEach(f => gaps.push(`round ${round}: ${f} was not read by its reviewer (not in filesReviewed)`))
   if (!unread.length) coverageRetried = false
   answers.forEach((a, i) => {
     const r = reviewers[i]
-    if (r.whole || r.key === WATCHER.key) return
+    if (r.whole || r.key === 'V') return
     if (a) missing.delete(r.key)
     else missing.add(r.key)
   })
@@ -1074,9 +1089,9 @@ while (true) {
     return questionStall(round, routed.pending, `the reviewers left ${routed.pending.length} question(s) for the owner: ${routed.pending.map(q => q.text).join(' | ')}`,
       answerResume(round, ASK_EACH, ' The answers go to the fixer and to the later reviewers.'))
   }
-  // An id whose file is still unread waits for the round that reads it; one closes only on A's explicit `closed` (the watcher can keep it open, never close it).
+  // An id whose file is still unread waits for the round that reads it; one closes only on the verifier's (or A's) explicit `closed`.
   const cleanupWait = []
-  const closedByA = id => alive.some(a => a.key === 'A' && (a.previous ?? []).some(v => v.id === id && v.status === 'closed'))
+  const closedByA = id => alive.some(a => (a.key === 'A' || a.key === 'V') && (a.previous ?? []).some(v => v.id === id && v.status === 'closed'))
   for (const id of cleanupSent) {
     if (isDirty(known[id].path, unread, repoRoot)) { cleanupWait.push(id); continue }
     if (merged.found.some(g => sameFinding(g, known[id], repoRoot)) || merged.verdicts[id] !== 'closed' || !closedByA(id)) continue
@@ -1110,6 +1125,28 @@ while (true) {
     tracked, verdicts: deduped.verdicts, found, soft, files: roundFiles, dirty, root: repoRoot, touched: [...changed], resolution, silent,
     challenged: Object.keys(asked), rejections: rejectionCounts, notReproduced: Object.keys(asked).filter(id => asked[id].notReproduced),
   })
+  // A finding the implementer rejected and its reader kept goes to the arbiter once; its ruling stands.
+  const toArbitrate = decision.kept.filter(id => !arbitrated.has(id))
+  if (toArbitrate.length) {
+    toArbitrate.forEach(id => arbitrated.add(id))
+    const label = `arbiter · round ${round}`
+    const ruled = await ask([
+      'Arbitrate: the implementer rejected these findings and the reviewer kept them. Read the code, reproduce the failure when you can, and rule for each id: closed = the finding is withdrawn, open = it stands and the implementer fixes it. Your ruling is final.',
+      `Intent: ${brief}`,
+      decisionsText,
+      reviewPerimeter,
+      toArbitrate.map(id => `- ${id} [${known[id].priority}] ${anchor(id)} - ${known[id].title}: ${known[id].failure} | the implementer's reason: ${asked[id].reason}${merged.notes[id] ? ` | the reviewer's note: ${merged.notes[id]}` : ''}`).join('\n'),
+      `${RULES} Return the structured output: one verdict per id above.`,
+      budgetText(reviewCalls(expected.length)),
+    ].filter(Boolean).join('\n\n'), { label, phase: 'Final verification', agentType: ARBITER.agentType, model: ARBITER.model, effort: ARBITER.effort, schema: ARBITRATION })
+    if (!ruled) gaps.push(`round ${round}: the arbiter returned nothing${why(label)}, the finding(s) ${toArbitrate.join(', ')} stand`)
+    const withdrawn = toArbitrate.filter(id => (ruled?.previous ?? []).some(v => v.id === id && v.status === 'closed'))
+    for (const id of withdrawn) decision.tracked[id].status = 'closed'
+    decision.closed.push(...withdrawn)
+    decision.kept = decision.kept.filter(id => !withdrawn.includes(id))
+    decision.toFix = decision.toFix.filter(id => !withdrawn.includes(id))
+    if (decision.action === 'FIX' && !decision.toFix.length) decision.action = decision.unanswered.length ? 'RECHECK' : 'DONE'
+  }
   tracked = decision.tracked
   silent = decision.silent
   challenged = Object.fromEntries(Object.entries(asked).filter(([id]) => decision.unanswered.includes(id)))
@@ -1130,22 +1167,13 @@ while (true) {
   const stopWhy = churnHit ? 'churn' : stuckHit ? 'not-converging' : ''
   const stopped = !!stopWhy && !redirected
   let cleanupIds = []
-  rounds.push({ round, size, reviewers: alive.length, new: found.filter(f => tracked[f.id]).map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: stopped ? [] : toFix, stalled: decision.stalled, unanswered: decision.unanswered, churn: null, ...(final ? { final: true } : {}) })
+  rounds.push({ round, size, reviewers: alive.length, new: found.filter(f => tracked[f.id]).map(f => f.id), rematched: deduped.rematched, closed: decision.closed, toFix: stopped ? [] : toFix, stalled: decision.stalled, unanswered: decision.unanswered, churn: null })
   log(`Round ${round}: ${found.length} new, ${decision.closed.length} closed, ${toFix.length} to fix, ${decision.stalled.length} stalled, ${decision.unanswered.length} unanswered`)
 
   if (action === 'DONE') {
     if (missing.size) {
       const keys = [...missing]
       return stallAgain(round, `the specialist reviewer(s) ${keys.join(', ')} returned nothing: their area was never reviewed`, { why: 'gap', reviewers: keys })
-    }
-    // The final read is reviewer A alone on the whole change, after any review fix at M/L: it covers every file, so it goes before the coverage rerun.
-    if (!finalReadDone && reviewFixed && size !== 'S') {
-      const churn = fixChurns.reduce((a, b) => a + b, 0)
-      finalTier = everyone.some(r => r.key === 'B' && r.model === 'opus') ? { model: 'opus', effort: 'medium' } : churnMissing || churn > FINAL_READ_SONNET_HIGH_MAX ? { model: 'opus', effort: 'medium' } : { model: 'sonnet', effort: churn > FINAL_READ_SONNET_MEDIUM_MAX ? 'high' : 'medium' }
-      finalReadDone = true
-      nextRound = { only: null, coverage: false, final: true }
-      openCounts = []
-      continue
     }
     const cover = coverageAction({ unread, retried: coverageRetried })
     if (cover === 'stall') return stallAgain(round, `no reviewer read these files (a second run of their reviewer did not either): ${unread.join(', ')}`, { why: 'gap', files: unread })
@@ -1170,7 +1198,7 @@ while (true) {
     }, `Ask the user: accept the risk or a different approach. ${relaunch(`{ round: ${round}, accept: [ids] }`)} to accept the risk (the reviewers of this round have already read the last fix), or { round: ${round}, guidance: "..." } / { round: ${round}, retry: true } for another attempt: ${RESOLUTIONS}.`)
   }
   if (action === 'STALL') {
-    return stall(round, { findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
+    return stall(round, { findings: decision.stalled.map(s => ({ ...s, ...known[s.id], ...(outsideCarried.has(s.id) && s.why === 'still-open' ? { why: 'widen' } : {}), ...(asked[s.id] ? { rejected: asked[s.id].reason, reviewerNote: merged.notes[s.id] } : {}) })) },
       `Ask the user: accept the risk, one more round, or a different approach; a "widen" finding asks to add its file to the perimeter (only on the user's yes: the session then rewrites perimeter.md with perimeter.ps1 -Files) or to accept it as out of scope. ${relaunch()}: ${RESOLUTIONS}.`)
   }
   if (action === 'RECHECK') {
@@ -1205,8 +1233,9 @@ while (true) {
     !cleaning && decisions.length ? 'A hunk an owner decision asked for is not reverted, whatever the finding says: list it under `questions` as { text, default, why }.' : '',
     perimeterTextFor(roundFiles),
     dirtyText,
+    ...gateLines(),
     ...writerTail(budgetText(80), cleaning),
-  ].filter(Boolean).join('\n\n'), fixOpts, round, resolution)
+  ].filter(Boolean).join('\n\n'), fixOpts, round, resolution, gated, `fix-${round}`)
   if (asked1.stall) return asked1.stall
   const fixed = asked1.report
   if (!fixed) return stallAgain(round, `the implementer returned nothing on the fix (stopped or failed${why(fixOpts.label)})`)
@@ -1223,7 +1252,8 @@ while (true) {
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
-  if (!cleaning) reviewFixed = true
+  lastFixP1 = sending.some(id => known[id]?.priority === 'P1')
+  lastFixLines = Number.isFinite(fixed.snapshot?.churn) ? fixed.snapshot.churn : Infinity
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (!cleaning) {
     afterFix = true
@@ -1231,7 +1261,7 @@ while (true) {
     if (Number.isFinite(churn)) {
       fixChurns.push(churn)
       rounds[rounds.length - 1].churn = churn
-    } else churnMissing = true
+    }
   }
   if (fixStall) return verifyStall(round, fixStall)
 }

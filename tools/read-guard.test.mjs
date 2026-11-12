@@ -63,3 +63,43 @@ test('a bad payload lets the read through', () => {
   assert.equal(r.status, 0);
   assert.equal(r.stdout, '');
 });
+
+test('given a persisted output at or below 20 KB, when it is read whole, then it passes; one byte above is denied', () => {
+  // Given
+  const small = file('Temp/claude/abc/sess/tool-results/small.txt', 1_024);
+  const atLimit = file('Temp/claude/abc/sess/tool-results/limit.txt', 20 * 1024);
+  const over = file('Temp/claude/abc/sess/tool-results/over.txt', 20 * 1024 + 1);
+
+  // When
+  const decisions = [small, atLimit, over].map((file_path) => read({ file_path }));
+
+  // Then
+  assert.equal(decisions[0], null);
+  assert.equal(decisions[1], null);
+  assert.equal(decisions[2]?.permissionDecision, 'deny');
+  assert.match(decisions[2].permissionDecisionReason, /a persisted tool output/);
+});
+
+test('given a small session transcript, when it is read whole, then it is still denied', () => {
+  // Given
+  const tiny = file('.claude/projects/C--repo/tiny.jsonl', 1_024);
+
+  // When
+  const decision = read({ file_path: tiny });
+
+  // Then
+  assert.equal(decision?.permissionDecision, 'deny');
+  assert.match(decision.permissionDecisionReason, /a session transcript/);
+});
+
+test('given a small transcript under tool-results, when it is read whole, then it is still denied as a transcript', () => {
+  // Given
+  const tiny = file('.claude/projects/C--repo/sess/tool-results/t.jsonl', 1_024);
+
+  // When
+  const decision = read({ file_path: tiny });
+
+  // Then
+  assert.equal(decision?.permissionDecision, 'deny');
+  assert.match(decision.permissionDecisionReason, /a session transcript/);
+});

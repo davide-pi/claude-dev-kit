@@ -10,7 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -161,6 +161,35 @@ test('given a recorded run whose supervisor is gone, when the gate waits, then i
   assert.equal(res.status, 1);
   assert.equal(lastLine(res).gate, 'red');
   assert.equal(lastLine(res).test, 'supervisor died');
+});
+
+test('given a recorded supervisor pid that a different process now holds, when the gate waits, then it reports red with "supervisor died"', () => {
+  // Given
+  const r = repo();
+  mkdirSync(join(r.root, '.git', 'deliver'), { recursive: true });
+  writeFileSync(join(r.root, '.git', 'deliver', 'gate.json'), JSON.stringify({
+    run: { id: 'x', pid: process.pid, pidStarted: Date.parse('2000-01-01T00:00:00Z'), status: 'running', command: OK, stuckMinutes: 0, startedAt: Date.now(), opts: { root: r.root, head: r.head, tree: 't' } },
+  }));
+
+  // When
+  const res = gate(r.root, '--wait');
+
+  // Then
+  assert.equal(res.status, 1);
+  assert.equal(lastLine(res).test, 'supervisor died');
+});
+
+test('given a --head that starts with a dash, when the gate runs with --no-scope, then it exits 2 and writes no file', () => {
+  // Given
+  const r = repo();
+  const target = join(r.root, 'pwned.txt');
+
+  // When
+  const res = gate(r.root, '--head', `--output=${target}`, '--test', OK, '--no-scope');
+
+  // Then
+  assert.equal(res.status, 2);
+  assert.equal(existsSync(target), false);
 });
 
 test('given no run recorded, when the gate runs with --wait, then it exits 2', () => {
@@ -401,6 +430,41 @@ test('given a proven red, when a test file changed before the green run, then th
   assert.equal(lastLine(res).gate, 'red: tests changed');
 });
 
+test('given a stored proof and a changed test file, when the gate runs with --force, then it drops the proof, says so and runs', () => {
+  // Given
+  const r = repoWithTest();
+  red(r);
+  writeFileSync(join(r.root, 'flag.txt'), 'x\n');
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited\n`);
+
+  // When
+  const res = run(r, UNIT, '--force');
+
+  // Then
+  const last = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
+  assert.equal(res.status, 0);
+  assert.equal(last.gate, 'green');
+  assert.equal(last.proof, 'dropped');
+  assert.equal(stateOf(r).proof, undefined);
+});
+
+test('given a stored proof and a changed test file, when the gate runs with --force and the tests fail, then the red line still says the proof was dropped', () => {
+  // Given
+  const r = repoWithTest();
+  red(r);
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited\n`);
+
+  // When
+  const res = run(r, UNIT, '--force');
+
+  // Then
+  const last = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
+  assert.equal(res.status, 1);
+  assert.equal(last.gate, 'red');
+  assert.equal(last.proof, 'dropped');
+  assert.equal(stateOf(r).proof, undefined);
+});
+
 test('given a unit command with a failing test, when the gate proves it with --red, then gate.json holds the proof for the test file', () => {
   // Given
   const r = repoWithTest();
@@ -410,6 +474,21 @@ test('given a unit command with a failing test, when the gate proves it with --r
 
   // Then
   assert.deepEqual(Object.keys(stateOf(r).proof.files), ['t.test.mjs']);
+});
+
+test('given a green run, when the gate has started its command, then gate.json records the process as pid and start time', () => {
+  // Given
+  const r = repo();
+  const before = Date.now();
+
+  // When
+  run(r, OK);
+
+  // Then
+  const procs = stateOf(r).procs;
+  assert.equal(procs.length, 1);
+  assert.ok(Number.isInteger(procs[0].pid) && procs[0].pid > 0);
+  assert.ok(Date.parse(procs[0].started) >= before - 1000);
 });
 
 test('given a unit command whose only test file fails to load, when the gate runs with --red, then it reports red, not red-proven', () => {

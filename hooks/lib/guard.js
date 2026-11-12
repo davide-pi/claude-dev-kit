@@ -6,7 +6,8 @@
  *   - the DENIES first (a raw database client on a non-dev host, a shell read of a secret file, a git write by a
  *     read-only agent):
  *     when one fires nothing else matters;
- *   - then every ASK, gathered, so one prompt carries all the reasons;
+ *   - then every ASK, gathered, so one prompt carries all the reasons; a script-args quoting deny (a re-quote
+ *     fixes it) is returned as a deny, its reason first and the ask reasons after it;
  *   - then the REWRITES (az identity pin, output filter), which never meet an ask.
  *
  * Each check is isolated: a bug in one must not silence the others, and is logged
@@ -128,14 +129,19 @@ function evaluate(payload) {
     ?? safely('browser-use-cli', () => checkBrowserUseCli(command));
   if (target) return { decision: 'deny', reason: target.reason };
 
+  const scriptArgs = safely('script-args', () => checkScriptArgs(command, payload.tool_name));
   const reasons = [
     safely('default-branch', () => checkDefaultBranch(command, payload.cwd)),
-    safely('destructive', () => checkDestructive(command)),
+    safely('destructive', () => checkDestructive(command, payload.session_id)),
     safely('alm-contract', () => checkAlmContract(command)),
     safely('docker-cp', () => checkDockerCp(command, payload.cwd)),
-    safely('script-args', () => checkScriptArgs(command, payload.tool_name)),
+    scriptArgs?.reason,
     safely('self-protect', () => checkSelfWrite(command, payload.cwd)),
   ].filter(Boolean);
+  // A re-quote fixes a script-args deny: it wins over the asks, whose reasons ride along.
+  if (scriptArgs?.decision === 'deny') {
+    return { decision: 'deny', reason: [scriptArgs.reason, ...reasons.filter((r) => r !== scriptArgs.reason)].join('\n\n') };
+  }
   if (reasons.length) return { decision: 'ask', reason: reasons.join('\n\n') };
 
   // One updatedInput, whichever rewrite applies. They never meet: no filter mode is an `az` command.

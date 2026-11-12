@@ -6,6 +6,18 @@ Before a question reaches the owner, read what the repo already answers: branch,
 (`git status -sb`, `git log @{u}..`), the code the perimeter names. A question whose answer a command prints is
 never asked.
 
+## The plan's tasks
+
+At M and L the analysis ends in tasks, passed to the loop as `plan`; the loop cuts the blocks (up to 4 tasks each) and
+computes the size from them. A task is `{ id, title, files, dependsOn, tdd, criteria }`: `files` its own files,
+`dependsOn` the ids it needs first, `criteria` Given/When/Then lines. A task is `tdd` when a unit-test project covers
+the code it touches and its behaviour can be written as criteria; layout, config, a migration or a mechanical batch is
+not. Pass `unit` (the unit-test command) and `testSkill` too, or no block is test-first. The cut is by count only:
+order the tasks so those on the same files are adjacent, and make each atomic (it needs no other task except ones done before it).
+
+**Scout.** One `Explore` agent (Sonnet, medium) only when the analysis would pass about 30 file reads; its summary
+replaces them.
+
 ## The doubts pass
 
 Between the analysis and the loop, list what the request leaves implicit: requirements, edge cases (empty, first run,
@@ -19,8 +31,9 @@ a concurrent run, a dependency down. `preview` is the default at M whenever the 
 
 ## The challenger
 
-When it runs: `SKILL.md` step 2, after the owner's ok and before the loop. One `Plan` agent, `model: sonnet` at M,
-`model: opus` at L (it replaces `grill-me`, which runs only on the rule below or when the owner asks). Read-only, it
+When it runs: `SKILL.md` step 2, after the owner's ok and before the loop. Once at M and L, one `Plan` agent, `model: sonnet` at M,
+`model: opus` at L or with a data, money, contract or security axis, always spawned with `effort: high` (it replaces
+`grill-me`, which runs only on the rule below or when the owner asks). Read-only, it
 never asks the user; budget ~12 tool calls over both messages. One agent, two messages, so it cannot anchor on ours:
 
 1. **Blind** (the spawn): the request verbatim, the perimeter and the owner's `decisions`, nothing of our approach. It
