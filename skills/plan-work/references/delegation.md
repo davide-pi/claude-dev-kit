@@ -15,8 +15,6 @@ Spawn a wave in **one message**.
 | locate code, trace a flow | `investigator` |
 | wide read-only search | `Explore` (Sonnet, its model never overridden) |
 | read-only audit or opinion | `analyst` or `Explore`; `Plan` with `model: sonnet`, opus only for the L challenger (deliver `analysis.md`) |
-| read a work item or a backlog slice against the code | `item-analyst` |
-| end-to-end check of a finished change on a running local environment | `e2e-verifier` |
 | SQL, logs | `/db`, `/logs` (their forks run `db-analyst`, `ops-analyst`) |
 | any other job | a fork only when the parent context is needed, else a fresh agent with a brief |
 

@@ -118,7 +118,9 @@ $Retired = @('skills/dev-loop', 'skills/done-check', 'skills/redis-dotnet',
              'mods/cockpit/tests/cockpit-subagents-rows.test.tsx', 'mods/cockpit/tests/cockpit-subagents.test.tsx',
              'mods/cockpit/tests/cockpit-tabs.test.tsx', 'mods/cockpit/tests/cockpit-work-pr.test.tsx',
              'mods/cockpit/tests/cockpit-work.test.tsx',
-             'workflows/impl-review-loop.js', 'workflows/review-large.js', 'workflows/audit-repos.js')
+             'workflows/impl-review-loop.js', 'workflows/review-large.js', 'workflows/audit-repos.js',
+             'skills/docs-sync', 'hooks/lib/e2e-browser.js',
+             'agents/e2e-verifier.md', 'agents/item-analyst.md')  # retired-ok: named on purpose, the repo no longer has them
 
 $script:Problems = 0
 $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'

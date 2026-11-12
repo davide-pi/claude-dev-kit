@@ -235,6 +235,22 @@ test('given a directory outside a repository, when a worktree is created, then i
   assert.equal(r.stdout, '');
 });
 
+test('given a session folder outside a repository, when a worktree is created, then it refuses with a readable reason and logs no hook error', () => {
+  // Given
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'wtr-norepo-')));
+  created.push(dir);
+  const config = realpathSync.native(mkdtempSync(join(tmpdir(), 'wtr-cfg-')));
+  created.push(config);
+
+  // When
+  const r = hook({ hook_event_name: 'WorktreeCreate', name: 'x', cwd: dir }, { CLAUDE_CONFIG_DIR: config, CLAUDE_WORKTREE_ROOT: dir, GIT_CEILING_DIRECTORIES: dirname(dir) });
+
+  // Then: an expected refusal, not a crash of the hook
+  assert.notEqual(r.status, 0);
+  assert.match(r.stderr, /is not inside a git repository: a worktree needs one/);
+  assert.equal(existsSync(join(config, '.cache', 'hook-errors.log')), false);
+});
+
 test('given a clean and a dirty worktree, when each is removed, then the clean one is removed with its branch kept and the dirty one is refused and kept', () => {
   // Given
   const { repo, root } = fixture();

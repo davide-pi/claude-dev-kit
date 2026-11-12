@@ -46,7 +46,14 @@ function git(cwd, args) {
 
 /** The main checkout's root, also when `cwd` is inside a linked worktree. */
 function mainRoot(cwd) {
-  const common = git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  let common;
+  try {
+    common = git(cwd, ['rev-parse', '--path-format=absolute', '--git-common-dir']);
+  } catch (error) {
+    if (!/not a git repository/i.test(error.message)) throw error;
+    // An expected refusal, not a crash: still a loud exit 1, but kept out of the hook-error log.
+    throw Object.assign(new Error(`${cwd} is not inside a git repository: a worktree needs one (open the session in the repo)`), { expected: true });
+  }
   return path.basename(common).toLowerCase() === '.git' ? path.dirname(common) : common.replace(/\.git$/i, '');
 }
 
@@ -134,7 +141,7 @@ try {
   else process.stdout.write(`${create(payload)}\n`);
   process.exit(0);
 } catch (error) {
-  try { require('./lib/cache').logError('worktree-root', error); } catch { /* the log is a courtesy */ }
+  if (!error.expected) { try { require('./lib/cache').logError('worktree-root', error); } catch { /* the log is a courtesy */ } }
   process.stderr.write(`worktree-root: ${error.message}\n`);
   process.exit(1);
 }

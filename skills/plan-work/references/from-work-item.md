@@ -7,8 +7,8 @@ the plan is **tagged**, and a **readiness verdict** comes before any task list.
 Markers stay verbatim in the chat-language verdict: `[S]` `[D]` `[A]`, the verdict keywords,
 `[BLOCKING]` / `[non-blocking]`, `file:line`, Azure DevOps type and state names.
 
-When the item read plus the code check won't fit in about ten tool calls of the session, hand both to
-`item-analyst` (item id, ALM target, repo root) and judge its draft.
+When the code check won't fit in about ten tool calls of the session, hand it to `Explore` with the item's
+statements to check, and judge its report.
 
 ## 1. Read before judging
 

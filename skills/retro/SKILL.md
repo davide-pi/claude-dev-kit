@@ -62,7 +62,7 @@ failed, retried call · a permission prompt · a fact asked for · a huge output
 | **Automated check** | a mistake a deterministic rule would catch: a fixed pattern, a banned API or command, a file location, a missing flag | **a backlog item** for a hook, lint rule, CI step or `validate.mjs` check — never a sentence |
 | Tool economy | an expensive or repeated call, a permission prompt | a narrower command, an allow rule, a script |
 | Information access | a fact out of reach (logs, database, board, browser) | a read-only CLI, an agent that holds the access |
-| Navigation | many reads to find one file or fact | a pointer in the project's `CLAUDE.md` or docs tree (`/docs-sync`) |
+| Navigation | many reads to find one file or fact | a pointer in the project's `CLAUDE.md` or docs tree (the `doc-keeper` agent) |
 | Skill gap | the same decision re-made by hand, or a skill that did not fire | the skill or its description (`skill-forge`) |
 | Review rule | a judgement-call mistake the reviewer let through | the reviewer's brief or a repo convention |
 | Steering bloat | a `CLAUDE.md` or rule line that changed nothing, or that a check could enforce | delete it, or move it into the check |

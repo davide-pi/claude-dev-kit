@@ -184,14 +184,6 @@ mode is the model *acting* on a phrasing the skill does not own, or doing by han
 have done in one shot. The forked ones (`/db`, `/logs`) add a second check: the raw output
 must stay in the subagent.
 
-### `/docs-sync`
-
-| Prompt | Expected |
-|--------|----------|
-| `/docs-sync` | MUST run `doc-keeper` on the working diff against the repo's docs tree |
-| `/docs-sync wiki --audit` | MUST audit the wiki tree against the source |
-| "aggiorna il README del progetto" | MUST NOT (a single edit, no docs-tree sync) |
-
 ### `/retro`
 
 | Prompt | Expected |
