@@ -25,7 +25,6 @@ const FLOW_TOOLS = new Set(['Agent', 'Task', 'Workflow']);
 const OVERRIDES = ['pace: owner asked', 'pace: finish'];
 const WINDOW_NAME = { five_hour: '5h', seven_day: '7d' };
 const PACE_STATE = '~/.claude/scripts/pace-state.mjs';
-const RESUME_TASK = '~/.claude/scripts/resume-task.ps1';
 
 const cachePath = (configDir, ...parts) => path.join(configDir, '.cache', ...parts);
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
@@ -80,10 +79,10 @@ function noticeText(band, key, w, ctx) {
   const cron = ctx.modAlive
     ? 'The cockpit mod is alive: it resumes the chat, so CronDelete a resume prompt you created and create none. '
     : 'Then CronCreate a one-shot prompt at resumeAt (the --arm output gives its cron) to resume from the checkpoint. ';
-  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt and the checkpoint path), then \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid}\`. `;
-  const at96 = `Check the resume task exists (\`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid} -Check\`; create it when missing), update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. ${cron}`
+  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt and the checkpoint path). `;
+  const at96 = `Update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. ${cron}`
     + (ctx.modAlive ? 'The cockpit mod compacts after your turn. ' : 'Then ask the owner to run /compact. ');
-  const disarm = `If the work finishes before the limit: \`node ${PACE_STATE} --done --session ${sid}\`, \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${sid} -Remove\`, and CronDelete the resume prompt if you created one.`;
+  const disarm = `If the work finishes before the limit: \`node ${PACE_STATE} --done --session ${sid}\` and CronDelete the resume prompt if you created one.`;
   // A jump past a band between two hook calls: the skipped band's actions were never told, so the notice carries them first.
   const catch92 = ctx.catchUp92 ? `Not armed yet. ${arm}Start no new flow and ask the running flows for their state. ` : '';
   const catch96 = ctx.catchUp96 ? at96 : '';
@@ -145,7 +144,7 @@ const armed = (configDir, sid, now) => {
 function resumeContext(input, ctx) {
   const state = armed(ctx.configDir, input.session_id, ctx.now);
   if (!state) return null;
-  return `Usage pace checkpoint: ${state.checkpoint}. Read it and verify the real state first (git status, the perimeter, the last gate), then continue. When the work is finished run \`node ${PACE_STATE} --done --session ${input.session_id}\` and \`pwsh -NoProfile -File ${RESUME_TASK} -SessionId ${input.session_id} -Remove\`, and CronDelete the resume prompt if you created one.`;
+  return `Usage pace checkpoint: ${state.checkpoint}. Read it and verify the real state first (git status, the perimeter, the last gate), then continue. When the work is finished run \`node ${PACE_STATE} --done --session ${input.session_id}\` and CronDelete the resume prompt if you created one.`;
 }
 
 /** PreCompact stdout: the path first, verbatim, then the head of the checkpoint, so the summary keeps both. */

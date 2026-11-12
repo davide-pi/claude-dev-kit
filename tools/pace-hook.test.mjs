@@ -178,7 +178,7 @@ test('Given a cold start, When the hook handles a payload, Then it costs under 8
   assert.ok(hook - floor < 80, `hook ${hook.toFixed(0)} ms, node floor ${floor.toFixed(0)} ms`);
 });
 
-test('Given the settings template, When the hooks are read, Then pace.js is registered for the four events and the two scripts are allowed', () => {
+test('Given the settings template, When the hooks are read, Then pace.js is registered for the four events and pace-state is allowed, resume-task is not', () => {
   // Given
   const s = JSON.parse(read('settings.json'));
   const runsPace = (g) => (g.hooks || []).some((h) => (h.args || []).join(' ').includes("/pace.js'"));
@@ -192,7 +192,7 @@ test('Given the settings template, When the hooks are read, Then pace.js is regi
   assert.ok(s.hooks.PreCompact.some(runsPace));
   for (const tool of ['Bash', 'PowerShell']) {
     assert.ok(allow.some((a) => a.startsWith(`${tool}(`) && a.includes('scripts/pace-state.mjs')), `${tool} pace-state`);
-    assert.ok(allow.some((a) => a.startsWith(`${tool}(`) && a.includes('scripts/resume-task.ps1')), `${tool} resume-task`);
+    assert.ok(!allow.some((a) => a.includes('scripts/resume-task.ps1')), `${tool} resume-task is gone`);
   }
 });
 
@@ -200,18 +200,20 @@ test('Given the README, When the hooks and scripts rows are read, Then every pac
   // Given
   const readme = read('README.md');
   // When / Then
-  for (const f of ['hooks/pace.js', 'scripts/pace-state.mjs', 'scripts/resume-task.ps1', 'scripts/resume-launch.ps1']) {
+  for (const f of ['hooks/pace.js', 'scripts/pace-state.mjs']) {
     assert.ok(readme.includes(`\`${f}\``), `${f} has no README row`);
   }
+  for (const f of ['resume-task.ps1', 'resume-launch.ps1', 'CLAUDE_PACE_NO_SCHEDULER']) assert.ok(!readme.includes(f), `README still names ${f}`);
   assert.ok(readme.includes('docs/usage-pace.md'), 'README points to the doc');
 });
 
-test('Given docs/usage-pace.md, When it is read, Then it covers bands, files, resume, the cockpit contract and task removal', () => {
+test('Given docs/usage-pace.md, When it is read, Then it covers bands, files, resume and the cockpit contract, and no Windows task', () => {
   // Given
   const doc = read('docs/usage-pace.md');
   // When / Then
   for (const band of ['70', '85', '92', '96', '98']) assert.ok(doc.includes(`| ${band} |`), `doc has no row for band ${band}`);
-  for (const word of ['.usage-pace.json', '.mod.json', 'aliveAt', 'resume-launch.ps1', 'claude --resume', '-Sweep', '-Remove', '-DryRun', 'claude-resume-<id8>']) {
+  for (const word of ['.usage-pace.json', '.mod.json', 'aliveAt', 'claude --resume']) {
     assert.ok(doc.includes(word), `doc lacks ${word}`);
   }
+  for (const word of ['resume-task.ps1', 'resume-launch.ps1', 'Register-ScheduledTask', 'claude-resume-<id8>']) assert.ok(!doc.includes(word), `doc still names ${word}`);
 });

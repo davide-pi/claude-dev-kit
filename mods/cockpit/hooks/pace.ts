@@ -83,9 +83,9 @@ export function resumeStep(pace: PaceFile | undefined, mod: ModFile, rates: read
 export const compactInstructions = (checkpoint: string): string =>
   `Checkpoint: ${checkpoint}\nKeep this path verbatim at the top of the summary: the work resumes from that file after the usage window resets. Keep the task in hand, its perimeter and the next step.`
 
-/** The resume prompt, the launcher's own words (scripts/resume-launch.ps1). */
+/** The resume prompt the mod sends when it resumes the chat. */
 export const resumePrompt = (checkpoint: string): string =>
-  `The usage window has reset. Read the checkpoint at ${checkpoint} and check the real state (git status, the perimeter, the last gate) before you continue. When the work is finished, remove the resume task.`
+  `The usage window has reset. Read the checkpoint at ${checkpoint} and check the real state (git status, the perimeter, the last gate) before you continue. When the work is finished, run pace-state.mjs --done for this session.`
 
 // ── The effects: files, compaction, prompt ──
 
