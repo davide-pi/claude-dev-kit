@@ -164,6 +164,19 @@ test('attention: the worklog behind is a row with its icon and log hours on the 
   expect(await noSkill.ui.find({ key: 'attention:worklog' })).toBeUndefined()
 })
 
+test('attention: Given the worklog behind, a blocking signal and more notifications than fit, When drawn closed, Then the worklog row is pinned right under the blocking one, above every notification, never behind the toggle', async ($, on) => {
+  // Given
+  const reads = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`/src/f${i}.ts`, 4]))
+  const s = snap({ sessionId: 's-1', worklog: { pending: ['2026-10-20'], underTarget: [] }, insights: insights({ reads }), claudeState: WAITING, signalsAt: { [`permissionWait:${SINCE}`]: NOW - 1_000 } })
+  // When
+  const { rows, ui } = await draw($, on, s, attentionBlocks)
+  // Then
+  expect(await ui.find({ key: 'worklog:days' })).toBeDefined()
+  const at = (re: RegExp) => rows.findIndex(r => re.test(r))
+  expect(at(/permission/)).toBeLessThan(at(/without logged hours/))
+  expect(at(/without logged hours/)).toBeLessThan(at(/read 4/))
+})
+
 test('attention: at most five rows and eight drawn lines, the rest behind the toggle', async ($, on) => {
   const reads = Object.fromEntries(Array.from({ length: 7 }, (_, i) => [`/src/f${i}.ts`, 4]))
   const calls: string[] = []

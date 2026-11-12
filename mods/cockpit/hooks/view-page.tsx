@@ -41,7 +41,7 @@ function rowsWithin(lines: readonly number[], maxRows: number, maxLines: number)
   return n
 }
 
-/** The live notifications, blocking first then cost then the rest, and the worklog behind; "nothing to do" when there is neither. */
+/** The live notifications: blocking first, then the worklog behind, then the rest newest first; "nothing to do" when there is neither. */
 export function attentionBlocks(k: Kit): Block[] {
   const { ui, s, title, actions } = k
   const { Box, Button } = ui
@@ -60,18 +60,7 @@ export function attentionBlocks(k: Kit): Block[] {
   // a day row only when the signals span two or more local days; the blocking ones stay on top, outside any day
   const dayOf = (sig: Signal) => localDate(s.signalsAt?.[signalId(sig)] ?? s.now)
   signals.filter(sig => signalSeverity(sig) === 'block').forEach(add)
-  const rest = signals.filter(sig => signalSeverity(sig) !== 'block')
-  if (new Set(rest.map(dayOf)).size < 2) rest.forEach(add)
-  else {
-    ;[...new Set(rest.map(dayOf))].forEach((date, i) => {
-      const key = `day:att:${date}`
-      const isOpen = s.groupsOpen?.[key] ?? i === 0
-      rows.push(dayRow(k, key, date, isOpen, []))
-      lines.push(1)
-      if (isOpen) rest.filter(sig => dayOf(sig) === date).forEach(add)
-    })
-  }
-
+  // the worklog behind asks an action, not a look: pinned under the blocking ones, above every notification, so the collapse never hides it
   const late = worklogBehindRows(k, n => S.worklog.withoutHours(n))
   if (late !== undefined) {
     const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
@@ -90,6 +79,18 @@ export function attentionBlocks(k: Kit): Block[] {
       late.days,
     ])
     lines.push(1)
+  }
+
+  const rest = signals.filter(sig => signalSeverity(sig) !== 'block')
+  if (new Set(rest.map(dayOf)).size < 2) rest.forEach(add)
+  else {
+    ;[...new Set(rest.map(dayOf))].forEach((date, i) => {
+      const key = `day:att:${date}`
+      const isOpen = s.groupsOpen?.[key] ?? i === 0
+      rows.push(dayRow(k, key, date, isOpen, []))
+      lines.push(1)
+      if (isOpen) rest.filter(sig => dayOf(sig) === date).forEach(add)
+    })
   }
 
   if (rows.length === 0) return [[title(S.page.attention), line(ui, [sp('✓ ', COLORS.green), dim(S.page.nothingToDo)])]]
