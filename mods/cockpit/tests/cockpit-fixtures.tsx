@@ -120,11 +120,11 @@ export const fileOfSession = (writes: Map<string, string>, id: string): { histor
 export const PERIMETER = 'branch: feat/x\nstatus: active\n- src/a.ts\n- src/b/\n'
 
 /** A workflow agent's spawn: `runId` and its place in the run. */
-export const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number) =>
+export const spawnWorkflowAgent = ($: Engine, runId: string, agentIndex: number, description = `step ${agentIndex}`) =>
   $.agent.spawn({
     tool_use_id: 'wf-call',
     prompt: 'go',
-    description: `step ${agentIndex}`,
+    description,
     subagentType: 'implementer',
     provider: { plugin: 'engine', tier: 'core' },
     parentModel: 'claude-opus-5-5',

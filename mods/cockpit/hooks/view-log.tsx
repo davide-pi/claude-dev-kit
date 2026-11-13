@@ -7,7 +7,7 @@ import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWid
 import type { Span } from './shared'
 import { loggedSignal, signalSeverity } from './signals'
 import { t } from './strings'
-import { agentIcon, pairRow, visibleAgents } from './view-agents'
+import { agentIcon, pairRow, subagentDetails, trailRows, visibleAgents } from './view-agents'
 import type { CockpitAgent } from '../types'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
@@ -37,6 +37,8 @@ type DoneEntry = DoneEvent & {
   effort?: string | number
   /** An agent that still runs: its icon spins. */
   isRunning?: boolean
+  /** The running agent itself: its row opens on its detail and trail. */
+  live?: CockpitAgent
   /** The time the row shows, when it is not `at`. */
   start?: number
   usd?: number
@@ -69,6 +71,7 @@ function liveAgentEntry(a: CockpitAgent, runId: string, now: number): DoneEntry 
     kind: 'agent',
     icon: agentIcon(a),
     isRunning: true,
+    live: a,
     key: a.id,
     text: a.type,
     runId,
@@ -196,10 +199,18 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
 }
 
 /** An event row at `prefix`'s depth: time, icon, text, an agent also its model and figures at the end. */
-function eventRow(k: Kit, e: DoneEntry, prefix: string): Block {
+function eventRow(k: Kit, e: DoneEntry, prefix: string, toggle?: { key: string; isOpen: boolean; onPress: () => void }): Block {
   const { ui } = k
-  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : [])]
+  const { Button, Text } = ui
+  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : [])]
   const spans = [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))]
+  // a flow agent that runs is a toggle: its row opens on its detail and trail
+  const rest = (from: number): Block =>
+    toggle === undefined ? line(ui, spans.slice(from)) : (
+      <Button key={toggle.key} plain onPress={toggle.onPress}>
+        <Text wrap="truncate">{spanNodes(ui, spans.slice(from))}</Text>
+      </Button>
+    )
   // a running agent's icon spins: it leaves the line for an animated cell between the time and the rest
   const at = 3
   if (e.isRunning === true && ui.Client !== undefined && e.key !== undefined && spans[at]?.t === e.icon.t && spans[at + 1]?.t === ' ') {
@@ -208,15 +219,15 @@ function eventRow(k: Kit, e: DoneEntry, prefix: string): Block {
       <Box>
         {line(ui, spans.slice(0, at))}
         {animCell(ui, `anim:log:${e.key}`, 'spin', spans.slice(at, at + 2))}
-        {line(ui, spans.slice(at + 2))}
+        {rest(at + 2)}
       </Box>
     )
   }
-  return line(ui, spans)
+  return rest(0)
 }
 
 /** The rows under an open node: a round's summary and events; a run's agents, by the round their label names where it names one. */
-function nodeChildren(k: Kit, g: G): Block[] {
+function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
   const { ui, width } = k
   const summary = g.flow === undefined ? summarySpans(g, k.s) : []
   const files = g.flow === undefined ? filesText(g, k.s) : undefined
@@ -239,7 +250,21 @@ function nodeChildren(k: Kit, g: G): Block[] {
   /** The row of `e` at `base`'s depth, then what it made. */
   const rowWithKids = (e: DoneEntry, base: string, isLast: boolean): Block[] => {
     const kids = g.events.filter(x => x.agent !== undefined && x.agent === e.key).sort((a, b) => a.at - b.at)
-    return [eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`), ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
+    const cont = `${base}${isLast ? '  ' : '│ '}`
+    let head: Block[]
+    if (e.live === undefined || e.key === undefined || drawn === undefined) head = [eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`)]
+    else {
+      // a running flow agent: a toggle (open while it runs until a person closes it) over its detail and its trail
+      const key = `${g.key}:agent:${e.key}`
+      const isOpen = k.s.groupsOpen?.[key] ?? true
+      const indent = `${cont}  `
+      drawn?.add(e.key)
+      head = [
+        eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`, { key, isOpen, onPress: () => k.actions.setGroupOpen(key, !isOpen) }),
+        ...(isOpen ? [...subagentDetails(e.live, indent, width), ...trailRows(e.live, indent, width)].map(spans => line(ui, spans)) : []),
+      ]
+    }
+    return [...head, ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
   }
   const highest = Math.max(...byRound.keys())
   const items:((isLast: boolean) => Block[])[] = [
@@ -268,7 +293,7 @@ function nodeChildren(k: Kit, g: G): Block[] {
 }
 
 /** A node: its header (a button while it holds something) and, open, its children. `isNewest` fades the header from its highlight. */
-function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean): Block {
+function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean, drawn?: Set<string>): Block {
   const { ui, actions } = k
   const { Box, Button, Text } = ui
   const { arrow, rest, second } = nodeHeader(k, tree, g, isOpen)
@@ -308,7 +333,7 @@ function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean)
               </Box>,
             ],
           ]
-  return [header, ...link, ...(isOpen ? nodeChildren(k, g) : [])]
+  return [header, ...link, ...(isOpen ? nodeChildren(k, g, drawn) : [])]
 }
 
 /** A day's row: a toggle (arrow, date) with `right` at the row's end. */
@@ -322,10 +347,11 @@ export function dayRow(k: Kit, key: string, date: string, isOpen: boolean, right
   ]
 }
 
-/** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it. */
-export function liveBlocks(k: Kit): Block[] {
+/** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it; `drawn` holds the running agents the nodes list (IN CORSO leaves them out of its flat list). */
+export function liveBlocks(k: Kit): { blocks: Block[]; drawn: Set<string> } {
   const tree = buildTree(k)
-  return tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false))
+  const drawn = new Set<string>()
+  return { blocks: tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false, drawn)), drawn }
 }
 
 /**

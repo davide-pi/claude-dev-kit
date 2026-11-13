@@ -32,6 +32,11 @@ export function recordLog(log: readonly CockpitLogEntry[] | undefined, entry: Co
   return [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e).slice(-SESSION_LOG_KEEP)
 }
 
+/** `s` with a tool call's log `entries` (test runs, commits, a PR) in its session log: they never enter the agents' `events` ring, so no number of them evicts an agent event. */
+export function withLogEntries<S extends { sessionLog?: CockpitLogEntry[] }>(s: S, entries: readonly CockpitLogEntry[]): S {
+  return { ...s, sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
+}
+
 /** `log` with the newest round entry that has no cost given `usd`: a round whose cost was measured after it ended. An entry that has one, or no round, leaves the log as it was. */
 export function withRoundUsd(log: readonly CockpitLogEntry[] | undefined, usd: number): CockpitLogEntry[] | undefined {
   const newest = newestRound(log)

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { COLORS, clockTime, duration, effortGlyph, textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
-import { colorOf, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
+import { colorOf, gatedBash, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
 import { NOW, rowTexts, world } from './cockpit-world'
 
 const WIDE = 70
@@ -213,8 +213,8 @@ test('Given a flow with agents of round 1 and 2, one running, and a commit by ag
   expect(before[reviewer]).toContain(effortGlyph('high')?.icon)
   expect(running).toBeGreaterThan(commit)
   expect(before[running]).toContain('\u{F1396}')
-  // the LOG row's icon is an animated cell (the IN PROGRESS list spins its own agent too, so the LOG's makes at least one more than the list's)
-  expect(spinners.length).toBeGreaterThanOrEqual(2)
+  // the LOG row's icon is an animated cell (the flow agent shows once, under its flow: IN PROGRESS spins no second one)
+  expect(spinners.length).toBeGreaterThanOrEqual(1)
   expect(before[running]).toMatch(/\d\dm\d\ds/)
   expect(before[running]).not.toContain('\u{F012C}')
   expect(after.some(r => /▾ R1/.test(r))).toBe(true)
@@ -362,4 +362,87 @@ test('Given a live flow whose name and progress do not fit a narrow pane, When d
   const flowRow = rows.find(r => /^[▾▸-] \d\d:\d\d fl/.test(r)) ?? ''
   expect(flowRow).toMatch(/· 0\/1/)
   expect(flowRow).toMatch(/flow [^·]*… +· step 0 · 0\/1/)
+})
+
+// ── The flow agent's row: expandable, with its detail and its trail ──
+
+const TASK = 'Fix the lexer'
+const TRAIL = /\d\d:\d\d (?:\S )?(?:Grep|Bash) ?(.*?)\s*$/u
+
+/** A live run whose implementer made a Grep and has a Bash in flight; `look` reads the pane while the Bash holds. */
+async function withRunningAgent<T>($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], columns: number, look: (ui: Awaited<ReturnType<typeof mountPane>>) => Promise<T>) {
+  const clock = world(on)
+  spawns(on)
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  const release = gatedBash(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1, TASK)
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  const inFlight = $.tool.call({ tool: 'Bash', command: 'hold', description: 'Hold on', agentId: 'a1' })
+  await clock.advance(3000)
+  await settleAll()
+  const ui = await mountPane($, columns)
+  const out = await look(ui)
+  release('hold')
+  await inFlight
+  await ui.unmount().catch(() => undefined) // `look` may have unmounted it
+  return out
+}
+
+test('Given a running flow agent under the live flow node, When its row is open by default, Then its task, running tool and trail (newest first) render under it', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 100, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  const agent = rows.findIndex(r => /implementer/.test(r))
+  const task = rows.findIndex((r, i) => i > agent && r.includes(TASK)) // the flow's own row names the task as its phase too
+  const tool = rows.findIndex(r => r.includes('󰍟 Bash'))
+  const trail = rows.map((r, i) => ({ i, m: TRAIL.exec(r) })).filter(x => x.m !== null)
+  expect(agent).toBeGreaterThan(-1)
+  expect(task).toBeGreaterThan(agent)
+  expect(tool).toBeGreaterThan(agent)
+  expect(trail.map(x => x.m?.[1])).toEqual(['Hold on', 'Order'])
+  expect(trail[0]?.i).toBeGreaterThan(agent)
+})
+
+test('Given a person closes the flow agent row, When IN PROGRESS re-renders, Then only the agent row shows and a new pane keeps it closed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const closed = await withRunningAgent($, on, 100, async ui => {
+    await ui.press({ key: 'flow:wf_1:agent:a1' })
+    const rows = rowTexts(await ui.drawn())
+    await ui.unmount()
+    const again = await mountPane($, 100)
+    const rowsAgain = rowTexts(await again.drawn())
+    await again.unmount()
+    return { rows, rowsAgain }
+  })
+  // Then
+  for (const rows of [closed.rows, closed.rowsAgain]) {
+    expect(rows.some(r => /implementer/.test(r))).toBe(true)
+    expect(rows.slice(rows.findIndex(r => /implementer/.test(r)) + 1).some(r => r.includes(TASK))).toBe(false)
+    expect(rows.some(r => TRAIL.test(r))).toBe(false)
+  }
+})
+
+test('Given a flow agent that spawns a subagent outside any run, When IN PROGRESS is drawn, Then the subagent is still listed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 0)
+  await $.agent.spawn({ tool_use_id: 'child', prompt: 'go', description: 'look around', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false, parentAgentId: 'a1' } as never)
+  await settleAll()
+  // When
+  const ui = await mountPane($, 100)
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  // Then
+  expect(rows.some(r => /Explore/.test(r))).toBe(true)
+})
+
+test('Given a narrow pane, When the open flow agent is drawn, Then no row is wider than the pane', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 30, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  expect(rows.some(r => r.includes('Hold'))).toBe(true)
+  expect(rows.filter(r => textCells(r) > 30)).toEqual([])
 })

@@ -37,6 +37,19 @@ export type CockpitAgent = {
   stepUsage?: CockpitUsage
   /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
   runId?: string
+  /** The agent's last tool calls (8 at most, oldest first), in memory only: never written to the session data. */
+  trail?: CockpitTrailEntry[]
+}
+
+/** One tool call of an agent's trail: a short label from the call's own arguments, never a raw command or a full path. */
+export type CockpitTrailEntry = {
+  tool: string
+  label?: string
+  at: number
+  /** True once the call returned. */
+  isDone?: boolean
+  /** True when the call ended on an error or a refusal. */
+  isFailed?: boolean
 }
 
 /** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */

@@ -1,6 +1,6 @@
 import type { CockpitAgent, CockpitSnapshot, CockpitTask } from '../types'
 import { AGENT_KEEP_MS, tokenShare } from './agents'
-import { COLORS, abbrevTokens, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
+import { COLORS, abbrevTokens, clockTime, costCell, duration, modelFamily, padCells, shortModel, spanWidth, truncEnd, truncateSpans, wrapCells } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
 import { dim, padStart, sp } from './view-base'
@@ -155,6 +155,14 @@ export function subagentDetails(a: CockpitAgent, indent: string, width: number):
   const task = a.description ? wrapped(indent, [], a.description.replace(/\s+/g, ' '), dim, width) : []
   const total = dim(`${indent}${t().costDetail.tokens(abbrevTokens(a.tokens))}`)
   return [truncateSpans([total], width), ...task, ...(counters ? [counters] : []), ...tool]
+}
+
+/** An agent's trail, newest first, dim: time, a mark while the call runs (or failed), tool and its short label; each row cut to `width`. */
+export function trailRows(a: CockpitAgent, indent: string, width: number): Span[][] {
+  return [...(a.trail ?? [])].reverse().map(c => {
+    const mark = c.isDone !== true ? [sp('󱎖', COLORS.blue), sp(' ')] : c.isFailed ? [sp('󰅖', COLORS.red), sp(' ')] : []
+    return truncateSpans([dim(indent), dim(clockTime(c.at)), sp(' '), ...mark, dim(c.tool), ...(c.label === undefined ? [] : [dim(` ${c.label}`)])], width)
+  })
 }
 
 /** `text` in full under `indent` after `label` on its first row: it wraps to `width` instead of being cut. */

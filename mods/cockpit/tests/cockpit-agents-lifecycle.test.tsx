@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { orderAgents } from '../hooks/view-agents'
-import { SPAWN, entry, fileOfSession, finishAgent, launchWorkflow, mountPane, openCockpit, settleAll, spawnAgent, spawnWorkflowAgent, spawns, workflowLaunches } from './cockpit-fixtures'
+import { SPAWN, entry, fileOfSession, finishAgent, gatedBash, launchWorkflow, mountPane, openCockpit, settleAll, spawnAgent, spawnWorkflowAgent, spawns, workflowLaunches } from './cockpit-fixtures'
 import { NOW, dataOf, rowTexts, world } from './cockpit-world'
 
 type Ui = Awaited<ReturnType<typeof mountPane>>
@@ -182,12 +182,12 @@ test('workflow agents: a tick does not end an agent just because the engine does
   await spawnWorkflowAgent($, 'wf_1', 2)
   await clock.advance(30_000) // two ticks
   const ui = await mountPane($)
-  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^implementer/)
-  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^implementer/)
+  expect((await ui.find({ key: 'flow:wf_1:agent:a1' }))?.text).toMatch(/implementer/)
+  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
   await finishAgent($, 'a1')
   await clock.advance(30_000)
-  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
-  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^implementer/)
+  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
+  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
   expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰄬 implementer'])
   await ui.unmount()
 })
@@ -201,8 +201,8 @@ test('workflow agents: an explicit failed or killed listing ends them', { timeou
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
-  expect((await ui.find({ key: 'agent:a2' }))?.text).toMatch(/^implementer/)
+  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
+  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
   expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰅖 implementer'])
   await ui.unmount()
 })
@@ -220,11 +220,11 @@ test('workflow agents: the end of their run (silence past the limit) ends the on
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'a1' }) // a step: the silence starts over
   await clock.advance(10 * 60_000)
   let ui = await mountPane($)
-  expect((await ui.find({ key: 'agent:a1' }))?.text).toMatch(/^implementer/)
+  expect((await ui.find({ key: 'flow:wf_1:agent:a1' }))?.text).toMatch(/implementer/)
   await ui.unmount()
   await clock.advance(6 * 60_000)
   ui = await mountPane($)
-  expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
+  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
   // the stall that closed the run is logged when it first held, beside the agent it ended
   expect(await doneAgents(ui)).toEqual(['󰄬 implementer', '󰏥 workflow'])
   await ui.press({ key: 'bar:compact' })
@@ -303,4 +303,78 @@ test('flow: given a run silent past the limit, when the tick closes it, then no 
   // Then
   expect(before.filter(e => e.kind === 'flow')).toEqual([])
   expect(after.filter(e => e.kind === 'flow')).toMatchObject([{ key: 'w1', isFailed: true }])
+})
+
+// ── The trail: what a subagent did and does, in memory only ──
+
+/** The trail rows a pane draws, newest first, as `{ mark, text }` (`<tool> <label>`): a row is a time, an optional one-glyph mark, a tool and its label. */
+const trailRows = (rows: string[]) =>
+  rows.flatMap(r => {
+    const m = /\d\d:\d\d (?:(\S) )?(Grep|Bash|Read) ?(.*?)\s*$/u.exec(r)
+    return m ? [{ mark: m[1], text: `${m[2]} ${m[3]}`.trim() }] : []
+  })
+
+test('trail: Given a subagent making 10 tool calls, When the last one is still running, Then the trail holds the last 8 newest first, the running one marked and the finished ones not', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on)
+  spawns(on)
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  const release = gatedBash(on)
+  await start($)
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  // When
+  for (let n = 1; n <= 9; n++) await $.tool.call({ tool: 'Grep', pattern: `p${n}`, agentId: 'a1' })
+  const last = $.tool.call({ tool: 'Bash', command: 'hold', description: 'Hold on', agentId: 'a1' })
+  await clock.advance(3000)
+  await settleAll()
+  const ui = await mountPane($, 100)
+  const trail = trailRows(rowTexts(await ui.drawn()))
+  release('hold')
+  await last
+  await ui.unmount()
+  // Then
+  expect(trail.map(r => r.text)).toEqual(['Bash Hold on', 'Grep p9', 'Grep p8', 'Grep p7', 'Grep p6', 'Grep p5', 'Grep p4', 'Grep p3'])
+  expect(trail[0]?.mark).toBe('󱎖')
+  expect(trail.slice(1).every(r => r.mark !== '󱎖')).toBe(true)
+})
+
+test('trail: Given a Read of C:/a/b/c.ts and a Bash with a description and a command, When they are recorded, Then the labels are the file name and the description, with no raw command or full path anywhere', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on)
+  spawns(on)
+  on('tool.call', { tool: 'Read' }, () => ({ result: {} }))
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  await start($)
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  // When
+  await $.tool.call({ tool: 'Read', file_path: 'C:/a/b/c.ts', agentId: 'a1' })
+  await $.tool.call({ tool: 'Bash', command: 'rm -rf x', description: 'Run tests', agentId: 'a1' })
+  await clock.advance(3000)
+  await settleAll()
+  const ui = await mountPane($, 100)
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  // Then
+  expect(trailRows(rows).map(r => r.text)).toEqual(['Bash Run tests', 'Read c.ts'])
+  expect(rows.some(r => r.includes('rm -rf') || r.includes('C:/a'))).toBe(false)
+})
+
+test('trail: Given an agent that made tool calls, When the session data is written, Then it holds no trail and no raw command', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  spawns(on)
+  on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
+  on('turn.complete', () => ({ text: '' }))
+  await start($)
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await $.tool.call({ tool: 'Bash', command: 'rm -rf x', description: 'Run tests', agentId: 'a1' })
+  // When
+  await finishAgent($, 'a1')
+  await clock.advance(3000)
+  await settleAll()
+  // Then
+  const written = [...writes.values()].join('\n')
+  expect(written).not.toContain('"trail"')
+  expect(written).not.toContain('rm -rf')
 })
