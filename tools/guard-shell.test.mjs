@@ -23,7 +23,7 @@
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync, spawn } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, utimesSync, symlinkSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, existsSync, utimesSync, symlinkSync, realpathSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { fileURLToPath } from 'node:url';
@@ -645,6 +645,196 @@ test('given the Windows 8.3 short form of a temp folder, when a delete targets i
   assert.equal(withSession(`rm -rf ${short}/sess-b/x`, 'sess-a').decision, 'ask');
 });
 
+// Every spelling of this machine's temp folder: long profile name, os.tmpdir()'s own (maybe 8.3), drive form and MSYS form.
+const spellings = () => {
+  const long = realpathSync.native(tmpdir()).replace(/\\/g, '/');
+  const own = tmpdir().replace(/\\/g, '/');
+  const msys = (p) => p.replace(/^([A-Za-z]):/, (_, d) => `/${d.toLowerCase()}`);
+  return [...new Set([long, own, msys(long), msys(own)])];
+};
+
+test('given a recursive delete below the session folder written in any spelling of the temp folder, when the guard reads it, then it approves', { skip: process.platform !== 'win32' }, () => {
+  for (const root of spellings()) {
+    // Given
+    const dir = `${root}/claude/proj/session`;
+    const commands = [`rm -rf "${dir}/x"`, `rm -rf '${dir}/x'`, `S="${dir}"; rm -rf "$S/x"`, `S='${dir}'\nrm -rf "$S/x"`];
+
+    for (const command of commands) {
+      // When
+      const { decision } = runRaw(JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd: onFeature }));
+
+      // Then
+      assert.equal(decision, 'approve', command);
+    }
+  }
+});
+
+test('given a recursive delete that is not strictly below a session folder, or a plain path, in any spelling, when the guard reads it, then it asks', { skip: process.platform !== 'win32' }, () => {
+  for (const root of spellings()) {
+    // Given
+    const dir = `${root}/claude/proj/session`;
+    const commands = [
+      `rm -rf "${root}/claude/proj"`, `rm -rf "${dir}"`, `rm -rf "${dir}/../x"`, `rm -rf "${dir}/x/.."`, `rm -rf "${dir}/*"`,
+      `rm -rf "${root}/other"`, `rm -rf "${root}/other/claude/proj/session/x"`, `S="${root}/claude/proj"; rm -rf "$S"`,
+      `S="${dir}"; rm -rf "$S/../x"`, `rm -rf "${dir}/$(whoami)"`,
+    ];
+
+    for (const command of commands) {
+      // When / Then
+      asks(command, /recursively or by force|previous command/);
+    }
+  }
+});
+
+test('given a heredoc whose receiver is not a shell, when its body holds a destructive text, then the guard approves', () => {
+  // Given
+  const bodies = ['rm -rf /', 'docker compose down -v', 'git push --delete origin main'];
+  const heads = ['cat > f.js', 'cat >> f.txt', 'node -', 'python -', 'python3 -', 'tee out.txt', 'deno run -', 'ruby -', 'perl -'];
+
+  for (const head of heads) for (const body of bodies) {
+    const command = `${head} <<'EOF'\n${body}\nEOF`;
+
+    // When
+    const { decision } = runShell(command);
+
+    // Then
+    assert.equal(decision, 'approve', command);
+  }
+});
+
+test('given a heredoc whose receiver is a shell, when its body holds rm -rf /, then the guard still asks', () => {
+  // Given
+  const heads = ['bash', 'sh -s', 'pwsh -Command -', 'ssh host', 'docker exec -i c sh', 'zsh', 'bash -s --'];
+
+  for (const head of heads) {
+    const command = `${head} <<'EOF'\nrm -rf /\nEOF`;
+
+    // When / Then
+    asks(command, /recursively or by force/);
+  }
+});
+
+test('given a script written by heredoc without a suffix, when a prefix command runs it, then the guard still asks', () => {
+  // Given
+  const runs = ['timeout 60 ./s', 'stdbuf -o0 ./s', 'watch ./s', 'watch s', 'nice ./s', 'setsid ./s', 'flock l ./s', 'strace ./s', 'doas ./s'];
+
+  for (const run of runs) {
+    const command = `cat > s <<'EOF'\nrm -rf /\nEOF\n${run}`;
+
+    // When / Then
+    asks(command, /recursively or by force/);
+  }
+});
+
+test('given a database client heredoc, when its body holds a destructive statement, then the guard still asks', () => {
+  // Given
+  const commands = [
+    `psql <<'SQL'\nDROP TABLE x;\nSQL`,
+    `sqlcmd -S s <<'SQL'\nTRUNCATE TABLE x;\nSQL`,
+    `mysql db <<'SQL'\nDROP DATABASE x;\nSQL`,
+    `sqlite3 f.db <<'SQL'\nDROP TABLE x;\nSQL`,
+    `redis-cli <<'R'\nFLUSHALL\nR`,
+    `mongosh <<'J'\ndb.dropDatabase()\nJ`,
+    `cqlsh <<'C'\nTRUNCATE t;\nC`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const { decision } = runShell(command);
+
+    // Then
+    assert.notEqual(decision, 'approve', command);
+  }
+});
+
+test('given a destructive opening line with a heredoc, when the guard reads it, then it still asks', () => {
+  // Given
+  const commands = [`cat <<EOF | sh\nrm -rf /\nEOF`, `rm -rf x <<EOF\nhello\nEOF`, `cat <<'EOF' | bash\nrm -rf /\nEOF`];
+
+  for (const command of commands) {
+    // When / Then
+    asks(command, /recursively or by force/);
+  }
+});
+
+test('given a body that may run as a command, when the guard reads the line, then it still asks', () => {
+  // Given
+  const commands = [
+    `timeout 60 bash <<'EOF'\nrm -rf /\nEOF`, `sudo -s <<'EOF'\nrm -rf /\nEOF`, `(bash <<'EOF'\nrm -rf /\nEOF\n)`,
+    `{ cat <<'EOF'\nrm -rf /\nEOF\n} | bash`, `cat <<EOF\n$(rm -rf /)\nEOF`, `cat <<EOF\n\`rm -rf /\`\nEOF`,
+    `echo $((1 << n))\nrm -rf src`, `cat <<'EOF.md' > notes.md\ntext\nEOF.md\nrm -rf src`,
+    `psql <<'SQL'\nDROP TABLE x;\nSQL`, `sqlcmd <<'SQL'\nTRUNCATE TABLE x;\nSQL`, `mysql <<'SQL'\nDROP TABLE x;\nSQL`,
+    `sqlite3 db <<'SQL'\nDROP TABLE x;\nSQL`, `redis-cli <<'R'\nFLUSHALL\nR`, `mongosh <<'J'\ndb.dropDatabase()\nJ`,
+    `cqlsh <<'C'\nDROP TABLE x;\nC`,
+  ];
+
+  for (const command of commands) {
+    // When / Then
+    const { decision } = runShell(command);
+    assert.equal(decision, 'ask', command);
+  }
+});
+
+test('given a body fed through process substitution, a trailing pipe or a script it wrote, when the guard reads the line, then it still asks', () => {
+  // Given
+  const commands = [
+    `cat <<'EOF' > >(bash)\nrm -rf /\nEOF`, `tee >(sh) <<'EOF'\nrm -rf /\nEOF`, `cat <<'EOF' |\nrm -rf /\nEOF\nsh`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nbash s.sh`, `cat > s.sh <<'EOF'\nrm -rf /\nEOF; bash s.sh`, `cat <<'EOF' \\\nrm -rf /\nEOF`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nchmod +x s.sh && ./s.sh`, `cat > s.sh <<'EOF'\nrm -rf /\nEOF\ntimeout 60 bash s.sh`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nash s.sh`, `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nfish s.sh`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nbusybox ash s.sh`, `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nwatch s.sh`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nstdbuf -o0 s.sh`,
+    `cat > s.sh <<'EOF'\nrm -rf /\nEOF\nnice sh s.sh`, `cat > s.sh <<'EOF'\nrm -rf /\nEOF\n"$SHELL" s.sh`,
+  ];
+
+  for (const command of commands) {
+    // When / Then
+    asks(command, /recursively or by force/);
+  }
+});
+
+test('given a data receiver with a dangerous body and no runner anywhere, when the guard reads it, then it approves', () => {
+  // Given
+  const commands = [`cat > f <<'EOF'\nrm -rf /\nEOF`, `node - <<'EOF'\nrm -rf /\nEOF`, `python - <<'EOF'\nrm -rf /\nEOF`];
+
+  for (const command of commands) {
+    // When
+    const { decision } = runShell(command);
+
+    // Then
+    assert.equal(decision, 'approve', command);
+  }
+});
+
+test('given a PowerShell /c/ temp path, when the guard reads a recursive delete, then it asks', { skip: process.platform !== 'win32' }, () => {
+  // Given
+  const root = spellings().find((s) => s.startsWith('/c/'));
+  const command = `Remove-Item -Recurse -Force ${root}/claude/proj/session/x`;
+
+  // When
+  const { decision } = asTool('PowerShell', command);
+
+  // Then
+  assert.equal(decision, 'ask', command);
+});
+
+test('given PowerShell here-strings, when a command follows a closer or the text expands, then the guard still asks', () => {
+  // Given
+  const commands = [
+    `$s = @'\ntext\n'@; Remove-Item -Recurse -Force C:\\repo\\src`, `$s = @'\ntext\n'@ | Invoke-Expression; Remove-Item -Recurse -Force C:\\repo\\src`,
+    `$s = @"\n$(Remove-Item -Recurse -Force C:\\repo\\src)\n"@`,
+    `$a = @'\none\n'@\n$b = @'\ntwo\n'@; Remove-Item -Recurse -Force C:\\repo\\src`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const { decision } = asTool('PowerShell', command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+});
+
 const asTool = (tool_name, command) => runRaw(JSON.stringify({ tool_name, tool_input: { command }, cwd: onFeature }));
 
 /** A real `<tmp>/claude/cdproj/cdsess/scratchpad/ui-tests` folder: a `cd` into it only counts when it exists. */
@@ -1144,6 +1334,96 @@ test('given gate.mjs called with the build, lint and package runners the loops u
 
       // Then
       assert.equal(result.decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with npm --prefix test --include or exec vitest run on relative paths, when the guard reads it, then it approves in both shells', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'npm --prefix src/ClientApp test -- --include=src/a.spec.ts --include=src/b.spec.ts'`,
+    `${GATE} --test 'npm --prefix src/ClientApp run test -- --include=src/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix src/ClientApp test -- --watch=false --include=src/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix src/ClientApp exec vitest -- run src/a.test.ts src/b'`,
+    `${GATE} --red --unit 'npm --prefix x exec vitest -- run a.test.ts' --test-files a.test.ts`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'approve', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with an include or run path that is absolute, climbs, expands or chains a command, when the guard reads it, then it still asks', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'npm --prefix x test -- --include=/etc/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=C:/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=//host/share/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=../a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/../../a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=$HOME/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include="src/a.spec.ts"'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts && calc'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts; calc'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts | calc'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts > out.txt'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run /etc/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run ../a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/../../a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run $HOME/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run "src/a.test.ts"'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/a.test.ts && calc'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/a.test.ts; calc'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/a.test.ts | calc'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
+    }
+  }
+});
+
+test('given gate.mjs called with a hijack flag or an exec target other than vitest on those runners, when the guard reads it, then it still asks', () => {
+  // Given
+  const commands = [
+    `${GATE} --test 'npm --prefix x test --script-shell calc.exe -- --include=src/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts --script-shell=calc.exe'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts --userconfig=evil'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts --globalconfig=evil'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts --node-options=--require=evil'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts --prefix=evil'`,
+    `${GATE} --test 'npm --prefix x --prefix y test -- --include=src/a.spec.ts'`,
+    `${GATE} --test 'npm --prefix x test -- --include=src/a.spec.ts -c calc'`,
+    `${GATE} --test 'npm --prefix x exec --call calc'`,
+    `${GATE} --test 'npm --prefix x exec -c calc'`,
+    `${GATE} --test 'npm --prefix x exec vitest -c calc -- run src/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest --script-shell=calc.exe -- run src/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/a.test.ts --node-options=--require=evil'`,
+    `${GATE} --test 'npm --prefix x exec vitest -- run src/a.test.ts --config=evil.ts'`,
+    `${GATE} --test 'npm --prefix x exec eslint -- run src/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec evil-vitest -- run src/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec vitest-evil -- run src/a.test.ts'`,
+    `${GATE} --test 'npm --prefix x exec -- vitest run src/a.test.ts'`,
+  ];
+
+  for (const command of commands) {
+    for (const tool of BOTH) {
+      // When
+      const result = runTool(tool, command);
+
+      // Then
+      assert.equal(result.decision, 'ask', `${tool}: ${command}`);
     }
   }
 });

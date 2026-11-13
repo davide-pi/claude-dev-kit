@@ -279,25 +279,88 @@ function walk(command) {
   return out;
 }
 
-const HEREDOC = /(?<!<)<<(?!<)-?\s*['"]?([A-Za-z_][\w-]*)['"]?/;   // `<<<` is a here-string of one word, no body
-const HERE_STRING_OPEN = /@['"]\s*$/;
-const HERE_STRING_CLOSE = /^['"]@/;
+// `<<` opens a heredoc unless it is `<<<`; the delimiter is the whole word, quotes off (`quoted` tells which).
+const HEREDOC = /(?<!<)<<(?!<)-?\s*(?:'([^']*)'|"([^"]*)"|([^\s;|&<>()'"]+))/;
+const HERE_STRING_OPEN = /@(['"])\s*$/;
+const UNQUOTED_DELIMITER = /(?<!<<-?\s*)(['"])[^'"]*\1/g;
 
-/** The command without heredoc and here-string bodies: the line that opens one is kept, its body and closer dropped. */
-function withoutBodies(command) {
+/**
+ * The command without heredoc and here-string bodies for which `dropBody(bareLine, open)` is true (all of
+ * them by default). The opening line stays; a body is dropped only when its closer is found, so an
+ * unclosed `<<` (`$((1 << n))`) never swallows the rest. A here-string closes only on a bare `'@` line: with a command after it (`'@ | iex`) the body stays.
+ */
+function stripBodies(command, { dropBody = () => true, hereStrings = true } = {}) {
+  const lines = command.split(/\r?\n/);
   const kept = [];
-  let close = null;
-  for (const line of command.split(/\r?\n/)) {
-    if (close) {
-      if (close(line)) close = null;
-      continue;
-    }
-    kept.push(line);
-    const heredoc = HEREDOC.exec(line);
-    if (heredoc) close = (l) => l.trim() === heredoc[1];
-    else if (HERE_STRING_OPEN.test(line)) close = (l) => HERE_STRING_CLOSE.test(l);
+  for (let i = 0; i < lines.length; i += 1) {
+    kept.push(lines[i]);
+    const bare = lines[i].replace(UNQUOTED_DELIMITER, '""');
+    const here = HEREDOC.exec(bare);
+    const str = hereStrings && !here && HERE_STRING_OPEN.exec(bare);
+    if (!here && !str) continue;
+    const delimiter = here && (here[1] ?? here[2] ?? here[3]);
+    const open = here ? { heredoc: true, delimiter, quoted: here[3] === undefined } : { heredoc: false, quote: str[1] };
+    if (!dropBody(bare, open, lines[i])) continue;
+    const closes = here ? (l) => l.trim() === delimiter : (l) => l.trim() === `${open.quote}@`;
+    const end = lines.findIndex((l, j) => j > i && closes(l));
+    if (end < 0) continue;
+    i = here ? end : end - 1;
   }
   return kept.join('\n');
+}
+
+/** The command without heredoc and here-string bodies: the line that opens one is kept, its body dropped. */
+const withoutBodies = (command) => stripBodies(command);
+
+// Receivers that read the body as data, never as commands. Anything else (a shell, ssh, docker, a DB client,
+// a wrapper such as sudo or timeout) may run it, so its body stays checked.
+const DATA_RECEIVERS = new Set([
+  'cat', 'tee', 'node', 'python', 'python3', 'deno', 'ruby', 'perl', 'git', 'gh',
+  'set-content', 'add-content', 'out-file',
+]);
+const SIMPLE_DELIMITER = /^[A-Za-z_][\w-]*$/;
+// Commands that may run a body: shells, remote and container shells, eval-likes, DB clients.
+const BODY_RUNNERS = new Set([
+  'bash', 'sh', 'zsh', 'dash', 'ash', 'ksh', 'fish', 'csh', 'tcsh', 'busybox', 'pwsh', 'powershell', 'cmd', 'eval', 'source', '.', 'xargs', 'su', 'wsl', 'ssh',
+  'iex', 'invoke-expression', 'psql', 'sqlcmd', 'mysql', 'sqlite3', 'redis-cli', 'mongosh', 'cqlsh',
+]);
+const EXEC_CLIS = new Set(['docker', 'podman', 'kubectl']);
+
+/** True when the command, bodies off, has a segment that may run text as commands (or a script a body wrote). */
+function hasBodyRunner(command) {
+  const targets = redirectTargets(command);
+  return expandSegments(stripBodies(command)).some((tokens) => [tokens, stripWrappers(tokens)].some((cmd) => {
+    const name = cmd.length ? baseName(cmd[0]).toLowerCase() : '';
+    if (BODY_RUNNERS.has(name) || (EXEC_CLIS.has(name) && cmd.some((t) => /^exec$/i.test(t)))) return true;
+    if (!cmd.length || DATA_RECEIVERS.has(name)) return false;
+    // `./s.sh`, `"$SHELL" s.sh`, `timeout 60 bash s.sh`, `nice sh s.sh`: a path, a variable or a runner after a prefix command.
+    // `watch s.sh`, `stdbuf -o0 s.sh`: a script argument after a prefix command counts too.
+    // A script named without a suffix (`timeout 60 ./s`, `watch s`): a path-like argument or a written file's name counts too.
+    return /[\\/$]|\.(?:sh|ps1|bat|cmd)$/i.test(cmd[0])
+      || cmd.slice(1).some((t) => BODY_RUNNERS.has(baseName(t)) || /\.(?:sh|ps1|bat|cmd)$/i.test(t) || /[\\/]/.test(t) || targets.has(t));
+  }));
+}
+
+/** File names a command writes to: `> s`, `>> s`, `tee s`, `tee -a s` (quotes dropped). */
+function redirectTargets(command) {
+  const names = new Set();
+  for (const m of command.matchAll(/>>?\s*(\S+)|\btee\s+(?:-\S+\s+)*(\S+)/g)) names.add((m[1] ?? m[2]).replace(/^['"]|['"]$/g, ''));
+  return names;
+}
+
+/** True when the heredoc body opened on `line` is plain data: quoted delimiter, only data receivers, nothing that expands or pipes on. */
+function isDataBody(bare, open, line) {
+  if (!open.heredoc || !open.quoted || !SIMPLE_DELIMITER.test(open.delimiter)) return false;
+  if (/<\(|>\(|\$\(|`/.test(line) || /(?:\||&&|\\)\s*$/.test(line)) return false;
+  return parseSegments(bare).every((tokens) => DATA_RECEIVERS.has(baseName(tokens[0]).toLowerCase()));
+}
+
+/**
+ * The command without the heredoc bodies whose receiver is data (`cat > f`, `node -`, `tee`), unless some
+ * command outside the bodies may run text (`bash s.sh` after `cat > s.sh <<'EOF'`): then every body stays.
+ */
+function withoutDataBodies(command) {
+  return hasBodyRunner(command) ? command : stripBodies(command, { dropBody: isDataBody, hereStrings: false });
 }
 
 /** Every command of a line as a token list, wrapper and substitution contents included. */
@@ -308,5 +371,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies,
 };
