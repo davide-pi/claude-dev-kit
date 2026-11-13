@@ -36,8 +36,8 @@ data, contract; `medium` local logic, testable; `low` cosmetic.
 
 ## Done means verified
 Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
-isn't proof). A main-session reply after an edit, commit, push or install puts a `**Verification**` line right after the bold outcome line, plain
-`Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `✓ done`, `? not verified: <reason>`
+isn't proof). A main-session reply after an edit, commit, push or install puts, after the bold outcome line, a `> ` quoted block:
+`**Verification**`, then the `Level|Command|Deciding line|Status` table, no fence; Deciding line: verbatim output. Status: `✓ done`, `? not verified: <reason>`
 (Command: how to check), `✗ failed` (quoted).
 
 ## Tools, no prompts

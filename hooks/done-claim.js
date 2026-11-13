@@ -445,7 +445,7 @@ try {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict rows against the command output. '
-          + 'Rewrite the verdict, a bold "**Verifica**" title line (English: "**Verification**") followed by the plain table (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
+          + 'Rewrite the verdict, a bold "**Verifica**" title line (English: "**Verification**") followed by the table, both quoted with "> " (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
       }));
       process.exit(0);
     }
@@ -471,7 +471,7 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the verdict: a bold "**Verifica**" title line (English chat: "**Verification**") followed by the plain table ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
+      + 'confirms it in the verdict: a bold "**Verifica**" title line (English chat: "**Verification**") followed by the table, both quoted with "> " ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
       + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
