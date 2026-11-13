@@ -33,17 +33,19 @@ Pace files and checkpoints under `.cache/resume/` are pruned after 7 days; so ar
 
 ## Bands (both windows, the weekly one is not spread over days)
 
+Every notice carries the burn in %/h and the estimated time of each next band at that rate (none past the reset).
+
 | Band | What the chat does |
 | --- | --- |
-| 70 | notice only: projection and reset time |
-| 85 | fewer parallel agents, smaller models where they are enough |
-| 92 | `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), start no new flow, ask running flows for their state and write the checkpoint |
+| 70 | notice only |
+| 85 | weigh the burn since the last notice: fewer parallel agents or a slower pace, same models (quality first) |
+| 92 | finish the work in hand: no new Workflow, small steps, one subagent at a time, no critical operation (merge, push, migration, deploy, delete); `pace-state.mjs --arm` (prints `resumeAt`, `resumeAtLocal`, `cron` and the checkpoint path), ask running flows for their state and write the checkpoint |
 | 96 | update the checkpoint, `pace-state.mjs --ready`; with no live mod `CronCreate` a one-shot at `resumeAt`, with one `CronDelete` any it has (decided here, not at 92: the mod beats every 30 s only once the pace file exists, so right after `--arm` it can look dead); the mod compacts after the turn, else the chat asks the owner to run `/compact` |
-| 98 | close the step in hand, stop the flows cleanly, last checkpoint update, stop; a subagent closes its step and reports its state |
+| 98 | close the step in hand cleanly, stop the flows without half-written work, last checkpoint update, stop; a subagent closes its step and reports its state |
 
 Notices at 92 and 96 go to the main loop only; subagents hear 70, 85 and 98. A jump over bands sends one notice, the
 highest band's, which carries first the actions of a skipped 92 (arm the resume) and 96 (`--ready`, compaction). The 92 and 96 notices also say how to disarm when the work ends before the limit. The brake: in the main
-loop, from 92% on either window, a new `Agent`, `Task` or `Workflow` is denied unless its prompt or args contain
+loop, from 92% on either window, a new `Workflow` is denied (one `Agent` at a time stays allowed) unless its prompt or args contain
 `pace: owner asked` or `pace: finish`. Data older than 10 minutes, or a window past its reset, lifts it. Flows inside a
 workflow never pass the hook; they hear the 98 notice on their own tool calls.
 

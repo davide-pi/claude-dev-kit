@@ -128,7 +128,8 @@ pwsh -NoProfile -File ~/.claude/scripts/perimeter.ps1 -Close -FindingsLog '<find
 
 `-LogRun` appends the line and keeps the perimeter active (a run that is not the last of the change); `-Close
 -FindingsLog` logs and closes in one call. The JSON goes in single quotes (inside them PowerShell doubles a single
-quote). The line is appended to `$(git rev-parse --git-dir)/deliver/findings.jsonl` (never committed): the object plus
+quote); or write it to a file in the scratchpad and pass the quoted path (`-FindingsLog '<path>'`), never an unquoted
+`$variable` (guard-shell denies it). The line is appended to `$(git rev-parse --git-dir)/deliver/findings.jsonl` (never committed): the object plus
 `at`, `run`, `minutes` (since the previous logged run's `at`, or `opened:` for the first) and `tokens` when given.
 `-Tokens`: the `usage` / subagent tokens of the workflow's completion notification when it shows them, else omit it.
 A bare `-Close` needs a run already logged since `opened:`; a change that never ran the loop closes with `-NoFindings`;
@@ -143,7 +144,7 @@ proposal (P3 `clean-code`), from the snapshot's line counts: it is no finding an
 
 ## The verdict
 
-The verdict is the standing evidence table, emitted as a bold title line (`**Verification**`, chat `it`: `Verifica`) and a plain table, never quoted nor inside a code fence; `done-claim`
+The verdict is the standing evidence table, emitted as a bold title line (`**Verification**`, chat `it`: `Verifica`) and its table, both quoted with `> `, never inside a code fence; `done-claim`
 proves a `fatto` / `failed` row only when its deciding line is found in what the turn's tools printed. So that cell holds
 output only, copied (`# pass 760`, or `` `True` / `True` `` for several), never a comment: counts and remarks ("6 files",
 "all equal") go in the command cell. S gets two or three lines. Then:

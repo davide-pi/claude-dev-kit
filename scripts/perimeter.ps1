@@ -6,7 +6,7 @@
   pwsh -NoProfile -File perimeter.ps1 -Files <entry>[,<entry>...]    write an active perimeter
   pwsh -NoProfile -File perimeter.ps1 -LogRun '<json>' [-Run <id>] [-Tokens <n>]
                                                                      append the findings log line, keep it active
-  pwsh -NoProfile -File perimeter.ps1 -Close -FindingsLog '<json>' [-Run <id>] [-Tokens <n>]
+  pwsh -NoProfile -File perimeter.ps1 -Close -FindingsLog '<json>|<path to .json>' [-Run <id>] [-Tokens <n>]
                                                                      append the findings log line, then close
   pwsh -NoProfile -File perimeter.ps1 -Close                         close when a run was logged since `opened:`
   pwsh -NoProfile -File perimeter.ps1 -Close -NoFindings             close a change that never ran the loop
@@ -18,7 +18,7 @@
   It is written as UTF-8 without a BOM, LF line endings, overwriting the previous one.
 
   -Close appends ONE line to `<git dir>/deliver/findings.jsonl` (never committed): the -FindingsLog object
-  (the loop's `result.findingsLog`, a JSON string; PowerShell doubles the quotes inside single quotes) plus `at`
+  (the loop's `result.findingsLog`, a JSON string, or the path to a file holding it; PowerShell doubles the quotes inside single quotes) plus `at`
   (now, UTC), `run` (-Run, when given), `minutes` (since `opened:`, when the file has it) and `tokens` (-Tokens, when
   given). A line is skipped when the log's last line already carries the same -Run. With -LogRun the line is appended and the perimeter stays active; `minutes` then counts from the previous
   logged run's `at` (from `opened:` for the first). -Close without -FindingsLog needs a run logged since `opened:`
@@ -73,6 +73,7 @@ function LastLoggedAt([string]$Text) {
   return $last
 }
 function AppendLog([string]$Json, [string]$Text) {
+  if (-not $Json.TrimStart().StartsWith('{') -and (Test-Path -LiteralPath $Json -PathType Leaf)) { $Json = Get-Content -LiteralPath $Json -Raw }
   try { $log = $Json | ConvertFrom-Json -ErrorAction Stop } catch { Fail "the findings JSON is not valid: $($_.Exception.Message)" }
   if ($log -isnot [pscustomobject] -or $log.PSObject.TypeNames[0] -ne 'System.Management.Automation.PSCustomObject') { Fail 'the findings JSON must be an object' }
   if ($Run -and (Test-Path -LiteralPath $logPath)) {
