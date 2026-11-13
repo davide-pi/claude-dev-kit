@@ -38,11 +38,17 @@ const live = (p5) => ({
   samples5h: [], samples7d: [],
 });
 
-test('Given 93% fresh data, When a Workflow PreToolUse arrives, Then the hook prints a deny and exits 0', () => {
+// 5h at p5 rising at 10 %/h (runs out in 42 min at 93%, the reset is in 60 min): short.
+const liveShort = (p5) => ({
+  ...live(p5),
+  samples5h: [{ t: Date.now() - 21 * 60_000, pct: p5 - 10 / 3 }, { t: Date.now() - 11 * 60_000, pct: p5 - 10 / 6 }, { t: Date.now() - 60_000, pct: p5 }],
+});
+
+test('Given 93% short fresh data, When a Workflow PreToolUse arrives, Then the hook prints a deny and exits 0', () => {
   // Given
   const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Workflow', tool_input: { args: { brief: 'go' } } });
   // When
-  const { status, out } = run(payload, live(93));
+  const { status, out } = run(payload, liveShort(93));
   // Then
   assert.equal(status, 0);
   assert.equal(JSON.parse(out).hookSpecificOutput.permissionDecision, 'deny');
@@ -215,18 +221,28 @@ test('Given docs/usage-pace.md, When it is read, Then it covers bands, files, re
   // Given
   const doc = read('docs/usage-pace.md');
   // When / Then
-  for (const band of ['70', '85', '92', '96', '98']) assert.ok(doc.includes(`| ${band} |`), `doc has no row for band ${band}`);
+  for (const band of ['70', '85', '92', '96', '98', '99']) assert.ok(doc.includes(`| ${band} |`), `doc has no row for band ${band}`);
   for (const word of ['.usage-pace.json', '.mod.json', 'aliveAt', 'claude --resume']) {
     assert.ok(doc.includes(word), `doc lacks ${word}`);
   }
   for (const word of ['resume-task.ps1', 'resume-launch.ps1', 'Register-ScheduledTask', 'claude-resume-<id8>']) assert.ok(!doc.includes(word), `doc still names ${word}`);
 });
 
-test('Given 93% fresh data, When a Workflow PreToolUse is denied, Then the fire log records the pace hook with its deny', () => {
+test('Given docs/usage-pace.md and the README, When read, Then they describe the per-window table, the pace rule, the always-cron and the compaction at reset', () => {
+  // Given
+  const doc = read('docs/usage-pace.md'), readme = read('README.md');
+  // When / Then
+  for (const re of [/short/i, /runway/i, /CronCreate/, /always/i, /compacts? .*reset|reset.*compact/i, /30 min/, /2 h/, /5h.*98|98.*5h/s, /7d.*99|99.*7d/s]) assert.match(doc, re);
+  assert.doesNotMatch(doc, /creates? no (resume )?cron|mod resumes the chat|resume prompt itself/i);
+  assert.match(readme, /7d[^\n]*99|99[^\n]*7d/);
+  assert.match(readme, /cron/i);
+});
+
+test('Given 93% short fresh data, When a Workflow PreToolUse is denied, Then the fire log records the pace hook with its deny', () => {
   // Given
   const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Workflow', tool_input: { args: { brief: 'go' } } });
   // When
-  const { dir } = run(payload, live(93), { logFires: true });
+  const { dir } = run(payload, liveShort(93), { logFires: true });
   // Then
   assert.deepEqual(fires(dir).map(({ hook, event, decision }) => ({ hook, event, decision })), [{ hook: 'pace', event: 'PreToolUse', decision: 'deny' }]);
 });

@@ -1,7 +1,8 @@
 /**
- * Usage pace for the hooks: what a chat or an agent is told when the account's 5h or 7d window crosses a band
- * (70, 85, 92, 96, 98), and the brake on new flows from 92. Data comes from the shared file the status line writes
- * (`statusline/pace.js`); the contract and the files are in docs/usage-pace.md.
+ * Usage pace for the hooks: what a chat or an agent is told when the account's 5h or 7d window crosses one of its own
+ * bands (5h 70, 85, 92, 96, 98; 7d 70, 85, 92, 96, 98, 99), and the brake on new flows. A conditional band slows the
+ * chat only when the window is short: at the current burn it runs out before its reset. Data comes from the shared
+ * file the status line writes (`statusline/pace.js`); the contract and the files are in docs/usage-pace.md.
  *
  * Pure decisions over an input and a context ({ now, pace, configDir }), plus the notice marker (a file created
  * with flag `wx`, so a band is told once per session, agent, window reset and band). Nothing here throws on a
@@ -16,16 +17,22 @@ const crypto = require('crypto');
 const { paceView } = require('../../statusline/pace');
 
 const MIN = 60_000;
+const HOUR = 60 * MIN;
 const STALE_MS = 10 * MIN;
 const MOD_ALIVE_MS = 3 * MIN;
-const MARKER_TTL_MS = 7 * 24 * 60 * MIN;
-const BANDS = [70, 85, 92, 96, 98];
-const BRAKE_FROM = 92;
-// From 92 one subagent at a time is still allowed (the notice says so); only a Workflow fan-out is denied.
+const MARKER_TTL_MS = 7 * 24 * HOUR;
+// Per window: what each band does ('slow' and 'brake' only when short), and the runway (min) under which the run is fast.
+const WINDOWS = {
+  five_hour: { name: '5h', bands: [70, 85, 92, 96, 98], roles: { 70: 'notice', 85: 'slow', 92: 'brake', 96: 'close', 98: 'stop' }, fastMin: 30 },
+  seven_day: { name: '7d', bands: [70, 85, 92, 96, 98, 99], roles: { 85: 'notice', 92: 'slow', 96: 'brake', 98: 'close', 99: 'stop' }, fastMin: 120 },
+};
+const SUBAGENT_ROLES = new Set(['notice', 'slow', 'stop']);
+// A new Workflow is denied; one subagent at a time is still allowed (the notice says so).
 const FLOW_TOOLS = new Set(['Workflow']);
 const OVERRIDES = ['pace: owner asked', 'pace: finish'];
-const WINDOW_NAME = { five_hour: '5h', seven_day: '7d' };
 const PACE_STATE = '~/.claude/scripts/pace-state.mjs';
+
+const roleBand = (cfg, role) => Number(Object.keys(cfg.roles).find((b) => cfg.roles[b] === role));
 
 const cachePath = (configDir, ...parts) => path.join(configDir, '.cache', ...parts);
 const readJson = (file) => { try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; } };
@@ -36,12 +43,40 @@ const resetLabel = (ms, now) => (ms - now < 20 * 3600_000 ? hhmm(ms) : `${day(ms
 /** The pace data is usable only while the status line keeps it fresh. */
 const isFresh = (pace, now) => Boolean(pace) && Number.isFinite(pace.updatedAt) && now - pace.updatedAt <= STALE_MS;
 
+/**
+ * The window's view with the hook's own band: the highest band of its table reached, raised to the closing band on a fast
+ * run. short: at the current burn it runs out before its reset (an unknown burn is not short); fast: short, with a runway
+ * under the window's limit.
+ */
+function judged(key, v, now) {
+  const cfg = WINDOWS[key];
+  const hours = v.burn > 0 ? (100 - v.pct) / v.burn : Infinity;
+  const short = Number.isFinite(hours) && Boolean(v.resetsAt) && hours * HOUR < v.resetsAt - now;
+  const fast = short && hours * 60 < cfg.fastMin;
+  const reached = cfg.bands.filter((b) => b <= v.pct).pop() || 0;
+  return { ...v, band: fast ? Math.max(reached, roleBand(cfg, 'close')) : reached, short, fast };
+}
+
 /** Windows as [key, view] pairs, the hotter first (band, then pct, then 5h). */
 function windows(pace, now) {
   const v = paceView(pace, now);
-  const list = [['five_hour', v.five_hour], ['seven_day', v.seven_day]];
-  return list[1][1].band > list[0][1].band || (list[1][1].band === list[0][1].band && list[1][1].pct > list[0][1].pct)
-    ? [list[1], list[0]] : list;
+  const a = judged('five_hour', v.five_hour, now), b = judged('seven_day', v.seven_day, now);
+  return b.band > a.band || (b.band === a.band && b.pct > a.pct) ? [['seven_day', b], ['five_hour', a]] : [['five_hour', a], ['seven_day', b]];
+}
+
+/** Keys of the windows whose resume is to be armed: short from the brake band, or from the closing band on. */
+function armWindows(pace, now) {
+  return windows(pace, now)
+    .filter(([key, w]) => w.band >= roleBand(WINDOWS[key], 'close') || (w.band >= roleBand(WINDOWS[key], 'brake') && w.short))
+    .map(([key]) => key);
+}
+
+/** True when the chat's pace file is on the window and reset that --arm would choose now: the later reset among armWindows. */
+function covers(state, ctx) {
+  if (!state) return false;
+  const v = paceView(ctx.pace, ctx.now);
+  const target = armWindows(ctx.pace, ctx.now).map((key) => [key, v[key].resetsAt]).sort((a, b) => b[1] - a[1])[0];
+  return Boolean(target) && state.window === target[0] && state.resetsAt === target[1];
 }
 
 function modAlive(configDir, sid, now) {
@@ -68,73 +103,78 @@ function claim(configDir, sid, agent, window, resetsAt, band, now) {
   return true;
 }
 
-function noticeText(band, key, w, ctx) {
-  const name = WINDOW_NAME[key];
-  const head = `Usage pace: ${name} window at ${w.pct}%`;
+function noticeText(role, key, w, ctx) {
+  const cfg = WINDOWS[key];
+  const head = `Usage pace: ${cfg.name} window at ${w.pct}%`;
   const reset = w.resetsAt ? `, resets ${resetLabel(w.resetsAt, ctx.now)}` : '';
   // Every notice carries the burn and when each next band would come at that rate (bands after the reset are left out).
   const next = w.burn !== null && w.burn > 0
-    ? BANDS.filter((b) => b > w.pct).map((b) => [b, ctx.now + ((b - w.pct) / w.burn) * 3600_000])
+    ? cfg.bands.filter((b) => b > w.pct).map((b) => [b, ctx.now + ((b - w.pct) / w.burn) * HOUR])
       .filter(([, at]) => !w.resetsAt || at < w.resetsAt).map(([b, at]) => `${b}% ~${resetLabel(at, ctx.now)}`)
     : [];
   const burn = w.burn !== null && w.burn > 0
     ? `, burning ${w.burn.toFixed(1)}%/h${next.length ? `, next: ${next.join(', ')}` : ''}`
     : '';
+  const lead = `${head}${reset}${burn}.`;
   const sid = ctx.sid;
-  // Decided at 96, not at 92: right after --arm the mod's aliveAt can be up to 30 s stale, so a 92 check would see no mod and resume twice.
-  const cron = ctx.modAlive
-    ? 'The cockpit mod is alive: it resumes the chat, so CronDelete a resume prompt you created and create none. '
-    : 'Then CronCreate a one-shot prompt at resumeAt (the --arm output gives its cron) to resume from the checkpoint. ';
-  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt and the checkpoint path). `;
-  const at96 = `Update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. ${cron}`
-    + (ctx.modAlive ? 'The cockpit mod compacts after your turn. ' : 'Then ask the owner to run /compact. ');
-  const disarm = `If the work finishes before the limit: \`node ${PACE_STATE} --done --session ${sid}\` and CronDelete the resume prompt if you created one.`;
-  // A jump past a band between two hook calls: the skipped band's actions were never told, so the notice carries them first.
-  const catch92 = ctx.catchUp92 ? `Not armed yet. ${arm}Start no new flow and ask the running flows for their state. ` : '';
-  const catch96 = ctx.catchUp96 ? at96 : '';
-  switch (band) {
-    case 70: return `${head}${reset}${burn}.`;
-    case 85: return `${head}${reset}${burn}. Weigh the burn since the last notice: run fewer agents in parallel, or slow down, so the work in hand ends before the limit; keep the same models (quality first).`;
-    case 92: return `${head}${reset}${burn}. Finish the work in hand: no new Workflow, only small steps, one subagent at a time, no critical operation (merge, push, migration, deploy, delete). ${arm}Ask the running flows for their state and write it to the checkpoint file. ${disarm}`;
-    case 96: return `${head}${reset}${burn}. ${catch92}${at96}${disarm}`;
-    default: return `${head}${reset}${burn}. ${catch92}${catch96}Close the step in hand cleanly, stop the flows without leaving work half-written, do a last checkpoint update, then stop.`;
+  const arm = `Arm the resume: \`node ${PACE_STATE} --arm --session ${sid}\` (prints resumeAt, cron=, prompt= and the checkpoint path; for another window or reset than a previous arm it also says to CronDelete the previous resume cron, for the same one to keep the existing cron: follow its note= line), then CronCreate a one-shot prompt at resumeAt with that cron and the prompt= line as its prompt. `;
+  const disarm = `If the work finishes before the limit: \`node ${PACE_STATE} --done --session ${sid}\` and CronDelete the resume prompt.`;
+  const close = `Close the step in hand cleanly, stop the flows without leaving work half-written. Update the checkpoint file, then \`node ${PACE_STATE} --ready --session ${sid}\`. `;
+  // A jump past the arming band: the notice carries the arm first, once per window and reset.
+  const armed = ctx.needArm ? `Not armed yet. ${arm}Start no new flow and ask the running flows for their state. ` : '';
+  if (role === 'notice' || ((role === 'slow' || role === 'brake') && !w.short)) return lead;
+  switch (role) {
+    case 'slow': return `${lead} Weigh the burn since the last notice: run fewer agents in parallel, or slow down, so the work in hand ends before the limit; keep the same models (quality first).`;
+    case 'brake': return `${lead} Finish the work in hand: no new Workflow, only small steps, one subagent at a time, no critical operation (merge, push, migration, deploy, delete). ${arm}Ask the running flows for their state and write it to the checkpoint file. ${disarm}`;
+    case 'close': return `${lead} ${armed}${close}${disarm}`;
+    default: return `${lead} ${armed}${ctx.catchClose ? close : 'Do a last checkpoint update. '}Stop: compact, save state, wait for the cron. `
+      + (ctx.modAlive ? 'The cockpit mod compacts at the reset and the cron resumes the chat.' : 'Ask the owner to run /compact, then wait for the cron.');
   }
 }
 
-const SUBAGENT_BAND = { 70: true, 85: true, 98: true };
-const subagentText = (band, key, w, ctx) => (band === 98
-  ? `Usage pace: ${WINDOW_NAME[key]} window at ${w.pct}%. Close your step now and report your state to the parent.`
-  : noticeText(band, key, w, ctx));
+const subagentText = (role, key, w, ctx) => (role === 'stop'
+  ? `Usage pace: ${WINDOWS[key].name} window at ${w.pct}%. Close your step now and report your state to the parent.`
+  : noticeText(role, key, w, ctx));
 
 /** The notice lines owed now: the highest unclaimed band of each window, lower bands claimed with it. */
 function notices(input, ctx) {
   const agent = input.agent_id || 'main';
   const lines = [];
   for (const [key, w] of windows(ctx.pace, ctx.now)) {
-    if (!w.band) continue;
-    const owed = BANDS.filter((b) => b <= w.band && (!input.agent_id || SUBAGENT_BAND[b]));
+    const cfg = WINDOWS[key];
+    const owed = cfg.bands.filter((b) => b <= w.band && cfg.roles[b] && (!input.agent_id || SUBAGENT_ROLES.has(cfg.roles[b])));
     let top = 0;
     const told = new Set();
     for (const b of owed) {
-      if (!claim(ctx.configDir, input.session_id, agent, key, w.resetsAt, b, ctx.now)) continue;
+      // A conditional band is owed again, in full, once the window turns short after a notice-only claim, but only while
+      // it is the highest band reached: under a close or stop already due it would arrive as a lower, later instruction.
+      const conditional = cfg.roles[b] === 'slow' || cfg.roles[b] === 'brake';
+      const again = conditional && w.short && (cfg.roles[w.band] === 'slow' || cfg.roles[w.band] === 'brake');
+      const plain = claim(ctx.configDir, input.session_id, agent, key, w.resetsAt, b, ctx.now);
+      const full = again && claim(ctx.configDir, input.session_id, agent, key, w.resetsAt, `${b}:short`, ctx.now);
+      if (!(again ? full : plain)) continue;
       top = b;
       told.add(b);
     }
-    // Main loop only: 92 or 96 was claimed in this same call but the text goes out for a higher band.
-    const catchUp92 = !input.agent_id && told.has(92) && top > 92;
-    const catchUp96 = !input.agent_id && told.has(96) && top > 96;
-    if (top) lines.push((input.agent_id ? subagentText : noticeText)(top, key, w, { ...ctx, sid: input.session_id, catchUp92, catchUp96 }));
+    if (!top) continue;
+    const role = cfg.roles[top];
+    // Main loop only: a closing or stop band tells the arm unless the chat's pace file is on the window --arm would pick now
+    // (among the windows that need arming, the later reset); a pace file removed by --done covers nothing.
+    const state = input.agent_id ? null : armed(ctx.configDir, input.session_id);
+    const needArm = !input.agent_id && (role === 'close' || role === 'stop') && !covers(state, ctx);
+    const catchClose = !input.agent_id && role === 'stop' && told.has(roleBand(cfg, 'close'));
+    lines.push((input.agent_id ? subagentText : noticeText)(role, key, w, { ...ctx, sid: input.session_id, needArm, catchClose }));
   }
   return lines;
 }
 
 function brake(input, ctx) {
   if (input.agent_id || !FLOW_TOOLS.has(input.tool_name) || !isFresh(ctx.pace, ctx.now)) return null;
-  const hot = windows(ctx.pace, ctx.now).find(([, w]) => w.band >= BRAKE_FROM);
+  const hot = windows(ctx.pace, ctx.now).find(([key, w]) => w.band >= roleBand(WINDOWS[key], 'stop') || (w.band >= roleBand(WINDOWS[key], 'brake') && w.short));
   if (!hot) return null;
   const text = JSON.stringify(input.tool_input || {}).toLowerCase();
   if (OVERRIDES.some((o) => text.includes(o))) return null;
-  return `Usage pace: the ${WINDOW_NAME[hot[0]]} window is at ${hot[1].pct}%, so no new flow starts. Finish the work in hand; if the owner wants it anyway, write \`pace: owner asked\` in the prompt, or \`pace: finish\` when the flow closes work already begun.`;
+  return `Usage pace: the ${WINDOWS[hot[0]].name} window is at ${hot[1].pct}%, so no new flow starts. Finish the work in hand; if the owner wants it anyway, write \`pace: owner asked\` in the prompt, or \`pace: finish\` when the flow closes work already begun.`;
 }
 
 /**
@@ -199,4 +239,4 @@ function plan(input, ctx) {
   return !lines.length ? null : { json: { hookSpecificOutput: { hookEventName: event, additionalContext: lines.join('\n') } } };
 }
 
-module.exports = { plan, notices, brake, claim, isFresh, modAlive, markCompacted, BANDS };
+module.exports = { plan, notices, brake, claim, isFresh, modAlive, markCompacted, armWindows };

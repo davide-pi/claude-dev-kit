@@ -1,7 +1,7 @@
 /**
  * Usage-pace hook: PreToolUse (shell, Agent, Task, Workflow), UserPromptSubmit, SessionStart (resume, compact) and
- * PreCompact. Tells a chat or an agent when the 5h or 7d window crosses a band, denies a new flow from 92% and
- * carries the checkpoint path through a resume or a compaction. Decisions live in lib/usage-pace.js.
+ * PreCompact. Tells a chat or an agent when the 5h or 7d window crosses one of its bands, denies a new flow
+ * when the window is short from its brake band (and always at its stop) and carries the checkpoint path through a resume or a compaction. Decisions live in lib/usage-pace.js.
  *
  * Fails open: any error prints nothing and exits 0.
  */

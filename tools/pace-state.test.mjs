@@ -207,6 +207,85 @@ test('Given no shared file, When --arm runs, Then it exits non-zero with one lin
   });
 });
 
+// Samples over 20 min ending a minute ago, rising at `burn` %/h (what the status line records).
+const rising = (pct, burn) => [{ t: Date.now() - 21 * MIN, pct: pct - burn / 3 }, { t: Date.now() - 11 * MIN, pct: pct - burn / 6 }, { t: Date.now() - MIN, pct }];
+
+test('Given 5h at its stop and 7d needing arming with a later reset, When --arm runs, Then resumeAt follows the 7d reset', () => {
+  // Given: 7d at 96.5% runs out in 8 h at 0.5 %/h, its reset is in 72 h
+  const sh = { ...shared(98.5, 96.5), samples7d: rising(96.5, 0.5) };
+  withDir(sh, (dir, run) => {
+    // When
+    const r = run('--arm', '--session', SID, '--cwd', dir);
+    // Then
+    assert.equal(r.status, 0, r.stderr);
+    const got = JSON.parse(readFileSync(paceFile(dir), 'utf8'));
+    assert.equal(got.window, 'seven_day');
+    assert.equal(got.resetsAt, sh.seven_day.resetsAt);
+    assert.ok(got.resumeAt >= sh.seven_day.resetsAt + 2 * MIN && got.resumeAt < sh.seven_day.resetsAt + 4 * MIN, `resumeAt ${got.resumeAt}`);
+  });
+});
+
+test('Given 5h at its stop and 7d at both stops, When --arm runs, Then resumeAt follows the later 7d reset', () => {
+  withDir(shared(98.5, 99.5), (dir, run) => {
+    // Given / When
+    const r = run('--arm', '--session', SID, '--cwd', dir);
+    // Then
+    assert.equal(r.status, 0, r.stderr);
+    assert.equal(JSON.parse(readFileSync(paceFile(dir), 'utf8')).window, 'seven_day');
+  });
+});
+
+test('Given 5h at its stop and 7d low, When --arm runs, Then only the 5h window needs arming and resumeAt follows its reset', () => {
+  const sh = shared(98.5, 10);
+  withDir(sh, (dir, run) => {
+    // Given / When
+    const r = run('--arm', '--session', SID, '--cwd', dir);
+    // Then
+    assert.equal(r.status, 0, r.stderr);
+    const got = JSON.parse(readFileSync(paceFile(dir), 'utf8'));
+    assert.equal(got.window, 'five_hour');
+    assert.equal(got.resetsAt, sh.five_hour.resetsAt);
+  });
+});
+
+test('Given --arm, When it prints, Then a prompt= line carries the resume prompt that starts with a credit check and keeps the prefix the mod recognises', () => {
+  withDir(shared(98.5, 10), (dir, run) => {
+    // Given / When
+    const r = run('--arm', '--session', SID, '--cwd', dir);
+    // Then
+    const prompt = out(r, 'prompt');
+    const got = JSON.parse(readFileSync(paceFile(dir), 'utf8'));
+    assert.ok(prompt, 'no prompt= line');
+    assert.ok(prompt.startsWith('The usage window has reset. Read the checkpoint'), prompt); // the prefix isResumePrompt matches
+    assert.ok(prompt.includes(got.checkpoint));
+    assert.match(prompt, /credits?/i);
+    assert.ok(prompt.search(/credits?/i) < prompt.search(/continue/i), 'the credit check comes before the work continues');
+    assert.match(prompt, /--arm/); // a window still at its stop: re-arm and stop
+    assert.match(prompt, /--done/);
+    assert.equal(prompt.includes('\n'), false);
+  });
+});
+
+test('Given a re-arm on another window or reset, When --arm prints, Then it says to CronDelete the previous resume cron; the same window and reset does not', () => {
+  const first = shared(98.5, 10);
+  withDir(first, (dir, run) => {
+    // Given
+    const a = run('--arm', '--session', SID, '--cwd', dir);
+    const same = run('--arm', '--session', SID, '--cwd', dir);
+    writeFileSync(join(dir, '.usage-pace.json'), JSON.stringify({ ...first, seven_day: { pct: 99.5, resetsAt: first.seven_day.resetsAt } }));
+    // When: the 7d window is now the one to arm
+    const otherWindow = run('--arm', '--session', SID, '--cwd', dir);
+    writeFileSync(join(dir, '.usage-pace.json'), JSON.stringify({ ...first, seven_day: { pct: 99.5, resetsAt: first.seven_day.resetsAt + 7 * 86_400_000 } }));
+    const otherReset = run('--arm', '--session', SID, '--cwd', dir);
+    // Then
+    assert.doesNotMatch(a.stdout, /CronDelete/);
+    assert.doesNotMatch(same.stdout, /CronDelete/);
+    assert.match(same.stdout, /note=Already armed for this window and reset: keep the existing resume cron and create none/);
+    assert.match(otherWindow.stdout, /CronDelete/);
+    assert.match(otherReset.stdout, /CronDelete/);
+  });
+});
+
 test('Given a successful --arm, When it finishes, Then no temp file is left beside the pace file', () => {
   withDir(shared(93, 10), (dir, run) => {
     // Given / When

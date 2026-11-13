@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // Chat-owned pace state: <config dir>/.cache/pace/<sid>.json (contract: docs/usage-pace.md).
-//   node pace-state.mjs --arm --session <id> [--cwd <dir>]   from the shared usage file; prints resumeAt= (epoch ms),
-//                                                              resumeAtLocal= (ISO, local offset), cron= (CronCreate) and checkpoint=
+//   node pace-state.mjs --arm --session <id> [--cwd <dir>]   from the shared usage file, on the window needing it with the later reset;
+//                                                              prints resumeAt= (epoch ms), resumeAtLocal= (ISO, local offset), cron= (CronCreate),
+//                                                              checkpoint=, prompt= (the resume cron's prompt) and, on a re-arm, note= (CronDelete the old cron; keep it when same window and reset)
 //   node pace-state.mjs --ready|--show --session <id>
 //   node pace-state.mjs --done --session <id>                 deletes the pace file (nothing left to resume); no-op when absent
 // Any bad input: one line on stderr, exit 1, no file written.
@@ -14,7 +15,9 @@ import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
-const { readPace, paceView } = createRequire(import.meta.url)(join(HERE, '..', 'statusline', 'pace.js'));
+const req = createRequire(import.meta.url);
+const { readPace, paceView } = req(join(HERE, '..', 'statusline', 'pace.js'));
+const { armWindows } = req(join(HERE, '..', 'hooks', 'lib', 'usage-pace.js'));
 
 const MIN = 60_000;
 const WEEK = 7 * 86_400_000;
@@ -53,12 +56,23 @@ function checkpointPath(cwd, sid) {
   return gitDir ? join(resolve(cwd, gitDir), 'deliver', `resume-${sid.slice(0, 8)}.md`) : join(configDir(), '.cache', 'resume', `${sid}.md`);
 }
 
-// Same pick as the notices: the hotter window by band, ties by pct, then the 5h one.
+// A manual arm with no window at its arming band: the hotter window by band, ties by pct, then the 5h one.
 function hotterWindow(pace) {
   const v = paceView(pace, Date.now());
   const a = v.five_hour, b = v.seven_day;
   return b.band > a.band || (b.band === a.band && b.pct > a.pct) ? ['seven_day', pace.seven_day] : ['five_hour', pace.five_hour];
 }
+
+/**
+ * The prompt the resume cron sends: it opens with the words the cockpit mod recognises as a resume (`isResumePrompt`),
+ * checks the credits first, and re-arms and stops when a window is still at its stop band. One line.
+ */
+const resumePrompt = (checkpoint, sid) => 'The usage window has reset. Read the checkpoint at ' + checkpoint
+  + ', but first check the credits in ~/.claude/.usage-pace.json (five_hour.pct and seven_day.pct; a window whose resetsAt has passed counts as 0): '
+  + 'if five_hour is at 98 or more, or seven_day at 99 or more, run `node ~/.claude/scripts/pace-state.mjs --arm --session ' + sid + '`, '
+  + 'do what it prints (replace the old resume cron, create the new one with its prompt= line) and stop. '
+  + 'Otherwise continue the work: check the real state (git status, the perimeter, the last gate) first. '
+  + 'When the work is finished, run `node ~/.claude/scripts/pace-state.mjs --done --session ' + sid + '`.';
 
 const stagger = (sid) => Math.floor(createHash('sha1').update(sid).digest().readUInt32BE(0) % 120) * 1000;
 
@@ -92,7 +106,11 @@ const file = join(paceDir(), `${sid}.json`);
 if (mode === 'arm') {
   const pace = readPace();
   if (!pace) fail('no usage file yet (the status line writes it)');
-  const [window, w] = hotterWindow(pace);
+  // Among the windows that need arming the one that resets LATER (a 5h stop with the 7d near its own resumes at the 7d reset);
+  // none needing it (a manual arm): the hotter one.
+  const needing = armWindows(pace, Date.now());
+  const window = needing.length ? needing.reduce((a, b) => (pace[b].resetsAt > pace[a].resetsAt ? b : a)) : hotterWindow(pace)[0];
+  const w = pace[window];
   if (!w || !Number.isFinite(w.resetsAt)) fail('the usage file has no reset time');
   const old = readState(file);
   const same = old && old.window === window && old.resetsAt === w.resetsAt;
@@ -103,7 +121,9 @@ if (mode === 'arm') {
   };
   if (same && Number.isFinite(old.compactedAt)) state.compactedAt = old.compactedAt;
   writeAtomic(file, state);
-  console.log(`resumeAt=${state.resumeAt}\nresumeAtLocal=${localIso(state.resumeAt)}\ncron=${cronAt(state.resumeAt)}\ncheckpoint=${state.checkpoint}`);
+  console.log(`resumeAt=${state.resumeAt}\nresumeAtLocal=${localIso(state.resumeAt)}\ncron=${cronAt(state.resumeAt)}\ncheckpoint=${state.checkpoint}\nprompt=${resumePrompt(state.checkpoint, sid)}`);
+  if (same && Number.isFinite(old.resumeAt)) console.log('note=Already armed for this window and reset: keep the existing resume cron and create none.');
+  else if (old && Number.isFinite(old.resumeAt)) console.log(`note=Re-armed on another window or reset: CronDelete the previous resume cron (it was set for ${localIso(old.resumeAt)}) before the CronCreate.`);
 } else if (mode === 'done') {
   // The mod and the hook read a missing file as nothing to resume.
   try { unlinkSync(file); } catch (e) { if (e.code !== 'ENOENT') fail(`cannot delete ${file}: ${e.code || e.message}`); }
