@@ -7,7 +7,7 @@ import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWid
 import type { Span } from './shared'
 import { loggedSignal, signalSeverity } from './signals'
 import { t } from './strings'
-import { agentIcon, pairRow, subagentDetails, trailRows, visibleAgents } from './view-agents'
+import { agentIcon, pairRow, subagentInline, trailRows, visibleAgents } from './view-agents'
 import type { CockpitAgent } from '../types'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
@@ -180,16 +180,17 @@ function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
 }
 
 /** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, and at the row's end the figures (length, cost, share of the session's cost). */
-function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; second?: Span[] } {
+function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; anchor?: number } {
   const { width, s } = k
   const { label, after } = nodeLabel(g, tree)
   const time = g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]
   const fig = figures(g.usd, g.ms, s.cost.usd)
   // a node with nothing under it opens nothing: a dash, not an arrow
   const arrow = sp(!isExpandable(g, s) ? '- ' : isOpen ? '▾ ' : '▸ ')
-  // a round has two lines: its time, number and prompt, then its context and model with the figures at the end
-  const round = roundHeader(g, s, { time, label, figures: fig, width })
-  if (round !== undefined) return { arrow, rest: round.first, ...(round.second.length > 0 && { second: round.second }) }
+  // a round is one row: time, number, prompt, context and model, the figures at the end; its link, when it has one, sits in front (2 cells)
+  const anchor = g.flow === undefined ? linkAnchor(g, s) : undefined
+  const round = roundHeader(g, s, { time, label, figures: fig, width: width - (anchor === undefined ? 0 : 2) })
+  if (round !== undefined) return { arrow, rest: round, ...(anchor !== undefined && { anchor }) }
   // a live run's phase and progress outrank its name: on a narrow pane the name gives way first, down to `flow…`
   const room = width - 2 - spanWidth(fig) - 1 - spanWidth(time) - (after.length > 0 ? 1 + spanWidth(after) : 0)
   const name = after.length > 0 && textCells(label.t) > room ? { ...label, t: truncateSpans([label], Math.max(room, 5)).map(x => x.t).join('') } : label
@@ -202,7 +203,7 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
 function eventRow(k: Kit, e: DoneEntry, prefix: string, toggle?: { key: string; isOpen: boolean; onPress: () => void }): Block {
   const { ui } = k
   const { Button, Text } = ui
-  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : [])]
+  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : []), ...(toggle?.isOpen === true && e.live !== undefined ? subagentInline(e.live) : [])]
   const spans = [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))]
   // a flow agent that runs is a toggle: its row opens on its detail and trail
   const rest = (from: number): Block =>
@@ -261,7 +262,7 @@ function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
       drawn?.add(e.key)
       head = [
         eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`, { key, isOpen, onPress: () => k.actions.setGroupOpen(key, !isOpen) }),
-        ...(isOpen ? [...subagentDetails(e.live, indent, width), ...trailRows(e.live, indent, width)].map(spans => line(ui, spans)) : []),
+        ...(isOpen ? trailRows(e.live, indent, width).map(spans => line(ui, spans)) : []),
       ]
     }
     return [...head, ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
@@ -296,11 +297,42 @@ function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
 function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean, drawn?: Set<string>): Block {
   const { ui, actions } = k
   const { Box, Button, Text } = ui
-  const { arrow, rest, second } = nodeHeader(k, tree, g, isOpen)
+  const { arrow, rest, anchor } = nodeHeader(k, tree, g, isOpen)
   const toggle = () => actions.setGroupOpen(g.key, !isOpen)
+  const isExpand = isExpandable(g, k.s)
+  const isFade = isExpand && isNewest
+  // the link is a button of its own (2 cells) between the arrow and the row: it scrolls the chat to the round's marker
+  if (anchor !== undefined) {
+    return [
+      [
+        <Box>
+          {isExpand ? (
+            <Button key={g.key} plain onPress={toggle}>
+              <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
+            </Button>
+          ) : (
+            <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
+          )}
+          <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
+            <Text wrap="truncate">{spanNodes(ui, [sp('󰌷', COLORS.blue), sp(' ')])}</Text>
+          </Button>
+          {isFade ? (
+            animCell(ui, 'anim:done', 'fade', rest)
+          ) : isExpand ? (
+            <Button key={`${g.key}:row`} plain onPress={toggle}>
+              <Text wrap="truncate">{spanNodes(ui, rest)}</Text>
+            </Button>
+          ) : (
+            <Text wrap="truncate">{spanNodes(ui, rest)}</Text>
+          )}
+        </Box>,
+      ],
+      ...(isOpen ? nodeChildren(k, g, drawn) : []),
+    ]
+  }
   let header: Block
-  if (!isExpandable(g, k.s)) header = [line(ui, [arrow, ...rest])]
-  else if (isNewest) {
+  if (!isExpand) header = [line(ui, [arrow, ...rest])]
+  else if (isFade) {
     header = [
       <Box>
         <Button key={g.key} plain onPress={toggle}>
@@ -316,24 +348,7 @@ function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean,
       </Button>,
     ]
   }
-  const anchor = linkAnchor(g, k.s)
-  // the link sits in front of the second line, a button of its own (2 cells, where the line's indent is): it scrolls the chat to the round's marker
-  const link: Block =
-    second === undefined
-      ? []
-      : anchor === undefined
-        ? [[line(ui, second)]]
-        : [
-            [
-              <Box>
-                <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
-                  <Text wrap="truncate">{spanNodes(ui, [sp('\u{F0337}', COLORS.blue), sp(' ')])}</Text>
-                </Button>
-                <Text wrap="truncate">{spanNodes(ui, second)}</Text>
-              </Box>,
-            ],
-          ]
-  return [header, ...link, ...(isOpen ? nodeChildren(k, g, drawn) : [])]
+  return [header, ...(isOpen ? nodeChildren(k, g, drawn) : [])]
 }
 
 /** A day's row: a toggle (arrow, date) with `right` at the row's end. */

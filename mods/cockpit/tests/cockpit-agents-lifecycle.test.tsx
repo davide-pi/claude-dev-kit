@@ -259,14 +259,15 @@ test('agents: a tool call seen before its agent spawned does not make a stub tha
   await start($)
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
   await $.agent.spawn({ ...SPAWN, subagentType: 'code-reviewer', description: 'Review the orders filter' })
-  const ui = await mountPane($, 50)
+  const ui = await mountPane($, 58)
   await ui.press({ key: 'agent:a1' })
   const rows = async () => rowTexts(await ui.drawn())
-  expect((await rows()).find(r => /^ +Review the orders filter/.test(r))).toBeDefined()
-  expect((await rows()).some(r => /last tool/.test(r))).toBe(false)
+  // the details are inline on the agent row: its description follows the name, and no row of its own is drawn
+  expect((await rows()).find(r => /^󱎖 code-reviewer · /.test(r))).toBeDefined()
+  expect((await rows()).some(r => /^ +(Review|last tool)/.test(r))).toBe(false)
   // a call after the spawn is seen as before
   await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
-  expect((await rows()).some(r => /^ +last tool Grep$/.test(r))).toBe(true)
+  expect((await rows()).some(r => /^ +last tool/.test(r))).toBe(false)
   await ui.unmount()
 })
 

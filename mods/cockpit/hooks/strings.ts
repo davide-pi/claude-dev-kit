@@ -38,6 +38,8 @@ const EN = {
   // Agents
   lastTool: 'last tool ',
   costDetail: { tokens: (n: string) => `tokens ${n}` },
+  /** The label a background task's completion message gets in the log, in place of its raw tags. */
+  notification: (kind: 'workflow' | 'agent', status: string | undefined) => `${kind}${status === undefined ? '' : ` ${status}`}`,
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
 
   // Notifications
@@ -128,6 +130,10 @@ const IT: Strings = {
 
   lastTool: 'ultimo tool ',
   costDetail: { tokens: (n: string) => `token ${n}` },
+  notification: (kind: 'workflow' | 'agent', status: string | undefined) => {
+    const done: Record<string, string> = { completed: 'completato', failed: 'fallito', killed: 'interrotto' }
+    return `${kind === 'agent' ? 'agente' : kind}${status === undefined ? '' : ` ${done[status] ?? status}`}`
+  },
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
 
   signalFields: { why: 'perché: ', todo: 'cosa fare: ' },

@@ -93,31 +93,29 @@ const ROW_FIXED_W = 2 + 1 + MODEL_W + 1 + 1 + 1 + SHARE_W + 1 + COST_W + 1 + TIM
 const rowModel = (model: string | undefined): string => (model ? truncEnd(shortModel(model), MODEL_W) : '—')
 
 /** An agent, live or from the history, in exactly one row of `width` cells: state, name (cut with `…` to fit), model, effort icon, their share of the session's `total` (blank when unknown), its cost `usd` (blank when unknown), time. */
-export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number, usd?: number): Span[] {
+export function agentRow(a: CockpitAgent, depth: number, now: number, width: number, total: number, usd?: number, inline: readonly Span[] = []): Span[] {
   // a pane too narrow for the name drops the model column: the share and the time matter more
   const hasModel = width - ROW_FIXED_W >= MIN_NAME_W
   const nameW = Math.max(1, width - (hasModel ? ROW_FIXED_W : ROW_FIXED_W - MODEL_W - 1))
   const prefix = depth > 0 ? `${'  '.repeat(depth - 1)}└ ` : ''
   const isRunning = a.status === 'running'
-  const name = padCells(truncEnd(prefix + a.type, nameW), nameW)
+  const cut = truncEnd(prefix + a.type, nameW)
+  const name = inline.length > 0 ? cut : padCells(cut, nameW)
   const effort = effortSpans(a.effort)
-  return truncateSpans(
-    [
-      agentIcon(a),
-      sp(' '),
-      depth > 0 ? sp(name, COLORS.dim) : sp(name, undefined, isRunning),
-      sp(' '),
-      ...(hasModel ? [sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning), sp(' ')] : []),
-      ...(effort.length ? effort : [sp(' ')]),
-      sp(' '),
-      sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
-      sp(' '),
-      dim(usd === undefined ? ' '.repeat(COST_W) : costCell(usd, COST_W)),
-      sp(' '),
-      sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
-    ],
-    width,
-  )
+  const nameSpan = depth > 0 ? sp(name, COLORS.dim) : sp(name, undefined, isRunning)
+  const right = [
+    ...(hasModel ? [sp(padCells(rowModel(a.model), MODEL_W), undefined, isRunning), sp(' ')] : []),
+    ...(effort.length ? effort : [sp(' ')]),
+    sp(' '),
+    sp(padStart(tokenShare(a.tokens, total) ?? '', SHARE_W)),
+    sp(' '),
+    dim(usd === undefined ? ' '.repeat(COST_W) : costCell(usd, COST_W)),
+    sp(' '),
+    sp(padStart(duration((a.endedAt ?? now) - a.startedAt), TIME_W)),
+  ]
+  // the inline details follow the name, cut to leave the fixed columns whole
+  if (inline.length > 0) return pairRow([agentIcon(a), sp(' '), nameSpan, ...inline], right, width)
+  return truncateSpans([agentIcon(a), sp(' '), nameSpan, sp(' '), ...right], width)
 }
 
 /** `left` and `right` on one row of `width` cells: a gap between them, the left cut to leave the right whole; a row too short for both is cut. */
@@ -129,32 +127,21 @@ export function pairRow(left: readonly Span[], right: readonly Span[], width: nu
 }
 
 /**
- * The rows under an agent's row in IN PROGRESS once it is expanded: the total tokens, what it was asked, the four counters, then the tool running
- * now (or, when none is, the last one). Each is left out until the engine gave it: nothing is faked.
+ * An agent's details on one line, to follow its row's name: what it was asked, the tool running now (or the last one), the total tokens and the four counters,
+ * each dim and set apart by a dot. The row cuts it to the pane; each part is left out until the engine gave it: nothing is faked.
  */
-export function subagentDetails(a: CockpitAgent, indent: string, width: number): Span[][] {
+export function subagentInline(a: CockpitAgent): Span[] {
   const running = a.status === 'running' ? a.activeTools?.at(-1) : undefined
-  const counters =
-    a.usage
-      ? truncateSpans(
-          [
-            sp(indent),
-            dim(t().tokenLabels.input),
-            sp(abbrevTokens(a.usage.input)),
-            dim(t().tokenLabels.output),
-            sp(abbrevTokens(a.usage.output)),
-            dim(t().tokenLabels.cacheRead),
-            sp(abbrevTokens(a.usage.cacheRead)),
-            dim(t().tokenLabels.cacheWrite),
-            sp(abbrevTokens(a.usage.cacheWrite)),
-          ],
-          width,
-        )
-      : undefined
-  const tool = running ? wrapped(indent, [sp('󰍟 ', COLORS.blue)], running, sp, width) : a.lastTool ? wrapped(indent, [dim(t().lastTool)], a.lastTool, sp, width) : []
-  const task = a.description ? wrapped(indent, [], a.description.replace(/\s+/g, ' '), dim, width) : []
-  const total = dim(`${indent}${t().costDetail.tokens(abbrevTokens(a.tokens))}`)
-  return [truncateSpans([total], width), ...task, ...(counters ? [counters] : []), ...tool]
+  const L = t().tokenLabels
+  const parts: Span[][] = [
+    ...(a.description ? [[dim(a.description.replace(/\s+/g, ' '))]] : []),
+    ...(running ? [[sp('󰍟 ', COLORS.blue), sp(running)]] : a.lastTool ? [[dim(t().lastTool), sp(a.lastTool)]] : []),
+    [dim(t().costDetail.tokens(abbrevTokens(a.tokens)))],
+    ...(a.usage
+      ? [[dim(L.input), sp(abbrevTokens(a.usage.input)), dim(L.output), sp(abbrevTokens(a.usage.output)), dim(L.cacheRead), sp(abbrevTokens(a.usage.cacheRead)), dim(L.cacheWrite), sp(abbrevTokens(a.usage.cacheWrite))]]
+      : []),
+  ]
+  return parts.flatMap(p => [dim(' · '), ...p])
 }
 
 /** An agent's trail, newest first, dim: time, a mark while the call runs (or failed), tool and its short label; each row cut to `width`. */
@@ -163,10 +150,4 @@ export function trailRows(a: CockpitAgent, indent: string, width: number): Span[
     const mark = c.isDone !== true ? [sp('󱎖', COLORS.blue), sp(' ')] : c.isFailed ? [sp('󰅖', COLORS.red), sp(' ')] : []
     return truncateSpans([dim(indent), dim(clockTime(c.at)), sp(' '), ...mark, dim(c.tool), ...(c.label === undefined ? [] : [dim(` ${c.label}`)])], width)
   })
-}
-
-/** `text` in full under `indent` after `label` on its first row: it wraps to `width` instead of being cut. */
-function wrapped(indent: string, label: readonly Span[], text: string, style: (t: string) => Span, width: number): Span[][] {
-  const labelW = spanWidth(label)
-  return wrapCells(text, Math.max(4, width - indent.length - labelW)).map((l, i) => [sp(indent), ...(i === 0 ? label : [sp(' '.repeat(labelW))]), style(l)])
 }

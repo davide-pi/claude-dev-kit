@@ -155,3 +155,18 @@ test('Given a round with a failed call and a wait, When drawn in principali and 
   expect(all).toContain('Read: no such file')
   expect(all).toContain('Write waited 1m10s')
 })
+
+test('Given a round with a placed anchor, When drawn, Then the link is on the round row and no row below holds the context or model', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const { writes, clock } = await start(on)
+  await oneRound($, clock, writes)
+  // When
+  const ui = await mountPane($, 100)
+  const rows = rowTexts(await ui.drawn()).map(r => r.trimEnd())
+  await ui.unmount()
+  // Then
+  const head = rows.findIndex(r => r.includes(LINK))
+  expect(head).toBeGreaterThan(-1)
+  expect(rows[head]).toMatch(/round|first/)
+  expect(rows[head + 1] ?? '').not.toMatch(/ctx \d|son ?5|opu ?5/)
+})
