@@ -38,9 +38,9 @@ const live = (p5) => ({
   samples5h: [], samples7d: [],
 });
 
-test('Given 93% fresh data, When an Agent PreToolUse arrives, Then the hook prints a deny and exits 0', () => {
+test('Given 93% fresh data, When a Workflow PreToolUse arrives, Then the hook prints a deny and exits 0', () => {
   // Given
-  const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Agent', tool_input: { prompt: 'go' } });
+  const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Workflow', tool_input: { args: { brief: 'go' } } });
   // When
   const { status, out } = run(payload, live(93));
   // Then
@@ -113,7 +113,7 @@ test('Given a torn usage file and a valid payload, When the hook runs, Then it p
   writeFileSync(join(dir, '.usage-pace.json'), '{"v":1,');
   // When
   const r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Agent', tool_input: { prompt: 'go' } }),
+    input: JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Workflow', tool_input: { args: { brief: 'go' } } }),
     encoding: 'utf8', env: { ...process.env, CLAUDE_CONFIG_DIR: dir },
   });
   // Then
@@ -222,9 +222,9 @@ test('Given docs/usage-pace.md, When it is read, Then it covers bands, files, re
   for (const word of ['resume-task.ps1', 'resume-launch.ps1', 'Register-ScheduledTask', 'claude-resume-<id8>']) assert.ok(!doc.includes(word), `doc still names ${word}`);
 });
 
-test('Given 93% fresh data, When an Agent PreToolUse is denied, Then the fire log records the pace hook with its deny', () => {
+test('Given 93% fresh data, When a Workflow PreToolUse is denied, Then the fire log records the pace hook with its deny', () => {
   // Given
-  const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Agent', tool_input: { prompt: 'go' } });
+  const payload = JSON.stringify({ hook_event_name: 'PreToolUse', session_id: SID, tool_name: 'Workflow', tool_input: { args: { brief: 'go' } } });
   // When
   const { dir } = run(payload, live(93), { logFires: true });
   // Then

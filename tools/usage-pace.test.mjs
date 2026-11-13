@@ -65,7 +65,7 @@ test('Given a jump to 92%, When a tool runs, Then only the 92 notice comes and 7
   const a = plan(pre('Bash'), ctx(dir, pace(93)));
   const b = plan(pre('Bash'), ctx(dir, pace(93.5)));
   // Then
-  assert.match(text(a), /Start no new flow/);
+  assert.match(text(a), /no new Workflow/);
   assert.doesNotMatch(text(a), /fewer agents/);
   assert.equal(b, null);
 });
@@ -198,11 +198,11 @@ test('Given a subagent and the main loop, When both cross 85%, Then each is told
   assert.equal(readdirSync(join(dir, '.cache', 'pace-notices')).length, 4);
 });
 
-test('Given 92% fresh data, When the main loop starts an Agent, Then it is denied unless the prompt carries an override', () => {
+test('Given 92% fresh data, When the main loop starts a Workflow, Then it is denied unless its input carries an override', () => {
   // Given
   const dir = world();
   const p = pace(93);
-  const call = (tool_input, extra = {}) => plan(pre('Agent', { tool_input, ...extra }), ctx(dir, p));
+  const call = (tool_input, extra = {}) => plan(pre('Workflow', { tool_input, ...extra }), ctx(dir, p));
   // When
   const plain = call({ prompt: 'review the diff' });
   const quoted = call({ prompt: 'the owner asked for a review of the diff' });
@@ -227,17 +227,17 @@ test('Given the 7d window at 93%, When a Workflow starts, Then it is denied too'
   assert.match(out.json.hookSpecificOutput.permissionDecisionReason, /7d window is at 93%/);
 });
 
-test('Given data older than 10 minutes or a window past its reset, When an Agent starts, Then the brake is lifted', () => {
+test('Given data older than 10 minutes or a window past its reset, When a Workflow starts, Then the brake is lifted', () => {
   // Given
   const dir = world();
   const stale = pace(95, 10, { updatedAt: NOW - 11 * MIN });
   // When
-  const old = plan(pre('Agent'), ctx(dir, stale));
-  const reset = plan(pre('Agent'), ctx(world(), pace(95, 10, { updatedAt: R5 }), R5 + MIN));
+  const old = plan(pre('Workflow'), ctx(dir, stale));
+  const reset = plan(pre('Workflow'), ctx(world(), pace(95, 10, { updatedAt: R5 }), R5 + MIN));
   // Then
   assert.equal(old, null);
   assert.ok(reset === null || reset.json.hookSpecificOutput.permissionDecision === undefined);
-  assert.equal(plan(pre('Agent'), ctx(world(), pace(95, 10, { updatedAt: R5 }), R5 - MIN)).json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.equal(plan(pre('Workflow'), ctx(world(), pace(95, 10, { updatedAt: R5 }), R5 - MIN)).json.hookSpecificOutput.permissionDecision, 'deny');
 });
 
 test('Given an unrelated tool at 95%, When it runs, Then it is never denied', () => {
@@ -341,4 +341,42 @@ test('Given an armed chat with a checkpoint, When PreCompact fires, Then stdout 
   // Then
   assert.ok(out.text.includes(`summary, it is the usage-pace checkpoint: ${checkpoint}\nGoal: ship\nNext: gate`));
   assert.equal(plan({ hook_event_name: 'PreCompact', session_id: 'other' }, ctx(dir, null)), null);
+});
+
+test('Given 93% fresh data, When the main loop starts one Agent or Task, Then it is not denied and the 92 notice asks for one subagent at a time and no critical operation', () => {
+  // Given
+  const dir = world();
+  // When
+  const agent = plan(pre('Agent', { tool_input: { prompt: 'x' } }), ctx(dir, pace(93)));
+  const task = plan(pre('Task', { tool_input: { prompt: 'x' } }), ctx(world(), pace(93)));
+  // Then
+  assert.notEqual(agent?.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.notEqual(task?.json.hookSpecificOutput.permissionDecision, 'deny');
+  assert.match(text(agent), /one subagent at a time/);
+  assert.match(text(agent), /no critical operation/);
+});
+
+test('Given 86%, When the 85 notice is told, Then it asks for fewer parallel agents or a slower pace and keeps the models', () => {
+  // Given
+  const dir = world();
+  // When
+  const out = text(plan(pre('Bash'), ctx(dir, pace(86))));
+  // Then
+  assert.match(out, /fewer agents in parallel, or slow down/);
+  assert.match(out, /keep the same models/);
+  assert.doesNotMatch(out, /smaller models/);
+});
+
+test('Given a burn rate from the samples, When any band is told, Then the notice carries the burn and the estimated time of each next band', () => {
+  // Given
+  const samples = (to) => [{ t: NOW - 20 * MIN, pct: to - 4 }, { t: NOW - 10 * MIN, pct: to - 2 }, { t: NOW - MIN, pct: to }];
+  const at = (pct) => text(plan(pre('Bash'), ctx(world(), pace(pct, 10, { samples5h: samples(pct) }))));
+  // When
+  const n70 = at(71), n92 = at(93), n96 = at(97);
+  // Then
+  assert.match(n70, /burning \d+\.\d%\/h/);
+  assert.match(n70, /next: 85% ~\d\d:\d\d, 92% ~\d\d:\d\d, 96% ~\d\d:\d\d\./);
+  assert.doesNotMatch(n70, /98% ~/); // at this rate 98% comes after the reset, so it is left out
+  assert.match(n92, /burning .*next: 96% ~\d\d:\d\d, 98% ~/);
+  assert.match(n96, /burning .*next: 98% ~/);
 });

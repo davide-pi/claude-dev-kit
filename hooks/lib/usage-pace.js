@@ -21,7 +21,8 @@ const MOD_ALIVE_MS = 3 * MIN;
 const MARKER_TTL_MS = 7 * 24 * 60 * MIN;
 const BANDS = [70, 85, 92, 96, 98];
 const BRAKE_FROM = 92;
-const FLOW_TOOLS = new Set(['Agent', 'Task', 'Workflow']);
+// From 92 one subagent at a time is still allowed (the notice says so); only a Workflow fan-out is denied.
+const FLOW_TOOLS = new Set(['Workflow']);
 const OVERRIDES = ['pace: owner asked', 'pace: finish'];
 const WINDOW_NAME = { five_hour: '5h', seven_day: '7d' };
 const PACE_STATE = '~/.claude/scripts/pace-state.mjs';
@@ -71,8 +72,13 @@ function noticeText(band, key, w, ctx) {
   const name = WINDOW_NAME[key];
   const head = `Usage pace: ${name} window at ${w.pct}%`;
   const reset = w.resetsAt ? `, resets ${resetLabel(w.resetsAt, ctx.now)}` : '';
+  // Every notice carries the burn and when each next band would come at that rate (bands after the reset are left out).
+  const next = w.burn !== null && w.burn > 0
+    ? BANDS.filter((b) => b > w.pct).map((b) => [b, ctx.now + ((b - w.pct) / w.burn) * 3600_000])
+      .filter(([, at]) => !w.resetsAt || at < w.resetsAt).map(([b, at]) => `${b}% ~${resetLabel(at, ctx.now)}`)
+    : [];
   const burn = w.burn !== null && w.burn > 0
-    ? `, burning ${w.burn.toFixed(1)}%/h${w.etaAt ? `, 98% around ${resetLabel(w.etaAt, ctx.now)}` : ''}`
+    ? `, burning ${w.burn.toFixed(1)}%/h${next.length ? `, next: ${next.join(', ')}` : ''}`
     : '';
   const sid = ctx.sid;
   // Decided at 96, not at 92: right after --arm the mod's aliveAt can be up to 30 s stale, so a 92 check would see no mod and resume twice.
@@ -88,10 +94,10 @@ function noticeText(band, key, w, ctx) {
   const catch96 = ctx.catchUp96 ? at96 : '';
   switch (band) {
     case 70: return `${head}${reset}${burn}.`;
-    case 85: return `${head}${reset}${burn}. Run fewer agents in parallel and pick smaller models where they are enough.`;
-    case 92: return `${head}${reset}. Start no new flow (Agent, Task, Workflow). ${arm}Ask the running flows for their state and write it to the checkpoint file. ${disarm}`;
-    case 96: return `${head}${reset}. ${catch92}${at96}${disarm}`;
-    default: return `${head}${reset}. ${catch92}${catch96}Close the step in hand, stop the flows cleanly, do a last checkpoint update, then stop.`;
+    case 85: return `${head}${reset}${burn}. Weigh the burn since the last notice: run fewer agents in parallel, or slow down, so the work in hand ends before the limit; keep the same models (quality first).`;
+    case 92: return `${head}${reset}${burn}. Finish the work in hand: no new Workflow, only small steps, one subagent at a time, no critical operation (merge, push, migration, deploy, delete). ${arm}Ask the running flows for their state and write it to the checkpoint file. ${disarm}`;
+    case 96: return `${head}${reset}${burn}. ${catch92}${at96}${disarm}`;
+    default: return `${head}${reset}${burn}. ${catch92}${catch96}Close the step in hand cleanly, stop the flows without leaving work half-written, do a last checkpoint update, then stop.`;
   }
 }
 
