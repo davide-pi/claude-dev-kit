@@ -60,6 +60,39 @@ test('given a repo on a branch, when files are given and then -Close, then the p
   assert.match(readFileSync(file, 'utf8'), /^branch: trunk\nstatus: active\nopened: \S+\n- only\.cs\n$/);
 });
 
+test('given an open perimeter, when -FindingsLog is a path to a JSON file, then it closes like the inline JSON; a file that is not a JSON object exits 2, nothing closed', { skip }, () => {
+  // Given
+  const repo = join(sandbox, 'main-path');
+  git(sandbox, 'init', '-b', 'trunk', repo);
+  git(repo, 'commit', '--allow-empty', '-m', 'init');
+  const file = join(repo, '.git', 'deliver', 'perimeter.md');
+  const lines = join(repo, '.git', 'deliver', 'findings.jsonl');
+  const bad = join(sandbox, 'bad-log.json');
+  const good = join(sandbox, 'good-log.json');
+  writeFileSync(bad, '[1]');
+  writeFileSync(good, '{"size":"S","rounds":1,"findings":[{"category":"correctness","priority":"P2","path":"a.cs","closed":true}]}');
+  perimeter(repo, '-Files', 'a.cs');
+
+  // When
+  const failed = perimeter(repo, '-Close', '-FindingsLog', bad);
+
+  // Then
+  assert.equal(failed.status, 2);
+  assert.match(failed.stderr, /the findings JSON must be an object/);
+  assert.match(readFileSync(file, 'utf8'), /status: active/);
+
+  // When
+  const r = perimeter(repo, '-Close', '-FindingsLog', good, '-Run', 'run-p');
+
+  // Then
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(readFileSync(file, 'utf8'), /status: closed/);
+  const entry = JSON.parse(readFileSync(lines, 'utf8'));
+  assert.equal(entry.size, 'S');
+  assert.equal(entry.run, 'run-p');
+  assert.deepEqual(entry.findings, [{ category: 'correctness', priority: 'P2', path: 'a.cs', closed: true }]);
+});
+
 test('given an open perimeter, when -Close runs with -FindingsLog, then it appends one line (the log plus at, run, minutes, tokens) and closes; without it or -NoFindings it exits 2, nothing closed', { skip }, () => {
   // Given
   const repo = join(sandbox, 'main4');
