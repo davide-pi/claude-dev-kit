@@ -1,12 +1,11 @@
 import { expect, test } from 'claude-code/testing'
 
-import { MAX_COMPACT_TRIES, PUSH_MS, compactInstructions, isCompactDue, parseModFile, parsePaceFile, resumePrompt, resumeStep, windowPct } from '../hooks/pace'
+import { MAX_COMPACT_TRIES, compactInstructions, isCompactDue, isResumePrompt, parseModFile, parsePaceFile, resumePrompt, windowPct } from '../hooks/pace'
 import type { ModFile, PaceFile } from '../hooks/pace'
 
 const NOW = Date.parse('2026-11-12T10:00:00Z')
 const ARMED = NOW - 3_600_000
 const pace = (over: Partial<PaceFile> = {}): PaceFile => ({ sessionId: 's-1', window: 'five_hour', resetsAt: NOW - 120_000, resumeAt: NOW - 1_000, checkpoint: 'C:/repo/.git/deliver/resume-s-1.md', ready: true, armedAt: ARMED, ...over })
-const fresh = { five_hour: { kind: 'five_hour', percentUsed: 3 }, seven_day: { kind: 'seven_day', percentUsed: 40 } }
 const rates = (five: number, seven: number, fiveReset?: number) => [
   { kind: 'five_hour', percentUsed: five, ...(fiveReset !== undefined && { resetsAt: new Date(fiveReset).toISOString() }) },
   { kind: 'seven_day', percentUsed: seven },
@@ -30,23 +29,28 @@ test('parseModFile: Given the mod file, When parsed, Then only finite times are 
   expect(parseModFile('{')).toEqual({})
 })
 
-test('isCompactDue: Given a ready chat not compacted since it armed, When asked, Then due; not ready, compacted by the chat or by the mod after arming, or out of tries is not', () => {
-  // Given
+test('isCompactDue: Given an armed chat whose window reset and resumeAt not come, When asked, Then due whether ready or not; before the reset, after resumeAt, compacted since arming or out of tries is not', () => {
+  // Given: reset 2 min ago, the cron resumes in 1 min
   const mod: ModFile = {}
+  const armed = pace({ resumeAt: NOW + 60_000 })
   // When / Then
-  expect(isCompactDue(pace(), mod, 0)).toBe(true)
-  expect(isCompactDue(pace({ ready: false }), mod, 0)).toBe(false)
-  expect(isCompactDue(pace({ compactedAt: ARMED }), mod, 0)).toBe(false)
-  expect(isCompactDue(pace(), { compactedAt: ARMED + 1 }, 0)).toBe(false)
-  expect(isCompactDue(undefined, mod, 0)).toBe(false)
-  expect(isCompactDue(pace(), mod, MAX_COMPACT_TRIES)).toBe(false)
+  expect(isCompactDue(armed, mod, 0, NOW)).toBe(true)
+  expect(isCompactDue({ ...armed, ready: false }, mod, 0, NOW)).toBe(true)
+  expect(isCompactDue({ ...armed, resetsAt: NOW + 1 }, mod, 0, NOW)).toBe(false)
+  expect(isCompactDue(armed, mod, 0, NOW + 60_000)).toBe(false)
+  expect(isCompactDue({ ...armed, compactedAt: ARMED }, mod, 0, NOW)).toBe(false)
+  expect(isCompactDue(armed, { compactedAt: ARMED + 1 }, 0, NOW)).toBe(false)
+  expect(isCompactDue(undefined, mod, 0, NOW)).toBe(false)
+  expect(isCompactDue(armed, mod, MAX_COMPACT_TRIES, NOW)).toBe(false)
   expect(MAX_COMPACT_TRIES).toBe(3)
 })
 
 test('isCompactDue: Given a compaction of an earlier arming, When the chat arms again, Then due again', () => {
-  // Given / When / Then
-  expect(isCompactDue(pace(), { compactedAt: ARMED - 1 }, 0)).toBe(true)
-  expect(isCompactDue(pace({ compactedAt: ARMED - 1 }), {}, 0)).toBe(true)
+  // Given
+  const armed = pace({ resumeAt: NOW + 60_000 })
+  // When / Then
+  expect(isCompactDue(armed, { compactedAt: ARMED - 1 }, 0, NOW)).toBe(true)
+  expect(isCompactDue({ ...armed, compactedAt: ARMED - 1 }, {}, 0, NOW)).toBe(true)
 })
 
 test('windowPct: Given a window past its reset, When read, Then 0 whatever the last reading said; a missing window is undefined', () => {
@@ -57,37 +61,11 @@ test('windowPct: Given a window past its reset, When read, Then 0 whatever the l
   expect(windowPct([], 'five_hour', NOW)).toBeUndefined()
 })
 
-test('resumeStep: Given the resume time come and the windows low, When the chat is idle, Then resume; before resumeAt, not idle, without a file or already resumed it waits', () => {
-  // Given
-  const low = [fresh.five_hour, fresh.seven_day]
-  // When / Then
-  expect(resumeStep(pace(), {}, low, NOW, true)).toBe('resume')
-  expect(resumeStep(pace({ resumeAt: NOW + 1 }), {}, low, NOW, true)).toBe('wait')
-  expect(resumeStep(pace(), {}, low, NOW, false)).toBe('wait')
-  expect(resumeStep(undefined, {}, low, NOW, true)).toBe('wait')
-  expect(resumeStep(pace(), { resumedAt: ARMED + 1 }, low, NOW, true)).toBe('wait')
-  // a resume of an earlier arming does not count
-  expect(resumeStep(pace(), { resumedAt: ARMED - 1 }, low, NOW, true)).toBe('resume')
-})
-
-test('resumeStep: Given the resume time come, When the new window is at 50% or more, or the other at 98% or more or missing, Then push by ten minutes', () => {
-  // Given: a reading of the new window resets after the one the chat armed on
-  const next = NOW + 4 * 3_600_000
-  // When / Then
-  expect(PUSH_MS).toBe(10 * 60_000)
-  expect(resumeStep(pace(), {}, rates(50, 40, next), NOW, true)).toBe('push')
-  expect(resumeStep(pace(), {}, rates(49.9, 97.9, next), NOW, true)).toBe('resume')
-  expect(resumeStep(pace(), {}, rates(10, 98, next), NOW, true)).toBe('push')
-  expect(resumeStep(pace({ window: 'seven_day' }), {}, rates(98, 10), NOW, true)).toBe('push')
-  expect(resumeStep(pace(), {}, [fresh.five_hour], NOW, true)).toBe('push')
-})
-
-test('resumeStep: Given the resume time come, When the reading of the window that reset is the old one or none, Then it reads 0 and resumes', () => {
-  // Given / When / Then: the old window's 96%, whether its reset passed or the reading never moved on
-  expect(resumeStep(pace(), {}, rates(96, 40, NOW - 1), NOW, true)).toBe('resume')
-  expect(resumeStep(pace(), {}, rates(96, 40, NOW - 120_000), NOW, true)).toBe('resume')
-  expect(resumeStep(pace(), {}, rates(96, 40), NOW, true)).toBe('resume')
-  expect(resumeStep(pace(), {}, [fresh.seven_day], NOW, true)).toBe('resume')
+test('isResumePrompt: Given the prompt the cron sends, When the mod reads a user input, Then it recognises the resume prefix and not other text', () => {
+  // Given / When / Then
+  expect(isResumePrompt(resumePrompt('C:/x.md'))).toBe(true)
+  expect(isResumePrompt('The usage window has reset. Read the checkpoint at C:/x.md, but first check the credits')).toBe(true)
+  expect(isResumePrompt('please continue')).toBe(false)
 })
 
 test('compactInstructions and resumePrompt: Given the checkpoint, When written, Then the compact keeps its path first and verbatim, and the resume names it', () => {
