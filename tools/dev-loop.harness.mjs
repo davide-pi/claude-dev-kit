@@ -53,7 +53,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
     let answer = opts.label === 'find the files to change' ? (extra.probe ?? null)
       : /^lanes? /.test(opts.label ?? '') ? (extra.lanes ?? laneRunner)(prompt, opts)
       : opts.agentType === 'implementer'
-      ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
+      ? (extra.implementer ? extra.implementer(prompt, opts) : impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
       : /^arbiter · round \d+/.test(opts.label ?? '') ? (arbiters.length ? arbiters.shift() : closeAll(prompt, 'open'))
       : queue.shift();

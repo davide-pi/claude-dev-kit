@@ -49,7 +49,7 @@ widening it is an edit to this file first, with the user's yes.
 
 | | S | M | L |
 | --- | --- | --- | --- |
-| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), tasks, owner ok, doubts pass, challenger `Plan` (Sonnet high; Opus with a data, money, contract or security axis) | `plan-work`, the same, challenger `Plan` (Opus high) |
+| analysis, criteria + proof | the approach and the criterion in one line | the approach, 3–5 criteria each with its proof (the error path too), tasks, owner ok, doubts pass, challenger `Plan` (Sonnet high); with a data, money, contract or security axis an Opus `Plan` subagent writes the tasks and replaces the challenger | `plan-work`, the same; Opus `Plan` subagent writes the tasks, replaces the challenger |
 | shared contract (API, event, schema) | ask the user | ask the user | ask the user, interface agreed first |
 | implementation | this session, inline (up to ~3 files) while the context is small, else `implementer`; a mechanical batch → `mechanical: true`, `implementer` on Haiku | `implementer`, one block (up to 4 tasks), closed by the gate | as M, block after block |
 | review | 1 `code-reviewer`, Sonnet high (mechanical: low) | reader A per block (Sonnet high); reader B once on the whole diff (Sonnet high; Opus with a security or data axis, over 10 files or 600 lines, or 3+ axes besides `logic`); + specialists when risk names them | reader A per block; B Opus high + a second reader Sonnet high; + specialists |
@@ -57,7 +57,7 @@ widening it is an edit to this file first, with the user's yes.
 **Docs only** (README, `docs/`, code comments; never a skill, agent, rule or hook): no perimeter, no loop.
 Edit inline, then one `code-reviewer` (Haiku, `medium`) on the diff; fix its P1/P2 inline, run the doc or lint check (this kit: `node tools/validate.mjs`).
 
-Loop args: `references/loop.md`; the brief: `file:line` + the change + the challenger's `read:`. Before the loop: the chosen scenario's section of `references/scenarios.md`; tasks, doubts pass, challenger: `references/analysis.md`.
+Loop args: `references/loop.md`; the brief: `file:line` + the change + the challenger's (or planner's) `read:`. Before the loop: the chosen scenario's section of `references/scenarios.md`; tasks, doubts pass, planner, challenger: `references/analysis.md`.
 
 ### 3. Who asks the user
 
@@ -94,7 +94,7 @@ The verdict and the closing table of everything outside the perimeter: `referenc
 
 ## References
 
-- `references/analysis.md` — M, L before the loop: doubts, criteria, challenger.
+- `references/analysis.md` — M, L, before the loop: doubts, planner, challenger.
 - `references/loop.md` — when launching the loop, after `OK`, writing the verdict.
 - `references/loop-extras.md` — the owner asked a cleanup pass, the gate said `red: scope`, or a relaunch; who reads what.
 - `references/stall.md` — a run returns `STALL`, or a test is red after `OK`.

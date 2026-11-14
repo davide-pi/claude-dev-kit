@@ -637,6 +637,7 @@ const IMPLEMENTATION = obj(['scope', 'files', 'evidence', 'verify', 'snapshot', 
   evidence: str('the verify command and the output line that settles it, quoted; or why not run'),
   verify: obj(['status'], { status: { type: 'string', enum: VERIFY_STATUSES }, command: str('the verify command that ran'), line: str('the output line that settles it, quoted') }),
   gate: str('the last output line of scripts/gate.mjs, verbatim, when the brief gives the gate command'),
+  handoff: str('for the next blocks, up to 8 lines: choices made, names and interfaces you created that later tasks use, traps found; empty when none'),
   snapshot: obj(['tree', 'files'], { tree: str(), files: arr(str()), churn: { type: 'integer' }, big: arr(obj(['file', 'start', 'now'], { file: str(), start: { type: 'integer' }, now: { type: 'integer' } }), 'as printed by the script') }),
   rejected: arr(obj(['id', 'reason'], {
     id: str(),
@@ -839,13 +840,29 @@ const recoverChanges = async (root = repoRoot) => {
 }
 
 const resolution0 = resolutions.find(r => Number(r?.round) === 0)
+// What the implementers of the earlier blocks pass on: one note per block (8 lines, 1200 chars), the newest kept within HANDOFF_CAP.
+const HANDOFF_CAP = 2000
+const cleanHandoff = v => String(v ?? '').trim().split('\n').slice(0, 8).join('\n').slice(0, 1200).trim()
+const handoffText = notes => {
+  const kept = []
+  let size = 0
+  for (const n of [...notes].reverse()) {
+    if (size + n.length > HANDOFF_CAP) break
+    kept.unshift(n)
+    size += n.length
+  }
+  return kept.length ? `Handoff from earlier blocks (what their implementers decided or created; the code is the truth if it differs):\n${kept.join('\n---\n')}` : ''
+}
 // The blocks of one lane, or of the whole plan when serial (lane null): `items` are { block, bid }, `total` the run's block count.
 // Returns a stall result, or null when every block is done.
 const runBlocks = async (items, total, lane) => {
   const root = lane?.path ?? repoRoot
   let blockTree = ''   // the previous block's tree: the base of the next block's delta
+  const handoffs = []  // this lane's (or the serial run's) own, never another lane's
   for (const { block, bid } of items) {
     phase('Implement')
+    let blockHandoff = ''
+    const noteHandoff = r => { blockHandoff = cleanHandoff(r?.handoff) || blockHandoff }
     const base = total === 1 ? 'implement the change' : `implement block ${bid}`
     const optsFor = label => ({ label, phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION })
     const implOpts = optsFor(base)
@@ -853,7 +870,9 @@ const runBlocks = async (items, total, lane) => {
       ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}${total > 1 ? '\nDo only the tasks of this block: a task of a later block is not yours, even a quick one.' : ''}`
       : ''
     const budgetLine = `Budget: about ${stepBudget(block.length)} turns. At that point stop widening: run the gate and report what is left.`
-    const buildImpl = (extra, tail = gateLines(root, !!lane)) => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree)].filter(Boolean).join('\n\n')
+    const buildImpl = (extra, tail = gateLines(root, !!lane), withHandoff = true) => [brief, extra, decisionsText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree), withHandoff ? handoffText(handoffs) : ''].filter(Boolean).join('\n\n')
+    // Fix runs get no handoff: they work on the tree as it is.
+    const buildFix = extra => buildImpl(extra, undefined, false)
     const tdd = block.some(t => t.tdd)
     if (tdd && !input.unit) gaps.push(`block ${bid}: tdd task but no unit command, so the block is not test-first`)
     if (tdd && input.unit) {
@@ -885,6 +904,7 @@ const runBlocks = async (items, total, lane) => {
     const asked0 = await askWithQuestions(buildImpl, implOpts, 0, resolution0, gated, bid)
     if (asked0.stall) return asked0.stall
     let impl = asked0.report
+    noteHandoff(impl)
     // An edited proven test is the owner's call (accept it with --force or revert it): no continuation or fix can settle it.
     const testsChanged = report => {
       const tg = readGate(report?.gate)
@@ -910,6 +930,7 @@ const runBlocks = async (items, total, lane) => {
       const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
       if (nextStall) return nextStall
       impl = next ?? impl
+      noteHandoff(next)
       const nextChanged = testsChanged(next)
       if (nextChanged) return nextChanged
     }
@@ -931,7 +952,7 @@ const runBlocks = async (items, total, lane) => {
       // exit 3: the brief already told the implementer to wait with --wait, so a fix call would only race the running suite
       if (g.gate === 'running') return stallAgain(0, `the gate was still running at the end of block ${bid}: ${g.line}`, { why: 'gate-running' })
       const fixLabel = `${base} (gate fix)`
-      const askedFix = await askWithQuestions(extra => buildImpl([
+      const askedFix = await askWithQuestions(extra => buildFix([
         `The gate is red at the end of block ${bid}: ${g.line}`,
         g.test ? `Failing: ${g.test}` : '',
         g.outside.length ? `Outside the perimeter (revert your own edits there, never the user's earlier work): ${g.outside.join(', ')}` : '',
@@ -996,7 +1017,7 @@ const runBlocks = async (items, total, lane) => {
         }
         if (inside.length) {
           const fixLabel = `${base} (reader A fix)`
-          const askedA = await askWithQuestions(extra => buildImpl([
+          const askedA = await askWithQuestions(extra => buildFix([
             `Reader A raised these findings on block ${bid}. ${FIX_RULE} One you judge wrong or cannot reproduce goes under \`rejected\` with its reason, no code change:`,
             ...inside.map(x => `- ${x.id} [${x.priority}] ${x.path}${x.line ? `:${x.line}` : ''} - ${x.title}: ${x.failure}${x.fix ? ` (suggested: ${x.fix})` : ''}${x.confidence === 'PLAUSIBLE' ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}`),
             inside.some(x => x.confidence === 'PLAUSIBLE') ? REPRODUCE_RULE : '',
@@ -1026,6 +1047,7 @@ const runBlocks = async (items, total, lane) => {
       }
     }
     blockTree = g?.tree || impl.snapshot?.tree || blockTree
+    if (blockHandoff) handoffs.push(blockHandoff)
   }
   return null
 }

@@ -1,6 +1,6 @@
 # Loop — launching `dev-loop`, and what to do with its answer
 
-Before the loop (M, L): facts first, doubts pass, criteria and challenger: `references/analysis.md`.
+Before the loop (M, L): facts first, doubts pass, criteria, planner and challenger: `references/analysis.md`.
 
 ## The start point (before the first edit of the change, yours or the implementer's)
 
