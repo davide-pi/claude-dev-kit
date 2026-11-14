@@ -522,7 +522,7 @@ test('given a block whose gate comes back red, when the fix call turns it green,
   const { calls } = await run(BLOCK_ARGS, [], impls);
   // Then
   const made = implCalls(calls);
-  assert.deepEqual(made.map(c => c.opts.label), ['implement block 1', 'implement block 1 (gate fix)', 'implement block 2']);
+  assert.deepEqual(made.map(c => c.opts.label), ['B1 · T1 T2 T3 · implement', 'B1 · T1 T2 T3 · fix (gate)', 'B2 · T4 T5 · implement']);
   assert.ok(made[1].prompt.includes('OrdersTests.Total fails'));
 });
 
@@ -607,7 +607,7 @@ test('given a block with a tdd task and a unit command, when it runs, then a tes
   // When
   const { calls } = await run(TDD_ARGS, [review([]), review([])], impls);
   // Then
-  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['implement the change (tests first)', 'implement the change']);
+  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['B1 · T1 · implement (tests first)', 'B1 · T1 · implement']);
 });
 
 test('given a tests-first call, when its brief is built, then it names the test skill and the red gate command', async () => {
@@ -714,7 +714,7 @@ test('given a tests-first call whose gate is a build failure, when it is retried
   const { out, calls } = await run(TDD_ARGS, [review([]), review([])], impls);
   // Then
   const retry = implCalls(calls)[1];
-  assert.equal(retry.opts.label, 'implement the change (tests first, retry)');
+  assert.equal(retry.opts.label, 'B1 · T1 · implement (tests first, retry)');
   assert.ok(retry.prompt.includes('CS0246 type Order not found') && retry.prompt.includes('stubs'));
   assert.ok(!out.gaps.includes('block 1: red not proven'));
 });
@@ -735,7 +735,7 @@ test('given two blocks with the same tree, when the second ends, then reader A d
   // When
   const { calls } = await run(BLOCK_ARGS, [review([]), review([]), review([]), review([])], impls);
   // Then
-  assert.equal(calls.filter(c => /reader A$/.test(c.opts.label ?? '') && c.opts.label.startsWith('block')).length, 1);
+  assert.equal(calls.filter(c => /^B\d+ ·.* · reader A$/.test(c.opts.label ?? '')).length, 1);
 });
 
 test('given a verify command with a single quote, when the loop starts, then it answers with an error and calls no agent', async () => {

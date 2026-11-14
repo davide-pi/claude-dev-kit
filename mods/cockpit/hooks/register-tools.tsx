@@ -9,7 +9,7 @@ import { asks, endAsk, live, waitOverlap } from './register-state'
 import { patch } from './store'
 import { bashLog, withLogEntries } from './timeline'
 import { endTrail, startTrail, trailLabel } from './trail'
-import { agentRunId, launchedRun, logRunChange, nameRun, runIdOf, touchRun } from './workflow'
+import { agentRunId, launchedRun, logRunChange, nameRun, runIdOf, taskPlan, touchRun } from './workflow'
 import { editedPathOf, parseCreatedPr, upsertPr } from './work'
 
 /** The tool handlers: the tasks, skills and workflows a call feeds, the tools in flight, a created PR, the asks a person answers. */
@@ -99,8 +99,10 @@ export const registerTools = (on: Parameters<Register>[0]): void => {
     const ran = await next(e)
     const launched = isOk(ran) ? launchedRun(ran.result) : undefined
     if (launched) {
+      // only dev-loop passes a plan: the call's own input is the one place the tasks reach the mod
+      const tasks = taskPlan(e)
       await patch($, s => {
-        const workflowRun = nameRun(s.workflowRun, launched)
+        const workflowRun = nameRun(s.workflowRun, { ...launched, ...(tasks !== undefined && { tasks }) })
         return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun) }
       }).catch(() => undefined)
     }

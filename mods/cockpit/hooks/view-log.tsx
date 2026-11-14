@@ -13,7 +13,7 @@ import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
 import type { Block, Kit } from './view-kit'
 import { ALL_KEY, LABEL_W, detailRows, filesText, isAllShown, isExpandable, isMainEntry, linkAnchor, modelSpans, roundHeader, summarySpans } from './view-log-round'
-import { activeRun, agentRunId, roundOf } from './workflow'
+import { activeRun, agentRunId, roundOf, taskRows } from './workflow'
 
 /** LOG shows this many nodes (an open one with its whole subtree); the rest sits behind its toggle. */
 const DONE_ROWS = 5
@@ -227,6 +227,27 @@ function eventRow(k: Kit, e: DoneEntry, prefix: string, toggle?: { key: string; 
   return rest(0)
 }
 
+/** The task tree under a live flow, one row per task: state icon, id, title (cut to fit), `← T1,T2`, its block and, while it runs, the step; none for a run with no tasks. */
+function taskTree(k: Kit, runId: string): Block[] {
+  const { ui, width, s } = k
+  const { Text } = ui
+  if (s.workflowRun?.runId !== runId) return []
+  const all = taskRows(s.workflowRun)
+  const open = all.filter(r => r.state !== 'done')
+  const finished = all.length - open.length
+  const collapsed: Block[] = finished === 0 ? [] : [[<Text key={`flow:${runId}:task:done`} wrap="truncate">{spanNodes(ui, [sp('  '), sp('󰄬', COLORS.green), sp(' '), dim(t().page.planDone(finished))])}</Text>]]
+  const rows = open.map(r => {
+    const icon = r.state === 'done' ? sp('󰄬', COLORS.green) : r.state === 'running' ? sp('󱎖', COLORS.blue) : dim('󰄰')
+    const right = [r.dependsOn.length > 0 ? `← ${r.dependsOn.join(',')}` : '', r.block === undefined ? '' : `B${r.block}`, r.tag === undefined ? '' : t().page.planStep(r.tag)].filter(Boolean).join(' · ')
+    const left = [sp('  '), icon, sp(' '), sp(r.id, undefined, r.state === 'running'), sp(' ')]
+    const room = width - spanWidth(left) - (right === '' ? 0 : textCells(right) + 1)
+    const title = r.title === undefined || room < 4 ? [] : truncateSpans([sp(r.title.replace(/\s+/g, ' '))], room)
+    const spans = truncateSpans([...left, ...title, ...(right === '' ? [] : [sp(' '), dim(right)])], width)
+    return [<Text key={`flow:${runId}:task:${r.id}`} wrap="truncate">{spanNodes(ui, spans)}</Text>]
+  })
+  return [...collapsed, ...rows]
+}
+
 /** The rows under an open node: a round's summary and events; a run's agents, by the round their label names where it names one. */
 function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
   const { ui, width } = k
@@ -236,6 +257,7 @@ function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
     ...(summary.length === 0 ? [] : [[line(ui, [sp('├ ', COLORS.rule), ...summary])]]),
     ...(files === undefined ? [] : [[line(ui, [sp('├ ', COLORS.rule), dim(files)])]]),
     ...detailRows(g, k.s).map(row => [line(ui, [sp('├ ', COLORS.rule), ...row])]),
+    ...(g.flow?.isLive === true ? taskTree(k, g.flow.runId) : []),
   ]
   // a commit, test or PR a flow agent made sits under that agent's row
   const agentIds = new Set(g.flow === undefined ? [] : g.events.flatMap(e => (e.kind === 'agent' && e.key !== undefined ? [e.key] : [])))

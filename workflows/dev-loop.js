@@ -97,6 +97,8 @@ const BLOCK_TASKS = 4
 const blocksFor = tasks => {
   const ids = new Set()
   for (const t of tasks) {
+    // the labels and the cockpit split a block tag on spaces and ` · `
+    if (/[\s·]/.test(t.id)) throw new Error(`task id has whitespace or a middle dot: ${t.id}`)
     if (ids.has(t.id)) throw new Error(`duplicate task id: ${t.id}`)
     ids.add(t.id)
   }
@@ -119,6 +121,14 @@ const blocksFor = tasks => {
   }
   return blocks
 }
+// The plan log lines (a header, then one line per block) and the stable tag of a block's agent labels (`B1 · T1 T2`, then ` · implement|reader A|fix`):
+// the cockpit parses that shape (mods/cockpit/hooks/workflow.ts, parseBlockLabel), a test on each side holds them together.
+const planLines = blocks => {
+  const count = blocks.reduce((n, b) => n + b.length, 0)
+  const task = t => `${[t.id, String(t.title ?? '').replace(/\s+/g, ' ').trim()].filter(Boolean).join(' ')}${(t.dependsOn ?? []).length ? ` (after ${t.dependsOn.join(', ')})` : ''}`
+  return [`Plan: ${blocks.length} block${blocks.length === 1 ? '' : 's'}, ${count} task${count === 1 ? '' : 's'}`, ...blocks.map((b, i) => `B${i + 1} · ${b.map(task).join(' · ')}`)]
+}
+const blockTag = (block, bid) => `B${bid} · ${block.map(t => t.id).join(' ')}`
 // The unplaced tasks left once those no other unplaced task depends on are peeled off: the cycle, not what waits on it.
 const cycleIds = left => {
   let rest = left
@@ -547,6 +557,7 @@ const planTasks = (Array.isArray(input.plan?.tasks) ? input.plan.tasks : []).fil
 let blocks
 try { blocks = planTasks.length ? blocksFor(planTasks) : [[{ id: '1', title: brief, files: [], dependsOn: [], tdd: false, criteria: [] }]] } catch (e) { return `dev-loop: args.plan: ${e.message}` }
 const loopSize = sizeFor(givenSize, risk, blocks.length)
+if (planTasks.length) for (const line of planLines(blocks)) log(line)
 // Only the gate command (built when the implementer runs, not inline) wraps them in single quotes: a literal in PowerShell and bash, `;` and `"` pass.
 if (!inline && /'/.test(text(input.verify))) return 'dev-loop: verify command contains a single quote: the gate command wraps it in single quotes.'
 if (!inline && /'/.test(text(input.unit))) return 'dev-loop: unit command contains a single quote: the gate command wraps it in single quotes.'
@@ -863,7 +874,9 @@ const runBlocks = async (items, total, lane) => {
     phase('Implement')
     let blockHandoff = ''
     const noteHandoff = r => { blockHandoff = cleanHandoff(r?.handoff) || blockHandoff }
-    const base = total === 1 ? 'implement the change' : `implement block ${bid}`
+    // a planned run tags every block agent with its task ids (the Workflow view and the cockpit read them)
+    const tag = planTasks.length ? blockTag(block, bid) : ''
+    const base = tag ? `${tag} · implement` : total === 1 ? 'implement the change' : `implement block ${bid}`
     const optsFor = label => ({ label, phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION })
     const implOpts = optsFor(base)
     const tasksText = planTasks.length
@@ -951,7 +964,7 @@ const runBlocks = async (items, total, lane) => {
       if (g.gate === 'red: timeout') return stallAgain(0, `the gate stalled twice on block ${bid}; last test seen: ${g.test || '(none)'}`, { why: 'gate-timeout' })
       // exit 3: the brief already told the implementer to wait with --wait, so a fix call would only race the running suite
       if (g.gate === 'running') return stallAgain(0, `the gate was still running at the end of block ${bid}: ${g.line}`, { why: 'gate-running' })
-      const fixLabel = `${base} (gate fix)`
+      const fixLabel = tag ? `${tag} · fix (gate)` : `${base} (gate fix)`
       const askedFix = await askWithQuestions(extra => buildFix([
         `The gate is red at the end of block ${bid}: ${g.line}`,
         g.test ? `Failing: ${g.test}` : '',
@@ -983,7 +996,7 @@ const runBlocks = async (items, total, lane) => {
     if (loopSize !== 'S' && gateGreen(g) && g.tree && g.tree !== blockTree) {
       // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried.
       phase('Block review')
-      const readLabel = `block ${bid} · reader A`
+      const readLabel = tag ? `${tag} · reader A` : `block ${bid} · reader A`
       const read = await ask([
         `Review block ${bid} of ${total} (tasks ${entry.tasks.join(', ')}): its delta is \`${deltaCommand(blockTree, g.tree, startHead)}\` (the trees are snapshots of the working tree, untracked files included): run it first, then judge the code as it is now.`,
         `Intent: ${brief}`,
@@ -1016,7 +1029,7 @@ const runBlocks = async (items, total, lane) => {
           else outOfScope.push({ source: 'review', ...x })
         }
         if (inside.length) {
-          const fixLabel = `${base} (reader A fix)`
+          const fixLabel = tag ? `${tag} · fix` : `${base} (reader A fix)`
           const askedA = await askWithQuestions(extra => buildFix([
             `Reader A raised these findings on block ${bid}. ${FIX_RULE} One you judge wrong or cannot reproduce goes under \`rejected\` with its reason, no code change:`,
             ...inside.map(x => `- ${x.id} [${x.priority}] ${x.path}${x.line ? `:${x.line}` : ''} - ${x.title}: ${x.failure}${x.fix ? ` (suggested: ${x.fix})` : ''}${x.confidence === 'PLAUSIBLE' ? ' (PLAUSIBLE: REPRODUCE FIRST)' : ''}`),

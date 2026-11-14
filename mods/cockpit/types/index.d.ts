@@ -122,10 +122,15 @@ export type CockpitPerimeterCheck = { files: number; outside: string[] }
  * and which of them finished, the label of the newest one (`phase`: the engine exposes no phase) and the round its `R<n>` names, and when
  * any of its agents last did something. `endedAt` is set when a main turn starts or a clock tick finds every agent done (a silent run's agents are taken as done); a later spawn reopens the run.
  */
+export type CockpitPlanTask = { id: string; title: string; dependsOn: string[] }
+
 export type CockpitWorkflowRun = {
   runId: string
   name?: string
-  agents: { id: string; isDone: boolean }[]
+  /** `label` is the agent's spawn description (`B1 · T1 T2 · implement` for a dev-loop block agent). */
+  agents: { id: string; isDone: boolean; label?: string; isFailed?: boolean }[]
+  /** The task plan the `Workflow` call passed (`args.plan.tasks`), in plan order; absent for a workflow without one. */
+  tasks?: CockpitPlanTask[]
   phase?: string
   round?: number
   lastAt?: number

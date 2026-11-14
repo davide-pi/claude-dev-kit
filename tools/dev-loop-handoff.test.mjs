@@ -11,14 +11,14 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run, ARGS_M, review, impl, gate, tasksOf } from './dev-loop.harness.mjs';
+import { run, ARGS_M, review, impl, gate, tasksOf, planLines, blockTag } from './dev-loop.harness.mjs';
 
 const HEADING = /Handoff from earlier blocks/i;
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
 const two = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
 const three = { ...two, plan: { tasks: tasksOf(10) } };
 const made = (calls) => calls.filter((c) => c.opts.agentType === 'implementer');
-const block = (calls, n) => made(calls).find((c) => c.opts.label === `implement block ${n}`);
+const block = (calls, n) => made(calls).find((c) => new RegExp(`^B${n} · .* · implement$`).test(c.opts.label));
 const task = (id, file) => ({ id, title: `task-${id}-title`, files: [file], dependsOn: [], tdd: false, criteria: [] });
 
 test('given two blocks where block 1 returns a handoff, when block 2 is called, then its prompt holds the handoff under its heading', async () => {
@@ -83,7 +83,7 @@ test('given lanes, when a lane runs its second block, then it gets only its own 
   // When
   const { calls } = await run(args, [review([]), review([])], [], { implementer });
   // Then
-  const second = made(calls).filter((c) => /implement block \d+$/.test(c.opts.label) && HEADING.test(c.prompt));
+  const second = made(calls).filter((c) => /^B\d · .* · implement$/.test(c.opts.label) && HEADING.test(c.prompt));
   assert.equal(second.length, 2);
   for (const c of second) {
     const lane = /--root 'C:\/lanes\/l(\d)'/.exec(c.prompt)[1];
@@ -113,7 +113,7 @@ test('given a handoff from block 1, when the gate fix of block 2 is called, then
   // When
   const { calls } = await run(two, [review([]), review([])], impls);
   // Then
-  const fix = made(calls).find((c) => c.opts.label === 'implement block 2 (gate fix)');
+  const fix = made(calls).find((c) => /^B2 · .* · fix \(gate\)$/.test(c.opts.label));
   assert.ok(fix);
   assert.doesNotMatch(fix.prompt, HEADING);
   assert.doesNotMatch(fix.prompt, /secret-handoff-marker/);
@@ -126,10 +126,106 @@ test('given a handoff from block 1, when the reader A fix of block 2 is called, 
   // When
   const { calls } = await run(two, [review([]), review([], [found]), review([]), review([])], impls);
   // Then
-  const fix = made(calls).find((c) => c.opts.label === 'implement block 2 (reader A fix)');
+  const fix = made(calls).find((c) => /^B2 · .* · fix$/.test(c.opts.label));
   assert.ok(fix);
   assert.doesNotMatch(fix.prompt, HEADING);
   assert.doesNotMatch(fix.prompt, /secret-handoff-marker/);
+});
+
+// ── the plan in the Workflow view: log lines and task-tagged labels ───────────────────────────────────
+const titled = (id, dependsOn = []) => ({ id, title: `Title ${id}`, files: [], dependsOn, tdd: false, criteria: [] });
+const PLAN = [titled('T1'), titled('T2', ['T1']), titled('T3'), titled('T4', ['T1']), titled('T5', ['T4'])];   // two blocks: T1 T2 T3 | T4 T5
+const planned = { ...ARGS_M, verify: 'node --test x', plan: { tasks: PLAN } };
+
+test('given a plan of 2 blocks, when the loop starts, then one header line and one line per block are logged with ids, titles and dependencies', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { logs } = await run(planned, [review([]), review([])], impls);
+  // Then
+  const header = logs.filter((l) => /2 blocks/.test(l));
+  assert.equal(header.length, 1);
+  assert.match(header[0], /5 tasks/);
+  const lines = logs.filter((l) => /^B\d · /.test(l));
+  assert.deepEqual(lines, ['B1 · T1 Title T1 · T2 Title T2 (after T1) · T3 Title T3', 'B2 · T4 Title T4 (after T1) · T5 Title T5 (after T4)']);
+});
+
+test('given the blocks of a plan, when the plan lines are built, then a header names the counts and each block gets one line', () => {
+  // Given
+  const blocks = [PLAN.slice(0, 3), PLAN.slice(3)];
+  // When
+  const lines = planLines(blocks);
+  // Then
+  assert.equal(lines.length, 3);
+  assert.match(lines[0], /2 blocks.*5 tasks/);
+  assert.equal(lines[2], 'B2 · T4 Title T4 (after T1) · T5 Title T5 (after T4)');
+});
+
+test('given a plan of 2 blocks, when the plan lines are built, then the header is exactly Plan: 2 blocks, 5 tasks', () => {
+  // Given
+  const blocks = [PLAN.slice(0, 3), PLAN.slice(3)];
+  // When
+  const [header] = planLines(blocks);
+  // Then
+  assert.equal(header, 'Plan: 2 blocks, 5 tasks');
+});
+
+test('given a title with a newline and runs of spaces, when the plan lines are built, then the title is one line with single spaces', () => {
+  // Given
+  const blocks = [[{ ...titled('T1'), title: 'Log  the\n plan' }]];
+  // When
+  const lines = planLines(blocks);
+  // Then
+  assert.equal(lines[1], 'B1 · T1 Log the plan');
+});
+
+test('given a plan task id with whitespace or a middle dot, when the loop starts, then the plan is refused with the args.plan error', async () => {
+  // Given
+  const bad = ['T 1', 'T·1'];
+  for (const id of bad) {
+    const args = { ...ARGS_M, verify: 'node --test x', plan: { tasks: [{ ...titled('T2'), id }] } };
+    // When
+    const { out, calls } = await run(args, [], []);
+    // Then
+    assert.match(String(out), /^dev-loop: args\.plan: .*task id/);
+    assert.equal(calls.length, 0);
+  }
+});
+
+test('given a block of T1 T2, when its tag is built, then it is B1 · T1 T2', () => {
+  // Given
+  const block = [titled('T1'), titled('T2')];
+  // When
+  const tag = blockTag(block, 1);
+  // Then
+  assert.equal(tag, 'B1 · T1 T2');
+});
+
+test('given block 2 of a plan, when its implementer, reader A and in-block fix start, then their labels are B2 · T4 T5 · implement|reader A|fix', async () => {
+  // Given
+  const found = { title: 'unrequested rename of a helper', path: 'src/Orders/OrdersQuery.cs', category: 'scope', priority: 'P2', failure: 'x' };
+  const impls = [green({ gate: gate('green', { tree: 'tr1' }) }), green({ gate: gate('green', { tree: 'tr2' }) }), green(), green()];
+  // When
+  const { calls } = await run(planned, [review([]), review([], [found]), review([]), review([])], impls);
+  // Then
+  const names = calls.map((c) => c.opts.label);
+  assert.ok(names.includes('B1 · T1 T2 T3 · implement'), names.join('\n'));
+  assert.ok(names.includes('B2 · T4 T5 · implement'));
+  assert.ok(names.includes('B1 · T1 T2 T3 · reader A'));
+  assert.ok(names.includes('B2 · T4 T5 · reader A'));
+  assert.ok(names.includes('B2 · T4 T5 · fix'));
+});
+
+test('given no plan, when the loop starts, then no plan line is logged and the labels are unchanged', async () => {
+  // Given
+  const args = { ...ARGS_M, verify: 'node --test x' };
+  // When
+  const { logs, calls } = await run(args, [review([]), review([]), review([])], [green()]);
+  // Then
+  assert.equal(logs.filter((l) => /^B\d · |\d+ blocks/.test(l)).length, 0);
+  const names = calls.map((c) => c.opts.label);
+  assert.ok(names.includes('implement the change'));
+  assert.ok(names.includes('block 1 · reader A'));
 });
 
 // ── deliver skill: the Opus planner ───────────────────────────────────────────

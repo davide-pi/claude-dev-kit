@@ -237,7 +237,7 @@ async function tickClock($: EngineInterface): Promise<number> {
       return isEnded ? { ...a, status: 'done', endedAt: now, isFailed: info?.status === 'failed' || info?.status === 'killed' } : a
     })
     // The run's agents that ended here count as finished in it, and a run with none left open is closed.
-    const finished = agents.reduce((run, a, i) => (a.status !== s.agents[i]?.status && inRun.has(a.id) ? finishWorkflowAgent(run, a.id, now) : run), s.workflowRun)
+    const finished = agents.reduce((run, a, i) => (a.status !== s.agents[i]?.status && inRun.has(a.id) ? finishWorkflowAgent(run, a.id, now, a.isFailed === true) : run), s.workflowRun)
     const closed = endRun(finished, now)
     // a run the silence check closed is not a finished one: it is marked, and logged only when a newer run replaces it
     const workflowRun = isSilent && closed !== finished ? silenceRun(closed) : closed
