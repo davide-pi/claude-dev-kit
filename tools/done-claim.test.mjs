@@ -20,7 +20,7 @@ import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, stopWithContext, committed, HOOK } from './done-claim.harness.mjs';
+import { created, prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, check, stopWithContext, committed, HOOK } from './done-claim.harness.mjs';
 
 test('given English claim words without proof and "works" before a qualifier, when the Stop hook judges an edit turn, then bare claims are blocked and the qualified "works" is not a claim', () => {
   // Given / When / Then
@@ -46,7 +46,7 @@ test('given an edit turn ending "fatto" with no evidence, when the hook runs, th
   // Then
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
-  assert.match(reason, /Livello \| Comando \| Riga che decide \| Stato/);
+  assert.match(reason, /Livello:[\s\S]*Comando:[\s\S]*Riga che decide:[\s\S]*Stato:/);
   assert.match(reason, /never in a code block/);
   assert.doesNotMatch(reason, /in un blocco ```/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');
@@ -133,11 +133,12 @@ test('given a "> **Dettaglio**" block, when the hook judges the claim, then the 
 
 test('given a quoted verdict title and table alone, when the hook judges the claim, then they are prose, not evidence', () => {
   // Given
-  const block = '> **Verifica**\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> | - | - | - | - |';
+  const block = '> **Verifica**\n> Livello: -\n> Comando: -\n> Riga che decide: -\n> Stato: -';
 
   // When / Then
   assert.match(stop(edited(`Fatto.\n\n${block}`)).reason, /"Fatto"/);
-  assert.match(stop(edited('Done.\n\n> **Verification**\n> | Level | Command |')).reason, /"Done"/);
+  // a check with no Stato is an unproven row of its own
+  assert.match(stop(edited('Done.\n\n> **Verification**\n> Level: unit\n> Command: dotnet test')).reason, /no Stato/);
   // Real quoted output beside it still counts.
   assert.equal(stop(edited(`Fatto.\n> 395 pass\n\n${block}`)).reason, '');
 });
@@ -253,7 +254,7 @@ test('given a cross-session message after an edit, when the hook finds the turn 
   assert.match(stop([...edit, peer({ isMeta: false, turnOrigin: undefined, origin: undefined }), say('Fatto.')]).reason, /"Fatto"/);
   assert.match(stop([...edit, peer({ message: { role: 'user', content: 'x' } }), say('Fatto.')]).reason, /"Fatto"/);
   // a table whose deciding line nobody printed is blocked after a peer reply too
-  const table = '| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n| unit | dotnet test | Passed: 48 | fatto |';
+  const table = verdict(row('Passed: 48')).replace('Fatto.\n\n', '');
   assert.match(stop([...edit, peer(), say(`Fatto.\n\n${table}`)]).reason, /"fatto"/);
   // a human prompt that quotes the tag mid-text is a boundary: the earlier Edit no longer arms the hook
   assert.equal(stop([...edit, prompt('perché questo <cross-session-message from="x"> è arrivato?'), say('Fatto.')]).reason, '');
@@ -292,7 +293,7 @@ test('given an active perimeter and a progress report with a row still running, 
   const repo = repoWithPerimeter('active');
 
   // When / Then
-  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), '| review | `dev-loop` `wf_1` | — | non verificato: ripresa |', row('—', 'not verified: still running', 'e2e')]) {
+  for (const open of [row('—', 'non verificato: run ancora in corso', 'review'), check('review', '`dev-loop` `wf_1`', '—', 'non verificato: ripresa'), row('—', 'not verified: still running', 'e2e')]) {
     assert.equal(stop(edited(verdict(row('Passed: 48'), open), 'Passed: 48'), { extra: { cwd: repo } }).reason, '', open);
   }
   // an honest gap that is not "still running" leaves the check on
@@ -445,10 +446,10 @@ test('given a blocked verdict in a large context, when the hook runs, then the /
   assert.equal(handoff, null);
 });
 
-test('given an English verdict table, when the hook judges it, then it is judged like the Italian one', () => {
+test('given an English stacked verdict, when the hook judges it, then it is judged like the Italian one', () => {
   // Given / When / Then
-  const en = '| Level | Command | Deciding line | Status |\n| --- | --- | --- | --- |';
-  assert.equal(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`, 'Passed: 48')).reason, '');
-  assert.match(stop(edited(`Done.\n\n${en}\n| unit | dotnet test | Passed: 48 | done |`)).reason, /"done"/);
-  assert.equal(stop(edited(`${en}\n| e2e | npm run e2e | - | not verified: needs staging |`)).reason, '');
+  const en = (deciding, status) => `> **Verification**\n> Level: unit\n> Command: dotnet test\n> Deciding line: ${deciding}\n> Status: ${status}`;
+  assert.equal(stop(edited(`Done.\n\n${en('Passed: 48', 'done')}`, 'Passed: 48')).reason, '');
+  assert.match(stop(edited(`Done.\n\n${en('Passed: 48', 'done')}`)).reason, /"done"/);
+  assert.equal(stop(edited(en('-', 'not verified: needs staging'))).reason, '');
 });
