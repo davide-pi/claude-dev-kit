@@ -302,16 +302,27 @@ const normalizePath = (p) => (process.platform === 'win32' ? p.replace(/\\/g, '/
 const LINK_CREATOR = /(?<![-\w])(?:ln|mklink|new-item|ni|symlink|symboliclink|junction|mv|move|move-item|mi)(?![-\w])/i;
 const SHORT_TEMP_CLAUDE = /^[a-z]:\/users\/[^/]+~\d+\/appdata\/local\/temp\/claude\//;
 
+/** `<tmp>/claude/` as os.tmpdir() spells it; on Windows also its long form and the one under the home folder. */
+function tempClaudeRoots() {
+  const temps = [os.tmpdir()];
+  if (process.platform === 'win32') {
+    try { temps.push(fs.realpathSync.native(os.tmpdir())); } catch { /* the 8.3 form still counts */ }
+    temps.push(`${os.homedir()}/AppData/Local/Temp`);
+  }
+  return [...new Set(temps.map((t) => `${normalizePath(t).replace(/\/+$/, '')}/claude/`))];
+}
+
 /**
  * True when the operand is a strict descendant of `<tmp>/claude/<proj>/<session>` (at least one segment
  * below the session folder): absolute, no `.`/`..`, no symbolic link or junction on the way. Any doubt is false.
  */
-function isThrowawayPath(operand, sessionId) {
+function isThrowawayPath(operand, sessionId, shell) {
   try {
-    const p = normalizePath(operand).replace(/\/$/, '');
+    let p = normalizePath(operand).replace(/\/$/, '');
     if (!(/^[a-z]:\//i.test(p) || (p.startsWith('/') && !p.startsWith('//')))) return false;
-    const root = `${normalizePath(os.tmpdir()).replace(/\/+$/, '')}/claude/`;
-    const rootLength = p.startsWith(root) ? root.length : process.platform === 'win32' ? SHORT_TEMP_CLAUDE.exec(p)?.[0].length : undefined;
+    if (process.platform === 'win32' && shell === 'bash') p = p.replace(/^\/([a-z])(?=\/)/, '$1:'); // Git-Bash `/c/…` is `C:/…`; PowerShell reads it as a path on the current drive
+    const root = tempClaudeRoots().find((r) => p.startsWith(r));
+    const rootLength = root ? root.length : process.platform === 'win32' ? SHORT_TEMP_CLAUDE.exec(p)?.[0].length : undefined;
     if (!rootLength) return false;
     const segments = p.slice(rootLength).split('/');
     if (segments.length < 3 || segments.some((s) => !s || /^\.+$/.test(s) || s.includes(':'))) return false;
@@ -387,7 +398,7 @@ function changeDir(text, command, cwd, vars, shell, sessionId) {
   if (value === null || (value.includes('\\') && !/^["']/.test(raw) && command !== 'set-location' && command !== 'sl')) return null;
   const path = value.replace(/\\/g, '/').replace(/\/+$/, '');
   const target = /^[a-z]:\//i.test(path) || path.startsWith('/') ? path : cwd && `${cwd}/${path.replace(/^(?:\.\/)+/, '')}`;
-  if (!target || !isThrowawayPath(`${target}/x`, sessionId)) return null;
+  if (!target || !isThrowawayPath(`${target}/x`, sessionId, shell)) return null;
   try { return fs.statSync(target).isDirectory() ? target : null; } catch { return null; }
 }
 
@@ -467,7 +478,7 @@ function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefi
   const mayFollowLinks = process.platform === 'win32' || command === 'remove-item' || command === 'ri';
   return !operands.every((operand) => {
     const target = absolutize(operand, state.cwd);
-    return target && isThrowawayPath(target, sessionId) && !(mayFollowLinks && holdsLink(target));
+    return target && isThrowawayPath(target, sessionId, line.shell) &&!(mayFollowLinks && holdsLink(target));
   });
 }
 
