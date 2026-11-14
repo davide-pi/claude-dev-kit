@@ -1,4 +1,5 @@
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
+import { t } from './strings'
 import { ROUND_LIST_KEEP } from './timeline'
 
 /** The prompt a round entry keeps: its first line, cut to this many characters. */
@@ -6,8 +7,19 @@ export const PROMPT_KEEP = 120
 const FAIL_TEXT_KEEP = 200
 const FILES_KEEP = 100
 
-/** The title of the round a submit opens: a slash command as `/name`, else the first non-empty line with its whitespace collapsed. */
+/** The label of a background task's completion message (`<task-notification>`): its kind and status, never its raw tags; none for any other text. */
+export function notificationLabel(text: string): string | undefined {
+  if (!text.trimStart().startsWith('<task-notification>')) return undefined
+  const status = /<status>\s*([^<\s]+)\s*<\/status>/.exec(text)?.[1]
+  // the summary names the kind; without it a workflow's task id (`wf_…`) does
+  const kind = /<summary>\s*(workflow|agent)/i.exec(text)?.[1]?.toLowerCase() ?? (/<task-id>\s*wf_/.test(text) ? 'workflow' : 'agent')
+  return t().notification(kind === 'workflow' ? 'workflow' : 'agent', status)
+}
+
+/** The title of the round a submit opens: a notification as its label, a slash command as `/name`, else the first non-empty line with its whitespace collapsed. */
 export function promptTitle(input: { text: string; command?: { name: string } }): string {
+  const label = notificationLabel(input.text)
+  if (label !== undefined) return label
   if (input.command) return `/${input.command.name}`
   const first = input.text.split(/\r?\n/).find(l => l.trim() !== '') ?? ''
   return [...first.replace(/\s+/g, ' ').trim()].slice(0, PROMPT_KEEP).join('')

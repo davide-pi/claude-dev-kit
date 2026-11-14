@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { CockpitLogEntry } from '../types'
 import { roundCost } from '../hooks/insights'
 import { endTurnCost, measuredCost, startedCost, withSettledRound } from '../hooks/refresh'
-import { SESSION_LOG_KEEP, bashLog, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
+import { EVENTS_KEEP, SESSION_LOG_KEEP, bashLog, recordAgentEvent, recordEvent, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withLogEntries, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
 
 test('recordLog: the newest 300 stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -17,6 +17,31 @@ test('recordLog: the newest 300 stay, ordered by time; the same kind and key is 
   expect(full).toHaveLength(SESSION_LOG_KEEP)
   expect(SESSION_LOG_KEEP).toBe(300)
   expect(full.at(-1)?.at).toBe(449)
+})
+
+test('Given a state with 2 agent events, When more than EVENTS_KEEP test runs are logged the way a Bash call logs them, Then the events ring is untouched and the agent event is still found', () => {
+  // Given
+  let events = recordAgentEvent(undefined, { at: 1, kind: 'agent', id: 'a1', text: 'reviewer', usd: 0.5 })
+  events = recordAgentEvent(events, { at: 2, kind: 'agent', id: 'a2', text: 'reviewer', usd: 0.5 })
+  let s: { events?: typeof events, sessionLog?: CockpitLogEntry[] } = { events }
+  // When: the same state step register-tools runs after each test run
+  for (let i = 0; i <= EVENTS_KEEP; i++) s = withLogEntries(s, [{ at: 100 + i, kind: 'test', text: 'npm test', isFailed: false }])
+  // Then
+  expect(s.events).toBe(events)
+  expect(s.events?.find(e => e.kind === 'agent' && e.id === 'a1')?.usd).toBe(0.5)
+  expect(s.sessionLog).toHaveLength(SESSION_LOG_KEEP)
+  expect(s.sessionLog?.every(e => e.kind === 'test')).toBe(true)
+})
+
+test('Given 2 agent events, When more than EVENTS_KEEP other events share their ring, Then the agent events are the oldest and go first (why test runs have a ring of their own)', () => {
+  // Given
+  let events = recordAgentEvent(undefined, { at: 1, kind: 'agent', id: 'a1', text: 'reviewer' })
+  events = recordAgentEvent(events, { at: 2, kind: 'agent', id: 'a2', text: 'reviewer' })
+  // When
+  for (let i = 0; i < EVENTS_KEEP; i++) events = recordEvent(events, { at: 100 + i, kind: 'test', text: 'npm test' } as never)
+  // Then
+  expect(events).toHaveLength(EVENTS_KEEP)
+  expect(events.some(e => e.kind === 'agent')).toBe(false)
 })
 
 test('withCompactAfter: the compact entry of that key takes the reading once, no other entry changes', () => {

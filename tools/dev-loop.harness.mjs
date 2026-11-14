@@ -12,8 +12,8 @@ import { fileURLToPath } from 'node:url';
 
 const SOURCE = readFileSync(join(dirname(fileURLToPath(import.meta.url)), '..', 'workflows', 'dev-loop.js'), 'utf8');
 const pure = SOURCE.split('// --- pure:begin')[1].split('// --- pure:end')[0];
-const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } =
-  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy }`)();
+const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy, planLines, blockTag } =
+  new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy, planLines, blockTag }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
 const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
@@ -53,7 +53,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
     let answer = opts.label === 'find the files to change' ? (extra.probe ?? null)
       : /^lanes? /.test(opts.label ?? '') ? (extra.lanes ?? laneRunner)(prompt, opts)
       : opts.agentType === 'implementer'
-      ? (impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
+      ? (extra.implementer ? extra.implementer(prompt, opts) : impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
       : /^arbiter · round \d+/.test(opts.label ?? '') ? (arbiters.length ? arbiters.shift() : closeAll(prompt, 'open'))
       : queue.shift();
@@ -64,9 +64,10 @@ async function run(args, reviews, implementers = [], extra = {}) {
     return answer;
   };
   const parallel = (thunks) => Promise.all(thunks.map((t) => t()));
+  const logs = [];
   const fn = new AsyncFunction('args', 'agent', 'parallel', 'pipeline', 'phase', 'log', 'budget', 'workflow', BODY);
-  const out = await fn(args, agent, parallel, null, () => {}, () => {}, {}, null);
-  return { out, calls };
+  const out = await fn(args, agent, parallel, null, () => {}, (line) => logs.push(line), {}, null);
+  return { out, calls, logs };
 }
 
 const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'S' };
@@ -97,4 +98,4 @@ const ASK = [{ text: 'Which tenant owns the order?', default: 'the caller tenant
 const ASK_R = [{ text: 'The brief drops the date sort the owner asked for: restore it?', default: 'restore it', why: 'the request names it' }];
 const asking = (previous, found = []) => ({ ...review(previous, found), questions: ASK_R });
 
-export { laneGate, SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, gate, tasksOf,plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy };
+export { laneGate, SOURCE, pure, FILES, f, ROOT, AsyncFunction, BODY, PASS, snapshot, ALL_READ, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, DONE, MANY, manyArgs, manyImpl, read, labels, isReview, reviewLabels, impl, FAIL, HELPER, gate, tasksOf,plausible, defect, nit, ASK, ASK_R, asking, decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy, planLines, blockTag };

@@ -38,6 +38,8 @@ const EN = {
   // Agents
   lastTool: 'last tool ',
   costDetail: { tokens: (n: string) => `tokens ${n}` },
+  /** The label a background task's completion message gets in the log, in place of its raw tags. */
+  notification: (kind: 'workflow' | 'agent', status: string | undefined) => `${kind}${status === undefined ? '' : ` ${status}`}`,
   askedModel: (asked: string, got: string, isForced: boolean) => `asked ${asked} → ${got}${isForced ? ' (env)' : ''}`,
 
   // Notifications
@@ -82,6 +84,10 @@ const EN = {
     mainShort: 'main',
     other: 'other',
     tasks: (done: number, total: number) => `tasks ${done}/${total}`,
+    /** A step tag of a block agent (`implement`, `reader A`, `fix`) in the task tree under a flow. */
+    planStep: (step: string) => step,
+    /** The one row that stands for the finished tasks of the tree under a flow. */
+    planDone: (n: number) => `+${n} done`,
     events: {
       round: (n: number) => `round ${String(n).padStart(3, '0')}`,
       current: 'current round',
@@ -128,6 +134,10 @@ const IT: Strings = {
 
   lastTool: 'ultimo tool ',
   costDetail: { tokens: (n: string) => `token ${n}` },
+  notification: (kind: 'workflow' | 'agent', status: string | undefined) => {
+    const done: Record<string, string> = { completed: 'completato', failed: 'fallito', killed: 'interrotto' }
+    return `${kind === 'agent' ? 'agente' : kind}${status === undefined ? '' : ` ${done[status] ?? status}`}`
+  },
   askedModel: (asked: string, got: string, isForced: boolean) => `chiesto ${asked} → ${got}${isForced ? ' (env)' : ''}`,
 
   signalFields: { why: 'perché: ', todo: 'cosa fare: ' },
@@ -168,6 +178,8 @@ const IT: Strings = {
     mainShort: 'princ.',
     other: 'altro',
     tasks: (done: number, total: number) => `task ${done}/${total}`,
+    planStep: (step: string) => ({ implement: 'implementa', 'reader A': 'lettore A', fix: 'correzione' })[step] ?? step,
+    planDone: (n: number) => `+${n} fatti`,
     events: {
       round: (n: number) => `giro ${String(n).padStart(3, '0')}`,
       current: 'giro in corso',

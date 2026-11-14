@@ -9,7 +9,7 @@ import { agentCosts, signalId, signalSeverity } from './signals'
 import type { Signal, SignalSeverity } from './signals'
 import { t } from './strings'
 import { signalAnim } from './anim'
-import { agentRow, agentWarning, pairRow, subagentDetails } from './view-agents'
+import { agentRow, agentWarning, pairRow, subagentInline } from './view-agents'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 
@@ -95,7 +95,7 @@ export function makeAgentBlock(k: Kit): (key: string, agent: CockpitAgent, depth
     const indent = '  '.repeat(depth + 1)
     const isOpen = s.agentsOpen?.includes(agent.id) === true
     const warn = agentWarning(agent, s.isSubagentModelForced)
-    const spans = agentRow(agent, depth, s.now, width, sessionTotal, usd ?? usdById.get(agent.id))
+    const spans = agentRow(agent, depth, s.now, width, sessionTotal, usd ?? usdById.get(agent.id), isOpen ? subagentInline(agent) : [])
     // A running agent's icon spins: it leaves the button (which holds the rest of the row) for an animated cell beside it
     const [icon, space, ...rest] = spans
     const isSpinning = ui.Client !== undefined && agent.status === 'running' && icon !== undefined && space?.t === ' '
@@ -115,7 +115,6 @@ export function makeAgentBlock(k: Kit): (key: string, agent: CockpitAgent, depth
       ),
       isOpen && [
         warn !== undefined && line(ui, [sp(`${indent}󰀦 ${warn}`, COLORS.yellow)]),
-        ...subagentDetails(agent, indent, width).map(spans => line(ui, spans)),
         gap(),
       ],
     ]
