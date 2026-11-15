@@ -15,7 +15,7 @@
 import { test as nodeTest, describe } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, writeFileSync } from 'node:fs';
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -471,6 +471,36 @@ test('given registry strings holding a variable, when Get-RawDatabaseList runs, 
   assert.equal(raw.value, '${DBRO_T_DB}, Other');
   assert.doesNotMatch(none.value, /x/);
   assert.equal(redis.value, '0');
+});
+
+test('given redirect variables set in the parent, when Clear-ProcessVar clears them, then a child process does not see them, not even empty', { skip: skip || (process.platform !== 'win32' && 'needs cmd.exe') }, async () => {
+  // Given
+  // SetEnvironmentVariable(name, $null) in PowerShell 7 left PGSERVICEFILE= (empty): psql 18 then failed with service file "" not found.
+  const driver = `
+    $ast = [System.Management.Automation.Language.Parser]::ParseFile($env:DBRO_SCRIPT, [ref]$null, [ref]$null)
+    $def = $ast.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -eq 'Clear-ProcessVar' }, $true)
+    . ([scriptblock]::Create($def.Extent.Text))
+    $env:PGSERVICEFILE = 'C:\nowhere\pg_service.conf'; $env:PGSERVICE = 'svc'; $env:PGKEEP_T = 'kept'
+    $before = (cmd /c 'set PG' 2>$null) -join ';'
+    Clear-ProcessVar @('PGSERVICEFILE', 'PGSERVICE', 'DBRO_T_NEVER_SET')
+    $after = (cmd /c 'set PG' 2>$null) -join ';'
+    ConvertTo-Json -Compress @{ before = $before; after = $after }`;
+  // When
+  const r = await spawnAsync('pwsh', ['-NoProfile', '-Command', driver], { encoding: 'utf8', env: { ...process.env, DBRO_SCRIPT: SCRIPT } });
+  // Then
+  assert.equal(r.status, 0, r.stderr);
+  const { before, after } = JSON.parse(r.stdout);
+  assert.match(before, /PGSERVICEFILE=C:/, 'the variables must reach the child before clearing');
+  assert.doesNotMatch(after, /PGSERVICEFILE|PGSERVICE=/);
+  assert.match(after, /PGKEEP_T=kept/, 'a variable not named stays');
+});
+
+test('given db-ro.ps1, when its source is read, then no variable is cleared by setting it to $null', () => {
+  // Given / When
+  const source = readFileSync(SCRIPT, 'utf8');
+  // Then: every clear goes through Clear-ProcessVar, which removes the variable instead of leaving it empty
+  assert.doesNotMatch(source, /SetEnvironmentVariable\(\$\w+(:\w+)?, \$null\)/);
+  assert.equal((source.match(/^\s*Clear-ProcessVar /gm) ?? []).length, 3);
 });
 
 // ---- the script as a process: wiring that the lifted functions cannot show ---------------------------
