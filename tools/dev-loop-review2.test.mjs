@@ -166,11 +166,11 @@ test('given no verify command, when an M run ends, then one gap says the blocks 
 
 test('given a reader A finding inside the perimeter, when the reader A fix is briefed, then it carries the scope-revert and reproduce-first rules of the fix round', async () => {
   // Given
-  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review([])];
+  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review([]), review([])];
   // When
-  const { calls } = await run(V_ARGS, queue, [green(), green()]);
+  const { calls } = await run({ ...V_ARGS, plan: { tasks: tasksOf(5) } }, queue, [green(), green(), green()]);
   // Then
-  const prompt = calls.find(c => c.opts.label === 'implement the change (reader A fix)').prompt;
+  const prompt = calls.find(c => c.opts.label === 'B1 · T1 T2 T3 · fix').prompt;
   assert.match(prompt, /A "scope" finding means revert that hunk/);
   assert.match(prompt, /REPRODUCE FIRST/);
   assert.match(prompt, /A1\.1 \[P2\].*\(PLAUSIBLE: REPRODUCE FIRST\)/);

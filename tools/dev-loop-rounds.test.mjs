@@ -576,11 +576,11 @@ test('given a finding the implementer rejects and its raiser keeps, when the rou
 
 test('given a carried finding, when the final readers judge it closed, then the run is OK and the finding is not open', async () => {
   // Given
-  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
   const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
   const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
   // When
-  const { out, calls } = await run(bid, [raised, review(closed('A1.1'))], [green()]);
+  const { out, calls } = await run(bid, [raised, review(closed('A1.1')), review(closed('A1.1'))], [green(), green()]);
   // Then
   assert.equal(out.status, 'OK');
   assert.deepEqual(out.open, []);
@@ -589,10 +589,11 @@ test('given a carried finding, when the final readers judge it closed, then the 
 
 test('given a carried finding outside the perimeter, when the final readers keep it open, then the loop stalls on it', async () => {
   // Given
-  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
   const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
+  const open = review([{ id: 'A1.1', status: 'open' }]);
   // When
-  const { out } = await run(bid, [raised, review([{ id: 'A1.1', status: 'open' }])], [impl({ gate: gate('green', { tree: 'tr1' }) })]);
+  const { out } = await run(bid, [raised, open, open], [impl({ gate: gate('green', { tree: 'tr1' }) }), impl({ gate: gate('green', { tree: 'tr1' }) })]);
   // Then
   assert.equal(out.status, 'STALL');
   assert.deepEqual(out.stall.findings.map(x => [x.id, x.why]), [['A1.1', 'widen']]);
@@ -604,9 +605,98 @@ test('given a review fix under the gate, when its report is read, then the fix p
   const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
   const claimsRed = green({ verify: FAIL, gate: gate('green', { tree: 'tr2' }) });
   // When
-  const { out, calls } = await run(bid, [review([]), review([], [finding()])], [green(), claimsRed], { verifiers: [review(closed('F1'))] });
+  const { out, calls } = await run(bid, [review([], [finding()])], [green(), claimsRed], { verifiers: [review(closed('F1'))] });
   // Then
   assert.equal(out.status, 'OK');
   assert.equal(out.verify.status, 'pass');
   assert.ok(calls.find(c => c.opts.label === 'fix round 1 findings').prompt.includes('node ~/.claude/scripts/gate.mjs --root'));
+});
+
+// ── reviewer probes: saved, turned into red tests, rerun by the verifier (P26) ───────────────────────────
+const PROBE = { path: 'C:/repo/.git/deliver/probes/r1-B-F1.mjs', cmd: 'node C:/repo/.git/deliver/probes/r1-B-F1.mjs' };
+const PROBED = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u' };
+const greenFix = (extra = {}) => impl({ gate: gate('green'), ...extra });
+const isReviewCall = (c) => /^reviewer \S+ · round \d+/.test(c.opts.label ?? '');
+
+test('given a review run, when a reader is asked, then its schema accepts probes of path and cmd on a finding and on the report', async () => {
+  // Given / When
+  const { calls } = await run(PROBED, [review([])], [greenFix()]);
+
+  // Then
+  const schema = calls.find((c) => isReviewCall(c)).opts.schema;
+  assert.deepEqual(Object.keys(schema.properties.probes.items.properties).sort(), ['cmd', 'path']);
+  assert.deepEqual(Object.keys(schema.properties.found.items.properties.probes.items.properties).sort(), ['cmd', 'path']);
+});
+
+test('given a final reader and a block reader A, when they are briefed, then each is told to save probe scripts under the deliver/probes dir named by round and label and to list them', async () => {
+  // Given
+  const args = { ...PROBED, plan: { tasks: tasksOf(5) } };
+
+  // When
+  const { calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenFix(), greenFix()]);
+
+  // Then
+  const readers = calls.filter((c) => isReviewCall(c) || /reader A$/.test(c.opts.label ?? ''));
+  assert.ok(readers.some((c) => /reader A$/.test(c.opts.label)));
+  assert.ok(readers.some((c) => isReviewCall(c)));
+  for (const c of readers) {
+    assert.match(c.prompt, /deliver\/probes\//, c.opts.label);
+    assert.match(c.prompt, /round/, c.opts.label);
+    assert.match(c.prompt, /probes/, c.opts.label);
+    assert.match(c.prompt, /rev-parse --absolute-git-dir/, c.opts.label);
+    assert.doesNotMatch(c.prompt, /git-common-dir|<your key>|<round>/, c.opts.label);
+    assert.match(c.prompt, /script text inline/, c.opts.label);
+  }
+  for (const c of readers.filter((x) => isReviewCall(x))) assert.match(c.prompt, /r1-[A-Z]\w*-F<n>/, c.opts.label);
+});
+
+test('given a review run, when a reader is asked, then the probe cmd is described as self-contained with the script inline', async () => {
+  // Given / When
+  const { calls } = await run(PROBED, [review([])], [greenFix()]);
+
+  // Then
+  const schema = calls.find((c) => isReviewCall(c)).opts.schema;
+  assert.match(schema.properties.probes.items.properties.cmd.description, /inline/);
+});
+
+test('given a finding with a probe, when the fixer is briefed, then the brief lists the probe, asks for a red test file through the --red call with --test-files and keeps a not reproduced probe under rejected', async () => {
+  // Given
+  const reviews = [review([]), review([], [finding({ probes: [PROBE] })]), review([]), review([]), review([])];   // reader A of block 1 first
+
+  // When
+  const { calls } = await run({ ...PROBED, plan: { tasks: tasksOf(5) } }, reviews, [greenFix(), greenFix(), greenFix()]);
+
+  // Then
+  const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
+  assert.ok(fix.includes(PROBE.path));
+  assert.ok(fix.includes(PROBE.cmd));
+  assert.match(fix, /--red --unit 'node --test u' --test-files/);
+  assert.match(fix, /red test file/);
+  assert.match(fix, /never deleted/);
+});
+
+test('given a fixed finding that had a probe, when the verifier is briefed, then the brief lists the probe to rerun first', async () => {
+  // Given
+  const reviews = [review([]), review([], [finding({ probes: [PROBE] })]), review([]), review([]), review([])];   // reader A of block 1 first
+
+  // When
+  const { calls } = await run({ ...PROBED, plan: { tasks: tasksOf(5) } }, reviews, [greenFix(), greenFix(), greenFix()]);
+
+  // Then
+  const verifier = calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt;
+  assert.ok(verifier.includes(PROBE.cmd));
+  assert.match(verifier, /rerun/i);
+});
+
+test('given a reader A finding inside the perimeter with a probe at two blocks, when its fixer is briefed, then the brief lists the probe and the red call', async () => {
+  // Given
+  const reviews = [review([], [finding({ probes: [PROBE] })]), review([]), review([]), review([]), review([])];
+
+  // When
+  const { calls } = await run({ ...PROBED, plan: { tasks: tasksOf(5) } }, reviews, [greenFix(), greenFix(), greenFix()]);
+
+  // Then
+  const fix = calls.find((c) => /Reader A raised/.test(c.prompt))?.prompt ?? "";
+  assert.ok(fix.includes(PROBE.path));
+  assert.match(fix, /--red --unit 'node --test u' --test-files/);
 });

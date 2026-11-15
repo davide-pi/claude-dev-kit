@@ -661,7 +661,8 @@ test('given a gate line inside a code fence with prose around it, when the repor
   const { out, calls } = await run({ ...ARGS_M, verify: 'node --test x' }, [review([]), review([])], [impl({ gate: wrapped })]);
   // Then
   assert.equal(out.status, 'OK');
-  assert.ok(calls.some(c => c.opts.label === 'block 1 · reader A'));
+  assert.equal(out.verify.status, 'pass');
+  assert.ok(calls.some(c => c.opts.label === 'reviewer B · round 1 · whole diff'));
 });
 
 test('given a red gate that the fix call leaves red, when the block ends again, then the loop stalls with gate-red and the files', async () => {

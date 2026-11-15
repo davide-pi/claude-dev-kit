@@ -380,3 +380,53 @@ test('script: a rejected id the fixer was not given (a V finding, an unknown id)
   assert.equal(out.status, 'OK');
   assert.doesNotMatch(calls.find((c) => c.opts.label === 'reviewer V · round 2 · verify the fixes').prompt, /CHALLENGE/);
 });
+
+// ── --accept-tests: the plan's own edits of a proven test (P19) ──────────────────────────────────────────
+import { tasksOf, reviewLabels } from './dev-loop.harness.mjs';
+
+const withFiles = (n) => tasksOf(n).map((t, i) => ({ ...t, files: [`src/f${i + 1}.cs`] }));
+const ACCEPT_ARGS = { ...ARGS_M, verify: 'node --test x', plan: { tasks: withFiles(5) } };   // two blocks: tasks 1-3, then 4-5
+const greenImpl = (extra = {}) => impl({ gate: gate('green'), ...extra });
+const implPrompts = (calls) => calls.filter((c) => c.opts.agentType === 'implementer').map((c) => c.prompt);
+
+test('given a plan whose tasks name files, when a block is briefed, then its gate command carries --accept-tests with the task files of that block only', async () => {
+  // Given
+  const impls = [greenImpl(), greenImpl()];
+
+  // When
+  const { calls } = await run(ACCEPT_ARGS, [review([]), review([]), review([])], impls);
+
+  // Then
+  const [first, second] = implPrompts(calls);
+  assert.match(first, /--accept-tests '?src\/f1\.cs,src\/f2\.cs,src\/f3\.cs'?/);
+  assert.doesNotMatch(first, /src\/f4\.cs/);
+  assert.match(second, /--accept-tests '?src\/f4\.cs,src\/f5\.cs'?/);
+});
+
+test('given a fix round of a planned run, when the fixer is briefed, then its gate command carries --accept-tests with the task files of the whole plan', async () => {
+  // Given
+  const reviews = [review([]), review([], [finding()]), review([]), review([]), review([])];
+
+  // When
+  const { calls } = await run(ACCEPT_ARGS, reviews, [greenImpl(), greenImpl(), greenImpl()]);
+
+  // Then
+  const fix = calls.find((c) => c.opts.label === 'fix round 1 findings').prompt;
+  assert.match(fix, /--accept-tests '?src\/f1\.cs,src\/f2\.cs,src\/f3\.cs,src\/f4\.cs,src\/f5\.cs'?/);
+});
+
+test('given a block gate line with testsAccepted, when later readers and the fix verifier are briefed, then each brief lists the accepted test files', async () => {
+  // Given
+  const accepted = greenImpl({ gate: gate('green', { testsAccepted: ['tests/OrdersAccepted.test.cs'] }) });
+  const reviews = [review([]), review([], [finding()]), review([]), review([]), review([])];
+
+  // When
+  const { calls } = await run(ACCEPT_ARGS, reviews, [accepted, greenImpl(), greenImpl()]);
+
+  // Then
+  const briefs = calls.filter((c) => /reader A$/.test(c.opts.label ?? '') || /^reviewer \S+ · round \d+/.test(c.opts.label ?? ''));
+  assert.ok(reviewLabels(calls, 1).length > 0);
+  assert.ok(reviewLabels(calls, 2).some((l) => l.startsWith('reviewer V')));
+  assert.ok(briefs.length >= 3);
+  for (const c of briefs) assert.match(c.prompt, /tests\/OrdersAccepted\.test\.cs/, c.opts.label);
+});

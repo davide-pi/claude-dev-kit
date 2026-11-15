@@ -225,7 +225,7 @@ test('given no plan, when the loop starts, then no plan line is logged and the l
   assert.equal(logs.filter((l) => /^B\d · |\d+ blocks/.test(l)).length, 0);
   const names = calls.map((c) => c.opts.label);
   assert.ok(names.includes('implement the change'));
-  assert.ok(names.includes('block 1 · reader A'));
+  assert.ok(names.includes('reviewer B · round 1 · whole diff'));
 });
 
 // ── deliver skill: the Opus planner ───────────────────────────────────────────

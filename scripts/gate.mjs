@@ -3,7 +3,7 @@
  * The `deliver` gate: runs a block's test command under a stuck check and answers with one JSON line.
  *
  *   node gate.mjs --root <repoRoot> --head <start head> --test "<command>"
- *        [--dirty a,b] [--stuck-minutes 5] [--max-minutes 9] [--force] [--no-scope]
+ *        [--dirty a,b] [--stuck-minutes 5] [--max-minutes 9] [--force] [--no-scope] [--accept-tests a,b]
  *   node gate.mjs --root <repoRoot> --red --unit "<command>" --test-files <a,b>
  *   node gate.mjs --root <repoRoot> --wait
  *   node gate.mjs --root <repoRoot> --head <start head> --lane-add <name>
@@ -31,7 +31,9 @@
  * up to `--max-minutes`, then prints `running` and exits 3; `--wait` polls again. Minutes may be fractions.
  *
  * A stored red proof makes every plain run `red: tests changed` while a proven test file differs; `--force` drops the
- * proof and adds `"proof":"dropped"` to the last line. A supervisor pid is stored with its start time: a live pid that
+ * proof and adds `"proof":"dropped"` to the last line. `--accept-tests a,b` accepts an edit of the listed proven files (the
+ * plan's own task files): they leave the proof (the proof is deleted when none is left) and the last line adds
+ * `"testsAccepted":[...]`; an unlisted changed proven file is still `red: tests changed`. A supervisor pid is stored with its start time: a live pid that
  * started at another time is a reused one, and the supervisor counts as dead (checked every 30 s while waiting).
  *
  * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}` (plus `proof` when dropped). Exit 0 green, 1 red, 2 not checked
@@ -54,7 +56,7 @@ const WIN = process.platform === 'win32';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FLAGS = ['--wait', '--supervise', '--force', '--no-scope', '--red'];
-const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add'];
+const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add', '--accept-tests'];
 const LISTS = ['--merge', '--lane-remove'];
 
 function parseArgs(argv) {
@@ -442,7 +444,7 @@ function finalize(dir, state) {
   const o = run.opts;
   if (o.leftover?.length) LEFTOVER = o.leftover;
   const seconds = Math.round(((run.endedAt ?? Date.now()) - run.startedAt) / 1000);
-  const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}) };
+  const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}), ...(o.testsAccepted?.length ? { testsAccepted: o.testsAccepted } : {}) };
   let log = '';
   try { log = readFileSync(join(dir, 'gate.log'), 'utf8'); } catch { /* no output */ }
   state.run = null;
@@ -522,6 +524,7 @@ async function main() {
   if (args.red) {
     if (!args.unit) usage('--unit is required with --red');
     if (!readableRunner(args.unit)) usage("--unit runs a test runner the gate can't read (dotnet test, node --test, vitest, jest)");
+    delete state.accepted;
     return startRun(dir, state, root, {
       command: args.unit, stuckMinutes,
       opts: { root, red: true, testFiles: (args['test-files'] ?? '').split(',').filter(Boolean) },
@@ -539,22 +542,33 @@ async function main() {
   const dirty = args.dirty ?? '';
   const proofDropped = !!args.force && !!state.proof;
   if (proofDropped) { delete state.proof; writeState(dir, state); }
+  const norm = (f) => f.trim().replace(/\\/g, '/');
+  const listed = (args['accept-tests'] ?? '').split(',').map(norm).filter(Boolean);
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
-  if (changed.length) emit('red: tests changed', 1, { test: changed.join('; ') });
+  const unlisted = changed.filter((f) => !listed.includes(norm(f)));
+  if (unlisted.length) emit('red: tests changed', 1, { test: unlisted.join('; ') });
+  // The accepted list stays in state until green or the next --red, so a later `red: scope` or rerun line still carries it.
+  const testsAccepted = [...new Set([...(state.accepted ?? []), ...changed])];
+  if (changed.length) {
+    for (const f of changed) delete state.proof.files[f];
+    if (!Object.keys(state.proof.files).length) delete state.proof;
+  }
+  if (testsAccepted.length) { state.accepted = testsAccepted; writeState(dir, state); }
+  const acceptedExtra = testsAccepted.length ? { testsAccepted } : {};
   const tree = treeHash(root, dir);
   if (!tree) usage('git could not hash the working tree');
   if (!noScope) {
     const scope = scopeCheck(root, args.head, dirty);
     if (scope.verdict === 'unchecked') process.exit(2);
-    if (scope.verdict === 'outside') emit('red: scope', 1, { tree, outside: scope.outside, ...(proofDropped ? { proof: 'dropped' } : {}) });
+    if (scope.verdict === 'outside') emit('red: scope', 1, { tree, outside: scope.outside, ...(proofDropped ? { proof: 'dropped' } : {}), ...acceptedExtra });
   }
   const g = state.green;
   if (!args.force && !state.proof && g && g.tree === tree && g.head === args.head && g.dirty === dirty && g.test === args.test && g.scope === !noScope) {
-    emit('skipped: tree unchanged', 0, { tree, greenAt: g.greenAt, formatOnly: g.formatOnly ?? [] });
+    emit('skipped: tree unchanged', 0, { tree, greenAt: g.greenAt, formatOnly: g.formatOnly ?? [], ...acceptedExtra });
   }
   return startRun(dir, state, root, {
     command: args.test, stuckMinutes,
-    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped, leftover: LEFTOVER },
+    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped, testsAccepted, leftover: LEFTOVER },
   }, maxMinutes);
 }
 

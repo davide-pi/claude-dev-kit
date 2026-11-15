@@ -37,7 +37,7 @@ writes the tasks: `{ id, title, files, dependsOn, tdd, criteria }` with each cri
 owner's `decisions` verbatim and the code it reads (read-only, it never asks the user, ~12 tool calls). It ends with a
 `read:` line of every `file:line` range it read. This session then filters it against the owner's decisions: a task or
 criterion that contradicts one is dropped or amended, and the result is the final plan, which this session owns and
-passes to the loop. The planner replaces the challenger at these sizes: its output is the plan the owner approves, so
+passes to the loop. For a guard, parser or hook the planner lists the bypass cases (every way round it: variants, quoting, encodings, order, a second path to the same effect) as numbered criteria, and the `tdd` red tests start from those numbers. The planner replaces the challenger at these sizes: its output is the plan the owner approves, so
 there's no second agent to attack it. At plain M this session plans and the Sonnet challenger below stays as is.
 
 ## The challenger
@@ -53,7 +53,8 @@ never asks the user; budget ~12 tool calls over both messages. One agent, two me
    approach and criteria. It attacks from every angle, each one a row or "none": the premise (the request read wrong,
    the cause elsewhere); a simpler way, or code that already does it; a pre-mortem ("two weeks on it failed: why?");
    the blast radius and the way back; a criterion no test can prove, or one without its error path; a design choice the
-   approach settles, checked against the ladder in `~/.claude/skills/principles/SKILL.md` (read it when the approach adds a type, an abstraction or a layer).
+   approach settles, checked against the ladder in `~/.claude/skills/principles/SKILL.md` (read it when the approach adds a type, an abstraction or a layer);
+   for a guard, parser or hook, the bypass cases: every way round it (variants, quoting, encodings, order, a second path to the same effect), one row each. Each case that holds becomes a numbered criterion, and the `tdd` red tests start from those numbers.
 3. **Output**, at most 15 lines: `blind way: equivalent | simpler (why, file:line) | worse`; then one row per objection,
    the heaviest first, `# | Weight | Objection | Evidence | Fix`, weight `blocking` | `minor`, evidence a `file:line`
    it read or the request's words (it drops an objection with neither); then a verdict, a proposal the owner decides:

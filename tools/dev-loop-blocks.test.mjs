@@ -367,3 +367,47 @@ test('given a glob and a literal file under its literal prefix, when the lanes a
   // Then
   assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
 });
+
+// ── reader A is skipped at M with a single block (P20) ───────────────────────────────────────────────────
+import { run, ARGS, ARGS_M, review, impl, gate } from './dev-loop.harness.mjs';
+
+const readerAs = (calls) => calls.filter((c) => /reader A$/.test(c.opts.label ?? ''));
+const greenAt = (tree) => impl({ gate: gate('green', { tree }) });
+const VERIFIED = { verify: 'node --test x' };
+
+test('given size M, one block and a verify command, when the loop runs, then no reader A runs and the block log says why', async () => {
+  // Given
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(2) } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [greenAt('tr1')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 0);
+  assert.equal(out.blocks[0].readerA.skipped, true);
+  assert.equal(typeof out.blocks[0].readerA.reason, 'string');
+  assert.ok(out.blocks[0].readerA.reason.length > 0);
+});
+
+test('given size M and two blocks, when the loop runs, then reader A runs on each block', async () => {
+  // Given
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(5) } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 2);
+  assert.deepEqual(out.blocks.map((b) => 'skipped' in b.readerA), [false, false]);
+});
+
+test('given size M, one block and no verify command, when the loop runs, then the block log does not claim a skip', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2) } };
+
+  // When
+  const { out } = await run(args, [review([]), review([])], [impl()]);
+
+  // Then
+  assert.equal('skipped' in out.blocks[0].readerA, false);
+});

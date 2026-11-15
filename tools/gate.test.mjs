@@ -844,3 +844,118 @@ test('given a branch outside deliver-lane/, when --lane-remove runs, then it exi
   assert.equal(res.status, 2);
   assert.equal(git(r.root, 'branch', '--list', 'other').trim(), 'other');
 });
+
+// ── --accept-tests: an edit of a proven test file that the plan lists is no longer red: tests changed ─────
+const UNIT2 = 'node --test t.test.mjs t2.test.mjs';
+
+/** A repo with two test files proven red; `flag.txt` is not there yet when `flag` is false. */
+function repoWithTwoProven(flag = true) {
+  const r = repoWithTest();
+  writeFileSync(join(r.root, 't2.test.mjs'), TEST_SOURCE.replace('needs the flag file', 'second needs the flag file'));
+  gate(r.root, '--red', '--unit', UNIT2, '--test-files', 't.test.mjs,t2.test.mjs');
+  if (flag) writeFileSync(join(r.root, 'flag.txt'), 'x\n');
+  return r;
+}
+
+test('given a stored proof and a changed proven file listed in --accept-tests, when the gate runs, then it is green, the file leaves the proof and the last line lists it in testsAccepted', () => {
+  // Given
+  const r = repoWithTwoProven();
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+
+  // When
+  const res = run(r, UNIT2, '--accept-tests', 't.test.mjs');
+
+  // Then
+  assert.equal(res.status, 0);
+  assert.equal(lastRaw(res).gate, 'green');
+  assert.deepEqual(lastRaw(res).testsAccepted, ['t.test.mjs']);
+});
+
+test('given a changed proven file that is not listed in --accept-tests, when the gate runs, then it reports red: tests changed naming only the unlisted file', () => {
+  // Given
+  const r = repoWithTwoProven();
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+  writeFileSync(join(r.root, 't2.test.mjs'), `${TEST_SOURCE}// weakened\n`);
+
+  // When
+  const res = run(r, UNIT2, '--accept-tests', 't.test.mjs');
+
+  // Then
+  assert.equal(res.status, 1);
+  assert.equal(lastRaw(res).gate, 'red: tests changed');
+  assert.equal(lastRaw(res).test, 't2.test.mjs');
+});
+
+test('given a changed proven file and no --accept-tests, when the gate runs, then it reports red: tests changed and the last line has no testsAccepted', () => {
+  // Given
+  const r = repoWithTwoProven();
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited\n`);
+
+  // When
+  const res = run(r, UNIT2);
+
+  // Then
+  assert.equal(res.status, 1);
+  assert.equal(lastRaw(res).gate, 'red: tests changed');
+  assert.equal('testsAccepted' in lastRaw(res), false);
+});
+
+test('given the only proven file accepted and the tests still failing, when the gate runs, then the proof is gone from gate.json', () => {
+  // Given
+  const r = repoWithTest();
+  red(r);
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+
+  // When
+  const res = run(r, UNIT, '--accept-tests', 't.test.mjs');
+
+  // Then
+  assert.equal(lastRaw(res).gate, 'red');
+  assert.equal(stateOf(r).proof, undefined);
+});
+
+test('given one of two proven files accepted and the tests still failing, when the gate runs, then only the other file stays in the proof', () => {
+  // Given
+  const r = repoWithTwoProven(false);
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+
+  // When
+  const res = run(r, UNIT2, '--accept-tests', 't.test.mjs');
+
+  // Then
+  assert.equal(lastRaw(res).gate, 'red');
+  assert.deepEqual(Object.keys(stateOf(r).proof.files), ['t2.test.mjs']);
+});
+
+test('given an accepted proven edit and a scope violation, when the gate runs, then red: scope still lists testsAccepted and a rerun carries it until green', () => {
+  // Given
+  const r = repoWithTwoProven();
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+  writeFileSync(join(r.root, 'other.txt'), 'x\n');
+  const branch = git(r.root, 'rev-parse', '--abbrev-ref', 'HEAD');
+  writeFileSync(join(r.root, '.git', 'deliver', 'perimeter.md'), `branch: ${branch}\nstatus: active\n- t.test.mjs\n- t2.test.mjs\n- flag.txt\n`);
+
+  // When
+  const first =run(r, UNIT2, '--accept-tests', 't.test.mjs',);
+  const second = run(r, UNIT2, '--accept-tests', 't.test.mjs',);
+
+  // Then
+  assert.equal(lastRaw(first).gate, 'red: scope');
+  assert.deepEqual(lastRaw(first).testsAccepted, ['t.test.mjs']);
+  assert.deepEqual(lastRaw(second).testsAccepted, ['t.test.mjs']);
+});
+
+test('given an accepted proven edit that went green, when the gate runs again, then the last line still lists testsAccepted', () => {
+  // Given
+  const r = repoWithTwoProven();
+  writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+  const first = run(r, UNIT2, '--accept-tests', 't.test.mjs');
+
+  // When
+  const second = run(r, UNIT2);
+
+  // Then
+  assert.equal(lastRaw(first).gate, 'green');
+  assert.equal(lastRaw(second).gate, 'skipped: tree unchanged');
+  assert.deepEqual(lastRaw(second).testsAccepted, ['t.test.mjs']);
+});
