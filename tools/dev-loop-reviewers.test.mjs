@@ -309,7 +309,7 @@ test('given an M run where B raised a P2 reading only F9, when the fix is verifi
   ];
   const impls = [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }];
   // When
-  const { out, calls } = await run(manyArgs({ size: 'M' }), queue, impls);
+  const { out, calls } = await run(manyArgs({ size: 'M', plan: ARGS_M.plan }), queue, impls);
   // Then
   assert.equal(out.status, 'OK');
   assert.deepEqual(reviewLabels(calls, 3), ['reviewer B · round 3 · whole diff']);
@@ -470,10 +470,10 @@ test('given a change past 10 files or 600 changed lines, when the final readers 
   const L = { plan: { tasks: tasksOf(5) } };
   // When
   const seen = {
-    wideFiles: await round1({ size: 'M' }, implOf(11)),
-    tenFiles: await round1({ size: 'M' }, implOf(10)),
-    wideLines: await round1({ size: 'M' }, implOf(2, 601)),
-    sixHundredLines: await round1({ size: 'M' }, implOf(2, 600)),
+    wideFiles: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(11)),
+    tenFiles: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(10)),
+    wideLines: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(2, 601)),
+    sixHundredLines: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(2, 600)),
     smallWideFiles: await round1({ size: 'S' }, implOf(14)),
     smallWideLines: await round1({ size: 'S' }, implOf(2, 601)),
     mechanical: await round1({ size: 'S', mechanical: true }, implOf(14)),

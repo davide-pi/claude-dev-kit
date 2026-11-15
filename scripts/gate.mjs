@@ -4,7 +4,7 @@
  *
  *   node gate.mjs --root <repoRoot> --head <start head> --test "<command>"
  *        [--dirty a,b] [--stuck-minutes 5] [--max-minutes 9] [--force] [--no-scope] [--accept-tests a,b]
- *   node gate.mjs --root <repoRoot> --red --unit "<command>" --test-files <a,b>
+ *   node gate.mjs --root <repoRoot> --red [--probe] --unit "<command>" --test-files <a,b>
  *   node gate.mjs --root <repoRoot> --wait
  *   node gate.mjs --root <repoRoot> --head <start head> --lane-add <name>
  *   node gate.mjs --root <repoRoot> --head <start head> --test "<command>" --merge <lane branch> [<lane branch> ...]
@@ -32,7 +32,8 @@
  *
  * A stored red proof makes every plain run `red: tests changed` while a proven test file differs; `--force` drops the
  * proof and adds `"proof":"dropped"` to the last line. `--accept-tests a,b` accepts an edit of the listed proven files (the
- * plan's own task files): they leave the proof (the proof is deleted when none is left) and the last line adds
+ * plan's own task files, except a file proven by `--red --probe`, which joins the stored proof and is always `red: tests
+ * changed` once edited): they leave the proof (the proof is deleted when none is left) and the last line adds
  * `"testsAccepted":[...]`; an unlisted changed proven file is still `red: tests changed`. A supervisor pid is stored with its start time: a live pid that
  * started at another time is a reused one, and the supervisor counts as dead (checked every 30 s while waiting).
  *
@@ -55,7 +56,7 @@ const { gitDirOf } = createRequire(import.meta.url)('../hooks/lib/git-dir.js');
 const WIN = process.platform === 'win32';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-const FLAGS = ['--wait', '--supervise', '--force', '--no-scope', '--red'];
+const FLAGS = ['--wait', '--supervise', '--force', '--no-scope', '--red', '--probe'];
 const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add', '--accept-tests'];
 const LISTS = ['--merge', '--lane-remove'];
 
@@ -454,7 +455,10 @@ function finalize(dir, state) {
     if (run.exitCode === 0) emit('red: no failing test', 1, base);
     const names = failedTests(log, o.testFiles);
     if (!names.length) emit('red', 1, { ...base, test: tail(log, 5).join(' | ') });
-    state.proof = { names, files: hashFiles(o.root, o.testFiles) };
+    const files = hashFiles(o.root, o.testFiles);
+    // Every --red adds to the stored proof; a probe's file is also listed so --accept-tests never accepts it, whoever lists it.
+    const probes = o.probe ? [...new Set([...(state.proof?.probes ?? []), ...Object.keys(files)])] : state.proof?.probes;
+    state.proof = { names: [...new Set([...(state.proof?.names ?? []), ...names])], files: { ...state.proof?.files, ...files }, ...(probes ? { probes } : {}) };
     writeState(dir, state);
     emit('red-proven', 0, { ...base, test: names.join('; ') });
   }
@@ -524,10 +528,10 @@ async function main() {
   if (args.red) {
     if (!args.unit) usage('--unit is required with --red');
     if (!readableRunner(args.unit)) usage("--unit runs a test runner the gate can't read (dotnet test, node --test, vitest, jest)");
-    delete state.accepted;
+    if (!args.probe) delete state.accepted;
     return startRun(dir, state, root, {
       command: args.unit, stuckMinutes,
-      opts: { root, red: true, testFiles: (args['test-files'] ?? '').split(',').filter(Boolean) },
+      opts: { root, red: true, probe: !!args.probe, testFiles: (args['test-files'] ?? '').split(',').filter(Boolean) },
     }, maxMinutes);
   }
   if (!args.test) usage('--test is required');
@@ -545,7 +549,8 @@ async function main() {
   const norm = (f) => f.trim().replace(/\\/g, '/');
   const listed = (args['accept-tests'] ?? '').split(',').map(norm).filter(Boolean);
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
-  const unlisted = changed.filter((f) => !listed.includes(norm(f)));
+  const probed = state.proof?.probes ?? [];
+  const unlisted = changed.filter((f) => probed.includes(f) || !listed.includes(norm(f)));
   if (unlisted.length) emit('red: tests changed', 1, { test: unlisted.join('; ') });
   // The accepted list stays in state until green or the next --red, so a later `red: scope` or rerun line still carries it.
   const testsAccepted = [...new Set([...(state.accepted ?? []), ...changed])];

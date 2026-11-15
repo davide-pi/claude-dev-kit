@@ -10,7 +10,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals } from './dev-loop.harness.mjs';
+import { FILES, f, ROOT, snapshot, run, ARGS, ARGS_M, CLEAN, review, finding, NULL_GUARD, read, labels, impl, nit, ASK, ASK_R, asking, classify, reviewersFor, readReport, isNeverBlocking, cleanupCandidates, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, tasksOf } from './dev-loop.harness.mjs';
 
 // ── delivery flow "two colleagues": P-run, P-size, P-weight, W1-W15 ──────────────────────────────────────────
 const closedIds = (...ids) => ids.map(id => ({ id, status: 'closed' }));
@@ -78,7 +78,7 @@ test('given an owner request, when the final readers and the verifier run, then 
   assert.equal(has('reviewer B · round 1 · whole diff'), true);
   assert.equal(has('reviewer security · round 1'), true);
   assert.equal(has('reviewer V · round 2 · verify the fixes'), false);
-  assert.equal(has('implement the change'), false);
+  assert.equal(has('B1 · T1 · implement'), false);
   assert.equal(has('fix round 1 findings'), false);
   assert.match(final, /Owner request \(verbatim\)/);
   assert.match(final, /against BOTH the intent and the request/);
@@ -161,20 +161,20 @@ test('given a preview arg and an M change, when the loop runs, then it stops aft
   assert.equal(first.out.stall.why, 'question');
   assert.equal(first.out.stall.round, 0);
   assert.match(text, /the order list page \/orders/);
-  assert.deepEqual(first.calls.map(c => c.opts.label), ['implement the change']);
+  assert.deepEqual(first.calls.map(c => c.opts.label), ['B1 · T1 · implement']);
   assert.equal(first.out.preview, preview);
   const ok = await withAnswer('ok', text);
   assert.equal(ok.out.status, 'OK');
-  assert.deepEqual(ok.calls.map(c => c.opts.label), ['implement the change', ...B]);
+  assert.deepEqual(ok.calls.map(c => c.opts.label), ['B1 · T1 · implement', ...B]);
   assert.equal(ok.out.preview, preview);
   for (const answer of ['ok grazie', 'Perfetto!', 'ok, va bene così', 'va bene']) {
-    assert.deepEqual((await withAnswer(answer, text)).calls.map(c => c.opts.label), ['implement the change', ...B], answer);   // a confirmation, not a direction
+    assert.deepEqual((await withAnswer(answer, text)).calls.map(c => c.opts.label), ['B1 · T1 · implement', ...B], answer);   // a confirmation, not a direction
   }
   for (const answer of ['così così', 'ok così così', 'va bene così così', 'ok ma ordina per data']) {
-    assert.deepEqual((await withAnswer(answer, text)).calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', ...B], answer);   // not a confirmation
+    assert.deepEqual((await withAnswer(answer, text)).calls.map(c => c.opts.label), ['B1 · T1 · implement', 'implement the change (preview feedback)', ...B], answer);   // not a confirmation
   }
   const change = await withAnswer('newest first please', text);
-  assert.deepEqual(change.calls.map(c => c.opts.label), ['implement the change', 'implement the change (preview feedback)', ...B]);
+  assert.deepEqual(change.calls.map(c => c.opts.label), ['B1 · T1 · implement', 'implement the change (preview feedback)', ...B]);
   assert.match(change.calls[1].prompt, /- .*-> newest first please/);
   assert.match(change.calls[1].prompt, /snapshot\.ps1/);
 });
@@ -270,7 +270,7 @@ test('given mechanical at size S, when the loop runs, then the implementer runs 
   const reviews = () => [review([], [finding()]), review(closedIds('F1'))];
   // When
   const mech = await run({ ...ARGS, size: 'S', mechanical: true }, reviews());
-  const lifted = await run({ ...ARGS, size: 'S', mechanical: true, risk: ['data'] }, reviews());
+  const lifted = await run({ ...ARGS, size: 'S', mechanical: true, risk: ['data'], plan: ARGS_M.plan }, reviews());
   const pinned = await run({ ...ARGS, size: 'S', mechanical: true, implementerModel: 'sonnet' }, reviews());
   // Then
   for (const label of ['implement the change', 'fix round 1 findings']) {
@@ -280,7 +280,7 @@ test('given mechanical at size S, when the loop runs, then the implementer runs 
   const reviewer = mech.calls.find(c => c.opts.label?.startsWith('reviewer A · round 1'));
   assert.equal(reviewer.opts.effort, 'low');
   assert.match(reviewer.prompt, /declared MECHANICAL/);
-  const impl = lifted.calls.find(c => c.opts.label === 'implement the change').opts;
+  const impl = lifted.calls.find(c => c.opts.agentType === 'implementer').opts;   // the plan tags the label
   assert.deepEqual(['model' in impl, impl.effort], [false, 'medium']);
   assert.doesNotMatch(lifted.calls.find(c => c.opts.label?.startsWith('reviewer B · round 1')).prompt, /declared MECHANICAL/);   // the risk lifts S to M: B reads alone
   assert.equal(pinned.calls.find(c => c.opts.label === 'implement the change').opts.model, 'sonnet');
@@ -457,403 +457,4 @@ test('given a soft note, when the verifier of the next round repeats it shifted 
   // Then
   assert.deepEqual(fixRounds(r), ['fix round 1 findings', 'fix round 2 findings']);
   assert.deepEqual(r.out.minor.map(m => m.id), ['F2']);
-});
-
-// ── deliver flow v2, tasks 9-10: blocks, the gate, test-first ─────────────────────────────────────────────
-import { gate, tasksOf, reviewLabels } from './dev-loop.harness.mjs';
-
-const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
-const BLOCK_ARGS = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
-const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
-
-test('given a plan of five tasks, when the loop runs, then the implementer is called once per block, three tasks then two', async () => {
-  // Given
-  const impls = [green(), green()];
-  // When
-  const { calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  const prompts = implCalls(calls).map(c => c.prompt);
-  assert.equal(prompts.length, 2);
-  for (const t of ['task-1-title', 'task-2-title', 'task-3-title']) assert.ok(prompts[0].includes(t) && !prompts[1].includes(t), t);
-  for (const t of ['task-4-title', 'task-5-title']) assert.ok(prompts[1].includes(t) && !prompts[0].includes(t), t);
-});
-
-test('given a plan of two blocks, when block 1 is briefed, then the implementer is told the later blocks are not its own', async () => {
-  // Given
-  const impls = [green(), green()];
-  // When
-  const { calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  const prompts = implCalls(calls).map(c => c.prompt);
-  assert.match(prompts[0], /Do only the tasks of this block: a task of a later block is not yours, even a quick one\./);
-});
-
-test('given an implementer whose gate says red: tests changed, when it reports, then the loop stalls at once for the owner, with no continuation or gate fix', async () => {
-  // Given: only the owner can accept the edited proven test (--force) or have it reverted
-  for (const extra of [{ remaining: ['the owner must accept the edited test'] }, {}]) {
-    const changed = impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }), ...extra });
-    // When
-    const { out, calls } = await run(BLOCK_ARGS, [], [changed, green(), green(), green()]);
-    // Then
-    assert.equal(out.status, 'STALL');
-    assert.equal(out.stall.why, 'tests-changed');
-    assert.equal(implCalls(calls).length, 1);
-    assert.match(out.stall.reason, /tests\/Orders\.test\.cs/);
-    assert.match(out.resume, /Ask the user/);
-    assert.match(out.resume, /--force/);
-  }
-});
-
-test('given a red gate whose fix edits the proven test, when the fix reports, then the loop stalls as tests-changed for the owner, not as gate-red', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), impl({ gate: gate('red: tests changed', { test: 'tests/Orders.test.cs' }) }), green()];
-  // When
-  const { out, calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.stall.why, 'tests-changed');
-  assert.equal(implCalls(calls).length, 2);
-  assert.match(out.resume, /Ask the user/);
-});
-
-test('given a block whose gate comes back red, when the fix call turns it green, then the loop goes on to the next block', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red', { test: 'OrdersTests.Total fails' }) }), green(), green()];
-  // When
-  const { calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  const made = implCalls(calls);
-  assert.deepEqual(made.map(c => c.opts.label), ['B1 · T1 T2 T3 · implement', 'B1 · T1 T2 T3 · fix (gate)', 'B2 · T4 T5 · implement']);
-  assert.ok(made[1].prompt.includes('OrdersTests.Total fails'));
-});
-
-test('given a gate that reports red: timeout, when the block ends, then the loop stalls at once and names the test', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red: timeout', { test: 'SlowSyncTest' }) }), green()];
-  // When
-  const { out, calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.match(out.stall.reason, /SlowSyncTest/);
-  assert.equal(implCalls(calls).length, 1);
-});
-
-test('given no plan, when the loop runs, then there is one block, the size is M and the final reader is B alone', async () => {
-  // Given
-  const args = { ...ARGS, size: undefined };
-  // When
-  const { out, calls } = await run(args, [review([])], [impl()]);
-  // Then
-  assert.equal(out.blocks.length, 1);
-  assert.deepEqual(out.blocks[0].tasks, ['1']);
-  assert.deepEqual(reviewLabels(calls, 1), ['reviewer B · round 1 · whole diff']);
-  assert.equal(out.findingsLog.size, 'M');
-});
-
-test('given a block brief, when it is built, then it carries the step budget and the gate command', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] }, stuckMinutes: 3 };
-  // When
-  const { calls } = await run(args, [review([]), review([])], [green()]);
-  // Then
-  const prompt = implCalls(calls)[0].prompt;
-  assert.ok(prompt.includes('Budget: about 16 turns. At that point stop widening: run the gate and report what is left.'));
-  assert.ok(prompt.includes("node ~/.claude/scripts/gate.mjs --root 'C:/repo' --head abc123 --test 'node --test x' --stuck-minutes 3"));
-  assert.ok(prompt.includes('paste its last output line as "gate"'));
-});
-
-test('given every agent call of a run, when the script launches it, then the call carries an effort', async () => {
-  // Given
-  const lost = await run(ARGS_M, [], [null, null, null, null, null], { probe: { files: ['src/Orders/OrdersQuery.cs'] } });
-  const full = await run(BLOCK_ARGS, [review([], [finding()]), review([]), review([]), review([])], [green(), green(), green()]);
-  // When
-  const all = [...lost.calls, ...full.calls];
-  // Then
-  assert.ok(lost.calls.some(c => c.opts.agentType === 'Explore'));
-  assert.deepEqual(all.filter(c => !c.opts.effort).map(c => c.opts.label), []);
-});
-
-test('given a stack skill and a test skill, when the briefs are built, then both are read from the skill file, never loaded', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u', stackSkill: 'dotnet-backend', testSkill: 'dotnet-testing', plan: { tasks: [{ ...tasksOf(1)[0], tdd: true, criteria: ['c1'] }] } };
-  // When
-  const { calls } = await run(args, [review([]), review([])], [impl({ gate: gate('red-proven') }), green()]);
-  // Then
-  const [tests, code] = implCalls(calls).map(c => c.prompt);
-  assert.ok(code.includes('Read ~/.claude/skills/dotnet-backend/SKILL.md first (the stack skill).'));
-  assert.ok(tests.includes('Read ~/.claude/skills/dotnet-testing/SKILL.md first.'));
-  assert.ok(!code.includes('Stack skill to load first') && !tests.includes('Load the skill'));
-});
-
-test('given a design arg, when the implementer brief is built, then it names the principles skill and the choice; without it, no principles line', async () => {
-  // Given
-  const design = 'share or duplicate the mapping in OrdersQuery';
-  const withDesign = { ...ARGS_M, verify: 'node --test x', design };
-  const without = { ...ARGS_M, verify: 'node --test x' };
-  // When
-  const a = await run(withDesign, [review([])], [green()]);
-  const b = await run(without, [review([])], [green()]);
-  // Then
-  const [promptA] = implCalls(a.calls).map(c => c.prompt);
-  const [promptB] = implCalls(b.calls).map(c => c.prompt);
-  assert.ok(promptA.includes(`Read ~/.claude/skills/principles/SKILL.md first: the plan leaves a design choice open — ${design}. Settle it with the ladder and list it under \`defaults\` (choice, alternative, the rung as the reason).`));
-  assert.ok(!promptB.includes('skills/principles/SKILL.md'));
-});
-
-const TDD_ARGS = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u', testSkill: 'dotnet-testing', plan: { tasks: [{ ...tasksOf(1)[0], tdd: true, criteria: ['the total adds the tax'] }] } };
-
-test('given a block with a tdd task and a unit command, when it runs, then a tests-first call precedes the code call', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red-proven') }), green()];
-  // When
-  const { calls } = await run(TDD_ARGS, [review([]), review([])], impls);
-  // Then
-  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['B1 · T1 · implement (tests first)', 'B1 · T1 · implement']);
-});
-
-test('given a tests-first call, when its brief is built, then it names the test skill and the red gate command', async () => {
-  // Given / When
-  const { calls } = await run(TDD_ARGS, [review([]), review([])], [impl({ gate: gate('red-proven') }), green()]);
-  // Then
-  const prompt = implCalls(calls)[0].prompt;
-  assert.ok(prompt.includes('Read ~/.claude/skills/dotnet-testing/SKILL.md first.'));
-  assert.ok(prompt.includes('the total adds the tax'));
-  assert.ok(prompt.includes("--test 'node --test x' --red --unit 'node --test u' --test-files"));
-});
-
-test('given a red that stays unproven after one retry, when the block goes on, then the result lists the missing proof under gaps', async () => {
-  // Given
-  const none = () => impl({ gate: gate('red: no failing test') });
-  // When
-  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], [none(), none(), green()]);
-  // Then
-  assert.equal(implCalls(calls).length, 3);
-  assert.ok(out.gaps.includes('block 1: red not proven'));
-});
-
-test('given a tdd task and no unit command, when the block runs, then there is one implementer call and a gap line', async () => {
-  // Given
-  const { unit, ...args } = TDD_ARGS;
-  // When
-  const { out, calls } = await run(args, [review([]), review([])], [green()]);
-  // Then
-  assert.equal(implCalls(calls).length, 1);
-  assert.ok(out.gaps.some(g => g.startsWith('block 1: ') && g.includes('no unit command')));
-});
-
-// ── review round: a requested gate is the only proof, size is always computed, quoting ────────────────────
-const plainGate = () => gate('green', { tree: '' });
-
-test('given a gate was requested, when the report carries no gate line, then it is not verified and the loop stalls', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: 'node --test x' };
-  // When
-  const { out, calls } = await run(args, [], [impl()]);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.stall.why, 'verify-not-run');
-  assert.equal(calls.filter(c => c.opts.agentType !== 'implementer').length, 0);
-});
-
-test('given a gate line inside a code fence with prose around it, when the report is read, then the last JSON line is the gate', async () => {
-  // Given
-  const wrapped = `I ran it:\n\`\`\`\n${gate('green')}\n\`\`\`\nall done`;
-  // When
-  const { out, calls } = await run({ ...ARGS_M, verify: 'node --test x' }, [review([]), review([])], [impl({ gate: wrapped })]);
-  // Then
-  assert.equal(out.status, 'OK');
-  assert.equal(out.verify.status, 'pass');
-  assert.ok(calls.some(c => c.opts.label === 'reviewer B · round 1 · whole diff'));
-});
-
-test('given a red gate that the fix call leaves red, when the block ends again, then the loop stalls with gate-red and the files', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red', { test: 'A fails' }) }), impl({ gate: gate('red', { test: 'A still fails' }) })];
-  // When
-  const { out, calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.stall.why, 'gate-red');
-  assert.match(out.stall.reason, /A still fails/);
-  assert.equal(implCalls(calls).length, 2);
-  assert.deepEqual(out.files, ['src/Orders/OrdersQuery.cs']);
-  assert.equal(out.verify.status, 'fail');
-});
-
-test('given a gate fix that returns no gate line, when the block ends again, then the loop stalls as not verified', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red', { test: 'A fails' }) }), impl()];
-  // When
-  const { out } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.stall.why, 'verify-not-run');
-});
-
-test('given a gate that is still running, when the block ends, then there is no fix call and the loop stalls with gate-running', async () => {
-  // Given
-  const impls = [impl({ gate: gate('running') }), green()];
-  // When
-  const { out, calls } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.stall.why, 'gate-running');
-  assert.equal(implCalls(calls).length, 1);
-});
-
-test('given a size L and no plan, when the loop runs, then the size is M and a gap says so', async () => {
-  // Given
-  const args = { ...ARGS, size: 'L' };
-  // When
-  const { out } = await run(args, [review([]), review([])], [impl()]);
-  // Then
-  assert.equal(out.findingsLog.size, 'M');
-  assert.ok(out.gaps.some(g => g.includes('size is M, not the L passed')));
-});
-
-test('given a tests-first call whose gate is a build failure, when it is retried, then the brief asks for the stubs and quotes the gate', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red', { test: 'CS0246 type Order not found' }) }), impl({ gate: gate('red-proven') }), green()];
-  // When
-  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], impls);
-  // Then
-  const retry = implCalls(calls)[1];
-  assert.equal(retry.opts.label, 'B1 · T1 · implement (tests first, retry)');
-  assert.ok(retry.prompt.includes('CS0246 type Order not found') && retry.prompt.includes('stubs'));
-  assert.ok(!out.gaps.includes('block 1: red not proven'));
-});
-
-test('given a tests-first call whose gate is neither unproven nor a build failure, when it ends, then there is no retry and a gap', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red: timeout', { test: 'Slow' }) }), green()];
-  // When
-  const { out, calls } = await run(TDD_ARGS, [review([]), review([])], impls);
-  // Then
-  assert.equal(implCalls(calls).length, 2);
-  assert.ok(out.gaps.includes('block 1: red not proven'));
-});
-
-test('given two blocks with the same tree, when the second ends, then reader A does not read an empty delta', async () => {
-  // Given
-  const impls = [green(), green()];
-  // When
-  const { calls } = await run(BLOCK_ARGS, [review([]), review([]), review([]), review([])], impls);
-  // Then
-  assert.equal(calls.filter(c => /^B\d+ ·.* · reader A$/.test(c.opts.label ?? '')).length, 1);
-});
-
-test('given a verify command with a single quote, when the loop starts, then it answers with an error and calls no agent', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: "node -e '1'" };
-  // When
-  const { out, calls } = await run(args, [], [impl()]);
-  // Then
-  assert.equal(typeof out, 'string');
-  assert.match(out, /verify command contains a single quote/);
-  assert.equal(calls.length, 0);
-});
-
-test('given a wide block whose gate fix changes few lines, when the change is sized, then both churns count and reader B runs on opus', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: 'node --test x' };
-  const impls = [impl({ gate: gate('red', { test: 'A fails' }), snapshot: T2('t1', 800) }), impl({ gate: gate('green'), snapshot: T2('t2', 5) })];
-  // When
-  const { calls } = await run(args, [review([]), review([])], impls);
-  // Then
-  const readers = calls.filter(c => c.opts.agentType !== 'implementer' && !/reader A$/.test(c.opts.label ?? ''));
-  assert.ok(readers.some(c => c.opts.model === 'opus'), readers.map(c => `${c.opts.label}:${c.opts.model}`).join(', '));
-});
-
-test('given an inline run whose verify command holds a single quote, when the loop starts, then it runs: no gate command is built', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: "dotnet test --filter 'Category=Unit'", inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
-  // When
-  const { out } = await run(args, [review([]), review([])]);
-  // Then
-  assert.equal(typeof out, 'object');
-  assert.equal(out.status, 'OK');
-});
-
-test('given an inline run with size L passed, when the loop runs, then the size is M and a gap says so', async () => {
-  // Given
-  const args = { ...ARGS, size: 'L', inline: true, changed: ['src/Orders/OrdersQuery.cs'] };
-  // When
-  const { out } = await run(args, [review([]), review([])]);
-  // Then
-  assert.equal(out.findingsLog.size, 'M');
-  assert.ok(out.gaps.some(g => g.includes('size is M, not the L passed')));
-});
-
-test('given a two-block plan that stalls before any review round, when the result is built, then the findings log names size L', async () => {
-  // Given
-  const impls = [impl({ gate: gate('red: timeout', { test: 'Slow' }) })];
-  // When
-  const { out } = await run(BLOCK_ARGS, [], impls);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.findingsLog.size, 'L');
-});
-
-test('given a root and dirty files with spaces, when the gate command is built, then both are quoted', async () => {
-  // Given
-  const args = { ...ARGS_M, verify: 'node --test x', repoRoot: 'C:/my repo', start: { head: 'abc123', dirty: [' M docs/a b.md'] } };
-  // When
-  const { calls } = await run(args, [], [green()]);
-  // Then
-  const prompt = implCalls(calls)[0].prompt;
-  assert.ok(prompt.includes("--root 'C:/my repo' --head abc123 --test 'node --test x' --dirty 'docs/a b.md'"));
-});
-
-// ── deliver flow v2, task 13: reversible questions are answered with their default ───────────────────────
-const askOf = (extra) => [{ text: 'Which sort order?', default: 'by date, newest first', why: 'the brief does not say', ...extra }];
-
-test('given a reversible question with a default on the logic axis, when it is raised mid-run, then the default is applied and written in the result', async () => {
-  // Given
-  const questions = askOf({ reversible: true, axis: 'logic' });
-  // When
-  const { out, calls } = await run(ARGS, [review([])], [impl({ questions }), impl()]);
-  // Then
-  assert.equal(out.status, 'OK');
-  assert.deepEqual(out.defaultsApplied, [{ block: 1, question: 'Which sort order?', default: 'by date, newest first' }]);
-  assert.ok(calls.filter(c => c.opts.agentType === 'implementer')[1].prompt.includes('Which sort order? -> by date, newest first'));
-});
-
-test('given a question on the data axis, when it is raised mid-run, then the loop stalls with the question', async () => {
-  // Given
-  const questions = askOf({ reversible: true, axis: 'data' });
-  // When
-  const { out } = await run(ARGS, [review([])], [impl({ questions })]);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.stall.why, 'question');
-  assert.deepEqual(out.stall.questions.map(q => q.text), ['Which sort order?']);
-});
-
-test('given a finished run, when it returns, then the result lists each block with its gate and its reader A counts', async () => {
-  // Given
-  const args = { ...ARGS, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
-  const green = impl({ gate: gate('green', { tree: 'tr1' }) });
-  // When
-  const { out } = await run(args, [review([]), review([])], [green]);
-  // Then
-  assert.deepEqual(out.blocks, [{ id: 1, tasks: ['1'], gate: gate('green', { tree: 'tr1' }), readerA: { raised: 0, fixed: 0, carried: 0 } }]);
-  assert.deepEqual(out.defaultsApplied, []);
-});
-
-// ── #P5: the question policy also covers the continuations and the preview pass ───────────────────────
-test('given a continuation that raises a data-axis question, when the loop reads it, then it stalls with the question instead of a note', async () => {
-  // Given: the first run stops early, its continuation asks a question the policy never answers alone
-  const questions = askOf({ reversible: true, axis: 'data' });
-  // When
-  const { out } = await run(ARGS, [review([])], [impl({ remaining: ['task 2'] }), impl({ questions })]);
-  // Then
-  assert.equal(out.status, 'STALL');
-  assert.equal(out.stall.why, 'question');
-  assert.equal(out.stall.questions[0].text, 'Which sort order?');
-});
-
-test('given a continuation that raises a reversible logic question, when the loop reads it, then the run goes on and the question is a note', async () => {
-  // Given
-  const questions = askOf({ reversible: true, axis: 'logic' });
-  // When
-  const { out } = await run(ARGS, [review([])], [impl({ remaining: ['task 2'] }), impl({ questions })]);
-  // Then
-  assert.equal(out.status, 'OK');
 });

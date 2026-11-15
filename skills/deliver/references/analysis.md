@@ -9,8 +9,8 @@ never asked.
 ## The plan's tasks
 
 At M and L the analysis ends in tasks, passed to the loop as `plan`; the loop cuts the blocks (up to 4 tasks each) and
-computes the size from them. A task is `{ id, title, files, dependsOn, tdd, criteria }`: `files` its own files,
-`dependsOn` the ids it needs first, `criteria` Given/When/Then lines. A task is `tdd` when a unit-test project covers
+computes the size from them. A task is `{ id, title, files, dependsOn, tdd, criteria, mechanical }`: `files` its own files,
+`dependsOn` the ids it needs first, `criteria` Given/When/Then lines, `mechanical: true` for a task with no judgment in it (a block whose tasks are all mechanical runs on Haiku at low). An M or L run with no plan is refused (STALL, a question) before any implementer. A task is `tdd` when a unit-test project covers
 the code it touches and its behaviour can be written as criteria; layout, config, a migration or a mechanical batch is
 not. Pass `unit` (the unit-test command) and `testSkill` too, or no block is test-first. The cut is by count only:
 order the tasks so those on the same files are adjacent, and make each atomic (it needs no other task except ones done before it).
@@ -30,20 +30,20 @@ words, so the run does not stop on a `question`. S has no pass.
 **Criteria** (M, L) cover the error path wherever the change has one: a rejection, an empty result, back to the form,
 a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
 
-## The planner (L, or M with a sensitive axis)
+## The planner (L, or M with a sensitive axis; plain M: this session plans)
 
 At size L, or M with a data, money, contract or security axis, one `Plan` subagent (Opus: `model: opus`, `effort: high`)
 writes the tasks: `{ id, title, files, dependsOn, tdd, criteria }` with each criterion's proof, from the brief, the
 owner's `decisions` verbatim and the code it reads (read-only, it never asks the user, ~12 tool calls). It ends with a
 `read:` line of every `file:line` range it read. This session then filters it against the owner's decisions: a task or
 criterion that contradicts one is dropped or amended, and the result is the final plan, which this session owns and
-passes to the loop. For a guard, parser or hook the planner lists the bypass cases (every way round it: variants, quoting, encodings, order, a second path to the same effect) as numbered criteria, and the `tdd` red tests start from those numbers. The planner replaces the challenger at these sizes: its output is the plan the owner approves, so
-there's no second agent to attack it. At plain M this session plans and the Sonnet challenger below stays as is.
+passes to the loop. For a guard, parser or hook the planner lists the bypass cases (every way round it: variants, quoting, encodings, order, a second path to the same effect) as numbered criteria, and the `tdd` red tests start from those numbers. The challenger below still attacks that plan: the planner never stands in for it. At plain M this session plans.
 
 ## The challenger
 
-When it runs: `SKILL.md` step 2, after the owner's ok and before the loop, at plain M only (at L or a sensitive M the planner above replaces it).
-One `Plan` agent, `model: sonnet`, always spawned with `effort: high` (it replaces
+When it runs, at every M and L (`SKILL.md` step 2): interpret+doubts, plan (Opus Plan at L or sensitive M, this session at plain M), challenger blind+attack on that plan (Sonnet high, Opus with security or data), owner ok, loop.
+A plan-only request stops after the owner ok.
+One `Plan` agent, `model: sonnet` (`model: opus` with a security or data axis), always spawned with `effort: high` (it replaces
 `grill-me`, which runs only on the rule below or when the owner asks). Read-only, it
 never asks the user; budget ~12 tool calls over both messages. One agent, two messages, so it cannot anchor on ours:
 

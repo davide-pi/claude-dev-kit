@@ -22,7 +22,7 @@ test('script: a round that would end OK with minor findings inside the perimeter
   const { out, calls } = await run(CLEAN, [review([], [nit(1), nit(2), oos])], [], { verifiers: [review(closed('F1', 'F2'), [nit(3)])] });   // the cleanup delta is read by the verifier
   assert.equal(out.status, 'OK');
   assert.equal(out.rounds, 2);
-  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['implement the change', 'cleanup of round 1 minor findings']);
+  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['B1 · T1 · implement', 'cleanup of round 1 minor findings']);
   const prompt = calls.find(c => c.opts.label === 'cleanup of round 1 minor findings').prompt;
   assert.match(prompt, /Cleanup pass, once/);
   assert.match(prompt, /- F1 \[P3\].*minor naming/);
@@ -48,7 +48,7 @@ test('given a cleanup fixer that rejects one finding and a verifier that finds a
   const { out, calls } = await run(CLEAN, reviews, impls, { verifiers });
   // Then
   assert.equal(out.status, 'OK');
-  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['implement the change', 'cleanup of round 1 minor findings', 'fix round 2 findings']);
+  assert.deepEqual(calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label), ['B1 · T1 · implement', 'cleanup of round 1 minor findings', 'fix round 2 findings']);
   assert.deepEqual(out.cleaned.map(x => x.id), ['F1']);
   assert.deepEqual(out.minor.map(x => x.id).sort(), ['F2', 'F4']);
   assert.equal(out.stall, undefined);

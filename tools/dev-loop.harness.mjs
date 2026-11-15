@@ -16,7 +16,7 @@ const { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirt
   new Function(`${pure}\nreturn { decideRound, mergeReviews, dedupeFound, inPerimeter, classify, parseDirty, sameFinding, unreviewedFiles, reviewersFor, sizeFor, readReport, verifyGate, deltaCommand, isNeverBlocking, widenedFiles, rejectionLedger, cleanupCandidates, readAnswers, findingHistory, churnGrowing, coverageAction, coverageOwners, recheckReviewers, idsToAsk, notConverging, findersOf, routeQuestions, reviewerQuestions, findingsLog, growthProposals, riskAxes, sizeSignal, reviewCalls, softScope, blocksFor, lanesFor, lanesWorth, stepBudget, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy, planLines, blockTag }`)();
 
 const FILES = ['src/Orders/OrdersQuery.cs', 'src/Orders/Dto/', 'tests/**/Orders*.cs'];
-const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', ...extra });
+const f = (id, extra = {}) => ({ id, path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', title: id, failure: 'x', evidence: 'src/Orders/OrdersQuery.cs:10 returns null', ...extra });
 
 const ROOT = 'C:/repo';
 
@@ -71,10 +71,10 @@ async function run(args, reviews, implementers = [], extra = {}) {
 }
 
 const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'S' };
-const ARGS_M = { ...ARGS, size: 'M' };
+const ARGS_M = { ...ARGS, size: 'M', plan: { tasks: [{ id: 'T1', title: 'the change', files: [], dependsOn: [], tdd: false, criteria: [] }] } };   // an M run needs a plan (one task: one block)
 const CLEAN = { ...ARGS_M, cleanup: true };   // the P3 cleanup pass runs only when asked
 const review = (previous, found = [], filesReviewed = ALL_READ) => ({ previous, found, checked: 'read', filesReviewed });
-const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', ...extra });
+const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', evidence: 'src/Orders/OrdersQuery.cs:10 returns null', ...extra });
 const NULL_GUARD = 'null guard missing on the order lookup';
 const DONE = { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] };
 const MANY = Array.from({ length: 14 }, (_, i) => `src/Orders/F${i}.cs`);

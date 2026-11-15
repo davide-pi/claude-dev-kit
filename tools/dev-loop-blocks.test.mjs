@@ -389,7 +389,7 @@ test('given size M, one block and a verify command, when the loop runs, then no 
   assert.ok(out.blocks[0].readerA.reason.length > 0);
 });
 
-test('given size M and two blocks, when the loop runs, then reader A runs on each block', async () => {
+test('given size M and a plan of five tasks, when the loop runs, then reader A runs on each block', async () => {
   // Given
   const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(5) } };
 
@@ -410,4 +410,29 @@ test('given size M, one block and no verify command, when the loop runs, then th
 
   // Then
   assert.equal('skipped' in out.blocks[0].readerA, false);
+});
+
+// ── T10: a block of mechanical tasks runs on Haiku ───────────────────────────────────────────────────
+const implementerOf = (calls, n) => calls.find((c) => c.opts.agentType === 'implementer' && new RegExp(`^B${n} · `).test(c.opts.label));
+
+test('given a block whose tasks are all mechanical true, when its implementer runs, then model haiku effort low', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2, { 1: { mechanical: true }, 2: { mechanical: true } }) } };
+  // When
+  const { calls } = await run(args, [review([])], [impl()]);
+  // Then
+  const opts = implementerOf(calls, 1).opts;
+  assert.equal(opts.model, 'haiku');
+  assert.equal(opts.effort, 'low');
+});
+
+test('given a block with one non-mechanical task, when its implementer runs, then the default model and effort', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2, { 1: { mechanical: true }, 2: { mechanical: false } }) } };
+  // When
+  const { calls } = await run(args, [review([])], [impl()]);
+  // Then
+  const opts = implementerOf(calls, 1).opts;
+  assert.equal(opts.model, undefined);
+  assert.equal(opts.effort, 'medium');
 });

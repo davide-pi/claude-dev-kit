@@ -85,7 +85,7 @@ export async function closeChange(opts, run = spawnRunner) {
   let verdict;
   try { verdict = JSON.parse(gateLine).gate; } catch { verdict = undefined; }
   say('gate', gateLine || reason(g));
-  if (g.status !== 0 || !['green', 'skipped'].includes(verdict)) return stop('gate', `gate is ${verdict ?? 'unreadable'} (exit ${g.status})`);
+  if (g.status !== 0 || !(verdict === 'green' || /^skipped\b/.test(verdict ?? ''))) return stop('gate', `gate is ${verdict ?? 'unreadable'} (exit ${g.status})`);
 
   // 2. sweep: closes what the gate started; --since is the perimeter's `opened:`.
   steps.push('sweep');

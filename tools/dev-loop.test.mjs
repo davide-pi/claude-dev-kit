@@ -151,7 +151,7 @@ test('given a size S, an M with security and performance touches, and an L of tw
   const touches = ['security', 'performance'];
   const cases = {
     S: [{ ...ARGS, size: 'S' }, [review([])]],
-    M: [{ ...ARGS, size: 'M', touches }, [review([]), review([]), review([])]],
+    M: [{ ...ARGS_M, touches }, [review([]), review([]), review([])]],
     L: [{ ...ARGS, size: 'L', touches, plan: { tasks: tasksOf(5) } }, [review([]), review([]), review([]), review([])]],
   };
   // When
@@ -198,11 +198,11 @@ test('given an S change that grows to 5 files in the fix, when the loop runs, th
 
 test('given risk axes on a triage size, when the loop runs, then risk only raises the floor: data lifts S to M, three axes with one block stay M, a passed L without a plan is M, a plan of two blocks is L', async () => {
   // Given
-  const panel = async (size, extra) => (await run({ ...ARGS, size, ...extra }, [review([]), review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
+  const panel = async (size, extra) => (await run({ ...ARGS, size, plan: ARGS_M.plan, ...extra }, [review([]), review([]), review([]), review([])])).calls.filter((c) => isReview(c.opts.label, 1)).map((c) => c.opts.label);
   const B = 'reviewer B · round 1 · whole diff';
   // When
-  const lifted = await run({ ...ARGS, size: 'S', risk: ['data'] }, [review([]), review([])]);
-  const many = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] }]);
+  const lifted = await run({ ...ARGS, size: 'S', risk: ['data'], plan: ARGS_M.plan }, [review([]), review([])]);
+  const many = await run({ ...ARGS_M, perimeter: { files: ['src/Orders/'] } }, [review([]), review([])], [{ scope: 's', files: MANY, evidence: 'ok', rejected: [], noticed: [] }]);
   // Then
   assert.deepEqual(await panel('S', {}), ['reviewer A · round 1 · code']);
   assert.deepEqual(await panel('S', { risk: ['logic'] }), ['reviewer A · round 1 · code']);
@@ -223,7 +223,7 @@ test('given 17 changed files at size M, when the final reader runs, then it is B
   // Given
   const seventeen = Array.from({ length: 17 }, (_, i) => `src/Orders/F${i}.cs`);
   // When
-  const { out, calls } = await run({ ...ARGS, size: 'M', perimeter: { files: ['src/Orders/'] } }, [review([])], [{ scope: 's', files: seventeen, evidence: 'ok', rejected: [], noticed: [] }]);
+  const { out, calls } = await run({ ...ARGS_M, perimeter: { files: ['src/Orders/'] } }, [review([])], [{ scope: 's', files: seventeen, evidence: 'ok', rejected: [], noticed: [] }]);
   // Then
   assert.equal(out.status, 'OK');
   const reviews = calls.filter((c) => isReview(c.opts.label, 1));

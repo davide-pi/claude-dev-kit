@@ -95,7 +95,7 @@ test('given lanes, when a lane runs its second block, then it gets only its own 
 test('given a handoff from block 1, when the reviewers and the fix run are called, then their prompts hold no handoff section', async () => {
   // Given
   const impls = [green({ handoff: 'secret-handoff-marker' }), green({ handoff: 'secret-handoff-marker' })];
-  const reviews = [review([]), review([], [{ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x' }]), review([]), review([{ id: 'F1', status: 'closed' }])];
+  const reviews = [review([]), review([], [{ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', evidence: 'src/Orders/OrdersQuery.cs:10 returns null' }]), review([]), review([{ id: 'F1', status: 'closed' }])];
   // When
   const { calls } = await run(two, reviews, impls);
   // Then
@@ -216,16 +216,16 @@ test('given block 2 of a plan, when its implementer, reader A and in-block fix s
   assert.ok(names.includes('B2 · T4 T5 · fix'));
 });
 
-test('given no plan, when the loop starts, then no plan line is logged and the labels are unchanged', async () => {
+test('given size S and no plan, when the loop starts, then no plan line is logged and the labels are unchanged', async () => {
   // Given
-  const args = { ...ARGS_M, verify: 'node --test x' };
+  const args = { ...ARGS_M, size: 'S', plan: undefined, verify: 'node --test x' };
   // When
   const { logs, calls } = await run(args, [review([]), review([]), review([])], [green()]);
   // Then
   assert.equal(logs.filter((l) => /^B\d · |\d+ blocks/.test(l)).length, 0);
   const names = calls.map((c) => c.opts.label);
   assert.ok(names.includes('implement the change'));
-  assert.ok(names.includes('reviewer B · round 1 · whole diff'));
+  assert.ok(names.includes('reviewer A · round 1 · code'));
 });
 
 // ── deliver skill: the Opus planner ───────────────────────────────────────────
@@ -243,15 +243,34 @@ test('given SKILL.md and analysis.md, when read, then an Opus Plan subagent plan
   assert.match(analysis, /Opus/);
   assert.match(analysis, /data, money, contract or security/);
   assert.match(analysis, /filter\w* it against the owner'?s decisions/i);
-  assert.match(analysis, /replaces the (separate )?challenger/i);
+  assert.match(analysis, /never stands in for it/i);
 });
 
 test('given analysis.md, when read, then plain M still has the main session plan and the Sonnet challenger', () => {
   // Given
   const analysis = doc('references/analysis.md');
   // When
-  const m = /plain M[^\n]*/i.exec(analysis)?.[0] ?? '';
+  const m = /[^\n]*this session at plain M[^\n]*/i.exec(analysis)?.[0] ?? '';
   // Then
   assert.match(m, /challenger/i);
   assert.match(m, /Sonnet/);
+});
+
+// ── T9: settled facts travel to the implementer ──────────────────────────────────────────────────────
+test('given arg read with a file range, when the implementer brief is built, then it contains those ranges under an already-read line', async () => {
+  // Given
+  const args = { ...two, read: ['a.js:10-20'] };
+  // When
+  const { calls } = await run(args, [], [green(), green()]);
+  // Then
+  assert.match(block(calls, 1).prompt, /already read, don't re-explore[^\n]*(\n[^\n]*)?a\.js:10-20/i);
+});
+
+test('given no read arg, when the implementer brief is built, then the brief has no such line', async () => {
+  // Given
+  const args = { ...two };
+  // When
+  const { calls } = await run(args, [], [green(), green()]);
+  // Then
+  assert.doesNotMatch(block(calls, 1).prompt, /already read/i);
 });
