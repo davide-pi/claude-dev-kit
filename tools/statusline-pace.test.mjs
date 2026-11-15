@@ -210,6 +210,14 @@ test('Given each threshold, When paceView runs, Then the band is 0/70/85/92/96/9
     [0, 0, 70, 70, 85, 85, 92, 92, 96, 96, 98, 98]);
 });
 
+test('Given 7d at 99%, When paceView runs, Then the status line band stays 98 (its look is unchanged by the hook bands)', () => {
+  // Given
+  const view = pace.paceView({ five_hour: { pct: 99, resetsAt: Date.now() + 3600_000 }, seven_day: { pct: 99.5, resetsAt: Date.now() + 86_400_000 } }, Date.now());
+  // When / Then
+  assert.equal(view.five_hour.band, 98);
+  assert.equal(view.seven_day.band, 98);
+});
+
 test('Given a window past its reset, When paceView runs, Then it reads 0 and the other window is unaffected', () => {
   // Given
   const p = { five_hour: { pct: 97, resetsAt: T0 - MIN }, seven_day: { pct: 86, resetsAt: R7 }, samples5h: [], samples7d: [] };

@@ -37,6 +37,19 @@ export type CockpitAgent = {
   stepUsage?: CockpitUsage
   /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
   runId?: string
+  /** The agent's last tool calls (8 at most, oldest first), in memory only: never written to the session data. */
+  trail?: CockpitTrailEntry[]
+}
+
+/** One tool call of an agent's trail: a short label from the call's own arguments, never a raw command or a full path. */
+export type CockpitTrailEntry = {
+  tool: string
+  label?: string
+  at: number
+  /** True once the call returned. */
+  isDone?: boolean
+  /** True when the call ended on an error or a refusal. */
+  isFailed?: boolean
 }
 
 /** A finished agent that left the live list, as the history keeps it (and the session data file persists it). */
@@ -109,10 +122,15 @@ export type CockpitPerimeterCheck = { files: number; outside: string[] }
  * and which of them finished, the label of the newest one (`phase`: the engine exposes no phase) and the round its `R<n>` names, and when
  * any of its agents last did something. `endedAt` is set when a main turn starts or a clock tick finds every agent done (a silent run's agents are taken as done); a later spawn reopens the run.
  */
+export type CockpitPlanTask = { id: string; title: string; dependsOn: string[] }
+
 export type CockpitWorkflowRun = {
   runId: string
   name?: string
-  agents: { id: string; isDone: boolean }[]
+  /** `label` is the agent's spawn description (`B1 · T1 T2 · implement` for a dev-loop block agent). */
+  agents: { id: string; isDone: boolean; label?: string; isFailed?: boolean }[]
+  /** The task plan the `Workflow` call passed (`args.plan.tasks`), in plan order; absent for a workflow without one. */
+  tasks?: CockpitPlanTask[]
   phase?: string
   round?: number
   lastAt?: number

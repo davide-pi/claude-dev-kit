@@ -1,6 +1,6 @@
 # Loop — launching `dev-loop`, and what to do with its answer
 
-Before the loop (M, L): facts first, doubts pass, criteria and challenger: `references/analysis.md`.
+Before the loop (M, L): facts first, doubts pass, criteria, planner and challenger: `references/analysis.md`.
 
 ## The start point (before the first edit of the change, yours or the implementer's)
 
@@ -64,7 +64,7 @@ cuts it into blocks of up to 4 tasks, as even as possible (5 → 3+2), in depend
 the analysis orders tasks so those on the same files are adjacent (a second agent pays the fixed context again). Parallel runs only for areas that share no file and no
 test, each in its own worktree (`branch-flow`). Each implementer call has a turn budget (`min(35, 10 + 6 × tasks)`)
 and runs the gate before it reports; a fresh one continues from its edits, up to four times (`stall.why: incomplete`
-after that: split the plan). A `'` in `verify` or `unit` is refused, so the gate runs by hand; `"` is fine (`dotnet test --logger "console;verbosity=normal"` per test works through the loop). Test files proven red by `--red` are frozen for the code call.
+after that: split the plan). With a `plan` the loop logs it (`Plan: 2 blocks, 5 tasks`, then `B1 · T1 Title · T2 Title (after T1)` per block) and labels each block agent `B1 · T1 T2 · implement|reader A|fix`: the Workflow view and the cockpit's task tree read that shape. A `'` in `verify` or `unit` is refused, so the gate runs by hand; `"` is fine (`dotnet test --logger "console;verbosity=normal"` per test works through the loop). Test files proven red by `--red` are frozen for the code call.
 
 ## Weight, criteria, proof
 

@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { COLORS, clockTime, duration, effortGlyph, textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
-import { colorOf, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
+import { colorOf, gatedBash, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
 import { NOW, rowTexts, world } from './cockpit-world'
 
 const WIDE = 70
@@ -24,18 +24,29 @@ const CLOSED = [
   { at: NOW - 100_000, kind: 'round', n: 30, ms: 61_000, usd: 0.44, ctxPct: 42, prompt: PROMPT, model: 'claude-sonnet-5-5', effort: 'high', tools: { Bash: 2 } },
 ]
 
-test('Given a closed round with prompt, cost, context after a round at 30, model and high effort, When drawn, Then line 1 holds time, number and the cut prompt and line 2 the figures and the battery', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a closed round with prompt, cost and context, When drawn, Then one row holds time, number, the cut prompt, the cut context and the figures, and no row follows with the details', { timeoutMs: 30_000 }, async ($, on) => {
   // Given / When
-  const { rows, root } = await drawn($, on, { sessionLog: CLOSED }, 50)
+  const { rows } = await drawn($, on, { sessionLog: CLOSED }, 100)
   // Then
   const head = rows.findIndex(r => /round 030/.test(r))
-  const [line1, line2] = [rows[head] ?? '', rows[head + 1] ?? '']
+  const line1 = rows[head] ?? ''
   expect(line1).toContain(clockTime(NOW - 100_000 - 61_000))
-  expect(line1).toContain('fix the parser')
+  expect(line1).toContain('fix the')
   expect(line1).toContain('…')
-  expect(textCells(line1)).toBeLessThanOrEqual(50)
-  expect(line2).toContain(duration(61_000))
-  expect(line2).toMatch(/\$ *0\.44/)
+  expect(textCells(line1)).toBeLessThanOrEqual(60) // the pane stops at 60 columns, whatever the dock
+  expect(rows[head + 1] ?? '').toMatch(/round 029/) // the next round, not a row of details
+  expect(line1).toContain(duration(61_000))
+  expect(line1).toMatch(/\$ *0\.44/)
+  expect(line1).toContain('ctx 4')
+})
+
+test('Given a closed round with prompt, context and model but no figures, When drawn, Then its one row holds the cut prompt, the context, the model and the effort battery', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const bare = CLOSED.map(({ ms: _ms, usd: _usd, ...e }) => e)
+  const { rows, root } = await drawn($, on, { sessionLog: bare }, 100)
+  // Then
+  const line2 = rows.find(r => /round 030/.test(r)) ?? ''
+  expect(line2).toContain('fix the parser')
   expect(line2).toContain('ctx 42% +12')
   expect(line2).toMatch(/son ?5\.5/)
   expect(line2).toContain(effortGlyph('high')?.icon)
@@ -49,8 +60,8 @@ test('Given a round after a compact entry, When drawn, Then the context delta is
   const { rows } = await drawn($, on, { sessionLog: log }, WIDE, undefined, 'log:all')
   // Then
   const head = rows.findIndex(r => /round 030/.test(r))
-  expect(rows[head + 1]).toContain('ctx 42%')
-  expect(rows[head + 1]).not.toContain('+12')
+  expect(rows[head]).toContain('ctx 42%')
+  expect(rows[head]).not.toContain('+12')
 })
 
 test('Given the open round with pending fields, When drawn, Then its header reads the prompt and the model', { timeoutMs: 30_000 }, async ($, on) => {
@@ -61,7 +72,7 @@ test('Given the open round with pending fields, When drawn, Then its header read
   // Then
   const head = rows.findIndex(r => /current round/.test(r))
   expect(rows[head]).toContain('open work')
-  expect(rows[head + 1]).toMatch(/opu ?5\.5/)
+  expect(rows[head]).toMatch(/opu ?5\.5/)
 })
 
 test('Given a round with 3 fails, 2 waits of 50s and 90s and 4 files, When drawn, Then the summary shows the total wait time and the files row shows the files', { timeoutMs: 30_000 }, async ($, on) => {
@@ -213,8 +224,8 @@ test('Given a flow with agents of round 1 and 2, one running, and a commit by ag
   expect(before[reviewer]).toContain(effortGlyph('high')?.icon)
   expect(running).toBeGreaterThan(commit)
   expect(before[running]).toContain('\u{F1396}')
-  // the LOG row's icon is an animated cell (the IN PROGRESS list spins its own agent too, so the LOG's makes at least one more than the list's)
-  expect(spinners.length).toBeGreaterThanOrEqual(2)
+  // the LOG row's icon is an animated cell (the flow agent shows once, under its flow: IN PROGRESS spins no second one)
+  expect(spinners.length).toBeGreaterThanOrEqual(1)
   expect(before[running]).toMatch(/\d\dm\d\ds/)
   expect(before[running]).not.toContain('\u{F012C}')
   expect(after.some(r => /▾ R1/.test(r))).toBe(true)
@@ -362,4 +373,116 @@ test('Given a live flow whose name and progress do not fit a narrow pane, When d
   const flowRow = rows.find(r => /^[▾▸-] \d\d:\d\d fl/.test(r)) ?? ''
   expect(flowRow).toMatch(/· 0\/1/)
   expect(flowRow).toMatch(/flow [^·]*… +· step 0 · 0\/1/)
+})
+
+// ── The flow agent's row: expandable, with its detail and its trail ──
+
+const TASK = 'Fix the lexer'
+const TRAIL = /\d\d:\d\d (?:\S )?(?:Grep|Bash) ?(.*?)\s*$/u
+
+/** A live run whose implementer made a Grep and has a Bash in flight; `look` reads the pane while the Bash holds. */
+async function withRunningAgent<T>($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], columns: number, look: (ui: Awaited<ReturnType<typeof mountPane>>) => Promise<T>) {
+  const clock = world(on)
+  spawns(on)
+  on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
+  const release = gatedBash(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1, TASK)
+  await $.tool.call({ tool: 'Grep', pattern: 'Order', agentId: 'a1' })
+  const inFlight = $.tool.call({ tool: 'Bash', command: 'hold', description: 'Hold on', agentId: 'a1' })
+  await clock.advance(3000)
+  await settleAll()
+  const ui = await mountPane($, columns)
+  const out = await look(ui)
+  release('hold')
+  await inFlight
+  await ui.unmount().catch(() => undefined) // `look` may have unmounted it
+  return out
+}
+
+test('Given a running flow agent under the live flow node, When its row is open by default, Then its task starts on its row and the trail (newest first) renders under it', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 100, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  const agent = rows.findIndex(r => /implementer/.test(r))
+  const task = rows.findIndex((r, i) => i >= agent && r.includes('· Fix')) // the flow's own row, above, names the task as its phase too
+  const trail = rows.map((r, i) => ({ i, m: TRAIL.exec(r) })).filter(x => x.m !== null)
+  expect(agent).toBeGreaterThan(-1)
+  expect(task).toBe(agent)
+  expect(trail.map(x => x.m?.[1])).toEqual(['Hold on', 'Order'])
+  expect(trail[0]?.i).toBeGreaterThan(agent)
+})
+
+test('Given a person closes the flow agent row, When IN PROGRESS re-renders, Then only the agent row shows and a new pane keeps it closed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const closed = await withRunningAgent($, on, 100, async ui => {
+    await ui.press({ key: 'flow:wf_1:agent:a1' })
+    const rows = rowTexts(await ui.drawn())
+    await ui.unmount()
+    const again = await mountPane($, 100)
+    const rowsAgain = rowTexts(await again.drawn())
+    await again.unmount()
+    return { rows, rowsAgain }
+  })
+  // Then
+  for (const rows of [closed.rows, closed.rowsAgain]) {
+    expect(rows.some(r => /implementer/.test(r))).toBe(true)
+    expect(rows.slice(rows.findIndex(r => /implementer/.test(r)) + 1).some(r => r.includes(TASK))).toBe(false)
+    expect(rows.some(r => TRAIL.test(r))).toBe(false)
+  }
+})
+
+test('Given a flow agent that spawns a subagent outside any run, When IN PROGRESS is drawn, Then the subagent is still listed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 0)
+  await $.agent.spawn({ tool_use_id: 'child', prompt: 'go', description: 'look around', subagentType: 'Explore', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-opus-5-5', background: true, fork: false, parentAgentId: 'a1' } as never)
+  await settleAll()
+  // When
+  const ui = await mountPane($, 100)
+  const rows = rowTexts(await ui.drawn())
+  await ui.unmount()
+  // Then
+  expect(rows.some(r => /Explore/.test(r))).toBe(true)
+})
+
+test('Given a narrow pane, When the open flow agent is drawn, Then no row is wider than the pane', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 30, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  expect(rows.some(r => r.includes('Hold'))).toBe(true)
+  expect(rows.filter(r => textCells(r) > 30)).toEqual([])
+})
+
+test('Given a narrow pane, When a closed round is drawn, Then the details are cut on its one row and none is wrapped onto a row below', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const { rows } = await drawn($, on, { sessionLog: CLOSED }, 40)
+  // Then
+  const head = rows.findIndex(r => /round 030/.test(r))
+  expect(head).toBeGreaterThan(-1)
+  expect(textCells(rows[head] ?? '')).toBeLessThanOrEqual(40)
+  expect(rows[head + 1] ?? '').not.toMatch(/ctx|son ?5|opu ?5/)
+})
+
+test('Given an open flow agent with a trail, When drawn, Then its detail is on its row and the trail rows follow it directly, newest first', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 100, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  const agent = rows.findIndex(r => /implementer/.test(r))
+  expect(rows[agent]).toContain('· Fix')
+  expect(rows.some((r, i) => i > agent && r.includes(TASK))).toBe(false)
+  expect(TRAIL.exec(rows[agent + 1] ?? '')?.[1]).toBe('Hold on')
+  expect(TRAIL.exec(rows[agent + 2] ?? '')?.[1]).toBe('Order')
+})
+
+test('Given a narrow pane, When the open flow agent is drawn, Then its detail is cut on its row and the trail follows it directly', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const rows = await withRunningAgent($, on, 40, async ui => rowTexts(await ui.drawn()).map(r => r.trimEnd()))
+  // Then
+  const agent = rows.findIndex(r => /impleme/.test(r))
+  expect(agent).toBeGreaterThan(-1)
+  expect(textCells(rows[agent] ?? '')).toBeLessThanOrEqual(40)
+  expect(TRAIL.test(rows[agent + 1] ?? '')).toBe(true)
 })

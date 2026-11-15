@@ -80,6 +80,15 @@ test('given two tasks with the same id, when the blocks are cut, then the plan i
   assert.throws(cut, /duplicate task id: t1/);
 });
 
+test('given a task id with whitespace or a middle dot, when the blocks are cut, then the plan is refused and the id is named', () => {
+  // Given
+  const ids = ['t 1', 't·1', 't\t1'];
+  // When
+  const cuts = ids.map((id) => () => blocksFor([{ id }]));
+  // Then
+  cuts.forEach((cut, i) => assert.throws(cut, (e) => e instanceof Error && /task id/.test(e.message) && e.message.includes(ids[i])));
+});
+
 // ── lanes ──────────────────────────────────────────────────────────────────
 const ids = (lanes) => lanes.map((lane) => lane.map((t) => t.id));
 

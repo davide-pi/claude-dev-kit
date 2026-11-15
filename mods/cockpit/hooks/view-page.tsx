@@ -159,7 +159,7 @@ export function inProgressBlocks(k: Kit): Block[] {
   const { ui, s, width, title, actions } = k
   const S = t()
   const running = visibleAgents(s).filter(a => a.status === 'running')
-  const nodes = liveBlocks(k)
+  const { blocks: nodes, drawn } = liveBlocks(k)
   if (running.length === 0 && nodes.length === 0 && openTasks(s).length === 0) return []
 
   const rows: Block[] = []
@@ -176,7 +176,9 @@ export function inProgressBlocks(k: Kit): Block[] {
   }
   rows.push(...nodes)
   const agentBlock = makeAgentBlock(k)
-  rows.push(...orderAgents(running).map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth)))
+  // an agent a flow node lists is not listed again; a child the node does not draw stays here
+  const flat = orderAgents(running.filter(a => !drawn.has(a.id)))
+  rows.push(...flat.map(({ agent, depth }) => agentBlock(`agent:${agent.id}`, agent, depth)))
 
   return [[title(S.page.inProgress), collapsible(k, 'inProgress', rows, MAX_ROWS, s.openKeys?.includes('inProgress') === true, () => actions.toggleOpen('inProgress'))]]
 }

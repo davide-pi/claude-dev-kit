@@ -4,9 +4,85 @@ import { COLORS } from '../hooks/shared'
 import { andamentoBlocks, attentionBlocks, inProgressBlocks, shortLabel } from '../hooks/view-page'
 import { paneView } from '../hooks/view'
 import type { CockpitSnapshot } from '../types'
-import { colorOf, keysInOrder } from './cockpit-fixtures'
+import { colorOf, keysInOrder, mountPane, settleAll, spawnAgent, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
 import { LONG_SPEND, SINCE, WAITING, WIDTH, agent, boldOf, draw, insights, keysOf, snap, titled } from './cockpit-page-draw'
-import { NOW } from './cockpit-world'
+import { NOW, rowTexts, world } from './cockpit-world'
+
+// ── IN PROGRESS: a flow's running agent shows once, under its flow ──
+
+test('in progress: Given a live run with a running implementer carrying its run id, When drawn, Then the implementer shows once, in the flow node\'s rows', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await clock.advance(3000)
+  await settleAll()
+  // When
+  const ui = await mountPane($, 100)
+  const rows = rowTexts(await ui.drawn())
+  const flat = await ui.find({ key: 'agent:a1' })
+  const under = await ui.find({ key: 'flow:wf_1:agent:a1' })
+  await ui.unmount()
+  // Then
+  expect(rows.filter(r => /implementer/.test(r))).toHaveLength(1)
+  expect(flat).toBeUndefined()
+  expect(under).toBeDefined()
+})
+
+test('in progress: Given a running agent with no workflow run, When drawn, Then it is still in the flat agent list', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnAgent($, 'reviewer')
+  // When
+  const ui = await mountPane($, 100)
+  const flat = await ui.find({ key: 'agent:a1' })
+  await ui.unmount()
+  // Then
+  expect(flat).toBeDefined()
+})
+
+test('in progress: Given a running agent whose run id names a run that is not the live one, When drawn, Then it is still listed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'w1', 1)
+  await spawnWorkflowAgent($, 'w2', 1)
+  await clock.advance(3000)
+  await settleAll()
+  // When
+  const ui = await mountPane($, 100)
+  const replaced = await ui.find({ key: 'agent:a1' })
+  const live = await ui.find({ key: 'agent:a2' })
+  const under = await ui.find({ key: 'flow:w2:agent:a2' })
+  await ui.unmount()
+  // Then
+  expect(replaced).toBeDefined()
+  expect(live).toBeUndefined()
+  expect(under).toBeDefined()
+})
+
+test('in progress: Given a live run whose flow node a person closed, When drawn, Then its running agent is back in the flat agent list', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const clock = world(on)
+  spawns(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  await spawnWorkflowAgent($, 'wf_1', 1)
+  await clock.advance(3000)
+  await settleAll()
+  const ui = await mountPane($, 100)
+  // When
+  await ui.press({ key: 'flow:wf_1' })
+  const flat = await ui.find({ key: 'agent:a1' })
+  const under = await ui.find({ key: 'flow:wf_1:agent:a1' })
+  await ui.unmount()
+  // Then
+  expect(flat).toBeDefined()
+  expect(under).toBeUndefined()
+})
 
 // ── ATTENZIONE ──
 

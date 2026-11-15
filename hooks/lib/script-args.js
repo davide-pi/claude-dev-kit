@@ -53,7 +53,9 @@ const BUILD_AND_LINT = [
   String.raw`^node\s+(?!\S*(?:gate|sweep|scope-guard)\.[cm]?js)${REPO_PATH}\.[cm]?js(?:\s+[\w.=/-]+)*$`,
   String.raw`^claude\s+plugin\s+test(?:\s+${REPO_PATH})?$`,
   // npm reads an abbreviated option as its own config (`--prefi`): the script's flags only, and only after `--`.
-  String.raw`^npm\s+--prefix\s+${REPO_PATH}\s+(?:run\s+)?test(?:\s+--(?:\s+--(?:watch(?:=(?:true|false))?|no-watch|no-coverage|run|silent))*)?$`,
+  String.raw`^npm\s+--prefix\s+${REPO_PATH}\s+(?:run\s+)?test(?:\s+--(?:\s+--(?:watch(?:=(?:true|false))?|no-watch|no-coverage|run|silent|include=${REPO_PATH}))*)?$`,
+  // vitest through npm exec: only the `run` command and repo-relative paths after `--`.
+  String.raw`^npm\s+--prefix\s+${REPO_PATH}\s+exec\s+vitest\s+--\s+run(?:\s+${REPO_PATH})*$`,
 ].map((source) => new RegExp(source, 'i'));
 const TEST_COMMAND_DANGER = /[&|<>^%$`()\r\n]/;
 /** sh (not cmd) honours `\"` and single quotes inside the value, which would defeat the `;` rule below. */

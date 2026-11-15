@@ -7,13 +7,13 @@ import { COLORS, abbrevTokens, clockTime, costCell, duration, localDate, spanWid
 import type { Span } from './shared'
 import { loggedSignal, signalSeverity } from './signals'
 import { t } from './strings'
-import { agentIcon, pairRow, visibleAgents } from './view-agents'
+import { agentIcon, pairRow, subagentInline, trailRows, visibleAgents } from './view-agents'
 import type { CockpitAgent } from '../types'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
 import type { Block, Kit } from './view-kit'
 import { ALL_KEY, LABEL_W, detailRows, filesText, isAllShown, isExpandable, isMainEntry, linkAnchor, modelSpans, roundHeader, summarySpans } from './view-log-round'
-import { activeRun, agentRunId, roundOf } from './workflow'
+import { activeRun, agentRunId, roundOf, taskRows } from './workflow'
 
 /** LOG shows this many nodes (an open one with its whole subtree); the rest sits behind its toggle. */
 const DONE_ROWS = 5
@@ -37,6 +37,8 @@ type DoneEntry = DoneEvent & {
   effort?: string | number
   /** An agent that still runs: its icon spins. */
   isRunning?: boolean
+  /** The running agent itself: its row opens on its detail and trail. */
+  live?: CockpitAgent
   /** The time the row shows, when it is not `at`. */
   start?: number
   usd?: number
@@ -69,6 +71,7 @@ function liveAgentEntry(a: CockpitAgent, runId: string, now: number): DoneEntry 
     kind: 'agent',
     icon: agentIcon(a),
     isRunning: true,
+    live: a,
     key: a.id,
     text: a.type,
     runId,
@@ -177,16 +180,17 @@ function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
 }
 
 /** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, and at the row's end the figures (length, cost, share of the session's cost). */
-function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; second?: Span[] } {
+function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; anchor?: number } {
   const { width, s } = k
   const { label, after } = nodeLabel(g, tree)
   const time = g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]
   const fig = figures(g.usd, g.ms, s.cost.usd)
   // a node with nothing under it opens nothing: a dash, not an arrow
   const arrow = sp(!isExpandable(g, s) ? '- ' : isOpen ? '▾ ' : '▸ ')
-  // a round has two lines: its time, number and prompt, then its context and model with the figures at the end
-  const round = roundHeader(g, s, { time, label, figures: fig, width })
-  if (round !== undefined) return { arrow, rest: round.first, ...(round.second.length > 0 && { second: round.second }) }
+  // a round is one row: time, number, prompt, context and model, the figures at the end; its link, when it has one, sits in front (2 cells)
+  const anchor = g.flow === undefined ? linkAnchor(g, s) : undefined
+  const round = roundHeader(g, s, { time, label, figures: fig, width: width - (anchor === undefined ? 0 : 2) })
+  if (round !== undefined) return { arrow, rest: round, ...(anchor !== undefined && { anchor }) }
   // a live run's phase and progress outrank its name: on a narrow pane the name gives way first, down to `flow…`
   const room = width - 2 - spanWidth(fig) - 1 - spanWidth(time) - (after.length > 0 ? 1 + spanWidth(after) : 0)
   const name = after.length > 0 && textCells(label.t) > room ? { ...label, t: truncateSpans([label], Math.max(room, 5)).map(x => x.t).join('') } : label
@@ -196,10 +200,18 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
 }
 
 /** An event row at `prefix`'s depth: time, icon, text, an agent also its model and figures at the end. */
-function eventRow(k: Kit, e: DoneEntry, prefix: string): Block {
+function eventRow(k: Kit, e: DoneEntry, prefix: string, toggle?: { key: string; isOpen: boolean; onPress: () => void }): Block {
   const { ui } = k
-  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : [])]
+  const { Button, Text } = ui
+  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : []), ...(toggle?.isOpen === true && e.live !== undefined ? subagentInline(e.live) : [])]
   const spans = [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))]
+  // a flow agent that runs is a toggle: its row opens on its detail and trail
+  const rest = (from: number): Block =>
+    toggle === undefined ? line(ui, spans.slice(from)) : (
+      <Button key={toggle.key} plain onPress={toggle.onPress}>
+        <Text wrap="truncate">{spanNodes(ui, spans.slice(from))}</Text>
+      </Button>
+    )
   // a running agent's icon spins: it leaves the line for an animated cell between the time and the rest
   const at = 3
   if (e.isRunning === true && ui.Client !== undefined && e.key !== undefined && spans[at]?.t === e.icon.t && spans[at + 1]?.t === ' ') {
@@ -208,15 +220,36 @@ function eventRow(k: Kit, e: DoneEntry, prefix: string): Block {
       <Box>
         {line(ui, spans.slice(0, at))}
         {animCell(ui, `anim:log:${e.key}`, 'spin', spans.slice(at, at + 2))}
-        {line(ui, spans.slice(at + 2))}
+        {rest(at + 2)}
       </Box>
     )
   }
-  return line(ui, spans)
+  return rest(0)
+}
+
+/** The task tree under a live flow, one row per task: state icon, id, title (cut to fit), `← T1,T2`, its block and, while it runs, the step; none for a run with no tasks. */
+function taskTree(k: Kit, runId: string): Block[] {
+  const { ui, width, s } = k
+  const { Text } = ui
+  if (s.workflowRun?.runId !== runId) return []
+  const all = taskRows(s.workflowRun)
+  const open = all.filter(r => r.state !== 'done')
+  const finished = all.length - open.length
+  const collapsed: Block[] = finished === 0 ? [] : [[<Text key={`flow:${runId}:task:done`} wrap="truncate">{spanNodes(ui, [sp('  '), sp('󰄬', COLORS.green), sp(' '), dim(t().page.planDone(finished))])}</Text>]]
+  const rows = open.map(r => {
+    const icon = r.state === 'done' ? sp('󰄬', COLORS.green) : r.state === 'running' ? sp('󱎖', COLORS.blue) : dim('󰄰')
+    const right = [r.dependsOn.length > 0 ? `← ${r.dependsOn.join(',')}` : '', r.block === undefined ? '' : `B${r.block}`, r.tag === undefined ? '' : t().page.planStep(r.tag)].filter(Boolean).join(' · ')
+    const left = [sp('  '), icon, sp(' '), sp(r.id, undefined, r.state === 'running'), sp(' ')]
+    const room = width - spanWidth(left) - (right === '' ? 0 : textCells(right) + 1)
+    const title = r.title === undefined || room < 4 ? [] : truncateSpans([sp(r.title.replace(/\s+/g, ' '))], room)
+    const spans = truncateSpans([...left, ...title, ...(right === '' ? [] : [sp(' '), dim(right)])], width)
+    return [<Text key={`flow:${runId}:task:${r.id}`} wrap="truncate">{spanNodes(ui, spans)}</Text>]
+  })
+  return [...collapsed, ...rows]
 }
 
 /** The rows under an open node: a round's summary and events; a run's agents, by the round their label names where it names one. */
-function nodeChildren(k: Kit, g: G): Block[] {
+function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
   const { ui, width } = k
   const summary = g.flow === undefined ? summarySpans(g, k.s) : []
   const files = g.flow === undefined ? filesText(g, k.s) : undefined
@@ -224,6 +257,7 @@ function nodeChildren(k: Kit, g: G): Block[] {
     ...(summary.length === 0 ? [] : [[line(ui, [sp('├ ', COLORS.rule), ...summary])]]),
     ...(files === undefined ? [] : [[line(ui, [sp('├ ', COLORS.rule), dim(files)])]]),
     ...detailRows(g, k.s).map(row => [line(ui, [sp('├ ', COLORS.rule), ...row])]),
+    ...(g.flow?.isLive === true ? taskTree(k, g.flow.runId) : []),
   ]
   // a commit, test or PR a flow agent made sits under that agent's row
   const agentIds = new Set(g.flow === undefined ? [] : g.events.flatMap(e => (e.kind === 'agent' && e.key !== undefined ? [e.key] : [])))
@@ -239,7 +273,21 @@ function nodeChildren(k: Kit, g: G): Block[] {
   /** The row of `e` at `base`'s depth, then what it made. */
   const rowWithKids = (e: DoneEntry, base: string, isLast: boolean): Block[] => {
     const kids = g.events.filter(x => x.agent !== undefined && x.agent === e.key).sort((a, b) => a.at - b.at)
-    return [eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`), ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
+    const cont = `${base}${isLast ? '  ' : '│ '}`
+    let head: Block[]
+    if (e.live === undefined || e.key === undefined || drawn === undefined) head = [eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`)]
+    else {
+      // a running flow agent: a toggle (open while it runs until a person closes it) over its detail and its trail
+      const key = `${g.key}:agent:${e.key}`
+      const isOpen = k.s.groupsOpen?.[key] ?? true
+      const indent = `${cont}  `
+      drawn?.add(e.key)
+      head = [
+        eventRow(k, e, `${base}${isLast ? '└ ' : '├ '}`, { key, isOpen, onPress: () => k.actions.setGroupOpen(key, !isOpen) }),
+        ...(isOpen ? trailRows(e.live, indent, width).map(spans => line(ui, spans)) : []),
+      ]
+    }
+    return [...head, ...kids.map((c, j) => eventRow(k, c, `${base}${isLast ? '  ' : '│ '}${j === kids.length - 1 ? '└ ' : '├ '}`))]
   }
   const highest = Math.max(...byRound.keys())
   const items:((isLast: boolean) => Block[])[] = [
@@ -268,14 +316,45 @@ function nodeChildren(k: Kit, g: G): Block[] {
 }
 
 /** A node: its header (a button while it holds something) and, open, its children. `isNewest` fades the header from its highlight. */
-function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean): Block {
+function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean, drawn?: Set<string>): Block {
   const { ui, actions } = k
   const { Box, Button, Text } = ui
-  const { arrow, rest, second } = nodeHeader(k, tree, g, isOpen)
+  const { arrow, rest, anchor } = nodeHeader(k, tree, g, isOpen)
   const toggle = () => actions.setGroupOpen(g.key, !isOpen)
+  const isExpand = isExpandable(g, k.s)
+  const isFade = isExpand && isNewest
+  // the link is a button of its own (2 cells) between the arrow and the row: it scrolls the chat to the round's marker
+  if (anchor !== undefined) {
+    return [
+      [
+        <Box>
+          {isExpand ? (
+            <Button key={g.key} plain onPress={toggle}>
+              <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
+            </Button>
+          ) : (
+            <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
+          )}
+          <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
+            <Text wrap="truncate">{spanNodes(ui, [sp('󰌷', COLORS.blue), sp(' ')])}</Text>
+          </Button>
+          {isFade ? (
+            animCell(ui, 'anim:done', 'fade', rest)
+          ) : isExpand ? (
+            <Button key={`${g.key}:row`} plain onPress={toggle}>
+              <Text wrap="truncate">{spanNodes(ui, rest)}</Text>
+            </Button>
+          ) : (
+            <Text wrap="truncate">{spanNodes(ui, rest)}</Text>
+          )}
+        </Box>,
+      ],
+      ...(isOpen ? nodeChildren(k, g, drawn) : []),
+    ]
+  }
   let header: Block
-  if (!isExpandable(g, k.s)) header = [line(ui, [arrow, ...rest])]
-  else if (isNewest) {
+  if (!isExpand) header = [line(ui, [arrow, ...rest])]
+  else if (isFade) {
     header = [
       <Box>
         <Button key={g.key} plain onPress={toggle}>
@@ -291,24 +370,7 @@ function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean)
       </Button>,
     ]
   }
-  const anchor = linkAnchor(g, k.s)
-  // the link sits in front of the second line, a button of its own (2 cells, where the line's indent is): it scrolls the chat to the round's marker
-  const link: Block =
-    second === undefined
-      ? []
-      : anchor === undefined
-        ? [[line(ui, second)]]
-        : [
-            [
-              <Box>
-                <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
-                  <Text wrap="truncate">{spanNodes(ui, [sp('\u{F0337}', COLORS.blue), sp(' ')])}</Text>
-                </Button>
-                <Text wrap="truncate">{spanNodes(ui, second)}</Text>
-              </Box>,
-            ],
-          ]
-  return [header, ...link, ...(isOpen ? nodeChildren(k, g) : [])]
+  return [header, ...(isOpen ? nodeChildren(k, g, drawn) : [])]
 }
 
 /** A day's row: a toggle (arrow, date) with `right` at the row's end. */
@@ -322,10 +384,11 @@ export function dayRow(k: Kit, key: string, date: string, isOpen: boolean, right
   ]
 }
 
-/** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it. */
-export function liveBlocks(k: Kit): Block[] {
+/** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it; `drawn` holds the running agents the nodes list (IN CORSO leaves them out of its flat list). */
+export function liveBlocks(k: Kit): { blocks: Block[]; drawn: Set<string> } {
   const tree = buildTree(k)
-  return tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false))
+  const drawn = new Set<string>()
+  return { blocks: tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false, drawn)), drawn }
 }
 
 /**

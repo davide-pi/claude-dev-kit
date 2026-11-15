@@ -19,7 +19,7 @@
 'use strict';
 
 const { checkDefaultBranch, parseGitCall } = require('./default-branch');
-const { expandTexts, expandSegments, parseSegments } = require('./shell-parse');
+const { expandTexts, expandSegments, parseSegments, withoutDataBodies } = require('./shell-parse');
 const { parseAzCall } = require('./alm-contract');
 const { READ_ONLY_AGENTS } = require('./read-only-agents');
 const { checkDestructive } = require('./destructive');
@@ -130,11 +130,13 @@ function evaluate(payload) {
   if (target) return { decision: 'deny', reason: target.reason };
 
   const scriptArgs = safely('script-args', () => checkScriptArgs(command, payload.tool_name));
+  // A heredoc body fed to a non-shell (`cat > f`, `node -`) is data: these checks read the command without it.
+  const code = withoutDataBodies(command);
   const reasons = [
-    safely('default-branch', () => checkDefaultBranch(command, payload.cwd)),
-    safely('destructive', () => checkDestructive(command, payload.session_id, payload.tool_name)),
-    safely('alm-contract', () => checkAlmContract(command)),
-    safely('docker-cp', () => checkDockerCp(command, payload.cwd)),
+    safely('default-branch', () => checkDefaultBranch(code, payload.cwd)),
+    safely('destructive', () => checkDestructive(code, payload.session_id, payload.tool_name)),
+    safely('alm-contract', () => checkAlmContract(code)),
+    safely('docker-cp', () => checkDockerCp(code, payload.cwd)),
     scriptArgs?.reason,
     safely('self-protect', () => checkSelfWrite(command, payload.cwd)),
   ].filter(Boolean);

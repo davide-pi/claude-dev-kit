@@ -82,6 +82,16 @@ test('done: given events after the newest round, when drawn, then LOG holds the 
   ])
 })
 
+test('Given a log entry kept with a raw task-notification prompt, When the log draws it, Then it shows a label and no raw tag', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [{ at: NOW - 60_000, kind: 'round', prompt: '<task-notification>', usd: 0.38, ms: 134_000 }] })
+  // When
+  const closed = await draw($, on, s, doneBlocks)
+  // Then
+  expect(closed.rows.join('\n')).not.toContain('task-notification')
+  expect(closed.rows.join('\n')).toMatch(/agent/)
+})
+
 test('done: given seven groups, when drawn, then the newest five show and the toggle opens the other two', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const calls: string[] = []
@@ -447,7 +457,8 @@ test('in progress: tasks, the perimeter with its files outside, the running agen
   await ui.press({ key: 'agent:a1' })
   expect(calls).toEqual(['toggleAgent:a1'])
   const open = await draw($, on, { ...s, agentsOpen: ['a1'] }, inProgressBlocks)
-  expect(open.rows).toContain('  tokens 0')
+  expect(open.rows.find(r => /^󱎖 implementer/.test(r))).toContain(' · tokens 0')
+  expect(open.rows).not.toContain('  tokens 0')
 })
 
 test('in progress: a perimeter with nothing outside reads as kept; the open workflow run is a node, and the round that launched it points to it', { timeoutMs: 30_000 }, async ($, on) => {

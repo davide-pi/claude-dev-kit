@@ -1,8 +1,9 @@
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import type { DoneEvent, DoneGroup } from './done-groups'
-import { COLORS, baseName, effortGlyph, shortModel, textCells, truncEnd } from './shared'
+import { COLORS, baseName, effortGlyph, shortModel, spanWidth, textCells, truncEnd, truncateSpans } from './shared'
 import type { Span } from './shared'
 import { isLinkShown } from './round-anchor'
+import { notificationLabel } from './round-capture'
 import { t } from './strings'
 import { pairRow } from './view-agents'
 import { dim, sp } from './view-base'
@@ -107,23 +108,27 @@ export function modelSpans(model: string | undefined, effort: string | number | 
 /** `ctx 42% +12`: the context at the round's end and what it gained; the change is left out after a compaction. */
 const ctxText = (pct: number, delta: number | undefined): string => `ctx ${pct}%${delta === undefined ? '' : ` ${delta < 0 ? '−' : '+'}${Math.abs(delta)}`}`
 
+/** The prompt keeps at least this many cells before the details after it give way. */
+const MIN_PROMPT_W = 8
+
 /**
- * The two header lines of a round node, beside its arrow. Line 1: start time, label and the prompt cut with an ellipsis to the width.
- * Line 2 (none when the round has no figures): `figures` (length, cost, share), the context, the model and its effort battery; the figures sit at the row's end.
- * A round with a link shows it in front of line 2 (the caller draws it, 2 cells), so line 2 is laid 2 cells narrower and its figures keep the other rows' columns.
+ * The header of a round node, beside its arrow, on one row: start time, label, the prompt cut with an ellipsis, the context, the model and its effort battery,
+ * and `figures` (length, cost, share) at the row's end. A narrow pane cuts the details, never wraps them. `width` is the row's, less the link's 2 cells when it has one.
  */
-export function roundHeader(g: Node, s: CockpitSnapshot, parts: { time: Span[]; label: Span; figures: Span[]; width: number }): { first: Span[]; second: Span[] } | undefined {
+export function roundHeader(g: Node, s: CockpitSnapshot, parts: { time: Span[]; label: Span; figures: Span[]; width: number }): Span[] | undefined {
   const facts = roundFacts(g, s)
   // a round saved before the log kept its prompt, context and model keeps its one line
   if (facts === undefined || (facts.prompt === undefined && facts.ctxPct === undefined && facts.model === undefined)) return undefined
   const { time, label, figures, width } = parts
   const lead = [...time, { ...label, t: label.t.padEnd(LABEL_W) }]
-  const room = width - 2 - lead.reduce((n, sp0) => n + textCells(sp0.t), 0) - 1
-  const first = [...lead, ...(facts.prompt === undefined || room < 2 ? [] : [sp(' '), sp(truncEnd(facts.prompt, room))])]
   const cells: Span[][] = [
     ...(facts.ctxPct === undefined ? [] : [[dim(ctxText(facts.ctxPct, facts.ctxDelta))]]),
     ...(facts.model === undefined && facts.effort === undefined ? [] : [modelSpans(facts.model, facts.effort)]),
   ]
-  const left = cells.flatMap((c, i) => [...(i > 0 ? [sp(' ')] : []), ...c])
-  return { first, second: left.length === 0 && figures.length === 0 ? [] : linkAnchor(g, s) === undefined ? pairRow([sp('  '), ...left], figures, width) : pairRow(left, figures, width - 2) }
+  const details = cells.flatMap((c, i) => [...(i > 0 ? [sp(' ')] : []), ...c])
+  const room = width - 2 - spanWidth(lead) - 1 - (figures.length > 0 ? spanWidth(figures) + 1 : 0) - (details.length > 0 ? spanWidth(details) + 1 : 0)
+  // an entry kept before the label existed holds the raw tag: it is labelled here, in the language of the moment
+  const prompt = facts.prompt === undefined ? [] : [sp(' '), sp(truncEnd(notificationLabel(facts.prompt) ?? facts.prompt, Math.max(room, MIN_PROMPT_W)))]
+  const left = [...lead, ...prompt, ...(details.length > 0 ? [sp(' '), ...details] : [])]
+  return figures.length === 0 ? truncateSpans(left, width - 2) : pairRow(left, figures, width - 2)
 }

@@ -25,18 +25,19 @@
  *     `> **Detail**` / `> **Dettaglio**` block and a `> - ` bullet line are prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
- * A `deliver` verdict block (a `Livello | Comando | Riga che decide | Stato` table, titled `**Verifica**` / `**Verification**`;
- * the legacy form with `> ` on every line is accepted too, its title and table lines prose, never tool output) is judged row by row
- * instead: a row ending `fatto`, `fallito` or `failed` is proven only when its deciding line (normalised: whitespace
+ * A `deliver` verdict block (a `**Verifica**` / `**Verification**` title, then per check the lines `Livello:`, `Comando:`, `Riga che decide:`,
+ * `Stato:` (English `Level`, `Command`, `Deciding line`, `Status`), a `────` line between checks; each line with or without a `> ` prefix; its title and
+ * lines are prose, never tool output; blank lines between checks are skipped, an unrecognised line continues the last label's value, a check with no `Stato:` is an unproven row, and the block ends at real prose: see `parseVerdicts`; the old `| Livello | Comando | … |` table is no longer read: it is no verdict and the claim is sent back
+ * asking for the stacked form) is judged check by check instead: a check whose status is `fatto`, `fallito` or `failed` is proven only when its deciding line (normalised: whitespace
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
  * A `non verificato` row passes alone and excuses no other row; one unproven row blocks, even after a
  * shell command ran. The transcript is read backward to the turn's start (cap 8 MB); when the turn is still
  * cut the proof may be in the part not read, so it fails closed: the log notes `tail-cut` and the turn is sent
- * back once to rewrite the verdict table with fresh output (or "non verificato"); a cut turn whose message holds
- * such a table is judged even when no edit is visible in the part read (the edit may be in the part not read).
+ * back once to rewrite the verdict with fresh output (or "non verificato"); a cut turn whose message holds
+ * such a verdict is judged even when no edit is visible in the part read (the edit may be in the part not read).
  *
- * A verdict table that passes those checks is still sent back once while the repo's `deliver` perimeter is
+ * A verdict that passes those checks is still sent back once while the repo's `deliver` perimeter is
  * `status: active` on the current branch (`payload.cwd`): the loop's findings log is written by
  * `perimeter.ps1 -Close -FindingsLog` before the verdict (the log notes `perimeter-open`).
  *
@@ -56,7 +57,7 @@
  *      assistant message: block only if it claims work is done, fixed or passing and quotes
  *      neither the command run nor its output, and does not say it is not verified." }] }]
  *
- * One task, one session: on a path that lets the turn end, when it closed a task (a verdict table that passed, or a
+ * One task, one session: on a path that lets the turn end, when it closed a task (a verdict that passed, or a
  * `git commit` among its shell calls) and the context is at `LARGE_CONTEXT` or more (lib/context-size.js), the
  * hook writes `<config>/.cache/handoff.json` (branch, head, rows) for session-brief and prints a `systemMessage`
  * asking for /clear. Never alongside a block.
@@ -124,13 +125,19 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** A section's detail: quoted bullet lines (`> - …`), prose like the block above, never tool output. */
 const DETAIL_BULLET = /^[ \t]*>[ \t]*[-*][ \t].*$/gm;
-/** The legacy quoted verdict block: its `> **Verifica**` / `> **Verification**` title and `> |` table lines are prose, never tool output. */
-const VERDICT_TITLE = /^[ \t]*>[ \t]*\*\*(?:Verifica|Verification)\*\*[ \t]*$/gim;
-const QUOTED_TABLE_LINE = /^[ \t]*>[ \t]*\|.*$/gm;
+/** A quoted `> |` table line (the old verdict form) is no evidence; the stacked block's own `> ` lines are stripped by `parseVerdicts`. */
+const QUOTED_TABLE_LINE = /^[ \t]*(?:>[ \t]*)+(?:\||(?:[-*][ \t]+)?(?:\*\*)?(?:Livello|Level|Comando|Command|Riga\s+che\s+decide|Deciding\s+line)(?:\*\*)?[ \t]*:).*$/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
-/** The `deliver` verdict table's header, plain or inside the quoted `> **Verifica**` / `> **Verification**` block; its rows are the contiguous `|` lines (each with the same optional `>`) that follow. */
-const VERDICT_HEAD = /^[ \t]*(?:>[ \t]*)?\|[ \t]*(?:Livello|Level)[ \t]*\|[ \t]*(?:Comando|Command)[ \t]*\|[^\n]*\|[ \t]*(?:Stato|Status)[ \t]*\|[ \t]*$/i;
+/** The verdict block's title line, with or without the `> ` quote. */
+const VERDICT_START = /^[ \t]*(?:>[ \t]*)?(?:#{1,6}[ \t]+(?:\*\*)?|\*\*)(?:Verifica|Verification):?(?:\*\*)?:?[ \t]*(?:\([^)\n]*\))?[ \t]*$/i;
+/** A deciding-line label outside any parsed block (quoted or not, bulleted or bold): a check the block rule never judged. */
+const ORPHAN_CHECK = /^[ \t]*(?:>[ \t]*)*(?:[-*][ \t]+)?(?:\*\*)?(?:Riga\s+che\s+decide|Deciding\s+line)(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(.*)$/i;
+/** A Stato / Status line outside any block: an orphan only when its value is a proof state (`Status: 200 OK` is output). Misspelled labels are an open set and stay a known limit. */
+const ORPHAN_STATE = /^[ \t]*(?:>[ \t]*)*(?:[-*][ \t]+)?(?:\*\*)?(?:Stato|Status)(?:\*\*)?[ \t]*:(?:\*\*)?[ \t]*(.*)$/i;
+/** One line of a check: its label (Italian or English) and the text after the first colon. */
+const CHECK_LINE = /^(Livello|Level|Comando|Command|Riga che decide|Deciding line|Stato|Status)[ \t]*:[ \t]*(.*)$/i;
+const CHECK_SEPARATOR = /^─+$/;
 /** A row's state that claims a result (`fatto`, `fallito` and their English forms) and so needs proof (`non verificato: …` / `not verified: …` do not). */
 const PROOF_STATE = /^(?:fatto|done|fallito|failed)$/i;
 
@@ -147,21 +154,66 @@ function stateOf(cell) {
   return /[✗✘❌]/u.test(symbols) ? 'fallito' : '';
 }
 
-/** The rows of the verdict table(s) in `message`: `{ level, command, line, state }`, the cells as written (state: `stateOf`). */
-function verdictRows(message) {
+/**
+ * The verdict block(s) in `message`: `rows` = the checks `{ level, command, line, state }` (values as written, state: `stateOf`; a check
+ * with no Stato line has `noState: true`), `quotedLines` = the indexes of the block's `> ` lines (title included), never tool output.
+ *
+ * A block starts at its title and skips blank and empty-`>` lines. It ends at real prose: with a quoted title, the first non-blank line
+ * with no `> `; with an unquoted title, the first line after a blank that is no label or separator. Inside it a line that is no label
+ * (`> (nota)`, a wrapped deciding line, a mistyped label) continues the last label's value; a Stato value is never extended.
+ * A check closes at a separator, at the next Livello (or a repeated label) or at the block's end.
+ */
+function parseVerdicts(message) {
   const lines = message.split(/\r?\n/);
   const rows = [];
+  const quotedLines = new Set();
+  const consumed = new Set();
   for (let i = 0; i < lines.length; i += 1) {
-    if (!VERDICT_HEAD.test(lines[i])) continue;
-    for (let j = i + 1; j < lines.length && /^[ \t]*(?:>[ \t]*)?\|/.test(lines[j]); j += 1) {
-      // An escaped pipe (`\|`) is cell text, not a separator.
-      const cells = lines[j].trim().replace(/^>[ \t]*/, '').replace(/^\||(?<!\\)\|$/g, '').split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
-      if (cells.length < 4 || cells.every((c) => /^:?-+:?$/.test(c))) continue;
-      rows.push({ level: cells[0], command: cells[1], line: cells[2], state: stateOf(cells[cells.length - 1]) });
+    if (!VERDICT_START.test(lines[i])) continue;
+    const quoted = /^\s*>/.test(lines[i]);
+    consumed.add(i);
+    if (quoted) quotedLines.add(i);
+    const fresh = () => ({ level: null, command: null, line: null, state: null });
+    let cur = fresh();
+    let last = '';
+    let blank = false;
+    const flush = () => {
+      const row = { level: cur.level ?? '', command: cur.command ?? '', line: cur.line ?? '' };
+      if (cur.state !== null) rows.push({ ...row, state: stateOf(cur.state) });
+      else if (row.level || row.command || row.line) rows.push({ ...row, state: '', noState: true });
+      cur = fresh();
+      last = '';
+    };
+    for (let j = i + 1; j < lines.length; j += 1) {
+      const isQuote = /^\s*>/.test(lines[j]);
+      const text = lines[j].trim().replace(/^>[ \t]*/, '').trim().replace(/^\*\*(.*?)\*\*/, '$1');
+      if (!text) { blank = true; continue; }
+      if (/^(?:```|~~~)/.test(text) || (quoted && !isQuote && !CHECK_SEPARATOR.test(text))) break;
+      const m = CHECK_LINE.exec(text);
+      if (m) {
+        const key = /^(?:livello|level)$/i.test(m[1]) ? 'level' : /^(?:comando|command)$/i.test(m[1]) ? 'command' : /^(?:riga che decide|deciding line)$/i.test(m[1]) ? 'line' : 'state';
+        if (key === 'level' ? Object.values(cur).some((v) => v !== null) : cur[key] !== null) flush();
+        cur[key] = m[2].trim();
+        last = key;
+        blank = false;
+      } else if (CHECK_SEPARATOR.test(text)) {
+        flush();
+        blank = false;
+      } else if (!quoted && (blank || !last)) break;
+      else if (last && last !== 'state') cur[last] = `${cur[last]} ${text}`.trim();
+      consumed.add(j);
+      if (isQuote) quotedLines.add(j);
     }
+    flush();
   }
-  return rows;
+  lines.forEach((text, i) => {
+    if (consumed.has(i)) return;
+    const m = ORPHAN_CHECK.exec(text) ?? (() => { const s = ORPHAN_STATE.exec(text); return s && PROOF_STATE.test(stateOf(s[1])) ? [s[0], ''] : null; })();
+    if (m) rows.push({ level: '', command: '', line: m[1].trim(), state: '', noState: true, orphan: true });
+  });
+  return { rows, quotedLines };
 }
+const verdictRows = (message) => parseVerdicts(message).rows;
 
 /** `text` appears in `printed` as whole words only: a short line ("ok", "0") is not proven by "token" or "10". */
 function printedAsWords(printed, text) {
@@ -240,6 +292,7 @@ function exitZeroRan(row, shellCommands) {
 function unprovenRows(rows, resultsText, shellCommands = []) {
   const printed = normalise(resultsText);
   return rows.filter((r) => {
+    if (r.noState) return true;
     if (!PROOF_STATE.test(r.state)) return false;
     const line = normalise(r.line);
     // An empty JSON array or object is proof only as a line of its own.
@@ -392,8 +445,9 @@ function readTurn(entries, truncated = false) {
 /** The claim word when the message claims success without evidence, else null. */
 function unprovenClaim(message) {
   if (!message || HONEST.test(message) || INLINE_RESULT.test(message)) return null;
-  const body = message.replace(DIFF_FENCE, ' ');
-  if (FENCE_OR_QUOTE.test(body.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, '').replace(VERDICT_TITLE, '').replace(QUOTED_TABLE_LINE, ''))) return null;
+  const { quotedLines } = parseVerdicts(message);
+  const body = message.split(/\r?\n/).filter((_, i) => !quotedLines.has(i)).join('\n').replace(DIFF_FENCE, ' ');
+  if (FENCE_OR_QUOTE.test(body.replace(DETAIL_BLOCK, '').replace(DETAIL_BULLET, '').replace(QUOTED_TABLE_LINE, ''))) return null;
   const prose = body.replace(/`[^`\n]*`/g, ' ').replace(QUOTED, ' ');
   const found = prose.match(CLAIM);
   return found ? found[1] ?? found[2] : null;
@@ -429,7 +483,7 @@ try {
   const rows = verdictRows(message);
   // Sent back once already: never again, but a turn that closed a task still leaves the hand-off.
   if (payload.stop_hook_active === true) allowWith(payload, turn, rows);
-  const claimsRows = rows.some((r) => PROOF_STATE.test(r.state));
+  const claimsRows = rows.some((r) => r.noState || PROOF_STATE.test(r.state));
   // A turn cut before its start may have edited in the part not read: a verdict table claiming results is judged anyway.
   // An unarmed turn can still close a task (a `/commit` with no edit): it may leave the hand-off.
   if (!turn.armed && !(claimsRows && !turn.complete)) allowWith(payload, turn, rows);
@@ -440,24 +494,27 @@ try {
     if (!unproven.length) { blockOpenPerimeter(payload, rows, message); allowWith(payload, turn, rows); }
     if (!turn.complete) {
       // The turn is longer than what was read: the proof may sit in the part not read, and an unchecked claim is not let through.
-      log(payload, 'tail-cut', unproven[0].state, message);
+      log(payload, 'tail-cut', unproven[0].state || 'no-stato', message);
       fire.decision = 'block';
       process.stdout.write(JSON.stringify({
         decision: 'block',
-        reason: 'The turn is too long to check the verdict rows against the command output. '
-          + 'Rewrite the verdict, a bold "**Verifica**" title line (English: "**Verification**") followed by the table, both quoted with "> " (Italian chat: "Livello | Comando | Riga che decide | Stato", English: "Level | Command | Deciding line | Status"), with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the state of each row.',
+        reason: 'The turn is too long to check the verdict checks against the command output. '
+          + 'Rewrite the verdict as a quoted note: a "> **Verifica**" title line (English: "> **Verification**"), then per check the lines "> Livello: …", "> Comando: …", "> Riga che decide: …", "> Stato: …" (English: Level, Command, Deciding line, Status) with a "> ────" line between checks, no table, with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato of each check.',
       }));
       process.exit(0);
     }
     // The excerpt is the failing row itself, so the log shows what the rule judged.
-    log(payload, 'unproven-row', unproven[0].state, message, `${unproven[0].command} | ${unproven[0].line}`.slice(0, 200));
+    const said = unproven[0].noState ? 'no Stato' : unproven[0].state;
+    log(payload, 'unproven-row', said, message, `${unproven[0].command} | ${unproven[0].line}`.slice(0, 200));
     fire.decision = 'block';
     const shown = unproven.slice(0, 3).map((r) => `"${r.line.slice(0, 80)}"`).join(', ');
     process.stdout.write(JSON.stringify({
       decision: 'block',
-      reason: `${unproven.length} verdict rows say "${unproven[0].state}" but the deciding line appears in no output of the turn: ${shown}. `
-        + 'The deciding cell holds copied output only: move any comment or count ("su tutti e 6", "6 files") to the command cell. '
-        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the state of that row.',
+      reason: `${unproven.length} verdict checks say "${said}" but the deciding line appears in no output of the turn: ${shown}. `
+        + 'The deciding line holds copied output only, on one line: move any comment or count ("su tutti e 6", "6 files") to the command line. '
+        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato of that check. '
+        + (unproven.some((r) => r.orphan) ? 'A check outside the block was found: every check goes inside the one "**Verifica**" block, stacked, with no prose or fence between checks. ' : '')
+        + 'Every check needs its Stato line. Keep the stacked note (Livello: / Comando: / Riga che decide: / Stato: lines, no table).',
     }));
     process.exit(0);
   }
@@ -471,8 +528,8 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the verdict: a bold "**Verifica**" title line (English chat: "**Verification**") followed by the table, both quoted with "> " ("Livello | Comando | Riga che decide | Stato", or "Level | Command | Deciding line | Status"), never in a code block, '
-      + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the table.',
+      + 'confirms it in the verdict: a quoted note: a "> **Verifica**" title line (English chat: "> **Verification**"), then per check the lines "> Livello: …", "> Comando: …", "> Riga che decide: …", "> Stato: …" (English: Level, Command, Deciding line, Status) with a "> ────" line between checks, each check ending with its Stato line, never a table, never in a code block, '
+      + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the note.',
   }));
   process.exit(0);
 } catch {

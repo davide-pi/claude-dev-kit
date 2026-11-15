@@ -1,14 +1,15 @@
 import type { Register } from 'claude-code'
 
-import type { CockpitAgent, CockpitLogEntry, CockpitTask } from '../types'
+import type { CockpitAgent, CockpitTask } from '../types'
 import { applyTodos, bashOutput, createdTask, isOk, isRefused, noteEdit, readClaudeState, removeOne, setClaudeState } from './events'
 import { readPathOf, recordToolCall, resultTokens, toolArg, toolArgFull } from './insights'
 import { withRoundFail, withRoundFile } from './round-capture'
 import { withLoggedSignals } from './signals'
 import { asks, endAsk, live, waitOverlap } from './register-state'
 import { patch } from './store'
-import { bashLog, recordLog } from './timeline'
-import { agentRunId, launchedRun, logRunChange, nameRun, runIdOf, touchRun } from './workflow'
+import { bashLog, withLogEntries } from './timeline'
+import { endTrail, startTrail, trailLabel } from './trail'
+import { agentRunId, launchedRun, logRunChange, nameRun, runIdOf, taskPlan, touchRun } from './workflow'
 import { editedPathOf, parseCreatedPr, upsertPr } from './work'
 
 /** The tool handlers: the tasks, skills and workflows a call feeds, the tools in flight, a created PR, the asks a person answers. */
@@ -98,8 +99,10 @@ export const registerTools = (on: Parameters<Register>[0]): void => {
     const ran = await next(e)
     const launched = isOk(ran) ? launchedRun(ran.result) : undefined
     if (launched) {
+      // only dev-loop passes a plan: the call's own input is the one place the tasks reach the mod
+      const tasks = taskPlan(e)
       await patch($, s => {
-        const workflowRun = nameRun(s.workflowRun, launched)
+        const workflowRun = nameRun(s.workflowRun, { ...launched, ...(tasks !== undefined && { tasks }) })
         return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun) }
       }).catch(() => undefined)
     }
@@ -113,23 +116,28 @@ export const registerTools = (on: Parameters<Register>[0]): void => {
     const { agentId, tool } = e
     if (agentId !== undefined) {
       const forAgent = (change: (a: CockpitAgent) => CockpitAgent) => patch($, s => ({ ...s, agents: s.agents.map(a => (a.id === agentId ? change(a) : a)) }))
+      let at: number | undefined
       try {
         // Only an agent the mod already knows: a call that outran the spawn makes no stub the spawn would later fill.
-        const at = await $.clock.now()
+        const began = await $.clock.now()
+        const label = trailLabel(tool, e)
         await patch($, s => ({
           ...s,
-          workflowRun: touchRun(s.workflowRun, agentId, at),
-          agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool] } : a)),
+          workflowRun: touchRun(s.workflowRun, agentId, began),
+          agents: s.agents.map(a => (a.id === agentId ? { ...a, lastTool: tool, activeTools: [...(a.activeTools ?? []), tool], trail: startTrail(a.trail, tool, label, began) } : a)),
         }))
+        at = began
       } catch {
         // observing must never break the call
       }
+      let isFailed = true
       try {
         const ran = await next(e)
+        isFailed = !isOk(ran)
         await noteEdit($, e, ran)
         return ran
       } finally {
-        await forAgent(a => ({ ...a, activeTools: removeOne(a.activeTools, tool) })).catch(() => undefined)
+        await forAgent(a => ({ ...a, activeTools: removeOne(a.activeTools, tool), ...(at !== undefined && { trail: endTrail(a.trail, tool, at, isFailed) }) })).catch(() => undefined)
       }
     }
     live.mainTools = [...live.mainTools, tool]
@@ -183,7 +191,7 @@ export const registerTools = (on: Parameters<Register>[0]): void => {
       const flow = e.agentId !== undefined && runId !== undefined ? { agent: e.agentId, runId } : undefined
       // a call the person or a rule refused never ran: it makes no entry
       const entries = ran.deny !== undefined ? [] : bashLog({ command: e.command, arg: toolArg(e), out, isOk: isRan, at: at ?? s.now, pr, ...(flow && { flow }) })
-      return entries.length === 0 && !pr ? s : { ...s, ...(pr && { prs: upsertPr(s.prs, pr) }), sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
+      return entries.length === 0 && !pr ? s : { ...withLogEntries(s, entries), ...(pr && { prs: upsertPr(s.prs, pr) }) }
     }).catch(() => undefined)
     return ran
   })

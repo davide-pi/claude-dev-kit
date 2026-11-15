@@ -223,7 +223,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
         return {
           ...s,
           ...(ended && delta !== 0 && { agentSpend: { ...s.agentSpend, [ended.type]: (s.agentSpend?.[ended.type] ?? 0) + delta } }),
-          workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now),
+          workflowRun: finishWorkflowAgent(s.workflowRun, agentId, now, ended?.isFailed === true),
           agents,
           // the agent is logged as it ends; a turn that ended twice is one entry
           sessionLog: entry ? recordAgentLog(s.sessionLog, entry) : s.sessionLog,

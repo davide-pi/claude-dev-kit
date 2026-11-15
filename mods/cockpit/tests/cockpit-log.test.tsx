@@ -159,13 +159,21 @@ test('a data file from before the log and the accumulator still loads, and write
   expect(dataOf(writes)).not.toHaveProperty('agentSpend')
 })
 
-test('the session log never evicts an agent event: 2 agents and 300 test runs leave the agent spend as it is, and an agent that ends again finds its event', { timeoutMs: 60_000 }, async ($, on) => {
-  const { writes, clock } = await start(on)
+test('the session log keeps its newest 300 test entries (290 saved + 20 run live) while 2 agents end and one ends again: the agent spend is counted once', { timeoutMs: 60_000 }, async ($, on) => {
+  // Given: 290 test entries saved with the session, 20 more run live: 310, past the 300 the session log keeps. 300 live runs would exceed the 10 s test-hook budget (about 46 ms a call), so this proves the session log's cap and the spend only; that test runs never evict an agent event is proven on the rings in format-timeline.test.ts
+  const writes = new Map<string, string>()
+  const saved = Array.from({ length: 290 }, (_, i) => ({ at: NOW - 600_000 + i, kind: 'test', text: 'npm test', isFailed: false }))
+  const clock = world(on, { writes, compacts: true, dataFile: JSON.stringify({ history: [], prs: [], sessionLog: saved }) })
+  spawns(on)
+  on('turn.complete', () => ({ text: '' }))
+  on('session.measure', (_, e) => ({ changed: e.changed }))
+  on('tool.call', { tool: 'Bash' }, (_, e) => ANSWERS[e.command] ?? bashResult(''))
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const end = (id: string) => $.turn.complete({ answer: '', durationMs: 1, isAborted: false, turnId: `${id}-t`, agentId: id, reason: 'answer', usage: USAGE })
   for (let i = 1; i <= 2; i++) await end(`a${i}`)
-  for (let i = 0; i < 300; i++) await $.tool.call({ tool: 'Bash', command: 'npm test' })
-  // a1 ends again: only the change is added, which needs its event still in the list; one shared list would hold 2 + 300 > 300 and drop it, and a1 would be counted twice
+  // When
+  for (let i = 0; i < 20; i++) await $.tool.call({ tool: 'Bash', command: 'npm test' })
+  // a1 ends again: only the change is added
   await end('a1')
   expect((await logOf(clock, writes)).filter(e => e.kind === 'test')).toHaveLength(300)
   const one = usdOf('claude-sonnet-5-5', { input: 1000, output: 10, cacheRead: 9000, cacheWrite: 0 })

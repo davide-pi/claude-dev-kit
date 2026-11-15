@@ -1,4 +1,4 @@
-# Analysis — doubts pass, criteria and challenger, before the loop (M and L)
+# Analysis — doubts pass, criteria, planner and challenger, before the loop (M and L)
 
 ## Facts first
 
@@ -30,10 +30,20 @@ words, so the run does not stop on a `question`. S has no pass.
 **Criteria** (M, L) cover the error path wherever the change has one: a rejection, an empty result, back to the form,
 a concurrent run, a dependency down. `preview` is the default at M whenever the change has an owner-visible output.
 
+## The planner (L, or M with a sensitive axis)
+
+At size L, or M with a data, money, contract or security axis, one `Plan` subagent (Opus: `model: opus`, `effort: high`)
+writes the tasks: `{ id, title, files, dependsOn, tdd, criteria }` with each criterion's proof, from the brief, the
+owner's `decisions` verbatim and the code it reads (read-only, it never asks the user, ~12 tool calls). It ends with a
+`read:` line of every `file:line` range it read. This session then filters it against the owner's decisions: a task or
+criterion that contradicts one is dropped or amended, and the result is the final plan, which this session owns and
+passes to the loop. The planner replaces the challenger at these sizes: its output is the plan the owner approves, so
+there's no second agent to attack it. At plain M this session plans and the Sonnet challenger below stays as is.
+
 ## The challenger
 
-When it runs: `SKILL.md` step 2, after the owner's ok and before the loop. Once at M and L, one `Plan` agent, `model: sonnet` at M,
-`model: opus` at L or with a data, money, contract or security axis, always spawned with `effort: high` (it replaces
+When it runs: `SKILL.md` step 2, after the owner's ok and before the loop, at plain M only (at L or a sensitive M the planner above replaces it).
+One `Plan` agent, `model: sonnet`, always spawned with `effort: high` (it replaces
 `grill-me`, which runs only on the rule below or when the owner asks). Read-only, it
 never asks the user; budget ~12 tool calls over both messages. One agent, two messages, so it cannot anchor on ours:
 
