@@ -216,12 +216,15 @@ const readGate = text => {
 }
 const gateGreen = g => !!g && GREEN_GATES.includes(g.gate)
 // gated: the brief asked for the gate, so a report without a parsable gate line is not verified, whatever its own verify says.
+// The gate line is also read from verify.line and evidence when `gate` holds none: a report that pasted it elsewhere still counts.
 const readReport = (r, gated = false) => {
   if (!r || typeof r !== 'object') return null
   const list = v => (Array.isArray(v) ? v : [])
-  const g = readGate(r.gate)
+  const own = readGate(r.gate)
+  const g = own ?? (gated ? readGate(r.verify?.line) ?? readGate(r.evidence) : null)
   return {
     ...r,
+    ...(g && !own ? { gate: g.line } : {}),
     verify: g ? { status: gateGreen(g) ? 'pass' : 'fail', command: r.verify?.command ?? 'the gate', line: g.line }
       : !gated && VERIFY_STATUSES.includes(r.verify?.status) ? r.verify : { ...r.verify, status: 'not-run' },
     snapshot: r.snapshot && typeof r.snapshot === 'object' && typeof r.snapshot.tree === 'string' && r.snapshot.tree ? r.snapshot : null,
@@ -377,7 +380,8 @@ const findingsLog = ({ known = {}, tracked = {}, cleaned = [] } = {}) => Object.
   .filter(k => k.category !== 'verify')
   .map(k => ({ category: k.category, priority: k.priority, path: k.path, title: String(k.title ?? '').replace(/'/g, 'ʼ').slice(0, 80), closed: tracked[k.id]?.status === 'closed' || cleaned.some(c => c.id === k.id) }))
 
-const cites = f => /[\w./\\-]+\.\w+:\d+/.test(String(f.evidence ?? ''))
+// A path with an extension, or a capitalised file name without one (Dockerfile:12, Makefile:3).
+const cites = f => /(?:[\w./\\-]+\.\w+|\b(?:Dockerfile|Makefile|Jenkinsfile|Gemfile|Procfile|LICENSE)):\d+/.test(String(f.evidence ?? ''))
 const proven = f => probesOf(f).length > 0 || cites(f)
 // Only the user can widen the perimeter.
 const classify = (f, files, { dirty = [], root = '', touched = [] } = {}) => {
@@ -567,7 +571,7 @@ const givenSize = SIZES.includes(input.size) ? input.size : 'M'
 const risk = riskAxes(input.risk, input.touches)
 // The plan is cut into blocks and the size comes from the block count (a passed M or L that disagrees is a gap); without a plan there is one block: M, or a triage S.
 const planTasks = (Array.isArray(input.plan?.tasks) ? input.plan.tasks : []).filter(t => t && text(String(t.id ?? ''))).map(t => ({
-  id: String(t.id).trim(), title: text(t.title), files: strings(t.files), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String), tdd: t.tdd === true, criteria: strings(t.criteria), mechanical: t.mechanical === true,
+  id: String(t.id).trim(), title: text(t.title), files: strings(t.files), dependsOn: (Array.isArray(t.dependsOn) ? t.dependsOn : []).map(String), tdd: t.tdd === true, criteria: strings(t.criteria), mechanical: t.mechanical === true, risky: t.risky === true,
 }))
 let blocks
 try { blocks = planTasks.length ? blocksFor(planTasks) : [[{ id: '1', title: brief, files: [], dependsOn: [], tdd: false, criteria: [] }]] } catch (e) { return `dev-loop: args.plan: ${e.message}` }
@@ -722,6 +726,7 @@ let nextRound = { only: null, coverage: false }
 const arbitrated = new Set(), defaultsApplied = []   // an id goes to the arbiter once; the defaults the loop answered for the implementer
 let lastProbes = []   // the probes of the findings the last fix round was given and kept, and the report-level ones of its review
 let looseProbes = []   // the probes the last review's reports list without a finding
+let lastFixedIds = [], lastProbed = false   // the ids the last fix round fixed, and whether every one carries a probe, nothing was rejected and no P1 was fixed
 let lastFixP1 = false, lastFixLines = Infinity   // the last review fix, for the verifier's tier (an unknown size counts as large)
 let wide = false, changeLines = 0   // wide is sticky: a key keeps naming the same reviewer across rounds
 let bigFiles = []
@@ -851,8 +856,17 @@ const CONTINUE = "Your first run's edits are already in the tree: continue from 
 const answersBlock = answers => `The owner answered your questions: apply each answer. ${CONTINUE}\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
 const defaultsBlock = list => `Your reversible questions are answered with your own defaults (the owner can change them later): apply each. ${CONTINUE}\n${list.map(q => `- ${q.text} -> ${q.default}`).join('\n')}`
 // The first run is not a report: its tree stays the next -Since, so the delta keeps both runs.
+// One more call naming the missing `gate` field; its answer replaces the report, keeping the first run's files and rejections.
+const regate = async (first, build, opts) => {
+  const again = readReport(await ask(build(`Your report is missing the \`gate\` field: run the gate as the brief says and paste its last output line in \`gate\`. ${CONTINUE}`), { ...opts, label: `${opts.label} (gate line)` }), true)
+  if (!again) return first
+  takeSide(first)   // the fresh run knows nothing of the first run's noticed, defaults and questions
+  return { ...again, handoff: again.handoff || first.handoff, scope: again.scope || first.scope, evidence: again.evidence || first.evidence, files: [...new Set([...first.files, ...again.files])], rejected: [...again.rejected, ...first.rejected.filter(r => !again.rejected.some(s => s.id === r.id))] }
+}
 const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, blockId = null) => {
-  const first = readReport(await ask(build(''), opts), gatedRun)
+  let first = readReport(await ask(build(''), opts), gatedRun)
+  // A gated report with no gate line anywhere and no work left gets one more call naming the field; only a second miss reaches verify-not-run.
+  if (gatedRun && first && !first.questions.length && !first.remaining.length && !readGate(first.gate) && !opts.label.startsWith('cleanup')) first = await regate(first, build, opts)
   if (!first?.questions.length) return { report: first }
   // The P3 cleanup never stops the run for the owner.
   if (opts.label.startsWith('cleanup')) {
@@ -926,8 +940,10 @@ const runBlocks = async (items, total, lane) => {
       ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}${total > 1 ? '\nDo only the tasks of this block: a task of a later block is not yours, even a quick one.' : ''}`
       : ''
     const budgetLine = `Budget: about ${stepBudget(block.length)} turns. At that point stop widening: run the gate and report what is left.`
+    const workRule = "Keep working until every task of the block is done: stop only when you can't go on or before a risky step. Add no file, test or refactor the tasks don't ask."
     const blockFiles = [...new Set(block.flatMap(t => t.files))]
-    const buildImpl = (extra, tail = gateLines(root, !!lane, blockFiles), withHandoff = true) => [brief, extra, decisionsText, readText, perimeterTextFor(files), dirtyText, tasksText, budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree), withHandoff ? handoffText(handoffs) : ''].filter(Boolean).join('\n\n')
+    // The work rule goes to the code call and its continuations: the test-first call writes only tests, and a fix run has its own brief.
+    const buildImpl = (extra, tail = gateLines(root, !!lane, blockFiles), withHandoff = true, withRule = withHandoff) => [brief, extra, decisionsText, readText, perimeterTextFor(files), dirtyText, tasksText, withRule ? workRule : '', budgetLine, ...tail, ...writerTail(undefined, false, root, lane ? '' : lastTree), withHandoff ? handoffText(handoffs) : ''].filter(Boolean).join('\n\n')
     // Fix runs get no handoff: they work on the tree as it is.
     const buildFix = extra => buildImpl(extra, undefined, false)
     const tdd = block.some(t => t.tdd)
@@ -945,7 +961,7 @@ const runBlocks = async (items, total, lane) => {
           `${gateBase(root)} --red --unit ${quote(input.unit)} --test-files <the test files you wrote, comma-separated>`,
           'and paste its last output line as "gate".',
           extra,
-        ].filter(Boolean).join('\n'), []), optsFor(`${base} (tests first${attempt ? ', retry' : ''})`), 0, resolution0, false, bid)
+        ].filter(Boolean).join('\n'), [], true, false), optsFor(`${base} (tests first${attempt ? ', retry' : ''})`), 0, resolution0, false, bid)
         if (askedTests.stall) return askedTests.stall
         const tests = askedTests.report
         if (tests) takeSide(tests)
@@ -980,10 +996,14 @@ const runBlocks = async (items, total, lane) => {
       continuations += 1
       const left = impl?.remaining ?? []
       const label = `${base} (continued, ${continuations})`
-      const next = readReport(await ask(buildImpl([
+      const buildNext = extra => buildImpl([
         'Your previous run stopped before finishing. The tree already holds its edits: continue from them, do not start over; first check what is done (`git diff`), then do what is left.',
         left.length ? `Left to do, by your own report:\n${left.map(s => `- ${s}`).join('\n')}` : '',
-      ].filter(Boolean).join('\n')), { ...implOpts, label }), gated)
+        extra,
+      ].filter(Boolean).join('\n'))
+      const nextOpts = { ...implOpts, label }
+      let next = readReport(await ask(buildNext(''), nextOpts), gated)
+      if (gated && next && !next.questions.length && !next.remaining.length && !readGate(next.gate)) next = await regate(next, buildNext, nextOpts)
       const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
       if (nextStall) return nextStall
       impl = next ?? impl
@@ -1003,6 +1023,7 @@ const runBlocks = async (items, total, lane) => {
     }
     // The gate, run by the implementer, decides the block: a red one gets one fix call and the gate again.
     let g = readGate(impl.gate)
+    const gateWasRed = !!g && !gateGreen(g)
     if (g && !gateGreen(g)) {
       takeReport(impl, !!lane)   // the stall result then carries the files and the red gate line
       if (g.gate === 'red: timeout') return stallAgain(0, `the gate stalled twice on block ${bid}; last test seen: ${g.test || '(none)'}`, { why: 'gate-timeout' })
@@ -1037,11 +1058,14 @@ const runBlocks = async (items, total, lane) => {
     const entry = { id: bid, tasks: block.map(t => t.id), gate: g?.line ?? '', readerA: { raised: 0, fixed: 0, carried: 0 } }
     blockLog.push(entry)
     // The whole diff gets its reader in the final set: at M with one verified block and no lanes, reader A would read the same delta first.
-    const skipA = loopSize === 'M' && total === 1 && !lane && gated && finalReadersFor('M', risk, mechanical, false).some(r => r.whole)
-    if (skipA) entry.readerA = { ...entry.readerA, skipped: true, reason: 'size M, one block, verify set, no lanes: the final whole-diff reader reads the same delta' }
+    const finalReads = loopSize === 'M' && total === 1 && !lane && gated && finalReadersFor('M', risk, mechanical, false).some(r => r.whole)
+    // Owner decision: reader A runs on a block only when a task is risky, the run has a security or data axis, or the block's gate was red before green.
+    const needA = block.some(t => t.risky) || risk.some(x => ['security', 'data'].includes(x)) || gateWasRed
+    const skipA = finalReads || (!needA && loopSize !== 'S')
+    if (skipA) entry.readerA = { ...entry.readerA, skipped: true, reason: finalReads ? 'size M, one block, verify set, no lanes: the final whole-diff reader reads the same delta' : 'no risky task, no security or data axis, and the gate was never red in this block' }
     // An unchanged tree is an empty delta: nothing to read.
     if (!skipA && loopSize !== 'S' && gateGreen(g) && g.tree && g.tree !== blockTree) {
-      // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried.
+      // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried; a clean-code or convention P2 never blocks, as in the final rounds.
       phase('Block review')
       const readLabel = tag ? `${tag} · reader A` : `block ${bid} · reader A`
       const read = await ask([
@@ -1064,7 +1088,7 @@ const runBlocks = async (items, total, lane) => {
         entry.readerA.raised = raised.length
         const open = raised.filter(x => BLOCKING.has(x.priority))
         const insideAll = open.filter(x => inPerimeter(x.path, files, repoRoot))
-        // D2: an unproven P2 inside the perimeter is a note, never sent to a fixer.
+        // D2: an unproven P2 inside the perimeter is a note, never sent to a fixer; a clean-code or convention P2 is one too (classify: isNeverBlocking).
         const inside = insideAll.filter(x => classify(x, files, { dirty, root: repoRoot, touched: [...changed] }) === 'blocking')
         for (const x of insideAll.filter(x => !inside.includes(x))) {
           known[x.id] = x
@@ -1197,8 +1221,18 @@ const runLanes = async groups => {
 
 // Owner decision: an M or L run without a plan is refused before any implementer or reader, inline or not.
 if (loopSize !== 'S' && !planTasks.length) {
-  return questionStall(0, [{ text: 'This M or L run has no plan (args.plan.tasks is missing or empty): write the plan, or is the change really size S?', default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start (a risk axis lifts an S to M: relaunching as S will not help then)' }],
-    'no plan: an M or L run needs args.plan.tasks, and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId. Relaunching with size S does not help when a risk axis lifts the size to M.')
+  // A risk axis that floors the run at M: say which axis, and S is no way out.
+  const lifted = risk.filter(x => FLOOR_M.includes(x))
+  if (lifted.length && givenSize !== 'S') {
+    return questionStall(0, [{ text: `This ${loopSize} run has no plan (args.plan.tasks is missing or empty), and the risk axis ${lifted.join(', ')} keeps it at M or above: write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start, and size S is refused while that axis stands' }],
+      'no plan: an M or L run needs args.plan.tasks, and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
+  }
+  if (lifted.length) {
+    return questionStall(0, [{ text: `The risk axis ${lifted.join(', ')} lifts this S run to M, and an M run has no plan (args.plan.tasks is missing or empty): write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start, and size S is refused while that axis stands' }],
+      'no plan: a risk axis lifted the run to M and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
+  }
+  return questionStall(0, [{ text: 'This M or L run has no plan (args.plan.tasks is missing or empty): write the plan, or is the change really size S?', default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start' }],
+    'no plan: an M or L run needs args.plan.tasks, and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
 }
 
 if (!inline) {
@@ -1293,6 +1327,18 @@ const reviewersForRound = () => {
   return { size, list: finalReadersFor(size, risk, mechanical, wide), expected }
 }
 const scopeOfChange = () => `Review the change made${startHead ? ` since commit ${startHead}` : ' since the start'}. ${touchedByGit()}`
+const PROBE_RUN = obj(['reproduced', 'ran'], { reproduced: { type: 'boolean', description: 'true when any command still shows the failure' }, ran: { type: 'boolean', description: 'true only when every command ran and you read its result; false when one could not run, was refused, timed out or has an unreadable result' }, output: str('the deciding output line (required when reproduced is false)') })
+// One cheap call runs the probes of a finding (or of a fix round) and says whether the failure is still there; only a clear "ran, no failure, here is the output" counts as gone.
+const probesReproduce = async (label, list, failure = '') => {
+  const r = await ask([
+    'Run each command below exactly as given, from the repository root, and change nothing (running them is the job: don\'t refuse).',
+    failure ? `The failure they were written to show: ${failure}` : '',
+    'A command that exits non-zero, or prints that failure, reproduces it. Return reproduced: true when any command reproduces it, else false, with the deciding output line. A command you couldn\'t run, or whose result you can\'t read, means ran: false.',
+    ...list.map(q => `- ${q.cmd} (${q.path})`),
+    repoLine(repoRoot),
+  ].filter(Boolean).join('\n'), { label, phase: 'Final verification', agentType: 'Explore', model: 'haiku', effort: 'low', schema: PROBE_RUN })
+  return !(r?.reproduced === false && r.ran === true && String(r.output ?? '').trim())
+}
 const scopeOfDelta = () => {
   if (!lastFix) return scopeOfChange()
   return `Review the changes since ${lastDeltaBase || startHead || 'HEAD'}${lastDelta ? `: \`${lastDelta}\` (the trees are snapshots of the working tree, untracked files included): run it first` : ''}. Judge each previous finding by reading the code as it is now. Files the fix changed: ${(lastFix.files ?? []).join(', ') || '(none reported)'}. What the fix says it did: ${lastFix.scope}\n${touchedByGit()}`
@@ -1322,7 +1368,10 @@ while (true) {
   const askedMap = Object.fromEntries(reviewers.map(r => [r.key, everyId()]))
   // Asked with the perimeter as it was BEFORE this round's resolution: a resume replays identical prompts.
   const reviewPerimeter = perimeterTextFor(widenedFiles(files, resolutions, round - 1), false)
-  const answers = await parallel(reviewers.map(r => () => ask([
+  // After a fix round with no P1, no rejection and a probe on every fixed finding, the green gate plus those probes replace the verifier.
+  const probesClear = !only && round > 1 && lastProbed && gated && lastReport?.verify.status === 'pass' && reviewers.length === 1 && reviewers[0].key === 'V'
+    && askedMap.V.length > 0 && askedMap.V.every(id => lastFixedIds.includes(id)) && !(await probesReproduce(`probe · round ${round} · verify the fixes`, lastProbes, lastFixedIds.map(id => known[id].failure).filter(Boolean).join(' | ')))
+  const answers = probesClear ? [{ previous: askedMap.V.map(id => ({ id, status: 'closed', note: 'the gate is green and the probes of the finding pass' })), found: [], checked: 'the gate and the probes of the fixed findings', filesReviewed: [] }] : await parallel(reviewers.map(r => () => ask([
     scopeOfReview(r),
     `Intent: ${brief}`,
     round === 1 ? requestText : '',
@@ -1433,6 +1482,19 @@ while (true) {
     decision.kept = decision.kept.filter(id => !withdrawn.includes(id))
     decision.toFix = decision.toFix.filter(id => !withdrawn.includes(id))
     if (decision.action === 'FIX' && !decision.toFix.length) decision.action = decision.unanswered.length ? 'RECHECK' : 'DONE'
+  }
+  // A P2 with a probe is checked before any fixer is called: a probe that doesn't reproduce makes it a note.
+  const probed = decision.toFix.filter(id => known[id].priority === 'P2' && !decision.kept.includes(id) && probesOf(known[id]).length)
+  if (probed.length) {
+    const reproduces = await parallel(probed.map(id => () => probesReproduce(`probe · round ${round} · ${id}`, probesOf(known[id]), known[id].failure)))
+    const demoted = probed.filter((id, i) => !reproduces[i])
+    for (const id of demoted) {
+      delete decision.tracked[id]
+      softIds.add(id)
+      minor.push(known[id])
+    }
+    decision.toFix = decision.toFix.filter(id => !demoted.includes(id))
+    if (demoted.length && decision.action === 'FIX' && !decision.toFix.length) decision.action = decision.unanswered.length ? 'RECHECK' : 'DONE'
   }
   tracked = decision.tracked
   silent = decision.silent
@@ -1554,6 +1616,8 @@ while (true) {
   lastFix = fixed
   lastProbes = cleaning ? [] : joinProbes(sending.filter(id => !rejectedIds.has(id)).flatMap(id => probesOf(known[id])), looseProbes)
   lastFixP1 = sending.some(id => known[id]?.priority === 'P1')
+  lastFixedIds = cleaning ? [] : sending.filter(id => !rejectedIds.has(id))
+  lastProbed = !cleaning && !lastFixP1 && fixed.rejected.length === 0 && lastFixedIds.length > 0 && lastFixedIds.every(id => probesOf(known[id]).length > 0)
   lastFixLines = Number.isFinite(fixed.snapshot?.churn) ? fixed.snapshot.churn : Infinity
   if (cleaning) cleanupSent = cleanupIds.filter(id => !rejectedIds.has(id))
   if (!cleaning) {

@@ -55,7 +55,7 @@ Write the path exactly so, literal `~` (allow rules match it), entries in single
 **Docs only** (README, `docs/`, code comments; never a skill, agent, rule or hook): no perimeter, no loop.
 Edit inline, one `code-reviewer` (Haiku, `medium`) on the diff; fix its P1/P2 inline, run the doc check (this kit: `node tools/validate.mjs`).
 
-Loop args: `references/loop.md`; the brief: `file:line` + the change + the challenger's `read:`. Before the loop: the scenario's section of `references/scenarios.md`; analysis: `references/analysis.md`.
+Loop args: `references/loop.md`; the brief: `file:line` + the change + the planner's and the challenger's `read:`. Before the loop: the scenario's section of `references/scenarios.md`; analysis: `references/analysis.md`.
 
 ### 3. Who asks the user
 

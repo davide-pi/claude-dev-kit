@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { blocksFor, lanesFor, lanesWorth, stepBudget, sizeFor, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } from './dev-loop.harness.mjs';
 
-const tasks = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `t${i + 1}`, title: `task ${i + 1}`, files: [], dependsOn: [], tdd: false, criteria: [], ...(extra[i + 1] ?? {}) }));
+const tasks = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `t${i + 1}`, title: `task ${i + 1}`, files: [], dependsOn: [], tdd: false, criteria: [], risky: true, ...(extra[i + 1] ?? {}) }));
 const shape = (blocks) => blocks.map((b) => b.length);
 
 // ── blocks ─────────────────────────────────────────────────────────────────
@@ -435,4 +435,55 @@ test('given a block with one non-mechanical task, when its implementer runs, the
   const opts = implementerOf(calls, 1).opts;
   assert.equal(opts.model, undefined);
   assert.equal(opts.effort, 'medium');
+});
+
+test('given size M and a plan of five tasks none risky, with no security or data axis and a green gate, when the loop runs, then reader A runs on no block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 0);
+  assert.deepEqual(out.blocks.map((b) => b.readerA.skipped), [true, true]);
+});
+
+test('given a plan with one risky:true task in one block of two, when the loop runs, then reader A runs on that block only', async () => {
+  // Given
+  const plan = tasks(5).map((t) => ({ ...t, risky: t.id === 't1' }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: plan } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 1);
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+});
+
+test('given no risky task but a data axis, when the loop runs, then reader A runs on every block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, risk: ['data'], plan: { tasks: calm } };
+
+  // When
+  const { calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 2);
+});
+
+test('given no risky task and a block gate red before green, when the loop runs, then reader A runs on that block only', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [impl({ gate: gate('red', { tree: 'tr0' }) }), greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+  assert.equal(readerAs(calls).length, 1);
 });

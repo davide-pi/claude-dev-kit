@@ -47,7 +47,7 @@ function fakeRunner({ gate = [GREEN], changed = 'rules/a.md\n', porcelain = ' M 
     if (is(args, 'gate.mjs')) {
       const out = gateAnswers.length > 1 ? gateAnswers.shift() : gateAnswers[0];
       const verdict = JSON.parse(out).gate;
-      const status = verdict === 'red' ? 1 : verdict === 'running' ? 3 : 0;
+      const status = verdict.startsWith('red') ? 1 : verdict === 'running' ? 3 : 0;
       return { status, stdout: `noise\n${out}\n`, stderr: '' };
     }
     if (is(args, 'sweep.mjs')) return ok('{"closed":1,"listed":0}\n');

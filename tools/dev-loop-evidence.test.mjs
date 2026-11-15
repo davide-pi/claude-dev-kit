@@ -76,3 +76,14 @@ test('given the reader briefs, when built, then each asks every P2 for a probe o
   assert.ok(readers.length > 0);
   for (const c of readers) assert.match(c.prompt, /every P2 .*probe or an evidence field quoting the file:line/, c.opts.label);
 });
+
+test('given P2 evidence that is prose with a slash and a port, when classified, then it is no quoted file:line', () => {
+  // Given
+  const cases = ['the TCP/IP:80 listener drops the header', 'I/O:3 retries are lost', 'returns HTTP/HTTPS:443 mixed'];
+
+  // When
+  const got = cases.map(evidence => classify(bare({ evidence }), FILES));
+
+  // Then
+  assert.deepEqual(got, ['minor', 'minor', 'minor']);
+});

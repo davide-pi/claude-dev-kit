@@ -11,7 +11,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { run, ARGS_M, review, impl, gate, tasksOf, planLines, blockTag } from './dev-loop.harness.mjs';
+import { run, ARGS_M, review, impl, gate, tasksOf, planLines, blockTag, readReport } from './dev-loop.harness.mjs';
 
 const HEADING = /Handoff from earlier blocks/i;
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
@@ -19,7 +19,7 @@ const two = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
 const three = { ...two, plan: { tasks: tasksOf(10) } };
 const made = (calls) => calls.filter((c) => c.opts.agentType === 'implementer');
 const block = (calls, n) => made(calls).find((c) => new RegExp(`^B${n} · .* · implement$`).test(c.opts.label));
-const task = (id, file) => ({ id, title: `task-${id}-title`, files: [file], dependsOn: [], tdd: false, criteria: [] });
+const task = (id, file) => ({ id, title: `task-${id}-title`, files: [file], dependsOn: [], tdd: false, criteria: [], risky: true });
 
 test('given two blocks where block 1 returns a handoff, when block 2 is called, then its prompt holds the handoff under its heading', async () => {
   // Given
@@ -133,7 +133,7 @@ test('given a handoff from block 1, when the reader A fix of block 2 is called, 
 });
 
 // ── the plan in the Workflow view: log lines and task-tagged labels ───────────────────────────────────
-const titled = (id, dependsOn = []) => ({ id, title: `Title ${id}`, files: [], dependsOn, tdd: false, criteria: [] });
+const titled = (id, dependsOn = []) => ({ id, title: `Title ${id}`, files: [], dependsOn, tdd: false, criteria: [], risky: true });
 const PLAN = [titled('T1'), titled('T2', ['T1']), titled('T3'), titled('T4', ['T1']), titled('T5', ['T4'])];   // two blocks: T1 T2 T3 | T4 T5
 const planned = { ...ARGS_M, verify: 'node --test x', plan: { tasks: PLAN } };
 
@@ -266,6 +266,69 @@ test('given arg read with a file range, when the implementer brief is built, the
   assert.match(block(calls, 1).prompt, /already read, don't re-explore[^\n]*(\n[^\n]*)?a\.js:10-20/i);
 });
 
+// ── T15: tolerant report read, one re-prompt before a stall ──────────────────────────────────────────
+test('given the gate line in verify.line and not in gate, when a gated report is read, then verify is pass from that line, not not-run', () => {
+  // Given
+  const report = { gate: '', verify: { status: 'not-run', command: 'node --test x', line: gate('green') } };
+  // When
+  const read = readReport(report, true);
+  // Then
+  assert.equal(read.verify.status, 'pass');
+});
+
+test('given a red gate line in evidence and none in gate or verify.line, when a gated report is read, then verify is fail from that line', () => {
+  // Given
+  const report = { verify: { status: 'pass', command: 'node --test x', line: '# fail 0' }, evidence: `ran the gate:\n${gate('red', { test: 'A fails' })}` };
+  // When
+  const read = readReport(report, true);
+  // Then
+  assert.equal(read.verify.status, 'fail');
+});
+
+test('given a gated report with no gate line anywhere, when the loop handles it, then the same role is called once more naming the missing gate field', async () => {
+  // Given
+  const impls = [impl(), green(), green()];
+  // When
+  const { out, calls } = await run(two, [review([]), review([]), review([]), review([])], impls);
+  // Then
+  assert.equal(made(calls).length >= 2, true);
+  assert.match(made(calls)[1].prompt, /missing[^\n]*`gate`|`gate`[^\n]*missing/i);
+  assert.notEqual(out.stall?.why, 'verify-not-run');
+});
+
+test('given a gated report with no gate line twice, when the loop handles it, then only the second miss stalls verify-not-run', async () => {
+  // Given
+  const impls = [impl(), impl()];
+  // When
+  const { out, calls } = await run(two, [], impls);
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.equal(out.stall.why, 'verify-not-run');
+  assert.equal(made(calls).length, 2);
+});
+
+// ── T16: the implementer keeps going, no unasked extras ──────────────────────────────────────────────
+test('given any implementer brief, when built, then it says to keep working until every task of the block is done, stopping only when it can\'t go on or before a risky step', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { calls } = await run(two, [], impls);
+  // Then
+  for (const n of [1, 2]) {
+    assert.match(block(calls, n).prompt, /keep working until every task of the block is done/i);
+    assert.match(block(calls, n).prompt, /stop only when you can't go on or before a risky step/i);
+  }
+});
+
+test('given any implementer brief, when built, then it says to add no file, test or refactor the tasks don\'t ask', async () => {
+  // Given
+  const impls = [green(), green()];
+  // When
+  const { calls } = await run(two, [], impls);
+  // Then
+  for (const n of [1, 2]) assert.match(block(calls, n).prompt, /add no file, test or refactor the tasks don't ask/i);
+});
+
 test('given no read arg, when the implementer brief is built, then the brief has no such line', async () => {
   // Given
   const args = { ...two };
@@ -273,4 +336,62 @@ test('given no read arg, when the implementer brief is built, then the brief has
   const { calls } = await run(args, [], [green(), green()]);
   // Then
   assert.doesNotMatch(block(calls, 1).prompt, /already read/i);
+});
+
+test('given a first gated report with no gate line that lists noticed and defaults, when the re-prompt answers green and empty, then the noticed item and the default still reach the report', async () => {
+  // Given
+  const first = impl({ noticed: [{ title: 'NOTICED-TITLE-XYZ', path: 'src/Other/Helper.cs', why: 'w' }], defaults: [{ choice: 'DEFAULT-CHOICE-XYZ', alternative: 'alt', path: 'src/Orders/OrdersQuery.cs' }] });
+  // When
+  const { out } = await run(two, [review([]), review([]), review([]), review([])], [first, green(), green()]);
+  // Then
+  const s = JSON.stringify(out);
+  assert.equal(s.includes('NOTICED-TITLE-XYZ'), true);
+  assert.equal(s.includes('DEFAULT-CHOICE-XYZ'), true);
+});
+
+// ── review F1/F3/F4: re-prompt and work rule edges ───────────────────────────────────────────────────
+test('given a gate-less report that lists remaining work, when the loop handles it, then it continues with no gate-line call and the remaining work is not dropped', async () => {
+  // Given
+  const impls = [impl({ remaining: ['T3'] }), green(), green()];
+  // When
+  const { calls } = await run(two, [review([]), review([]), review([]), review([])], impls);
+  // Then
+  assert.deepEqual(made(calls).filter((c) => /gate line/.test(c.opts.label)).map((c) => c.opts.label), []);
+  assert.match(made(calls)[1].opts.label, /continued, 1/);
+  assert.match(made(calls)[1].prompt, /- T3/);
+});
+
+test('given a tdd block with a unit command, when the test-first call is briefed, then it has no keep-working rule that contradicts write only the tests', async () => {
+  // Given
+  const args = { ...two, unit: 'node --test u', plan: { tasks: tasksOf(1).map((t) => ({ ...t, tdd: true })) } };
+  // When
+  const { calls } = await run(args, [review([]), review([])], [impl({ gate: gate('red-proven') }), green()]);
+  // Then
+  const first = calls.find((c) => /tests first/.test(c.opts.label ?? ''));
+  assert.match(first.prompt, /Write only the tests/);
+  assert.doesNotMatch(first.prompt, /Keep working until every task of the block is done/);
+});
+
+test('given a continuation report with no gate line and no remaining work, when the loop handles it, then one gate-line call follows before verify-not-run', async () => {
+  // Given
+  const args = { ...two, plan: { tasks: tasksOf(1) } };
+  const impls = [green({ remaining: ['finish T1'] }), impl({ remaining: [] }), green()];
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], impls);
+  // Then
+  assert.equal(made(calls).some((c) => /continued, 1\) \(gate line\)/.test(c.opts.label)), true);
+  assert.notEqual(out.stall?.why, 'verify-not-run');
+});
+
+test('given a block report with a handoff but no gate line, when the gate re-prompt answers green without one, then the next block still gets the handoff', async () => {
+  // Given
+  const two = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
+
+  // When
+  const { calls } = await run(two, [review([]), review([]), review([]), review([])], [impl({ handoff: 'HANDOFF-XYZ created OrdersMap' }), impl({ gate: gate('green') }), impl({ gate: gate('green') })]);
+
+  // Then
+  const b2 = calls.filter(c => c.opts.agentType === 'implementer').find(c => /^B2 · .* · implement$/.test(c.opts.label));
+  assert.ok(b2);
+  assert.match(b2.prompt, /HANDOFF-XYZ/);
 });

@@ -47,19 +47,6 @@ test('given readers A and B report the same finding each with a different probe 
   assert.deepEqual(merged.found[0].probes.map(q => q.path).sort(), [p1.path, p2.path].sort());
 });
 
-test('given the fixer brief for a finding with probes, when it is built, then it asks a new test file per probe', async () => {
-  // Given
-  const withProbe = finding({ probes: [probe('one')] });
-
-  // When
-  const { calls } = await run(V_ARGS, [review([], [withProbe])], [treeless(), treeless({ snapshot: T2('t2', 10) }), treeless({ snapshot: T2('t3', 10) })]);
-
-  // Then
-  const fixer = calls.find(c => c.opts.label === 'fix round 1 findings');
-  assert.ok(fixer, 'the fix round ran');
-  assert.match(fixer.prompt, /one new test file per probe/);
-});
-
 test('given args with verify set and no unit, when the fixer brief for a finding with probes is built, then it asks one new test file per probe and carries no gate --red --probe command', async () => {
   // Given
   const withProbe = finding({ probes: [probe('one')] });
@@ -74,6 +61,59 @@ test('given args with verify set and no unit, when the fixer brief for a finding
   assert.doesNotMatch(fixer.prompt, /--red --probe/);
 });
 
+// ── T17: a P2's probe runs (Haiku, low) before the fix round ─────────────────────────────────────────
+const probeCalls = calls => calls.filter(c => /^probe · round \d+ · (?!verify the fixes)/.test(c.opts.label ?? ''));
+const impls3 = () => [treeless(), treeless({ snapshot: T2('t2', 10) }), treeless({ snapshot: T2('t3', 10) })];
+const fixerOf = calls => calls.find(c => c.opts.label === 'fix round 1 findings');
+
+test('given a P2 finding with a probe that does not reproduce, when the fix round is prepared, then a haiku low call ran the probe, the finding is minor and no fixer is called for it', async () => {
+  // Given
+  const withProbe = finding({ title: 'probe-demoted', probes: [probe('one')] });
+  const probes = () => ({ reproduced: false, ran: true, output: 'exit 0' });
+  // When
+  const { out, calls } = await run(V_ARGS, [review([], [withProbe])], impls3(), { probes });
+  // Then
+  const ran = probeCalls(calls);
+  assert.equal(ran.length, 1);
+  assert.equal(ran[0].opts.model, 'haiku');
+  assert.equal(ran[0].opts.effort, 'low');
+  assert.ok(ran[0].prompt.includes(probe('one').cmd));
+  assert.equal(fixerOf(calls), undefined);
+  assert.ok(out.minor.some(m => m.title === 'probe-demoted'));
+});
+
+test('given a P2 whose probe reproduces, when the fix round is prepared, then it goes to the fixer as today', async () => {
+  // Given
+  const withProbe = finding({ title: 'probe-kept', probes: [probe('one')] });
+  const probes = () => ({ reproduced: true, output: 'exit 1' });
+  // When
+  const { calls } = await run(V_ARGS, [review([], [withProbe])], impls3(), { probes });
+  // Then
+  assert.equal(probeCalls(calls).length, 1);
+  assert.ok(fixerOf(calls));
+  assert.match(fixerOf(calls).prompt, /probe-kept/);
+});
+
+test('given a P1 with a probe, when the fix round is prepared, then no probe call runs and the fixer gets it', async () => {
+  // Given
+  const p1 = finding({ priority: 'P1', title: 'p1-kept', probes: [probe('one')] });
+  // When
+  const { calls } = await run(V_ARGS, [review([], [p1])], impls3(), { probes: () => ({ reproduced: false, ran: true, output: 'exit 0' }) });
+  // Then
+  assert.equal(probeCalls(calls).length, 0);
+  assert.match(fixerOf(calls).prompt, /p1-kept/);
+});
+
+test('given a P2 with no probe, when the fix round is prepared, then no probe call runs and the fixer gets it', async () => {
+  // Given
+  const noProbe = finding({ title: 'no-probe-kept' });
+  // When
+  const { calls } = await run(V_ARGS, [review([], [noProbe])], impls3(), { probes: () => ({ reproduced: false, ran: true, output: 'exit 0' }) });
+  // Then
+  assert.equal(probeCalls(calls).length, 0);
+  assert.match(fixerOf(calls).prompt, /no-probe-kept/);
+});
+
 test('given args with unit set, when the fixer brief for a finding with probes is built, then the --red --probe command uses that unit', async () => {
   // Given
   const withProbe = finding({ probes: [probe('one')] });
@@ -86,4 +126,65 @@ test('given args with unit set, when the fixer brief for a finding with probes i
   const fixer = calls.find(c => c.opts.label === 'fix round 1 findings');
   assert.ok(fixer, 'the fix round ran');
   assert.match(fixer.prompt, /--red --probe --unit 'node --test unit-x'/);
+});
+
+// ── T18: the gate plus the probes replace the verifier ───────────────────────────────────────────────
+const verifierRuns = calls => calls.filter(c => /verify the fixes$/.test(c.opts.label ?? '') && c.opts.agentType === 'code-reviewer');
+
+test('given a fix round with no P1 fixed and every fixed finding carrying a probe that now passes, when verified, then no verifier agent runs', async () => {
+  // Given
+  const withProbe = finding({ title: 'probed-fix', probes: [probe('one')] });
+  let n = 0;
+  const probes = () => ({ reproduced: ++n === 1, ran: true, output: 'exit 0' });   // reproduces before the fix, passes after
+
+  // When
+  const { out, calls } = await run(V_ARGS, [review([], [withProbe])], impls3(), { probes });
+
+  // Then
+  assert.equal(out.status, 'OK');
+  assert.ok(fixerOf(calls));
+  assert.equal(verifierRuns(calls).length, 0);
+});
+
+test('given a fix round that fixed a P1 carrying a probe, when verified, then the verifier runs', async () => {
+  // Given
+  const p1 = finding({ priority: 'P1', title: 'p1-probed', probes: [probe('one')] });
+
+  // When
+  const { calls } = await run(V_ARGS, [review([], [p1])], impls3(), { probes: () => ({ reproduced: false, ran: true, output: 'exit 0' }) });
+
+  // Then
+  assert.equal(verifierRuns(calls).length, 1);
+});
+
+// ── review F2/F5: a probe the Haiku run could not judge is not a pass ────────────────────────────────
+const demoteRun = (answer, extra = {}) => run(V_ARGS, [review([], [finding({ title: 'probe-judged', probes: [probe('one')], ...extra })])], impls3(), { probes: () => answer });
+
+test('given a probe answer reproduced false without ran true, when the fix round is prepared, then the finding still goes to the fixer', async () => {
+  // Given
+  const answer = { reproduced: false, output: 'exit 0' };
+  // When
+  const { calls } = await demoteRun(answer);
+  // Then
+  assert.ok(fixerOf(calls));
+});
+
+test('given a probe answer reproduced false with ran true and an empty output, when the fix round is prepared, then the finding still goes to the fixer', async () => {
+  // Given
+  const answer = { reproduced: false, ran: true, output: '' };
+  // When
+  const { calls } = await demoteRun(answer);
+  // Then
+  assert.ok(fixerOf(calls));
+});
+
+test('given a finding with a failure text and a probe, when the probe call is briefed, then the prompt carries the failure text and says an unrunnable command counts as ran false', async () => {
+  // Given
+  const answer = { reproduced: true, ran: true, output: 'exit 1' };
+  // When
+  const { calls } = await demoteRun(answer, { failure: 'FAILURE-TEXT-XYZ' });
+  // Then
+  const prompt = probeCalls(calls)[0].prompt;
+  assert.match(prompt, /FAILURE-TEXT-XYZ/);
+  assert.match(prompt, /ran: false/);
 });

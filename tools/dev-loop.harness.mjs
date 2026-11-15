@@ -36,8 +36,9 @@ const laneRunner = (prompt, opts) => {
 
 /**
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
- * Two calls are answered by the harness, not by the queue: the verifier of a fix round (label "reviewer V · round <n> · verify the fixes": every previous id closed
- * unless `extra.verifiers` or the review queue holds its answer) and the arbiter (label "arbiter · round <n>": every id kept open unless `extra.arbiters` queues its answers).
+ * Three calls are answered by the harness, not by the queue: the verifier of a fix round (label "reviewer V · round <n> · verify the fixes": every previous id closed
+ * unless `extra.verifiers` or the review queue holds its answer), the arbiter (label "arbiter · round <n>": every id kept open unless `extra.arbiters` queues its answers)
+ * and the probe run (label "probe · round <n> · <id>": the failure reproduces unless `extra.probes(prompt, opts)` answers { reproduced: false }).
  */
 async function run(args, reviews, implementers = [], extra = {}) {
   const calls = [];
@@ -56,6 +57,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
       ? (extra.implementer ? extra.implementer(prompt, opts) : impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
       : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
       : /^arbiter · round \d+/.test(opts.label ?? '') ? (arbiters.length ? arbiters.shift() : closeAll(prompt, 'open'))
+      : /^probe · round \d+ · /.test(opts.label ?? '') ? (extra.probes ? extra.probes(prompt, opts) : { reproduced: true, output: '' })   // the Haiku probe run before a fix round: { reproduced, output }
       : queue.shift();
     if (answer instanceof Error) throw answer;
     if (opts.agentType === 'implementer' && answer) [...(answer.snapshot?.files ?? []), ...(answer.files ?? [])].forEach((f) => touched.add(f));
@@ -71,7 +73,7 @@ async function run(args, reviews, implementers = [], extra = {}) {
 }
 
 const ARGS = { brief: 'fix it', perimeter: { files: FILES }, repoRoot: ROOT, size: 'S' };
-const ARGS_M = { ...ARGS, size: 'M', plan: { tasks: [{ id: 'T1', title: 'the change', files: [], dependsOn: [], tdd: false, criteria: [] }] } };   // an M run needs a plan (one task: one block)
+const ARGS_M = { ...ARGS, size: 'M', plan: { tasks: [{ id: 'T1', title: 'the change', files: [], dependsOn: [], tdd: false, criteria: [], risky: true }] } };   // an M run needs a plan (one task: one block)
 const CLEAN = { ...ARGS_M, cleanup: true };   // the P3 cleanup pass runs only when asked
 const review = (previous, found = [], filesReviewed = ALL_READ) => ({ previous, found, checked: 'read', filesReviewed });
 const finding = (extra = {}) => ({ title: 't', path: 'src/Orders/OrdersQuery.cs', category: 'correctness', priority: 'P2', failure: 'x', evidence: 'src/Orders/OrdersQuery.cs:10 returns null', ...extra });
@@ -90,7 +92,7 @@ const FAIL = { status: 'fail', command: 'node --test', line: '# fail 2' };
 const HELPER = 'src/Other/Helper.cs';
 // The last line of scripts/gate.mjs, as a scripted implementer reports it in `gate`.
 const gate = (kind = 'green', extra = {}) => JSON.stringify({ gate: kind, test: '', outside: [], formatOnly: [], tree: 'tr1', greenAt: '2026-11-11T10:00:00Z', seconds: 1, ...extra });
-const tasksOf = (n) => Array.from({ length: n }, (_, i) => ({ id: `T${i + 1}`, title: `task-${i + 1}-title`, files: [], dependsOn: [], tdd: false, criteria: [] }));
+const tasksOf = (n) => Array.from({ length: n }, (_, i) => ({ id: `T${i + 1}`, title: `task-${i + 1}-title`, files: [], dependsOn: [], tdd: false, criteria: [], risky: true }));
 const plausible = () => finding({ confidence: 'PLAUSIBLE', title: 'tenant filter dropped' });
 const defect = (n) => finding({ line: 1000 * n, title: `defect${n}x` });
 const nit = (n) => finding({ priority: 'P3', line: 40 * n, title: ['minor naming', 'comment typo', 'unused import', 'spacing'][n - 1] });

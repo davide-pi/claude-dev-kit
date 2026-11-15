@@ -33,9 +33,9 @@ a concurrent run, a dependency down. `preview` is the default at M whenever the 
 ## The planner (L, or M with a sensitive axis; plain M: this session plans)
 
 At size L, or M with a data, money, contract or security axis, one `Plan` subagent (Opus: `model: opus`, `effort: high`)
-writes the tasks: `{ id, title, files, dependsOn, tdd, criteria }` with each criterion's proof, from the brief, the
+writes the tasks: `{ id, title, files, dependsOn, tdd, criteria, mechanical, risky }` with each criterion's proof, from the brief, the
 owner's `decisions` verbatim and the code it reads (read-only, it never asks the user, ~12 tool calls). It ends with a
-`read:` line of every `file:line` range it read. This session then filters it against the owner's decisions: a task or
+`read:` line of every `file:line` range it read. A task is `risky: true` when it touches a guard, a persisted shape, money, concurrency, a public contract or auth logic, or the planner's unsure; an omitted flag means no block reader A. This session then filters it against the owner's decisions: a task or
 criterion that contradicts one is dropped or amended, and the result is the final plan, which this session owns and
 passes to the loop. For a guard, parser or hook the planner lists the bypass cases (every way round it: variants, quoting, encodings, order, a second path to the same effect) as numbered criteria, and the `tdd` red tests start from those numbers. The challenger below still attacks that plan: the planner never stands in for it. At plain M this session plans.
 

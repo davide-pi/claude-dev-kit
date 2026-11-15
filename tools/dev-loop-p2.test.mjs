@@ -77,3 +77,74 @@ test('given an inline run lifted to M by a risk axis and no plan, when the loop 
   assert.equal(calls.length, 0);
   assert.match(JSON.stringify(out), /no plan/);
 });
+
+test('given an S run lifted to M by a risk axis and no plan, when the loop starts, then the stop names the axis and offers no relaunch with size S', async () => {
+  // Given
+  const args = { ...ARGS, size: 'S', risk: ['security'] };
+
+  // When
+  const { out } = await run(args, [], [impl({})]);
+
+  // Then
+  const text = JSON.stringify(out);
+  assert.match(text, /security/);
+  assert.doesNotMatch(text, /relaunch with size S|really size S/);
+});
+
+test('given an M run with no plan and no risk lift, when the loop starts, then the stop still asks whether the change is really size S', async () => {
+  // Given
+  const args = { ...ARGS, size: 'M' };
+
+  // When
+  const { out } = await run(args, [], [impl({})]);
+
+  // Then
+  assert.match(JSON.stringify(out), /really size S/);
+});
+
+test('given an L run with blocks and a proven clean-code P2 from reader A inside the perimeter, when the block is read, then no fixer is sent it', async () => {
+  // Given
+  const tasks = ['T1', 'T2', 'T3', 'T4', 'T5'].map((id, i) => ({ id, title: `task ${id}`, files: ['src/Orders/OrdersQuery.cs'], dependsOn: i ? [`T${i}`] : [], tdd: false, criteria: [], risky: true }));
+  const args = { ...ARGS, size: 'L', plan: { tasks }, verify: 'node --test x' };
+  const style = finding({ title: 'naming drifts from the sibling file', category: 'clean-code', line: 10, evidence: 'src/Orders/OrdersQuery.cs:10 uses a different name' });
+
+  // When
+  const { calls } = await run(args, [review([], [style]), ...Array.from({ length: 8 }, () => review([]))], Array.from({ length: 8 }, (_, i) => impl({ gate: gate('green', { tree: `t${i + 2}` }) })));
+
+  // Then
+  const sent = calls.filter(c => c.opts.agentType === 'implementer' && c.prompt.includes('naming drifts'));
+  assert.deepEqual(sent.map(c => c.opts.label), []);
+});
+
+test('given a P2 whose evidence only has a capitalised word and digits like HTTP:500, when classified, then it is a note, not a cited file:line', () => {
+  // Given
+  const p2 = (evidence) => finding({ priority: 'P2', category: 'logic', evidence });
+  // When
+  const bare = ['the handler returns HTTP:500 on an empty body', 'Status:404 is lost', 'ID:42 is reused'].map((e) => classify(p2(e), FILES, { root: ROOT }));
+  // Then
+  assert.deepEqual(bare, ['minor', 'minor', 'minor']);
+});
+
+test('given a P2 with evidence "Dockerfile:12 copies .env", when classified, then it counts as evidence and blocks', () => {
+  // Given
+  const p2 = finding({ priority: 'P2', category: 'logic', evidence: 'Dockerfile:12 copies .env' });
+
+  // When
+  const kind = classify(p2, FILES, { root: ROOT });
+
+  // Then
+  assert.equal(kind, 'blocking');
+});
+
+test('given size M with a security axis and no plan, when the loop starts, then the stop offers no relaunch as size S', async () => {
+  // Given
+  const args = { ...ARGS, size: 'M', risk: ['security'] };
+
+  // When
+  const { out } = await run(args, [], []);
+
+  // Then
+  assert.equal(out.status, 'STALL');
+  assert.doesNotMatch(JSON.stringify(out.stall.questions), /really size S/);
+  assert.match(out.stall.questions[0].text, /security/);
+});
