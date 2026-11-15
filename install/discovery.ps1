@@ -93,7 +93,11 @@ function Get-InstalledAssets {
 function Get-NormalizedHash([string]$Path) {
     # Line endings differ by design (.ps1 is CRLF, the rest LF), so compare on content only.
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    $text = [System.IO.File]::ReadAllText($Path) -replace "`r`n", "`n"
+    return Get-TextHash ([System.IO.File]::ReadAllText($Path))
+}
+
+function Get-TextHash([string]$Content) {
+    $text = $Content -replace "`r`n", "`n"
     $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
     $sha = [System.Security.Cryptography.SHA256]::Create()
     try { return [System.BitConverter]::ToString($sha.ComputeHash($bytes)) } finally { $sha.Dispose() }

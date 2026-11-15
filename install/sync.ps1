@@ -142,6 +142,79 @@ function Sync-Assets {
     }
 }
 
+# ── Targeted install (-Only / -Verify) ───────────────────────────────────────
+function Get-TargetedAssets([string]$List) {
+    # The -Only paths that are kit assets. settings.json never (generated or hand-kept); tools/, docs/, install/
+    # and the repo-only root files are not assets, so Get-KitAssets already leaves them out.
+    $assets = @(Get-KitAssets)
+    foreach ($raw in @($List -split ',')) {
+        $rel = $raw.Trim().Replace('\', '/')
+        if (-not $rel) { continue }
+        if ($rel -eq 'settings.json') { Write-Info 'settings.json skipped: never installed by -Only'; continue }
+        if ($rel -cnotin $assets) { Write-Info "$rel skipped: not a kit asset"; continue }
+        $rel
+    }
+}
+
+function Get-BaseHash([string]$Ref, [string]$Relative) {
+    # Normalized hash of the file at a git revision, $null when the revision does not have it.
+    $psi = [System.Diagnostics.ProcessStartInfo]::new('git')
+    foreach ($arg in '-C', $RepoRoot, 'show', "${Ref}:$Relative") { $psi.ArgumentList.Add($arg) }
+    $psi.RedirectStandardOutput = $true
+    $psi.RedirectStandardError = $true
+    $psi.UseShellExecute = $false
+    $process = [System.Diagnostics.Process]::Start($psi)
+    $buffer = [System.IO.MemoryStream]::new()
+    $process.StandardOutput.BaseStream.CopyTo($buffer)
+    $process.StandardError.ReadToEnd() | Out-Null
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) { return $null }
+    return Get-TextHash ([System.Text.Encoding]::UTF8.GetString($buffer.ToArray()).TrimStart([char]0xFEFF))
+}
+
+function Install-Only([string[]]$Paths, [string]$Ref) {
+    Write-Section 'Targeted install (repo -> installed)'
+    if (-not $Paths) { Write-Info 'no kit asset among the -Only paths, nothing to do'; exit 0 }
+    & git -C $RepoRoot rev-parse --verify --quiet "${Ref}^{commit}" *> $null
+    if ($LASTEXITCODE -ne 0) { Write-Host "  ISSUE   -Base '$Ref' is not a commit of this repo" -ForegroundColor Yellow; exit 1 }
+
+    # All or nothing: an installed copy is safe to replace only when it is the base content (the change is the
+    # only difference), already the new content (a rerun) or absent on both sides.
+    $blocked = @()
+    foreach ($rel in $Paths) {
+        $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
+        $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
+        if ($homeHash -eq $repoHash -or $homeHash -eq (Get-BaseHash $Ref $rel)) { continue }
+        $blocked += $rel
+    }
+    if ($blocked) {
+        foreach ($rel in $blocked) { Write-Host "  ISSUE   $rel in the live config matches neither $Ref nor the repo: edited there?" -ForegroundColor Yellow }
+        Write-Host '  nothing written' -ForegroundColor Yellow
+        exit 1
+    }
+    foreach ($rel in $Paths) {
+        $same = (Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))) -eq (Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\')))
+        if ($same) { Write-Ok $rel; continue }
+        Copy-Asset $rel $RepoRoot $ClaudeHome
+        Write-Change "$rel installed"
+    }
+    exit 0
+}
+
+function Test-OnlyVerify([string[]]$Paths) {
+    # Read only: exit 0 when the repo and the live config hold the same content for exactly these assets.
+    Write-Section 'Verify (repo vs installed)'
+    $bad = 0
+    foreach ($rel in $Paths) {
+        $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))
+        $homeHash = Get-NormalizedHash (Join-Path $ClaudeHome $rel.Replace('/', '\'))
+        if ($repoHash -eq $homeHash) { Write-Ok $rel; continue }
+        $bad++
+        Write-Host "  ISSUE   $rel $(if ($null -eq $homeHash) { 'is not installed' } else { 'differs between repo and the live config' })" -ForegroundColor Yellow
+    }
+    exit $(if ($bad) { 1 } else { 0 })
+}
+
 function Test-InstalledOnlyAssets {
     # Assets that exist in the live config but not in the repo: the check that caught a skill
     # living in one place only. -Pull is the fix; deleting it is the other.
