@@ -154,6 +154,12 @@ function Set-ProcessVar([string]$Name, [string]$Value) {
   $script:SetVars.Add($Name)
 }
 
+# Remove variables from this process, so a child does not inherit them: SetEnvironmentVariable(name, $null)
+# leaves them set but empty in PowerShell 7, and psql reads an empty PGSERVICEFILE as a file named "".
+function Clear-ProcessVar([string[]]$Names) {
+  foreach ($name in $Names) { Remove-Item -LiteralPath "Env:$name" -ErrorAction Ignore }
+}
+
 # ---- value references -------------------------------------------------------------------------
 
 function Read-DotEnv([string]$Path) {
@@ -779,7 +785,7 @@ function Invoke-SqlServer($Target, [string]$Server, [string]$DbName, [string]$Lo
   if ($trust -eq $true) { $commonArgs += '-C' }
   if ($readOnlyIntent) { $commonArgs += @('-K', 'ReadOnly') }
 
-  foreach ($name in $ClearedSqlcmdVars) { [System.Environment]::SetEnvironmentVariable($name, $null) }
+  Clear-ProcessVar $ClearedSqlcmdVars
   Set-ProcessVar 'SQLCMDPASSWORD' $script:Secret
 
   if ($script:WriteMode) {
@@ -881,7 +887,7 @@ function Invoke-Postgres($Target, [string]$Server, [string]$DbName, [string]$Log
   $hostName = $endpoint.Host
   if ($client.Docker -and $hostName -in @('localhost', '127.0.0.1')) { $hostName = 'host.docker.internal' }
 
-  foreach ($name in $ClearedPgVars) { [System.Environment]::SetEnvironmentVariable($name, $null) }
+  Clear-ProcessVar $ClearedPgVars
   Set-ProcessVar 'PGPASSWORD' $script:Secret
   Set-ProcessVar 'PGOPTIONS' $(if ($script:WriteMode) { $PgTimeouts } else { $PgOptions })
   Set-ProcessVar 'PGCONNECT_TIMEOUT' '15'
@@ -1083,7 +1089,7 @@ try {
   [Console]::Error.WriteLine((Hide-Secret "db-ro failed: $($_.Exception.Message)"))
   $exitCode = 2
 } finally {
-  foreach ($name in $script:SetVars) { [System.Environment]::SetEnvironmentVariable($name, $null) }
+  Clear-ProcessVar $script:SetVars
   $env:WSLENV = $script:PreviousWslEnv
   foreach ($path in $script:TempFiles) { Remove-Item -LiteralPath $path -Force -ErrorAction SilentlyContinue }
 }
