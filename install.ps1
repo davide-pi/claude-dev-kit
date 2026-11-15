@@ -42,6 +42,12 @@ param(
     # kept in <ClaudeHome>/kit-options.json and read by every run. Names: see $Components.
     [string[]]$Without,
     [string[]]$With,
+    # Targeted install for closing a change: only these repo-relative paths (comma separated) that are kit assets,
+    # after checking each installed copy is still the -Base revision's content (or already the new one).
+    # -Verify -Only is the read-only comparison of exactly those paths.
+    [string[]]$Only,
+    [string]$Base,
+    [switch]$Verify,
     [string]$ClaudeHome = (Join-Path $HOME '.claude')
 )
 
@@ -63,6 +69,14 @@ $RepoRoot = Resolve-RootPath $PSScriptRoot
 $ClaudeHome = Resolve-RootPath $ClaudeHome
 
 if ($Check -and $Pull) { throw 'Use either -Check or -Pull, not both.' }
+if ($PSBoundParameters.ContainsKey('Only')) {
+    $Only = @($Only | Where-Object { $_ -and $_.Trim() })
+    if (-not $Only) { throw '-Only needs at least one path.' }
+}
+if ($Verify -and -not $Only) { throw '-Verify needs -Only <paths>.' }
+if ($Only -and ($Check -or $Pull)) { throw '-Only is for a plain install or -Verify, not -Check or -Pull.' }
+if ($Only -and ($Without -or $With)) { throw '-Only does not combine with -Without or -With: it touches nothing but the listed paths.' }
+if ($Only -and -not $Verify -and -not $Base) { throw '-Only needs -Base <ref>: the revision the installed copies are checked against.' }
 
 # Optional components: a name and the config-relative assets (file or folder) it is made of. A component the
 # machine opted out of (kit-options.json) behaves like $LocalOnly: not installed, not drift, not pulled.
@@ -128,15 +142,21 @@ $script:RunStamp = Get-Date -Format 'yyyyMMdd-HHmmss'
 foreach ($part in 'output', 'discovery', 'environment', 'sync') { . (Join-Path (Join-Path $PSScriptRoot 'install') "$part.ps1") }
 
 # ── Run ───────────────────────────────────────────────────────────────────────
-Write-Host "claude-dev-kit  ·  $(if ($Check) { 'check' } elseif ($Pull) { 'pull' } else { 'install' })  ·  home: $ClaudeHome"
+Write-Host "claude-dev-kit  ·  $(if ($Check) { 'check' } elseif ($Pull) { 'pull' } elseif ($Verify) { 'verify' } else { 'install' })  ·  home: $ClaudeHome"
 
 if (-not (Test-Path -LiteralPath $ClaudeHome)) {
-    if ($Check -or $Pull) { throw "$ClaudeHome does not exist — run .\install.ps1 first." }
+    if ($Check -or $Pull -or $Verify) { throw "$ClaudeHome does not exist — run .\install.ps1 first." }
     New-Item -ItemType Directory -Force -Path $ClaudeHome | Out-Null
     $ClaudeHome = Resolve-RootPath $ClaudeHome   # now that it exists, in its canonical form
 }
 
 Set-KitOptions
+if ($Only) {
+    # Neither mode touches anything else: no settings merge, no retired or environment checks.
+    $targets = @(Get-TargetedAssets (@($Only) -join ',') | Sort-Object -Unique)
+    if ($Verify) { Test-OnlyVerify $targets }
+    Install-Only $targets $Base
+}
 if (-not $Check -and -not $Pull) { Move-ExcludedAssets }
 
 Sync-Assets
