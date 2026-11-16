@@ -2185,6 +2185,16 @@ test('given a preamble and a heredoc written to a script, when the script then r
   notApproved(`P=s.sh; cat > "$P" <<'EOF'\n${BODY}\nEOF\n./s.sh`);
 });
 
+test('given a heredoc written to a build file on the opener line of dotnet build or test, when the guard reads it, then it still asks', () => {
+  // Given: MSBuild imports Directory.Build.targets on its own, so a body written there runs at the build.
+  const builds = ['dotnet build', 'dotnet test'];
+
+  for (const next of builds) {
+    // When / Then
+    notApproved(`cat > Directory.Build.targets <<'EOF'; ${next}\n${BODY}\nEOF`);
+  }
+});
+
 test('given a preamble and an unquoted heredoc delimiter, when the body substitutes rm -rf, then the guard still asks', () => {
   // Given
   const command = `cd C:/repo && cat > f <<EOF\n$(rm -rf ~)\nEOF`;
