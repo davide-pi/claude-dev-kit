@@ -462,5 +462,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, afterLauncher, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS,
 };
