@@ -159,7 +159,7 @@ export type CockpitEventKind = 'agent'
 export type CockpitEvent = { at: number; kind: CockpitEventKind; key?: string; text?: string; desc?: string; effort?: string | number; ms?: number; isFailed?: boolean; usd?: number; model?: string; tokens?: number; id?: string }
 
 /** What an entry of the session log is about: a main turn's end, a successful `git commit`, a test run, a compaction, a created pull request, a finished agent, a notification that first held. */
-export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal' | 'flow'
+export type CockpitLogKind = 'round' | 'commit' | 'test' | 'compact' | 'pr' | 'agent' | 'signal' | 'flow' | 'error'
 
 /**
  * One entry of the session log: when, what, and the numbers its kind carries. `round`: `usd` and `ms`, `tools` the main loop's tool calls of the round by tool name; `commit`: `text` and `key` are the short hash;
@@ -311,6 +311,8 @@ export type CockpitSnapshot = {
   events?: CockpitEvent[]
   /** The ring buffer of the session's events (rounds, commits, test runs, compactions, pull requests, finished agents, notifications), oldest first, at most 300; kept in the session data file. Not `history`, the agent history. */
   sessionLog?: CockpitLogEntry[]
+  /** How many entries the session log's keep has dropped; kept in the session data file. Absent when none. */
+  logTrimmed?: number
   /** The main loop's tool calls since the last round ended, by tool name: the next round entry takes them. Kept in the session data file. */
   roundTools?: Record<string, number>
   /** The open round's first prompt line, the files the main loop edited, its failed calls and its permission waits: the next round entry takes them. Kept in the session data file. */

@@ -78,19 +78,32 @@ export function filesText(g: Node, s: CockpitSnapshot): string | undefined {
   return `${t().page.events.files} ${files.slice(0, FILES_SHOWN).map(baseName).join(' · ')}${extra > 0 ? ` +${extra}` : ''}`
 }
 
-/** The marker a round's link scrolls to; none when the round has none, this process did not place it, or a scroll was refused. */
-export const linkAnchor = (g: Node, s: CockpitSnapshot): string | undefined => {
+/** A round's link: its marker, and whether it scrolls (this process placed it and no scroll was refused); none when the round has no marker. */
+export function roundLink(g: Node, s: CockpitSnapshot): { anchor: string; isLive: boolean } | undefined {
   const anchor = roundFacts(g, s)?.anchor
-  return isLinkShown(anchor) ? anchor : undefined
+  return anchor === undefined ? undefined : { anchor, isLive: isLinkShown(anchor) }
 }
 
-/** The rows of the full log under a round: each permission wait (tool, length) and each failed call (tool, error), the newest ten of each. */
+/** The markers the session's rounds hold, the open one's too: what the reason line under LOG is asked about. */
+export const roundAnchors = (s: CockpitSnapshot): string[] => [...(s.sessionLog ?? []).flatMap(e => (e.kind === 'round' && e.anchor !== undefined ? [e.anchor] : [])), ...(s.roundAnchor === undefined ? [] : [s.roundAnchor])]
+
+/** A failed call's row: the tool and its error text, red. */
+const failRow = (f: { tool: string; text: string }, text: string): Span[] => [sp(`${f.tool}${text === '' ? '' : `: ${text}`}`, COLORS.red)]
+
+/**
+ * The rows under a round's summary: the newest failed call, its first line (the base view), or the full log's rows: each permission wait (tool, length)
+ * and each failed call (tool, error), the newest ten of each.
+ */
 export function detailRows(g: Node, s: CockpitSnapshot): Span[][] {
-  if (!isAllShown(s)) return []
   const facts = roundFacts(g, s)
+  const fails = facts?.fails?.list ?? []
+  if (!isAllShown(s)) {
+    const last = fails.at(-1)
+    return last === undefined ? [] : [failRow(last, (last.text.split(/\r?\n/)[0] ?? '').replace(/\s+/g, ' ').trim())]
+  }
   return [
     ...(facts?.waits?.list ?? []).map(w => [dim(`${w.tool} ${t().page.events.wait} ${waitText(w.ms)}`)]),
-    ...(facts?.fails?.list ?? []).map(f => [sp(`${f.tool}${f.text === '' ? '' : `: ${f.text.replace(/\s+/g, ' ')}`}`, COLORS.red)]),
+    ...fails.map(f => failRow(f, f.text.replace(/\s+/g, ' '))),
   ]
 }
 

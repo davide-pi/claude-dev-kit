@@ -2,7 +2,7 @@ import type { CockpitInsights, CockpitSnapshot } from '../types'
 import { ROUNDS_KEEP } from './context'
 import { baseName } from './shared'
 import { THRESHOLDS } from './signals'
-import { lastCompactKey, nextCompactKey, recordLog, withCompactAfter } from './timeline'
+import { lastCompactKey, nextCompactKey, withCompactAfter, withLogged } from './timeline'
 
 // ── Insights and Work: the main loop's last tools, the pull requests of the chat ──
 
@@ -144,17 +144,18 @@ const COMPACT_DROP_TOKENS = 50_000
  * read from the data that does arrive: a drop between consecutive readings, recorded once (a compaction the engine event already
  * recorded, still waiting for its `after`, is the same one). The session log's compact entry follows: made with a drop, its `after` filled by key.
  */
-export function withContextReading(s: CockpitSnapshot, tokens: number | undefined, at: number = s.now): Pick<CockpitSnapshot, 'insights' | 'sessionLog'> {
+export function withContextReading(s: CockpitSnapshot, tokens: number | undefined, at: number = s.now): Pick<CockpitSnapshot, 'insights' | 'sessionLog' | 'logTrimmed'> {
   const prev = s.ctx.tokens
   const pending = s.insights?.compactCtx?.at(-1)?.after === undefined && (s.insights?.compactCtx?.length ?? 0) > 0
   const isDrop = prev !== undefined && tokens !== undefined && !pending && prev - tokens > COMPACT_DROP_TOKENS && prev - tokens > prev * COMPACT_DROP_RATIO
   const base = isDrop ? recordCompaction(s.insights, prev) : s.insights
-  let sessionLog = isDrop && base ? recordLog(s.sessionLog, { at, kind: 'compact', key: nextCompactKey(s.sessionLog), tokens: prev }) : s.sessionLog
+  const counted = isDrop && base ? withLogged(s, { at, kind: 'compact', key: nextCompactKey(s.sessionLog), tokens: prev }) : s
+  let { sessionLog } = counted
   const insights = recordCtxAfter(base, tokens)
   const after = insights?.compactCtx?.at(-1)?.after
   const key = lastCompactKey(sessionLog)
   if (insights !== base && insights && after !== undefined && key !== undefined) sessionLog = withCompactAfter(sessionLog, key, after)
-  return { insights, sessionLog }
+  return { insights, sessionLog, ...(counted.logTrimmed !== undefined && { logTrimmed: counted.logTrimmed }) }
 }
 
 export const emptyInsights =(): CockpitInsights => ({ rounds: 0, usd: 0, compactions: 0, roundMs: 0, toolMs: 0, waitMs: 0, tools: {}, reads: {}, cacheShares: [] })

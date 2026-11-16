@@ -3,7 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { CockpitLogEntry } from '../types'
 import { roundCost } from '../hooks/insights'
 import { endTurnCost, measuredCost, startedCost, withSettledRound } from '../hooks/refresh'
-import { EVENTS_KEEP, SESSION_LOG_KEEP, bashLog, recordAgentEvent, recordEvent, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withLogEntries, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
+import { EVENTS_KEEP, SESSION_LOG_KEEP, bashLog, recordLogCount, recordAgentEvent, recordEvent, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withLogEntries, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
 
 test('recordLog: the newest 300 stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -273,4 +273,45 @@ test('parseLog: Given a round entry with malformed new fields, When parsed, Then
   const parsed = parseLog([bad, { at: 11, kind: 'commit', key: 'abc', agent: 'a1', runId: 'wf_1' }])
   // Then
   expect(parsed).toEqual([{ at: 9, kind: 'round', ms: 5 }, { at: 11, kind: 'commit', key: 'abc', runId: 'wf_1', agent: 'a1' }])
+})
+
+const fullLog = (): CockpitLogEntry[] => Array.from({ length: SESSION_LOG_KEEP }, (_, i) => ({ at: 1000 + i, kind: 'test' as const, text: `t${i}`, isFailed: true }))
+
+test('Given a log of SESSION_LOG_KEEP entries, When one newer entry is recorded, Then the oldest is dropped and the trimmed count is 1', () => {
+  // Given
+  const log = fullLog()
+  // When
+  const out = recordLogCount(log, { at: 5000, kind: 'commit', key: 'abc1234' })
+  // Then
+  expect(out.log).toHaveLength(SESSION_LOG_KEEP)
+  expect(out.log[0]?.text).toBe('t1')
+  expect(out.trimmed).toBe(1)
+})
+
+test('Given a full log, When an entry older than all kept ones is recorded, Then it is the one dropped and the trimmed count is 1', () => {
+  // Given
+  const log = fullLog()
+  // When
+  const out = recordLogCount(log, { at: 1, kind: 'commit', key: 'old' })
+  // Then
+  expect(out.log.some(e => e.key === 'old')).toBe(false)
+  expect(out.log[0]?.text).toBe('t0')
+  expect(out.trimmed).toBe(1)
+})
+
+test('Given a full log with a flow entry, When the flow entry is recorded again, Then it replaces its node and the trimmed count is 0', () => {
+  // Given
+  const log = [...fullLog().slice(1), { at: 4000, kind: 'flow' as const, key: 'wf_1', text: 'run' }]
+  // When
+  const out = recordLogCount(log, { at: 4100, kind: 'flow', key: 'wf_1', text: 'run' })
+  // Then
+  expect(out.log).toHaveLength(SESSION_LOG_KEEP)
+  expect(out.trimmed).toBe(0)
+})
+
+test('Given a log with room, When an entry is recorded, Then the trimmed count is 0', () => {
+  // Given / When
+  const out = recordLogCount(undefined, { at: 1, kind: 'round' })
+  // Then
+  expect(out.trimmed).toBe(0)
 })

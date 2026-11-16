@@ -2,7 +2,7 @@ import type { CockpitLogEntry } from '../types'
 
 export type DoneEvent = {
   at: number
-  kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' | 'launch'
+  kind: 'agent' | 'signal' | 'commit' | 'test' | 'pr' | 'compact' | 'error' | 'launch'
   /** The workflow run an agent, commit, test or PR belongs to: it is listed under that run's node, not under a round. */
   runId?: string
 }

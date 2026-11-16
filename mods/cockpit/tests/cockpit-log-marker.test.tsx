@@ -1,21 +1,21 @@
 import { expect, test } from 'claude-code/testing'
 
 import { isLinkShown, placeMarker, resetAnchors, scrollToAnchor } from '../hooks/round-anchor'
-import { textCells } from '../hooks/shared'
+import { COLORS, textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
 import type { CockpitLogEntry } from '../types'
-import { bashResult, mountPane, permissionChecks, settleAll, spawns } from './cockpit-fixtures'
+import { bashResult, colorOf, mountPane, permissionChecks, settleAll, spawns } from './cockpit-fixtures'
 import { NOW, dataOf, rowTexts, world } from './cockpit-world'
 
 const LINK = '\u{F0337}'
 type Hooks = Parameters<typeof world>[0]
 
-async function start(on: Hooks, options: { dataFile?: object } = {}) {
+async function start(on: Hooks, options: { dataFile?: object; files?: Record<string, string> } = {}) {
   resetAnchors()
   setLang('en')
   const writes = new Map<string, string>()
   const placed: string[] = []
-  const clock = world(on, { writes, compacts: true, ...(options.dataFile && { dataFile: JSON.stringify(options.dataFile) }) })
+  const clock = world(on, { writes, compacts: true, ...(options.dataFile && { dataFile: JSON.stringify(options.dataFile) }), ...(options.files && { files: options.files }) })
   spawns(on)
   permissionChecks(on)
   on('prompt.submit', (_, e) => ({ text: e.text }))
@@ -94,8 +94,9 @@ test('Given a pane whose engine cannot scroll to the placed row, When its link i
   // When
   await ui.press({ key: `done:${round?.at}:link` })
   await settleAll()
-  // Then
-  expect(rowTexts(await ui.drawn()).join('\n')).not.toContain(LINK)
+  // Then: the glyph stays, dim and not a button
+  const root = await ui.drawn()
+  expect(colorOf(root, new RegExp(LINK))).toBe(COLORS.dim)
   await ui.unmount()
 })
 
@@ -118,20 +119,87 @@ test('Given a round with a placed anchor and one without, When drawn, Then the f
   expect(new Set(ends).size, rows.join('\n')).toBe(1)
 })
 
-test('Given a round saved with an anchor an earlier process placed, When drawn, Then it shows no link', { timeoutMs: 30_000 }, async ($, on) => {
+const RESTART_REASON = "Links from before a restart don't scroll"
+const DENIED_REASON = 'The chat refused the scroll: links are off'
+
+test('Given a round saved with an anchor an earlier process placed, When drawn, Then the slot shows a dim link glyph and one dim reason line says links from before a restart do not scroll', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   await start(on, { dataFile: { history: [], prs: [], sessionLog: [{ at: 1, kind: 'round', n: 1, prompt: 'old', anchor: 'req-gone' }] } })
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  const ui = await mountPane($, 70)
+  const root = await ui.drawn()
+  const text = rowTexts(root).join('\n')
+  await ui.unmount()
+  // Then
+  expect(text).toContain('old')
+  expect(text).toContain(LINK)
+  expect(colorOf(root, new RegExp(LINK))).toBe(COLORS.dim)
+  expect(text.split(RESTART_REASON)).toHaveLength(2)
+  expect(colorOf(root, /before a restart/)).toBe(COLORS.dim)
+})
+
+test('Given a round saved with a stale anchor, When drawn in Italian, Then the reason line is in Italian', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  await start(on, { dataFile: { history: [], prs: [], sessionLog: [{ at: 1, kind: 'round', n: 1, prompt: 'old', anchor: 'req-gone' }] }, files: { 'cockpit.json': '{"lang":"it"}' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // When
   const ui = await mountPane($, 70)
   const text = rowTexts(await ui.drawn()).join('\n')
   await ui.unmount()
   // Then
-  expect(text).toContain('old')
-  expect(text).not.toContain(LINK)
+  expect(text).toContain('I link di prima del riavvio non scorrono')
 })
 
-test('Given a round with a failed call and a wait, When drawn in principali and then in tutto, Then the wait and failed-call rows show only in tutto', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a refused scroll and a stale anchor, When drawn, Then the glyphs are dim and the reason names the refused scroll, not the restart', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const { writes, clock } = await start(on, { dataFile: { history: [], prs: [], sessionLog: [{ at: 1, kind: 'round', n: 1, prompt: 'old', anchor: 'req-gone' }] } })
+  const round = (await oneRound($, clock, writes)).find(r => r.anchor?.startsWith('req-round-'))
+  const ui = await mountPane($, 70)
+  await ui.press({ key: `done:${round?.at}:link` })
+  await settleAll()
+  // When
+  const root = await ui.drawn()
+  const text = rowTexts(root).join('\n')
+  await ui.unmount()
+  // Then
+  expect(text).toContain(DENIED_REASON)
+  expect(text).not.toContain("before a restart")
+  expect(colorOf(root, new RegExp(LINK))).toBe(COLORS.dim)
+})
+
+test('Given an anchor placed by this process and no refusal, When drawn, Then the link is a blue button and no reason line shows', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const { writes, clock } = await start(on)
+  const [round] = await oneRound($, clock, writes)
+  // When
+  const ui = await mountPane($, 70)
+  const root = await ui.drawn()
+  const text = rowTexts(root).join('\n')
+  await ui.press({ key: `done:${round?.at}:link` })
+  await ui.unmount()
+  // Then
+  expect(colorOf(root, new RegExp(LINK))).toBe(COLORS.blue)
+  expect(text).not.toContain(RESTART_REASON)
+  expect(text).not.toContain(DENIED_REASON)
+})
+
+test('Given a narrow pane, When a round header has a dim link and another a live link, Then both header rows have the same width', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const old = { at: NOW - 300_000, kind: 'round', n: 1, ms: 0, prompt: 'old prompt that is long enough to be cut', anchor: 'req-gone' }
+  const { writes, clock } = await start(on, { dataFile: { history: [], prs: [], sessionLog: [old] } })
+  await oneRound($, clock, writes)
+  // When
+  const ui = await mountPane($, 40)
+  const rows = rowTexts(await ui.drawn()).map(r => r.trimEnd())
+  await ui.unmount()
+  // Then
+  const heads = rows.filter(r => r.includes(LINK))
+  expect(heads, rows.join('\n')).toHaveLength(2)
+  expect(new Set(heads.map(textCells)).size, rows.join('\n')).toBe(1)
+})
+
+test('Given a round with a failed call and a wait, When drawn in principali and then in tutto, Then the wait row and the older failed calls show only in tutto', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   resetAnchors()
   setLang('en')
@@ -150,7 +218,7 @@ test('Given a round with a failed call and a wait, When drawn in principali and 
   const all = rowTexts(await ui.drawn()).join('\n')
   await ui.unmount()
   // Then
-  expect(main).not.toContain('Read: no such file')
+  expect(main).toContain('Read: no such file')
   expect(main).not.toContain('Write waited 1m10s')
   expect(all).toContain('Read: no such file')
   expect(all).toContain('Write waited 1m10s')

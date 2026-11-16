@@ -12,7 +12,8 @@ import type { CockpitAgent } from '../types'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import { SEVERITY_COLORS, collapsible, signalIcon, signalText } from './view-kit'
 import type { Block, Kit } from './view-kit'
-import { ALL_KEY, LABEL_W, detailRows, filesText, isAllShown, isExpandable, isMainEntry, linkAnchor, modelSpans, roundHeader, summarySpans } from './view-log-round'
+import { ALL_KEY, LABEL_W, detailRows, filesText, isAllShown, isExpandable, isMainEntry, modelSpans, roundAnchors, roundHeader, roundLink, summarySpans } from './view-log-round'
+import { linkReason } from './round-anchor'
 import { activeRun, agentRunId, roundOf, taskRows } from './workflow'
 
 /** LOG shows this many nodes (an open one with its whole subtree); the rest sits behind its toggle. */
@@ -39,6 +40,8 @@ type DoneEntry = DoneEvent & {
   isRunning?: boolean
   /** The running agent itself: its row opens on its detail and trail. */
   live?: CockpitAgent
+  /** The text's color, when it is not the default. */
+  color?: string
   /** The time the row shows, when it is not `at`. */
   start?: number
   usd?: number
@@ -103,6 +106,8 @@ function logEntry(e: CockpitLogEntry): DoneEntry | undefined {
       return { at: e.at, kind: 'test', icon: e.isFailed ? sp('󰤒', COLORS.red) : sp('󰙨', COLORS.green), text: E.test(e.text ?? '', e.isFailed === true), ...(e.runId !== undefined && { runId: e.runId }), ...(e.agent !== undefined && { agent: e.agent }) }
     case 'compact':
       return { at: e.at, kind: 'compact', icon: sp('◇', COLORS.blue), text: E.compact(e.tokens === undefined ? '' : abbrevTokens(e.tokens), e.after === undefined ? '' : abbrevTokens(e.after)) }
+    case 'error':
+      return { at: e.at, kind: 'error', icon: sp('󰀦', COLORS.red), text: E.error(e.key ?? '?', e.n ?? 1), color: COLORS.red }
     case 'pr':
       return { at: e.at, kind: 'pr', icon: sp('󰓂', COLORS.lavender), text: E.pr(e.key ?? '', e.text ?? ''), ...(e.runId !== undefined && { runId: e.runId }), ...(e.agent !== undefined && { agent: e.agent }) }
   }
@@ -180,7 +185,7 @@ function nodeLabel(g: G, tree: Tree): { label: Span; after: Span[] } {
 }
 
 /** The header of a node: toggle arrow (a dash when empty), start time (not the open round's), label, and at the row's end the figures (length, cost, share of the session's cost). */
-function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; anchor?: number } {
+function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; rest: Span[]; link?: { anchor: string; isLive: boolean } } {
   const { width, s } = k
   const { label, after } = nodeLabel(g, tree)
   const time = g.isCurrent ? [] : [dim(clockTime(startOf(g))), sp(' ')]
@@ -188,9 +193,9 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
   // a node with nothing under it opens nothing: a dash, not an arrow
   const arrow = sp(!isExpandable(g, s) ? '- ' : isOpen ? '▾ ' : '▸ ')
   // a round is one row: time, number, prompt, context and model, the figures at the end; its link, when it has one, sits in front (2 cells)
-  const anchor = g.flow === undefined ? linkAnchor(g, s) : undefined
-  const round = roundHeader(g, s, { time, label, figures: fig, width: width - (anchor === undefined ? 0 : 2) })
-  if (round !== undefined) return { arrow, rest: round, ...(anchor !== undefined && { anchor }) }
+  const link = g.flow === undefined ? roundLink(g, s) : undefined
+  const round = roundHeader(g, s, { time, label, figures: fig, width: width - (link === undefined ? 0 : 2) })
+  if (round !== undefined) return { arrow, rest: round, ...(link !== undefined && { link }) }
   // a live run's phase and progress outrank its name: on a narrow pane the name gives way first, down to `flow…`
   const room = width - 2 - spanWidth(fig) - 1 - spanWidth(time) - (after.length > 0 ? 1 + spanWidth(after) : 0)
   const name = after.length > 0 && textCells(label.t) > room ? { ...label, t: truncateSpans([label], Math.max(room, 5)).map(x => x.t).join('') } : label
@@ -203,7 +208,7 @@ function nodeHeader(k: Kit, tree: Tree, g: G, isOpen: boolean): { arrow: Span; r
 function eventRow(k: Kit, e: DoneEntry, prefix: string, toggle?: { key: string; isOpen: boolean; onPress: () => void }): Block {
   const { ui } = k
   const { Button, Text } = ui
-  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : []), ...(toggle?.isOpen === true && e.live !== undefined ? subagentInline(e.live) : [])]
+  const left = [dim(clockTime(e.start ?? e.at)), sp(' '), e.icon, sp(' '), sp(e.text, e.color), ...(toggle === undefined ? [] : [sp(toggle.isOpen ? ' ▾' : ' ▸')]), ...(e.kind === 'agent' && (e.model !== undefined || e.effort !== undefined) ? [sp(' '), ...modelSpans(e.model, e.effort)] : []), ...(toggle?.isOpen === true && e.live !== undefined ? subagentInline(e.live) : [])]
   const spans = [sp(prefix, COLORS.rule), ...pairRow(left, e.kind === 'agent' ? figures(e.usd, e.ms, k.s.cost.usd) : [], k.width - textCells(prefix))]
   // a flow agent that runs is a toggle: its row opens on its detail and trail
   const rest = (from: number): Block =>
@@ -319,12 +324,12 @@ function nodeChildren(k: Kit, g: G, drawn?: Set<string>): Block[] {
 function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean, drawn?: Set<string>): Block {
   const { ui, actions } = k
   const { Box, Button, Text } = ui
-  const { arrow, rest, anchor } = nodeHeader(k, tree, g, isOpen)
+  const { arrow, rest, link } = nodeHeader(k, tree, g, isOpen)
   const toggle = () => actions.setGroupOpen(g.key, !isOpen)
   const isExpand = isExpandable(g, k.s)
   const isFade = isExpand && isNewest
-  // the link is a button of its own (2 cells) between the arrow and the row: it scrolls the chat to the round's marker
-  if (anchor !== undefined) {
+  // the link is a button of its own (2 cells) between the arrow and the row: it scrolls the chat to the round's marker; one that cannot scroll keeps its slot, dim and not pressable
+  if (link !== undefined) {
     return [
       [
         <Box>
@@ -335,9 +340,13 @@ function nodeBlock(k: Kit, tree: Tree, g: G, isOpen: boolean, isNewest: boolean,
           ) : (
             <Text wrap="truncate">{spanNodes(ui, [arrow])}</Text>
           )}
-          <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(anchor)}>
-            <Text wrap="truncate">{spanNodes(ui, [sp('󰌷', COLORS.blue), sp(' ')])}</Text>
-          </Button>
+          {link.isLive ? (
+            <Button key={`${g.key}:link`} plain onPress={() => actions.scrollTo(link.anchor)}>
+              <Text wrap="truncate">{spanNodes(ui, [sp('󰌷', COLORS.blue), sp(' ')])}</Text>
+            </Button>
+          ) : (
+            <Text wrap="truncate">{spanNodes(ui, [sp('󰌷', COLORS.dim), sp(' ')])}</Text>
+          )}
           {isFade ? (
             animCell(ui, 'anim:done', 'fade', rest)
           ) : isExpand ? (
@@ -452,5 +461,10 @@ export function doneBlocks(k: Kit): Block[] {
       </Button>
     </Box>,
   ]
-  return [[title, collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done'))]]
+  const E = t().page.events
+  const reason = linkReason(roundAnchors(s))
+  // the reason sits under the title; the trimmed row ends the log: neither is a node, so neither counts in DONE_ROWS
+  const reasonRow: Block[] = reason === undefined ? [] : [[line(ui, [sp(reason === 'denied' ? E.linkDenied : E.linkRestart, COLORS.dim)])]]
+  const trimmedRow: Block[] = s.logTrimmed === undefined || !(s.logTrimmed > 0) ? [] : [[line(ui, [sp(E.trimmed(s.logTrimmed), COLORS.dim)])]]
+  return [[title, ...reasonRow, collapsible(k, 'done', rows, DONE_ROWS, s.openKeys?.includes('done') === true, () => actions.toggleOpen('done')), ...trimmedRow]]
 }

@@ -8,7 +8,8 @@ import { ROUNDS_KEEP, parseCounts, parseCtx } from './context'
 import { shownTurnUsd } from './shared'
 import { INITIAL } from './state'
 import { configDir } from './store'
-import { parseFails, parseLog, parseToolCounts, parseWaits } from './timeline'
+import { clearSwallowed, noteSwallowed, settleSwallowed, swallowedPending, withSwallowed } from './swallowed'
+import { parseFails, parseLogCount, parseToolCounts, parseWaits } from './timeline'
 import { agentCounts, taskCounts } from './view-agents'
 import { parseEdited, parseSavedPrs } from './work'
 
@@ -46,6 +47,7 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
     ...(s.ctxRounds !== undefined && { ctxRounds: s.ctxRounds }),
     ...(s.edited !== undefined && { edited: s.edited }),
     ...(s.sessionLog !== undefined && { sessionLog: s.sessionLog }),
+    ...(s.logTrimmed !== undefined && { logTrimmed: s.logTrimmed }),
     ...(s.roundTools !== undefined && { roundTools: s.roundTools }),
     ...(s.roundPrompt !== undefined && { roundPrompt: s.roundPrompt }),
     ...(s.roundAnchor !== undefined && { roundAnchor: s.roundAnchor }),
@@ -87,12 +89,14 @@ export async function writeState($: EngineInterface, isForced = false, isHeartbe
     const file = `${dir}/.cache/cockpit-${id}.json`
     const key = `${file} ${JSON.stringify(content)}`
     const dataFile = `${dir}/.cache/cockpit-data-${id}.json`
-    const data = JSON.stringify(sessionData(s))
+    // the swallowed errors waiting are logged with this write; the snapshot takes them, and the count is forgotten, only once it succeeded
+    const swallowed = new Map(swallowedPending())
+    const now = await $.clock.now()
+    const data = JSON.stringify(sessionData(swallowed.size > 0 ? withSwallowed(s, swallowed, now) : s))
     const dataKey = `${dataFile} ${data}`
     const isStateStale = key !== lastWritten || isHeartbeat
     const isDataStale = dataKey !== lastDataWritten
     if (!isStateStale && !isDataStale) return
-    const now = await $.clock.now()
     const wait = STATE_MIN_MS - (now - lastWriteAt)
     if (!isForced && wait > 0) {
       if (writeScheduledAt === undefined || now - writeScheduledAt >= 2 * STATE_MIN_MS) {
@@ -112,10 +116,15 @@ export async function writeState($: EngineInterface, isForced = false, isHeartbe
     if (isDataStale) {
       await $.fs.write(dataFile, data)
       lastDataWritten = dataKey
+      if (swallowed.size > 0) {
+        await update($, snapshot, st => withSwallowed(st, swallowed, now))
+        settleSwallowed(swallowed)
+      }
     }
     lastWriteAt = now
   } catch {
-    // best-effort: the statusline simply shows what it showed
+    // best-effort: the statusline simply shows what it showed; the failure is counted and logged at the next write that succeeds
+    noteSwallowed('session-data:write')
   }
 }
 
@@ -138,6 +147,7 @@ type Saved = {
   ctxRounds?: number[]
   edited?: string[]
   sessionLog?: CockpitLogEntry[]
+  logTrimmed?: number
   roundTools?: Record<string, number>
   roundPrompt?: string
   roundAnchor?: string
@@ -166,6 +176,9 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
     const field = (key: 'history' | 'prs') => (data && key in data ? data[key] : state?.[key])
     const history = parseHistory(field('history'))
     const prs = parseSavedPrs(field('prs'))
+    const parsedLog = parseLogCount(data?.sessionLog)
+    // a stored log longer than the keep adds its overflow to the count it was saved with
+    const logTrimmed = (count(data?.logTrimmed) ?? 0) + parsedLog.trimmed
     return {
       history,
       prs: prs.length > 0 ? prs : undefined,
@@ -173,7 +186,8 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       agentTokens: count(state?.agentTokens) ?? historyTokens(history),
       ctxRounds: parseCounts(data?.ctxRounds, ROUNDS_KEEP),
       edited: parseEdited(data?.edited),
-      sessionLog: withHistoryAgents(parseLog(data?.sessionLog), history),
+      sessionLog: withHistoryAgents(parsedLog.log, history),
+      logTrimmed: logTrimmed > 0 ? logTrimmed : undefined,
       roundTools: parseToolCounts(data?.roundTools),
       roundPrompt: typeof data?.roundPrompt === 'string' && data.roundPrompt !== '' ? data.roundPrompt : undefined,
       roundAnchor: typeof data?.roundAnchor === 'string' && data.roundAnchor !== '' ? data.roundAnchor : undefined,
@@ -212,6 +226,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   ctxRounds: undefined,
   edited: undefined,
   sessionLog: undefined,
+  logTrimmed: undefined,
   roundTools: undefined,
   roundPrompt: undefined,
   roundAnchor: undefined,
@@ -244,10 +259,12 @@ export async function adoptSession($: EngineInterface, isStart = false): Promise
   const saved = await savedState($, id)
   // A resume keeps the moment the chat began: the pull requests opened since then are the chat's.
   const startedAt = saved.startedAt ?? (await $.clock.now())
+  // the errors counted so far belong to the session that is gone
+  clearSwallowed()
   await update($, snapshot, s =>
     s.sessionId === id
       ? s
-      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
+      : { ...withoutSession(s), sessionId: id, endedSessionId: undefined, history: saved.history, prs: saved.prs, ctxRounds: saved.ctxRounds, edited: saved.edited, sessionLog: saved.sessionLog, logTrimmed: saved.logTrimmed, roundTools: saved.roundTools, roundPrompt: saved.roundPrompt, roundAnchor: saved.roundAnchor, roundFiles: saved.roundFiles, roundFails: saved.roundFails, roundWaits: saved.roundWaits, roundSeq: saved.roundSeq, agentSpend: saved.agentSpend, lastCtx: saved.ctx, mainTokens: saved.mainTokens, agentTokens: saved.agentTokens, startedAt },
   )
 }
 

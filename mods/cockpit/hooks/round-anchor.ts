@@ -28,6 +28,10 @@ export async function placeMarker($: EngineInterface, n: number): Promise<string
 /** Whether a round's link shows: its marker was placed by this process and no scroll has been refused yet. */
 export const isLinkShown = (anchor: string | undefined): boolean => anchor !== undefined && !isDenied && placed.has(anchor)
 
+/** Why the links of `anchors` are dim: a refused scroll outranks markers an earlier process placed; none when every link works or there is none. */
+export const linkReason = (anchors: readonly string[]): 'denied' | 'restart' | undefined =>
+  anchors.length === 0 ? undefined : isDenied ? 'denied' : anchors.some(a => !placed.has(a)) ? 'restart' : undefined
+
 /** Scrolls the chat to a marker; a refusal, or an engine with no scroll to a transcript row, hides the links for the rest of the session and redraws. */
 export async function scrollToAnchor($: EngineInterface, anchor: string): Promise<void> {
   const result = await $.ui.scroll({ to: { requestId: anchor } }).catch((): { deny?: string } => ({ deny: 'scroll failed' }))

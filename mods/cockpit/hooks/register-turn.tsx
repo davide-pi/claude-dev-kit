@@ -16,7 +16,8 @@ import { INITIAL } from './state'
 import { patch } from './store'
 import { CENT } from './shared'
 import { usdOf } from './pricing'
-import { flowUsdIn, lastRoundFlowUsd, nextCompactKey, recordAgentEvent, recordLog, withRoundLastUsd } from './timeline'
+import { noteSwallowed } from './swallowed'
+import { flowUsdIn, lastRoundFlowUsd, nextCompactKey, recordAgentEvent, withLogged, withRoundLastUsd } from './timeline'
 import { addWorkflowAgent, agentRunId, endRun, finishWorkflowAgent, logRunChange, recordAgentLog, touchRun } from './workflow'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -61,6 +62,7 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
       )
     } catch {
       // observing must never break the step
+      noteSwallowed('register-turn:step')
     }
     // The main loop's chunks tell what Claude is doing: a thinking chunk is thinking, text or a tool's start is working. A chunk
     // repeats many times a second: the state is written when the kind it derives changes, with no snapshot read in between.
@@ -82,6 +84,7 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
       if (usage) await addStepUsage($, e.agentId, usageOf(usage))
     } catch {
       // observing must never break the step
+      noteSwallowed('register-turn:usage')
     }
   })
 }
@@ -97,12 +100,12 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
       await patch($, s => {
         const before = done.tokensBefore ?? s.ctx.tokens
         const insights = recordCompaction(s.insights, before)
-        const logged = { ...s, insights, sessionLog: recordLog(s.sessionLog, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) }) }
+        const logged = withLogged({ ...s, insights }, { at: at ?? s.now, kind: 'compact', key: nextCompactKey(s.sessionLog), ...(before !== undefined && before > 0 && { tokens: before }) })
         if (after === undefined) return logged
         // the size the compaction reports is the context now: drawn at once, and the entry's `after`, not left until the next reading
         const { window } = s.ctx
         return { ...logged, ctx: { ...s.ctx, tokens: after, percent: window !== undefined && window > 0 ? (100 * after) / window : undefined }, ...withContextReading(logged, after, at) }
-      }).catch(() => undefined)
+      }).catch(() => noteSwallowed('register-turn:compact'))
       // no size reported: the engine's own reading, rather than the context before the compaction until the next turn
       if (after === undefined) await refreshUsage($)
     }
@@ -145,7 +148,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
         const title = promptTitle(e)
         const before = await read($, snapshot)
         // the round's first prompt places its chat marker; a refused place leaves the round without a link
-        const anchor = before.roundPrompt === undefined && title !== '' ? await placeMarker($, nextRoundNumber(before)).catch(() => undefined) : undefined
+        const anchor = before.roundPrompt === undefined && title !== '' ? await placeMarker($, nextRoundNumber(before)).catch((): undefined => void noteSwallowed('register-turn:marker')) : undefined
         await patch($, s => {
           const titled = withRoundPrompt(s, title)
           return anchor !== undefined && titled !== s && s.roundAnchor === undefined ? { ...titled, roundAnchor: anchor } : titled
@@ -153,6 +156,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
       }
     } catch {
       // observing must never break the submit
+      noteSwallowed('register-turn:submit')
     }
     return next(e)
   })
@@ -177,8 +181,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
         const insights = recordRoundEnd(s.insights, { usd, ms: e.durationMs, cacheShare, endedAt: now })
         const round = nextRoundNumber(s)
         return withLoggedSignals({
-          ...s,
-          sessionLog: recordLog(s.sessionLog, { at: now, kind: 'round', n: round, ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }), ...roundFields(s) }),
+          ...withLogged(s, { at: now, kind: 'round', n: round, ms: e.durationMs, ...(usd !== undefined && usd >= CENT && { usd }), ...(s.roundTools !== undefined && { tools: s.roundTools }), ...roundFields(s) }),
           roundTools: undefined,
           roundPrompt: undefined,
           roundAnchor: undefined,
