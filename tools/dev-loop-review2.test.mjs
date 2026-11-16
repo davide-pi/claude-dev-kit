@@ -85,7 +85,7 @@ test('given a gate fix call that raises a reversible logic question, when it ret
   // Then
   assert.equal(out.status, 'OK');
   assert.deepEqual(out.defaultsApplied, [{ block: 1, question: 'Which sort order?', default: 'newest first' }]);
-  assert.ok(implCalls(calls).some(c => c.opts.label === 'implement the change (gate fix) (answers)'));
+  assert.ok(implCalls(calls).some(c => c.opts.label === 'B1 · T1 · fix (gate) (answers)'));
 });
 
 const fixRoundRun = (fixGate, extra = {}) => run(V_ARGS, [review([], [finding()])], [treeless(), impl({ gate: fixGate, snapshot: T2('t2', 10) }), treeless({ snapshot: T2('t3', 10) })], extra);
@@ -166,11 +166,11 @@ test('given no verify command, when an M run ends, then one gap says the blocks 
 
 test('given a reader A finding inside the perimeter, when the reader A fix is briefed, then it carries the scope-revert and reproduce-first rules of the fix round', async () => {
   // Given
-  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review([])];
+  const queue = [review([], [scopeAt({ confidence: 'PLAUSIBLE' })]), review([]), review([])];
   // When
-  const { calls } = await run(V_ARGS, queue, [green(), green()]);
+  const { calls } = await run({ ...V_ARGS, plan: { tasks: tasksOf(5) } }, queue, [green(), green(), green()]);
   // Then
-  const prompt = calls.find(c => c.opts.label === 'implement the change (reader A fix)').prompt;
+  const prompt = calls.find(c => c.opts.label === 'B1 · T1 T2 T3 · fix').prompt;
   assert.match(prompt, /A "scope" finding means revert that hunk/);
   assert.match(prompt, /REPRODUCE FIRST/);
   assert.match(prompt, /A1\.1 \[P2\].*\(PLAUSIBLE: REPRODUCE FIRST\)/);
@@ -206,7 +206,7 @@ test('given M, when its only final reader raises a CONFIRMED scope finding, then
   // When
   const { calls } = await run(ARGS_M, queue, [impl(), impl({ snapshot: T2('t2', 10) })]);
   // Then
-  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['implement the change', 'fix round 1 findings']);
+  assert.deepEqual(implCalls(calls).map(c => c.opts.label), ['B1 · T1 · implement', 'fix round 1 findings']);
 });
 
 test('given the coverage rerun at M that goes to B alone, when it runs, then its effort is medium and its model unchanged', async () => {

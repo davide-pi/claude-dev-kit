@@ -47,7 +47,7 @@ function fakeRunner({ gate = [GREEN], changed = 'rules/a.md\n', porcelain = ' M 
     if (is(args, 'gate.mjs')) {
       const out = gateAnswers.length > 1 ? gateAnswers.shift() : gateAnswers[0];
       const verdict = JSON.parse(out).gate;
-      const status = verdict === 'red' ? 1 : verdict === 'running' ? 3 : 0;
+      const status = verdict.startsWith('red') ? 1 : verdict === 'running' ? 3 : 0;
       return { status, stdout: `noise\n${out}\n`, stderr: '' };
     }
     if (is(args, 'sweep.mjs')) return ok('{"closed":1,"listed":0}\n');
@@ -208,3 +208,24 @@ test('given the README, when read, then kit-close.mjs, install.ps1 -Only/-Verify
   assert.match(readme, /`kit-close`/);
   assert.match(readme, /`install-only`/);
 });
+
+test('given a gate last line "skipped: tree unchanged" with exit 0, when kit-close runs, then it goes on to the sweep step instead of stopping at gate', withRoot(async root => {
+  // Given
+  const { run } = fakeRunner({ gate: ['{"gate":"skipped: tree unchanged","tree":"t1","greenAt":"x","formatOnly":[]}'] });
+  // When
+  const result = await closeChange(base(root), run);
+  // Then
+  assert.equal(result.code, 0);
+  assert.notEqual(result.failed, 'gate');
+  assert.deepEqual(result.steps.slice(0, 2), ['gate', 'sweep']);
+}));
+
+test('given a gate line red: tests changed with exit 1, when kit-close runs, then it still stops at gate', withRoot(async root => {
+  // Given
+  const { run } = fakeRunner({ gate: ['{"gate":"red: tests changed","test":"t.test.mjs"}'] });
+  // When
+  const result = await closeChange(base(root), run);
+  // Then
+  assert.equal(result.failed, 'gate');
+  assert.deepEqual(result.steps, ['gate']);
+}));

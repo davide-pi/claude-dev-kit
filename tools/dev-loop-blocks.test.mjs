@@ -12,7 +12,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { blocksFor, lanesFor, lanesWorth, stepBudget, sizeFor, blockReader, finalReadersFor, verifierFor, ARBITER, questionPolicy } from './dev-loop.harness.mjs';
 
-const tasks = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `t${i + 1}`, title: `task ${i + 1}`, files: [], dependsOn: [], tdd: false, criteria: [], ...(extra[i + 1] ?? {}) }));
+const tasks = (n, extra = {}) => Array.from({ length: n }, (_, i) => ({ id: `t${i + 1}`, title: `task ${i + 1}`, files: [], dependsOn: [], tdd: false, criteria: [], risky: true, ...(extra[i + 1] ?? {}) }));
 const shape = (blocks) => blocks.map((b) => b.length);
 
 // ── blocks ─────────────────────────────────────────────────────────────────
@@ -366,4 +366,151 @@ test('given a glob and a literal file under its literal prefix, when the lanes a
   const lanes = lanesFor(plan);
   // Then
   assert.deepEqual(ids(lanes), [['t1', 't2'], ['t3']]);
+});
+
+// ── reader A is skipped at M with a single block (P20) ───────────────────────────────────────────────────
+import { run, ARGS, ARGS_M, review, impl, gate } from './dev-loop.harness.mjs';
+
+const readerAs = (calls) => calls.filter((c) => /reader A$/.test(c.opts.label ?? ''));
+const greenAt = (tree) => impl({ gate: gate('green', { tree }) });
+const VERIFIED = { verify: 'node --test x' };
+
+test('given size M, one block and a verify command, when the loop runs, then no reader A runs and the block log says why', async () => {
+  // Given
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(2) } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [greenAt('tr1')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 0);
+  assert.equal(out.blocks[0].readerA.skipped, true);
+  assert.equal(typeof out.blocks[0].readerA.reason, 'string');
+  assert.ok(out.blocks[0].readerA.reason.length > 0);
+});
+
+test('given size M and a plan of five tasks, when the loop runs, then reader A runs on each block', async () => {
+  // Given
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(5) } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 2);
+  assert.deepEqual(out.blocks.map((b) => 'skipped' in b.readerA), [false, false]);
+});
+
+test('given size M, one block and no verify command, when the loop runs, then the block log does not claim a skip', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2) } };
+
+  // When
+  const { out } = await run(args, [review([]), review([])], [impl()]);
+
+  // Then
+  assert.equal('skipped' in out.blocks[0].readerA, false);
+});
+
+// ── T10: a block of mechanical tasks runs on Haiku ───────────────────────────────────────────────────
+const implementerOf = (calls, n) => calls.find((c) => c.opts.agentType === 'implementer' && new RegExp(`^B${n} · `).test(c.opts.label));
+
+test('given a block whose tasks are all mechanical true, when its implementer runs, then model haiku effort low', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2, { 1: { mechanical: true }, 2: { mechanical: true } }) } };
+  // When
+  const { calls } = await run(args, [review([])], [impl()]);
+  // Then
+  const opts = implementerOf(calls, 1).opts;
+  assert.equal(opts.model, 'haiku');
+  assert.equal(opts.effort, 'low');
+});
+
+test('given a block with one non-mechanical task, when its implementer runs, then the default model and effort', async () => {
+  // Given
+  const args = { ...ARGS_M, plan: { tasks: tasks(2, { 1: { mechanical: true }, 2: { mechanical: false } }) } };
+  // When
+  const { calls } = await run(args, [review([])], [impl()]);
+  // Then
+  const opts = implementerOf(calls, 1).opts;
+  assert.equal(opts.model, undefined);
+  assert.equal(opts.effort, 'medium');
+});
+
+test('given size M and a plan of five tasks none risky, with no security or data axis and a green gate, when the loop runs, then reader A runs on no block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 0);
+  assert.deepEqual(out.blocks.map((b) => b.readerA.skipped), [true, true]);
+});
+
+test('given a plan with one risky:true task in one block of two, when the loop runs, then reader A runs on that block only', async () => {
+  // Given
+  const plan = tasks(5).map((t) => ({ ...t, risky: t.id === 't1' }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: plan } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 1);
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+});
+
+test('given no risky task but a data axis, when the loop runs, then reader A runs on every block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, risk: ['data'], plan: { tasks: calm } };
+
+  // When
+  const { calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.equal(readerAs(calls).length, 2);
+});
+
+test('given no risky task and a block gate red before green, when the loop runs, then reader A runs on that block only', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [impl({ gate: gate('red', { tree: 'tr0' }) }), greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+  assert.equal(readerAs(calls).length, 1);
+});
+
+test('given no risky task and a partial report with a red gate, when its continuation turns green, then reader A still runs on that block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+  const partialRed = impl({ gate: gate('red', { tree: 'tr0' }), remaining: ['T3: not started'] });
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [partialRed, greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+  assert.equal(readerAs(calls).length, 1);
+});
+
+test('given a gated block whose implementer asked a question, when the answers run reports no gate line, then it gets one gate re-prompt before verify-not-run', async () => {
+  // Given
+  const question = [{ text: 'Which tenant owns the order?', default: 'the caller tenant', why: 'two tenants are possible' }];
+  const args = { ...ARGS_M, ...VERIFIED, resolutions: [{ round: 0, answers: [{ text: question[0].text, answer: 'the caller tenant' }] }] };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [impl({ questions: question }), impl(), greenAt('tr1')]);
+
+  // Then
+  assert.equal(calls.filter((c) => /\(answers\) \(gate line\)$/.test(c.opts.label ?? '')).length, 1);
+  assert.equal(out.status, 'OK');
 });

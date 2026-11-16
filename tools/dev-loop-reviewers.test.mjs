@@ -309,7 +309,7 @@ test('given an M run where B raised a P2 reading only F9, when the fix is verifi
   ];
   const impls = [manyImpl, { scope: 'fixed', files: [f9], evidence: 'ok', rejected: [], noticed: [] }];
   // When
-  const { out, calls } = await run(manyArgs({ size: 'M' }), queue, impls);
+  const { out, calls } = await run(manyArgs({ size: 'M', plan: ARGS_M.plan }), queue, impls);
   // Then
   assert.equal(out.status, 'OK');
   assert.deepEqual(reviewLabels(calls, 3), ['reviewer B · round 3 · whole diff']);
@@ -470,10 +470,10 @@ test('given a change past 10 files or 600 changed lines, when the final readers 
   const L = { plan: { tasks: tasksOf(5) } };
   // When
   const seen = {
-    wideFiles: await round1({ size: 'M' }, implOf(11)),
-    tenFiles: await round1({ size: 'M' }, implOf(10)),
-    wideLines: await round1({ size: 'M' }, implOf(2, 601)),
-    sixHundredLines: await round1({ size: 'M' }, implOf(2, 600)),
+    wideFiles: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(11)),
+    tenFiles: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(10)),
+    wideLines: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(2, 601)),
+    sixHundredLines: await round1({ size: 'M', plan: ARGS_M.plan }, implOf(2, 600)),
     smallWideFiles: await round1({ size: 'S' }, implOf(14)),
     smallWideLines: await round1({ size: 'S' }, implOf(2, 601)),
     mechanical: await round1({ size: 'S', mechanical: true }, implOf(14)),
@@ -497,16 +497,18 @@ test('given a change past 10 files or 600 changed lines, when the final readers 
 // ── deliver flow v2, task 11: reader A reads each block ───────────────────────────────────────────────────
 import { gate } from './dev-loop.harness.mjs';
 
-const readerA = (calls) => calls.filter(c => /^block \d+ · reader A$/.test(c.opts.label ?? ''));
+const readerA = (calls) => calls.filter(c => /reader A$/.test(c.opts.label ?? ''));
 const implLabels = (calls) => calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label);
-const BLOCK = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] } };
+// two blocks (size L): reader A runs on a block when its tree differs from the previous one; the scripted blocks share tree tr1, so only block 1 is read
+const BLOCK = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
+const FIX1 = 'B1 · T1 T2 T3 · fix';
 const greenImpl = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
 
 test('given a block whose gate is green, when it ends, then reader A reads that block\'s delta on sonnet at high', async () => {
   // Given
-  const impls = [greenImpl()];
+  const impls = [greenImpl(), greenImpl()];
   // When
-  const { calls } = await run(BLOCK, [review([]), review([])], impls);
+  const { calls } = await run(BLOCK, [review([]), review([]), review([])], impls);
   // Then
   const [a] = readerA(calls);
   assert.deepEqual([a.opts.agentType, a.opts.model, a.opts.effort], ['code-reviewer', 'sonnet', 'high']);
@@ -518,9 +520,10 @@ test('given reader A raises a P2 inside the perimeter, when the block closes, th
   const raised = review([], [finding({ title: 'tax rounds the wrong way' })]);
   const impls = [greenImpl(), greenImpl({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 2 }, gate: gate('green', { tree: 'tr2' }) })];
   // When
-  const { out, calls } = await run(BLOCK, [raised, review([])], impls);
+  impls.push(greenImpl({ gate: gate('green', { tree: 'tr2' }) }));
+  const { out, calls } = await run(BLOCK, [raised, review([]), review([])], impls);
   // Then
-  assert.deepEqual(implLabels(calls), ['implement the change', 'implement the change (reader A fix)']);
+  assert.deepEqual(implLabels(calls), ['B1 · T1 T2 T3 · implement', FIX1, 'B2 · T4 T5 · implement']);
   const fix = calls.filter(c => c.opts.agentType === 'implementer')[1].prompt;
   assert.ok(fix.includes('tax rounds the wrong way') && fix.includes('node ~/.claude/scripts/gate.mjs --root \'C:/repo\' --head abc123'));
   assert.deepEqual(out.blocks[0].readerA, { raised: 1, fixed: 1, carried: 0 });
@@ -531,7 +534,7 @@ test('given a finding still open after the in-block fix, when the final verifica
   const raised = review([], [finding({ title: 'carried-title-xyz' })]);
   const rejects = greenImpl({ rejected: [{ id: 'A1.1', reason: 'it is not a defect', kind: 'wrong' }] });
   // When
-  const { out, calls } = await run(BLOCK, [raised, review([])], [greenImpl(), rejects]);
+  const { out, calls } = await run(BLOCK, [raised, review([]), review([])], [greenImpl(), rejects, greenImpl()]);
   // Then
   const [round1] = calls.filter(c => isReview(c.opts.label, 1));
   assert.ok(round1.prompt.includes('carried-title-xyz'));
@@ -540,9 +543,9 @@ test('given a finding still open after the in-block fix, when the final verifica
 
 test('given a format-only file, when reader A is briefed, then the brief says not to raise formatting findings on it', async () => {
   // Given
-  const impls = [impl({ gate: gate('green', { tree: 'tr1', formatOnly: ['src/Orders/Fmt.cs'] }) })];
+  const impls = [impl({ gate: gate('green', { tree: 'tr1', formatOnly: ['src/Orders/Fmt.cs'] }) }), greenImpl()];
   // When
-  const { calls } = await run(BLOCK, [review([]), review([])], impls);
+  const { calls } = await run(BLOCK, [review([]), review([]), review([])], impls);
   // Then
   const [a] = readerA(calls);
   assert.ok(a.prompt.includes('src/Orders/Fmt.cs') && /do not raise formatting findings/i.test(a.prompt));
@@ -554,7 +557,7 @@ test('given reader A findings that stay open, when the loop ends, then the resul
   const raised = review([], [finding({ title: 'carried-title-xyz' }), finding({ title: 'elsewhere-title', path: 'src/Other/Helper.cs', line: 9, causedByChange: true })]);
   const rejects = greenImpl({ rejected: [{ id: 'A1.1', reason: 'it is not a defect', kind: 'wrong' }] });
   // When
-  const { out } = await run(BLOCK, [raised, review([])], [greenImpl(), rejects]);
+  const { out } = await run(BLOCK, [raised, review([]), review([])], [greenImpl(), rejects, greenImpl()]);
   // Then
   assert.deepEqual(out.carried, [
     { block: 1, id: 'A1.2', priority: 'P2', title: 'elsewhere-title', file: 'src/Other/Helper.cs', why: 'outside perimeter' },
@@ -566,10 +569,10 @@ test('given reader A raises a P3 inside the perimeter, when the block closes, th
   // Given
   const raised = review([], [finding({ priority: 'P3', title: 'minor-naming-note' })]);
   // When
-  const { out, calls } = await run(BLOCK, [raised, review([])], [greenImpl()]);
+  const { out, calls } = await run(BLOCK, [raised, review([]), review([])], [greenImpl(), greenImpl()]);
   // Then
   assert.deepEqual(out.minor.map(m => m.title), ['minor-naming-note']);
-  assert.equal(calls.filter(c => c.opts.agentType === 'implementer').length, 1);
+  assert.equal(calls.filter(c => c.opts.agentType === 'implementer').length, 2);
 });
 
 test('given a reader A fix that edits a proven test, when its gate says red: tests changed, then the loop stalls as tests-changed for the owner', async () => {
