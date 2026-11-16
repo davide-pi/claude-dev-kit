@@ -200,7 +200,7 @@ function checkScriptArgs(command, tool) {
       for (let i = 0; i < tokens.length - 1; i++) {
         if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
           note(`The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `
-            + 'npm/pnpm/yarn test) or holds a shell operator, and the gate runs it through a shell. Confirm?');
+            + 'npm/pnpm/yarn test, claude plugin test) or holds a shell operator, and the gate runs it through a shell. Confirm?');
           break;
         }
       }

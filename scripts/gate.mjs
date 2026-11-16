@@ -439,7 +439,7 @@ function hashFiles(root, files) {
 }
 
 /** A runner whose failed tests `failedTests` can read, from the command line; null when none matches. */
-export const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\b|\bvitest\b|\bjest\b|\bbun\s+test\b|\bclaude\s+plugin\s+test\b/.exec(command)?.[0] ?? null;
+export const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\b|\bvitest\b|\bjest\b|\bbun\s+test(?![\w.-])|\bclaude\s+plugin\s+test(?![\w.-])/.exec(command)?.[0] ?? null;
 
 function finalize(dir, state) {
   const run = state.run;
