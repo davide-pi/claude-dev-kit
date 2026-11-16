@@ -317,3 +317,16 @@ test('given a client behind ssh, when the guard runs it, then the inner host is 
   expect('deny', ['ssh host "psql -h prod-pg.example.com"', 'ssh -p 22 host redis-cli -h cache-prod.example.com'], /db-ro\.ps1/);
   expect('approve', ['ssh host "psql -h localhost"', 'ssh host ls']);
 });
+
+test('given a client launched through npx, npm exec, pnpm dlx or yarn dlx, when the guard runs it, then a non-dev host is denied and a dev host passes', () => {
+  // Given / When / Then
+  expect('deny', [
+    'npx psql -h pg-prod.example.com -c "select 1"', 'npx -y sh -c \'psql -h pg-prod.example.com -c "select 1"\'',
+    'npm exec -- sh -c "psql -h pg-prod.example.com"', 'npm exec -c "psql -h pg-prod.example.com"',
+    'pnpm dlx mysql -h prod-db.example.com', 'yarn dlx mysql --host=prod-db.example.com',
+    'npx --loglevel silent psql -h pg-prod.example.com', 'npm exec --loglevel silent -- psql -h pg-prod.example.com',
+    'pnpm --reporter silent dlx psql -h pg-prod.example.com', 'npx npx npx npx npx psql -h pg-prod.example.com',
+    'npx -y sh -c "npx -y sh -c \'npx psql -h pg-prod.example.com\'"',
+  ], /db-ro\.ps1/);
+  expect('approve', ['npx psql -h localhost -c "select 1"', 'npm exec -- sh -c "psql -h localhost"']);
+});

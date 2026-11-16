@@ -45,7 +45,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  parseSegments, stripWrappers, baseName, SHELLS, CONTAINER_CLIS, innerSegments,
+  parseSegments, stripWrappers, baseName, SHELLS, CONTAINER_CLIS, innerSegments, afterLauncher,
 } = require('./shell-parse');
 
 /** Local by definition: always dev hosts, whatever the registry lists. */
@@ -321,7 +321,15 @@ function scan(tokens, depth, command) {
 
   if (name === 'wsl' || name === 'ssh' || SHELLS.has(name)) return firstDecision(innerSegments(cmd), depth + 1, command);
 
-  const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : -1;
+  // A package launcher: its own reading first (`-c` strings), then any client further on, as after `docker exec`,
+  // so an unknown value option (`--loglevel silent`) or stacked launchers (`npx npx … psql`) cannot hide it.
+  const launcher = Boolean(afterLauncher(cmd))
+    || (/^(?:npm|pnpm|yarn|bun)$/.test(name) && cmd.slice(1).some((t) => /^(?:exec|x|dlx)$/.test(t)));
+  if (launcher) {
+    const inner = firstDecision(innerSegments(cmd), depth + 1, command);
+    if (inner) return inner;
+  }
+  const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : launcher ? 0 : -1;
   if (launch < 0) return null;
 
   for (let i = launch + 1; i < cmd.length; i += 1) {
