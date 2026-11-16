@@ -130,9 +130,12 @@ const CONTAINER_CLIS = new Set(['docker', 'podman', 'nerdctl']);
 const SHELLS = new Set(['pwsh', 'powershell', 'bash', 'sh', 'zsh', 'dash', 'ash', 'ksh', 'cmd']);
 const POWERSHELLS = new Set(['pwsh', 'powershell']);
 /** Words that put a command in command position without being the command. */
-const WRAPPERS = new Set(['sudo', 'call', 'command', 'env', 'time', 'nohup', 'start', 'start-process', 'exec']);
+const WRAPPERS = new Set(['sudo', 'call', 'command', 'env', 'time', 'nohup', 'start', 'start-process', 'exec', 'timeout', 'nice']);
 /** Wrapper options that take a value (`sudo -u postgres psql`). */
 const WRAPPER_VALUE_OPTS = new Set(['-u', '-g', '-h', '-p', '-c', '-d', '--user', '--group']);
+/** Options of one wrapper that take a value (`nice -n 10`; `-n` is a flag for sudo), and wrappers that then take a positional (`timeout 5`). */
+const OWN_VALUE_OPTS = { timeout: new Set(['-s', '-k', '--signal', '--kill-after']), nice: new Set(['-n', '--adjustment']) };
+const LEADING_POSITIONAL = new Set(['timeout']);
 /** `wsl` options that take a value; `-e`, `--exec` and `--` end the options. */
 const WSL_VALUE_OPTS = new Set(['-d', '--distribution', '-u', '--user', '--cd', '--shell-type', '--distribution-id']);
 /** `ssh` options that take a value; the first other word is the host, the rest is the remote command. */
@@ -162,9 +165,12 @@ function stripWrappers(tokens) {
   let i = 0;
   while (i < tokens.length) {
     if (ASSIGNMENT.test(tokens[i])) { i += 1; continue; }
-    if (!WRAPPERS.has(baseName(tokens[i]))) break;
+    const wrapper = baseName(tokens[i]);
+    if (!WRAPPERS.has(wrapper)) break;
     i += 1;
-    while (i < tokens.length && tokens[i].startsWith('-')) i += WRAPPER_VALUE_OPTS.has(tokens[i]) ? 2 : 1;
+    const own = OWN_VALUE_OPTS[wrapper];
+    while (i < tokens.length && tokens[i].startsWith('-')) i += (own ? own.has(tokens[i]) : WRAPPER_VALUE_OPTS.has(tokens[i])) ? 2 : 1;
+    if (LEADING_POSITIONAL.has(wrapper)) i += 1;
   }
   return tokens.slice(i);
 }
@@ -321,7 +327,7 @@ const UNQUOTED_DELIMITER = /(?<!<<-?\s*)(['"])[^'"]*\1/g;
  * them by default). The opening line stays; a body is dropped only when its closer is found, so an
  * unclosed `<<` (`$((1 << n))`) never swallows the rest. A here-string closes only on a bare `'@` line: with a command after it (`'@ | iex`) the body stays.
  */
-function stripBodies(command, { dropBody = () => true, hereStrings = true } = {}) {
+function stripBodies(command, { dropBody = () => true, hereStrings = true, dropped = null } = {}) {
   const lines = command.split(/\r?\n/);
   const kept = [];
   for (let i = 0; i < lines.length; i += 1) {
@@ -336,6 +342,7 @@ function stripBodies(command, { dropBody = () => true, hereStrings = true } = {}
     const closes = here ? (l) => l.trim() === delimiter : (l) => l.trim() === `${open.quote}@`;
     const end = lines.findIndex((l, j) => j > i && closes(l));
     if (end < 0) continue;
+    if (dropped && here) dropped.push(...lines.slice(i + 1, end));
     i = here ? end : end - 1;
   }
   return kept.join('\n');
@@ -348,8 +355,10 @@ const withoutBodies = (command) => stripBodies(command);
 // a wrapper such as sudo or timeout) may run it, so its body stays checked.
 const DATA_RECEIVERS = new Set([
   'cat', 'tee', 'node', 'python', 'python3', 'deno', 'ruby', 'perl', 'git', 'gh',
-  'set-content', 'add-content', 'out-file',
+  'set-content', 'add-content', 'out-file', 'echo', 'printf',
 ]);
+// Interpreters whose stdin body is a script in their own language, never shell lines.
+const STDIN_INTERPRETERS = new Set(['node', 'python', 'python3', 'deno', 'ruby', 'perl']);
 const SIMPLE_DELIMITER = /^[A-Za-z_][\w-]*$/;
 // Commands that may run a body: shells, remote and container shells, eval-likes, DB clients.
 const BODY_RUNNERS = new Set([
@@ -373,19 +382,25 @@ const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BA
 // one: MSBuild imports Directory.Build.targets and npm runs package.json scripts a body may have just written.
 const INERT_COMMANDS = new Set(['cd', 'pushd', 'set-location', 'push-location', 'sl', 'mkdir', 'md', 'ls', 'dir']);
 
-/** `{ name, value }` when a segment is only an assignment (`P=x`, `$P='x'`, `$P = 'x'`), else null. */
-function assignment(tokens) {
-  const one = tokens.length === 1 && /^\$?([A-Za-z_]\w*)=(.*)$/.exec(tokens[0]);
-  if (one) return { name: one[1], value: one[2] };
-  const spaced = tokens.length === 3 && tokens[1] === '=' && /^\$([A-Za-z_]\w*)$/.exec(tokens[0]);
-  return spaced ? { name: spaced[1], value: tokens[2] } : null;
+// The only forms each shell reads as an assignment of a literal: Bash `name=value`, PowerShell `$name = 'value'`.
+const BASH_ASSIGNMENT = /^([A-Za-z_]\w*)=(?:"([^"$`\\\s]*)"|'([^'\s]*)'|([^"'$`\\\s]*))$/;
+const PS_ASSIGNMENT = /^\$([A-Za-z_]\w*)\s*=\s*(?:"([^"$`\s]*)"|'([^'\s]*)')$/;
+
+/** `[name, value]` when `text` is a plain literal assignment in `shell` (`any`: either form; a PowerShell name is case-insensitive), else null. */
+function parseAssignment(text, shell) {
+  if (shell === 'any') return parseAssignment(text, 'bash') ?? parseAssignment(text, 'powershell');
+  const m = shell === 'bash' ? BASH_ASSIGNMENT.exec(text) : shell === 'powershell' ? PS_ASSIGNMENT.exec(text) : null;
+  return m ? [shell === 'powershell' ? m[1].toLowerCase() : m[1], m[2] ?? m[3] ?? m[4] ?? ''] : null;
 }
+
+/** The assignment a token list spells (`P=x`, `$P = x`: the quotes are already gone), else null. */
+const tokenAssignment = (tokens) => parseAssignment(tokens.length === 3 && tokens[1] === '=' ? `${tokens[0]} = '${tokens[2]}'` : tokens.length === 1 ? tokens[0] : '', 'any');
 
 /** True for a segment that cannot run a body or a script: a literal non-reserved assignment, `cd`, `mkdir`, `ls`. */
 function isInert(tokens) {
   if (!tokens.length || tokens.some((t) => /\$\(|[<>]\(/.test(t))) return false;
-  const assigned = assignment(tokens);
-  if (assigned) return !RESERVED_VARS.test(assigned.name) && !/[$`(]/.test(assigned.value);
+  const assigned = tokenAssignment(tokens);
+  if (assigned) return !RESERVED_VARS.test(assigned[0]) && !/[$`(]/.test(assigned[1]);
   const command = baseName(tokens[0]);
   return INERT_COMMANDS.has(command);
 }
@@ -399,7 +414,8 @@ function hasBodyRunner(command) {
     if (BODY_RUNNERS.has(name) || (EXEC_CLIS.has(name) && cmd.some((t) => /^exec$/i.test(t)))) return true;
     if (autorun.has(name)) return true;
     if (cmd === tokens && cmd.length && RESERVED_VARS.test(/^\$?([A-Za-z_]\w*)=/.exec(cmd[0])?.[1] ?? '')) return true;
-    if (!cmd.length || DATA_RECEIVERS.has(name)) return false;
+    // `S=$(printf x)` split at its spaces: the rest is the substitution's own words, read as their own segment.
+    if (!cmd.length || DATA_RECEIVERS.has(name) || /^[A-Za-z_]\w*=\$\([^)]*$/.test(tokens[0])) return false;
     // `./s.sh`, `"$SHELL" s.sh`, `timeout 60 bash s.sh`, `nice sh s.sh`: a path, a variable or a runner after a prefix command.
     // `watch s.sh`, `stdbuf -o0 s.sh`: a script argument after a prefix command counts too.
     // A script named without a suffix (`timeout 60 ./s`, `watch s`): a path-like argument or a written file's name counts too.
@@ -435,8 +451,16 @@ function runsScript(command) {
  * check reads. Read one at a time, a stray quote in one line cannot hide the next.
  */
 function runnableBodyLines(command) {
-  if (!runsScript(command)) return [];
-  return [...command.matchAll(HERE_STRING_BODY)].flatMap((m) => m[2].split(/\r?\n/)).filter((line) => line.trim());
+  const heredocs = [];
+  // Heredoc bodies stay in the checked text when a command may run them; read line by line too, an apostrophe in one line (`# don't`) opens a quote that hides the lines after it.
+  // A body fed on its own line to node/python stays unread (owner decision), whatever else the line runs.
+  const stdinScript = (bare) => {
+    const names = parseSegments(bare).filter((t) => t.length).map((t) => baseName(t[0]).toLowerCase());
+    return names.some((n) => STDIN_INTERPRETERS.has(n)) && !names.some((n) => BODY_RUNNERS.has(n));
+  };
+  if (hasBodyRunner(command)) stripBodies(command, { hereStrings: false, dropped: heredocs, dropBody: (bare) => !stdinScript(bare) });
+  const hereStrings = runsScript(command) ? [...command.matchAll(HERE_STRING_BODY)].flatMap((m) => m[2].split(/\r?\n/)) : [];
+  return [...heredocs, ...hereStrings].filter((line) => line.trim());
 }
 
 /** True when the heredoc body opened on `line` is plain data: quoted delimiter, only data receivers, nothing that expands or pipes on. */
@@ -462,5 +486,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, afterLauncher, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, afterLauncher, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS, parseAssignment,
 };

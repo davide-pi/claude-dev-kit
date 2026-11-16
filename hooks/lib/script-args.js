@@ -40,8 +40,7 @@
 
 'use strict';
 
-const { splitSegments, RESERVED_VARS } = require('./shell-parse');
-const { parseAssignment } = require('./destructive');
+const { splitSegments, RESERVED_VARS, parseAssignment } = require('./shell-parse');
 
 const SCRIPT = /^(?:pwsh\s+-NoProfile\s+-File|node)\s+(["']?)~[\\/]\.claude[\\/](?:scripts[\\/](?:(perimeter|snapshot|db-ro)\.ps1|(gate|sweep)\.mjs)|hooks[\\/](scope-guard)\.js)(?=$|[\s"'])/i;
 /** The gate runs `--test` / `--unit` through a shell: only a known test runner passes, with no shell operator. */
@@ -151,6 +150,8 @@ const RESERVED_ASSIGNMENT = new RegExp(String.raw`(?<!\w)\$?${RESERVED_VARS.sour
 const SEGMENT_GAP = /^\s*(?:;|&&)?\s*$/;
 const CD_LITERAL = /^(?:cd|pushd|chdir|set-location|sl)\s+(?:"[^"$`]*"|'[^']*'|[\w./:@+,~\\-]+)$/i;
 const DEFINES_COMMAND = /(?:^|[\s;&|(])(?:function|filter|set-alias|new-alias|sal|nal|alias)\s|(?<!\$)[\w.-]+\s*\(\s*\)/i;
+/** `text` with the inside of every quoted string blanked: a `name()` in a commit message defines nothing. */
+const unquoted = (text) => text.replace(/"(?:[^"\\]|\\.)*"|'[^']*'/g, '""');
 const PLAIN_CALL =/^(?:git|node|dotnet|npm|npx)(?:\s|$)/i;
 
 /** `text` with `$NAME` / `${NAME}` outside single quotes replaced by the literal in `vars`; what it cannot resolve stays. */
@@ -193,7 +194,7 @@ function resolveCalls(text, tool) {
   const segments = splitSegments(text);
   const shell = tool === 'Bash' ? 'bash' : tool === 'PowerShell' ? 'powershell' : null;
   // A function or alias may shadow `git` / `node`: no call is inert then.
-  if (!shell || RESERVED_ASSIGNMENT.test(text) || DEFINES_COMMAND.test(text)) return segments;
+  if (!shell || RESERVED_ASSIGNMENT.test(text) || DEFINES_COMMAND.test(/\b(?:eval|iex|invoke-expression)\b/i.test(text) ? text : unquoted(text))) return segments;
   const entries = [];
   let at = 0;
   for (const segment of segments) {
@@ -215,7 +216,7 @@ function resolveCalls(text, tool) {
       return entry.segment;
     }
     if (SCRIPT.test(trimmed)) return resolveVars(entry.segment, vars, shell);
-    if (!(CD_LITERAL.test(trimmed) || (PLAIN_CALL.test(trimmed) && !/[`({]/.test(trimmed)))) vars.clear();
+    if (!(CD_LITERAL.test(trimmed) || (PLAIN_CALL.test(trimmed) && !/[`{]|[$<>]\(/.test(trimmed) && !unquoted(trimmed).includes('(')))) vars.clear();
     return entry.segment;
   });
 }
