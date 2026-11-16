@@ -328,7 +328,8 @@ const EXEC_CLIS = new Set(['docker', 'podman', 'kubectl']);
 
 // Variables that change how the shell splits words, finds folders or commands, or where it is.
 const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BASH_ENV|ENV|GLOBIGNORE|PS4|PROMPT_COMMAND)$/i;
-// Commands that only move, list, make a folder or build: they run no text and no script a body wrote.
+// Commands that only move, list or make a folder: they run no text and no script a body wrote. A build is not
+// one: MSBuild imports Directory.Build.targets and npm runs package.json scripts a body may have just written.
 const INERT_COMMANDS = new Set(['cd', 'pushd', 'set-location', 'push-location', 'sl', 'mkdir', 'md', 'ls', 'dir']);
 
 /** `{ name, value }` when a segment is only an assignment (`P=x`, `$P='x'`, `$P = 'x'`), else null. */
@@ -339,13 +340,13 @@ function assignment(tokens) {
   return spaced ? { name: spaced[1], value: tokens[2] } : null;
 }
 
-/** True for a segment that cannot run a body or a script: a literal non-reserved assignment, `cd`, `mkdir`, `dotnet build|test`, `npm`, `ls`. */
+/** True for a segment that cannot run a body or a script: a literal non-reserved assignment, `cd`, `mkdir`, `ls`. */
 function isInert(tokens) {
   if (!tokens.length || tokens.some((t) => /\$\(|[<>]\(/.test(t))) return false;
   const assigned = assignment(tokens);
   if (assigned) return !RESERVED_VARS.test(assigned.name) && !/[$`(]/.test(assigned.value);
   const command = baseName(tokens[0]);
-  return INERT_COMMANDS.has(command) || (command === 'dotnet' && /^(?:build|test)$/i.test(tokens[1] ?? ''));
+  return INERT_COMMANDS.has(command);
 }
 
 /** True when the command, bodies off, has a segment that may run text as commands (or a script a body wrote). */
