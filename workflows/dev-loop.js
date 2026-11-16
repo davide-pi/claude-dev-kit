@@ -990,9 +990,12 @@ const runBlocks = async (items, total, lane) => {
     if (changedStall) return changedStall
     // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
     let continuations = 0
+    let sawRed = false   // a red gate in a partial report counts, though its continuation turns green
     // The implementer stops itself at 30 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
     while ((!impl || impl.remaining.length) && continuations < 4) {
       if (impl) takeSide(impl)
+      const seen = impl && readGate(impl.gate)
+      if (seen && !gateGreen(seen)) sawRed = true
       continuations += 1
       const left = impl?.remaining ?? []
       const label = `${base} (continued, ${continuations})`
@@ -1023,7 +1026,7 @@ const runBlocks = async (items, total, lane) => {
     }
     // The gate, run by the implementer, decides the block: a red one gets one fix call and the gate again.
     let g = readGate(impl.gate)
-    const gateWasRed = !!g && !gateGreen(g)
+    const gateWasRed = sawRed || (!!g && !gateGreen(g))
     if (g && !gateGreen(g)) {
       takeReport(impl, !!lane)   // the stall result then carries the files and the red gate line
       if (g.gate === 'red: timeout') return stallAgain(0, `the gate stalled twice on block ${bid}; last test seen: ${g.test || '(none)'}`, { why: 'gate-timeout' })
@@ -1224,14 +1227,14 @@ if (loopSize !== 'S' && !planTasks.length) {
   // A risk axis that floors the run at M: say which axis, and S is no way out.
   const lifted = risk.filter(x => FLOOR_M.includes(x))
   if (lifted.length && givenSize !== 'S') {
-    return questionStall(0, [{ text: `This ${loopSize} run has no plan (args.plan.tasks is missing or empty), and the risk axis ${lifted.join(', ')} keeps it at M or above: write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start, and size S is refused while that axis stands' }],
+    return questionStall(0, [{ text: `This ${loopSize} run has no plan (args.plan.tasks is missing or empty), and the risk axis ${lifted.join(', ')} keeps it at M or above: write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop doesn\x27t start, and size S is refused while that axis stands' }],
       'no plan: an M or L run needs args.plan.tasks, and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
   }
   if (lifted.length) {
-    return questionStall(0, [{ text: `The risk axis ${lifted.join(', ')} lifts this S run to M, and an M run has no plan (args.plan.tasks is missing or empty): write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start, and size S is refused while that axis stands' }],
+    return questionStall(0, [{ text: `The risk axis ${lifted.join(', ')} lifts this S run to M, and an M run has no plan (args.plan.tasks is missing or empty): write the plan.`, default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop doesn\x27t start, and size S is refused while that axis stands' }],
       'no plan: a risk axis lifted the run to M and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
   }
-  return questionStall(0, [{ text: 'This M or L run has no plan (args.plan.tasks is missing or empty): write the plan, or is the change really size S?', default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop does not start' }],
+  return questionStall(0, [{ text: 'This M or L run has no plan (args.plan.tasks is missing or empty): write the plan, or is the change really size S?', default: 'write the plan with plan-work and relaunch with args.plan', why: 'an M or L run is cut into blocks from its plan; without one the loop doesn\x27t start' }],
     'no plan: an M or L run needs args.plan.tasks, and nothing ran', 'Write the plan (plan-work) and relaunch with args.plan WITHOUT resumeFromRunId.')
 }
 

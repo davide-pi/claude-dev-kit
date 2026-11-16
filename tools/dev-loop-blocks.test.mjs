@@ -487,3 +487,17 @@ test('given no risky task and a block gate red before green, when the loop runs,
   assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
   assert.equal(readerAs(calls).length, 1);
 });
+
+test('given no risky task and a partial report with a red gate, when its continuation turns green, then reader A still runs on that block', async () => {
+  // Given
+  const calm = tasks(5).map((t) => ({ ...t, risky: false }));
+  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: calm } };
+  const partialRed = impl({ gate: gate('red', { tree: 'tr0' }), remaining: ['T3: not started'] });
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [partialRed, greenAt('tr1'), greenAt('tr2')]);
+
+  // Then
+  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
+  assert.equal(readerAs(calls).length, 1);
+});
