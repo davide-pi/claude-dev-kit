@@ -87,3 +87,14 @@ test('given P2 evidence that is prose with a slash and a port, when classified, 
   // Then
   assert.deepEqual(got, ['minor', 'minor', 'minor']);
 });
+
+test('given P2 evidence quoting a well-known extensionless file name before a line, when classified, then it counts as a quoted file:line', () => {
+  // Given
+  const cases = ['Rakefile:12 skips the task', 'CODEOWNERS:3 lists no owner', 'makefile:7 drops the flag', 'Dockerfile:5 and Vagrantfile:2 differ', 'Containerfile:9 pins nothing', 'Brewfile:4 is stale', 'dockerfile:8 copies too much'];
+
+  // When
+  const got = cases.map(evidence => classify(bare({ evidence }), FILES));
+
+  // Then
+  assert.deepEqual(got, ['blocking', 'blocking', 'blocking', 'blocking', 'blocking', 'blocking', 'blocking']);
+});

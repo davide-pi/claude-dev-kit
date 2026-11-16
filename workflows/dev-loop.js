@@ -380,8 +380,8 @@ const findingsLog = ({ known = {}, tracked = {}, cleaned = [] } = {}) => Object.
   .filter(k => k.category !== 'verify')
   .map(k => ({ category: k.category, priority: k.priority, path: k.path, title: String(k.title ?? '').replace(/'/g, 'ʼ').slice(0, 80), closed: tracked[k.id]?.status === 'closed' || cleaned.some(c => c.id === k.id) }))
 
-// A path with an extension, or a capitalised file name without one (Dockerfile:12, Makefile:3).
-const cites = f => /(?:[\w./\\-]+\.\w+|\b(?:Dockerfile|Makefile|Jenkinsfile|Gemfile|Procfile|LICENSE)):\d+/.test(String(f.evidence ?? ''))
+// A path with an extension, or a well-known file name without one (Dockerfile:12, makefile:3).
+const cites = f => /(?:[\w./\\-]+\.\w+|\b(?:[Dd]ockerfile|[Mm]akefile|Jenkinsfile|Gemfile|Procfile|LICENSE|Rakefile|Vagrantfile|Containerfile|Brewfile|CODEOWNERS)):\d+/.test(String(f.evidence ?? ''))
 const proven = f => probesOf(f).length > 0 || cites(f)
 // Only the user can widen the perimeter.
 const classify = (f, files, { dirty = [], root = '', touched = [] } = {}) => {
