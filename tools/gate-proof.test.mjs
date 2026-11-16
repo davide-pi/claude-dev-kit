@@ -61,7 +61,7 @@ const lastLine = (res) => {
   return out;
 };
 const stateOf = (r) => JSON.parse(readFileSync(join(r.root, '.git', 'deliver', 'gate.json'), 'utf8'));
-const { failedTests } = await import(pathToFileURL(SCRIPT).href);
+const { failedTests, readableRunner } = await import(pathToFileURL(SCRIPT).href);
 
 const UNIT = 'node --test t.test.mjs';
 const TEST_SOURCE = [
@@ -139,6 +139,30 @@ test('given jest output, when the failures are read, then only a "suite › test
   // Then
   assert.deepEqual(names, ['Math › adds']);
   assert.deepEqual(suiteOnly, []);
+});
+
+test('given bun output (claude plugin test), when the failures are read, then each (fail) line names the test without its time, and a file that did not load is no test', () => {
+  // Given
+  const log = '(pass) Given a, When b, Then c [1.20ms]\n(fail) Given x, When y, Then z [3.15ms]\n(fail) Given p, When q, Then r\n(fail) A > b [1.23s]\n(fail) with [x] [2ms]\n(fail) the file did not load\n 1 pass\n 4 fail\n';
+
+  // When
+  const names = failedTests(log);
+  const loadErrorOnly = failedTests('(fail) the file did not load\n 1 fail\n');
+
+  // Then
+  assert.deepEqual(names, ['Given x, When y, Then z', 'Given p, When q, Then r', 'A > b', 'with [x]']);
+  assert.deepEqual(loadErrorOnly, []);
+});
+
+test('given a bun runner command, when the gate checks it for --red, then it is readable', () => {
+  // Given
+  const commands = ['claude plugin test mods/cockpit', 'bun test tests/', 'npm test'];
+
+  // When
+  const readable = commands.map((c) => readableRunner(c) !== null);
+
+  // Then
+  assert.deepEqual(readable, [true, true, false]);
 });
 
 test("given a runner the gate can't read, when it runs with --red, then it exits 2", () => {
