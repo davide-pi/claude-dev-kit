@@ -1,7 +1,7 @@
 import type { CockpitAgent, CockpitClaudeState, CockpitEvent, CockpitInsights, CockpitSnapshot, CockpitWorkflowRun } from '../types'
 import { usdOf } from './pricing'
 import { baseName, modelFamily } from './shared'
-import { recordLog } from './timeline'
+import { withLogged } from './timeline'
 import { claimsOf } from './work'
 import { activeRun } from './workflow'
 
@@ -173,11 +173,10 @@ export function withLoggedSignals(s: CockpitSnapshot, at: number): CockpitSnapsh
   const logged = new Set((s.sessionLog ?? []).filter(e => e.kind === 'signal').map(e => e.key))
   const fresh = signalsOf(s).filter(sig => !logged.has(signalId(sig)))
   if (fresh.length === 0) return s
-  const sessionLog = fresh.reduce<CockpitSnapshot['sessionLog']>(
-    (log, sig) => recordLog(log, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }),
-    s.sessionLog,
+  return fresh.reduce(
+    (acc, sig) => withLogged(acc, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }),
+    s,
   )
-  return { ...s, sessionLog }
 }
 
 /** Every signal that holds now, from the snapshot alone (no clock, no model); one id only once (the same result read twice is one notification). */

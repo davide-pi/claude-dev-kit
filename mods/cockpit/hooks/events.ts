@@ -6,6 +6,7 @@ import { addUsage, newTokens } from './agents'
 import { adoptSession, writeState } from './session-data'
 import { INITIAL } from './state'
 import { patch } from './store'
+import { noteSwallowed } from './swallowed'
 import { editedPathOf, recordEdited } from './work'
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
@@ -31,10 +32,11 @@ export async function setClaudeState($: EngineInterface, state: CockpitClaudeSta
     if (held?.kind === state.kind && held.tool === state.tool) return
     held = state
     await update($, snapshot, s => ({ ...s, claudeState: state }))
-    await adoptSession($).catch(() => undefined)
+    await adoptSession($).catch(() => noteSwallowed('events:adopt'))
     await writeState($)
   } catch {
     // observing must never break the event
+    noteSwallowed('events:state')
   }
 }
 
@@ -106,7 +108,7 @@ export function bashOutput(ran: { result?: unknown; text?: string }): string {
 /** An edit call that ran clean adds its file to the ones this chat edited (a subagent's edit too), to tell which checkout is the chat's. */
 export async function noteEdit($: EngineInterface, input: { readonly [key: string]: unknown }, ran: { deny?: string; isError?: boolean }): Promise<void> {
   const path = editedPathOf(input)
-  if (path !== undefined && isOk(ran)) await patch($, s => ({ ...s, edited: recordEdited(s.edited, path) })).catch(() => undefined)
+  if (path !== undefined && isOk(ran)) await patch($, s => ({ ...s, edited: recordEdited(s.edited, path) })).catch(() => noteSwallowed('events:edit'))
 }
 
 /** A TaskUpdate result that says it did not apply (`success: false`), narrowed from `unknown`. */

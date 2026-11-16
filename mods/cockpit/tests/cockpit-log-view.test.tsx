@@ -2,8 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import { COLORS, clockTime, duration, effortGlyph, textCells } from '../hooks/shared'
 import { setLang } from '../hooks/strings'
-import { colorOf, gatedBash, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
-import { NOW, rowTexts, world } from './cockpit-world'
+import { SESSION_LOG_KEEP } from '../hooks/timeline'
+import { bashResult, colorOf, gatedBash, mountPane, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
+import { NOW, dataOf, rowTexts, world } from './cockpit-world'
 
 const WIDE = 70
 
@@ -169,7 +170,9 @@ test('Given a round with 2 waits and 3 failed calls, When drawn in principali an
     expect(rows.some(r => r.includes('3 failed tools'))).toBe(true)
     expect(rows.some(r => /2 waits/.test(r))).toBe(true)
   }
-  expect(main.filter(r => /waited|no such file|bad regex|no match/.test(r))).toEqual([])
+  expect(main.filter(r => /waited|no such file|bad regex/.test(r))).toEqual([])
+  // the base view names the newest failed call only
+  expect(main.filter(r => /Glob: no match/.test(r))).toHaveLength(1)
   expect(all.filter(r => /waited/.test(r))).toHaveLength(2)
   expect(all.filter(r => /Read: no such file|Grep: bad regex|Glob: no match/.test(r))).toHaveLength(3)
   expect(all.filter(r => /Read: no such file/.test(r) && /Grep: bad regex/.test(r))).toEqual([])
@@ -485,4 +488,90 @@ test('Given a narrow pane, When the open flow agent is drawn, Then its detail is
   expect(agent).toBeGreaterThan(-1)
   expect(textCells(rows[agent] ?? '')).toBeLessThanOrEqual(40)
   expect(TRAIL.test(rows[agent + 1] ?? '')).toBe(true)
+})
+
+// ── The trimmed-entries row ──
+
+const TRIMMED_LOG = [
+  { at: NOW - 200_000, kind: 'round', n: 29, ms: 50_000, ctxPct: 30 },
+  { at: NOW - 100_000, kind: 'round', n: 30, ms: 61_000, ctxPct: 42 },
+]
+
+test('Given a log with 1 trimmed entry, When drawn, Then a dim row says 1 older entries trimmed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const { rows, root } = await drawn($, on, { sessionLog: TRIMMED_LOG, logTrimmed: 1 })
+  // Then
+  expect(rows.some(r => r.includes('1 older entries trimmed'))).toBe(true)
+  expect(colorOf(root, /1 older entries trimmed/)).toBe(COLORS.dim)
+})
+
+test('Given a log with 1 trimmed entry, When drawn in Italian, Then the row reads voci più vecchie tagliate', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const { rows } = await drawn($, on, { sessionLog: TRIMMED_LOG, logTrimmed: 1 }, WIDE, 'it')
+  // Then
+  expect(rows.some(r => r.includes('1 voci più vecchie tagliate'))).toBe(true)
+})
+
+test('Given exactly as many rounds as the log shows by default and a trimmed count, When drawn, Then the trimmed row is not a node: every round shows and no more-toggle', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const rounds = Array.from({ length: 5 }, (_, i) => ({ at: NOW - (6 - i) * 10_000, kind: 'round', n: i + 1, ms: 1000, usd: 0.1, prompt: `work ${i}`, ctxPct: 30 }))
+  // When
+  const { rows } = await drawn($, on, { sessionLog: rounds, logTrimmed: 4 })
+  // Then
+  expect(rows.filter(r => /round 00\d/.test(r)), rows.join('\n')).toHaveLength(5)
+  expect(rows.some(r => r.includes('4 older entries trimmed'))).toBe(true)
+  expect(rows.join('\n')).not.toContain('\u{F035F}')
+})
+
+for (const [what, logTrimmed] of [['no trimmed field', undefined], ['a negative one', -3], ['a NaN one', 'NaN']] as const) {
+  test(`Given a data file with ${what}, When drawn, Then no trimmed row shows`, { timeoutMs: 30_000 }, async ($, on) => {
+    // Given / When
+    const { rows } = await drawn($, on, { sessionLog: TRIMMED_LOG, logTrimmed })
+    // Then
+    expect(rows.some(r => r.includes('trimmed'))).toBe(false)
+  })
+}
+
+test('Given a stored log longer than SESSION_LOG_KEEP and a saved count, When the session loads and saves, Then the overflow adds to the saved count', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const stored = Array.from({ length: SESSION_LOG_KEEP + 5 }, (_, i) => ({ at: NOW - 1_000_000 + i, kind: 'test', text: `t${i}`, isFailed: true }))
+  const writes = new Map<string, string>()
+  world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [], sessionLog: stored, logTrimmed: 10 }) })
+  // When
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // Then
+  expect(dataOf(writes)?.logTrimmed).toBe(15)
+})
+
+test('Given a full session log, When a commit is logged by a tool call, Then the saved trimmed count grows by 1', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const full = Array.from({ length: SESSION_LOG_KEEP }, (_, i) => ({ at: NOW - 1_000_000 + i, kind: 'test', text: `t${i}`, isFailed: true }))
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, dataFile: JSON.stringify({ history: [], prs: [], sessionLog: full, logTrimmed: 2 }) })
+  on('tool.call', { tool: 'Bash' }, () => bashResult('[main abc1234] fix'))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m "fix"' })
+  await clock.advance(5000)
+  await settleAll()
+  // Then
+  expect(dataOf(writes)?.logTrimmed).toBe(3)
+})
+
+test('Given a session with a trimmed count, When another session is adopted, Then the count is that session own', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  let id = 's-1'
+  const writes = new Map<string, string>()
+  const files = { [`cockpit-data-s-1.json`]: JSON.stringify({ history: [], prs: [], sessionLog: TRIMMED_LOG, logTrimmed: 7 }), [`cockpit-data-s-2.json`]: JSON.stringify({ history: [], prs: [], sessionLog: TRIMMED_LOG }) }
+  const clock = world(on, { writes, sessionId: () => id, files })
+  on('tool.call', { tool: 'Bash' }, () => bashResult('[main abc1234] fix'))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  id = 's-2'
+  await $.tool.call({ tool: 'Bash', command: 'git commit -m "fix"' })
+  await clock.advance(5000)
+  await settleAll()
+  // Then
+  const path = [...writes.keys()].find(k => /cockpit-data-s-2\.json$/.test(k)) ?? ''
+  expect(JSON.parse(writes.get(path) ?? 'null')).not.toHaveProperty('logTrimmed')
 })

@@ -24,17 +24,27 @@ export const SESSION_LOG_KEEP = 300
  * `log` with `entry` in its place by time; one whose kind and `key` are already there is not added twice, except a 'flow' entry, which replaces
  * its node (a resumed run closes again). The log keeps the newest `SESSION_LOG_KEEP`.
  */
-export function recordLog(log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] {
+export const recordLog = (log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): CockpitLogEntry[] => recordLogCount(log, entry).log
+
+/** `recordLog` and how many entries the keep dropped (the count the log's `logTrimmed` grows by). */
+export function recordLogCount(log: readonly CockpitLogEntry[] | undefined, entry: CockpitLogEntry): { log: CockpitLogEntry[]; trimmed: number } {
   const all = log ?? []
   const isSame = (e: CockpitLogEntry) => entry.key !== undefined && e.kind === entry.kind && e.key === entry.key
-  if (entry.kind !== 'flow' && all.some(isSame)) return all.slice()
+  if (entry.kind !== 'flow' && all.some(isSame)) return { log: all.slice(), trimmed: 0 }
   const entries = entry.kind === 'flow' ? all.filter(e => !isSame(e)) : all
-  return [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e).slice(-SESSION_LOG_KEEP)
+  const sorted = [...entries, entry].map((e, i) => ({ e, i })).sort((a, b) => a.e.at - b.e.at || a.i - b.i).map(x => x.e)
+  return { log: sorted.slice(-SESSION_LOG_KEEP), trimmed: Math.max(0, sorted.length - SESSION_LOG_KEEP) }
+}
+
+/** `s` with `entry` recorded in its session log and the entries the keep dropped added to `logTrimmed`. */
+export function withLogged<S extends { sessionLog?: CockpitLogEntry[]; logTrimmed?: number }>(s: S, entry: CockpitLogEntry): S {
+  const { log, trimmed } = recordLogCount(s.sessionLog, entry)
+  return { ...s, sessionLog: log, ...(trimmed > 0 && { logTrimmed: (s.logTrimmed ?? 0) + trimmed }) }
 }
 
 /** `s` with a tool call's log `entries` (test runs, commits, a PR) in its session log: they never enter the agents' `events` ring, so no number of them evicts an agent event. */
-export function withLogEntries<S extends { sessionLog?: CockpitLogEntry[] }>(s: S, entries: readonly CockpitLogEntry[]): S {
-  return { ...s, sessionLog: entries.reduce<CockpitLogEntry[] | undefined>(recordLog, s.sessionLog) }
+export function withLogEntries<S extends { sessionLog?: CockpitLogEntry[]; logTrimmed?: number }>(s: S, entries: readonly CockpitLogEntry[]): S {
+  return entries.reduce((acc, e) => withLogged(acc, e), s)
 }
 
 /** `log` with the newest round entry that has no cost given `usd`: a round whose cost was measured after it ended. An entry that has one, or no round, leaves the log as it was. */
@@ -68,7 +78,7 @@ export const lastRoundFlowUsd = (log: readonly CockpitLogEntry[] | undefined): n
   return newest === undefined ? 0 : roundFlowUsd(log, newest, Infinity)
 }
 
-const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal', 'flow']
+const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal', 'flow', 'error']
 const SEVERITIES: readonly string[] = ['block', 'warn', 'info']
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
 
@@ -103,9 +113,12 @@ export function parseFails(value: unknown): CockpitLogEntry['fails'] {
 }
 
 /** The session log a data file keeps: the entries with a time and a known kind (the other fields only when they have their type), the newest `SESSION_LOG_KEEP`; none for anything else. */
-export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
-  if (!Array.isArray(value)) return undefined
-  const entries = value.flatMap((v: unknown): CockpitLogEntry[] => {
+export const parseLog = (value: unknown): CockpitLogEntry[] | undefined => parseLogCount(value).log
+
+/** `parseLog` and how many valid entries the keep dropped. */
+export function parseLogCount(value: unknown): { log: CockpitLogEntry[] | undefined; trimmed: number } {
+  if (!Array.isArray(value)) return { log: undefined, trimmed: 0 }
+  const parsed = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
     const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc, prompt, files, ctxPct, anchor, waits, fails, agent } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
@@ -137,8 +150,9 @@ export function parseLog(value: unknown): CockpitLogEntry[] | undefined {
       ...(parsedWaits && { waits: parsedWaits }),
       ...(parsedFails && { fails: parsedFails }),
     }]
-  }).slice(-SESSION_LOG_KEEP)
-  return entries.length > 0 ? entries : undefined
+  })
+  const entries = parsed.slice(-SESSION_LOG_KEEP)
+  return { log: entries.length > 0 ? entries : undefined, trimmed: parsed.length - entries.length }
 }
 
 /** The key of the next compact entry: after the highest the log holds, so a resumed session (whose counters restart) never meets a saved key. */
