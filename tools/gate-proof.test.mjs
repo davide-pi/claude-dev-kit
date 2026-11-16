@@ -156,13 +156,13 @@ test('given bun output (claude plugin test), when the failures are read, then ea
 
 test('given a bun runner command, when the gate checks it for --red, then it is readable', () => {
   // Given
-  const commands = ['claude plugin test mods/cockpit', 'bun test tests/', 'npm test'];
+  const commands = ['claude plugin test mods/cockpit', 'bun test tests/', 'bun test', 'sh -c "bun test"', 'npm test', 'bun test-helper.sh', 'claude plugin tester'];
 
   // When
   const readable = commands.map((c) => readableRunner(c) !== null);
 
   // Then
-  assert.deepEqual(readable, [true, true, false]);
+  assert.deepEqual(readable, [true, true, true, true, false, false, false]);
 });
 
 test("given a runner the gate can't read, when it runs with --red, then it exits 2", () => {
