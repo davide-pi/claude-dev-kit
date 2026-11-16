@@ -18,7 +18,9 @@ const { CACHE_DIR, prune, logError } = require('./cache');
 const SAME_REQUEST_MS = 1500;
 const IDLE_MS = 10 * 60 * 1000;
 const RUN_LENGTH = 5;
-const TEXT = '5 shell calls in a row, one per request: send independent ones in one message, chain dependent ones in one command.';
+const TEXT = 'Independent calls go in parallel in one message; dependent ones are chained in one command, never starting with cd; use git -C and absolute paths.';
+const CD_HINT = 'A command that starts with cd X && defeats the permission rules: use git -C <dir> and absolute paths instead of cd.';
+const CD_FIRST = /^\s*(?:cd|pushd|Set-Location|sl)\s+(?:"[^"]*"|'[^']*'|\S+)\s*(?:&&|;)/i;
 const LOG = path.join(CACHE_DIR, 'batch-nudge.log');
 const LOG_MAX_BYTES = 16 * 1024;
 const STALE_MS = 60 * 60 * 1000;
@@ -99,4 +101,21 @@ function nudge(payload, now = Date.now(), settleMs = SETTLE_MS) {
   }
 }
 
-module.exports = { nudgeFor, nudge };
+/** The cd-first hint, once per session and agent (a flag file, created atomically), or null: no cd first, already given, or any I/O error. */
+function cdHint(payload, now = Date.now()) {
+  try {
+    const clean = (value) => String(value ?? '').replace(/[^\w-]/g, '');
+    const session = clean(payload?.session_id);
+    if (!session) return null;
+    prune(/^cd-hint-.+$/, now, STALE_MS);
+    if (!CD_FIRST.test(String(payload.tool_input?.command ?? ''))) return null;
+    fs.mkdirSync(CACHE_DIR, { recursive: true });
+    fs.writeFileSync(path.join(CACHE_DIR, `cd-hint-${session}-${clean(payload.agent_id) || 'main'}`), `${now}\n`, { flag: 'wx' });
+    return CD_HINT;
+  } catch (error) {
+    if (error?.code !== 'EEXIST') logError('guard-shell/cd-hint', error);
+    return null;
+  }
+}
+
+module.exports = { nudgeFor, nudge, cdHint };

@@ -29,7 +29,8 @@
  *                             `dotnet build` / `npm test` / `npx vitest` / `docker compose logs` is
  *                             rewritten to pipe through a failure filter (opt-out `# raw`);
  *   - lib/batch-nudge.js    — not a check: on an allowed or rewritten call of the main session, the fifth
- *                             single shell call in a row adds one `additionalContext` line to batch;
+ *                             single shell call in a row adds one `additionalContext` line to batch; the same
+ *                             lib also adds a one-time hint (per session and agent) on a call that starts `cd X &&`;
  *   - lib/az-pin.js         — the other rewrite: an `az` command the allow list already covers, in a
  *                             directory the workspace map gives an identity, is pinned to that
  *                             identity's AZURE_CONFIG_DIR (opt-out `# raw`).
@@ -53,15 +54,16 @@
 
 const { approve, requestConfirmation, deny, rewrite, readPayload } = require('./lib/decision');
 const { evaluate } = require('./lib/guard');
-const { nudge } = require('./lib/batch-nudge');
+const { nudge, cdHint } = require('./lib/batch-nudge');
 const { logError } = require('./lib/cache');
 
 try {
   const payload = readPayload('guard-shell');
   const result = evaluate(payload);
   // Only a call that goes through counts toward the run: an ask or a deny gets no nudge.
-  if (!result) approve(nudge(payload));
-  if (result.rewrite) rewrite(result.rewrite, nudge(payload));
+  const context = () => [nudge(payload), cdHint(payload)].filter(Boolean).join('\n') || undefined;
+  if (!result) approve(context());
+  if (result.rewrite) rewrite(result.rewrite, context());
   if (result.decision === 'deny') deny(result.reason);
   requestConfirmation(result.reason);
 } catch (error) {

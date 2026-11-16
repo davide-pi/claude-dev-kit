@@ -134,7 +134,7 @@ function evaluate(payload) {
   const code = withoutDataBodies(command);
   const reasons = [
     safely('default-branch', () => checkDefaultBranch(code, payload.cwd)),
-    safely('destructive', () => checkDestructive(code, payload.session_id, payload.tool_name)),
+    safely('destructive', () => checkDestructive(code, payload.session_id, payload.tool_name, payload.cwd)),
     safely('alm-contract', () => checkAlmContract(code)),
     safely('docker-cp', () => checkDockerCp(code, payload.cwd)),
     scriptArgs?.reason,
