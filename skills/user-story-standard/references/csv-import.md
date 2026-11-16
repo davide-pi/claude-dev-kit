@@ -60,10 +60,6 @@ do not drop the column (the header row would stop matching), and do not copy
 `Actual result` is the column that owns it. If the user volunteered reproduction steps of their own
 accord while describing the bug, they may go here; they are never solicited.
 
-This mapping is written down here because **the source standard defines the Bug body and the CSV
-headers in separate places and never connects the two** — it is a deliberate completion of the
-standard, not a drift away from it, and the headers themselves are untouched.
-
 ## Quoting rules
 
 Quote with double quotes any field containing a comma, a line break or a double quote, doubling the

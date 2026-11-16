@@ -110,3 +110,26 @@ criteria: a single free Description.
 | Title | short, oriented to the technical activity ("Aggiornamento libreria X alla major successiva", "Refactoring modulo di autenticazione") |
 | Must not contain | acceptance criteria, the "Come utente" or `Comportamento attuale` / `atteso` structures, and not the Impediment's fixed structure either (cosa osservato / cosa non torna / `Da analizzare:`) — here the Description is free |
 | After delivery | ask for confirmation that the item is ready; offer no criteria in addition, as for an Impediment |
+
+## Criteria block
+
+User Story and Bug only, after a yes. The block as pasted — happy path, content check, empty case:
+
+```
+Criteri di accettazione
+
+AC01
+Dato che l'utente si trova nella pagina del report mensile
+Quando seleziona il pulsante "Esporta PDF"
+Allora il sistema genera un file PDF con i dati del mese visualizzato
+
+AC02
+Dato che il report contiene almeno una riga
+Quando viene generato il PDF
+Allora il PDF riporta intestazione, righe e totale mensile identici a quelli a video
+
+AC03
+Dato che non è presente alcun dato per il mese selezionato
+Quando l'utente seleziona "Esporta PDF"
+Allora il sistema mostra un messaggio che segnala l'assenza di dati e non genera il file
+```
