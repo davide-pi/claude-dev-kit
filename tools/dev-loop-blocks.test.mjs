@@ -501,3 +501,16 @@ test('given no risky task and a partial report with a red gate, when its continu
   assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
   assert.equal(readerAs(calls).length, 1);
 });
+
+test('given a gated block whose implementer asked a question, when the answers run reports no gate line, then it gets one gate re-prompt before verify-not-run', async () => {
+  // Given
+  const question = [{ text: 'Which tenant owns the order?', default: 'the caller tenant', why: 'two tenants are possible' }];
+  const args = { ...ARGS_M, ...VERIFIED, resolutions: [{ round: 0, answers: [{ text: question[0].text, answer: 'the caller tenant' }] }] };
+
+  // When
+  const { out, calls } = await run(args, [review([]), review([])], [impl({ questions: question }), impl(), greenAt('tr1')]);
+
+  // Then
+  assert.equal(calls.filter((c) => /\(answers\) \(gate line\)$/.test(c.opts.label ?? '')).length, 1);
+  assert.equal(out.status, 'OK');
+});

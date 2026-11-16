@@ -882,7 +882,10 @@ const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, b
   }
   takeSide(first)
   auto.forEach(q => defaultsApplied.push({ block: blockId, question: q.text, default: String(q.default).trim() }))
-  const second = readReport(await ask(build([answers.length ? answersBlock(answers) : '', auto.length ? defaultsBlock(auto) : ''].filter(Boolean).join('\n\n')), { ...opts, label: `${opts.label} (answers)` }), gatedRun)
+  const answersText = [answers.length ? answersBlock(answers) : '', auto.length ? defaultsBlock(auto) : ''].filter(Boolean).join('\n\n')
+  const answersOpts = { ...opts, label: `${opts.label} (answers)` }
+  let second = readReport(await ask(build(answersText), answersOpts), gatedRun)
+  if (gatedRun && second && !second.questions.length && !second.remaining.length && !readGate(second.gate)) second = await regate(second, extra => build([answersText, extra].filter(Boolean).join('\n\n')), answersOpts)
   addQuestionNotes(second?.questions ?? [])
   if (!second) return { report: second }
   // First-run rejections stay in the report (the ids count as rejected) but are no CHALLENGE when the second run changed their file.
