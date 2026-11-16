@@ -225,13 +225,14 @@ function isTestFile(name, testFiles) {
   return /\.(test|spec)\.[cm]?[jt]sx?$/.test(n) || testFiles.some((f) => n.endsWith(f.replace(/\\/g, '/')));
 }
 
-/** Names of failed tests in a runner's output (node spec and TAP, dotnet, vitest, jest), up to 5; file-level failures are no test. */
+/** Names of failed tests in a runner's output (node spec and TAP, dotnet, vitest, jest, bun), up to 5; file-level failures are no test. */
 export function failedTests(log, testFiles = []) {
   const names = [];
   for (const line of log.split(/\r?\n/)) {
     const m = /^\s*✖\s+(.+?)(?:\s+\(\d[\d.]*ms\))?\s*$/.exec(line) || /^\s*not ok \d+ - (.+)$/.exec(line)
       || /^\s*Failed\s+(\S+)/.exec(line) || /^\s*●\s+(.+? › .+)$/.exec(line)
-      || /^\s*FAIL\s+\S+\s+>\s+(.+)$/.exec(line) || /^\s*×\s+(.+?)(?:\s+\d[\d.]*m?s)?\s*$/.exec(line);
+      || /^\s*FAIL\s+\S+\s+>\s+(.+)$/.exec(line) || /^\s*×\s+(.+?)(?:\s+\d[\d.]*m?s)?\s*$/.exec(line)
+      || /^\s*\(fail\)\s+(?!the file did not load\s*$)(.+?)(?:\s+\[\d[\d.]*m?s\])?\s*$/.exec(line);
     if (m && !/^failing tests:?$/.test(m[1]) && !isTestFile(m[1], testFiles) && !names.includes(m[1])) names.push(m[1]);
   }
   return names.slice(0, 5);
@@ -438,7 +439,7 @@ function hashFiles(root, files) {
 }
 
 /** A runner whose failed tests `failedTests` can read, from the command line; null when none matches. */
-const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\b|\bvitest\b|\bjest\b/.exec(command)?.[0] ?? null;
+export const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\b|\bvitest\b|\bjest\b|\bbun\s+test\b|\bclaude\s+plugin\s+test\b/.exec(command)?.[0] ?? null;
 
 function finalize(dir, state) {
   const run = state.run;
@@ -527,7 +528,7 @@ async function main() {
   if (state.run?.status === 'running' && supervisorAlive(state.run)) usage('a gate is already running here: use --wait');
   if (args.red) {
     if (!args.unit) usage('--unit is required with --red');
-    if (!readableRunner(args.unit)) usage("--unit runs a test runner the gate can't read (dotnet test, node --test, vitest, jest)");
+    if (!readableRunner(args.unit)) usage("--unit runs a test runner the gate can't read (dotnet test, node --test, vitest, jest, bun test, claude plugin test)");
     if (!args.probe) delete state.accepted;
     return startRun(dir, state, root, {
       command: args.unit, stuckMinutes,
