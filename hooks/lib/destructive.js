@@ -39,7 +39,8 @@
 
 const fs = require('fs');
 const os = require('os');
-const { splitSegments, expandTexts, hasSubstitution, SEARCHERS } = require('./shell-parse');
+const nodePath = require('path');
+const { splitSegments, expandTexts, hasSubstitution, SEARCHERS, RESERVED_VARS } = require('./shell-parse');
 
 /**
  * Cheap gate. If none of these words is anywhere in the line, no rule below can fire, so the
@@ -100,8 +101,11 @@ function leadingCommand(segment) {
     .toLowerCase();
 }
 
+/** Git's global options before the verb (`-C x`, `-c k=v`, `--git-dir=x`, `--no-pager`), as a regex source. */
+const GIT_OPTIONS = '(?:(?:-[cC]\\s+\\S+|--(?:git-dir|work-tree|namespace|exec-path|config-env|super-prefix)\\s+\\S+|--[\\w-]+(?:=\\S+)?)\\s+)*';
+
 /**
- * `git grep` / `git log --grep=…` are searchers too, but the verb is the second token. A searcher
+ * `git grep` / `git log --grep=…` are searchers too, but the verb follows git's global options. A searcher
  * that carries a substitution (`grep foo $(rm -rf x)`) runs something else, so it is not skipped.
  */
 function isSearcher(segment) {
@@ -109,7 +113,7 @@ function isSearcher(segment) {
   const command = leadingCommand(segment);
   if (LOOKUPS.has(command)) return true;
   if (command === 'git') {
-    const verb = segment.trim().split(/\s+/)[1];
+    const verb = new RegExp(`^${GIT_OPTIONS}(\\w[\\w-]*)`).exec(segment.trim().replace(/^\S+\s+/, ''))?.[1];
     return ['grep', 'log', 'show', 'blame', 'diff'].includes(verb);
   }
   return false;
@@ -346,8 +350,6 @@ function isThrowawayPath(operand, sessionId, shell) {
 const CD_COMMANDS = new Set(['cd', 'chdir', 'pushd', 'set-location', 'sl']);
 const BASH_CD = new Set(['cd', 'pushd']);
 const PLAIN_CD = new Set(['cd']);
-// Variables that change how the shell splits words, finds folders or commands, or where it is.
-const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BASH_ENV|ENV|GLOBIGNORE)$/i;
 const stripQuotes = (s) => /^(["'])(.*)\1$/.exec(s)?.[2] ?? s;
 // The only forms each shell reads as an assignment of a literal: Bash `name=value`, PowerShell `$name = 'value'`.
 const BASH_ASSIGNMENT = /^([A-Za-z_]\w*)=(?:"([^"$`\\\s]*)"|'([^'\s]*)'|([^"'$`\\\s]*))$/;
@@ -456,6 +458,56 @@ function holdsLink(root, budget = { left: 20000 }) {
   return false;
 }
 
+/** The nearest ancestor of `dir` (itself included) holding a `.git` file or folder, else null. Fs only, no git process. */
+function worktreeRoot(dir) {
+  for (let at = dir; ; at = nodePath.dirname(at)) {
+    if (fs.existsSync(nodePath.join(at, '.git'))) return at;
+    if (nodePath.dirname(at) === at) return null;
+  }
+}
+
+/**
+ * `rm -f <file>…` (no `-r`, no `-d`) where every target is a literal path to an existing regular file inside
+ * the git worktree of the folder the hook runs in. A `cd`, a link maker or a nested text before it: not exempt.
+ */
+function removesWorktreeFiles(segment, line) {
+  if (!line?.cwd) return false;
+  const tokens = segment.trim().split(/\s+/);
+  let forced = false;
+  let flagsEnded = false;
+  for (const token of tokens.slice(1)) {
+    if (flagsEnded || !token.startsWith('-')) continue;
+    if (token === '--') flagsEnded = true;
+    else if (/^-[fv]+$|^--(?:force|verbose)$/.test(token)) forced = forced || /f|force/.test(token);
+    else return false;
+  }
+  if (!forced) return false;
+  if (line.steps.some((s) => CD_COMMANDS.has(effectiveCommand(s.text))) || LINK_CREATOR.test([...line.steps.map((s) => s.text), segment].join(' '))) return false;
+  const operands = deleteOperands(segment, 'rm');
+  if (!operands) return false;
+  try {
+    const root = worktreeRoot(line.cwd);
+    if (!root) return false;
+    const realRoot = fs.realpathSync(root);
+    const claudeHome = nodePath.join(os.homedir(), '.claude');
+    let claudeReal = claudeHome;
+    try { claudeReal = fs.realpathSync(claudeHome); } catch { /* none yet: the plain path stands */ }
+    const under = (dir, file) => { const rel = nodePath.relative(dir, file); return !rel.startsWith('..') && !nodePath.isAbsolute(rel); };
+    return operands.every((operand) => {
+      const target = nodePath.resolve(line.cwd, operand);
+      const parent = fs.realpathSync(nodePath.dirname(target));
+      // The owner's Claude folder keeps asking, even when it (or the home) is a git worktree.
+      if (under(claudeReal, nodePath.join(parent, nodePath.basename(target)))) return false;
+      const relative = nodePath.relative(realRoot, nodePath.join(parent, nodePath.basename(target)));
+      if (relative.startsWith('..') || nodePath.isAbsolute(relative) || relative.split(/[\\/]/).some((part) => part.toLowerCase() === '.git')) return false;
+      const found = worktreeRoot(parent);
+      return found && fs.realpathSync(found) === realRoot && fs.lstatSync(target).isFile();
+    });
+  } catch {
+    return false;
+  }
+}
+
 /** A delete that recurses or forces: `rm -rf`, `rm -R`, `Remove-Item -Recurse`, `rd /s`. Not one aimed only at Claude's own temp folders. */
 function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefined) {
   const command = effectiveCommand(segment);
@@ -464,6 +516,7 @@ function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefi
     ? /(?<![-\w])(?:-[a-zA-Z]*[rRf][a-zA-Z]*|--recursive|--force)(?![\w-])/.test(keep)
     : /(?<![-\w])-(?:r|rec\w*|fo\w*)(?![\w-])/i.test(keep) || /(?<!\S)\/[sf](?!\w)/i.test(keep);
   if (!recursive) return false;
+  if (command === 'rm' && removesWorktreeFiles(segment, line)) return false;
   // The hook reads every segment before any runs: a link made earlier on the same line (by any tool or
   // interpreter) is not on disk yet. So the exemption holds only when every segment before the delete is a
   // delete, a `cd` or an assignment (what comes after cannot touch it). A nested text (`bash -c "…"`) is not
@@ -483,11 +536,13 @@ function deletesRecursively(scan, keep, segment, piped, line, sessionId = undefi
 }
 
 /** `git [-c k=v] <verb> …`: the verb is the first word after git and its options, never a word inside a message. */
-const GIT_VERB = /\bgit\s+(?:(?:-[cC]\s+\S+|--(?:git-dir|work-tree|namespace|exec-path|config-env|super-prefix)\s+\S+|--[\w-]+(?:=\S+)?)\s+)*(checkout|restore|clean|reset|branch|update-ref|filter-branch|gc)(?![\w-])/i;
+const GIT_VERB = new RegExp(`\\bgit\\s+${GIT_OPTIONS}(checkout|restore|clean|reset|branch|update-ref|filter-branch|gc)(?![\\w-])`, 'i');
 function gitCall(text) {
   const m = GIT_VERB.exec(text);
   return m ? { verb: m[1].toLowerCase(), rest: text.slice(m.index + m[0].length) } : null;
 }
+// A nested `git -C <dir>` / `git -c k=v` at a command boundary: its global options are not flags of the outer verb.
+const NESTED_GIT_OPTIONS = /(?<=[(`|;&{\n]\s*)git\s+(?:-[cC]\s+\S+\s+)+/g;
 const flagCluster = (letter) => new RegExp(`(?<![-\\w])-[a-zA-Z]*${letter}[a-zA-Z]*(?![\\w-])`);
 
 /** `git clean` that really deletes: forced and not a dry run (`-n` anywhere in a cluster). */
@@ -510,9 +565,10 @@ function resetsHard(scan, keep) {
 function branchRewrites(scan, keep) {
   const call = gitCall(keep);
   if (call?.verb !== 'branch') return false;
-  const moves = /(?<!\S)-[a-zA-Z]*[mMcC][a-zA-Z]*(?![\w-])/.test(call.rest) || /(?<!\S)--(?:move|copy)(?![\w-])/.test(call.rest);
-  const deletes = /(?<!\S)-[a-zA-Z]*[dD][a-zA-Z]*(?![\w-])/.test(call.rest) || /(?<!\S)--delete(?![\w-])/.test(call.rest);
-  return moves || (!deletes && (flagCluster('f').test(call.rest) || /(?<!\S)--force(?![\w-])/.test(call.rest)));
+  const rest = call.rest.replace(NESTED_GIT_OPTIONS, (m) => ' '.repeat(m.length));
+  const moves = /(?<!\S)-[a-zA-Z]*[mMcC][a-zA-Z]*(?![\w-])/.test(rest) || /(?<!\S)--(?:move|copy)(?![\w-])/.test(rest);
+  const deletes = /(?<!\S)-[a-zA-Z]*[dD][a-zA-Z]*(?![\w-])/.test(rest) || /(?<!\S)--delete(?![\w-])/.test(rest);
+  return moves || (!deletes && (flagCluster('f').test(rest) || /(?<!\S)--force(?![\w-])/.test(rest)));
 }
 
 /** `git update-ref -d`, `git filter-branch`, `git gc --prune=now`: refs or objects with no way back. */
@@ -692,13 +748,13 @@ const RULES = [
 ];
 
 /** The reason for the first action with no undo in one command string (a whole line or a nested one), else null. */
-function checkText(command, whole = command, sessionId = undefined, shell = undefined) {
+function checkText(command, whole = command, sessionId = undefined, shell = undefined, cwd = undefined) {
   let at = 0;
   const steps = [];
   for (const segment of splitSegments(command)) {
     const start = command.indexOf(segment, at);
     // What the delete rule needs of the line: the segments before this one with their separators (null when nested).
-    const line = command === whole ? { steps: steps.slice(), sep: command.slice(at, start), shell } : null;
+    const line = command === whole ? { steps: steps.slice(), sep: command.slice(at, start), shell, cwd } : null;
     steps.push({ text: segment, sep: command.slice(at, start) });
     at = start;
     const before = command.slice(0, at).trimEnd();
@@ -720,15 +776,15 @@ function checkText(command, whole = command, sessionId = undefined, shell = unde
 }
 
 /** The confirmation reason for the first action with no undo in `command` (run by the `Bash` or `PowerShell` tool), nested wrappers included, else null. */
-function checkDestructive(command, sessionId = undefined, toolName = undefined) {
+function checkDestructive(command, sessionId = undefined, toolName = undefined, cwd = undefined) {
   // Fast path: nothing here can be one of the rules.
   if (!isDangerous(command)) return null;
   const shell = { bash: 'bash', powershell: 'powershell' }[String(toolName).toLowerCase()];
   for (const text of expandTexts(command)) {
-    const reason = checkText(text, command, sessionId, shell);
+    const reason = checkText(text, command, sessionId, shell, cwd);
     if (reason) return reason;
   }
   return null;
 }
 
-module.exports = { checkDestructive };
+module.exports = { checkDestructive, parseAssignment };

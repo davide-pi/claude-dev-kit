@@ -326,12 +326,35 @@ const BODY_RUNNERS = new Set([
 ]);
 const EXEC_CLIS = new Set(['docker', 'podman', 'kubectl']);
 
+// Variables that change how the shell splits words, finds folders or commands, or where it is.
+const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BASH_ENV|ENV|GLOBIGNORE|PS4|PROMPT_COMMAND)$/i;
+// Commands that only move, list, make a folder or build: they run no text and no script a body wrote.
+const INERT_COMMANDS = new Set(['cd', 'pushd', 'set-location', 'push-location', 'sl', 'mkdir', 'md', 'ls', 'dir']);
+
+/** `{ name, value }` when a segment is only an assignment (`P=x`, `$P='x'`, `$P = 'x'`), else null. */
+function assignment(tokens) {
+  const one = tokens.length === 1 && /^\$?([A-Za-z_]\w*)=(.*)$/.exec(tokens[0]);
+  if (one) return { name: one[1], value: one[2] };
+  const spaced = tokens.length === 3 && tokens[1] === '=' && /^\$([A-Za-z_]\w*)$/.exec(tokens[0]);
+  return spaced ? { name: spaced[1], value: tokens[2] } : null;
+}
+
+/** True for a segment that cannot run a body or a script: a literal non-reserved assignment, `cd`, `mkdir`, `dotnet build|test`, `npm`, `ls`. */
+function isInert(tokens) {
+  if (!tokens.length || tokens.some((t) => /\$\(|[<>]\(/.test(t))) return false;
+  const assigned = assignment(tokens);
+  if (assigned) return !RESERVED_VARS.test(assigned.name) && !/[$`(]/.test(assigned.value);
+  const command = baseName(tokens[0]);
+  return INERT_COMMANDS.has(command) || (command === 'dotnet' && /^(?:build|test)$/i.test(tokens[1] ?? ''));
+}
+
 /** True when the command, bodies off, has a segment that may run text as commands (or a script a body wrote). */
 function hasBodyRunner(command) {
   const targets = redirectTargets(command);
-  return expandSegments(stripBodies(command)).some((tokens) => [tokens, stripWrappers(tokens)].some((cmd) => {
+  return expandSegments(stripBodies(command)).some((tokens) => !isInert(tokens) && [tokens, stripWrappers(tokens)].some((cmd) => {
     const name = cmd.length ? baseName(cmd[0]).toLowerCase() : '';
     if (BODY_RUNNERS.has(name) || (EXEC_CLIS.has(name) && cmd.some((t) => /^exec$/i.test(t)))) return true;
+    if (cmd === tokens && cmd.length && RESERVED_VARS.test(/^\$?([A-Za-z_]\w*)=/.exec(cmd[0])?.[1] ?? '')) return true;
     if (!cmd.length || DATA_RECEIVERS.has(name)) return false;
     // `./s.sh`, `"$SHELL" s.sh`, `timeout 60 bash s.sh`, `nice sh s.sh`: a path, a variable or a runner after a prefix command.
     // `watch s.sh`, `stdbuf -o0 s.sh`: a script argument after a prefix command counts too.
@@ -352,7 +375,7 @@ function redirectTargets(command) {
 function isDataBody(bare, open, line) {
   if (!open.heredoc || !open.quoted || !SIMPLE_DELIMITER.test(open.delimiter)) return false;
   if (/<\(|>\(|\$\(|`/.test(line) || /(?:\||&&|\\)\s*$/.test(line)) return false;
-  return parseSegments(bare).every((tokens) => DATA_RECEIVERS.has(baseName(tokens[0]).toLowerCase()));
+  return parseSegments(bare).every((tokens) => DATA_RECEIVERS.has(baseName(tokens[0]).toLowerCase()) || isInert(tokens));
 }
 
 /**
@@ -371,5 +394,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies, RESERVED_VARS,
 };
