@@ -201,11 +201,43 @@ function afterSsh(tokens) {
   return tokens.slice(i + 1);
 }
 
-/** The commands one command runs on behalf of its wrapper: `bash -c "..."`, `docker exec c sh -c "..."`, `ssh h "..."`. */
+// Package launchers that run the command after their options: `npx cmd`, `npm exec -- cmd`, `pnpm dlx cmd`, `npm exec -c "..."`.
+const PACKAGE_RUNNERS = new Set(['npx', 'pnpx', 'bunx']);
+const PACKAGE_MANAGERS = new Set(['npm', 'pnpm', 'yarn', 'bun']);
+const LAUNCH_VERBS = new Set(['exec', 'x', 'dlx']);
+const LAUNCH_VALUE_OPTS = new Set(['-p', '--package', '-w', '--workspace', '--prefix', '-C', '--dir', '--filter', '-F',
+  '--registry', '--cache', '--userconfig', '--globalconfig', '--node-options', '--cwd']);
+
+/** The command a package launcher runs, as tokens (`-c`/`--call` gives its one string), or null when `cmd` launches nothing. */
+function afterLauncher(cmd) {
+  const name = baseName(cmd[0]);
+  let i = 1;
+  if (!PACKAGE_RUNNERS.has(name)) {
+    if (!PACKAGE_MANAGERS.has(name)) return null;
+    // Global options (`pnpm -r`, `--filter web`, `npm -w a`, `yarn workspace a`) come before the verb.
+    while (i < cmd.length && (cmd[i].startsWith('-') || (name === 'yarn' && cmd[i] === 'workspace'))) {
+      i += LAUNCH_VALUE_OPTS.has(cmd[i]) || cmd[i] === 'workspace' ? 2 : 1;
+    }
+    if (!LAUNCH_VERBS.has(String(cmd[i]).toLowerCase())) return null;
+    i += 1;
+  }
+  for (; i < cmd.length; i += 1) {
+    const call = /^(?:-c|--call)(?:=([\s\S]*))?$/.exec(cmd[i]);
+    if (call) return call[1] !== undefined ? [call[1]] : cmd.slice(i + 1, i + 2);
+    if (cmd[i] === '--') return cmd.slice(i + 1);
+    if (!cmd[i].startsWith('-')) return cmd.slice(i);
+    if (LAUNCH_VALUE_OPTS.has(cmd[i])) i += 1;
+  }
+  return [];
+}
+
+/** The commands one command runs on behalf of its wrapper: `bash -c "..."`, `docker exec c sh -c "..."`, `ssh h "..."`, `npx sh -c "..."`. */
 function innerOf(cmd) {
   const name = baseName(cmd[0]);
   if (name === 'wsl') return nested(afterWsl(cmd));
   if (name === 'ssh') return nested(afterSsh(cmd));
+  const launched = afterLauncher(cmd);
+  if (launched) return nested(launched);
   if (SHELLS.has(name)) return shellInner(cmd, 1, name);
   const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : -1;
   if (launch < 0) return [];
@@ -325,6 +357,15 @@ const BODY_RUNNERS = new Set([
   'iex', 'invoke-expression', 'psql', 'sqlcmd', 'mysql', 'sqlite3', 'redis-cli', 'mongosh', 'cqlsh',
 ]);
 const EXEC_CLIS = new Set(['docker', 'podman', 'kubectl']);
+// Files a tool runs on its own, each with its tools: a Makefile recipe at `make`, a git hook (`.husky/`, `.githooks/` via core.hooksPath) at `git commit`.
+const AUTORUN_PAIRS = [
+  [/(?:^|[\\/])(?:GNU)?[Mm]akefile$/, ['make', 'gmake']],
+  [/(?:^|[\\/])(?:\.git[\\/]hooks|\.husky|\.githooks)[\\/][^\\/]+$/, ['git']],
+];
+/** The tools that run a file the line wrote: `make` for a Makefile, `git` for a hook. */
+const autorunTools = (targets) => new Set(AUTORUN_PAIRS.filter(([file]) => [...targets].some((t) => file.test(t))).flatMap(([, tools]) => tools));
+// A PowerShell here-string with its body: `@'` or `@"` ending its line, up to the closer at a line start.
+const HERE_STRING_BODY = /@(['"])[ \t]*\r?\n([\s\S]*?)\r?\n\1@/g;
 
 // Variables that change how the shell splits words, finds folders or commands, or where it is.
 const RESERVED_VARS = /^(?:IFS|CDPATH|PATH|HOME|PWD|OLDPWD|SHELLOPTS|BASHOPTS|BASH_ENV|ENV|GLOBIGNORE|PS4|PROMPT_COMMAND)$/i;
@@ -352,9 +393,11 @@ function isInert(tokens) {
 /** True when the command, bodies off, has a segment that may run text as commands (or a script a body wrote). */
 function hasBodyRunner(command) {
   const targets = redirectTargets(command);
+  const autorun = autorunTools(targets);
   return expandSegments(stripBodies(command)).some((tokens) => !isInert(tokens) && [tokens, stripWrappers(tokens)].some((cmd) => {
     const name = cmd.length ? baseName(cmd[0]).toLowerCase() : '';
     if (BODY_RUNNERS.has(name) || (EXEC_CLIS.has(name) && cmd.some((t) => /^exec$/i.test(t)))) return true;
+    if (autorun.has(name)) return true;
     if (cmd === tokens && cmd.length && RESERVED_VARS.test(/^\$?([A-Za-z_]\w*)=/.exec(cmd[0])?.[1] ?? '')) return true;
     if (!cmd.length || DATA_RECEIVERS.has(name)) return false;
     // `./s.sh`, `"$SHELL" s.sh`, `timeout 60 bash s.sh`, `nice sh s.sh`: a path, a variable or a runner after a prefix command.
@@ -365,11 +408,35 @@ function hasBodyRunner(command) {
   }));
 }
 
-/** File names a command writes to: `> s`, `>> s`, `tee s`, `tee -a s` (quotes dropped). */
+/** File names a command writes to: `> s`, `>> s`, `tee s`, `tee -a s`, `Set-Content [-Path] s` (quotes and a trailing `;` dropped). */
 function redirectTargets(command) {
   const names = new Set();
-  for (const m of command.matchAll(/>>?\s*(\S+)|\btee\s+(?:-\S+\s+)*(\S+)/g)) names.add((m[1] ?? m[2]).replace(/^['"]|['"]$/g, ''));
+  const writes = />>?\s*(\S+)|\btee\s+(?:-\S+\s+)*(\S+)|\b(?:set-content|add-content|out-file)\s+(?:-(?:path|filepath|literalpath)\s+)?([^\s;|@-][^\s;|]*)/gi;
+  for (const m of command.matchAll(writes)) names.add((m[1] ?? m[2] ?? m[3]).replace(/[;|&)]+$/, '').replace(/^['"]|['"]$/g, ''));
   return names;
+}
+
+/** True when a command, bodies off, runs a script or text: a shell or eval-like, a script path, or a file the line wrote. */
+function runsScript(command) {
+  const targets = redirectTargets(command);
+  const autorun = autorunTools(targets);
+  // `.` and `source` run a script only in command position: as an argument (`dotnet build .`) they are a path or a word.
+  const argRunner = (t) => BODY_RUNNERS.has(t) && t !== '.' && t !== 'source';
+  // The writer itself (`Set-Content s.ps1`) and node/python (owner decision: their scripts stay unread) run nothing here.
+  return expandSegments(stripBodies(command.replace(HERE_STRING_BODY, "''"))).some((tokens) => [tokens, stripWrappers(tokens)].some((cmd) => cmd.length
+    && (autorun.has(baseName(cmd[0]).toLowerCase())
+      || (!DATA_RECEIVERS.has(baseName(cmd[0]))
+        && (BODY_RUNNERS.has(baseName(cmd[0])) || /^\.{0,2}[\\/]|\.(?:sh|ps1|bat|cmd)$/i.test(cmd[0])
+          || cmd.slice(1).some((t) => targets.has(t) || argRunner(t)))))));
+}
+
+/**
+ * Each line of the PowerShell here-string bodies when a script runner follows: otherwise a body is one quoted token no
+ * check reads. Read one at a time, a stray quote in one line cannot hide the next.
+ */
+function runnableBodyLines(command) {
+  if (!runsScript(command)) return [];
+  return [...command.matchAll(HERE_STRING_BODY)].flatMap((m) => m[2].split(/\r?\n/)).filter((line) => line.trim());
 }
 
 /** True when the heredoc body opened on `line` is plain data: quoted delimiter, only data receivers, nothing that expands or pipes on. */
@@ -395,5 +462,5 @@ const expandTexts = (command) => walk(command).filter((e) => e.text !== null).ma
 
 module.exports = {
   parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
-  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies, RESERVED_VARS,
+  stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS,
 };

@@ -5,7 +5,7 @@ import { createRequire } from 'node:module';
 const { evaluate } = createRequire(import.meta.url)('../hooks/lib/guard.js');
 const decide = (tool_name, command, cwd = 'C:/repo') => evaluate({ tool_name, tool_input: { command }, cwd, session_id: 's1' })?.decision ?? 'pass';
 
-test('given a PowerShell here-string written to a script, when a runner follows, then the guard stays silent as before', () => {
+test('given a PowerShell here-string written to a script, when a runner follows, then the guard asks', () => {
   // Given
   const commands = [
     "Set-Content f.ps1 @'\nRemove-Item -Recurse C:/x/y\n'@\npwsh f.ps1",
@@ -17,6 +17,6 @@ test('given a PowerShell here-string written to a script, when a runner follows,
     const decision = decide('PowerShell', command);
 
     // Then
-    assert.equal(decision, 'pass', command);
+    assert.equal(decision, 'ask', command);
   }
 });

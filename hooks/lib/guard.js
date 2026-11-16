@@ -19,7 +19,7 @@
 'use strict';
 
 const { checkDefaultBranch, parseGitCall } = require('./default-branch');
-const { expandTexts, expandSegments, parseSegments, withoutDataBodies } = require('./shell-parse');
+const { expandTexts, expandSegments, parseSegments, withoutDataBodies, runnableBodyLines } = require('./shell-parse');
 const { parseAzCall } = require('./alm-contract');
 const { READ_ONLY_AGENTS } = require('./read-only-agents');
 const { checkDestructive } = require('./destructive');
@@ -131,12 +131,14 @@ function evaluate(payload) {
 
   const scriptArgs = safely('script-args', () => checkScriptArgs(command, payload.tool_name));
   // A heredoc body fed to a non-shell (`cat > f`, `node -`) is data: these checks read the command without it.
-  const code = withoutDataBodies(command);
+  // A body a runner may run is also read line by line, so a stray quote in one line cannot hide the next.
+  const codes = [withoutDataBodies(command), ...(safely('body-lines', () => runnableBodyLines(command)) ?? [])];
+  const first = (check) => codes.reduce((found, code) => found ?? check(code), null);
   const reasons = [
-    safely('default-branch', () => checkDefaultBranch(code, payload.cwd)),
-    safely('destructive', () => checkDestructive(code, payload.session_id, payload.tool_name, payload.cwd)),
-    safely('alm-contract', () => checkAlmContract(code)),
-    safely('docker-cp', () => checkDockerCp(code, payload.cwd)),
+    safely('default-branch', () => first((code) => checkDefaultBranch(code, payload.cwd))),
+    safely('destructive', () => first((code) => checkDestructive(code, payload.session_id, payload.tool_name, payload.cwd))),
+    safely('alm-contract', () => first((code) => checkAlmContract(code))),
+    safely('docker-cp', () => first((code) => checkDockerCp(code, payload.cwd))),
     scriptArgs?.reason,
     safely('self-protect', () => checkSelfWrite(command, payload.cwd)),
   ].filter(Boolean);
