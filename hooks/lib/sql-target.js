@@ -329,7 +329,16 @@ function scan(tokens, depth, command) {
     const inner = firstDecision(innerSegments(cmd), depth + 1, command);
     if (inner) return inner;
   }
-  const launch = CONTAINER_CLIS.has(name) ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : launcher ? 0 : -1;
+  // `kubectl exec pod -- psql` runs like `docker exec`; `yarn psql` / `bun run psql` run the package's bin.
+  // A package manager runs a bin only as `yarn psql` or after run/exec; install, add, info and the like only name a package.
+  const managerLaunch = () => {
+    const k = cmd.findIndex((t, i) => i > 0 && !t.startsWith('-'));
+    if (k < 0) return -1;
+    if (/^(?:run|run-script|exec|x|dlx)$/.test(cmd[k])) return k;
+    return isTool(baseName(cmd[k])) ? k - 1 : -1;
+  };
+  const manager = /^(?:npm|pnpm|yarn|bun)$/.test(name);
+  const launch = CONTAINER_CLIS.has(name) || name === 'kubectl' ? cmd.findIndex((t) => /^(?:exec|run)$/i.test(t)) : launcher ? 0 : manager ? managerLaunch() : -1;
   if (launch < 0) return null;
 
   for (let i = launch + 1; i < cmd.length; i += 1) {

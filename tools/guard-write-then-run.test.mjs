@@ -250,3 +250,107 @@ test('given a launcher behind an npm value option, a .githooks hook or gmake, wh
     assert.equal(decision, 'ask', command);
   }
 });
+
+test('given a heredoc body with an apostrophe line fed to a shell, when the rm line follows it, then the guard asks', () => {
+  // Given
+  const commands = [
+    `bash <<'EOF'\n# don't\n${BODY}\nEOF`,
+    `sh -s <<'EOF'\n# don't\n${BODY}\nEOF`,
+    `cat > s.sh <<'EOF'\n# don't\n${BODY}\nEOF\nbash s.sh`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const decision = decide('Bash', command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+});
+
+test('given a heredoc body with an apostrophe line fed to node or python, when the rm line follows it, then the guard does not ask', () => {
+  // Given
+  const commands = [
+    `node - <<'EOF'\n// don't\n${BODY}\nEOF`,
+    `python - <<'EOF'\n# don't\n${BODY}\nEOF`,
+    `S=$(printf '%s' x); cat > /tmp/p2.js <<'EOF'\nconst t = "it's a string";\nconst cmds = [\n \`${BODY}\`,\n];\nconsole.log(cmds, t);\nEOF\nnode /tmp/p2.js`,
+  ];
+
+  for (const command of commands) {
+    // When
+    const decision = decide('Bash', command);
+
+    // Then
+    assert.notEqual(decision, 'ask', command);
+  }
+});
+
+test('given a heredoc body that npm exec runs, when the guard reads it, then it asks', () => {
+  // Given
+  const commands = [
+    "npm exec bash <<'EOF'\nrm -rf /tmp/x/y\nEOF",
+    "cat > f.sh <<'EOF'\nrm -rf /x/y\nEOF\nnpm exec -- ./f.sh",
+    "cat > f.sh <<'EOF'\nrm -rf /x/y\nEOF\nnpm run x -- ./f.sh",
+  ];
+
+  for (const command of commands) {
+    // When
+    const decision = decide('Bash', command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+});
+
+test('given a PowerShell here-string written to a script, when a runner follows, then the guard asks', () => {
+  // Given
+  const commands = [
+    "Set-Content f.ps1 @'\nRemove-Item -Recurse C:/x/y\n'@\npwsh f.ps1",
+    "Set-Content f.ps1 @'\nRemove-Item -Recurse C:/x/y\n'@\n./f.ps1",
+  ];
+
+  for (const command of commands) {
+    // When
+    const decision = decide('PowerShell', command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+});
+
+test('given a heredoc fed to a shell through npm exec or explore, when the guard reads it, then it asks', () => {
+  // Given
+  const commands = [
+    "npm exec -- bash <<'EOF'\nrm -rf ~/x\nEOF",
+    "npm exec bash <<'EOF'\nrm -rf ~/x\nEOF",
+    "npm explore lodash -- sh <<'EOF'\nrm -rf ~/x\nEOF",
+  ];
+
+  for (const command of commands) {
+    // When
+    const decision = decide('Bash', command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+  }
+});
+
+test('given a here-string piped to Set-Content and then run, when the guard reads it, then it asks', () => {
+  // Given
+  const command = "@'\nRemove-Item -Recurse -Force C:/repo/src\n'@ | Set-Content s.ps1; pwsh -File s.ps1";
+
+  // When
+  const decision = decide('PowerShell', command);
+
+  // Then
+  assert.equal(decision, 'ask');
+});
+
+test('given a shell heredoc and a node stdin heredoc on one line, when the node body has an apostrophe and a delete, then the guard stays silent', () => {
+  // Given
+  const command = `bash <<'EOF'\necho hi\nEOF\nnode - <<'EOF2'\n// don't\n${BODY}\nEOF2`;
+  // When
+  const decision = decide('Bash', command);
+  // Then
+  assert.equal(decision, 'pass');
+});

@@ -330,3 +330,34 @@ test('given a client launched through npx, npm exec, pnpm dlx or yarn dlx, when 
   ], /db-ro\.ps1/);
   expect('approve', ['npx psql -h localhost -c "select 1"', 'npm exec -- sh -c "psql -h localhost"']);
 });
+
+test('given a client behind timeout, nice, cross-env, dotenv, kubectl exec or a package-manager bin run, when the guard runs it, then a non-dev host is denied towards db-ro.ps1', () => {
+  // Given / When / Then
+  expect('deny', [
+    'timeout 5 psql -h pg-prod.example.com',
+    'nice -n 10 psql -h pg-prod.example.com',
+    'npx cross-env A=1 psql -h pg-prod.example.com',
+    'npx dotenv -e .env.prod -- psql -h pg-prod.example.com',
+    'kubectl exec -n db pod-0 -- psql -h pg-prod.example.com',
+    'kubectl exec pod-0 -- sh -c "psql -h pg-prod.example.com"',
+    'yarn psql -h pg-prod.example.com',
+    'bun run psql -h pg-prod.example.com',
+  ], /db-ro\.ps1/);
+});
+
+test('given the same wrapped forms with a dev host or no client, when the guard runs them, then nothing is denied', () => {
+  // Given / When / Then
+  expect('approve', [
+    'timeout 5 psql -h localhost',
+    'nice -n 10 psql -h localhost',
+    'npx cross-env A=1 psql -h localhost',
+    'npx dotenv -e .env.prod -- psql -h localhost',
+    'kubectl exec -n db pod-0 -- psql -h localhost',
+    'kubectl exec pod-0 -- sh -c "psql -h localhost"',
+    'yarn psql -h localhost',
+    'bun run psql -h localhost',
+    'timeout 60 dotnet test',
+    'kubectl exec pod-0 -- ls',
+    'yarn build',
+  ]);
+});
