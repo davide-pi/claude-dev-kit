@@ -22,7 +22,7 @@ import { fileURLToPath } from 'node:url';
 
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..');
 global.__edgeCdpLibrary = true;
-const { run } = createRequire(import.meta.url)(join(ROOT, 'hooks', 'edge-cdp.js'));
+const { run, SCRIPT_TIMEOUT_MS } = createRequire(import.meta.url)(join(ROOT, 'hooks', 'edge-cdp.js'));
 
 const listen = () => new Promise((resolve) => {
   const server = createServer((socket) => socket.destroy());
@@ -89,6 +89,19 @@ test('given no port answers, when the gate runs, then the pwsh script runs and i
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
+});
+
+test('given the script timeout and the settings.json hook timeout, when compared, then the script is at least 5 s under', () => {
+  // Given
+  const { hooks } = JSON.parse(readFileSync(join(ROOT, 'settings.json'), 'utf8'));
+  const group = hooks.PreToolUse.find((g) => g.matcher.startsWith('mcp__plugin_browser-use'));
+  const hookTimeoutMs = group.hooks[0].timeout * 1000;
+
+  // When
+  const margin = hookTimeoutMs - SCRIPT_TIMEOUT_MS;
+
+  // Then
+  assert.ok(margin >= 5000, `margin was ${margin} ms`);
 });
 
 test('given settings.json, when the PreToolUse hooks for browser-use tools are read, then they wire the node gate, not pwsh', () => {

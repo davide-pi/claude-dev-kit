@@ -172,6 +172,7 @@ const lanesFor = tasks => {
 // Lanes pay when there are two and at least two tasks run outside the largest one.
 const lanesWorth = lanes => lanes.length >= 2 && lanes.reduce((n, l) => n + l.length, 0) - Math.max(...lanes.map(l => l.length)) >= 2
 const stepBudget = taskCount => Math.min(35, 10 + 6 * taskCount)
+const turnBudgetText = taskCount => `Budget: about ${stepBudget(taskCount)} turns. At that point stop widening: run the gate and report what is left.`
 // More files than the triage size implies: a signal for the verdict, never a bump of the size.
 const sizeSignal = (size, count) => (size === 'S' && count > 1) || (size === 'M' && count > 6)
   ? `the change touches ${count} files, more than a size ${size} triage implies: the triage may have been too small`
@@ -942,7 +943,7 @@ const runBlocks = async (items, total, lane) => {
     const tasksText = planTasks.length
       ? `Tasks of this block:\n${block.map(t => `- ${t.id}: ${t.title}${t.files.length ? ` (files: ${t.files.join(', ')})` : ''}${t.criteria.length ? `\n  criteria: ${t.criteria.join(' | ')}` : ''}`).join('\n')}${total > 1 ? '\nDo only the tasks of this block: a task of a later block is not yours, even a quick one.' : ''}`
       : ''
-    const budgetLine = `Budget: about ${stepBudget(block.length)} turns. At that point stop widening: run the gate and report what is left.`
+    const budgetLine = turnBudgetText(block.length)
     const workRule = "Keep working until every task of the block is done: stop only when you can't go on or before a risky step. Add no file, test or refactor the tasks don't ask."
     const blockFiles = [...new Set(block.flatMap(t => t.files))]
     // The work rule goes to the code call and its continuations: the test-first call writes only tests, and a fix run has its own brief.
@@ -994,7 +995,7 @@ const runBlocks = async (items, total, lane) => {
     // A partial run is never reviewed: the implementer continues from its own edits (its -Since stays the start tree, so the delta covers every run).
     let continuations = 0
     let sawRed = false   // a red gate in a partial report counts, though its continuation turns green
-    // The implementer stops itself at 30 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
+    // The implementer stops itself at 35 turns (agents/implementer.md): a fresh one continues with a clean context, cheaper than one long run.
     while ((!impl || impl.remaining.length) && continuations < 4) {
       if (impl) takeSide(impl)
       const seen = impl && readGate(impl.gate)
@@ -1342,7 +1343,7 @@ const probesReproduce = async (label, list, failure = '') => {
     'A command that exits non-zero, or prints that failure, reproduces it. Return reproduced: true when any command reproduces it, else false, with the deciding output line. A command you couldn\'t run, or whose result you can\'t read, means ran: false.',
     ...list.map(q => `- ${q.cmd} (${q.path})`),
     repoLine(repoRoot),
-  ].filter(Boolean).join('\n'), { label, phase: 'Final verification', agentType: 'Explore', model: 'haiku', effort: 'low', schema: PROBE_RUN })
+  ].filter(Boolean).join('\n'), { label, phase: 'Final verification', agentType: 'code-reviewer', model: 'haiku', effort: 'low', schema: PROBE_RUN })
   return !(r?.reproduced === false && r.ran === true && String(r.output ?? '').trim())
 }
 const scopeOfDelta = () => {
@@ -1590,7 +1591,7 @@ while (true) {
     perimeterTextFor(roundFiles),
     dirtyText,
     ...gateLines(repoRoot, false, planFiles),
-    ...writerTail(budgetText(80), cleaning),
+    ...writerTail(`${turnBudgetText(2)}\n\n${budgetText(60)}`, cleaning),
   ].filter(Boolean).join('\n\n'), fixOpts, round, resolution, gated, `fix-${round}`)
   if (asked1.stall) return asked1.stall
   const fixed = asked1.report

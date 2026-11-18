@@ -24,7 +24,7 @@ A broken hook must never stop work, so every hook exits 0 on an internal error. 
 
 | Hook | Behaviour | Why |
 | --- | --- | --- |
-| `guard-shell.js`, `secret-scan.js` | `onFailure: "block"`: a missing or unloadable script blocks the call; a runtime error inside still approves | a guard that silently disappears is worse than a blocked call |
+| `guard-shell.js`, `secret-scan.js` | `onFailure: "block"`: a missing or unloadable script, or a runtime error inside, answers ask (the inline wrapper or the hook's own fallback), never approve; only the rewrites fail open | a guard that silently disappears is worse than a blocked call |
 | `worktree-root.js` | fails loudly | a silent failure leaves the session in a worktree that does not exist |
 
 ## Cost

@@ -112,3 +112,33 @@ test('given a home file edited after install, when -Verify -Only runs, then it e
   assert.equal(r.status, 1, r.stdout + r.stderr);
   assert.match(r.stdout + r.stderr, /rules\/b\.md/);
 }));
+
+test('given -Only with no kit asset among the paths, when it runs, then it exits non-zero with nothing verified', { skip }, withFixture(f => {
+  // Given: tools/x and settings.json are never kit assets
+  // When
+  const r = install(f, '-Only', 'tools/x,settings.json', '-Base', f.baseSha);
+  // Then
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /nothing verified/);
+}));
+
+test('given -Verify -Only with no kit asset among the paths, when it runs, then it exits non-zero with nothing verified', { skip }, withFixture(f => {
+  // Given: tools/x is not a kit asset
+  // When
+  const r = install(f, '-Verify', '-Only', 'tools/x');
+  // Then
+  assert.notEqual(r.status, 0, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /nothing verified/);
+}));
+
+test('given a binary asset that differs from the installed one only in bytes that are not valid UTF-8, when -Verify -Only runs, then it exits 1 naming it', { skip }, withFixture(f => {
+  // Given
+  writeFileSync(join(f.repo, 'rules', 'blob.dat'), Buffer.from([0x01, 0xff, 0x80, 0x0d, 0x0a, 0x02]));
+  mkdirSync(join(f.home, 'rules'), { recursive: true });
+  writeFileSync(join(f.home, 'rules', 'blob.dat'), Buffer.from([0x01, 0xff, 0x81, 0x0d, 0x0a, 0x02]));
+  // When
+  const r = install(f, '-Verify', '-Only', 'rules/blob.dat');
+  // Then
+  assert.equal(r.status, 1, r.stdout + r.stderr);
+  assert.match(r.stdout + r.stderr, /rules\/blob\.dat/);
+}));

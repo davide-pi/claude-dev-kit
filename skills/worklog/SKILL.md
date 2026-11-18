@@ -3,6 +3,7 @@ name: worklog
 description: >-
   Use when the user asks to log hours ("segna le ore", "registra le ore", /worklog [period]): hours
   per day from the transcripts, onto Azure DevOps.
+disable-model-invocation: true
 ---
 
 # worklog — what was done, each day against its target, the hours on the board

@@ -97,6 +97,36 @@ test('the formatter key may live in the package manifest instead of its own file
   assert.match(onFile(join(root, 'src/main.tsx')), /^prettier --write /);
 });
 
+test('given a workspace package folder, when format-on-edit decides, then it formats', () => {
+  // Given
+  const root = fixture({
+    'package.json': '{ "name": "web", "prettier": {} }',
+    ...INSTALLED,
+    'packages/ui/src/a.ts': 'export {};',
+  });
+
+  // When
+  const plan = onFile(join(root, 'packages/ui/src/a.ts'));
+
+  // Then
+  assert.match(plan, /^prettier --write /);
+});
+
+test('given a NuGet packages folder, when format-on-edit decides, then it skips', () => {
+  // Given
+  const root = fixture({
+    '.editorconfig': '[*.cs]\nindent_size = 4\n',
+    'App.csproj': '<Project Sdk="Microsoft.NET.Sdk" />',
+    'packages/Newtonsoft.Json.13.0.1/lib/x.cs': 'class X { }',
+  });
+
+  // When
+  const plan = onFile(join(root, 'packages/Newtonsoft.Json.13.0.1/lib/x.cs'));
+
+  // Then
+  assert.equal(plan, '');
+});
+
 // ── Doing nothing is the common case, and the one that must never surprise ─────────────────────
 
 test('a file outside any project is left alone', () => {

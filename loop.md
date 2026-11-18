@@ -12,7 +12,7 @@ Read-only, one pass, report in the chat language; follow the `azdo-cli` skill fo
 3. Latest run of the branch: `az pipelines runs list --branch <branch> --top 1`; a failed run is `result`
    `failed` with `status` `completed`.
 4. Report one line per item: PR (status, unresolved threads), run (result). Nothing changed since the last
-   pass → "nessuna novità".
+   pass → "nothing new".
 5. `result` `failed` → suggest reading the failing step's log (`azdo-cli`), then `debug-systematic`; it proposes only.
 
 Never push, comment, resolve a thread, vote, complete the PR or re-run a pipeline.

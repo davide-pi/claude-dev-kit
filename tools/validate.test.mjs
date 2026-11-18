@@ -284,3 +284,53 @@ test('given an asset naming Italian as an output language, when the validator ru
   const bare = run((write, read) => write(SKILL, `${read(SKILL)}\nAn Italian prompt never matches an English trigger list.\n`));
   assert.equal(bare.code, 0, bare.out);
 });
+
+const rootRead = (rel) => readFileSync(join(HERE, '..', rel), 'utf8');
+const flag = (rel) => /^disable-model-invocation:\s*true\s*$/m.test(rootRead(rel).split(/\n---/)[0]);
+
+test('given the pr-create, worklog and commit skills, when parsed, then the first two are hidden from the model and commit is not', () => {
+  // Given / When
+  const flags = ['pr-create', 'worklog', 'commit'].map((s) => flag(`skills/${s}/SKILL.md`));
+  // Then
+  assert.deepEqual(flags, [true, true, false]);
+});
+
+test('given commit/SKILL.md with nothing staged, when read, then it stages tracked changes with git add -u and never git add -A', () => {
+  // Given
+  const text = rootRead('skills/commit/SKILL.md');
+  // When
+  const nothingStaged = text.split('\n').find((l) => l.startsWith('| nothing staged |'));
+  // Then
+  assert.match(nothingStaged, /git add -u/);
+  assert.match(nothingStaged, /untracked/);
+  assert.doesNotMatch(text, /git add -A/);
+});
+
+const LEVELS = (skills, agents, workflows, hooks) => `# Fixture kit
+
+Hooks resolve through CLAUDE_HOOKS.
+
+| Level | What it solves | Assets |
+|---|---|---|
+| **Knowledge** | x | ${skills} skills, depth on demand |
+| **Exploration** | x | ${agents} subagents |
+| **Execution** | x | 9 one-shot skills (\`/name\`), ${workflows} saved workflows |
+| **Safety net** | x | ${hooks} hook files, the validator |
+`;
+
+test('given a README level table equal to the counted assets, when the validator runs, then it validates clean', () => {
+  // Given / When
+  const { code, out } = run((write) => write('README.md', LEVELS(2, 1, 1, 1)));
+  // Then
+  assert.equal(code, 0, out);
+});
+
+test('given a README level table whose skill, subagent, workflow or hook-file count is off, when the validator runs, then it fails naming it', () => {
+  for (const [args, what] of [[[3, 1, 1, 1], 'skills'], [[2, 4, 1, 1], 'subagents'], [[2, 1, 5, 1], 'workflows'], [[2, 1, 1, 7], 'hook files']]) {
+    // Given / When
+    const { code, out } = run((write) => write('README.md', LEVELS(...args)));
+    // Then
+    assert.equal(code, 1, `${what}: ${out}`);
+    assert.match(out, new RegExp(`README\.md.*${what}`), what);
+  }
+});

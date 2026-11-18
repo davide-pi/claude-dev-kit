@@ -45,7 +45,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  parseSegments, stripWrappers, baseName, SHELLS, CONTAINER_CLIS, innerSegments, afterLauncher,
+  commandPositions, headsOfTokens, decodedCommands, expandSegments, stripWrappers, baseName, SHELLS, CONTAINER_CLIS, SEARCHERS, DATA_RECEIVERS, innerSegments, afterLauncher,
 } = require('./shell-parse');
 
 /** Local by definition: always dev hosts, whatever the registry lists. */
@@ -361,14 +361,37 @@ function firstDecision(commands, depth, command) {
   return null;
 }
 
-/** `{ decision: 'deny', reason }` for a database client the rules above stop, else null. */
-function checkSqlTarget(command) {
-  try {
-    if (typeof command !== 'string' || !TOOL_HINT.test(command)) return null;
-    return firstDecision(parseSegments(command), 0, command);
-  } catch {
-    return null;
+/** A host or server flag, or a URI, among the arguments of a client. */
+const HOST_ARG = /^(?:-S|-h|-H|--host|--server)(?:=|$)|:\/\//;
+
+/**
+ * The ask for a client named after a command head, with a host argument, in a line no head scan could read
+ * (`. sqlcmd -S prod`): a launcher, a data receiver or a searcher keeps its own reading, and a client that is
+ * a head somewhere was already judged.
+ */
+function strayClient(command) {
+  const launchers = (cmd, head) => CONTAINER_CLIS.has(head) || SHELLS.has(head) || /^(?:kubectl|wsl|ssh|npm|pnpm|yarn|bun)$/.test(head) || Boolean(afterLauncher(cmd));
+  const segments = expandSegments(command).map((tokens) => ({ tokens, cmd: stripWrappers(tokens) })).filter((s) => s.cmd.length);
+  const launched = segments.filter((s) => launchers(s.cmd, baseName(s.cmd[0]))).map((s) => s.cmd);
+  for (const { tokens, cmd } of segments) {
+    const offset = tokens.length - cmd.length;
+    // Judged by position in this segment, not by text: the same client named in another segment says nothing about this one.
+    // A segment cut out of a longer launcher segment (`npx cross-env A=1 psql` holds `cross-env A=1 psql`) was read with it.
+    const within = (outer) => outer.length > cmd.length && outer.some((_, o) => o + cmd.length <= outer.length && cmd.every((t, k) => outer[o + k] === t));
+    if (launched.some(within)) continue;
+    const judged = new Set(headsOfTokens(tokens).map((h) => h.start));
+    const head = baseName(cmd[0]);
+    if (isTool(head) || DATA_RECEIVERS.has(head) || SEARCHERS.has(head) || NOT_LAUNCHERS.has(head) || launchers(cmd, head)) continue;
+    const at = cmd.findIndex((t, i) => i > 0 && isTool(baseName(t)) && !judged.has(offset + i) && cmd.slice(i + 1).some((a) => HOST_ARG.test(a)));
+    if (at > 0) return { decision: 'ask', reason: `A database client (${cmd[at]}) with a host argument sits where the guard cannot tell it runs. Confirm the target is a dev host, or read non-dev databases through ~/.claude/scripts/db-ro.ps1 (/db).` };
   }
+  return null;
+}
+
+/** `{ decision: 'deny', reason }` for a database client the rules above stop, `{ decision: 'ask', reason }` for one it cannot place, else null. */
+function checkSqlTarget(command) {
+  if (typeof command !== 'string' || ![command, ...decodedCommands(command)].some((text) => TOOL_HINT.test(text))) return null;
+  return firstDecision(commandPositions(command), 0, command) ?? strayClient(command);
 }
 
 module.exports = { checkSqlTarget };

@@ -9,6 +9,10 @@
  */
 
 import { test } from 'node:test';
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { spawnSync } from 'node:child_process';
 import assert from 'node:assert/strict';
 import { run, ARGS_M, review, finding, impl, gate, mergeReviews, ROOT } from './dev-loop.harness.mjs';
 
@@ -129,7 +133,7 @@ test('given args with unit set, when the fixer brief for a finding with probes i
 });
 
 // ── T18: the gate plus the probes replace the verifier ───────────────────────────────────────────────
-const verifierRuns = calls => calls.filter(c => /verify the fixes$/.test(c.opts.label ?? '') && c.opts.agentType === 'code-reviewer');
+const verifierRuns = calls => calls.filter(c => /^(?!probe ·).*verify the fixes$/.test(c.opts.label ?? '') && c.opts.agentType === 'code-reviewer');
 
 test('given a fix round with no P1 fixed and every fixed finding carrying a probe that now passes, when verified, then no verifier agent runs', async () => {
   // Given
@@ -188,3 +192,50 @@ test('given a finding with a failure text and a probe, when the probe call is br
   assert.match(prompt, /FAILURE-TEXT-XYZ/);
   assert.match(prompt, /ran: false/);
 });
+
+// ── T13: probes run on code-reviewer, which may write probe scripts only ─────────────────────────────
+test('given probes to run, when probesReproduce is called, then agentType is code-reviewer (haiku, low), never Explore', async () => {
+  // Given
+  const withProbe = finding({ title: 'probe-agent', probes: [probe('one')] });
+  const probes = () => ({ reproduced: true, output: 'exit 1' });
+  // When
+  const { calls } = await run(V_ARGS, [review([], [withProbe])], impls3(), { probes });
+  // Then
+  const [ran] = probeCalls(calls);
+  assert.equal(ran.opts.agentType, 'code-reviewer');
+  assert.equal(ran.opts.model, 'haiku');
+  assert.equal(ran.opts.effort, 'low');
+});
+
+test('given agents/code-reviewer.md, when read, then it allows running commands a brief asks and writing only probe scripts under <git dir>/deliver/probes/, every other edit still forbidden', () => {
+  // Given
+  const text = readFileSync(join(KIT, 'agents/code-reviewer.md'), 'utf8');
+  // When
+  const readOnly = text.split('\n').find(l => /^- Read-only/.test(l)) ?? '';
+  // Then
+  assert.match(text, /deliver\/probes\//);
+  assert.match(text, /commands? (a|the) brief asks/i);
+  assert.match(readOnly, /edit/);
+});
+
+test('given probeSaveText, when rendered, then it still names the git dir path', async () => {
+  // Given
+  const { calls } = await run(V_ARGS, [review([], [finding()])], impls3());
+  // When
+  const reader = calls.find(c => /PROBES:/.test(c.prompt));
+  // Then
+  assert.ok(reader, 'a reader brief carries the probe text');
+  assert.match(reader.prompt, /rev-parse --absolute-git-dir/);
+  assert.match(reader.prompt, /deliver\/probes\//);
+});
+
+test('given validate.mjs, when run, then it is clean', () => {
+  // Given
+  const cmd = [join(KIT, 'tools/validate.mjs')];
+  // When
+  const r = spawnSync(process.execPath, cmd, { cwd: KIT, encoding: 'utf8' });
+  // Then
+  assert.equal(r.status, 0, String(r.error) + r.stdout + r.stderr);
+});
+
+const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');

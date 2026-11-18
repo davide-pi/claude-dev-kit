@@ -15,7 +15,7 @@ export const meta = {
 const input = typeof args === 'string' ? { range: args } : (args ?? {})
 const range = typeof input.range === 'string' ? input.range.trim() : ''
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
-const effort = EFFORTS.includes(input.effort) ? input.effort : 'medium'
+const effort = EFFORTS.includes(input.effort) ? input.effort : 'high'
 const MODELS = ['sonnet', 'opus', 'haiku', 'fable']
 const modelOverride = typeof input.modelB === 'string' && input.modelB ? input.modelB : null
 const intent = typeof input.intent === 'string' && input.intent.trim()
@@ -29,7 +29,7 @@ const LIST_ALL_MAX = 60
 const EXCLUDE = `':!*.lock' ':!package-lock.json' ':!*.min.*' ':!*dist/*' ':!*__snapshots__/*' ':!*.Designer.cs' ':!*ModelSnapshot.cs' ':!*.g.cs'`
 
 const MERGE_RULE = [
-  '1. A and B report the same defect at the same anchor -> the script already merged them (foundBy "A+B"): one finding, CONFIRMED, first within its priority.',
+  '1. The script merged only one-to-one pairs: one A and one B finding, same anchor + category, same defect (foundBy "A+B"): one finding, CONFIRMED, first within its priority. Findings tagged sameAnchor share an anchor + category with others and were not merged: merge two only when they are clearly the same defect, else keep them apart.',
   '2. Found by one model only -> PLAUSIBLE, unless its evidence quotes the line or failing call that settles it.',
   '3. Same line, different failure -> two findings. Same defect across files -> one finding per anchor.',
   '4. Priority conflict -> the higher. Sort P1 -> P3, CONFIRMED before PLAUSIBLE, clean-code last; number 1..n.',
@@ -148,22 +148,46 @@ if (gaps) log(`${gaps} reviewer(s) blocked: reported as a gap, the change is not
 // The merger input: empty fields dropped, `checked` capped, findings deduped across A and B by anchor + category.
 const PRIORITY = { P1: 0, P2: 1, P3: 2 }
 const compact = o => Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined && v !== null && v !== '' && !(Array.isArray(v) && !v.length)))
-const byKey = new Map()
+const words = s => new Set((s ?? '').toLowerCase().match(/[\p{L}\p{N}_]+/gu) ?? [])
+const STOP = new Set(['when', 'then', 'that', 'this', 'with', 'from', 'into', 'than', 'were', 'have', 'does', 'will', 'which', 'there', 'their', 'while', 'where', 'after', 'before'])
+// Content words: short and filler words dropped; a text made only of them keeps all its words.
+const content = s => {
+  const all = words(s)
+  const kept = new Set([...all].filter(w => w.length > 3 && !STOP.has(w)))
+  return kept.size ? kept : all
+}
+// Same defect = the failure texts share at least 2 content words (or all of a shorter text) and 60% of the longer one.
+const sameDefect = (x, y) => {
+  const a = content(x.failure), b = content(y.failure)
+  const common = [...a].filter(w => b.has(w)).length
+  return common >= Math.min(2, a.size, b.size) && common > 0 && common / Math.max(a.size, b.size) >= 0.6
+}
+const groups = new Map()
 const findings = []
 for (const r of results) {
   for (const f of r.findings ?? []) {
     const tagged = { ...f, foundBy: r.reviewer }
     const key = `${(f.anchor ?? '').trim().toLowerCase()}|${f.category}`
-    const prev = byKey.get(key)
-    if (prev && prev.foundBy !== r.reviewer && prev.foundBy.length === 1) {
-      const best = (PRIORITY[f.priority] ?? 3) < (PRIORITY[prev.priority] ?? 3) ? tagged : prev
-      Object.assign(prev, best, { foundBy: 'A+B', verdict: 'CONFIRMED' })
-    } else {
-      if (!prev) byKey.set(key, tagged)
-      findings.push(tagged)
-    }
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key).push(tagged)
+    findings.push(tagged)
   }
 }
+// Only a one-to-one pair (one from A, one from B at the anchor + category, same defect) is merged here;
+// any other group sharing an anchor + category goes to the merger tagged sameAnchor.
+const dropped = new Set()
+for (const group of groups.values()) {
+  if (group.length < 2) continue
+  const [x, y] = group
+  if (group.length === 2 && x.foundBy !== y.foundBy && sameDefect(x, y)) {
+    const best = (PRIORITY[y.priority] ?? 3) < (PRIORITY[x.priority] ?? 3) ? y : x
+    Object.assign(x, best, { foundBy: 'A+B', verdict: 'CONFIRMED' })
+    dropped.add(y)
+  } else {
+    for (const f of group) f.sameAnchor = true
+  }
+}
+for (let i = findings.length - 1; i >= 0; i--) if (dropped.has(findings[i])) findings.splice(i, 1)
 const workers = results.map(r => compact({
   reviewer: r.reviewer, model: r.model, status: r.status,
   checked: (r.checked ?? '').slice(0, 300), blockedReason: r.blockedReason, intentNotes: r.intentNotes,

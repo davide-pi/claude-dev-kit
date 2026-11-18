@@ -58,16 +58,16 @@ never asks the user; budget ~12 tool calls over both messages. One agent, two me
 3. **Output**, at most 15 lines: `blind way: equivalent | simpler (why, file:line) | worse`; then one row per objection,
    the heaviest first, `# | Weight | Objection | Evidence | Fix`, weight `blocking` | `minor`, evidence a `file:line`
    it read or the request's words (it drops an objection with neither); then a verdict, a proposal the owner decides:
-   `scartare` (redo the analysis) only on a `blocking` premise row, or a blind way that is `simpler` and meets all our
-   criteria; `cambiare` (amend the plan) on any other `blocking` row; else `tenere`. A fix that changes an approved
+   `discard` (redo the analysis) only on a `blocking` premise row, or a blind way that is `simpler` and meets all our
+   criteria; `amend` (amend the plan) on any other `blocking` row; else `keep`. A fix that changes an approved
    criterion or the perimeter is `blocking`, never `minor`. Last line: `read: <file:line, …>`, every range it read.
 
 **After the verdict.**
 
 | Verdict | Then |
 | --- | --- |
-| `cambiare`, `scartare` | a `grill-me` round with the owner on the `blocking` rows only, one question at a time, each with a recommendation; every answer becomes a `decisions` line |
-| `tenere` | goes on; each `minor` fix taken becomes a `decisions` line marked `challenger:` (ours, not the owner's) and a line of the message that launches the loop (`challenger: <fix>`): never silent |
+| `amend`, `discard` | a `grill-me` round with the owner on the `blocking` rows only, one question at a time, each with a recommendation; every answer becomes a `decisions` line |
+| `keep` | goes on; each `minor` fix taken becomes a `decisions` line marked `challenger:` (ours, not the owner's) and a line of the message that launches the loop (`challenger: <fix>`): never silent |
 
 The `read:` list goes into the implementer's brief as settled `file:line` facts, so the implementer does not re-explore them.
 

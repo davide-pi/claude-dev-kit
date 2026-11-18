@@ -165,13 +165,13 @@ test('reviewCalls: 35 up to 10 files, 2 more per file above, capped at 60', () =
   assert.deepEqual([0, 10, 11, 15, 30, 40].map(reviewCalls), [35, 35, 37, 45, 60, 60]);
 });
 
-test('script: the reviewer budget follows the expected file count; the writer budget stays 80', async () => {
+test('script: the reviewer budget follows the expected file count; the fixer budget is 60 calls', async () => {
   const small = await run(ARGS_M, [review([]), review([])]);
   assert.match(small.calls.find(c => isReview(c.opts.label, 1)).prompt, /at most 35 tool calls/);
   const { calls } = await run(manyArgs(), [review([]), review([])], [manyImpl]);
   calls.filter(c => isReview(c.opts.label, 1)).forEach(c => assert.match(c.prompt, /at most 43 tool calls/));
   const fixed = await run({ ...ARGS, size: 'S' }, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])]);
-  assert.match(fixed.calls.find(c => c.opts.label === 'fix round 1 findings').prompt, /at most 80 tool calls/);
+  assert.match(fixed.calls.find(c => c.opts.label === 'fix round 1 findings').prompt, /at most 60 tool calls/);
 });
 
 test('script: M with a security or data risk runs B on opus even when the change is not wide', async () => {
@@ -597,3 +597,44 @@ test('given reader A fix whose gate comes back red, when the block closes, then 
   assert.equal(out.stall.why, 'gate-red');
   assert.match(out.stall.reason, /TaxTests\.Round fails/);
 });
+
+// ── T14: the implementer budget text agrees with its maxTurns ────────────────────────────────────────
+import { readFileSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { gate as gateOf } from './dev-loop.harness.mjs';
+
+test('given dev-loop.js, when grepped, then the continuation comment says 35, not 30', () => {
+  // Given
+  const src = readFileSync(join(KIT, 'workflows/dev-loop.js'), 'utf8');
+  // When
+  const line = src.split('\n').find(l => /stops itself at \d+ turns/.test(l)) ?? '';
+  // Then
+  assert.match(line, /stops itself at 35 turns/);
+});
+
+test('given fix briefs, when rendered, then the budget is in turns and below the implementer maxTurns of 40', async () => {
+  // Given
+  const green = (extra = {}) => impl({ gate: gateOf('green', { tree: '' }), ...extra });
+  const impls = [green(), green({ snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 10 } }), green({ snapshot: { tree: 't3', files: ['src/Orders/OrdersQuery.cs'], churn: 10 } })];
+  // When
+  const { calls } = await run({ ...ARGS_M, verify: 'node --test x' }, [review([], [finding()])], impls);
+  // Then
+  const fixer = calls.find(c => c.opts.label === 'fix round 1 findings');
+  assert.ok(fixer, 'a fix round ran');
+  assert.doesNotMatch(fixer.prompt, /at most 80 tool calls/);
+  const turns = Number(/about (\d+) turns/.exec(fixer.prompt)?.[1]);
+  assert.ok(turns > 0 && turns <= 35, `budget in turns, got ${turns}`);
+});
+
+test('given implementer.md front matter, when parsed, then tools does not list Skill', () => {
+  // Given
+  const text = readFileSync(join(KIT, 'agents/implementer.md'), 'utf8');
+  // When
+  const tools = /^tools:\s*(.*)$/m.exec(text)?.[1].split(',').map(s => s.trim()) ?? [];
+  // Then
+  assert.ok(tools.includes('Edit'));
+  assert.ok(!tools.includes('Skill'));
+});
+
+const KIT = join(dirname(fileURLToPath(import.meta.url)), '..');

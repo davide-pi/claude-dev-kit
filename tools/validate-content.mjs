@@ -192,6 +192,23 @@ export function checkContent({ ROOT, fail, warn, read, has, allFiles, textFiles,
     }
   }
 
+  // ── 4d. The README's level table states the real asset counts ───────────────
+  {
+    const table = read('README.md');
+    const dirFiles = (dir, re) => allFiles.filter((f) => f.startsWith(`${dir}/`) && !f.slice(dir.length + 1).includes('/') && re.test(f)).length;
+    const counted = {
+      skills: allFiles.filter((f) => /^skills\/[^/]+\/SKILL\.md$/.test(f)).length,
+      subagents: dirFiles('agents', /\.md$/),
+      workflows: dirFiles('workflows', /\.js$/),
+      'hook files': dirFiles('hooks', /\.(?:js|mjs|ps1)$/),
+    };
+    const stated = { skills: /\b(\d+) skills\b/, subagents: /\b(\d+) subagents\b/, workflows: /\b(\d+) saved workflows\b/, 'hook files': /\b(\d+) hook files\b/ };
+    for (const [what, re] of Object.entries(stated)) {
+      const m = table.match(re);
+      if (m && Number(m[1]) !== counted[what]) fail('README.md', `level table says ${m[1]} ${what}, the tree has ${counted[what]}`);
+    }
+  }
+
   // ── 5. Environment variables the kit needs are documented ────────────────────
   const SYSTEM_VARS = new Set(['USERPROFILE', 'LOCALAPPDATA', 'HOME', 'TEMP', 'TMP', 'PATH', 'APPDATA', 'COMPUTERNAME', 'CLAUDE_PROJECT_DIR']);
   const readme = read('README.md');

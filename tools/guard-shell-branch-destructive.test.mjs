@@ -135,8 +135,9 @@ test('a repo whose default branch is not main is handled by name', () => {
   assert.equal(run('git push origin release/v2', trunk).decision, 'approve');
 });
 
-test('anything unusable is approved rather than blocking the work', () => {
-  for (const input of ['', 'not json at all', '{}', JSON.stringify({ tool_input: {} }), JSON.stringify({ tool_input: { command: '   ' } })]) {
+test('an empty or incomplete payload is approved, an unreadable one asks', () => {
+  assert.equal(spawnRaw('not json at all').decision, 'ask');
+  for (const input of ['', '{}', JSON.stringify({ tool_input: {} }), JSON.stringify({ tool_input: { command: '   ' } })]) {
     assert.equal(spawnRaw(input).decision, 'approve', input);
   }
   assert.equal(run('git commit -m "wip"', join(tmpdir(), 'does-not-exist-guard')).decision, 'approve');
@@ -429,4 +430,33 @@ test('a recursive or forced delete asks, in either shell and behind sudo or xarg
     'rm notes.txt', 'rm -i notes.txt', 'Remove-Item notes.txt', 'Remove-Item -Path a.txt -LiteralPath b.txt',
     'git rm -r --cached dist', 'echo rm -rf', 'grep -rn "rm -rf" scripts',
   ]) approves(command);
+});
+
+test('given a git push named only as text, when run on the default branch, then it does not ask', () => {
+  // Given
+  const commands = ['echo git push origin main', 'git log --grep "git push main"'];
+  for (const command of commands) {
+    // When
+    const { decision } = run(command, onDefault);
+
+    // Then
+    assert.equal(decision, 'approve', command);
+  }
+});
+
+test('given a real push in a substitution, group, wrapper, keyword body or assignment, when run on the default branch, then each asks', () => {
+  // Given
+  const commands = [
+    '$(git push origin main)', '(git push origin main)', 'command git push',
+    '"C:\\Program Files\\Git\\cmd\\git.exe" push origin main',
+    'if x; then git push origin main; fi', '$r = git push origin main',
+  ];
+  for (const command of commands) {
+    // When
+    const { decision, reason } = run(command, onDefault);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+    assert.match(reason, /default branch/, command);
+  }
 });

@@ -98,3 +98,28 @@ test('given the kit, when node tools/validate.mjs runs, then it is clean', () =>
   assert.equal(res.status, 0, res.stdout + res.stderr);
   assert.ok(!/ERROR/.test(res.stdout), res.stdout);
 });
+
+test('given CLAUDE.md rule 1, when read, then it says deliver\'s own gates (owner ok at M/L) still apply', () => {
+  // Given
+  const text = read('CLAUDE.md');
+
+  // When
+  const rule = text.split('\n').slice(text.split('\n').findIndex((l) => l.startsWith('1. '))).join('\n').split(/\n(?=\d\. )/)[0];
+
+  // Then
+  assert.match(rule, /deliver/);
+  assert.match(rule, /owner ok/);
+  assert.match(rule, /M\/L/);
+});
+
+test('given Explore.md, loop.md and analysis.md, when grepped for Italian literals, then nothing is found', () => {
+  // Given
+  const words = ['non trovato', 'nessuna novit', 'scartare', 'cambiare', 'tenere'];
+  const files = ['agents/Explore.md', 'loop.md', 'skills/deliver/references/analysis.md'];
+
+  // When
+  const hits = files.flatMap((f) => words.filter((w) => read(f).toLowerCase().includes(w)).map((w) => `${f}: ${w}`));
+
+  // Then
+  assert.deepEqual(hits, []);
+});

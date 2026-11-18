@@ -19,16 +19,20 @@ const CONFIG_DIR = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), ".cl
 // linked worktree, which almost never changes, for minutes. Best-effort: any failure just runs `fn`.
 const GIT_CACHE_MS = 30_000;
 const WORKTREE_CACHE_MS = 10 * 60_000;
-function cachedByCwd(name, cwd, ttlMs, fn) {
+const TIMEOUT_CACHE_MS = 5_000;  // a null from a timed-out git call lives this long, not the full ttl
+// `timedOut` tells whether the null of `fn` was a timeout; the git cache asks git.js by default.
+function cachedByCwd(name, cwd, ttlMs, fn, timedOut = name === "git" ? () => require("./git").gitTimedOut() : () => false) {
   const file = path.join(CONFIG_DIR, ".cache", `${name}-${crypto.createHash("sha1").update(String(cwd)).digest("hex").slice(0, 16)}.json`);
   try {
     const hit = JSON.parse(fs.readFileSync(file, "utf8"));
     if (hit && Date.now() - hit.at < ttlMs) return hit.value ?? null;
   } catch { /* no cache yet */ }
   const value = fn();
+  // Back-dated so the entry expires after TIMEOUT_CACHE_MS.
+  const at = value == null && timedOut() ? Date.now() - (ttlMs - TIMEOUT_CACHE_MS) : Date.now();
   try {
     fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify({ at: Date.now(), value }));
+    fs.writeFileSync(file, JSON.stringify({ at, value }));
   } catch { /* best-effort */ }
   return value;
 }

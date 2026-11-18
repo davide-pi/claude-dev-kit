@@ -140,9 +140,9 @@ export function checkAssets({ fail, warn, read, has, allFiles, frontMatter }) {
   // grill-me is not here: it fires on natural phrasing ("poke holes in this").
   // Named with a slash in the description on purpose, yet invocable by the model: `/code-review` is also
   // what "review this" resolves to (CLAUDE.md routes every review through it). `grill-me` is meant to
-  // trigger from natural language (owner decision, eval r2), so it stays model-invocable too. `worklog`
-  // fires when the owner asks in prose to log hours (owner decision): its two confirmation gates guard the write.
-  const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me', 'worklog']);
+  // trigger from natural language (owner decision, eval r2), so it stays model-invocable too. `commit` stays
+  // model-invocable (owner decision); `pr-create` and `worklog` write outside the repo, so they carry the flag.
+  const MODEL_INVOCABLE_BY_DESIGN = new Set(['code-review', 'grill-me']);
   const EXPLICIT_TRIGGER = [
     'retro',
   ];

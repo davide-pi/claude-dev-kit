@@ -32,7 +32,7 @@ function fixtureRoot() {
 }
 
 /** Canned runner: classifies each call and answers it; `calls` records every argv. */
-function fakeRunner({ gate = [GREEN], changed = 'rules/a.md\n', porcelain = ' M rules/a.md\n', verifyStatus = 0 } = {}) {
+function fakeRunner({ gate = [GREEN], changed = 'rules/a.md\n', porcelain = ' M rules/a.md\n', verifyStatus = 0, verifyOut = 'ok rules/a.md\n' } = {}) {
   const calls = [];
   const gateAnswers = [...gate];
   const is = (args, s) => args.some(a => String(a).endsWith(s));
@@ -52,7 +52,7 @@ function fakeRunner({ gate = [GREEN], changed = 'rules/a.md\n', porcelain = ' M 
     }
     if (is(args, 'sweep.mjs')) return ok('{"closed":1,"listed":0}\n');
     if (is(args, 'perimeter.ps1')) return ok('perimeter closed: feat/x\n');
-    if (is(args, 'install.ps1') && args.includes('-Verify')) return { status: verifyStatus, stdout: 'ok rules/a.md\n', stderr: '' };
+    if (is(args, 'install.ps1') && args.includes('-Verify')) return { status: verifyStatus, stdout: verifyOut, stderr: '' };
     if (is(args, 'install.ps1')) return ok('installed rules/a.md\n');
     if (cmd === 'claude') return ok('plugin test: 3 passed\n');
     return ok();
@@ -228,4 +228,15 @@ test('given a gate line red: tests changed with exit 1, when kit-close runs, the
   // Then
   assert.equal(result.failed, 'gate');
   assert.deepEqual(result.steps, ['gate']);
+}));
+
+test('given a verify that checked zero assets, when kit-close runs, then it does not print repo == home and stops at verify', withRoot(async root => {
+  // Given: the verify exits 0 but says it checked nothing
+  const { run } = fakeRunner({ verifyOut: '  nothing verified: no kit asset among the -Only paths\n' });
+  // When
+  const result = await closeChange(base(root), run);
+  // Then
+  assert.notEqual(result.code, 0);
+  assert.equal(result.failed, 'verify');
+  assert.doesNotMatch(result.lines.join('\n'), /repo == home/);
 }));
