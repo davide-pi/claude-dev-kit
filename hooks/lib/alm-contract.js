@@ -48,7 +48,7 @@ const HOURS_SCRIPT = /worklog-push\.ps1/i;
 /** The flags that complete a PR. az accepts any unique prefix of a long flag, so `--stat` is `--status`. */
 const COMPLETION_FLAGS = ['--status', '--auto-complete', '--bypass-policy'];
 const canonicalFlag = (name) => {
-  if (!name.startsWith('--') || name.length < 5) return name;
+  if (!name.startsWith('--') || name.length < 3) return name;
   const hits = COMPLETION_FLAGS.filter((full) => full.startsWith(name));
   return hits.length === 1 ? hits[0] : name;
 };

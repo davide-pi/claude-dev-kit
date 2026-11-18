@@ -3,6 +3,7 @@ name: pr-create
 description: >-
   Use when a pull request is opened or its title and description written: "open the PR", "ship
   this branch", "apri la PR", "scrivi la descrizione".
+disable-model-invocation: true
 ---
 
 # pr-create — turn a pushed branch into a reviewable PR

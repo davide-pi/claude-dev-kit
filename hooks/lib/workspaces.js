@@ -90,10 +90,20 @@ function resolveLang(dir) {
   return out;
 }
 
-/** The session line: `Lang: commit it · pr it · prComment it · items it · wiki it`. */
+/** The chat language: the native `language` setting of the config dir, null when absent or unreadable. */
+function chatLang() {
+  try {
+    return langValue(JSON.parse(fs.readFileSync(path.join(CONFIG_DIR, 'settings.json'), 'utf8'))?.language);
+  } catch {
+    return null;
+  }
+}
+
+/** The session line: `Lang: [chat italian · ]commit it · pr it · prComment it · items it · wiki it`. */
 function langLine(dir) {
   const lang = resolveLang(dir);
-  return `Lang: ${LANG_ASPECTS.map((k) => `${k} ${lang[k]}`).join(' · ')}`;
+  const chat = chatLang();
+  return `Lang: ${[...(chat ? [`chat ${chat}`] : []), ...LANG_ASPECTS.map((k) => `${k} ${lang[k]}`)].join(' · ')}`;
 }
 
 module.exports = { CONFIG_DIR, LANG_ASPECTS, readRoots, resolveDir, matchRoot, azConfigDir, resolveLang, langLine };

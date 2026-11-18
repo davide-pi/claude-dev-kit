@@ -26,7 +26,7 @@
 'use strict';
 
 const {
-  expandSegments, expandTexts, splitPipelines, parseSegments, stripWrappers, baseName, SEARCHERS,
+  expandSegments, expandTexts, commandPositions, splitPipelines, parseSegments, stripWrappers, baseName, SEARCHERS, DATA_RECEIVERS,
 } = require('./shell-parse');
 
 /** Cheap gate: without one of these substrings (or a glob character) no secret file is named. */
@@ -177,16 +177,39 @@ function pipedSecret(text) {
   return null;
 }
 
-/** `{ reason }` when the command reads a secret file through the shell, else null. */
+/**
+ * The ask for a reader named after another word (`somewrapper --flag cat .env`) with a secret-file token after
+ * it, in a line no head scan could read: a data receiver or a searcher keeps its own reading, and a reader that
+ * is a head somewhere was already judged.
+ */
+function strayReader(command) {
+  for (const tokens of expandSegments(command)) {
+    const cmd = stripWrappers(tokens);
+    if (!cmd.length) continue;
+    const head = baseName(cmd[0]);
+    if (READERS.has(head) || COPIERS.has(head) || DATA_RECEIVERS.has(head) || SEARCHERS.has(head)) continue;
+    const at = cmd.findIndex((t, i) => i > 0 && READERS.has(baseName(t)) && firstSecret(cmd.slice(i + 1)));
+    if (at > 0) {
+      return {
+        decision: 'ask',
+        reason: `A file reader (${cmd[at]}) with a secret-bearing file (${firstSecret(cmd.slice(at + 1))}) sits where the guard cannot tell it runs. `
+          + 'Confirm the read is intended, or ask the owner to pass the value another way.',
+      };
+    }
+  }
+  return null;
+}
+
+/** `{ reason }` when the command reads a secret file through the shell, `{ decision: 'ask', reason }` when it may, else null. */
 function checkSecretRead(command) {
   if (!HINT.test(command)) return null;
   let hit = null;
-  for (const tokens of expandSegments(command)) {
+  for (const tokens of [...expandSegments(command), ...commandPositions(command)]) {
     hit = secretRead(tokens);
     if (hit) break;
   }
   if (!hit) for (const text of expandTexts(command)) { hit = pipedSecret(text); if (hit) break; }
-  if (!hit) return null;
+  if (!hit) return strayReader(command);
   return {
     reason: `This reads a secret-bearing file through the shell (${hit}); the Read deny rules do not apply to `
       + 'shell reads, so the guard does. Ask the owner to pass the value another way; do not retry with another command.',

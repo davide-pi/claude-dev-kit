@@ -68,8 +68,11 @@ function Get-DirAssets([string]$Root) {
     $files = foreach ($dir in $AssetDirs) {
         $path = Join-Path $Root $dir
         if (-not (Test-Path -LiteralPath $path)) { continue }
-        Get-ChildItem -LiteralPath $path -File -Recurse -ErrorAction SilentlyContinue |
+        $enumErrors = $null
+        Get-ChildItem -LiteralPath $path -File -Recurse -ErrorAction SilentlyContinue -ErrorVariable enumErrors |
             Where-Object { -not (Test-Ignorable $_.Name) }
+        # A folder that cannot be read would otherwise look like an asset that does not exist.
+        foreach ($e in @($enumErrors)) { Write-Problem "cannot list $path — $($e.Exception.Message)" }
     }
     $files | ForEach-Object { [System.IO.Path]::GetRelativePath($Root, $_.FullName).Replace('\', '/') } |
         Where-Object { -not (Test-LocalOnly $_) }
@@ -93,14 +96,24 @@ function Get-InstalledAssets {
 function Get-NormalizedHash([string]$Path) {
     # Line endings differ by design (.ps1 is CRLF, the rest LF), so compare on content only.
     if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    return Get-TextHash ([System.IO.File]::ReadAllText($Path))
+    return Get-BytesHash ([System.IO.File]::ReadAllBytes($Path))
+}
+
+function Get-BytesHash([byte[]]$Bytes) {
+    # Text (valid UTF-8) is compared on content, BOM and line endings aside; anything else is a binary
+    # asset and is hashed as the bytes it is, so two different blobs never collapse to one decoded string.
+    try { return Get-TextHash ([System.Text.UTF8Encoding]::new($false, $true).GetString($Bytes).TrimStart([char]0xFEFF)) }
+    catch [System.Text.DecoderFallbackException] { return Get-RawHash $Bytes }
+}
+
+function Get-RawHash([byte[]]$Bytes) {
+    $sha = [System.Security.Cryptography.SHA256]::Create()
+    try { return [System.BitConverter]::ToString($sha.ComputeHash($Bytes)) } finally { $sha.Dispose() }
 }
 
 function Get-TextHash([string]$Content) {
     $text = $Content -replace "`r`n", "`n"
-    $bytes = [System.Text.Encoding]::UTF8.GetBytes($text)
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try { return [System.BitConverter]::ToString($sha.ComputeHash($bytes)) } finally { $sha.Dispose() }
+    return Get-RawHash ([System.Text.Encoding]::UTF8.GetBytes($text))
 }
 
 function Copy-Asset([string]$Relative, [string]$From, [string]$To) {

@@ -211,3 +211,40 @@ test('given an az or gh write nested in a shell wrapper, when the guard runs it,
   assert.equal(run('wsl -e bash -c "az repos pr create --title T"').decision, 'ask', 'the nested create lacks --work-items');
   assert.equal(run('pwsh -c "az repos pr update --id 12 --status abandoned"').decision, 'approve');
 });
+
+test('given a unique short prefix of a completion flag, when the guard runs a PR update, then the completion ask applies', () => {
+  // Given
+  const commands = [
+    'az repos pr update --id 1 --st completed',
+    'az repos pr update --id 1 --stat completed',
+    'az repos pr update --id 1 --au true',
+    'az repos pr update --id 1 --by true',
+  ];
+  for (const command of commands) {
+    // When
+    const { decision, reason } = run(command);
+
+    // Then
+    assert.equal(decision, 'ask', command);
+    assert.match(reason, /completes the PR/, command);
+  }
+});
+
+test('given an ambiguous flag prefix, when the guard runs a PR update, then it is treated as the checked flag', () => {
+  // Given: `--s` is `--squash` or `--status`, so az would reject it; the guard reads it as `--status`
+  const command = 'az repos pr update --id 1 --s completed';
+
+  // When
+  const { decision } = run(command);
+
+  // Then
+  assert.equal(decision, 'ask');
+});
+
+test('given the exact completion flags in either form, when the guard runs a PR update, then behaviour is unchanged', () => {
+  // Given / When / Then
+  assert.equal(run('az repos pr update --id 1 --status=completed').decision, 'ask');
+  assert.equal(run('az repos pr update --id 1 --auto-complete true').decision, 'ask');
+  assert.equal(run('az repos pr update --id 1 --auto-complete false').decision, 'approve');
+  assert.equal(run('az repos pr update --id 1 --status active').decision, 'approve');
+});

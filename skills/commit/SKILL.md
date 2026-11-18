@@ -35,7 +35,7 @@ pushing or opening a PR (`pr-create`); deciding whether the change is done (the 
 | State | Commit |
 | --- | --- |
 | something already staged | only the staged changes |
-| nothing staged | everything pending, new files included (`git add -A`) |
+| nothing staged | tracked changes only (`git add -u`); list untracked files for the user, who names the ones to add |
 | nothing to commit | say so and stop |
 
 List the files before committing, so unrelated work is seen. Target is the default branch → say so
@@ -62,7 +62,7 @@ This skill does not build or test.
 git status --short
 git diff --staged --stat; git diff --stat
 git log --oneline -10                          # the repo's subject style
-git add -A                                     # only when nothing was staged
+git add -u                                     # only when nothing was staged; untracked files are listed, not added
 git commit -m "<subject>" -m "- <body line>"   # -m per paragraph: no heredoc, works in both shells
 git log -1 --format="%h %s"
 ```
@@ -74,5 +74,5 @@ Report: branch · short hash · files count · the final message (+ the evidence
 
 1. A hook fails the commit → surface its output and stop; never `--no-verify`, never retry around it.
 2. `git switch` refuses because of conflicts → report and stop; never force.
-3. Unrelated files swept in by `git add -A` → the list was not shown → show it before committing.
+3. Unrelated tracked files swept in by `git add -u` → the list was not shown → show it before committing.
 4. "committa e pusha" → commit here; the push is a separate, explicit act (`pr-create`, `branch-flow`).

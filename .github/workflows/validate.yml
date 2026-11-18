@@ -2,6 +2,8 @@ name: validate
 
 # The kit is configuration: nothing compiles, so a broken front matter or a machine-specific
 # path only shows up when Claude Code silently stops loading an asset. This is the guardrail.
+# The mods/cockpit tests and the evals run locally only (they need the Claude Code runtime and
+# model access), so a green run here says nothing about them.
 on:
   push:
     branches: [main]
@@ -20,7 +22,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
 
       - name: Validate assets, references, leaks and docs
         run: node tools/validate.mjs
@@ -38,7 +40,7 @@ jobs:
 
       - name: Syntax-check hooks and tools
         run: |
-          for f in hooks/*.js hooks/lib/*.js tools/*.js tools/*.mjs; do
+          for f in hooks/*.js hooks/lib/*.js tools/*.js tools/*.mjs scripts/*.mjs workflows/*.js; do
             [ -e "$f" ] || continue
             node --check "$f"
           done
@@ -59,3 +61,21 @@ jobs:
           }
           if ($failed) { exit 1 }
           Write-Host "all PowerShell scripts parse"
+
+  # The installer, the hooks and the tools are Windows-first: the same checks on the platform they target.
+  # .gitattributes keeps text files LF in the checkout, so the byte-equal checks hold there too.
+  test-windows:
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Validate assets, references, leaks and docs
+        run: node tools/validate.mjs
+
+      - name: Test the hooks and tools
+        run: node --test --test-concurrency=1 tools/*.test.mjs

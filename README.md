@@ -15,10 +15,10 @@ organization and project names, machine paths and addresses are placeholders.
 | Level | What it solves | Assets |
 |---|---|---|
 | **Routing** | which asset owns this task | the route table in `CLAUDE.md`, path-scoped `rules/` |
-| **Knowledge** | not re-deciding what was decided once | 27 skills, depth in reference files loaded on demand |
+| **Knowledge** | not re-deciding what was decided once | 28 skills, depth in reference files loaded on demand |
 | **Exploration** | finding context without burning the main context window | 10 subagents |
-| **Execution** | running a known sequence in one shot | 6 one-shot skills (`/name`), 3 saved workflows |
-| **Safety net** | not forgetting, and not doing the irreversible | 13 hook files, the completion gate, the validator |
+| **Execution** | running a known sequence in one shot | 6 one-shot skills (`/name`), 2 saved workflows |
+| **Safety net** | not forgetting, and not doing the irreversible | 16 hook files, the completion gate, the validator |
 
 Two rules govern all of them, and they live in `CLAUDE.md` so they apply without being triggered:
 **route through the table**, and **try the CLI before the MCP server, every time**.
@@ -175,7 +175,7 @@ default to Sonnet; the caller can override.
 ## Hooks
 
 The safety net: it fires whether or not you remembered. Every hook exits 0 on any internal error —
-a broken hook must never block work (`worktree-root.js` alone fails loudly: a silent failure would leave the session in a worktree that does not exist). The other exceptions are `guard-shell.js` and `secret-scan.js`, which run with `onFailure: "block"`: a missing or unloadable script blocks the call (requires Claude Code 2.1.308 or later), while a runtime error inside them still approves, by design. Each has a dependency-free test in `tools/`.
+a broken hook must never block work (`worktree-root.js` alone fails loudly: a silent failure would leave the session in a worktree that does not exist). The other exceptions are `guard-shell.js` and `secret-scan.js`, which run with `onFailure: "block"`: a missing, unloadable or crashing guard asks (the inline wrapper in settings.json or the hook's own fallback) and never approves. Each has a dependency-free test in `tools/`.
 
 | Hook | Event | Does |
 |---|---|---|

@@ -386,21 +386,19 @@ test('given a call that does not start with cd, when it is evaluated, then there
   }
 });
 
-test('given a subagent and the main session, when each starts a call with cd, then each gets the hint once under its own flag file', () => {
+test('given a subagent and the main session, when each starts a call with cd, then the subagent is denied and the main session gets the hint once', () => {
   // Given
   const config = emptyConfig();
   const sub = { agent_id: 'a1', agent_type: 'implementer' };
   // When
-  const first = runHook(config, 'cd C:/repo && git status', sub);
-  const again = runHook(config, 'cd C:/repo && git status', sub);
+  const denied = runHook(config, 'cd C:/repo && git status', sub);
   const main = runHook(config, 'cd C:/repo && git status');
+  const again = runHook(config, 'cd C:/repo && git status');
   // Then
-  assert.match(first?.additionalContext ?? '', CD_HINT);
-  assert.equal(again, null);
+  assert.equal(denied?.permissionDecision, 'deny');
   assert.match(main?.additionalContext ?? '', CD_HINT);
-  assert.equal(hintFileNames(config).length, 2);
-  assert.ok(hintFileNames(config).some((name) => name.startsWith('cd-hint-s1-a1')));
-  assert.ok(hintFileNames(config).some((name) => name.startsWith('cd-hint-s1-main')));
+  assert.equal(again, null);
+  assert.deepEqual(hintFileNames(config).map((name) => name.startsWith('cd-hint-s1-main')), [true]);
 });
 
 test('given a fifth single call that starts with cd, when the guard answers, then the context carries the nudge and the hint', () => {

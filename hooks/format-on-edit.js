@@ -49,7 +49,7 @@ const DRY_RUN = process.argv.includes('--dry-run');
 const IS_WINDOWS = process.platform === 'win32';
 
 /** Generated output and dependency trees are not ours to format. */
-const EXCLUDED_PATH = /[\\/](?:node_modules|bin|obj|dist|out|coverage|\.git|\.vs|\.next|\.nuxt|\.angular|packages|TestResults)[\\/]/i;
+const EXCLUDED_PATH = /[\\/](?:node_modules|bin|obj|dist|out|coverage|\.git|\.vs|\.next|\.nuxt|\.angular|TestResults)[\\/]|[\\/]packages[\\/][^\\/]+\.\d+(?:\.\d+)+[^\\/]*[\\/]/i;
 
 /** The .NET formatter handles these; the project's own JavaScript/TypeScript formatter the rest. */
 const DOTNET_EXT = new Set(['.cs', '.vb', '.razor', '.cshtml']);

@@ -26,8 +26,14 @@ const HINT = /claude|hooks|settings|CLAUDE\.md/i;
 
 /** Commands that write every file they are given. */
 const WRITERS = new Set(['tee', 'set-content', 'sc', 'add-content', 'ac', 'out-file', 'clear-content', 'new-item', 'ni']);
+/** Commands that move or rename: the SOURCE is changed too, so any path they name counts. */
+const MOVERS = new Set(['mv', 'move', 'move-item', 'mi', 'rename-item', 'rni', 'ren']);
 /** Commands whose last positional argument (or `-Destination`) is where they write. */
-const COPIERS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'mv', 'move', 'move-item', 'mi', 'install', 'ln', 'rename-item']);
+const COPIERS = new Set(['cp', 'copy', 'copy-item', 'cpi', 'install', 'ln', ...MOVERS]);
+/** Commands that delete every path they are given. */
+const DELETERS = new Set(['rm', 'del', 'erase', 'rd', 'rmdir', 'ri', 'remove-item']);
+/** A .NET `[IO.File]::Method(` call that writes, deletes, moves or copies. */
+const DOTNET_WRITE = /\]::(?:write|append|delete|move|copy|replace|create|open)\w*\(/i;
 const PATH_FLAGS = /^-(?:path|literalpath|filepath)$/i;
 const DEST_FLAGS = /^-(?:destination|dest|value)$/i;
 const REDIRECT = /^(?:\d|\*|&)?>>?(.*)$/;
@@ -43,12 +49,13 @@ function expandHome(token) {
 }
 
 /** True when `token`, resolved against `cwd`, is a file the user's Claude configuration lives in. */
-function isProtected(token, cwd) {
+function isProtected(token, cwd, withRoot = false) {
   if (!token || /^-/.test(token)) return false;
   const expanded = expandHome(token);
   if (/[$%]/.test(expanded)) return false; // an unresolved variable cannot be placed
   const full = norm(path.resolve(cwd || process.cwd(), expanded));
   const root = `${norm(os.homedir())}/.claude`;
+  if (withRoot && full === root) return true; // moving or deleting the directory takes every file in it
   if (full === `${root}/hooks` || full.startsWith(`${root}/hooks/`)) return true;
   if (full === `${root}/claude.md`) return true;
   const rel = full.startsWith(`${root}/`) ? full.slice(root.length + 1) : null;
@@ -67,9 +74,25 @@ function writeTarget(tokens, cwd) {
     if (isProtected(target.replace(/^&/, ''), cwd)) return target;
   }
 
+  const dotnet = cmd.findIndex((t) => DOTNET_WRITE.test(t));
+  if (dotnet >= 0) {
+    // `[IO.File]::Copy('a', 'b')` is split at its spaces: every comma- or paren-separated piece after the call is an argument.
+    const pieces = cmd.slice(dotnet).flatMap((t) => t.split(/[(,]/)).map((t) => t.replace(/[)'"]+$|^['"]+/g, ''));
+    const hit = pieces.find((p) => isProtected(p, cwd));
+    if (hit) return hit;
+  }
+
   if (!cmd.length) return null;
   const name = baseName(cmd[0]);
   const args = cmd.slice(1);
+
+  if (DELETERS.has(name)) {
+    for (let i = 0; i < args.length; i += 1) {
+      if (PATH_FLAGS.test(args[i])) { if (isProtected(args[i + 1], cwd, true)) return args[i + 1]; i += 1; continue; }
+      if (isProtected(args[i], cwd, true)) return args[i];
+    }
+    return null;
+  }
 
   if (WRITERS.has(name)) {
     for (let i = 0; i < args.length; i += 1) {
@@ -87,9 +110,14 @@ function writeTarget(tokens, cwd) {
     const positional = [];
     for (let i = 0; i < args.length; i += 1) {
       if (DEST_FLAGS.test(args[i])) { if (isProtected(args[i + 1], cwd)) return args[i + 1]; i += 1; continue; }
-      if (PATH_FLAGS.test(args[i])) { i += 1; continue; }
+      if (PATH_FLAGS.test(args[i])) {
+        if (MOVERS.has(name) && isProtected(args[i + 1], cwd, true)) return args[i + 1];
+        i += 1;
+        continue;
+      }
       if (!args[i].startsWith('-')) positional.push(args[i]);
     }
+    if (MOVERS.has(name)) { const source = positional.find((p) => isProtected(p, cwd, true)); if (source) return source; }
     const last = positional.at(-1);
     return positional.length >= 1 && isProtected(last, cwd) ? last : null;
   }

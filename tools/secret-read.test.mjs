@@ -119,3 +119,71 @@ test('given samples with a further suffix, program text and plain copies, when t
   // When / Then
   for (const command of quiet) assert.equal(run(command).decision, 'approve', command);
 });
+
+test('given a glued input redirect from a secret file, when the hook runs, then it is denied', () => {
+  // Given
+  const glued = ['cat<.env', 'cat 0<.env', 'type<.env'];
+  for (const command of glued) {
+    // When
+    const r = run(command);
+
+    // Then
+    assert.equal(r.decision, 'deny', command);
+  }
+});
+
+test('given a PowerShell reader in parentheses, an assignment or a script block, when the hook runs, then each is denied', () => {
+  // Given
+  const readers = ['(Get-Content .env)', '$x = Get-Content .env', '$x = gc .env', '& { gc .env }'];
+  for (const command of readers) {
+    // When
+    const r = run(command, 'PowerShell');
+
+    // Then
+    assert.equal(r.decision, 'deny', command);
+  }
+});
+
+test('given a reader after a shell keyword or in a command substitution, when the hook runs, then each is denied', () => {
+  // Given
+  const readers = ['if true; then cat .env; fi', 'x=$(cat .env)'];
+  for (const command of readers) {
+    // When
+    const r = run(command);
+
+    // Then
+    assert.equal(r.decision, 'deny', command);
+  }
+});
+
+test('given a glued redirect from documentation or a quoted literal, when the hook runs, then it is not denied', () => {
+  // Given
+  const quiet = ['cat<.env.example', 'echo "<.env"'];
+  for (const command of quiet) {
+    // When
+    const r = run(command);
+
+    // Then
+    assert.notEqual(r.decision, 'deny', command);
+  }
+});
+
+test('given a reader behind an unknown wrapper with a secret file token, when the hook runs, then it at least asks', () => {
+  // Given
+  const command = 'somewrapper --flag cat .env';
+
+  // When
+  const r = run(command);
+
+  // Then
+  assert.ok(['ask', 'deny'].includes(r.decision), `${command}: ${r.decision}`);
+});
+
+test('given a reader named as data to echo, when the hook runs, then the fallback stays silent', () => {
+  // Given / When
+  const r = run('echo cat .env');
+
+  // Then
+  assert.notEqual(r.decision, 'ask');
+  assert.notEqual(r.decision, 'deny');
+});

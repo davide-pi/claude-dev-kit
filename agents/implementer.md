@@ -3,7 +3,7 @@ name: implementer
 description: >-
   Use proactively for any code change beyond a few lines whose scope is decided: plan steps,
   fixes with a known cause, feature slices.
-tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell, Skill
+tools: Read, Grep, Glob, Edit, Write, Bash, PowerShell
 model: sonnet
 effort: medium
 memory: project

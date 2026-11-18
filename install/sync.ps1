@@ -169,12 +169,12 @@ function Get-BaseHash([string]$Ref, [string]$Relative) {
     $process.StandardError.ReadToEnd() | Out-Null
     $process.WaitForExit()
     if ($process.ExitCode -ne 0) { return $null }
-    return Get-TextHash ([System.Text.Encoding]::UTF8.GetString($buffer.ToArray()).TrimStart([char]0xFEFF))
+    return Get-BytesHash $buffer.ToArray()
 }
 
 function Install-Only([string[]]$Paths, [string]$Ref) {
     Write-Section 'Targeted install (repo -> installed)'
-    if (-not $Paths) { Write-Info 'no kit asset among the -Only paths, nothing to do'; exit 0 }
+    if (-not $Paths) { Write-Host '  ISSUE   nothing verified: no kit asset among the -Only paths' -ForegroundColor Yellow; exit 1 }
     & git -C $RepoRoot rev-parse --verify --quiet "${Ref}^{commit}" *> $null
     if ($LASTEXITCODE -ne 0) { Write-Host "  ISSUE   -Base '$Ref' is not a commit of this repo" -ForegroundColor Yellow; exit 1 }
 
@@ -204,6 +204,7 @@ function Install-Only([string[]]$Paths, [string]$Ref) {
 function Test-OnlyVerify([string[]]$Paths) {
     # Read only: exit 0 when the repo and the live config hold the same content for exactly these assets.
     Write-Section 'Verify (repo vs installed)'
+    if (-not $Paths) { Write-Host '  ISSUE   nothing verified: no kit asset among the -Only paths' -ForegroundColor Yellow; exit 1 }
     $bad = 0
     foreach ($rel in $Paths) {
         $repoHash = Get-NormalizedHash (Join-Path $RepoRoot $rel.Replace('/', '\'))

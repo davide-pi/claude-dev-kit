@@ -22,7 +22,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parseSegments, expandTexts } = require('./shell-parse');
+const { commandPositions, expandTexts, baseName, DATA_RECEIVERS, SEARCHERS } = require('./shell-parse');
 const { findGitDir, readRef, currentBranch, commonDir } = require('./git-dir');
 
 /**
@@ -48,6 +48,9 @@ const GIT_VALUE_FLAGS = new Set([
 function isGitToken(token) {
   return /(?:^|[/\\(])git(?:\.exe)?$/i.test(token.replace(/^\$/, ''));
 }
+
+/** A command that only receives git as text (`echo git push`, `grep git push f`): any other head may run the git it names. */
+const isTextHead = (head) => !isGitToken(head[0]) && (DATA_RECEIVERS.has(baseName(head[0])) || SEARCHERS.has(baseName(head[0])));
 
 /**
  * The git call inside one segment: its subcommand, its `-C` path and its own arguments. Global
@@ -115,9 +118,9 @@ function checkDefaultBranch(command, cwd) {
   // so it is one regex and no parsing at all.
   if (!/\b(?:commit|push)\b/.test(scan)) return null;
 
-  // Only the calls that really run a commit/push, dry runs excluded one command at a time.
+  // Only the calls that may run a commit/push (git anywhere in a head, behind any launcher, but not `echo git push`), dry runs excluded one command at a time.
   const calls = expandTexts(command)
-    .flatMap((text) => parseSegments(scrubMessages(text)).map(parseGitCall))
+    .flatMap((text) => commandPositions(scrubMessages(text)).filter((head) => !isTextHead(head)).map(parseGitCall))
     .filter((call) => call
       && (call.subcommand === 'commit' || call.subcommand === 'push')
       && !isDryRun(call));
@@ -160,4 +163,4 @@ function checkDefaultBranch(command, cwd) {
     + `'${fallback}'. Confirm anyway?`;
 }
 
-module.exports = { checkDefaultBranch, parseGitCall };
+module.exports = { checkDefaultBranch, parseGitCall, isTextHead };

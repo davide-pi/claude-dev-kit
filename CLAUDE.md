@@ -11,7 +11,7 @@
 | commit, PR, ship | `branch-flow`, `/commit`, `pr-create` |
 
 1. Ask only before the irreversible: data, deploy, money, deletes. Else the approach in one line, then go;
-   a shared contract (API, event, schema) -> agree the interface first.
+   a shared contract (API, event, schema) -> agree the interface first. `deliver` keeps its M/L owner ok.
 2. CLI before MCP: `az`, `gh`; `azdo-*` MCP only for a proven gap (`azdo-cli`).
 3. ALM target (org, project, az identity) = the `ALM:` session line, passed explicitly on every call.
    No line, unmapped, or an added dir -> ask.
@@ -21,9 +21,9 @@
 Route, rules 1, 4: main session only; a subagent never invokes `deliver` or asks the user.
 
 ## Change scope
-The smallest diff that fully satisfies the request, written well. No unrequested refactor, rename, reformat,
+The smallest diff that fully satisfies the request. No unrequested refactor, rename, reformat,
 dependency bump or "while I'm here" fix. Remove only what your change made unused. Anything else: a `#P`
-item (output style) with recommendation, Risk and Effort, each with its why, then stop. Risk: `high` behaviour,
+item with recommendation, Risk and Effort, each with its why, then stop. Risk: `high` behaviour,
 data, contract; `medium` local logic, testable; `low` cosmetic.
 
 ## Language
@@ -42,4 +42,4 @@ Deciding line: verbatim. Status: `✓ done`, `? not verified: <reason>`
 (Command: how to check), `✗ failed` (quoted).
 
 ## Tools, no prompts
-`git -C <path>`, never `cd X && ...` (it prompts). Batch independent calls; read a file once, not after an edit.
+`git -C <path>`, never `cd X && ...`. Batch independent calls; read a file once, not after an edit.

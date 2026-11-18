@@ -118,4 +118,12 @@ function cdHint(payload, now = Date.now()) {
   }
 }
 
-module.exports = { nudgeFor, nudge, cdHint };
+const CD_DENY = 'A subagent never starts a command with cd: it prompts the user for every directory outside the session. Run the same command again without the cd: use git -C <dir> for git, absolute paths for files, and a tool flag such as --root or --prefix where one exists.';
+
+/** The deny reason for a subagent (`agent_type` set) whose command starts with cd X && / ;, else null. */
+function cdDeny(payload) {
+  if (!payload?.agent_type) return null;
+  return CD_FIRST.test(String(payload.tool_input?.command ?? '')) ? CD_DENY : null;
+}
+
+module.exports = { nudgeFor, nudge, cdHint, cdDeny };

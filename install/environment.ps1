@@ -44,10 +44,14 @@ function Test-Environment {
         Write-Ok 'CLAUDE_HOOKS not set — the hooks fall back to ~/.claude/hooks, which is where they are'
     }
     elseif ($Check) { Write-Problem "CLAUDE_HOOKS is not set (User scope) and the hooks are not in ~/.claude/hooks — they would not be found: guard-shell and secret-scan block (onFailure: block), the other hooks fail silently since they exit 0 by design" }
-    else {
+    elseif ($expected.TrimEnd('\') -ieq (Join-Path $HOME '.claude\hooks').TrimEnd('\')) {
         [Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', $expected, 'User')
         $env:CLAUDE_HOOKS = $expected
         Write-Change "CLAUDE_HOOKS set to $expected (new shells pick it up)"
+    }
+    else {
+        # A user-wide variable is for the real home only: a test or side-by-side home must not repoint it.
+        Write-Info "CLAUDE_HOOKS not set: this home is not ~/.claude. To use it, run: [Environment]::SetEnvironmentVariable('CLAUDE_HOOKS', '$expected', 'User')"
     }
 }
 
@@ -123,7 +127,20 @@ function Get-LocalImage([string]$Repository) {
     $previous = $ErrorActionPreference
     $ErrorActionPreference = 'Continue'
     try {
-        return (& docker image ls $Repository --format '{{.Repository}}:{{.Tag}}' 2>$null |
+        # A stopped Docker daemon can leave `docker image ls` waiting for good: past the timeout the image
+        # counts as not pulled, so the installer never hangs on it.
+        $start = [Diagnostics.ProcessStartInfo]::new((Get-Command docker).Source)
+        foreach ($arg in 'image', 'ls', $Repository, '--format', '{{.Repository}}:{{.Tag}}') { $start.ArgumentList.Add($arg) }
+        $start.RedirectStandardOutput = $true
+        $start.RedirectStandardError = $true
+        $start.UseShellExecute = $false
+        $process = [Diagnostics.Process]::Start($start)
+        $output = $process.StandardOutput.ReadToEndAsync()
+        if (-not $process.WaitForExit(5000)) {
+            try { $process.Kill($true) } catch { }
+            return $null
+        }
+        return ($output.Result -split "`r?`n" |
             Where-Object { $_ -and $_ -notmatch '<none>' } | Select-Object -First 1)
     } catch { return $null }
     finally { $ErrorActionPreference = $previous }

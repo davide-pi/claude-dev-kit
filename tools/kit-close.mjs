@@ -138,11 +138,17 @@ export async function closeChange(opts, run = spawnRunner) {
   const only = changed.join(',');
   const inst = run('pwsh', pwsh(installPs1, '-ClaudeHome', home, '-Only', only, '-Base', base), { cwd: root });
   for (const l of tail(inst.stdout)) say('install', l);
+  // Repo-only changes (tools/, README, CI) hold no asset: the installer says so with exit 1, which is not a failure here.
+  if (inst.status === 1 && /nothing verified/i.test(inst.stdout)) {
+    say('install', 'nothing to install: no kit asset changed');
+    return { code: 0, failed: null, steps, lines };
+  }
   if (inst.status !== 0) return stop('install', reason(inst));
   steps.push('verify');
   const ver = run('pwsh', pwsh(installPs1, '-ClaudeHome', home, '-Verify', '-Only', only), { cwd: root });
   for (const l of tail(ver.stdout)) say('verify', l);
   if (ver.status !== 0) return stop('verify', reason(ver));
+  if (/nothing verified/i.test(ver.stdout)) return stop('verify', 'checked zero assets');
   say('verify', 'repo == home for the changed assets');
 
   // 7. the cockpit mod's own tests, on the installed copy.

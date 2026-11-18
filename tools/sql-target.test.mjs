@@ -32,11 +32,11 @@ process.on('exit', () => {
   for (const dir of [home, cwd]) { try { rmSync(dir, { recursive: true, force: true }); } catch { /* tmp */ } }
 });
 
-function run(command) {
+function run(command, tool = 'Bash') {
   const env = { ...process.env, HOME: home, USERPROFILE: home };
   delete env.PGHOST;
   const r = spawnSync(process.execPath, [HOOK], {
-    input: JSON.stringify({ tool_name: 'Bash', tool_input: { command }, cwd }), encoding: 'utf8', env,
+    input: JSON.stringify({ tool_name: tool, tool_input: { command }, cwd }), encoding: 'utf8', env,
   });
   assert.equal(r.status, 0, 'the hook must always exit 0');
   if (!r.stdout.trim()) return { decision: 'approve', reason: '' };
@@ -360,4 +360,68 @@ test('given the same wrapped forms with a dev host or no client, when the guard 
     'kubectl exec pod-0 -- ls',
     'yarn build',
   ]);
+});
+
+// ── Every command position ─────────────────────────────────────────────────────────────────────
+
+test('given a PowerShell assignment of a non-dev sqlcmd call, when the guard runs it, then it is denied', () => {
+  // Given
+  const command = '$r = sqlcmd -S prod-host -d Orders -Q "DELETE FROM dbo.T"';
+
+  // When
+  const got = run(command, 'PowerShell');
+
+  // Then
+  assert.equal(got.decision, 'deny');
+  assert.match(got.reason, /db-ro\.ps1/);
+});
+
+test('given a non-dev client in a subshell, a substitution, a backtick or an assignment, when the guard runs it, then each is denied', () => {
+  // Given / When / Then
+  expect('deny', [
+    '(sqlcmd -S prod-host -Q "SELECT 1")',
+    'echo $(sqlcmd -S prod-host -Q "SELECT 1")',
+    'echo `sqlcmd -S prod-host -Q "SELECT 1"`',
+    'x=$(psql -h prod-host -c "SELECT 1")',
+  ], /db-ro\.ps1/);
+});
+
+test('given a non-dev client inside if, a brace group or a while loop, when the guard runs it, then each is denied', () => {
+  // Given / When / Then
+  expect('deny', [
+    'if true; then sqlcmd -S prod-host -Q "SELECT 1"; fi',
+    '{ sqlcmd -S prod-host -Q "SELECT 1"; }',
+    'while :; do redis-cli -h prod-host; done',
+  ], /db-ro\.ps1/);
+});
+
+test('given a dev-host client inside the same constructs, when the guard runs it, then nothing is denied', () => {
+  // Given / When / Then
+  expect('approve', [
+    '$r = sqlcmd -S localhost -Q "SELECT 1"',
+    '(sqlcmd -S localhost -Q "SELECT 1")',
+    'echo $(sqlcmd -S localhost -Q "SELECT 1")',
+    'x=$(psql -h localhost -c "SELECT 1")',
+    'if true; then sqlcmd -S localhost -Q "SELECT 1"; fi',
+    '{ sqlcmd -S localhost -Q "SELECT 1"; }',
+    'while :; do redis-cli -h localhost; done',
+  ]);
+});
+
+test('given a client name only as the argument of echo, when the guard runs it, then nothing is denied', () => {
+  // Given / When / Then
+  expect('approve', ['echo sqlcmd -S prod-host']);
+});
+
+test('given a non-dev client behind a dot-source or in a foreach block that the head list might miss, when the guard runs it, then it at least asks', () => {
+  // Given
+  const cases = [['. sqlcmd -S prod-host -Q "SELECT 1"', 'Bash'], ['foreach ($x in 1) { sqlcmd -S prod-host }', 'PowerShell']];
+
+  for (const [command, tool] of cases) {
+    // When
+    const got = run(command, tool);
+
+    // Then
+    assert.ok(['ask', 'deny'].includes(got.decision), command);
+  }
 });

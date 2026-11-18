@@ -563,15 +563,7 @@
       "WebFetch(domain:code.claude.com)",
       "WebFetch(domain:platform.claude.com)",
       "PowerShell(sqlcmd *)",
-      "Bash(sqlcmd *)",
-      "PowerShell(git branch -D*)",
-      "Bash(git branch -D*)",
-      "PowerShell(git worktree remove *)",
-      "Bash(git worktree remove *)",
-      "PowerShell(git checkout -- *)",
-      "Bash(git checkout -- *)",
-      "PowerShell(git restore *)",
-      "Bash(git restore *)"
+      "Bash(sqlcmd *)"
     ],
     "deny": [
       "Read(**/.env)",
@@ -654,7 +646,21 @@
       "PowerShell(az repos delete*)",
       "Bash(az repos delete*)",
       "PowerShell(az pipelines delete*)",
-      "Bash(az pipelines delete*)"
+      "Bash(az pipelines delete*)",
+      "PowerShell(git branch -D*)",
+      "Bash(git branch -D*)",
+      "PowerShell(git worktree remove *)",
+      "Bash(git worktree remove *)",
+      "PowerShell(git checkout -- *)",
+      "Bash(git checkout -- *)",
+      "PowerShell(git restore *)",
+      "Bash(git restore *)",
+      "Edit(~/.claude/hooks/**)",
+      "Write(~/.claude/hooks/**)",
+      "Edit(~/.claude/settings*.json)",
+      "Write(~/.claude/settings*.json)",
+      "Edit(~/.claude/CLAUDE.md)",
+      "Write(~/.claude/CLAUDE.md)"
     ],
     "defaultMode": "auto"
   },
@@ -791,7 +797,7 @@
             "command": "node",
             "args": [
               "-e",
-              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/guard-shell.js')"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/guard-shell.js')}catch(e){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'ask',permissionDecisionReason:'The guard-shell hook could not load ('+e.code+'): confirm this command yourself.'}}))}"
             ],
             "timeout": 15,
             "onFailure": "block",
@@ -807,7 +813,7 @@
             "command": "node",
             "args": [
               "-e",
-              "require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/secret-scan.js')"
+              "try{require((process.env.CLAUDE_HOOKS||require('os').homedir()+'/.claude/hooks')+'/secret-scan.js')}catch(e){process.stdout.write(JSON.stringify({hookSpecificOutput:{hookEventName:'PreToolUse',permissionDecision:'ask',permissionDecisionReason:'The secret-scan hook could not load ('+e.code+'): confirm this write yourself.'}}))}"
             ],
             "timeout": 15,
             "onFailure": "block",

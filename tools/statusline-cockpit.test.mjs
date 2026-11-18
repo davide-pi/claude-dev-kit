@@ -303,6 +303,60 @@ test('given a git cache entry of 12 s and one of 31 s, when the status line rend
   assert.doesNotMatch(renderWithGitCache('git', git, 31_000), /cached-branch/, 'a 31 s old entry is recomputed');
 });
 
+/** Runs gitInfo behind cachedByCwd as statusline.js composes them, with `git` faked by `fake`; returns the cache file's entry or null. */
+function gitCacheEntryAfter(fake) {
+  const require = createRequire(import.meta.url);
+  const dir = mkdtempSync(join(tmpdir(), 'statusline-gitcache-'));
+  const cp = require('node:child_process');
+  const real = cp.execFileSync;
+  const prevDir = process.env.CLAUDE_CONFIG_DIR;
+  const modules = ['../statusline/git.js', '../statusline/cache.js'].map((m) => require.resolve(m));
+  try {
+    process.env.CLAUDE_CONFIG_DIR = dir;
+    cp.execFileSync = fake;
+    for (const m of modules) delete require.cache[m];
+    const { gitInfo, gitTimedOut } = require('../statusline/git.js');
+    const { cachedByCwd, GIT_CACHE_MS } = require('../statusline/cache.js');
+    const cwd = join(dir, 'work');
+    cachedByCwd('git', cwd, GIT_CACHE_MS, () => gitInfo(cwd), () => gitTimedOut());
+    const file = join(dir, '.cache', `git-${createHash('sha1').update(cwd).digest('hex').slice(0, 16)}.json`);
+    return existsSync(file) ? JSON.parse(readFileSync(file, 'utf8')) : null;
+  } finally {
+    cp.execFileSync = real;
+    if (prevDir === undefined) delete process.env.CLAUDE_CONFIG_DIR; else process.env.CLAUDE_CONFIG_DIR = prevDir;
+    for (const m of modules) delete require.cache[m];
+    rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+test('given git status timing out, when gitInfo runs behind the cache, then the null is not kept for 30 s', () => {
+  // Given
+  const timeout = () => { throw Object.assign(new Error('spawnSync git ETIMEDOUT'), { code: 'ETIMEDOUT' }); };
+  // When
+  const entry = gitCacheEntryAfter(timeout);
+  // Then
+  assert.ok(entry === null || Date.now() - entry.at >= 25_000, 'no entry, or one back-dated so it lives 5 s at most');
+});
+
+test('given a directory that is not a repository, when gitInfo runs behind the cache, then the null is cached for the full 30 s', () => {
+  // Given
+  const notRepo = () => { throw Object.assign(new Error('fatal: not a git repository'), { status: 128 }); };
+  // When
+  const entry = gitCacheEntryAfter(notRepo);
+  // Then
+  assert.ok(entry && entry.value === null && Date.now() - entry.at < 5_000);
+});
+
+test('given git status succeeding, when gitInfo runs behind the cache, then the result is cached for 30 s', () => {
+  // Given
+  const ok = () => '## main...origin/main\n M file.txt\n';
+  // When
+  const entry = gitCacheEntryAfter(ok);
+  // Then
+  assert.equal(entry?.value?.branch, 'main');
+  assert.ok(Date.now() - entry.at < 5_000);
+});
+
 test('given a worktree cache entry of 5 minutes, when the status line renders, then the linked-worktree root is kept', () => {
   // Given / When / Then
   assert.match(renderWithGitCache('worktree', { root: 'C:/wt/cached-tree' }, 5 * 60_000), /cached-tree/);

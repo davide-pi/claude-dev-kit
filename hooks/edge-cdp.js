@@ -20,8 +20,8 @@ const { spawnSync } = require('child_process');
 
 const DEFAULT_PORT = 9222;
 const PROBE_TIMEOUT_MS = 500;
-/** Under the hook's 30 s timeout: the script waits up to 20 s for a freshly started Edge. */
-const SCRIPT_TIMEOUT_MS = 28_000;
+/** At least 5 s under the hook's 30 s timeout: the script waits up to 20 s for a freshly started Edge. */
+const SCRIPT_TIMEOUT_MS = 25_000;
 
 /** The port Edge's main profile wrote, or null when the file is missing or unreadable. */
 function writtenPort(userData) {
@@ -64,7 +64,7 @@ async function run({
   return fallback();
 }
 
-module.exports = { run };
+module.exports = { run, SCRIPT_TIMEOUT_MS };
 
 if (!global.__edgeCdpLibrary) {
   const fire = require('./lib/fire-log').armFire('edge-cdp', 'PreToolUse');

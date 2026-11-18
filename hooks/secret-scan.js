@@ -9,7 +9,7 @@
  * The catalogue is the one tools/validate.mjs already enforces on the kit's own files — provider
  * tokens, a cloud access key id, an API-key-shaped string, a password inside a connection string —
  * plus the shapes a source file can carry that a config repo cannot: a private key block, a signed
- * token, a password in a URL (`scheme://user:secret@host`) and a quoted `"password": "literal"` pair.
+ * token, a password in a URL (`scheme://user:secret@host`) and a quoted `"password": "<literal>"` pair.
  * Keeping the two lists in step matters: what the validator rejects in the repo is exactly what must
  * never be written into a project either.
  *
@@ -27,8 +27,8 @@
  *     itself a fixture (`ValidPassword1!`).
  *   - a *detector*: the regex or the grep that hunts for secrets contains, by construction, the
  *     very shapes it looks for. A line carrying regex syntax is read as a pattern, not a value, and
- *     a scanner file (this one, the validator) is skipped whole — otherwise the hook would make
- *     itself unmaintainable.
+ *     a scanner file (this one, the validator) is read like any other, so its detector lines
+ *     stay writable and a real token in it is still reported.
  *
  * Deliberately NOT detected: a high-entropy string with no recognisable shape (`ApiKey = "8f3c…"`).
  * Entropy scoring on every write is a false-positive machine — minified assets, hashes, base64
@@ -42,8 +42,20 @@
 
 'use strict';
 
-const { approve, deny, readPayload } = require('./lib/decision');
-const { logError } = require('./lib/cache');
+// A failing scan asks, never approves: the ask is written by hand so it survives a broken lib.
+const askRaw = (error) => {
+  try { require('./lib/cache').logError('secret-scan', error); } catch { /* the log is as broken as the rest */ }
+  process.stdout.write(JSON.stringify({ hookSpecificOutput: { hookEventName: 'PreToolUse', permissionDecision: 'ask', permissionDecisionReason: 'The credential scan failed, so this write could not be checked. Confirm it yourself (details in hook-errors.log).' } }));
+  process.exit(0);
+};
+let approve;
+let deny;
+let readPayload;
+try {
+  ({ approve, deny, readPayload } = require('./lib/decision'));
+} catch (error) {
+  askRaw(error);
+}
 
 /**
  * The catalogue. `value` is the capture group holding the part that has to look like a real secret;
@@ -144,6 +156,12 @@ const EXAMPLE_MARKER = /example|sample|placeholder|redacted|changeme|dummy|myuse
 /** A test source file: `tests/…`, `__tests__/…`, `*Tests.cs`, `*.test.ts`, `*.spec.js`. */
 const TEST_FILE = /(?:^|[\\/])(?:tests?|__tests__|specs?)[\\/]|(?:Tests?|[.-]test|[.-]spec)\.\w+$/i;
 /** In a test file, a value that names itself a fixture (`ValidPassword1!`, `wrong-secret`) is test data. */
+const fs = require('fs');
+const path = require('path');
+const KIT_TEST_SHAPE =/(?:^|[\\/])tools[\\/][^\\/]+\.test\.\w+$/i;
+/** The kit's own checkout: a `tools/*.test.*` file whose repo also holds this scanner and the validator. Any other project's tools folder is not exempt. */
+const KIT_TEST = { test: (file) => KIT_TEST_SHAPE.test(file) && fs.existsSync(path.join(path.dirname(path.dirname(path.resolve(file))), 'hooks', 'secret-scan.js'))
+  && fs.existsSync(path.join(path.dirname(path.dirname(path.resolve(file))), 'tools', 'validate.mjs')) };
 const FIXTURE_WORD = /valid|wrong|bad|fake|test|password|secret/i;
 /** A mask: `***`, `xxxx`, `…`, `--`. */
 const MASK = /^[*x.\-_•…\s]+$/i;
@@ -154,10 +172,12 @@ const MASK = /^[*x.\-_•…\s]+$/i;
  * patterns: a signed token is three dot-separated word runs, which is exactly the shape of a
  * member access, and treating it as a reference let a real token straight through.
  */
-function isPlaceholder(value, reference, inTest = false) {
+function isPlaceholder(value, reference, inTest = false, kitTest = false) {
   const v = value.trim().replace(/^["'`]|["'`]$/g, '');
   if (!v) return true;
   if (inTest && FIXTURE_WORD.test(v)) return true;
+  // The kit's own tests hold the fixtures that prove the scanner: a configuration slot there is a fixture value.
+  if (kitTest && reference) return true;
   if (INTERPOLATION.test(v)) return true;
   if (MASK.test(v)) return true;
   if (PLACEHOLDER_WORD.test(v)) return true;
@@ -180,10 +200,8 @@ function isPlaceholder(value, reference, inTest = false) {
  * secret, not the secret. Skipping it is what keeps a scanner, a test fixture list and a
  * `git grep` recipe writable.
  */
-const DETECTOR_LINE = /\(\?[:<=!]|\[A-Za-z|\[a-zA-Z|\[0-9|\[\^|\\b|\\s|\\d|\\w|\{\d+,|matchAll|RegExp|^\s*(?:[$>#]\s*)?(?:git\s+grep|grep|egrep|rg|Select-String|sls)\b/i;
-
-/** Files whose whole job is to carry these patterns, and only code: a `.json` named `secret-…` is data. */
-const SCANNER_FILE = /(?:^|[\\/])(?:hooks|tools)[\\/][\w.-]*(?:secret|leak|scan|validate|guard)[\w.-]*(?:\.(?:js|mjs|ps1)|\.test\.\w+)$/i;
+// A `\s`-style escape counts only inside a `/…/` literal: elsewhere it is as likely a Windows path (`C:\sys\d1`).
+const DETECTOR_LINE = /\(\?[:<=!]|\[A-Za-z|\[a-zA-Z|\[0-9|\[\^|\{\d+,|matchAll|RegExp|\/[^/\n]*\\[bsdw][^/\n]*\/|^\s*(?:[$>#]\s*)?(?:git\s+grep|grep|egrep|rg|Select-String|sls)\b/i;
 
 /** The text a Write or an Edit is about to introduce — never the text it removes. */
 function newText(input) {
@@ -207,23 +225,23 @@ try {
   const filePath = payload?.tool_input?.file_path ?? payload?.tool_input?.notebook_path ?? '';
   const text = newText(payload?.tool_input);
   if (typeof text !== 'string' || !text.trim()) approve();
-  if (SCANNER_FILE.test(filePath)) approve();
 
   const findings = [];
   const lines = text.split('\n');
   for (let i = 0; i < lines.length; i += 1) {
     const line = lines[i];
-    if (line.length > 4000) continue;           // a minified bundle is not hand-written config
     // A pattern definition is not a value, but a provider token on the same line is still a token.
-    const detector = DETECTOR_LINE.test(line);
+    // A minified bundle is not hand-written config either: only the shape-matched tokens are read there.
+    const skipValues = line.length > 4000 || DETECTOR_LINE.test(line);
 
     for (const { label, re, value, files } of PATTERNS) {
-      if (detector && value) continue;
+      if (skipValues && value) continue;
       if (files && !files.test(filePath)) continue;
+      if (KIT_TEST.test(filePath) && label === 'a private key block') continue; // the scanner's own fixture headers
       re.lastIndex = 0;
       for (const m of line.matchAll(re)) {
         const found = value ? m[value] : m[0];
-        if (isPlaceholder(found, value !== undefined, TEST_FILE.test(filePath))) continue;
+        if (isPlaceholder(found, value !== undefined, TEST_FILE.test(filePath), KIT_TEST.test(filePath))) continue;
         findings.push(`  line ${i + 1}: ${label} — ${redact(found)}`);
         break;                                   // one finding per pattern per line is enough
       }
@@ -243,7 +261,5 @@ try {
     + 'detection pattern, make it look like one and the write goes through.',
   );
 } catch (error) {
-  // A bug in the hook must never get in the way of the work.
-  logError('secret-scan', error);
-  approve();
+  askRaw(error);
 }

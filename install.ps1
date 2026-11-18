@@ -163,6 +163,8 @@ Sync-Assets
 Test-InstalledOnlyAssets
 Test-RetiredAssets
 if ($Check) { Test-LocalOnlyAssets }
+# Problems found so far are about the kit's own files and options; what follows is the machine's toolchain.
+$installProblems = $script:Problems
 Test-Environment
 Test-LanguageServers
 Test-Toolchain
@@ -183,5 +185,6 @@ if ($Pull) {
 }
 
 Write-Host '  done — restart Claude Code so it picks up agents, skills, workflows and settings.' -ForegroundColor Green
-if ($script:Problems -gt 0) { Write-Host "  $($script:Problems) environment item(s) still need attention (see ISSUE above)" -ForegroundColor Yellow }
-exit 0
+if ($script:Problems -gt 0) { Write-Host "  $($script:Problems) item(s) still need attention (see ISSUE above)" -ForegroundColor Yellow }
+# Exit 1 when the install itself had problems; a missing tool on this machine is reported, not a failure.
+exit $(if ($installProblems -gt 0) { 1 } else { 0 })

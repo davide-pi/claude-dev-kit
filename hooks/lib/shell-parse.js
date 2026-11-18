@@ -33,12 +33,27 @@ function parseSegments(command) {
   const endToken = () => { if (token) { tokens.push(token); token = ''; } };
   const endSegment = () => { endToken(); if (tokens.length) { segments.push(tokens); tokens = []; } };
 
-  for (const c of command) {
+  for (let i = 0; i < command.length; i += 1) {
+    const c = command[i];
     if (quote) {
       if (c === quote) quote = null;
       else token += c;
     } else if (c === '"' || c === "'") {
       quote = c;
+    } else if ((c === '<' || c === '>') && command[i + 1] !== '(') {
+      // A redirect glued to its word (`cat<.env`, `echo x>f`, `2>f`) is an operator token and a target token; `<(` stays a process substitution.
+      const fd = /^\d+$/.test(token) ? token : '';
+      if (fd) token = ''; else endToken();
+      let op = fd + c;
+      while (command[i + 1] === c) { op += c; i += 1; }
+      if (c === '>' && command[i + 1] === '&') { op += '&'; i += 1; }
+      tokens.push(op);
+    } else if (c === '&' && command[i + 1] === '>') {
+      endToken();
+      let op = '&>';
+      i += 1;
+      while (command[i + 1] === '>') { op += '>'; i += 1; }
+      tokens.push(op);
     } else if (isSeparator(c)) {
       endSegment();
     } else if (c === ' ' || c === '\t' || c === '`') {
@@ -134,7 +149,7 @@ const WRAPPERS = new Set(['sudo', 'call', 'command', 'env', 'time', 'nohup', 'st
 /** Wrapper options that take a value (`sudo -u postgres psql`). */
 const WRAPPER_VALUE_OPTS = new Set(['-u', '-g', '-h', '-p', '-c', '-d', '--user', '--group']);
 /** Options of one wrapper that take a value (`nice -n 10`; `-n` is a flag for sudo), and wrappers that then take a positional (`timeout 5`). */
-const OWN_VALUE_OPTS = { timeout: new Set(['-s', '-k', '--signal', '--kill-after']), nice: new Set(['-n', '--adjustment']) };
+const OWN_VALUE_OPTS = { timeout: new Set(['-s', '-k', '--signal', '--kill-after']), nice: new Set(['-n', '--adjustment']), command: new Set() };
 const LEADING_POSITIONAL = new Set(['timeout']);
 /** `wsl` options that take a value; `-e`, `--exec` and `--` end the options. */
 const WSL_VALUE_OPTS = new Set(['-d', '--distribution', '-u', '--user', '--cd', '--shell-type', '--distribution-id']);
@@ -148,6 +163,22 @@ const SSH_VALUE_OPTS = new Set(['-p', '-i', '-l', '-o', '-F', '-J', '-L', '-R', 
  */
 const POSIX_SHELL_FLAG = /^-[A-Za-z]*c[A-Za-z]*$/;
 const POWERSHELL_FLAG = /^-(?:c|com\w*|cwa)$/i;
+/** `-EncodedCommand` as PowerShell takes it: any prefix of the name, `-ec`, behind a dash, a slash or a Unicode dash. `-File` ends the options. */
+const ENCODED_FLAG = /^[-/\u2010-\u2015\u2212]([A-Za-z]+)$/;
+const isEncodedFlag = (t) => { const m = ENCODED_FLAG.exec(t); const name = m && m[1].toLowerCase(); return Boolean(name) && (name === 'ec' || 'encodedcommand'.startsWith(name)); };
+const FILE_FLAG = /^[-/]f(?:i(?:l(?:e)?)?)?$/i;
+const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+/** The text a PowerShell `-EncodedCommand` payload holds (base64 of UTF-16LE), as a nested command, or an opaque marker when it cannot be read. */
+function decodeEncoded(payload) {
+  const opaque = (why) => [{ text: '', opaque: `A PowerShell -EncodedCommand payload the guard could not read (${why}): it may hide anything.` }];
+  if (payload === undefined) return opaque('no payload');
+  if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(payload)) return opaque('not base64');
+  const bytes = Buffer.from(payload, 'base64');
+  if (bytes.length % 2) return opaque('not UTF-16LE');
+  const text = bytes.toString('utf16le');
+  return LONE_SURROGATE.test(text) ? opaque('not UTF-16LE') : [{ text, encoded: true }];
+}
 const CMD_FLAG = /^[/-][ck]$/i;
 const shellFlag = (shell) => (POWERSHELLS.has(shell) ? POWERSHELL_FLAG : shell === 'cmd' ? CMD_FLAG : POSIX_SHELL_FLAG);
 const ASSIGNMENT = /^[A-Za-z_]\w*=/;
@@ -186,6 +217,11 @@ function nested(rest) {
 function shellInner(tokens, from, shell) {
   const isFlag = shellFlag(shell);
   const flag = tokens.findIndex((t, i) => i >= from && isFlag.test(t));
+  if (POWERSHELLS.has(shell)) {
+    const end = tokens.findIndex((t, i) => i >= from && FILE_FLAG.test(t));
+    const encoded = tokens.findIndex((t, i) => i >= from && isEncodedFlag(t));
+    if (encoded >= 0 && (end < 0 || encoded < end) && (flag < 0 || encoded < flag)) return decodeEncoded(tokens[encoded + 1]);
+  }
   return flag < 0 ? [] : nested(tokens.slice(flag + 1));
 }
 
@@ -305,12 +341,19 @@ function walk(command) {
   };
   const visitTokens = (tokens, depth) => {
     out.push({ text: null, tokens });
-    if (depth >= MAX_DEPTH) return;
     const cmd = stripWrappers(tokens);
+    if (depth >= MAX_DEPTH) {
+      if (cmd.some((t) => POWERSHELLS.has(baseName(t))) && cmd.some(isEncodedFlag)) out.push({ text: null, tokens: null, opaque: 'A PowerShell -EncodedCommand nested deeper than the guard reads: it may hide anything.' });
+      return;
+    }
     if (!cmd.length) return;
     for (const inner of innerOf(cmd)) {
+      if (inner.opaque) { out.push({ text: null, tokens: null, opaque: inner.opaque }); continue; }
       if (inner.tokens) { out.push({ text: inner.text, tokens: null }); visitTokens(inner.tokens, depth + 1); }
-      else visitText(inner.text, depth + 1);
+      else {
+        if (inner.encoded) out.push({ text: null, tokens: null, decoded: inner.text });
+        visitText(inner.text, depth + 1);
+      }
     }
   };
   visitText(command, 0);
@@ -484,7 +527,60 @@ const expandSegments = (command) => walk(command).filter((e) => e.tokens).map((e
 /** The line itself and every command string nested in it (`bash -c "..."`, `$(...)`, `ssh h "..."`). */
 const expandTexts = (command) => walk(command).filter((e) => e.text !== null).map((e) => e.text);
 
+/** The text of every -EncodedCommand payload of a line, decoded. */
+const decodedCommands = (command) => walk(command).filter((e) => e.decoded !== undefined).map((e) => e.decoded);
+
+/** The reasons a line hides a PowerShell -EncodedCommand the guard cannot read (see above). */
+const opaqueCommands = (command) => walk(command).filter((e) => e.opaque).map((e) => e.opaque);
+
+const HEAD_KEYWORDS = new Set(['!', 'if', 'then', 'else', 'elif', 'do', 'while', 'until', 'time']);
+
+/** The commands one token list starts: past `(`, `{`, `!`, `then`/`do`..., `$r =`, assignments and wrappers, plus those in `{ ... }` blocks further on. */
+function headsOfTokens(tokens) {
+  const out = [];
+  // Drop the first `n` characters of the head token (the whole token when nothing is left).
+  const trimHead = (rest, n) => (n < rest[0].length ? [rest[0].slice(n), ...rest.slice(1)] : rest.slice(1));
+  const visit = (list, inBlock = false) => {
+    let rest = list;
+    let paren = false;
+    let brace = inBlock;
+    for (;;) {
+      const first = rest[0];
+      if (first === undefined) return;
+      const open = /^(?:@(?=\())?[({]+/.exec(first);
+      const glued = /^\$[\w:]+\+?=/.exec(first) ?? /^\[[^\]\s]+\]/.exec(first);
+      if (open) {
+        paren = paren || open[0].includes('(');
+        brace = brace || open[0].includes('{');
+        rest = trimHead(rest, open[0].length);
+      } else if (HEAD_KEYWORDS.has(first.toLowerCase())) rest = rest.slice(1);
+      else if (glued) rest = trimHead(rest, glued[0].length); // `$r=sqlcmd`, `$r=(sqlcmd`, `[void](sqlcmd`
+      else if (first.startsWith('$') && /^\+?=/.test(rest[1] ?? '')) rest = trimHead(rest.slice(1), /^\+?=/.exec(rest[1])[0].length);
+      else break;
+    }
+    let cmd = stripWrappers(rest);
+    const start = tokens.length - cmd.length; // the lists are always suffixes of `tokens`; the trims below only cut the tail
+    if (brace && cmd.length) cmd = [...cmd.slice(0, -1), cmd[cmd.length - 1].replace(/\}+$/, '')].filter(Boolean);
+    if (paren && cmd.length) {
+      // The group ends at the first `)` that is not a `$(...)` of its own: what follows (`.Length`, `[0]`, `-join`) is not an argument.
+      const blanked = cmd.map((t) => t.replace(/\$?\([^()]*\)/g, (m) => ' '.repeat(m.length)));
+      const close = blanked.findIndex((t) => t.includes(')'));
+      if (close >= 0) cmd = [...cmd.slice(0, close), cmd[close].slice(0, blanked[close].indexOf(')'))].filter(Boolean);
+    }
+    if (cmd.length) out.push(Object.assign(cmd, { start }));
+    // A block opens after `{`, glued or not: `if($a){sqlcmd`, `1){sqlcmd`; `${var}` does not.
+    // Only the first brace recurses: the tail still holds the later ones, so each is reached once (a visit per brace was 2^N).
+    const i = rest.findIndex((t) => /(?<!\$)\{/.test(t));
+    if (i >= 0) visit([rest[i].slice(rest[i].search(/(?<!\$)\{/) + 1), ...rest.slice(i + 1)].filter(Boolean), true);
+  };
+  visit(tokens);
+  return out;
+}
+
+/** Every command head of a line as the token list that starts at it, nested ones included (wrappers, `$(...)`, blocks, `if`/`do`). */
+const commandPositions = (command) => walk(command).filter((e) => e.tokens).flatMap((e) => headsOfTokens(e.tokens));
+
 module.exports = {
-  parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
+  commandPositions, headsOfTokens, opaqueCommands, decodedCommands, DATA_RECEIVERS, parseSegments, splitSegments, splitPipelines, unquotedHas, expandSegments, expandTexts, hasSubstitution,
   stripWrappers, baseName, SEARCHERS, SHELLS, CONTAINER_CLIS, innerOf, innerSegments, afterLauncher, withoutBodies, withoutDataBodies, runnableBodyLines, RESERVED_VARS, parseAssignment,
 };

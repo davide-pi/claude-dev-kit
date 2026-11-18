@@ -343,3 +343,99 @@ test('the shell guard denies browser-use through evaluate when the CLI is missin
     rmSync(empty, { recursive: true, force: true });
   }
 });
+
+// A read-only agent gets an allow-list of git read verbs: anything else (or unknown) is denied.
+const asAgent = (command, extra = {}, tool_name = 'Bash') =>
+  evaluate({ tool_name, tool_input: { command }, cwd: onFeature, agent_id: 'a1', agent_type: 'code-reviewer', ...extra });
+
+test('given agent_type code-reviewer, when it runs a git write verb, then guard-shell denies it', () => {
+  // Given
+  const commands = ['git pull', 'git merge main', 'git clean -n', 'git add .', 'git restore f', 'git cherry-pick abc', 'git revert abc', 'git am p.patch',
+    'git apply p.diff', 'git mv a b', 'git rm f', 'git gc', 'git prune', 'git update-ref refs/heads/x abc', 'git config --global x y'];
+
+  for (const command of commands) {
+    // When
+    const r = asAgent(command);
+
+    // Then
+    assert.equal(r?.decision, 'deny', command);
+  }
+});
+
+test('given agent_type code-reviewer, when it runs a git read verb, then guard-shell does not deny it', () => {
+  // Given
+  const commands = ['git diff a..b', 'git show abc', 'git log -5', 'git blame f', 'git rev-list HEAD', 'git rev-parse HEAD', 'git ls-files', 'git ls-tree HEAD',
+    'git grep foo', 'git cat-file -p abc', 'git status', 'git fetch', 'git merge-base a b', 'git describe', 'git shortlog -s', 'git for-each-ref', 'git show-ref'];
+
+  for (const command of commands) {
+    // When
+    const r = asAgent(command);
+
+    // Then
+    assert.notEqual(r?.decision, 'deny', command);
+  }
+});
+
+test('given agent_type code-reviewer, when it runs branch, tag, stash, worktree or remote, then only the read forms pass', () => {
+  // Given
+  const reads = ['git branch', 'git branch -a', 'git branch --list "x*"', 'git branch --show-current', 'git tag', 'git tag -l', 'git tag --points-at HEAD',
+    'git stash list', 'git stash show', 'git worktree list', 'git remote', 'git remote -v', 'git remote get-url origin', 'git remote show origin'];
+  const writes = ['git branch topic', 'git branch -D topic', 'git tag v1', 'git tag -d v1', 'git stash drop', 'git stash pop', 'git worktree add ../w', 'git worktree remove ../w',
+    'git remote add x u', 'git remote remove x', 'git remote set-url x u'];
+
+  for (const command of reads) {
+    // When / Then
+    assert.notEqual(asAgent(command)?.decision, 'deny', command);
+  }
+  for (const command of writes) {
+    // When / Then
+    assert.equal(asAgent(command)?.decision, 'deny', command);
+  }
+});
+
+test('given global flags before the verb, when a read-only agent runs a write, then the verb is still found', () => {
+  // Given
+  const commands = ['git -C . pull', 'git --no-pager add .', 'git -c core.x=1 merge main', 'git --git-dir /x --work-tree /y clean -n', 'git -C /r -c a=b rm f'];
+
+  for (const command of commands) {
+    // When / Then
+    assert.equal(asAgent(command)?.decision, 'deny', command);
+  }
+  assert.notEqual(asAgent('git -C . --no-pager diff')?.decision, 'deny');
+});
+
+test('given a git write in a substitution, a group or a wrapped shell, when a read-only agent runs it, then it denies', () => {
+  // Given
+  const commands = ['echo $(git pull)', '(git add .)', 'bash -c "git pull"', 'echo `git merge x`', 'sh -c "git status; git rm f"'];
+
+  for (const command of commands) {
+    // When / Then
+    assert.equal(asAgent(command)?.decision, 'deny', command);
+  }
+});
+
+test('given an unknown git verb or an alias, when a read-only agent runs it, then it denies', () => {
+  // Given
+  const commands = ['git frobnicate', 'git co main', 'git st', 'git lg'];
+
+  for (const command of commands) {
+    // When / Then
+    assert.equal(asAgent(command)?.decision, 'deny', command);
+  }
+});
+
+test('given a PowerShell call and a read-only agent, when it runs git pull, then it denies', () => {
+  // Given / When
+  const r = asAgent('git pull', {}, 'PowerShell');
+
+  // Then
+  assert.equal(r?.decision, 'deny');
+});
+
+test('given no agent_type, when git pull runs, then guard-shell does not deny', () => {
+  // Given / When
+  const r = evaluate({ tool_name: 'Bash', tool_input: { command: 'git pull' }, cwd: onFeature });
+
+  // Then
+  assert.notEqual(r?.decision, 'deny');
+});

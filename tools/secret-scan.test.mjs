@@ -158,7 +158,7 @@ test('given settings.json, when the secret-scan hook entry is read, then it runs
   // Then
   assert.equal(hook?.matcher, 'Write|Edit|MultiEdit|NotebookEdit');
   assert.equal(hook.onFailure, 'block');
-  assert.ok(!(hook.args ?? []).join(' ').includes('catch'), 'no fail-open wrapper around the require');
+  assert.match((hook.args ?? []).join(' '), /catch.*permissionDecision:'ask'/, 'a load failure asks, never approves');
 });
 
 test('given content with a password in a URL, when the hook scans it, then it is denied as a password in a URL', () => {
@@ -265,15 +265,13 @@ test('given URLs and keys with a reference, a mask or a short or empty value, wh
   allows('password: secretValue123');
 });
 
-test('given a scanner file path, when the hook scans a token written to it, then it is approved while the same content in a normal file is denied', () => {
+test('given a scanner file path, when the hook scans a token written to it, then it is denied like in a normal file', () => {
   // Given
-  const scanners = ['hooks/secret-scan.js', 'tools/secret-scan.test.mjs', 'tools/validate.mjs'];
+  const files = ['hooks/secret-scan.js', 'tools/secret-scan.test.mjs', 'tools/validate.mjs', 'src/App/Client.cs'];
   // When / Then
-  for (const file of scanners) {
-    assert.equal(write(`const token = "${providerToken}";`, file).decision, 'approve', file);
+  for (const file of files) {
+    assert.equal(write(`const token = "${providerToken}";`, file).decision, 'deny', file);
   }
-  // A normal file with the same content is still blocked.
-  assert.equal(write(`const token = "${providerToken}";`, 'src/App/Client.cs').decision, 'deny');
 });
 
 test('given ordinary content, when the hook scans it, then it is approved', () => {
@@ -290,10 +288,10 @@ test('given ordinary content, when the hook scans it, then it is approved', () =
   for (const content of quiet) allows(content);
 });
 
-test('given unusable input, when the hook runs, then the write is let through', () => {
+test('given empty or incomplete input the write is let through, and unreadable input asks', () => {
   // Given / When / Then
   assert.equal(runRaw('').decision, 'approve');
-  assert.equal(runRaw('not json at all').decision, 'approve');
+  assert.equal(runRaw('not json at all').decision, 'ask');
   assert.equal(runRaw('{}').decision, 'approve');
   assert.equal(runRaw(JSON.stringify({ tool_input: {} })).decision, 'approve');
   assert.equal(runRaw(JSON.stringify({ tool_input: { file_path: 'a.txt', content: '   ' } })).decision, 'approve');
@@ -360,16 +358,15 @@ test('given masked tokens and bracketed hints, when the hook scans them, then th
   ]) allows(line);
 });
 
-test('given a token written to a scanner path, when the hook scans it, then code files are approved and other file types are denied', () => {
+test('given a token written to a scanner path, when the hook scans it, then a real token is denied in any file while a regex detector line is approved', () => {
   // Given / When / Then
   // Paths are assembled: validate.mjs would otherwise want each of them to exist.
   const at = (dir, name) => `${dir}/${name}`;
-  for (const file of [at('hooks', 'secret-scan.js'), at('tools', 'leak-check.mjs'), at('tools', 'scan-secrets.ps1'), at('tools', 'secret-scan.test.mjs')]) {
-    assert.equal(write(`const token = "${providerToken}";`, file).decision, 'approve', file);
-  }
-  for (const file of [at('hooks', 'secret-guard.json'), at('tools', 'validate.md'), at('tools', 'leak-fixtures.txt'), at('src/hooks', 'x.js')]) {
+  for (const file of [at('hooks', 'secret-scan.js'), at('tools', 'leak-check.mjs'), at('tools', 'scan-secrets.ps1'), at('tools', 'secret-scan.test.mjs'),
+    at('hooks', 'secret-guard.json'), at('tools', 'validate.md'), at('tools', 'leak-fixtures.txt'), at('src/hooks', 'x.js')]) {
     assert.equal(write(`const token = "${providerToken}";`, file).decision, 'deny', file);
   }
+  allows('const re = /ghp_[A-Za-z0-9_-]{8,}/g;', at('hooks', 'secret-scan.js'));
 });
 
 test('given a cmdlet, a default dev account or an obvious test fixture, when the hook scans it, then they are approved while the same value elsewhere or a real-looking one in a test file is denied', () => {
@@ -386,4 +383,52 @@ test('given a cmdlet, a default dev account or an obvious test fixture, when the
   // The same value outside a test file, or a real-looking one inside a test file, still blocks.
   blocks(`var cs = "Server=.;Password=${fixture}";`, /password in a connection string/, 'src/App/Program.cs');
   blocks(`var cs = "Server=.;Password=${PW}";`, /password in a connection string/, 'tests/Api.Tests/AuthEndpointsTests.cs');
+});
+
+// ── Detector lines, scanner files and long lines ──────────────────────────────────────────────
+
+test('given a line with a Windows path holding \\s or \\d and a password value, when the hook scans a Write, then it reports', () => {
+  // Given
+  const line = `connect to C:\\sys\\d1\\db Password=${PW}`;
+
+  // When / Then
+  blocks(line, /password/);
+});
+
+test('given a real regex literal or a RegExp detector line, when the hook scans it, then it is still skipped', () => {
+  // Given / When / Then
+  allows(`const re = /Password=${PW}\\s/;`);
+  allows(`const re = new RegExp('Password=${PW}\\\\s');`);
+});
+
+test('given escape-like text in a string next to a provider token, when the hook scans it, then it reports', () => {
+  // Given / When / Then
+  blocks(`const msg = "match \\\\d+ and \\\\s*"; const t = "${providerToken}";`, /provider token/);
+});
+
+test('given a scanner-named file whose content is a real token outside any regex, when the hook scans it, then it reports', () => {
+  // Given / When / Then
+  blocks(`const token = "${providerToken}";`, /provider token/, 'hooks/lib/secret-scan.js');
+  allows('const re = /ghp_[A-Za-z0-9_-]{8,}/g;', 'hooks/lib/secret-scan.js');
+});
+
+test('given a 5000-char line holding a provider token, when the hook scans it, then it reports', () => {
+  // Given
+  const line = `${'x'.repeat(2500)} ${providerToken} ${'y'.repeat(2500)}`;
+
+  // When / Then
+  blocks(line, /provider token/, 'src/bundle.js');
+});
+
+test('given a minified 50 KB bundle with no token, when the hook scans it, then it stays under the hook timeout with no report', () => {
+  // Given
+  const bundle = 'function a(b){return b+1}var c=[1,2,3];'.repeat(1400);
+
+  // When
+  const started = Date.now();
+  const { decision } = write(bundle, 'src/bundle.min.js');
+
+  // Then
+  assert.equal(decision, 'approve');
+  assert.ok(Date.now() - started < 5000, 'scan took too long');
 });

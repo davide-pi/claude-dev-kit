@@ -4,13 +4,18 @@ const { execFileSync } = require("node:child_process");
 const path = require("node:path");
 
 // ── Git info (fast, skip optional locks) ──────────────────────────────────────
+let lastTimedOut = false;
 function gitInfo(cwd) {
+  lastTimedOut = false;
   function run(...args) {
     try {
       return execFileSync("git", ["-C", cwd, "--no-optional-locks", ...args], {
         encoding: "utf8", stdio: ["pipe", "pipe", "pipe"], timeout: 2000,
       }).trim();
-    } catch { return null; }
+    } catch (e) {
+      if (e && e.code === "ETIMEDOUT") lastTimedOut = true;
+      return null;
+    }
   }
 
   // One `status -b` call gives the branch (its `##` header) and the dirty counts: a separate
@@ -60,4 +65,7 @@ function worktreeInfo(cwd) {
   } catch { return null; }
 }
 
-module.exports = { gitInfo, worktreeInfo };
+// Whether the last gitInfo hit the timeout: its null is a slow repo, not a non-repo, so the cache keeps it briefly.
+function gitTimedOut() { return lastTimedOut; }
+
+module.exports = { gitInfo, worktreeInfo, gitTimedOut };

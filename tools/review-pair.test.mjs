@@ -194,6 +194,70 @@ test('given A and B findings on the same anchor, when the workflow runs, then th
   assert.ok(input.workers.every((w) => w.checked.length === 300));
 });
 
+/** Runs the workflow with per-reviewer findings; returns the merger's parsed input. */
+async function mergerInput(findingsA, findingsB) {
+  const { spawned } = await dryRun(6, {}, (o) => {
+    if (o.agentType !== 'code-reviewer') return undefined;
+    return { status: 'ISSUES', checked: 'read it', findings: o.model === 'sonnet' ? findingsA : findingsB };
+  });
+  const prompt = spawned.find((o) => o.label === 'merge the reviews into one report').prompt;
+  return JSON.parse(prompt.slice(prompt.indexOf('Results (JSON):') + 16));
+}
+const mk = (failure, title = 'T') => ({ title, anchor: 'src/a.cs:3', category: 'correctness', verdict: 'PLAUSIBLE', status: 'todo', priority: 'P2', failure, evidence: 'e' });
+
+test('given A with two findings at one anchor and category and B with one, when merged, then nothing is auto-merged and all three reach the merger tagged sameAnchor', async () => {
+  // Given
+  const a = [mk('null deref', 'one'), mk('wrong total', 'two')];
+  const b = [mk('null deref', 'three')];
+
+  // When
+  const input = await mergerInput(a, b);
+
+  // Then
+  assert.equal(input.findings.length, 3);
+  assert.ok(input.findings.every((f) => f.sameAnchor === true), JSON.stringify(input.findings));
+  assert.deepEqual(input.findings.map((f) => f.foundBy), ['A', 'A', 'B']);
+});
+
+test('given A and B with one finding each at the same anchor and category, when merged, then one A+B CONFIRMED finding without sameAnchor', async () => {
+  // Given / When
+  const input = await mergerInput([mk('null deref')], [mk('null deref')]);
+
+  // Then
+  assert.equal(input.findings.length, 1);
+  assert.equal(input.findings[0].foundBy, 'A+B');
+  assert.equal(input.findings[0].verdict, 'CONFIRMED');
+  assert.equal(input.findings[0].sameAnchor, undefined);
+});
+
+test('given the same anchor and category with different failures, when merged, then the two findings stay apart', async () => {
+  // Given / When
+  const input = await mergerInput([mk('null deref')], [mk('wrong total')]);
+
+  // Then
+  assert.equal(input.findings.length, 2);
+  assert.deepEqual(input.findings.map((f) => f.foundBy), ['A', 'B']);
+  assert.ok(input.findings.every((f) => f.verdict === 'PLAUSIBLE'));
+});
+
+test('given the merge rule, when read, then rule 1 says only one-to-one pairs were merged by the script', async () => {
+  // Given / When
+  const { logs } = await dryRun(6);
+
+  // Then
+  const rule = logs.find((l) => l.startsWith('Merge rule'));
+  assert.match(rule, /1\. [^\n]*one-to-one/);
+});
+
+test('given no effort arg, when the workflow starts, then the reviewers and the merger input carry effort high', async () => {
+  // Given / When
+  const { reviewers, spawned } = await dryRun(6);
+
+  // Then
+  assert.ok(reviewers.every((r) => r.effort === 'high'));
+  assert.match(spawned.find((o) => o.label === 'merge the reviews into one report').prompt, /effort high/);
+});
+
 test('given a repo path, when the workflow runs, then the scope step, both reviewers and the merger run git with -C on that path', async () => {
   // Given: a session whose cwd is not the repository
   const repo = String.raw`D:\work\O'Brien\my kit`;
