@@ -46,7 +46,7 @@ test('given an edit turn ending "fatto" with no evidence, when the hook runs, th
   // Then
   assert.match(reason, /"Fatto"/);
   assert.match(reason, /non verificato/);
-  assert.match(reason, /Livello:[\s\S]*Comando:[\s\S]*Riga che decide:[\s\S]*Stato:/);
+  assert.match(reason, /\| Livello \| Comando \| Riga che decide \| Stato \|/);
   assert.match(reason, /never in a code block/);
   assert.doesNotMatch(reason, /in un blocco ```/);
   const log = readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n');

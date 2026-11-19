@@ -13,7 +13,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
-import { prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, notification, check, SEP } from './done-claim.harness.mjs';
+import { prompt, say, tool, result, stop, edited, VERDICT, PRINTED, peer, head, row, verdict, notification, check, SEP, tableRow, tableVerdict, TABLE_HEAD, stopWithContext } from './done-claim.harness.mjs';
 
 test('given a verdict block whose "fatto" row quotes a line the turn printed, when the hook judges it, then it is evidence and stays silent', () => {
   // Given / When / Then
@@ -22,15 +22,15 @@ test('given a verdict block whose "fatto" row quotes a line the turn printed, wh
   assert.equal(stop(edited(both.replace(/\n/g, '\r\n'), `${PRINTED}\n3 failed`)).reason, '');
 });
 
-test('given a stacked verdict with a "fatto" check, when the turn printed its deciding line, then it passes, and blocks asking for the stacked form when it did not', () => {
+test('given a stacked verdict with a "fatto" check, when the turn printed its deciding line, then it passes, and blocks asking for the table form when it did not', () => {
   // Given
   const block = verdict(check('unit', '`node --test`', '# fail 0', 'fatto'));
 
   // When / Then
   const blocked = stop(edited(block, 'ok')).reason;
   assert.match(blocked, /"# fail 0"/);
-  assert.match(blocked, /Livello:[\s\S]*Comando:[\s\S]*Riga che decide:[\s\S]*Stato:/);
-  assert.doesNotMatch(blocked, /Livello \|/);
+  assert.match(blocked, /\| Livello \| Comando \| Riga che decide \| Stato \|/);
+  assert.doesNotMatch(blocked, /Livello:/);
   assert.equal(stop(edited(block, '# tests 5\n# fail 0')).reason, '');
 });
 
@@ -52,15 +52,122 @@ test('given Italian or English labels, ──── separators, with or without 
   assert.match(stop(edited(`Fatto.\n\n${head}\n${SEP}\n${SEP}`, '────')).reason, /"Fatto"/);
 });
 
-test('given the old verdict table, when the hook judges it, then it is no longer a verdict and the claim is blocked', () => {
+test('given a verdict table with no title, quoted or not, when the hook judges it, then it is a verdict judged row by row', () => {
   // Given
   const table = 'Fatto.\n\n| Livello | Comando | Riga che decide | Stato |\n| --- | --- | --- | --- |\n| unit | dotnet test | Passed: 48 | fatto |';
+  const quoted = table.replace(/^\|/gm, '> |');
 
   // When / Then
-  const { reason } = stop(edited(table, 'Passed: 48'));
-  assert.match(reason, /"Fatto"/);
-  assert.match(reason, /Livello:[\s\S]*Riga che decide:/);
-  assert.match(stop(edited(`Fatto.\n\n> | Livello | Comando | Riga che decide | Stato |\n> | --- | --- | --- | --- |\n> | unit | dotnet test | Passed: 48 | fatto |`, 'Passed: 48')).reason, /"Fatto"/);
+  for (const text of [table, quoted]) {
+    assert.equal(stop(edited(text, 'Passed: 48')).reason, '', text);
+    assert.match(stop(edited(text, 'ok')).reason, /"Passed: 48"/, text);
+  }
+});
+
+// ── Verdict table: the form the block reasons ask for ──
+
+test('given a table verdict whose "fatto" row quotes a printed line, when the hook judges it, then it passes, and blocks naming the line when it was not printed', () => {
+  // Given
+  const table = tableVerdict(tableRow('unit', '`node --test`', '`# fail 0`', '✓ fatto'), tableRow('e2e', '-', '-', '? non verificato: serve staging'));
+
+  // When / Then
+  assert.equal(stop(edited(table, '# tests 5\n# fail 0')).reason, '');
+  const blocked = stop(edited(table, 'ok')).reason;
+  assert.match(blocked, /say "fatto"/);
+  assert.match(blocked, /# fail 0/);
+});
+
+test('given table variants (English labels, "> " quotes, CRLF, aligned columns, no blank under the title, no title), when the hook judges them, then they are parsed the same', () => {
+  // Given
+  const two = tableVerdict(tableRow('unit', '`dotnet test`', '`Passed: 48, Failed: 0`', 'fatto'), tableRow('e2e', 'npm run e2e', '3 passed', 'fatto'));
+  const quote = (text) => text.split('\n').map((l, i) => (i < 2 ? l : `> ${l}`)).join('\n');
+  const english = (text) => text.replace('**Verifica**', '**Verification**').replace('| Livello | Comando | Riga che decide | Stato |', '| Level | Command | Deciding line | Status |').replace(/fatto \|$/gm, 'done |');
+  const variants = [
+    two, quote(two), english(two), quote(english(two)), two.replace(/\n/g, '\r\n'), quote(two).replace(/\n/g, '\r\n'),
+    two.replace('| --- | --- | --- | --- |', '| :--- | ---: | :---: | --- |'), two.replace('**Verifica**\n\n', '**Verifica**\n'), two.replace('**Verifica**\n\n', ''),
+  ];
+
+  // When / Then
+  for (const variant of variants) {
+    assert.equal(stop(edited(variant, 'Passed: 48, Failed: 0\n3 passed')).reason, '', variant);
+    assert.match(stop(edited(variant, 'Passed: 48, Failed: 0')).reason, /"3 passed"/, variant);
+    assert.match(stop(edited(variant, 'ok')).reason, /say "(?:fatto|done)"/, variant);
+  }
+});
+
+test('given a cell with a pipe inside a backtick span or escaped as "\\|", when the hook splits the row, then it stays one cell', () => {
+  // Given
+  const inSpan = tableVerdict(tableRow('unit', '`dotnet test | tail -1`', 'Passed: 48', 'fatto'));
+  const escaped = tableVerdict(tableRow('unit', String.raw`dotnet test \| tail -1`, String.raw`a \| b: 5 passed`, 'fatto'));
+
+  // When / Then
+  assert.equal(stop(edited(inSpan, 'Passed: 48')).reason, '');
+  assert.match(stop(edited(inSpan, 'tail -1')).reason, /"Passed: 48"/);
+  assert.equal(stop(edited(escaped, 'a | b: 5 passed')).reason, '');
+  assert.match(stop(edited(escaped, 'a')).reason, /say "fatto"/);
+});
+
+test('given a "non verificato" table row, when it is the only row, with or without a claim word and a "?" symbol, then it passes, and beside an unproven "fatto" row it excuses nothing', () => {
+  // Given
+  const skipped = tableRow('e2e', '-', '-', 'non verificato: serve staging');
+
+  // When / Then
+  assert.equal(stop(edited(tableVerdict(skipped), 'ok')).reason, '');
+  assert.equal(stop(edited(tableVerdict(skipped).replace('Fatto.', 'Ok.'), 'ok')).reason, '');
+  assert.equal(stop(edited(tableVerdict(tableRow('e2e', '-', '-', '? not verified: needs staging')), 'ok')).reason, '');
+  assert.match(stop(edited(tableVerdict(tableRow('unit', 'x', 'Passed: 48', 'fatto'), skipped), 'ok')).reason, /"Passed: 48"/);
+});
+
+test('given a table row that does not map to the four columns or has an empty Stato cell, when a "non verificato" row stands beside it, then it is an unproven row, never dropped', () => {
+  // Given
+  const skipped = tableRow('e2e', '-', '-', 'non verificato: serve staging');
+  const bad = ['| unit | x | Passed: 48 |', '| unit | x | Passed: 48 | fatto | extra |', '| unit | a | b | Passed: 48 | fatto |', '| unit | x | Passed: 48 |  |'];
+
+  // When / Then
+  for (const row of bad) assert.match(stop(edited(tableVerdict(row, skipped), 'Passed: 48')).reason, /no Stato/, row);
+});
+
+test('given a table under the verdict title whose header does not map to the four labels, when the hook judges it, then its rows are unproven, never dropped', () => {
+  // Given
+  const typo = `Fatto.\n\n**Verifica**\n\n| Livello | Comando | Riga decisiva | Stato |\n| --- | --- | --- | --- |\n${tableRow('unit', 'x', 'Passed: 48', 'fatto')}\n${tableRow('e2e', '-', '-', 'non verificato: serve staging')}`;
+
+  // When / Then
+  assert.match(stop(edited(typo, 'Passed: 48')).reason, /no Stato/);
+});
+
+test('given a title-less table whose header has Stato as its only verdict label, when the hook judges it, then it is no verdict: a claim word blocks, none passes', () => {
+  // Given
+  const summary = 'Fatto.\n\n| # | Voce | Stato | Da te |\n| --- | --- | --- | --- |\n| 1 | Hook | fatto | - |';
+
+  // When / Then
+  assert.match(stop(edited(summary, 'ok')).reason, /"Fatto"/);
+  assert.match(stop(edited(summary.replace(/^\|/gm, '> |'), 'ok')).reason, /"Fatto"/);
+  assert.equal(stop(edited(summary.replace('Fatto.', 'Riepilogo.'), 'ok')).reason, '');
+  assert.equal(stop(edited(summary.replace('Fatto.', 'Riepilogo.').replace('| fatto |', '| aggiornato |'), 'ok')).reason, '');
+});
+
+test('given a Stato cell coloured in LaTeX, when the hook judges the row, then the wrapper is dropped and the word decides', () => {
+  // Given
+  const claims = [String.raw`$\color{green}{\textsf{fatto}}$`, String.raw`$\color{green}{\textsf{✓ fatto}}$`, String.raw`$\color{red}{\text{fallito}}$`];
+
+  // When / Then
+  for (const state of claims) {
+    const table = tableVerdict(tableRow('unit', 'x', 'Passed: 48', state));
+    assert.match(stop(edited(table, 'ok')).reason, /"Passed: 48"/, state);
+    assert.equal(stop(edited(table, 'Passed: 48')).reason, '', state);
+  }
+  assert.equal(stop(edited(tableVerdict(tableRow('e2e', '-', '-', String.raw`$\color{orange}{\textsf{non verificato}}$: serve staging`)), 'ok')).reason, '');
+});
+
+test('given a header, an alignment row or a placeholder table, when the turn claims done, then they are never a check nor proof and the claim word blocks', () => {
+  // Given
+  const placeholder = tableVerdict('| - | - | - | - |');
+  const headerOnly = `Fatto.\n\n> **Verifica**\n>\n> ${TABLE_HEAD.replace('\n', '\n> ')}`;
+
+  // When / Then
+  assert.match(stop(edited(placeholder, 'ok')).reason, /"Fatto"/);
+  assert.match(stop(edited(placeholder.replace(/^\|/gm, '> |'), 'ok')).reason, /"Fatto"/);
+  assert.match(stop(edited(headerOnly, '| --- | --- | --- | --- |')).reason, /"Fatto"/);
 });
 
 test('given a verdict block with no filled row or a placeholder row, when the hook judges it, then it is not evidence and is blocked', () => {
@@ -165,11 +272,12 @@ test('given Livello or Comando quoted lines outside a block, when the turn claim
 
 test('given a proof-state line outside a titled block, when the turn claims done, then it is an orphan check and blocked; a non-proof Status value stays evidence', () => {
   // Given
-  const cases = ['Fatto.\n\n> Livello: unit\n> Comando: x\n> Stato: fatto', 'Fatto.\n\n> Stato: fatto', 'Done.\n\n- **Status:** done', 'Fatto.\n\n> Stato: ✓', 'Failed.\n\n>> Status: failed'];
+  const cases = ['Fatto.\n\n> Livello: unit\n> Comando: x\n> Stato: fatto', 'Fatto.\n\n> Stato: fatto', 'Done.\n\n- **Status:** done', 'Fatto.\n\n> Stato: ✓', 'Failed.\n\n>> Status: failed', 'Fatto.\n\n> Stato: fatto. ✓'];
 
   // When / Then
   for (const text of cases) assert.match(stop(edited(text, 'ok')).reason, /inside the one/, text);
   assert.equal(stop(edited('Fatto.\n\n> Status: 200 OK', 'ok')).reason, '');
+  assert.equal(stop(edited('Fixed.\n\n> Status: failed to connect', 'ok')).reason, '');
   assert.equal(stop(edited('Fatto.\n\n> Stato: non verificato: serve staging', 'ok')).reason, '');
 });
 
@@ -379,7 +487,7 @@ test('given a turn whose start is beyond the 8 MB cap, when the hook judges the 
 
   // Then
   assert.match(reason, /too long/);
-  assert.match(reason, /Livello:[\s\S]*Comando:[\s\S]*Riga che decide:[\s\S]*Stato:/);
+  assert.match(reason, /\| Livello \| Comando \| Riga che decide \| Stato \|/);
   assert.equal(JSON.parse(readFileSync(join(dir, '.cache', 'done-claim.log'), 'utf8').trim().split('\n')[0]).rule, 'tail-cut');
   // a row whose proof is in the part read is still proven
   const inTail = stop([prompt('x'), tool('Edit'), result('ok'), ...filler, tool('Bash'), result('Passed: 48, Failed: 0'), claim]);
@@ -629,4 +737,103 @@ test('given a reply with a diff preview block, when it claims done without proof
   // When / Then
   assert.notEqual(stop(edited(message, 'ok')).reason, '');
   assert.equal(stop(edited('Domanda: applico questo?\n\n```diff\n- vecchio\n+ nuovo\n```', 'ok')).reason, '');
+});
+
+// ── Stato cells and table headers read fail-closed (review of the table form) ──
+
+/** A table verdict under a message with no claim word: only the rows can block. */
+const plain = (...rows) => tableVerdict(...rows).replace('Fatto.', 'Ok.');
+
+test('given a Stato that starts with a claim word and adds a note or a symbol, when the turn did not print its deciding line, then it is judged in both forms', () => {
+  // Given
+  const states = ['fatto.', 'fatto ✓', '✓ fatto (3 test)', '✓ fatto: 48 test', 'fatto — 48 test', '🟢 fatto', 'done.'];
+  const forms = (state) => [plain(tableRow('unit', 'x', 'Passed: 48', state)), `Ok.\n\n${head}\n${check('unit', 'x', 'Passed: 48', state)}`];
+
+  // When / Then
+  for (const state of states) {
+    for (const text of forms(state)) {
+      assert.match(stop(edited(text, 'ok')).reason, /"Passed: 48"/, text);
+      assert.equal(stop(edited(text, 'Passed: 48')).reason, '', text);
+    }
+  }
+});
+
+test('given a decorated "fatto" row that passed in a large context, when the turn ends, then the hand-off names the row', () => {
+  // Given
+  const passed = edited(plain(tableRow('unit', 'x', 'Passed: 48', '✓ fatto (3 test)')), 'Passed: 48');
+
+  // When
+  const { handoff } = stopWithContext(passed, 150_000);
+
+  // Then
+  assert.deepEqual(handoff?.rows, ['unit | fatto (3 test)']);
+});
+
+test('given a Stato in nested or other LaTeX wrappers, when the hook judges the row, then the markup is dropped and the text decides', () => {
+  // Given
+  const claims = [
+    String.raw`$\color{green}{\textsf{\textbf{✓ fatto}}}$`, String.raw`$\textcolor{green}{\textsf{✓ fatto}}$`,
+    String.raw`$\colorbox{green}{\color{white}\textsf{✓ fatto}}$`, String.raw`$\color{green}{\mathbf{✓ fatto}}$`, String.raw`$\textsf{✓ fatto}$`,
+  ];
+
+  // When / Then
+  for (const state of claims) {
+    const table = plain(tableRow('unit', 'x', 'Passed: 48', state));
+    assert.match(stop(edited(table, 'ok')).reason, /"Passed: 48"/, state);
+    assert.equal(stop(edited(table, 'Passed: 48')).reason, '', state);
+  }
+  assert.equal(stop(edited(plain(tableRow('e2e', '-', '-', String.raw`$\textcolor{orange}{\textsf{\textbf{? non verificato}}}$: serve staging`)), 'ok')).reason, '');
+});
+
+test('given a verdict table with no leading pipes over an alignment row, when the hook judges it, then it is read row by row; without the alignment row it is prose', () => {
+  // Given
+  const loose = 'Livello | Comando | Riga che decide | Stato\n--- | --- | --- | ---\nunit | x | Passed: 48 | fatto';
+  const forms = [`Ok.\n\n${loose}`, `Ok.\n\n**Verifica**\n\n${loose}`, `Ok.\n\n> **Verifica**\n>\n${loose.replace(/^/gm, '> ')}`];
+
+  // When / Then
+  for (const text of forms) {
+    assert.match(stop(edited(text, 'ok')).reason, /"Passed: 48"/, text);
+    assert.equal(stop(edited(text, 'Passed: 48')).reason, '', text);
+  }
+  assert.equal(stop(edited(`Ok.\n\n${loose.replace('--- | --- | --- | ---\n', '')}`, 'ok')).reason, '');
+});
+
+test('given a title-less table whose header has Stato and two more verdict labels, when one label is misspelt, then every row is unproven', () => {
+  // Given
+  const near = 'Ok.\n\n| Livello | Comando | Riga decisiva | Stato |\n| --- | --- | --- | --- |\n| unit | x | Passed: 48 | fatto |';
+
+  // When / Then
+  assert.match(stop(edited(near, 'Passed: 48')).reason, /no Stato/);
+  assert.match(stop(edited(near.replace(/^\|/gm, '> |'), 'Passed: 48')).reason, /no Stato/);
+  assert.equal(stop(edited('Ok.\n\n| # | Voce | Stato | Da te |\n| --- | --- | --- | --- |\n| 1 | Hook | fatto | - |', 'ok')).reason, '');
+});
+
+test('given a table row whose Stato is no known state, when the hook judges it, then it is unproven; a "-" placeholder is no claim', () => {
+  // Given
+  const unknown = ['b: 5 passed', 'ok', 'passed', 'completato'];
+
+  // When / Then
+  for (const state of unknown) assert.match(stop(edited(plain(tableRow('unit', 'x', 'Passed: 48', state)), 'Passed: 48')).reason, /no Stato/, state);
+  assert.equal(stop(edited(plain(tableRow('e2e', '-', '-', '-')), 'ok')).reason, '');
+});
+
+test('given an ordinary table right under the verdict title, when its header has no verdict label besides Stato, then it is no verdict and the claim word decides', () => {
+  // Given
+  const summary = '**Verifica**\n\n| # | Voce | Stato | Da te |\n| --- | --- | --- | --- |\n| 1 | Hook | fatto | - |';
+  const oneLabel = 'Ok.\n\n**Verifica**\n\n| # | Comando | Stato |\n| --- | --- | --- |\n| 1 | x | fatto |';
+
+  // When / Then
+  assert.equal(stop(edited(`Ok.\n\n${summary}`, 'ok')).reason, '');
+  assert.match(stop(edited(`Fatto.\n\n${summary}`, 'ok')).reason, /"Fatto"/);
+  // one verdict label besides Stato under the title: read fail-closed
+  assert.match(stop(edited(oneLabel, 'ok')).reason, /no Stato/);
+});
+
+test('given a verdict-looking table inside a fenced or a diff block, when the hook anchors on headers, then it is no verdict', () => {
+  // Given
+  const table = `${TABLE_HEAD}\n${tableRow('unit', 'x', 'Passed: 48', 'fatto')}`;
+
+  // When / Then
+  assert.equal(stop(edited(`Ok.\n\n\`\`\`\n${table}\n\`\`\``, 'ok')).reason, '');
+  assert.equal(stop(edited(`Ok.\n\n\`\`\`diff\n${table.replace(/^/gm, ' ')}\n\`\`\``, 'ok')).reason, '');
 });
