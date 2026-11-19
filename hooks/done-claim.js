@@ -180,9 +180,11 @@ function stateOf(cell) {
  * (`> (nota)`, a wrapped deciding line, a mistyped label) continues the last label's value; a Stato value is never extended.
  * A check closes at a separator, at the next Livello (or a repeated label) or at the block's end.
  *
- * A table is read from its header row, with or without the title above, never inside a fenced block (see `tableAt`): a header with the
+ * A table is read from its header row, with or without the title above (see `tableAt`); a fenced block is skipped unless it holds a verdict
+ * header, then read as a verdict anyway, its fence lines never output: a header with the
  * four labels maps its columns by name; one with Stato and two more labels, or a table right under the title whose header has a label
- * besides Stato, keeps every row, unproven; a table under the title with no such label is no verdict. Its rows run to the first line that
+ * besides Stato, keeps every row, unproven; a table under the title with no such label is no verdict. Pipe rows right under the title
+ * whose first line has no alignment row under it have no header: every row is unproven. Its rows run to the first line that
  * is no `|` row; a row whose cell count differs from the header's, or whose Stato cell is empty or no known state, is unproven (`noState`).
  */
 function parseVerdicts(message) {
@@ -191,11 +193,20 @@ function parseVerdicts(message) {
   const quotedLines = new Set();
   const consumed = new Set();
   const fenced = new Set();
+  const isFence = (line) => /^[ \t]*(?:>[ \t]*)*(?:```|~~~)/.test(line);
+  let block = [];
+  // A fenced block holding a verdict header is read as a verdict anyway (fail closed) and its fence lines are never output.
+  const closeBlock = () => {
+    if (block.slice(1).some((k) => tableAt(lines, k))) block.filter((k) => isFence(lines[k])).forEach((k) => { consumed.add(k); quotedLines.add(k); });
+    else block.forEach((k) => fenced.add(k));
+    block = [];
+  };
   for (let i = 0, open = false; i < lines.length; i += 1) {
-    const fence = /^[ \t]*(?:>[ \t]*)*(?:```|~~~)/.test(lines[i]);
-    if (open || fence) fenced.add(i);
-    if (fence) open = !open;
+    const fence = isFence(lines[i]);
+    if (open || fence) block.push(i);
+    if (fence) { open = !open; if (!open) closeBlock(); }
   }
+  closeBlock();
   for (let i = 0; i < lines.length; i += 1) {
     const table = consumed.has(i) || fenced.has(i) ? null : tableAt(lines, i);
     if (table) { i = readTable(lines, i, table.keys, rows, consumed, quotedLines, table.loose); continue; }
@@ -220,10 +231,14 @@ function parseVerdicts(message) {
       const text = lines[j].trim().replace(/^>[ \t]*/, '').trim().replace(/^\*\*(.*?)\*\*/, '$1');
       if (!text) { blank = true; continue; }
       // A verdict header is read by the outer loop; a table under the title whose header has a label besides Stato is read here, every
-      // row unproven; one with no such label is an ordinary table, no verdict.
+      // row unproven; one with no such label is an ordinary table, no verdict. A first row with no alignment row under it is no header:
+      // the rows are headerless verdict rows, every one unproven (read from line j - 1, a blank or the title, so line j is a row).
       const row = tableLine(lines[j]);
       if (row !== null ? first || tableAt(lines, j) : tableAt(lines, j)) {
-        if (row !== null && !tableAt(lines, j) && headerKind(row) === 'label') readTable(lines, j, null, rows, consumed, quotedLines);
+        if (row !== null && !tableAt(lines, j)) {
+          if (!TABLE_ALIGN.test(tableLine(lines[j + 1] ?? '') ?? '')) readTable(lines, j - 1, null, rows, consumed, quotedLines);
+          else if (headerKind(row) === 'label') readTable(lines, j, null, rows, consumed, quotedLines);
+        }
         break;
       }
       first = false;

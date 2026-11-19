@@ -829,11 +829,35 @@ test('given an ordinary table right under the verdict title, when its header has
   assert.match(stop(edited(oneLabel, 'ok')).reason, /no Stato/);
 });
 
-test('given a verdict-looking table inside a fenced or a diff block, when the hook anchors on headers, then it is no verdict', () => {
+test('given a verdict table inside a fenced block of any fence or info string, when the hook judges it, then its rows are judged like an unfenced table and the reason forbids the code block', () => {
   // Given
   const table = `${TABLE_HEAD}\n${tableRow('unit', 'x', 'Passed: 48', 'fatto')}`;
+  const fenced = [
+    `Fatto.\n\n\`\`\`\n${table}\n\`\`\``, `Fatto.\n\n~~~\n${table}\n~~~`, `Ok.\n\n**Verifica**\n\n\`\`\`text\n${table}\n\`\`\``,
+    `Ok.\n\n\`\`\`diff\n${table.replace(/^/gm, ' ')}\n\`\`\``, `Fatto.\n\n\`\`\`markdown\n${table}`,
+  ];
 
   // When / Then
-  assert.equal(stop(edited(`Ok.\n\n\`\`\`\n${table}\n\`\`\``, 'ok')).reason, '');
-  assert.equal(stop(edited(`Ok.\n\n\`\`\`diff\n${table.replace(/^/gm, ' ')}\n\`\`\``, 'ok')).reason, '');
+  for (const text of fenced) {
+    const blocked = stop(edited(text, 'ok')).reason;
+    assert.match(blocked, /"Passed: 48"/, text);
+    assert.match(blocked, /never in a code block/, text);
+    assert.equal(stop(edited(text, 'Passed: 48')).reason, '', text);
+  }
+  // a misspelt header in a fence is read fail-closed; a fence of real output, with no verdict header, stays evidence
+  assert.match(stop(edited(`Ok.\n\n\`\`\`\n${table.replace('Riga che decide', 'Riga decisiva')}\n\`\`\``, 'Passed: 48')).reason, /no Stato/);
+  assert.equal(stop(edited('Fatto.\n\n```\nPassed: 48\n```', 'ok')).reason, '');
+});
+
+test('given pipe rows with no header right under the verdict title, when the hook judges them, then every row is unproven; a first line over an alignment row is a header as before', () => {
+  // Given
+  const rows = `${tableRow('unit', 'x', 'Passed: 48', 'fatto')}\n${tableRow('e2e', 'y', '3 passed', 'fatto')}`;
+  const headerless = [
+    `Ok.\n\n**Verifica**\n\n${rows}`, `Ok.\n\n**Verifica**\n${rows}`, `Ok.\n\n**Verification**\n\n| --- | --- | --- | --- |\n${rows}`,
+    `Ok.\n\n> **Verifica**\n>\n${rows.replace(/^/gm, '> ')}`,
+  ];
+
+  // When / Then
+  for (const text of headerless) assert.match(stop(edited(text, 'Passed: 48\n3 passed')).reason, /no Stato/, text);
+  assert.equal(stop(edited('Ok.\n\n**Verifica**\n\n| # | Voce | Stato | Da te |\n| --- | --- | --- | --- |\n| 1 | Hook | fatto | - |', 'ok')).reason, '');
 });
