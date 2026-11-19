@@ -40,6 +40,8 @@ export type PaneActions = {
   scrollTo: (anchor: string) => void
   /** Gives many FATTO groups and days one state in a single write. */
   setGroupsOpen: (keys: string[], isOpen: boolean) => void
+  /** Shows a page of the desktop Log tab: the next one from its more button, 0 from back to top. */
+  setLogPage: (page: number) => void
 }
 
 export type Node = RenderElement | false | undefined

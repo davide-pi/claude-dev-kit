@@ -45,6 +45,7 @@ async function drawLog($: Engine, on: On, s: CockpitSnapshot, bodyRows = 30) {
     setGroupOpen: rec('setGroupOpen'),
     scrollTo: rec('scrollTo'),
     setGroupsOpen: rec('setGroupsOpen'),
+    setLogPage: rec('setLogPage'),
   }
   on('ui.render', { component: 'Pane' }, ($$, e, next) => {
     if (e.requestId !== 'desk-log' || e.surface !== 'desktop') return next(e)
@@ -155,7 +156,7 @@ test('Given a flow with no lane, When the log is drawn, Then its row carries its
   expect(svgs(root).every(r => !String(r.source).includes('x1="21"'))).toBe(true)
 })
 
-test('Given more rows than bodyRows, When the log is drawn, Then the rows, more row included, fill at most bodyRows cells and the more row counts the rest', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given more rows than bodyRows, When the log is drawn, Then the filter and the rows, more button included, fill at most bodyRows cells and the more button counts the rest', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
   // When
@@ -163,11 +164,57 @@ test('Given more rows than bodyRows, When the log is drawn, Then the rows, more 
   await ui.unmount()
   // Then
   const rows = logRows(root)
-  // a row is its 28px rail tall, two cells of the desktop's code font
-  expect(rows.length * 2).toBeLessThanOrEqual(8)
+  // the filter takes 2 cells; a row is its 28px rail tall, 1.4 cells of the desktop's code font
+  expect(2 + rows.length * 1.4).toBeLessThanOrEqual(8)
   expect(rows.length).toBe(4)
   expect(rows[0]?.text).toBe('#12 prompt 12')
   expect(rows.at(-1)).toEqual({ key: 'desk:log:more', text: '+9' })
+})
+
+test('Given more rows than a page, When the more button is pressed, Then the next page is asked for', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
+  const { ui, calls } = await drawLog($, on, s, 8)
+  // When
+  await ui.press({ key: 'desk:log:more' })
+  await ui.unmount()
+  // Then
+  expect(calls).toEqual(['setLogPage:1'])
+})
+
+test('Given the second page, When the log is drawn, Then it shows the next rows, the more button counts what is left and back to top asks for page 0', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)), deskLogPage: 1 })
+  // When
+  const { ui, root, calls } = await drawLog($, on, s, 8)
+  await ui.press({ key: 'desk:log:top' })
+  await ui.unmount()
+  // Then
+  const rows = logRows(root)
+  expect(rows.map(r => r.text)).toEqual(['#9 prompt 9', '#8 prompt 8', '#7 prompt 7', '+6'])
+  expect(calls).toEqual(['setLogPage:0'])
+})
+
+test('Given a page past the end, When the log is drawn, Then the last page shows, with back to top and no more button', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: Array.from({ length: 7 }, (_, i) => round(i + 1)), deskLogPage: 9 })
+  // When
+  const { ui, root } = await drawLog($, on, s, 8)
+  const top = await ui.findAll({ type: 'Button' })
+  await ui.unmount()
+  // Then
+  expect(logRows(root).map(r => r.text)).toEqual(['#1 prompt 1'])
+  expect(top.map(b => b.key)).toContain('desk:log:top')
+})
+
+test('Given a round with no prompt text, When the log is drawn, Then its row reads a dim placeholder', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [round(1), round(2, { prompt: '' })] })
+  // When
+  const { ui, root } = await drawLog($, on, s)
+  await ui.unmount()
+  // Then
+  expect(logRows(root)[0]?.text).toBe(`#2 ${t().desk.log.noPrompt}`)
 })
 
 test('Given exactly as many rows as bodyRows holds, When the log is drawn, Then every row shows and no more row', { timeoutMs: 30_000 }, async ($, on) => {

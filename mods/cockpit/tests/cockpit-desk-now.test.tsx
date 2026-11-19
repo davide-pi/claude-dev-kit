@@ -36,7 +36,7 @@ const uncut = (n: unknown, isCut: boolean): Node[] => {
 const section =(root: unknown, key: string): Node => find(root, x => x.props?.key === key)[0] ?? {}
 /** Every action does nothing: the tab only draws. */
 const NO_OP = (): void => undefined
-const ACTIONS: PaneActions = { compact: NO_OP, ask: NO_OP, answer: NO_OP, retro: NO_OP, worklog: NO_OP, setTab: NO_OP, toggleAgent: NO_OP, toggleSignal: NO_OP, toggleOpen: NO_OP, setGroupOpen: NO_OP, scrollTo: NO_OP, setGroupsOpen: NO_OP }
+const ACTIONS: PaneActions = { compact: NO_OP, ask: NO_OP, answer: NO_OP, retro: NO_OP, worklog: NO_OP, setTab: NO_OP, toggleAgent: NO_OP, toggleSignal: NO_OP, toggleOpen: NO_OP, setGroupOpen: NO_OP, scrollTo: NO_OP, setGroupsOpen: NO_OP, setLogPage: NO_OP }
 
 type Draw = { s: CockpitSnapshot; layout: DeskLayout }
 /** The draws each test's hook answers, by pane id; the hook is registered once, before the test's first call on `$`. */

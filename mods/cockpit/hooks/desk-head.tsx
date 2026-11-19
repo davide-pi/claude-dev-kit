@@ -19,8 +19,9 @@ const LINK = '#B9A2FF'
 const OK = '#7CC79A'
 const WARN = '#F2A65A'
 const RED = '#FF9A85'
-/** The background of the head's cards. */
+/** The background of the head's cards and their border, as on the design board. */
 const CARD = '#30302E'
+const BORDER = '#403F3B'
 const ICON_PX = 20
 const BAR_PX = 8
 
@@ -69,15 +70,16 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
             {when}
           </Text>
         </Box>
-        {/* the percent right after its bar: nothing grows between them, so it never drifts to the pane's edge */}
+        {/* the bar takes the row (an Svg with no width fills its slot), the percent sits at its right end and never shrinks */}
         <Box key={`desk:window:${kind}:bar`} columnGap={1} alignItems="center">
-          <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${H.left}`} width={layout.barWidth} height={BAR_PX} />
-          <Text wrap="truncate" color={color} weight="bold" size="heading" tabular>
-            {left}
-            <Text color={DIM} weight="regular" size="footnote">
-              {r === undefined ? ' ' : ` ${H.left}`}
+          <Box key={`desk:window:${kind}:track`} flexGrow={1} flexShrink={1} minWidth={0}>
+            <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${left} ${H.left}`} height={BAR_PX} />
+          </Box>
+          <Box key={`desk:window:${kind}:percent`} flexShrink={0}>
+            <Text wrap="truncate" color={color} weight="bold" size="heading" tabular>
+              {left}
             </Text>
-          </Text>
+          </Box>
         </Box>
         <Box key={`desk:window:${kind}:pace`}>
           <Text wrap="truncate" size="footnote" color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>
@@ -113,13 +115,13 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
           {detail || ' '}
         </Text>
       </Box>
-      <Box key="desk:gauges" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'flex-start' : 'center'} columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD}>
+      <Box key="desk:gauges" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'stretch' : 'center'} columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD} borderStyle="round" borderColor={BORDER}>
         <Box key="desk:context" flexDirection="column" alignItems="center" flexShrink={0}>
           <Text key="desk:context:label" wrap="truncate" size="caption" weight="bold" color={DIM}>
             {H.contextShort}
           </Text>
           <Box key="desk:context:donut">
-            <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, cachePct: s.cacheShare, color: ctxColor })} alt={`${H.context} ${shown}%`} width={layout.gaugeSize} height={layout.gaugeSize} />
+            <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, color: ctxColor })} alt={`${H.context} ${shown}%`} width={layout.gaugeSize} height={layout.gaugeSize} />
             {/* the percent over the donut, centred: it spans the Svg's box, so it follows the gauge size */}
             <Box key="desk:context:over" position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column" alignItems="center" justifyContent="center">
               <Text wrap="truncate" size="heading" weight="bold" tabular color={ctxColor}>

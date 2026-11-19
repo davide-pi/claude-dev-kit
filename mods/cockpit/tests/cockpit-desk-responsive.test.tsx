@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { deskLayout } from '../hooks/desk-layout'
+import { bodyLimit } from '../hooks/desk-view'
 import { mountDesk } from './cockpit-fixtures'
 import { PANE, settle, world } from './cockpit-world'
 
@@ -46,6 +47,33 @@ for (const [columns, size, gauge] of SIZES) {
     expect(keysOf(log)).toContain('desk:body:log')
     expect(keysOf(analysis)).toContain('desk:body:analysis')
     for (const drawn of [now, log, analysis]) expect(donutWidth(drawn)).toBe(gauge)
+    await ui.unmount()
+  })
+
+  test(`Given bodyColumns ${columns}, When each tab is drawn, Then the page takes the pane's height, the body takes the room between head and bar and clips, and the bar is last and never shrinks`, { timeoutMs: 30_000 }, async ($, on) => {
+    // Given
+    world(on)
+    await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+    const ui = await mountDesk($, columns, 48)
+    const drawn: unknown[] = []
+    // When
+    for (const tab of ['now', 'log', 'analysis']) {
+      await ui.press({ key: `tab:${tab}` })
+      await settle()
+      drawn.push(await ui.drawn())
+    }
+    // Then
+    for (const [i, root] of drawn.entries()) {
+      expect(propsOf(root).height).toBe('100%')
+      const parts = childrenOf(root)
+      const body = parts.find(p => String(propsOf(p).key).startsWith('desk:body:'))
+      expect(propsOf(body).key).toBe(`desk:body:${['now', 'log', 'analysis'][i]}`)
+      expect(propsOf(body).flexGrow).toBe(1)
+      expect(propsOf(body).overflow).toBe('hidden')
+      expect(propsOf(body).minHeight).toBe(bodyLimit(48, columns))
+      expect(propsOf(parts.at(-1)).key).toBe('desk:actions')
+      expect(propsOf(parts.at(-1)).flexShrink).toBe(0)
+    }
     await ui.unmount()
   })
 }

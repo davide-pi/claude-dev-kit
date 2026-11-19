@@ -17,14 +17,13 @@ type Tab = 'now' | 'log' | 'analysis'
 const TABS: readonly Tab[] = ['now', 'log', 'analysis']
 
 const ACCENT = '#8B6CF6'
-const TEXT = '#F2F0EA'
 const DIM = '#A8A49B'
 /**
- * Rows the head and the tab row take by layout size, each followed by a 1-row gap: the state lines 3 (a 20px icon, the cost in heading size), the gauges
- * card (the donut, 72/96/120px, with its 2 lines under it beside the credit windows' 7 rows: 8 medium, 10 wide; narrow stacks them: 15), the URGENTE
- * card 5 (its worklog row holds a native button, 2 rows) and the tab row 3 (a native button and its underline). Medium: 3+1+8+1+5+1+3+1 = 23.
+ * Rows the head and the tab row take by layout size, gaps included: only the cap of the lists a tab draws, the page itself fills the pane by layout.
+ * Measured on a medium pane (a capture at about 780 by 960 px): the state lines, the gauges card, the URGENTE card (title, its one slot, the worklog
+ * row) and the tab row take about 15 cells; a margin of 3 keeps a list from reaching under the action bar. Narrow stacks the donut over the windows.
  */
-const HEAD_ROWS = { narrow: 30, medium: 23, wide: 25 } as const
+const HEAD_ROWS = { narrow: 26, medium: 18, wide: 20 } as const
 /** Rows the action bar takes with the gap above it: one row of native buttons, two when narrow (compact, then the retrospectives). */
 const ACTION_ROWS = { narrow: 5, medium: 3, wide: 3 } as const
 const MIN_BODY_ROWS = 8
@@ -47,7 +46,11 @@ const underline = (color: string, px: number): string => `<svg xmlns="http://www
 
 const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
 
-/** The desktop page: the head, the tab row, the open tab's body (its rows reserved, so the bar below never moves), then the action bar. Widths are the pane's own (`100%`) or the layout's, never a fixed column count. */
+/**
+ * The desktop page: the head, the tab row, the open tab's body, then the action bar. The page takes the pane's height and the body every row between
+ * head and bar (grown, clipped, never under `limit` so the bar holds still if the height is not given), so the bar sits at the pane's bottom.
+ * Widths are the pane's own (`100%`) or the layout's, never a fixed column count.
+ */
 export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Text, Button, Svg } = ui
   const S = t().desk
@@ -61,7 +64,7 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
         return (
           <Box key={`desk:tab:${tab}`} flexDirection="column">
             <Button key={`tab:${tab}`} onPress={() => actions.setTab(tab)}>
-              <Text color={tab === open ? TEXT : DIM} weight="semibold">
+              <Text color={tab === open ? ACCENT : DIM} weight="semibold">
                 {S.tabs[tab]}
               </Text>
             </Button>
@@ -72,12 +75,12 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
     </Box>
   )
   const body = (
-    <Box key={`desk:body:${open}`} flexDirection="column" minHeight={limit}>
+    <Box key={`desk:body:${open}`} flexDirection="column" flexGrow={1} flexShrink={1} minHeight={limit} overflow="hidden">
       {BODIES[open](ui, s, layout, actions)}
     </Box>
   )
   return (
-    <Box flexDirection="column" width="100%" rowGap={1} paddingX={1}>
+    <Box flexDirection="column" width="100%" height="100%" rowGap={1} paddingX={1}>
       {deskHead(ui, s, layout, actions)}
       {tabs}
       {body}

@@ -1,7 +1,6 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
-import { limitRows } from './desk-layout'
 import { iconSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
 import { signalSeverity, signalsOf } from './signals'
@@ -19,8 +18,8 @@ const PAGE = '#262624'
 const WORKLOG_CARD = '#2F2A40'
 const BLOCK_CARD = '#3B2723'
 const ICON_PX = 16
-/** The rows the blocking notifications always take, blank when fewer (the card is 4 rows: title, worklog, these). */
-const SIGNAL_SLOTS = 2
+/** The rows the blocking notifications always take, blank when none (the card is 3 rows: title, worklog, this): a second one joins the first as `+1`, so nothing jumps. */
+const SIGNAL_SLOTS = 1
 
 /** The URGENTE card: only what waits for the person (the worklog days behind and the blocking notifications), with the page's only log-hours button. Every row is always drawn and the blank ones sit at the bottom, so nothing jumps and no hole opens under the title. */
 export function deskUrgent(ui: DeskUi, s: CockpitSnapshot, actions: PaneActions): RenderElement {
@@ -35,7 +34,10 @@ export function deskUrgent(ui: DeskUi, s: CockpitSnapshot, actions: PaneActions)
   // the same gate as the terminal's footer: logging hours needs a session and the worklog skill
   const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
 
-  const shown = limitRows(blocking, SIGNAL_SLOTS, n => `+${n}`)
+  // the last slot carries the count of those left out after its own text, never a bare `+n` in place of a notification
+  const kept = blocking.slice(0, SIGNAL_SLOTS)
+  const rest = blocking.length - kept.length
+  const shown = kept.map((what, i) => (i === kept.length - 1 && rest > 0 ? `${what} +${rest}` : what))
   const slots = Array.from({ length: SIGNAL_SLOTS }, (_, i) => {
     const text = shown[i]
     return (

@@ -4,7 +4,7 @@ import type { CockpitSnapshot } from '../types'
 import { spendSplit } from './andamento'
 import type { DeskLayout } from './desk-layout'
 import { limitRows } from './desk-layout'
-import { iconSvg } from './desk-svg'
+import { iconSvg, shareSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
 import { duration, fmtCost } from './shared'
 import { signalsOf } from './signals'
@@ -22,12 +22,16 @@ const DIM = '#A8A49B'
 const CARD = '#30302E'
 /** Every section always draws this many rows, so nothing jumps when the data arrives. */
 const SECTION_ROWS = 3
+/** The watch list's rows: small, so an empty one is one dim line and a blank, never a big empty card. */
+const WATCH_ROWS = 2
 const GAP = 2
+const BORDER = '#403F3B'
+const SHARE = '#B9A2FF'
 
-/** `SECTION_ROWS` rows: a cut list ends with the `more` row, a short one is padded with blank ones, so a section keeps its height. */
-const keepRows = (rows: readonly RenderElement[], more: (n: number) => RenderElement, blank: (n: number) => RenderElement): RenderElement[] => [
-  ...limitRows(rows, SECTION_ROWS, more),
-  ...Array.from({ length: Math.max(0, SECTION_ROWS - rows.length) }, (_, i) => blank(i)),
+/** `size` rows: a cut list ends with the `more` row, a short one is padded with blank ones, so a section keeps its height. */
+const keepRows = (rows: readonly RenderElement[], size: number, more: (n: number) => RenderElement, blank: (n: number) => RenderElement): RenderElement[] => [
+  ...limitRows(rows, size, more),
+  ...Array.from({ length: Math.max(0, size - rows.length) }, (_, i) => blank(i)),
 ]
 
 /** The page's action bar, under every tab as on the design board: compact on the left, the two retrospectives on the right (on their own line when narrow). One handler per action, these keys only here. */
@@ -36,7 +40,7 @@ export function deskActions(ui: DeskUi, layout: DeskLayout, actions: PaneActions
   const A = t().desk.analysis
   const isNarrow = layout.size === 'narrow'
   return (
-    <Box key="desk:actions" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'flex-start' : 'center'} columnGap={1}>
+    <Box key="desk:actions" flexDirection={isNarrow ? 'column' : 'row'} flexWrap={isNarrow ? 'nowrap' : 'wrap'} flexShrink={0} alignItems={isNarrow ? 'flex-start' : 'center'} columnGap={1} rowGap={1}>
       <Button key="analysis:compact" variant="primary" onPress={() => actions.compact()}>
         <Text wrap="truncate">{A.compactNow}</Text>
       </Button>
@@ -62,14 +66,35 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
   const A = t().desk.analysis
   const S = t()
   const ins = s.insights
-  const title = (key: string, label: string) => (
-    <Text key={key} weight="bold" size="footnote" color={TITLE} wrap="truncate">
-      {label}
-    </Text>
-  )
-  const row = (key: string, icon: string, text: string) => (
+  // the title as the head's section titles, with an optional figure at its right
+  const title = (key: string, label: string, right?: string) => (
     <Box key={key} columnGap={1} alignItems="center">
-      <Svg source={iconSvg(icon, ACCENT)} alt={text} width={16} height={16} />
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <Text weight="bold" size="footnote" color={TITLE} wrap="truncate">
+          {label}
+        </Text>
+      </Box>
+      <Text weight="bold" color={TEXT} tabular wrap="truncate">
+        {right ?? ' '}
+      </Text>
+    </Box>
+  )
+  // two columns: the label takes the row, the value sits right-aligned in tabular figures
+  const pair = (key: string, label: string, value: string) => (
+    <Box key={key} columnGap={1} alignItems="center">
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <Text color={TEXT} wrap="truncate">
+          {label}
+        </Text>
+      </Box>
+      <Text color={TEXT} weight="semibold" tabular wrap="truncate">
+        {value}
+      </Text>
+    </Box>
+  )
+  const watchRow = (key: string, text: string) => (
+    <Box key={key} columnGap={1} alignItems="center">
+      <Svg source={iconSvg('alert', ACCENT)} alt={text} width={16} height={16} />
       <Text color={TEXT} wrap="truncate">
         {text}
       </Text>
@@ -80,20 +105,37 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
   const time =
     ins === undefined || ins.rounds <= 0
       ? []
-      : [row('time:rounds', 'clock', `${A.rounds} ${duration(ins.roundMs)}`), row('time:tools', 'flow', `${A.tools} ${duration(ins.toolMs)}`), row('time:wait', 'alert', `${A.waited} ${duration(ins.waitMs)}`)]
-  // SPEND: who spent the session money
+      : [pair('time:rounds', A.rounds, duration(ins.roundMs)), pair('time:tools', A.tools, duration(ins.toolMs)), pair('time:wait', A.waited, duration(ins.waitMs))]
+  // SPEND: who spent the session money, as on the design board: share, its bar, who, cost
   const spend = spendSplit(s).map(p => {
     const label = p.label === 'main' ? S.page.main : p.label === 'other' ? S.page.other : p.label
-    return row(`spend:${p.label}`, 'check', `${label} ${Math.round(p.pct)}% ${fmtCost(p.usd)}`)
+    const pct = Math.round(p.pct)
+    return (
+      <Box key={`spend:${p.label}`} columnGap={1} alignItems="center">
+        <Text color={TEXT} weight="bold" tabular wrap="truncate">
+          {`${pct}%`.padStart(4)}
+        </Text>
+        <Svg source={shareSvg(pct, SHARE)} alt={`${label} ${pct}%`} width={84} height={6} />
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text color={TEXT} wrap="truncate">
+            {label}
+          </Text>
+        </Box>
+        <Text color={DIM} tabular wrap="truncate">
+          {fmtCost(p.usd)}
+        </Text>
+      </Box>
+    )
   })
   // KEEP AN EYE ON: the live notifications
-  const watch = signalsOf(s).map(sig => row(`watch:${sig.kind}:${sig.key}`, 'alert', signalText(sig).what))
+  const watch = signalsOf(s).map(sig => watchRow(`watch:${sig.kind}:${sig.key}`, signalText(sig).what))
 
-  const section = (key: string, label: string, rows: RenderElement[]) => (
-    <Box key={`analysis:${key}`} flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={CARD}>
-      {title(`${key}:title`, label)}
+  const section = (key: string, label: string, rows: RenderElement[], size = SECTION_ROWS, right?: string) => (
+    <Box key={`analysis:${key}`} flexDirection="column" flexGrow={1} paddingX={1} backgroundColor={CARD} borderStyle="round" borderColor={BORDER}>
+      {title(`${key}:title`, label, right)}
       {keepRows(
         rows,
+        size,
         n => (
           <Text key={`${key}:more`} color={DIM}>
             {`+${n}`}
@@ -112,9 +154,9 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
     <Box key="desk:analysis" flexDirection="column" width="100%" rowGap={1}>
       <Box flexDirection={layout.size === 'wide' ? 'row' : 'column'} columnGap={GAP} rowGap={1}>
         {section('time', A.time, time)}
-        {section('spend', A.spend, spend)}
+        {section('spend', A.spend, spend, SECTION_ROWS, fmtCost(s.cost.usd))}
       </Box>
-      {section('watch', A.watch, watch)}
+      {section('watch', A.watch, watch, WATCH_ROWS)}
     </Box>
   )
 }

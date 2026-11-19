@@ -53,6 +53,7 @@ function recorder(calls: string[]): PaneActions {
       setGroupOpen: noop,
       scrollTo: noop,
       setGroupsOpen: noop,
+      setLogPage: noop,
     }
   }
 }
@@ -79,49 +80,87 @@ test('Given no insights and no notification, When the Analysis tab is drawn, The
   const { ui } = await drawAnalysis($, on, s, 100, [])
   const drawn = await ui.drawn()
   // Then
-  for (const key of ['analysis:time', 'analysis:watch']) {
+  for (const [key, rows] of [['analysis:time', 3], ['analysis:watch', 2]] as const) {
     const section = find(drawn, key)
-    expect(kids(section)).toHaveLength(1 + 3)
+    expect(kids(section)).toHaveLength(1 + rows)
     expect(textOf(kids(section)[1])).toBe(t().desk.analysis.none)
+  }
+  await ui.unmount()
+})
+
+test('Given insights and spend, When the Analysis tab is drawn, Then a time row is its label left and its value right, and a spend row has a share bar and no check icon', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = FULL()
+  // When
+  const { ui } = await drawAnalysis($, on, s, 100, [])
+  const drawn = await ui.drawn()
+  // Then
+  const rounds = kids(find(drawn, 'time:rounds'))
+  expect(rounds).toHaveLength(2)
+  expect(propsOf(rounds[0]).flexGrow).toBe(1)
+  expect(textOf(rounds[0])).toBe(t().desk.analysis.rounds)
+  expect(textOf(rounds[1])).toBe('02m00s')
+  const spend = find(drawn, 'analysis:spend')
+  const sources = svgSources(spend)
+  expect(sources.length).toBeGreaterThan(0)
+  expect(sources.every(src => src.includes('width="84" height="6"'))).toBe(true)
+  expect(sources.some(src => src.includes('M3 8.5l3.2 3.2L13 4.8'))).toBe(false)
+  expect(textOf(find(drawn, 'spend:title'))).toContain('$10')
+  await ui.unmount()
+})
+
+test('Given the Analysis tab, When drawn, Then every section card carries a visible border', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = FULL()
+  // When
+  const { ui } = await drawAnalysis($, on, s, 100, [])
+  const drawn = await ui.drawn()
+  // Then
+  for (const key of ['analysis:time', 'analysis:spend', 'analysis:watch']) {
+    expect(typeof propsOf(find(drawn, key)).borderStyle).toBe('string')
+    expect(propsOf(find(drawn, key)).borderColor).toBeDefined()
   }
   await ui.unmount()
 })
 
 const failing = (names: string[]) => snap({ insights: insights({ failedCmds: Object.fromEntries(names.map(n => [n, 3])) }) })
 
-type Node = { props?: unknown; children?: unknown; text?: unknown }
+type Node = { type?: unknown; props?: unknown; children?: unknown; text?: unknown }
 const isNode = (v: unknown): v is Node => typeof v === 'object' && v !== null
 const kids = (v: unknown): unknown[] => (isNode(v) && Array.isArray(v.children) ? v.children : [])
+const propsOf = (v: unknown): Record<string, unknown> => (isNode(v) && typeof v.props === 'object' && v.props !== null ? { ...v.props } : {})
+const all = (v: unknown): unknown[] => [v, ...kids(v).flatMap(all)]
+const svgSources = (v: unknown): string[] => all(v).flatMap(n => (isNode(n) && n.type === 'Svg' ? [String(propsOf(n).source)] : []))
 const keyOf = (v: unknown): unknown => (isNode(v) && typeof v.props === 'object' && v.props !== null && 'key' in v.props ? v.props.key : undefined)
 const textOf = (v: unknown): string => (typeof v === 'string' ? v : isNode(v) && typeof v.text === 'string' ? v.text : kids(v).map(textOf).join(''))
 const find = (v: unknown, key: string): unknown => (keyOf(v) === key ? v : kids(v).map(k => find(k, key)).find(x => x !== undefined))
 /** The rows of the watch section under its title, as text. */
 const watchRows = async (ui: Mounted): Promise<string[]> => kids(find(await ui.drawn(), 'analysis:watch')).slice(1).map(textOf)
 
-test('Given five notifications, When the Analysis tab is drawn, Then the watch section shows two and a +3 row in its three rows', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given five notifications, When the Analysis tab is drawn, Then the watch section shows one and a +4 row in its two rows', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = failing(['cmd-a', 'cmd-b', 'cmd-c', 'cmd-d', 'cmd-e'])
   // When
   const five = await drawAnalysis($, on, s, 100, [])
   const rows = await watchRows(five.ui)
   // Then
-  expect(rows).toHaveLength(3)
-  expect(rows.filter(r => /cmd-[a-e]/.test(r))).toHaveLength(2)
-  expect(rows[2]?.trim()).toBe('+3')
+  expect(rows).toHaveLength(2)
+  expect(rows.filter(r => /cmd-[a-e]/.test(r))).toHaveLength(1)
+  expect(rows[1]?.trim()).toBe('+4')
   await five.ui.unmount()
 })
 
-test('Given exactly three notifications, When the Analysis tab is drawn, Then all three show and no more row', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given exactly two notifications, When the Analysis tab is drawn, Then both show and no more row', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
-  const s = failing(['cmd-a', 'cmd-b', 'cmd-c'])
+  const s = failing(['cmd-a', 'cmd-b'])
   // When
-  const three = await drawAnalysis($, on, s, 100, [])
-  const rows = await watchRows(three.ui)
+  const two = await drawAnalysis($, on, s, 100, [])
+  const rows = await watchRows(two.ui)
   // Then
-  expect(rows).toHaveLength(3)
-  expect(rows.filter(r => /cmd-[a-c]/.test(r))).toHaveLength(3)
+  expect(rows).toHaveLength(2)
+  expect(rows.filter(r => /cmd-[ab]/.test(r))).toHaveLength(2)
   expect(rows.some(r => /^\+\d+$/.test(r.trim()))).toBe(false)
-  await three.ui.unmount()
+  await two.ui.unmount()
 })
 
 test('Given a narrow and a wide pane, When drawn, Then both show the sections and no button: the actions live in the page bar', { timeoutMs: 30_000 }, async ($, on) => {

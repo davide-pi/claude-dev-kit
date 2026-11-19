@@ -57,6 +57,15 @@ test('Given a desk tab, When a new session resets the snapshot, Then deskTab is 
   expect(reset.deskTab).toBeUndefined()
 })
 
+test('Given a log page, When a new session resets the snapshot, Then deskLogPage is undefined', () => {
+  // Given
+  const s = { ...INITIAL, deskLogPage: 2 }
+  // When
+  const reset = withoutSession(s)
+  // Then
+  expect(reset.deskLogPage).toBeUndefined()
+})
+
 test('Given retro(days), When handled, Then command.run receives the days count of RETRO_DAYS (15)', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const commands: string[] = []
@@ -467,6 +476,7 @@ function urgentRecorder(calls: string[]): PaneActions {
     setGroupOpen: noop,
     scrollTo: noop,
     setGroupsOpen: noop,
+    setLogPage: noop,
   }
 }
 

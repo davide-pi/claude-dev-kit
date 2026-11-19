@@ -34,6 +34,7 @@ const ACTIONS: PaneActions = {
   setGroupOpen: noop,
   scrollTo: noop,
   setGroupsOpen: noop,
+  setLogPage: noop,
 }
 
 const SLOTS = new WeakMap<object, Map<string, CockpitSnapshot>>()
@@ -63,7 +64,7 @@ const waiting = { claudeState: { kind: 'waiting', since: NOW - 600_000 } } as co
 /** A workflow run silent for an hour with an agent still out: the other blocking notification. */
 const stalled = { workflowRun: { runId: 'wf_1', name: 'loop', phase: 'x', round: 1, lastAt: NOW - 3_600_000, agents: [{ id: 'a1', isDone: false }] } }
 
-test('Given two blocking notifications, When the card is drawn, Then both show and no more row', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given two blocking notifications, When the card is drawn, Then the first shows with a +1 on its own row and the card stays title, one slot and the worklog row', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionId: 's-1', ...waiting, ...stalled })
   const whats = signalsOf(s).map(sig => signalText(sig).what)
@@ -71,8 +72,20 @@ test('Given two blocking notifications, When the card is drawn, Then both show a
   const card = await drawCard($, on, s)
   // Then
   expect(whats).toHaveLength(2)
-  for (const what of whats) expect(card.text).toContain(what)
-  expect(card.text).not.toContain('+1')
+  expect(card.text).toContain(`${whats[0] ?? ''} +1`)
+  expect(card.rows).toBe(3)
+})
+
+test('Given one blocking notification, When the card is drawn, Then it shows whole, with no +n', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionId: 's-1', ...waiting })
+  const what = signalsOf(s).map(sig => signalText(sig).what)[0] ?? ''
+  // When
+  const card = await drawCard($, on, s)
+  // Then
+  expect(card.text).toContain(what)
+  expect(card.text).not.toMatch(/\+\d/)
+  expect(card.rows).toBe(3)
 })
 
 test('Given none, one or two blocking notifications, When the card is drawn, Then it keeps the same number of rows', { timeoutMs: 30_000 }, async ($, on) => {

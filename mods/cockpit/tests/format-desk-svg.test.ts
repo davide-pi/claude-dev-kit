@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { barSvg, donutSvg, iconSvg, railSvg } from '../hooks/desk-svg'
+import { barSvg, donutSvg, iconSvg, railSvg, shareSvg } from '../hooks/desk-svg'
 
 const C = 2 * Math.PI * 44
 const round2 = (n: number): number => Math.round(n * 100) / 100
@@ -36,14 +36,13 @@ test('Given no threshold, When built, Then there is no tick element; Given thres
   expect(ticked).toContain('rotate(342 60 60)')
 })
 
-test('Given the donut, When built, Then it has the board geometry and the cache ring only when a cache percent is given', () => {
+test('Given the donut, When built, Then it has the board geometry and only the context ring: no inner cache ring', () => {
   // Given / When
   const svg = donutSvg({ percent: 40, color: '#5EC8C2' })
-  const cached = donutSvg({ percent: 40, cachePct: 71, color: '#5EC8C2' })
   // Then
   for (const part of ['viewBox="0 0 120 120"', 'r="44"', 'stroke-width="11"', '#3A3936', 'rotate(-90 60 60)', '#5EC8C2']) expect(svg).toContain(part)
   expect(svg.match(/<circle/g)).toHaveLength(2)
-  expect(cached.match(/<circle/g)).toHaveLength(4)
+  expect(svg).not.toContain('r="33"')
 })
 
 test('Given a bar, When built, Then it is 8 high with preserveAspectRatio none, the left share filled and the pace mark only when given', () => {
@@ -57,6 +56,29 @@ test('Given a bar, When built, Then it is 8 high with preserveAspectRatio none, 
   expect(paced).toContain('<line')
   expect(paced).toContain('x1="156"')
   expect(over).toContain('width="260"')
+})
+
+test('Given a bar, When built, Then its markup is wider than any pane, so an Svg without width takes its whole slot, and the pace mark keeps its stroke when stretched', () => {
+  // Given / When
+  const paced = barSvg({ left: 40, pace: 60, color: '#7CC79A' })
+  // Then
+  const own = Number(/^<svg [^>]*?width="(\d+)"/.exec(paced)?.[1])
+  expect(own).toBeGreaterThanOrEqual(2000)
+  expect(paced).toContain('vector-effect="non-scaling-stroke"')
+})
+
+test('Given a share of 0, 25 and 250 percent, When shareSvg is built, Then it is 84 by 6, the share filled on its track and clamped, no fill at 0', () => {
+  // Given / When
+  const [none, quarter, over] = [0, 25, 250].map(pct => shareSvg(pct, '#B9A2FF'))
+  // Then
+  for (const svg of [none, quarter, over]) {
+    expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
+    expect(svg).toMatch(/^<svg [^>]*width="84" height="6"/)
+  }
+  expect(none?.match(/<rect/g)).toHaveLength(1)
+  expect(quarter).toContain('width="21"')
+  expect(quarter).toContain('#B9A2FF')
+  expect(over?.match(/width="84"/g)).toHaveLength(3)
 })
 
 test('Given a known icon name, When built, Then it is an svg in the given colour; Given an unknown one, Then it is an empty-but-valid svg of the same size', () => {

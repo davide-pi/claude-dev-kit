@@ -61,7 +61,7 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
     </Box>
   )
   const card = (key: string, children: RenderElement | RenderElement[], direction: 'row' | 'column' = 'column'): RenderElement => (
-    <Box key={key} flexDirection={direction} columnGap={1} paddingX={1} backgroundColor={CARD}>
+    <Box key={key} flexDirection={direction} columnGap={1} paddingX={1} backgroundColor={CARD} borderStyle="round" borderColor="#403F3B">
       {children}
     </Box>
   )

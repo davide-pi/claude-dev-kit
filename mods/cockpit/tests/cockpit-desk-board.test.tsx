@@ -41,6 +41,7 @@ function recorder(calls: string[]): PaneActions {
     setGroupOpen: noop,
     scrollTo: noop,
     setGroupsOpen: noop,
+    setLogPage: noop,
   }
 }
 
@@ -111,8 +112,8 @@ test('Given a 60-row pane at each size, When the body limit is read, Then the he
   // When
   const [narrow, medium, wide] = [bodyLimit(rows, 36), bodyLimit(rows, 80), bodyLimit(rows, 160)]
   // Then
-  // medium: 23 head and tab rows, 3 for the action bar and its gap
-  expect(medium).toBe(34)
+  // medium: 18 head and tab rows, 3 for the action bar and its gap
+  expect(medium).toBe(39)
   expect(narrow).toBeLessThan(medium)
   expect(wide).toBeLessThan(medium)
 })
@@ -123,17 +124,25 @@ const RATES = [
 ] as const
 
 for (const columns of [36, 80, 160]) {
-  test(`Given ${columns} columns, When a credit row is drawn, Then the percent sits right after its bar, nothing grows between them, and no forecast row exists`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given ${columns} columns, When a credit row is drawn, Then the bar takes the whole row, the percent sits at its right end without the left word, and no forecast row exists`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     const s = snap({ rateLimits: [...RATES] })
     // When
     const ui = await drawPart($, on, 'head', s, columns)
     const head = await ui.drawn()
     // Then
-    const row = childrenOf(keyed(head, 'desk:window:five_hour:bar'))
-    expect(isRecord(row[0]) && row[0].type).toBe('Svg')
-    expect(textOf(row[1])).toContain('62%')
-    expect(nodes(keyed(head, 'desk:window:five_hour:bar')).filter(n => propsOf(n).flexGrow !== undefined)).toEqual([])
+    const bar = keyed(head, 'desk:window:five_hour:bar')
+    const [track, percent] = childrenOf(bar)
+    expect(propsOf(track).flexGrow).toBe(1)
+    expect(propsOf(track).minWidth).toBe(0)
+    const svg = childrenOf(track)[0]
+    expect(isRecord(svg) && svg.type).toBe('Svg')
+    expect(propsOf(svg).width).toBeUndefined()
+    expect(propsOf(svg).height).toBe(8)
+    expect(String(propsOf(svg).alt)).toContain(t().desk.head.left)
+    expect(propsOf(percent).flexShrink).toBe(0)
+    expect(textOf(percent)).toContain('62%')
+    expect(textOf(bar)).not.toContain(t().desk.head.left)
     expect(textOf(keyed(head, 'desk:window:five_hour:label'))).toContain(t().desk.head.renews)
     expect(keyed(head, 'desk:forecast')).toBeUndefined()
     expect(textOf(head)).not.toContain('→')
@@ -156,7 +165,41 @@ test('Given a context reading, When the head is drawn, Then the short label sits
   expect(textOf(context)).toContain(t().desk.head.contextShort)
   expect(textOf(over)).toMatch(/\d+%/)
   expect(textOf(context)).toContain(`${t().desk.head.cache} 98%`)
+  const donut = nodes(context).find(n => isRecord(n) && n.type === 'Svg')
+  expect(String(propsOf(donut).source).match(/<circle/g)?.length).toBeLessThanOrEqual(2)
+  expect(String(propsOf(donut).source)).not.toContain('#7CC79A')
   await ui.unmount()
+})
+
+test('Given desktop, When the page is drawn, Then the open tab label is in the accent colour and the others are not', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  world(on)
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  // When
+  const ui = await mountDesk($)
+  const tabs = keyed(await ui.drawn(), 'desk:tabs')
+  // Then
+  const colours = ['now', 'log', 'analysis'].map(tab => propsOf(nodes(keyed(tabs, `desk:tab:${tab}`)).find(n => isRecord(n) && n.type === 'Text')).color)
+  expect(colours[0]).toBe('#8B6CF6')
+  expect(colours.slice(1).includes('#8B6CF6')).toBe(false)
+  await ui.unmount()
+})
+
+test('Given the head and the In progress tab, When drawn, Then the gauges card and every Now card carry a visible border', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ rateLimits: [...RATES] })
+  // When
+  const head = await drawPart($, on, 'head', s)
+  const now = await drawPart($, on, 'now', s)
+  const [h, n] = [await head.drawn(), await now.drawn()]
+  // Then
+  const cards = [keyed(h, 'desk:gauges'), keyed(n, 'now:request:prompt'), keyed(n, 'now:flow:card'), keyed(n, 'now:outside:list')]
+  for (const card of cards) {
+    expect(typeof propsOf(card).borderStyle).toBe('string')
+    expect(propsOf(card).borderColor).toBeDefined()
+  }
+  await head.unmount()
+  await now.unmount()
 })
 
 test('Given desktop, When the tab row is drawn, Then each tab underline Svg has a numeric pixel width matching its markup and a 2px height', { timeoutMs: 30_000 }, async ($, on) => {
