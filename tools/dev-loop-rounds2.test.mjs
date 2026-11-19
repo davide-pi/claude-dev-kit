@@ -83,7 +83,7 @@ test('given a finding the implementer rejects and its raiser keeps, when the rou
 
 test('given a carried finding, when the final readers judge it closed, then the run is OK and the finding is not open', async () => {
   // Given
-  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
+  const bid = { ...ARGS, size: 'M', risk: ['data'], verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
   const green = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
   const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
   // When
@@ -96,7 +96,7 @@ test('given a carried finding, when the final readers judge it closed, then the 
 
 test('given a carried finding outside the perimeter, when the final readers keep it open, then the loop stalls on it', async () => {
   // Given
-  const bid = { ...ARGS, size: 'M', verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
+  const bid = { ...ARGS, size: 'M', risk: ['data'], verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
   const raised = review([], [finding({ title: 'elsewhere-title', path: HELPER, line: 9, causedByChange: true })]);
   const open = review([{ id: 'A1.1', status: 'open' }]);
   // When
@@ -121,7 +121,7 @@ test('given a review fix under the gate, when its report is read, then the fix p
 
 // ── reviewer probes: saved, turned into red tests, rerun by the verifier (P26) ───────────────────────────
 const PROBE = { path: 'C:/repo/.git/deliver/probes/r1-B-F1.mjs', cmd: 'node C:/repo/.git/deliver/probes/r1-B-F1.mjs' };
-const PROBED = { ...ARGS_M, verify: 'node --test x', unit: 'node --test u' };
+const PROBED = { ...ARGS_M, risk: ['data'], verify: 'node --test x', unit: 'node --test u' };
 const greenFix = (extra = {}) => impl({ gate: gate('green'), ...extra });
 const isReviewCall = (c) => /^reviewer \S+ · round \d+/.test(c.opts.label ?? '');
 

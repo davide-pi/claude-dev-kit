@@ -122,7 +122,7 @@ test('script: a question of the implementer without a matching answer stays a ST
   assert.equal(out.status, 'STALL');
   assert.equal(out.stall.why, 'question');
   assert.deepEqual(out.stall.questions.map(q => q.text), ['Soft delete?']);
-  assert.deepEqual(calls.map(c => c.opts.label), ['implement the change']);
+  assert.deepEqual(calls.map(c => c.opts.label), ['implement the change', 'question judge · round 0']);   // the judge found nothing in the owner's text
 });
 
 test('script: questions asked again after the answers are open decisions in outOfScope, not a second stall', async () => {

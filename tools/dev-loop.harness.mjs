@@ -38,7 +38,8 @@ const laneRunner = (prompt, opts) => {
  * Runs the workflow; `reviews` is the queue of review answers (one per reviewer call), fixes always succeed.
  * Three calls are answered by the harness, not by the queue: the verifier of a fix round (label "reviewer V · round <n> · verify the fixes": every previous id closed
  * unless `extra.verifiers` or the review queue holds its answer), the arbiter (label "arbiter · round <n>": every id kept open unless `extra.arbiters` queues its answers)
- * and the probe run (label "probe · round <n> · <id>": the failure reproduces unless `extra.probes(prompt, opts)` answers { reproduced: false }).
+ * and the probe run (label "probe · round <n> · <id>": the failure reproduces unless `extra.probes(prompt, opts)` answers { reproduced: false }),
+ * the question judge (label starts "question judge", answers nothing unless `extra.judge(prompt, opts)` does), and the full gate of the lite path (label starts "full gate", not an implementer: green unless `extra.fullGate(prompt, opts)` answers another { gate }).
  */
 async function run(args, reviews, implementers = [], extra = {}) {
   const calls = [];
@@ -55,6 +56,8 @@ async function run(args, reviews, implementers = [], extra = {}) {
       : /^lanes? /.test(opts.label ?? '') ? (extra.lanes ?? laneRunner)(prompt, opts)
       : opts.agentType === 'implementer'
       ? (extra.implementer ? extra.implementer(prompt, opts) : impls.length ? impls.shift() : { scope: 's', files: ['src/Orders/OrdersQuery.cs'], evidence: 'ok', verify: PASS, snapshot: snapshot(['src/Orders/OrdersQuery.cs']), rejected: [], noticed: [], openQuestions: [] })
+      : /^question judge/.test(opts.label ?? '') ? (extra.judge ? extra.judge(prompt, opts) : { judgments: [] })   // the question judge: every question stays open unless `extra.judge` answers { judgments }
+      : /^full gate/.test(opts.label ?? '') ? (extra.fullGate ? extra.fullGate(prompt, opts) : { gate: gate() })   // the lite path's full gate run: { gate: <last line> }
       : /^reviewer V · round \d+ · /.test(opts.label ?? '') ? (verifiers.length ? verifiers.shift() : queue.length ? queue.shift() : closeAll(prompt, 'closed'))
       : /^arbiter · round \d+/.test(opts.label ?? '') ? (arbiters.length ? arbiters.shift() : closeAll(prompt, 'open'))
       : /^probe · round \d+ · /.test(opts.label ?? '') ? (extra.probes ? extra.probes(prompt, opts) : { reproduced: true, output: '' })   // the Haiku probe run before a fix round: { reproduced, output }

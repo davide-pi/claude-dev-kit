@@ -500,7 +500,7 @@ import { gate } from './dev-loop.harness.mjs';
 const readerA = (calls) => calls.filter(c => /reader A$/.test(c.opts.label ?? ''));
 const implLabels = (calls) => calls.filter(c => c.opts.agentType === 'implementer').map(c => c.opts.label);
 // two blocks (size L): reader A runs on a block when its tree differs from the previous one; the scripted blocks share tree tr1, so only block 1 is read
-const BLOCK = { ...ARGS_M, verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
+const BLOCK = { ...ARGS_M, risk: ['data'], verify: 'node --test x', start: { head: 'abc123', dirty: [] }, plan: { tasks: tasksOf(5) } };
 const FIX1 = 'B1 · T1 T2 T3 · fix';
 const greenImpl = (extra = {}) => impl({ gate: gate('green', { tree: 'tr1' }), ...extra });
 
