@@ -24,15 +24,14 @@ function covers(rule, tool, command) {
 }
 const coveredBy = (rules, tool, command) => rules.filter((rule) => covers(rule, tool, command));
 
-test('given settings.json, when parsed, then ask has Edit and Write for the hooks, the settings files and CLAUDE.md', () => {
+test('given settings.json, when parsed, then ask has Edit for the hooks, the settings files and CLAUDE.md, and no Write rule for them', () => {
   // Given
   const paths = ['~/.claude/hooks/**', '~/.claude/settings*.json', '~/.claude/CLAUDE.md'];
 
-  for (const tool of ['Edit', 'Write']) {
-    for (const path of paths) {
-      // When / Then
-      assert.ok(ask.includes(`${tool}(${path})`), `${tool}(${path})`);
-    }
+  for (const path of paths) {
+    // When / Then: Edit rules cover every file write; Claude Code warns that a Write(path) rule never matches
+    assert.ok(ask.includes(`Edit(${path})`), `Edit(${path})`);
+    assert.ok(!ask.includes(`Write(${path})`), `Write(${path}) never matches`);
   }
 });
 
