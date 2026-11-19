@@ -131,7 +131,7 @@ test('given a targeted green, when a full gate runs on the same tree, then it ru
 });
 
 test('given a changed test file whose name holds a shell character, when the gate runs targeted, then the full --test command runs', () => {
-  for (const name of ['a;b.test.mjs', 'a&b.test.mjs', '-r.test.mjs']) {
+  for (const name of ['a;b.test.mjs', 'a&b.test.mjs', '-r.test.mjs', '@r.test.mjs']) {
     // Given
     const r = repoWithChanges();
     writeFileSync(join(r.root, name), 'x\n');

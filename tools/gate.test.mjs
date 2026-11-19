@@ -57,7 +57,7 @@ const run = (r, command, ...args) => gate(r.root, '--head', r.head, '--test', co
 const KEYS = ['gate', 'test', 'outside', 'formatOnly', 'tree', 'greenAt', 'seconds'].sort();
 const lastLine = (res) => {
   const out = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
-  assert.deepEqual(Object.keys(out).sort(), KEYS);
+  assert.deepEqual(Object.keys(out).sort(), out.gate === 'green' ? [...KEYS, 'reds'].sort() : KEYS);
   return out;
 };
 const stateOf = (r) => JSON.parse(readFileSync(join(r.root, '.git', 'deliver', 'gate.json'), 'utf8'));
