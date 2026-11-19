@@ -42,7 +42,8 @@
  * than the cap run the full `--test`. The last line adds `"tests":"targeted:<n>"` or `"tests":"full"`, and a targeted green
  * never lets a later full gate answer `skipped: tree unchanged`. It saves time in JS/TS repos; .NET stays full.
  *
- * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}` (plus `proof` when dropped). Exit 0 green, 1 red, 2 not checked
+ * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}` (plus `proof` when dropped, and `reds`, the red runs since
+ * the last green for the same head, on a green run). Exit 0 green, 1 red, 2 not checked
  * (bad arguments, no git repository, a scope or git step that failed), 3 still running. git runs through argv,
  * never a shell.
  *
@@ -52,8 +53,8 @@
 import { spawn, spawnSync, execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { mkdirSync, copyFileSync, readFileSync, writeFileSync, openSync, closeSync, statSync, rmSync, realpathSync, existsSync } from 'node:fs';
-import { join, dirname, resolve } from 'node:path';
+import { mkdirSync, copyFileSync, readFileSync, writeFileSync, openSync, closeSync, statSync, rmSync, realpathSync, existsSync, symlinkSync, readdirSync } from 'node:fs';
+import { join, dirname, resolve, isAbsolute, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -243,6 +244,22 @@ export function failedTests(log, testFiles = []) {
   return names.slice(0, 5);
 }
 
+/**
+ * Files of the failed tests that the output names (node TAP: the `location:` line after each `not ok`), without the line and column;
+ * file-level failures are left out. Empty when the runner names none.
+ */
+function failedFiles(log, testFiles) {
+  const files = [];
+  let failing = false;
+  for (const line of log.split(/\r?\n/)) {
+    const ko = /^\s*not ok \d+ - (.+)$/.exec(line);
+    if (ko || /^\s*ok \d+ /.test(line)) failing = !!ko && !isTestFile(ko[1], testFiles);
+    const loc = failing && /^\s*location: '(.+):\d+:\d+'\s*$/.exec(line);
+    if (loc) files.push(loc[1].replace(/\\+/g, '/'));
+  }
+  return files;
+}
+
 const GUARD = join(HERE, '..', 'hooks', 'scope-guard.js');
 
 /** The scope check through `scope-guard.js --check`: `{ verdict: 'clean' | 'outside' | 'unchecked', outside }`. */
@@ -262,6 +279,18 @@ const LANE_PREFIX = 'deliver-lane/';
 // A lane's own commits and the merge commits are scratch: the merge ends with the start branch back at its head.
 const LANE_GIT = ['-c', 'user.name=deliver-lane', '-c', 'user.email=deliver-lane@localhost', '-c', 'commit.gpgsign=false'];
 const laneGit = (root, args) => git(root, [...LANE_GIT, ...args]);
+
+/** Links the root's `node_modules` into the lane and copies the root's `.env*` files that git doesn't track; a failure is a warning. */
+function seedLane(root, path) {
+  try {
+    if (existsSync(join(root, 'node_modules'))) symlinkSync(join(root, 'node_modules'), join(path, 'node_modules'), WIN ? 'junction' : 'dir');
+  } catch (e) { process.stderr.write(`gate: could not link node_modules into the lane: ${e.message}\n`); }
+  try {
+    for (const e of readdirSync(root, { withFileTypes: true })) {
+      if (e.isFile() && e.name.startsWith('.env') && !out(git(root, ['ls-files', '--', e.name]))) copyFileSync(join(root, e.name), join(path, e.name));
+    }
+  } catch (e) { process.stderr.write(`gate: could not copy the .env files into the lane: ${e.message}\n`); }
+}
 
 /** Adds `<root>-lane-<name>` (the next free name) as a worktree on a new branch `deliver-lane/<name>` from `head`; the last line is `{lane,path,branch}`. */
 function laneAdd(root, dir0, name, head) {
@@ -285,6 +314,7 @@ function laneAdd(root, dir0, name, head) {
     mkdirSync(join(laneDir, 'deliver'), { recursive: true });
     writeFileSync(join(laneDir, 'deliver', 'perimeter.md'), text.replace(/^branch:.*$/im, `branch: ${branch}`));
   } catch { /* no perimeter at the start: the lane has none either */ }
+  seedLane(root, path);
   console.log(JSON.stringify({ lane, path, branch }));
   process.exit(0);
 }
@@ -331,7 +361,7 @@ function effectiveCommand(root, args) {
     ...nulList(git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', '--diff-filter=d', '--end-of-options', args.head])),
     ...nulList(git(root, ['-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard', '-z'])),
   ])].filter((f) => isTestFile(f, []) && existsSync(join(root, f)));
-  if (!files.length || files.length > TARGETED_CAP || files.some((f) => f.startsWith('-') || /[^\w ./@+()[\]-]/.test(f))) return { command: args.test, tests: 'full' };
+  if (!files.length || files.length > TARGETED_CAP || files.some((f) => f.startsWith('-') || f.startsWith('@') || /[^\w ./@+()[\]-]/.test(f))) return { command: args.test, tests: 'full' };
   return { command: args.targeted.split('{files}').join(files.map((f) => `"${f}"`).join(' ')), tests: `targeted:${files.length}` };
 }
 
@@ -473,11 +503,21 @@ function finalize(dir, state) {
   try { log = readFileSync(join(dir, 'gate.log'), 'utf8'); } catch { /* no output */ }
   state.run = null;
   writeState(dir, state);
-  if (run.timedOut) emit('red: timeout', 1, { ...base, test: lastTestSeen(log) });
+  // Plain runs that end red since the last green, per head: the next green says how many there were.
+  const noteRed = () => {
+    if (o.red || !o.head) return;
+    state.reds = { head: o.head, n: (state.reds?.head === o.head ? state.reds.n : 0) + 1 };
+    writeState(dir, state);
+  };
+  if (run.timedOut) { noteRed(); emit('red: timeout', 1, { ...base, test: lastTestSeen(log) }); }
   if (o.red) {
     if (run.exitCode === 0) emit('red: no failing test', 1, base);
     const names = failedTests(log, o.testFiles);
     if (!names.length) emit('red', 1, { ...base, test: tail(log, 5).join(' | ') });
+    // Where the runner names the file of each failed test (node --test), one of them must be a given file; other runners are taken as they are.
+    const named = failedFiles(log, o.testFiles).map((f) => f.toLowerCase());
+    const given = o.testFiles.map((f) => `/${f.replace(/\\/g, '/').replace(/^(\.\/)+/, '')}`.toLowerCase());
+    if (named.length && !named.some((f) => given.some((g) => `/${f}`.endsWith(g)))) emit('red: no failing test in the given files', 1, { ...base, test: names.join('; ') });
     const files = hashFiles(o.root, o.testFiles);
     // Every --red adds to the stored proof; a probe's file is also listed so --accept-tests never accepts it, whoever lists it.
     const probes = o.probe ? [...new Set([...(state.proof?.probes ?? []), ...Object.keys(files)])] : state.proof?.probes;
@@ -485,18 +525,20 @@ function finalize(dir, state) {
     writeState(dir, state);
     emit('red-proven', 0, { ...base, test: names.join('; ') });
   }
-  if (run.exitCode !== 0) emit('red', 1, { ...base, test: failedTests(log).join('; ') || tail(log, 5).join(' | ') });
+  if (run.exitCode !== 0) { noteRed(); emit('red', 1, { ...base, test: failedTests(log).join('; ') || tail(log, 5).join(' | ') }); }
   if (!o.noScope) {
     const scope = scopeCheck(o.root, o.head, o.dirty);
     if (scope.verdict === 'unchecked') process.exit(2);
-    if (scope.verdict === 'outside') emit('red: scope', 1, { ...base, outside: scope.outside });
+    if (scope.verdict === 'outside') { noteRed(); emit('red: scope', 1, { ...base, outside: scope.outside }); }
   }
+  const reds = state.reds?.head === o.head ? state.reds.n : 0;
+  delete state.reds;
   const formatOnly = formatOnlyFiles(o.root, o.head);
   const greenAt = new Date().toISOString();
   state.green = { tree: o.tree, head: o.head, dirty: o.dirty, test: o.command, mode: o.mode ?? 'full', scope: !o.noScope, greenAt, formatOnly };
   delete state.proof;
   writeState(dir, state);
-  emit('green', 0, { ...base, formatOnly, greenAt });
+  emit('green', 0, { ...base, formatOnly, greenAt, reds });
 }
 
 async function waitFor(dir, maxMinutes) {
@@ -551,6 +593,7 @@ async function main() {
   if (args.red) {
     if (!args.unit) usage('--unit is required with --red');
     if (!readableRunner(args.unit)) usage("--unit runs a test runner the gate can't read (dotnet test, node --test, vitest, jest, bun test, claude plugin test)");
+    if (!args['test-files']) usage('--test-files is required with --red');
     if (!args.probe) delete state.accepted;
     return startRun(dir, state, root, {
       command: args.unit, stuckMinutes,
@@ -573,7 +616,11 @@ async function main() {
   const dirty = args.dirty ?? '';
   const proofDropped = !!args.force && !!state.proof;
   if (proofDropped) { delete state.proof; writeState(dir, state); }
-  const norm = (f) => f.trim().replace(/\\/g, '/');
+  // `./` prefix, backslashes and an absolute path (made relative to --root) all name the same file
+  const norm = (f) => {
+    const s = f.trim().replace(/\\/g, '/');
+    return (isAbsolute(s) ? relative(root, s).replace(/\\/g, '/') : s).replace(/^(\.\/)+/, '');
+  };
   const listed = (args['accept-tests'] ?? '').split(',').map(norm).filter(Boolean);
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
   const probed = state.proof?.probes ?? [];

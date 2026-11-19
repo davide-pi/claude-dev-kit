@@ -57,7 +57,7 @@ const run = (r, command, ...args) => gate(r.root, '--head', r.head, '--test', co
 const KEYS = ['gate', 'test', 'outside', 'formatOnly', 'tree', 'greenAt', 'seconds'].sort();
 const lastLine = (res) => {
   const out = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
-  assert.deepEqual(Object.keys(out).sort(), KEYS);
+  assert.deepEqual(Object.keys(out).sort(), out.gate === 'green' ? [...KEYS, 'reds'].sort() : KEYS);
   return out;
 };
 const stateOf = (r) => JSON.parse(readFileSync(join(r.root, '.git', 'deliver', 'gate.json'), 'utf8'));
@@ -578,4 +578,119 @@ test('given a test file proven red by a --red --probe and listed in --accept-tes
   assert.equal(lastRaw(res).gate, 'red: tests changed');
   assert.equal(lastRaw(res).test, 'p.test.mjs');
   assert.equal('testsAccepted' in lastRaw(res), false);
+});
+
+// ── the red proof needs a failing test in the given files ─────────────────────
+test('given a failing test outside the --test-files, when --red runs, then the red is not proven and no proof is stored', () => {
+  // Given
+  const r = repoWithTest();
+  writeFileSync(join(r.root, 'o.test.mjs'), TEST_SOURCE.replace('needs the flag file', 'other needs the flag file'));
+
+  // When
+  const res = gate(r.root, '--red', '--unit', 'node --test o.test.mjs', '--test-files', 't.test.mjs');
+
+  // Then
+  assert.equal(res.status, 1);
+  assert.equal(lastRaw(res).gate, 'red: no failing test in the given files');
+  assert.equal(stateOf(r).proof, undefined);
+});
+
+test('given failing tests in two files and one of them in the --test-files, when --red runs, then the red is proven', () => {
+  // Given
+  const r = repoWithTest();
+  writeFileSync(join(r.root, 'o.test.mjs'), TEST_SOURCE.replace('needs the flag file', 'other needs the flag file'));
+
+  // When
+  const res = gate(r.root, '--red', '--unit', 'node --test o.test.mjs t.test.mjs', '--test-files', 't.test.mjs');
+
+  // Then
+  assert.equal(res.status, 0);
+  assert.equal(lastRaw(res).gate, 'red-proven');
+});
+
+test('given --red without --test-files, when the gate runs, then it exits 2 with a usage message', () => {
+  // Given
+  const r = repoWithTest();
+
+  // When
+  const res = gate(r.root, '--red', '--unit', UNIT);
+
+  // Then
+  assert.equal(res.status, 2);
+  assert.match(res.stderr, /--test-files/);
+  assert.ok(!res.stdout.includes('red-proven'));
+});
+
+test('given a proven file listed with ./, backslashes or an absolute path, when --accept-tests runs after it changed, then it is accepted', () => {
+  for (const spell of ['./t.test.mjs', '.\\t.test.mjs', 'ROOT/t.test.mjs']) {
+    // Given
+    const r = repoWithTest();
+    red(r);
+    writeFileSync(join(r.root, 't.test.mjs'), `${TEST_SOURCE}// edited by the plan\n`);
+
+    // When
+    const res = run(r, UNIT, '--accept-tests', spell.replace('ROOT', r.root));
+
+    // Then
+    assert.deepEqual(lastRaw(res).testsAccepted, ['t.test.mjs'], spell);
+  }
+});
+
+// ── the red counter ───────────────────────────────────────────────────────────
+test('given two red runs for a head, when the next run is green, then the last line says reds: 2 and a later green says reds: 0', () => {
+  // Given
+  const r = repo();
+  run(r, FAIL);
+  run(r, FAIL);
+
+  // When
+  const green = run(r, OK);
+  const again = run(r, OK, '--force');
+
+  // Then
+  assert.equal(lastRaw(green).reds, 2);
+  assert.equal(lastRaw(again).reds, 0);
+});
+
+test('given a red run for one head, when a green run follows for another head, then the last line says reds: 0', () => {
+  // Given
+  const r = repo();
+  run(r, FAIL);
+  writeFileSync(join(r.root, 'x.txt'), 'x\n');
+  git(r.root, 'add', '-A');
+  git(r.root, 'commit', '-m', 'second');
+
+  // When
+  const res = gate(r.root, '--head', git(r.root, 'rev-parse', 'HEAD'), '--test', OK);
+
+  // Then
+  assert.equal(lastRaw(res).reds, 0);
+});
+
+// ── --lane-add seeds the lane ─────────────────────────────────────────────────
+test('given node_modules and untracked .env files at the root, when a lane is added, then node_modules is linked and the untracked .env files are copied', () => {
+  // Given
+  const r = repo();
+  writeFileSync(join(r.root, '.env.example'), 'tracked\n');
+  git(r.root, 'add', '-A');
+  git(r.root, 'commit', '-m', 'env example');
+  const head = git(r.root, 'rev-parse', 'HEAD');
+  mkdirSync(join(r.root, 'node_modules'));
+  writeFileSync(join(r.root, 'node_modules', 'dep.txt'), 'dep\n');
+  writeFileSync(join(r.root, '.env'), 'SECRET=1\n');
+  writeFileSync(join(r.root, '.env.local'), 'LOCAL=1\n');
+
+  // When
+  const res = gate(r.root, '--head', head, '--lane-add', 'l1');
+  const lane = JSON.parse(res.stdout.trim().split(/\r?\n/).pop());
+  created.push(lane.path);
+
+  // Then
+  assert.equal(res.status, 0, res.stderr);
+  assert.equal(lf(join(lane.path, 'node_modules', 'dep.txt')), 'dep\n');
+  assert.equal(lf(join(lane.path, '.env')), 'SECRET=1\n');
+  assert.equal(lf(join(lane.path, '.env.local')), 'LOCAL=1\n');
+  assert.equal(lf(join(lane.path, '.env.example')), 'tracked\n');
+  gate(r.root, '--lane-remove', lane.branch);
+  assert.equal(lf(join(r.root, 'node_modules', 'dep.txt')), 'dep\n');
 });
