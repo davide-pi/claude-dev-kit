@@ -1,6 +1,8 @@
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import { t } from './strings'
-import { ROUND_LIST_KEEP } from './timeline'
+
+/** The entries a round keeps of its waits and failed calls: the newest ten. */
+export const ROUND_LIST_KEEP = 10
 
 /** The prompt a round entry keeps: its first line, cut to this many characters. */
 export const PROMPT_KEEP = 120

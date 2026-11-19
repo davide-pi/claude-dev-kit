@@ -35,8 +35,8 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
       await patch($, s => {
         const workflowRun = endRun(s.workflowRun, now)
         const cost = startedCost(s.cost, lastRoundFlowUsd(s.sessionLog))
-        // the state is still idle here: the round this turn opens is the next one
-        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun, nextRoundNumber(s))
+        // a run closed while Claude is idle ends on the last round counted, not on the one this turn opens
+        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun, s.roundSeq)
         return {
           ...s,
           cost,
@@ -193,6 +193,8 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
           roundFails: undefined,
           roundWaits: undefined,
           roundSeq: round,
+          // set with roundSeq: between the two patches an entry logged would read the round after this one as open
+          claudeState: { kind: 'idle' },
           mainTokens: usage ? Math.max(0, (s.mainTokens ?? 0) - (s.mainStepTokens ?? 0)) + newTokens(usageOf(usage)) : s.mainTokens,
           mainStepTokens: undefined,
           // Every main turn is a round of the compact hint: the context the engine last measured.

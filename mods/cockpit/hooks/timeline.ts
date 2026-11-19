@@ -1,5 +1,5 @@
 import type { CockpitEvent, CockpitLogEntry } from '../types'
-import { openRound } from './round-capture'
+import { ROUND_LIST_KEEP, openRound } from './round-capture'
 
 /** The events kept: the oldest go first. */
 export const EVENTS_KEEP = 300
@@ -98,9 +98,6 @@ export function parseToolCounts(value: unknown): Record<string, number> | undefi
   const counts = Object.entries(value).filter((e): e is [string, number] => isNum(e[1]) && e[1] > 0)
   return counts.length > 0 ? Object.fromEntries(counts) : undefined
 }
-
-/** The entries a round keeps of its waits and failed calls: the newest ten. */
-export const ROUND_LIST_KEEP = 10
 
 const isRecordOf = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 

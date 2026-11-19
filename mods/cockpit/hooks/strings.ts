@@ -71,6 +71,15 @@ const EN = {
     withoutHours: (n: number) => `${n} ${plural(n, 'day', 'days')} without logged hours`,
   },
 
+  /** The desktop page (tabs In progress / Log / Analysis); its buttons reuse `buttons.*` where a label exists. */
+  desk: {
+    tabs: { now: 'In progress', log: 'Log', analysis: 'Analysis' },
+    head: { context: 'Context', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
+    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', unattributed: 'Outside a round' },
+    now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step' },
+    analysis: { time: 'TIME', spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', retroSession: 'this session', retroDays: 'last 10 days', promptNotEmpty: 'the prompt box is not empty' },
+  },
+
   // The single page: its four sections
   page: {
     attention: 'ATTENTION',
@@ -168,6 +177,14 @@ const IT: Strings = {
     underTarget: 'sotto target',
     label: (days: number, what: string, dates: string) => `worklog: ${days}g ${what} (${dates})`,
     withoutHours: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} senza ore segnate`,
+  },
+
+  desk: {
+    tabs: { now: 'In corso', log: 'Log', analysis: 'Analisi' },
+    head: { context: 'Contesto', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
+    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', unattributed: 'Fuori da un giro' },
+    now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo' },
+    analysis: { time: 'TEMPO', spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', retroSession: 'questa sessione', retroDays: 'ultimi 10 giorni', promptNotEmpty: 'il campo prompt non è vuoto' },
   },
 
   page: {

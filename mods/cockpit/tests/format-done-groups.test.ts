@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { groupDone } from '../hooks/done-groups'
+import { groupDone, logModel } from '../hooks/done-groups'
 import type { DoneEvent } from '../hooks/done-groups'
 import type { CockpitLogEntry } from '../types'
 
@@ -117,4 +117,72 @@ test('groupDone: Given a live flow whose agents all run and appear as agent even
   const groups = groupDone([{ at: 490, kind: 'agent', runId: 'wf_9' }], [], open)
   // Then
   expect(groups.find(g => g.flow?.isLive)?.events).toHaveLength(1)
+})
+
+const entry = (at: number, kind: CockpitLogEntry['kind'], over: Partial<CockpitLogEntry> = {}): CockpitLogEntry => ({ at, kind, ...over })
+
+test('logModel: Given entries with round 3 and 4, When modelled, Then two groups, newest round first, each holding its round entry and events', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 3 }), entry(12, 'agent', { round: 3 }), entry(20, 'round', { n: 4 }), entry(22, 'commit', { round: 4 }), entry(23, 'test', { round: 4 })]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.rounds.map(r => [r.n, r.entry?.at, r.events.map(e => e.at)])).toEqual([
+    [4, 20, [23, 22]],
+    [3, 10, [12]],
+  ])
+  expect(model.unattributed).toEqual([])
+})
+
+test('logModel: Given an entry with no round, When modelled, Then it is in unattributed', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 1 }), entry(15, 'compact')]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.unattributed.map(e => e.at)).toEqual([15])
+  expect(model.rounds.map(r => r.n)).toEqual([1])
+})
+
+test('logModel: Given an event of a round with no round entry, When modelled, Then the group exists without an entry', () => {
+  // Given
+  const agent = entry(15, 'agent', { round: 7 })
+  // When
+  const model = logModel([agent])
+  // Then
+  expect(model.rounds).toEqual([{ n: 7, events: [agent] }])
+})
+
+test('logModel: Given a pre-v3 log, When modelled, Then rounds come from the round entries and every other entry is unattributed', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 1 }), entry(12, 'agent'), entry(20, 'round'), entry(25, 'error')]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.rounds.map(r => [r.n, r.events.length])).toEqual([[2, 0], [1, 0]])
+  expect(model.unattributed.map(e => e.at)).toEqual([25, 12])
+})
+
+test('logModel: Given flows, When modelled, Then they carry the recorded rounds and lane, a flow with no lane has none, and the open one is live', () => {
+  // Given
+  const withLane = entry(30, 'flow', { key: 'a', text: 'build', round: 2, endRound: 4, lane: 1 })
+  const bare = entry(20, 'flow', { key: 'b' })
+  const open = entry(40, 'flow', { key: 'c', round: 5, lane: 0 })
+  // When
+  const model = logModel([withLane, bare, entry(50, 'agent', { round: 2 })], open)
+  // Then
+  expect(model.flows).toEqual([
+    { runId: 'c', startRound: 5, lane: 0, isLive: true },
+    { runId: 'a', name: 'build', startRound: 2, endRound: 4, lane: 1, isLive: false },
+    { runId: 'b', isLive: false },
+  ])
+  expect(model.flows[2]?.lane).toBeUndefined()
+  expect(model.rounds.map(r => r.n)).toEqual([2])
+})
+
+test('logModel: Given an empty log, When modelled, Then all lists are empty', () => {
+  // Given / When
+  const model = logModel([])
+  // Then
+  expect(model).toEqual({ rounds: [], unattributed: [], flows: [] })
 })
