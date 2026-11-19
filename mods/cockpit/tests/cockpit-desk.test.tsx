@@ -3,9 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { deskHead } from '../hooks/desk-head'
-import { deskLayout } from '../hooks/desk-layout'
+import { deskLayout, scrollOffset } from '../hooks/desk-layout'
 import { deskUrgent } from '../hooks/desk-urgent'
-import { bodyLimit, limitRows } from '../hooks/desk-view'
+import { bodyLimit, deskScrollMax, limitRows } from '../hooks/desk-view'
 import { RETRO_DAYS } from '../hooks/pane-actions'
 import { withoutSession } from '../hooks/session-data'
 import { INITIAL } from '../hooks/state'
@@ -57,13 +57,32 @@ test('Given a desk tab, When a new session resets the snapshot, Then deskTab is 
   expect(reset.deskTab).toBeUndefined()
 })
 
-test('Given a log page, When a new session resets the snapshot, Then deskLogPage is undefined', () => {
+test('Given a body scroll offset, When a new session resets the snapshot, Then deskScroll is undefined', () => {
   // Given
-  const s = { ...INITIAL, deskLogPage: 2 }
+  const s = { ...INITIAL, deskScroll: 2 }
   // When
   const reset = withoutSession(s)
   // Then
-  expect(reset.deskLogPage).toBeUndefined()
+  expect(reset.deskScroll).toBeUndefined()
+})
+
+test('Given offsets and wheel moves, When scrollOffset clamps them, Then the result stays within 0 and max', () => {
+  // Given
+  const moves = [[0, -3, 9], [5, 10, 9], [2, 3, 9], [4, 1, 0]] as const
+  // When
+  const offsets = moves.map(([offset, by, max]) => scrollOffset(offset, by, max))
+  // Then
+  expect(offsets).toEqual([0, 9, 5, 0])
+})
+
+test('Given 12 rounds, When deskScrollMax is asked per tab, Then the Log can scroll past its window and Now and Analysis cannot', () => {
+  // Given
+  const sessionLog = Array.from({ length: 12 }, (_, i) => ({ at: i * 1000, kind: 'round' as const, n: i + 1, prompt: `p${i + 1}` }))
+  // When
+  const max = (['log', 'now', 'analysis'] as const).map(deskTab => deskScrollMax(snap({ sessionLog, deskTab }), 100, 8))
+  // Then
+  expect(max[0]).toBeGreaterThan(0)
+  expect(max.slice(1)).toEqual([0, 0])
 })
 
 test('Given retro(days), When handled, Then command.run receives the days count of RETRO_DAYS (15)', { timeoutMs: 30_000 }, async ($, on) => {
@@ -476,7 +495,7 @@ function urgentRecorder(calls: string[]): PaneActions {
     setGroupOpen: noop,
     scrollTo: noop,
     setGroupsOpen: noop,
-    setLogPage: noop,
+    scrollBody: noop,
   }
 }
 

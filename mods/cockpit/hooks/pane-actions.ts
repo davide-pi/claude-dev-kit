@@ -2,6 +2,7 @@ import { atom, read } from 'claude-code'
 import type { EngineInterface } from 'claude-code'
 
 import { compactInstructions } from './context'
+import { scrollOffset } from './desk-layout'
 import { toggled } from './events'
 import { INITIAL } from './state'
 import { scrollToAnchor } from './round-anchor'
@@ -40,9 +41,10 @@ export function paneActions($: EngineInterface): PaneActions {
         .catch(() => undefined),
     toggleAgent: id => void patch($, s => ({ ...s, agentsOpen: toggled(s.agentsOpen, id) })).catch(() => undefined),
     toggleSignal: key => void patch($, s => ({ ...s, signalOpen: s.signalOpen === key ? undefined : key })).catch(() => undefined),
-    setTab: tab => void patch($, s => ({ ...s, deskTab: tab })).catch(() => undefined),
-    setLogPage: page => void patch($, s => ({ ...s, deskLogPage: page })).catch(() => undefined),
-    toggleOpen: key => void patch($, s => ({ ...s, openKeys: toggled(s.openKeys, key) })).catch(() => undefined),
+    setTab: tab => void patch($, s => ({ ...s, deskTab: tab, deskScroll: undefined })).catch(() => undefined),
+    scrollBody: (by, max) => void patch($, s => ({ ...s, deskScroll: scrollOffset(s.deskScroll ?? 0, by, max) })).catch(() => undefined),
+    // the desktop Log's filter is one of these keys: a changed list starts its window at the top
+    toggleOpen: key => void patch($, s => ({ ...s, openKeys: toggled(s.openKeys, key), deskScroll: undefined })).catch(() => undefined),
     scrollTo: anchor => void scrollToAnchor($, anchor).catch(() => undefined),
     setGroupOpen: (key, isOpen) => void patch($, s => ({ ...s, groupsOpen: { ...s.groupsOpen, [key]: isOpen } })).catch(() => undefined),
     setGroupsOpen: (keys, isOpen) => void patch($, s => ({ ...s, groupsOpen: { ...s.groupsOpen, ...Object.fromEntries(keys.map(key => [key, isOpen])) } })).catch(() => undefined),

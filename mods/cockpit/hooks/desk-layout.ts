@@ -31,3 +31,10 @@ export function deskLayout(bodyColumns: number, bodyRows: number): DeskLayout {
     nowColumns: size === 'wide' ? 2 : 1,
   }
 }
+
+/** A scroll offset moved `by` rows and kept within [0, max]; the start is clamped first, so an offset left past a shrunk list moves at once. */
+export function scrollOffset(offset: number, by: number, max: number): number {
+  const top = Math.max(0, Math.floor(max))
+  const from = Math.min(Math.max(0, Math.floor(offset)), top)
+  return Math.min(Math.max(0, from + Math.round(by)), top)
+}

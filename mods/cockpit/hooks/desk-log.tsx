@@ -1,6 +1,7 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
+import { scrollOffset } from './desk-layout'
 import type { DeskLayout } from './desk-layout'
 import { railSvg } from './desk-svg'
 import type { LaneCell } from './desk-svg'
@@ -25,6 +26,11 @@ const RAIL_PX = 28
 const ROW_CELLS = 1.4
 /** The cells the filter row (native buttons) takes above the rows. */
 const FILTER_CELLS = 2
+/** The cells the position hint takes under the rows. */
+const HINT_CELLS = 1
+
+/** The rows a window of the Log holds: what `layout.bodyRows` leaves under the filter and over the hint, a rail's height each. */
+const windowRows = (layout: DeskLayout): number => Math.max(2, Math.floor((layout.bodyRows - FILTER_CELLS - HINT_CELLS) / ROW_CELLS))
 
 type Flow = LogModel['flows'][number]
 
@@ -153,13 +159,20 @@ function withLanes(rows: Row[], flows: readonly Flow[]): Row[] {
   return rows
 }
 
+const logRowsOf = (s: CockpitSnapshot): Row[] => {
+  const log = s.sessionLog ?? []
+  return buildRows(logModel(log, openFlowOf(s, log)), isAllShown(s))
+}
+
+/** The furthest the Log's window scrolls in `layout`: the rows past one window, 0 when they all show. */
+export const logScrollMax = (s: CockpitSnapshot, layout: DeskLayout): number => Math.max(0, logRowsOf(s).length - windowRows(layout))
+
 /** The Log tab of the desktop page: the filter and legend, then one row per round, event and flow, each a fixed-width rail and a text column that takes the rest. */
 export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Button, Svg } = ui
   const S = t().desk.log
-  const log = s.sessionLog ?? []
   const isAll = isAllShown(s)
-  const rows = buildRows(logModel(log, openFlowOf(s, log)), isAll)
+  const rows = logRowsOf(s)
 
   const line = (key: string, rail: string, alt: string, content: RenderElement): RenderElement => (
     <Box key={key} flexDirection="row" alignItems="center" columnGap={1}>
@@ -180,31 +193,20 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
     ]
     return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: RAIL_PX }), id === '' ? r.text : id, <Text wrap="truncate">{parts}</Text>)
   }
-  // all rows when they fit; else pages of `cap - 1` rows and the pager row (more, back to top), the page clamped as the filter changes the count
-  const cap = Math.max(2, Math.floor((layout.bodyRows - FILTER_CELLS) / ROW_CELLS))
-  const perPage = cap - 1
-  const pages = rows.length <= cap ? 1 : Math.ceil(rows.length / perPage)
-  const page = Math.min(Math.max(0, Math.floor(s.deskLogPage ?? 0)), pages - 1)
-  const pageRows = pages === 1 ? rows : rows.slice(page * perPage, (page + 1) * perPage)
-  const left = pages === 1 ? 0 : rows.length - (page + 1) * perPage
-  const pager = (
-    <Box key="desk:log:pager" flexDirection="row" alignItems="center" columnGap={2} paddingLeft={1}>
-      {left > 0 ? (
-        <Button key="desk:log:more" onPress={() => actions.setLogPage(page + 1)}>
-          <Text color={LINK}>{`+${left}`}</Text>
-        </Button>
-      ) : null}
-      {page > 0 ? (
-        <Button key="desk:log:top" onPress={() => actions.setLogPage(0)}>
-          <Text color={DIM}>{S.toTop}</Text>
-        </Button>
-      ) : null}
+  // a window of `cap` rows from the body's scroll offset (moved by the wheel, see register), clamped again as the filter changes the count
+  const cap = windowRows(layout)
+  const offset = scrollOffset(s.deskScroll ?? 0, 0, rows.length - cap)
+  const shown = rows.slice(offset, offset + cap)
+  // always drawn, one cell tall, blank when every row shows: the rows above never shift
+  const hint = (
+    <Box key="desk:log:hint" height={HINT_CELLS} paddingLeft={1}>
+      <Text color={DIM}>{rows.length > cap ? `${offset + 1}–${offset + shown.length} / ${rows.length}` : ' '}</Text>
     </Box>
   )
   const drawn =
     rows.length === 0
-      ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>)]
-      : [...pageRows.map(drawRow), ...(pages === 1 ? [] : [pager])]
+      ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>), hint]
+      : [...shown.map(drawRow), hint]
 
   // one filter for both pages on purpose: the same ALL_KEY the terminal log toggles; pressing the active choice changes nothing
   const choice = (key: string, label: string, isOn: boolean): RenderElement => (

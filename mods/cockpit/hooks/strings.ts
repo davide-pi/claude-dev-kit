@@ -78,7 +78,7 @@ const EN = {
   desk: {
     tabs: { now: 'In progress', log: 'Log', analysis: 'Analysis' },
     head: { context: 'Context', contextShort: 'CTX', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
-    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', unattributed: 'Outside a round', empty: 'nothing logged yet', noPrompt: 'no text', toTop: 'back to top' },
+    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', unattributed: 'Outside a round', empty: 'nothing logged yet', noPrompt: 'no text' },
     now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step', noRequest: 'no open request', noFlow: 'no flow running', noAgents: 'no agent outside the flow' },
     analysis: { time: 'TIME', rounds: 'in rounds', tools: 'in tools', waited: 'waiting for you', spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
   },
@@ -187,7 +187,7 @@ const IT: Strings = {
   desk: {
     tabs: { now: 'In corso', log: 'Log', analysis: 'Analisi' },
     head: { context: 'Contesto', contextShort: 'CTX', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
-    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log', noPrompt: 'senza testo', toTop: 'torna in cima' },
+    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log', noPrompt: 'senza testo' },
     now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo', noRequest: 'nessuna richiesta aperta', noFlow: 'nessun flow in corso', noAgents: 'nessun agente fuori dal flow' },
     analysis: { time: 'TEMPO', rounds: 'nei giri', tools: 'negli strumenti', waited: 'in attesa di te', spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
   },

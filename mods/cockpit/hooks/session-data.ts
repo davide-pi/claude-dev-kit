@@ -220,7 +220,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   signalsAt: undefined,
   openKeys: undefined,
   deskTab: undefined,
-  deskLogPage: undefined,
+  deskScroll: undefined,
   groupsOpen: undefined,
   tasks: [],
   cacheShare: undefined,

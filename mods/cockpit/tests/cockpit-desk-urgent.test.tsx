@@ -34,7 +34,7 @@ const ACTIONS: PaneActions = {
   setGroupOpen: noop,
   scrollTo: noop,
   setGroupsOpen: noop,
-  setLogPage: noop,
+  scrollBody: noop,
 }
 
 const SLOTS = new WeakMap<object, Map<string, CockpitSnapshot>>()

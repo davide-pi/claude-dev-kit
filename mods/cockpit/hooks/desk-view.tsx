@@ -4,7 +4,7 @@ import type { CockpitSnapshot } from '../types'
 import { deskActions, deskAnalysis } from './desk-analysis'
 import { deskHead } from './desk-head'
 import { DESK_MEDIUM_FROM, DESK_WIDE_FROM, deskLayout } from './desk-layout'
-import { deskLog } from './desk-log'
+import { deskLog, logScrollMax } from './desk-log'
 import { deskNow } from './desk-now'
 import { t } from './strings'
 import type { Ui } from './view-base'
@@ -39,6 +39,13 @@ export const bodyLimit = (bodyRows: number, bodyColumns: number = DESK_WIDE_FROM
   return Math.max(bodyRows - HEAD_ROWS[size] - ACTION_ROWS[size], MIN_BODY_ROWS)
 }
 
+
+/**
+ * The furthest the body of the open tab scrolls under the fixed head and action bar. Only the Log's rows outgrow its window: Now and Analysis
+ * cap their own lists to the body (their `+n` rows), so they stay at 0.
+ */
+export const deskScrollMax = (s: CockpitSnapshot, bodyColumns: number, bodyRows: number): number =>
+  (s.deskTab ?? 'now') === 'log' ? logScrollMax(s, deskLayout(bodyColumns, bodyLimit(bodyRows, bodyColumns))) : 0
 export { limitRows } from './desk-layout'
 
 /** The tab's underline, `px` wide: always there, the accent under the open tab and transparent under the others, so the row never changes size. */
