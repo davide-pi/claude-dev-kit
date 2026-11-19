@@ -36,10 +36,10 @@ data, contract; `medium` local logic, testable; `low` cosmetic.
 
 ## Done means verified
 Never claim done, fixed, passing, verified without a command run this turn (reading code or a report
-isn't proof). A main-session reply after an edit, commit, push or install puts, after the bold line, a `> ` note,
-`**Verification**`, per check `Level:` `Command:` `Deciding line:` `Status:`, `> ────` between.
-Deciding line: verbatim. Status: `✓ done`, `? not verified: <reason>`
-(Command: how to check), `✗ failed` (quoted).
+isn't proof). A main-session reply after an edit, commit, push or install puts, after the bold line, `**Verification**`
+and a real markdown table, never fenced: Level | Command | Deciding line | Status, a row per check.
+Deciding line: verbatim. Status: `✓ done`, `✗ failed` (quoted), or `? not verified: <reason>`
+and Command: how to check.
 
 ## Tools, no prompts
 `git -C <path>`, never `cd X && ...`. Batch independent calls; read a file once, not after an edit.
