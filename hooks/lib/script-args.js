@@ -280,7 +280,11 @@ function checkScriptArgs(command, tool) {
         note('gate.mjs --lane-remove force-removes lane worktrees and deletes their branches: unmerged lane work is lost. Confirm?');
       }
       for (let i = 0; i < tokens.length - 1; i++) {
-        if ((tokens[i] === '--test' || tokens[i] === '--unit') && !isPlainTestCommand(tokens[i + 1])) {
+        const vetted = ['--test', '--unit', '--targeted'].includes(tokens[i]);
+        // The {files} placeholder is replaced by quoted test file names: a plain test path stands in for it.
+        // The gate quotes each name itself: a quote in the template would unpair them.
+        const quoted = tokens[i] === '--targeted' && /["']/.test(tokens[i + 1]);
+        if (vetted && (quoted || !isPlainTestCommand(tokens[i] === '--targeted' ? tokens[i + 1].split('{files}').join('x.test.js') : tokens[i + 1]))) {
           note(`The ${tokens[i]} command of gate.mjs isn't a known test runner call (dotnet test, node --test, vitest, jest, `
             + 'npm/pnpm/yarn test, claude plugin test) or holds a shell operator, and the gate runs it through a shell. Confirm?');
           break;

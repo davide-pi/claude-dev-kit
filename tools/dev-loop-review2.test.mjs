@@ -16,7 +16,7 @@ import { run, ARGS, ARGS_M, review, finding, impl, gate, tasksOf, HELPER, review
 const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
 const treeless = (extra = {}) => impl({ gate: gate('green', { tree: '' }), ...extra });   // no block delta to read
-const V_ARGS = { ...ARGS_M, verify: 'node --test x' };
+const V_ARGS = { ...ARGS_M, risk: ['data'], verify: 'node --test x' };
 const T2 = (tree, churn = 3) => ({ tree, files: ['src/Orders/OrdersQuery.cs'], churn });
 const readerA = (calls) => calls.filter(c => /^block \d+ · reader A$/.test(c.opts.label ?? ''));
 const scopeAt = (extra = {}) => finding({ category: 'scope', title: 'unrequested rename of a helper', ...extra });

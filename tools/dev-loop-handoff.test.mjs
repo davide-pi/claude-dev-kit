@@ -15,7 +15,7 @@ import { run, ARGS_M, review, impl, gate, tasksOf, planLines, blockTag, readRepo
 
 const HEADING = /Handoff from earlier blocks/i;
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
-const two = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
+const two = { ...ARGS_M, verify: 'node --test x', risk: ['data'], plan: { tasks: tasksOf(5) } };
 const three = { ...two, plan: { tasks: tasksOf(10) } };
 const made = (calls) => calls.filter((c) => c.opts.agentType === 'implementer');
 const block = (calls, n) => made(calls).find((c) => new RegExp(`^B${n} · .* · implement$`).test(c.opts.label));
@@ -135,7 +135,7 @@ test('given a handoff from block 1, when the reader A fix of block 2 is called, 
 // ── the plan in the Workflow view: log lines and task-tagged labels ───────────────────────────────────
 const titled = (id, dependsOn = []) => ({ id, title: `Title ${id}`, files: [], dependsOn, tdd: false, criteria: [], risky: true });
 const PLAN = [titled('T1'), titled('T2', ['T1']), titled('T3'), titled('T4', ['T1']), titled('T5', ['T4'])];   // two blocks: T1 T2 T3 | T4 T5
-const planned = { ...ARGS_M, verify: 'node --test x', plan: { tasks: PLAN } };
+const planned = { ...ARGS_M, verify: 'node --test x', risk: ['data'], plan: { tasks: PLAN } };
 
 test('given a plan of 2 blocks, when the loop starts, then one header line and one line per block are logged with ids, titles and dependencies', async () => {
   // Given

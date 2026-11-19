@@ -25,10 +25,13 @@
  *     `> **Detail**` / `> **Dettaglio**` block and a `> - ` bullet line are prose, not output), no inline `` `command` → result ``, no honest
  *     "non verificato" / "not verified".
  *
- * A `deliver` verdict block (a `**Verifica**` / `**Verification**` title, then per check the lines `Livello:`, `Comando:`, `Riga che decide:`,
- * `Stato:` (English `Level`, `Command`, `Deciding line`, `Status`), a `────` line between checks; each line with or without a `> ` prefix; its title and
- * lines are prose, never tool output; blank lines between checks are skipped, an unrecognised line continues the last label's value, a check with no `Stato:` is an unproven row, and the block ends at real prose: see `parseVerdicts`; the old `| Livello | Comando | … |` table is no longer read: it is no verdict and the claim is sent back
- * asking for the stacked form) is judged check by check instead: a check whose status is `fatto`, `fallito` or `failed` is proven only when its deciding line (normalised: whitespace
+ * A `deliver` verdict (a `**Verifica**` / `**Verification**` title, then the table `| Livello | Comando | Riga che decide | Stato |` (English `Level`,
+ * `Command`, `Deciding line`, `Status`; columns found by header name, the header alone anchors a table with no title, leading pipes optional) with one row per check; or the
+ * stacked form, per check the lines `Livello:`, `Comando:`, `Riga che decide:`, `Stato:` with a `────` line between checks; each line with or without a
+ * `> ` prefix; its title and lines are prose, never tool output; a table row that does not map to the header's columns or whose Stato is missing or no
+ * known state, and a stacked check with no `Stato:`, is an unproven row, never dropped; see `parseVerdicts`; the block reasons ask for the table)
+ * is judged check by check instead: a check whose status starts with `fatto`, `done`, `fallito` or `failed` (markup, symbols and a trailing note
+ * dropped; never one that says `non verificato`) is proven only when its deciding line (normalised: whitespace
  * collapsed, backslashes and backticks stripped, lowercase) is a substring of what the turn's tools
  * printed (tool results, task notifications, cross-session messages: the model's own text never counts).
  * A `non verificato` row passes alone and excuses no other row; one unproven row blocks, even after a
@@ -125,7 +128,7 @@ const FENCE_OR_QUOTE = /^\s*(?:```|~~~)|^\s*>\s?\S/m;
 const DETAIL_BLOCK = /^[ \t]*>[ \t]*\*\*(?:Detail|Dettaglio)\*\*.*(?:\n[ \t]*>.*)*/gim;
 /** A section's detail: quoted bullet lines (`> - …`), prose like the block above, never tool output. */
 const DETAIL_BULLET = /^[ \t]*>[ \t]*[-*][ \t].*$/gm;
-/** A quoted `> |` table line (the old verdict form) is no evidence; the stacked block's own `> ` lines are stripped by `parseVerdicts`. */
+/** A quoted `> |` table line or check label is no evidence; the verdict's own `> ` lines are stripped by `parseVerdicts`. */
 const QUOTED_TABLE_LINE = /^[ \t]*(?:>[ \t]*)+(?:\||(?:[-*][ \t]+)?(?:\*\*)?(?:Livello|Level|Comando|Command|Riga\s+che\s+decide|Deciding\s+line)(?:\*\*)?[ \t]*:).*$/gim;
 /** `` `dotnet test` → 42 passed ``: the command and its result on one line. */
 const INLINE_RESULT = /`[^`\n]+`\s*(?:→|->|=>|:|=|—|–)\s*[^\s`]*(?:\d|\b(?:ok|verde|green|passed|failed|exit|succeeded)\b)/i;
@@ -138,16 +141,30 @@ const ORPHAN_STATE = /^[ \t]*(?:>[ \t]*)*(?:[-*][ \t]+)?(?:\*\*)?(?:Stato|Status
 /** One line of a check: its label (Italian or English) and the text after the first colon. */
 const CHECK_LINE = /^(Livello|Level|Comando|Command|Riga che decide|Deciding line|Stato|Status)[ \t]*:[ \t]*(.*)$/i;
 const CHECK_SEPARATOR = /^─+$/;
-/** A row's state that claims a result (`fatto`, `fallito` and their English forms) and so needs proof (`non verificato: …` / `not verified: …` do not). */
-const PROOF_STATE = /^(?:fatto|done|fallito|failed)$/i;
+/** A row's state that claims a result: it starts with `fatto`, `fallito` or their English forms, a note may follow (`fatto (3 test)`). */
+const PROOF_STATE = /^(?:fatto|done|fallito|failed)(?![\p{L}\p{N}_])/iu;
+/** A state that says the check did not run: never a claim, whatever word it starts with. */
+const UNVERIFIED_STATE = /non\s+verificat|not\s+verified/i;
+/** True when the state claims a result and so needs proof (`non verificato: …` / `not verified: …` do not). */
+const claimsProof = (state) => PROOF_STATE.test(state) && !UNVERIFIED_STATE.test(state);
+/** A verdict table's header labels (Italian or English), by row key. */
+const TABLE_LABELS = { livello: 'level', level: 'level', comando: 'command', command: 'command', 'riga che decide': 'line', 'deciding line': 'line', stato: 'state', status: 'state' };
+/** A table's alignment row: `| --- | :---: |`. */
+const TABLE_ALIGN = /^\|?(?:[ \t]*:?-+:?[ \t]*\|)*[ \t]*:?-+:?[ \t]*\|?$/;
+/** The verdict form the block reasons ask for. */
+const TABLE_FORM = 'a "**Verifica**" title line (English chat: "**Verification**"), then the table "| Livello | Comando | Riga che decide | Stato |" '
+  + '(English: "| Level | Command | Deciding line | Status |") with its "| --- | --- | --- | --- |" line and one row per check, never in a code block';
 
 /** ANSI escape codes dropped, lowercase, whitespace collapsed, backslashes and backticks stripped: a line compares the same raw and JSON-escaped. */
 const normalise = (text) => text.replace(/\u001b\[[0-9;?]*[A-Za-z]/g, '').replace(/[\\`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase();
 
-/** A state cell without markup and its leading status symbols; a bare ✓ reads `fatto`, a bare ✗ `fallito`. */
+/** A `$…$` span's text: `\command` tokens, the colour argument of `\color` / `\textcolor` / `\colorbox`, braces and `$` dropped. */
+const latexText = (cell) => cell.replace(/\$([^$\n]+)\$/g, (_, tex) => tex.replace(/\\ /g, ' ').replace(/\\(?:color|textcolor|colorbox)[ \t]*\{[^{}]*\}/g, '').replace(/\\[A-Za-z]+/g, '').replace(/[{}]/g, ''));
+
+/** A state cell without markup (LaTeX too) and its leading status symbols and emoji; a bare ✓ reads `fatto`, a bare ✗ `fallito`. */
 function stateOf(cell) {
-  const raw = cell.replace(/[*_`]/g, '').trim();
-  const symbols = raw.match(/^[\s✓✔✅✗✘❌?️]+/u)?.[0] ?? '';
+  const raw = latexText(cell).replace(/\\ /g, ' ').replace(/[*_`]/g, '').trim();
+  const symbols = raw.match(/^[\s✓✔✅✗✘❌?️‍\p{Extended_Pictographic}]+/u)?.[0] ?? '';
   const word = raw.slice(symbols.length).trim();
   if (word) return word;
   if (/[✓✔✅]/u.test(symbols)) return 'fatto';
@@ -162,13 +179,37 @@ function stateOf(cell) {
  * with no `> `; with an unquoted title, the first line after a blank that is no label or separator. Inside it a line that is no label
  * (`> (nota)`, a wrapped deciding line, a mistyped label) continues the last label's value; a Stato value is never extended.
  * A check closes at a separator, at the next Livello (or a repeated label) or at the block's end.
+ *
+ * A table is read from its header row, with or without the title above (see `tableAt`); a fenced block is skipped unless it holds a verdict
+ * header, then read as a verdict anyway, its fence lines never output: a header with the
+ * four labels maps its columns by name; one with Stato and two more labels, or a table right under the title whose header has a label
+ * besides Stato, keeps every row, unproven; a table under the title with no such label is no verdict. Pipe rows right under the title
+ * whose first line has no alignment row under it have no header: every row is unproven. Its rows run to the first line that
+ * is no `|` row; a row whose cell count differs from the header's, or whose Stato cell is empty or no known state, is unproven (`noState`).
  */
 function parseVerdicts(message) {
   const lines = message.split(/\r?\n/);
   const rows = [];
   const quotedLines = new Set();
   const consumed = new Set();
+  const fenced = new Set();
+  const isFence = (line) => /^[ \t]*(?:>[ \t]*)*(?:```|~~~)/.test(line);
+  let block = [];
+  // A fenced block holding a verdict header is read as a verdict anyway (fail closed) and its fence lines are never output.
+  const closeBlock = () => {
+    if (block.slice(1).some((k) => tableAt(lines, k))) block.filter((k) => isFence(lines[k])).forEach((k) => { consumed.add(k); quotedLines.add(k); });
+    else block.forEach((k) => fenced.add(k));
+    block = [];
+  };
+  for (let i = 0, open = false; i < lines.length; i += 1) {
+    const fence = isFence(lines[i]);
+    if (open || fence) block.push(i);
+    if (fence) { open = !open; if (!open) closeBlock(); }
+  }
+  closeBlock();
   for (let i = 0; i < lines.length; i += 1) {
+    const table = consumed.has(i) || fenced.has(i) ? null : tableAt(lines, i);
+    if (table) { i = readTable(lines, i, table.keys, rows, consumed, quotedLines, table.loose); continue; }
     if (!VERDICT_START.test(lines[i])) continue;
     const quoted = /^\s*>/.test(lines[i]);
     consumed.add(i);
@@ -177,6 +218,7 @@ function parseVerdicts(message) {
     let cur = fresh();
     let last = '';
     let blank = false;
+    let first = true;
     const flush = () => {
       const row = { level: cur.level ?? '', command: cur.command ?? '', line: cur.line ?? '' };
       if (cur.state !== null) rows.push({ ...row, state: stateOf(cur.state) });
@@ -188,6 +230,18 @@ function parseVerdicts(message) {
       const isQuote = /^\s*>/.test(lines[j]);
       const text = lines[j].trim().replace(/^>[ \t]*/, '').trim().replace(/^\*\*(.*?)\*\*/, '$1');
       if (!text) { blank = true; continue; }
+      // A verdict header is read by the outer loop; a table under the title whose header has a label besides Stato is read here, every
+      // row unproven; one with no such label is an ordinary table, no verdict. A first row with no alignment row under it is no header:
+      // the rows are headerless verdict rows, every one unproven (read from line j - 1, a blank or the title, so line j is a row).
+      const row = tableLine(lines[j]);
+      if (row !== null ? first || tableAt(lines, j) : tableAt(lines, j)) {
+        if (row !== null && !tableAt(lines, j)) {
+          if (!TABLE_ALIGN.test(tableLine(lines[j + 1] ?? '') ?? '')) readTable(lines, j - 1, null, rows, consumed, quotedLines);
+          else if (headerKind(row) === 'label') readTable(lines, j, null, rows, consumed, quotedLines);
+        }
+        break;
+      }
+      first = false;
       if (/^(?:```|~~~)/.test(text) || (quoted && !isQuote && !CHECK_SEPARATOR.test(text))) break;
       const m = CHECK_LINE.exec(text);
       if (m) {
@@ -208,12 +262,96 @@ function parseVerdicts(message) {
   }
   lines.forEach((text, i) => {
     if (consumed.has(i)) return;
-    const m = ORPHAN_CHECK.exec(text) ?? (() => { const s = ORPHAN_STATE.exec(text); return s && PROOF_STATE.test(stateOf(s[1])) ? [s[0], ''] : null; })();
+    // An orphan state is the claim word alone (symbols and punctuation aside): `Status: failed to connect` is quoted output.
+    const m = ORPHAN_CHECK.exec(text) ?? (() => { const s = ORPHAN_STATE.exec(text); return s && /^\p{L}+[^\p{L}\p{N}]*$/u.test(stateOf(s[1])) && claimsProof(stateOf(s[1])) ? [s[0], ''] : null; })();
     if (m) rows.push({ level: '', command: '', line: m[1].trim(), state: '', noState: true, orphan: true });
   });
   return { rows, quotedLines };
 }
 const verdictRows = (message) => parseVerdicts(message).rows;
+
+/** A line as a table row without its `> ` quotes, or null when it is no `|` row; `loose`: a row with no leading pipe (`a | b`) too, given one. */
+function tableLine(line, loose = false) {
+  const text = line.trim().replace(/^(?:>[ \t]*)+/, '').trim();
+  if (text.startsWith('|')) return text;
+  return loose && text.includes('|') ? `| ${text}` : null;
+}
+
+/** A table row's cells, split on `|` outside backtick spans and not escaped (`\|` reads `|`); the outer pipes open and close the row. */
+function tableCells(row) {
+  const cells = [];
+  let cell = '';
+  let span = 0;                                  // the length of the open backtick run, 0 outside a span
+  for (let k = 0; k < row.length; k += 1) {
+    if (row[k] === '\\' && row[k + 1] === '|') { cell += '|'; k += 1; continue; }
+    if (row[k] === '`') {
+      let n = 1;
+      while (row[k + n] === '`') n += 1;
+      if (span === n) span = 0;
+      else if (!span && new RegExp(`(?<!\`)\`{${n}}(?!\`)`).test(row.slice(k + n))) span = n;
+      cell += row.slice(k, k + n);
+      k += n - 1;
+    } else if (row[k] === '|' && !span) {
+      cells.push(cell.trim());
+      cell = '';
+    } else cell += row[k];
+  }
+  cells.push(cell.trim());
+  cells.shift();
+  if (cells.length && cells[cells.length - 1] === '' && row.endsWith('|')) cells.pop();
+  return cells;
+}
+
+/** The row keys of a table header's columns (null for a column that is no label). */
+const headerKeys = (row) => tableCells(row).map((c) => TABLE_LABELS[c.replace(/[*_`]/g, '').replace(/\s+/g, ' ').trim().toLowerCase()] ?? null);
+
+/** A header row read as a verdict's: `full` (the four labels), `near` (Stato and two more: a misspelt label), `label` (a label besides Stato), else null. */
+function headerKind(row) {
+  const keys = headerKeys(row);
+  const others = ['level', 'command', 'line'].filter((k) => keys.includes(k)).length;
+  if (keys.includes('state') && others >= 2) return others === 3 ? 'full' : 'near';
+  return others ? 'label' : null;
+}
+
+/**
+ * The verdict table whose header is line `i`, or null: `keys` maps its columns (null when a label is misspelt: every row unproven),
+ * `loose` when its rows have no leading pipe (read only with the four labels over an alignment row: prose may hold a `|`).
+ */
+function tableAt(lines, i) {
+  const row = tableLine(lines[i]);
+  if (row !== null) {
+    const kind = headerKind(row);
+    return kind === 'full' ? { keys: headerKeys(row) } : kind === 'near' ? { keys: null } : null;
+  }
+  const loose = tableLine(lines[i], true);
+  if (loose === null || headerKind(loose) !== 'full' || !TABLE_ALIGN.test(tableLine(lines[i + 1] ?? '', true) ?? '')) return null;
+  return { keys: headerKeys(loose), loose: true };
+}
+
+/** A Stato cell the table reads: a claim, a "non verificato", or a bare `-` placeholder; anything else is no state. */
+const knownState = (state) => PROOF_STATE.test(state) || UNVERIFIED_STATE.test(state) || /^[-–—]$/.test(state);
+
+/**
+ * Reads the table whose header is line `at` into `rows` (`keys`: the header's row keys; null for a header that maps no verdict, so every row is
+ * unproven; `loose`: rows with no leading pipe) and marks its lines consumed (quoted ones in `quotedLines`); returns the index of its last line.
+ */
+function readTable(lines, at, keys, rows, consumed, quotedLines, loose = false) {
+  const mark = (k) => { consumed.add(k); if (/^\s*>/.test(lines[k])) quotedLines.add(k); };
+  let k = at;
+  mark(k);
+  if (k + 1 < lines.length && TABLE_ALIGN.test(tableLine(lines[k + 1], loose) ?? '')) mark(++k);
+  while (k + 1 < lines.length && tableLine(lines[k + 1], loose) !== null) {
+    mark(++k);
+    const text = tableLine(lines[k], loose);
+    const cells = tableCells(text);
+    if (!keys || cells.length !== keys.length) { rows.push({ level: '', command: '', line: text, state: '', noState: true }); continue; }
+    const row = { level: '', command: '', line: '', state: '' };
+    keys.forEach((key, c) => { if (key) row[key] = cells[c]; });
+    const state = stateOf(row.state);
+    rows.push(state && knownState(state) ? { ...row, state } : { ...row, state: '', noState: true });
+  }
+  return k;
+}
 
 /** `text` appears in `printed` as whole words only: a short line ("ok", "0") is not proven by "token" or "10". */
 function printedAsWords(printed, text) {
@@ -293,7 +431,7 @@ function unprovenRows(rows, resultsText, shellCommands = []) {
   const printed = normalise(resultsText);
   return rows.filter((r) => {
     if (r.noState) return true;
-    if (!PROOF_STATE.test(r.state)) return false;
+    if (!claimsProof(r.state)) return false;
     const line = normalise(r.line);
     // An empty JSON array or object is proof only as a line of its own.
     if (/^(?:\[\]|\{\})$/.test(line)) return !new RegExp(`(?:^|\\s)${line.replace(/[[\]{}]/g, '\\$&')}(?:\\s|$)`).test(printed);
@@ -319,7 +457,7 @@ function shortHead(gitDir, branch) {
 
 /** What closed the task: the passing verdict rows as `Livello | Stato`, else the commit subjects; empty when nothing did. */
 function closedTask(turn, rows) {
-  const verdict = rows.filter((r) => PROOF_STATE.test(r.state)).slice(0, 5).map((r) => `${r.level} | ${r.state}`);
+  const verdict = rows.filter((r) => claimsProof(r.state)).slice(0, 5).map((r) => `${r.level} | ${r.state}`);
   if (verdict.length) return verdict;
   return turn.shellCommands.filter((c) => GIT_COMMIT.test(c)).slice(0, 5).map((c) => {
     const m = COMMIT_SUBJECT.exec(c);
@@ -483,7 +621,7 @@ try {
   const rows = verdictRows(message);
   // Sent back once already: never again, but a turn that closed a task still leaves the hand-off.
   if (payload.stop_hook_active === true) allowWith(payload, turn, rows);
-  const claimsRows = rows.some((r) => r.noState || PROOF_STATE.test(r.state));
+  const claimsRows = rows.some((r) => r.noState || claimsProof(r.state));
   // A turn cut before its start may have edited in the part not read: a verdict table claiming results is judged anyway.
   // An unarmed turn can still close a task (a `/commit` with no edit): it may leave the hand-off.
   if (!turn.armed && !(claimsRows && !turn.complete)) allowWith(payload, turn, rows);
@@ -499,7 +637,7 @@ try {
       process.stdout.write(JSON.stringify({
         decision: 'block',
         reason: 'The turn is too long to check the verdict checks against the command output. '
-          + 'Rewrite the verdict as a quoted note: a "> **Verifica**" title line (English: "> **Verification**"), then per check the lines "> Livello: …", "> Comando: …", "> Riga che decide: …", "> Stato: …" (English: Level, Command, Deciding line, Status) with a "> ────" line between checks, no table, with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato of each check.',
+          + `Rewrite the verdict as ${TABLE_FORM}, with the output of commands run now, or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato cell of each row.`,
       }));
       process.exit(0);
     }
@@ -512,9 +650,10 @@ try {
       decision: 'block',
       reason: `${unproven.length} verdict checks say "${said}" but the deciding line appears in no output of the turn: ${shown}. `
         + 'The deciding line holds copied output only, on one line: move any comment or count ("su tutti e 6", "6 files") to the command line. '
-        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato of that check. '
-        + (unproven.some((r) => r.orphan) ? 'A check outside the block was found: every check goes inside the one "**Verifica**" block, stacked, with no prose or fence between checks. ' : '')
-        + 'Every check needs its Stato line. Keep the stacked note (Livello: / Comando: / Riga che decide: / Stato: lines, no table).',
+        + 'Quote the real command output (rerun it if you did not see it), or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato cell of that row. '
+        + (unproven.some((r) => r.orphan) ? 'A check outside the block was found: every check goes inside the one "**Verifica**" block, one table row per check, with no prose or fence between rows. ' : '')
+        + 'Every row needs its Stato cell and exactly four cells (a | inside a cell goes in backticks or as \\|). '
+        + `Write the verdict as ${TABLE_FORM}.`,
     }));
     process.exit(0);
   }
@@ -528,8 +667,8 @@ try {
   process.stdout.write(JSON.stringify({
     decision: 'block',
     reason: `You claim an outcome ("${word}") without proof. Put the command you ran and the output line that `
-      + 'confirms it in the verdict: a quoted note: a "> **Verifica**" title line (English chat: "> **Verification**"), then per check the lines "> Livello: …", "> Comando: …", "> Riga che decide: …", "> Stato: …" (English: Level, Command, Deciding line, Status) with a "> ────" line between checks, each check ending with its Stato line, never a table, never in a code block, '
-      + 'or write "non verificato" / "not verified" and why. Do not rerun anything if the output is already above: quote it in the note.',
+      + `confirms it in the verdict: ${TABLE_FORM}, every row with its Stato cell, `
+      + 'or write "non verificato: <motivo>" / "not verified: <reason>" in the Stato cell of a check you could not run. Do not rerun anything if the output is already above: quote it in the table.',
   }));
   process.exit(0);
 } catch {

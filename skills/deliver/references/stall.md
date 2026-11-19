@@ -31,6 +31,12 @@ that round's other resolution; the stall comes back while a question has none), 
 no cap on the rounds; `guidance` or `accept` on a `churn` or `not-converging`
 round restarts its count, `retry` does not.
 
+Before a `question` stall, a Sonnet judge looks for the answer in the owner's own text (the request, the decisions, every
+guidance and answer so far) and returns a quote; the code keeps the answer only when that quote is literally in the text.
+Those answers come back in the result as `judged: [{ round, text, answer, quote, judged: true }]`: on a relaunch copy each
+one, flag included, into `answers` of its round, so the judge isn't asked twice. Only the questions it can't settle stall.
+Guidance also goes to the reviewers of the later rounds, not only to the fixer.
+
 | `stall.why` | Meaning, and the question |
 | --- | --- |
 | `question` | see "Questions" above |
@@ -56,7 +62,9 @@ round restarts its count, `retry` does not.
 
 **Lane stalls** (`lanes: true`): any stall raised while the lanes run (a lane's `gate-red`, `incomplete`, `question`, ...) keeps its own `why`, but its reason ends with the worktree path and branch of every lane, and `resume` says to ask the user: nothing is merged (no partial merge of the green lanes). Remove the lanes with `node ~/.claude/scripts/gate.mjs --root <repoRoot> --lane-remove deliver-lane/<name> ...` (force: unmerged work in them is lost), then relaunch WITHOUT `resumeFromRunId`. A merge that went through but could not remove a worktree or branch is no stall: the verdict has a `gaps` line naming them.
 
-**Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `tests-changed`, `incomplete`), from round 0 or a fix round: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
+**Gate stalls** (`gate-red`, `gate-timeout`, `gate-running`, `tests-changed`, `incomplete`) raised by a block: the block phase never reads `retry` or `guidance`, and a resume replays the cached reports. Relaunch WITHOUT `resumeFromRunId`, with the gate line or the user's guidance in `brief`.
+
+**Full gate and merge gate stalls** (lite path `targeted`, or lanes; `gate-red`, `gate-timeout`, `gate-running`, `verify-not-run`; not `merge-conflict`), at round 0 or later: relaunch WITH `resumeFromRunId` and every resolution, adding `{ round: <stall.round>, guidance: "..." }` or `{ round: <stall.round>, retry: true }`. The finished blocks replay from the cache and are never redone (the tree already holds their work); the gate and fix calls carry the resolution, so they run again as new calls. A merge gate that already merged the lanes and failed only on the tests reruns as a plain gate on the tree.
 
 A stall at round 0 (`verify-not-run` of the implementer, or `stall.reason` saying an agent returned nothing) replays the
 cached implementer report: relaunch WITHOUT `resumeFromRunId`. An implementer with no report or a non-empty `remaining` is continued (twice at most), never reviewed partial. A red implementer verify at round 0 is no stall: it
