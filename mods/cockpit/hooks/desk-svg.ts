@@ -31,7 +31,7 @@ const ring = (r: number, width: number, percent: number, color: string): string 
 export function donutSvg(o: { percent: number; threshold?: number; cachePct?: number; color: string }): string {
   const tick = o.threshold === undefined ? '' : `<line x1="60" y1="23" x2="60" y2="9" stroke="#FF9A85" stroke-width="3" stroke-linecap="round" transform="rotate(${num(clamp(o.threshold, 0, 1) * 360)} 60 60)"/>`
   const cache = o.cachePct === undefined ? '' : ring(33, 3, o.cachePct, '#7CC79A')
-  return `<svg width="120" height="120" viewBox="0 0 120 120">${ring(DONUT_R, 11, o.percent, o.color)}${cache}${tick}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">${ring(DONUT_R, 11, o.percent, o.color)}${cache}${tick}</svg>`
 }
 
 /** A bar of `left` percent in `color`, with a pace mark at `pace` percent when given. */
@@ -39,7 +39,7 @@ export function barSvg(o: { left: number; pace?: number; color: string }): strin
   const fill = `<rect x="0" y="0" width="${num(clamp(o.left, 0, 100) * 2.6)}" height="8" rx="4" fill="${safe(o.color)}"/>`
   const x = o.pace === undefined ? '' : num(clamp(o.pace, 0, 100) * 2.6)
   const mark = o.pace === undefined ? '' : `<line x1="${x}" y1="0" x2="${x}" y2="8" stroke="#F2F0EA" stroke-width="2"/>`
-  return `<svg width="260" height="8" viewBox="0 0 260 8" preserveAspectRatio="none"><rect x="0" y="0" width="260" height="8" rx="4" fill="${TRACK}"/>${fill}${mark}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="260" height="8" viewBox="0 0 260 8" preserveAspectRatio="none"><rect x="0" y="0" width="260" height="8" rx="4" fill="${TRACK}"/>${fill}${mark}</svg>`
 }
 
 const ICONS: Record<string, string> = {
@@ -53,7 +53,7 @@ const ICONS: Record<string, string> = {
 export function iconSvg(name: string, color: string): string {
   const path = Object.hasOwn(ICONS, name) ? ICONS[name] : undefined
   const body = path === undefined ? '' : `<path d="${path}" fill="none" stroke="${safe(color)}" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/>`
-  return `<svg width="16" height="16" viewBox="0 0 16 16">${body}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">${body}</svg>`
 }
 
 export type LaneCell = { lane: number; kind: 'start' | 'through' | 'end' | 'dot'; color?: string }
@@ -76,5 +76,5 @@ export function railSvg(o: { lanes: LaneCell[]; dot?: 'session' | number; height
   }
   if (o.dot === 'session') parts.push(`<circle cx="7" cy="${mid}" r="5" fill="#B9A2FF"/>`)
   else if (o.dot !== undefined) parts.push(`<circle cx="${laneX(o.dot)}" cy="${mid}" r="5" fill="${laneColor({ lane: o.dot, kind: 'dot' })}"/>`)
-  return `<svg width="${RAIL_WIDTH}" height="${h}" viewBox="0 0 ${RAIL_WIDTH} ${h}">${parts.join('')}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${RAIL_WIDTH}" height="${h}" viewBox="0 0 ${RAIL_WIDTH} ${h}">${parts.join('')}</svg>`
 }

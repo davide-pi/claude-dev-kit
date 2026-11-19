@@ -32,7 +32,7 @@ export const bodyLimit = (bodyRows: number, bodyColumns: number = DESK_WIDE_FROM
 export { limitRows } from './desk-layout'
 
 /** The tab's underline: always there, the accent under the open tab and transparent under the others, so the row never changes size. */
-const underline = (color: string): string => `<svg width="100%" height="2" viewBox="0 0 100 2" preserveAspectRatio="none"><rect width="100" height="2" fill="${color}"/></svg>`
+const underline = (color: string): string => `<svg xmlns="http://www.w3.org/2000/svg" width="100%" height="2" viewBox="0 0 100 2" preserveAspectRatio="none"><rect width="100" height="2" fill="${color}"/></svg>`
 
 const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
 

@@ -142,3 +142,17 @@ test('Given a lane dot and a custom height, When built, Then the dot sits in its
   expect(svg).toContain('#8FB4F5')
   expect(svg).toContain('cx="31"')
 })
+
+test('Given every builder, When its source is read, Then the root carries the SVG namespace, without which the desktop draws a broken image', () => {
+  // Given
+  const sources = [
+    donutSvg({ percent: 50, color: '#8B6CF6' }),
+    barSvg({ left: 40, color: '#8B6CF6' }),
+    iconSvg('clock', '#8B6CF6'),
+    railSvg({ lanes: [] }),
+  ]
+  // When
+  const named = sources.map(s => s.startsWith('<svg xmlns="http://www.w3.org/2000/svg" '))
+  // Then
+  expect(named).toEqual([true, true, true, true])
+})
