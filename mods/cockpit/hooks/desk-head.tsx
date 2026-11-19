@@ -35,7 +35,7 @@ const STATE_ICON: Record<CockpitClaudeState['kind'], { icon: string; color: stri
   waiting: { icon: 'alert', color: WARN },
 }
 
-/** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (its percent over it, tokens and cache under it) and the two credit windows (label and renewal, bar and what is left, pace), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
+/** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (the short label above it, its percent over it, tokens and cache under it) and the two credit windows (label and renewal, bar and what is left, pace), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
 export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const S = t()
@@ -115,13 +115,13 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
       </Box>
       <Box key="desk:gauges" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'flex-start' : 'center'} columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD}>
         <Box key="desk:context" flexDirection="column" alignItems="center" flexShrink={0}>
+          <Text key="desk:context:label" wrap="truncate" size="caption" weight="bold" color={DIM}>
+            {H.contextShort}
+          </Text>
           <Box key="desk:context:donut">
             <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, cachePct: s.cacheShare, color: ctxColor })} alt={`${H.context} ${shown}%`} width={layout.gaugeSize} height={layout.gaugeSize} />
             {/* the percent over the donut, centred: it spans the Svg's box, so it follows the gauge size */}
             <Box key="desk:context:over" position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column" alignItems="center" justifyContent="center">
-              <Text wrap="truncate" size="caption" color={DIM}>
-                {H.context}
-              </Text>
               <Text wrap="truncate" size="heading" weight="bold" tabular color={ctxColor}>
                 {`${isStale ? '~' : ''}${shown}%`}
               </Text>

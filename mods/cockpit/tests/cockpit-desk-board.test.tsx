@@ -141,7 +141,7 @@ for (const columns of [36, 80, 160]) {
   })
 }
 
-test('Given a context reading, When the head is drawn, Then the percent is drawn over the donut and the tokens and cache sit centred under it', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a context reading, When the head is drawn, Then the short label sits above the donut, the percent alone is drawn over it and the tokens and cache sit centred under it', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ ctx: { tokens: 161_100, window: 216_000, percent: 75 }, cacheShare: 98 })
   // When
@@ -152,7 +152,8 @@ test('Given a context reading, When the head is drawn, Then the percent is drawn
   expect(propsOf(context).alignItems).toBe('center')
   const over = keyed(context, 'desk:context:over')
   expect(propsOf(over).position).toBe('absolute')
-  expect(textOf(over)).toContain(t().desk.head.context)
+  expect(textOf(over)).not.toContain(t().desk.head.context)
+  expect(textOf(context)).toContain(t().desk.head.contextShort)
   expect(textOf(over)).toMatch(/\d+%/)
   expect(textOf(context)).toContain(`${t().desk.head.cache} 98%`)
   await ui.unmount()
