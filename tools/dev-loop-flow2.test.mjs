@@ -22,7 +22,7 @@ const T2 = (tree, churn = 3) => ({ tree, files: ['src/Orders/OrdersQuery.cs'], c
 import { gate, tasksOf, reviewLabels } from './dev-loop.harness.mjs';
 
 const implCalls = (calls) => calls.filter(c => c.opts.agentType === 'implementer');
-const BLOCK_ARGS = { ...ARGS_M, verify: 'node --test x', plan: { tasks: tasksOf(5) } };
+const BLOCK_ARGS = { ...ARGS_M, risk: ['data'], verify: 'node --test x', plan: { tasks: tasksOf(5) } };
 const green = (extra = {}) => impl({ gate: gate('green'), ...extra });
 
 test('given a plan of five tasks, when the loop runs, then the implementer is called once per block, three tasks then two', async () => {

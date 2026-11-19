@@ -1,10 +1,10 @@
 export const meta = {
   name: 'dev-loop',
-  description: 'Implement a decided scope in blocks (a gate and a reader A per block), verify the whole diff once, fix inside the perimeter and verify each fix until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md.',
+  description: 'Implement a decided scope in blocks (a gate per block, reader A only on a security or data axis or a red-before-green gate), verify the whole diff once, fix inside the perimeter and verify each fix until no P1/P2 is open or a finding stalls',
+  whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md. Optional `targeted` (a gate template with {files}, JS/TS repos and blocks that change tests; .NET stays full): S and M gate blocks on the changed tests, then one full gate before the final readers.',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
-    { title: 'Block review', detail: 'reader A reads each block after its green gate; open P1/P2 get one in-block fix' },
+    { title: 'Block review', detail: 'reader A reads a block after its green gate when the run has a security or data axis or the gate was red first; open P1/P2 get one in-block fix' },
     { title: 'Final verification', detail: 'the final readers read the whole diff once, with the carried findings; a verifier checks each fix round' },
     { title: 'Fix', detail: 'the implementer fixes the open P1/P2 inside the perimeter only' },
   ],
@@ -237,14 +237,15 @@ const readReport = (r, gated = false) => {
 
 const deltaCommand = (prevTree, tree, startHead) => (tree ? `git diff ${prevTree || startHead || 'HEAD'} ${tree}` : '')
 
-const verifyGate = ({ report, verifyCmd, toFixHadVerify = false, previous, next = 1 } = {}) => {
+// previousMode/mode: a targeted pass followed by a full run is a different measure, never a green-to-red.
+const verifyGate = ({ report, verifyCmd, toFixHadVerify = false, previous, previousMode, mode, next = 1 } = {}) => {
   const v = report?.verify ?? {}
   const status = VERIFY_STATUSES.includes(v.status) ? v.status : 'not-run'
   const seen = `\`${v.command ?? verifyCmd ?? '(no command)'}\` → ${status}${v.line ? `: ${v.line}` : ''}`
   if (status === 'pass') return { status }
   if (status === 'not-run') return verifyCmd || toFixHadVerify ? { status, stall: { why: 'verify-not-run', reason: `the verify command was not run: ${seen}` } } : { status }
   if (toFixHadVerify) return { status, stall: { why: 'verify-failed', reason: `the verify still fails after the fix: ${seen}` } }
-  if (previous === 'pass') return { status, stall: { why: 'green-to-red', reason: `the verify was green and is red after the fix: ${seen}` } }
+  if (previous === 'pass' && !(previousMode === 'targeted' && mode === 'full')) return { status, stall: { why: 'green-to-red', reason: `the verify was green and is red after the fix: ${seen}` } }
   return { status, finding: { id: `V${next}`, path: '(verify)', category: 'verify', priority: 'P1', title: 'the verify command fails', failure: seen, fix: 'make the verify command pass without weakening the check' } }
 }
 
@@ -586,7 +587,9 @@ const mechanical = input.mechanical === true && loopSize === 'S'
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
 const implEffort = EFFORTS.includes(input.implementerEffort) ? input.implementerEffort : mechanical ? 'low' : 'medium'
 const implModel = ['haiku', 'sonnet', 'opus'].includes(input.implementerModel) ? input.implementerModel : mechanical ? 'haiku' : undefined
-const resolutions = Array.isArray(input.resolutions) ? input.resolutions : []
+// Copies: the question judge adds its accepted answers to a round's entry (flagged `judged`), the stall result hands them back for a resume.
+const resolutions = Array.isArray(input.resolutions) ? input.resolutions.map(r => (r && typeof r === 'object' ? { ...r } : r)) : []
+const judged = []
 
 const perimeterTextFor = (list, forWriter = true) => [
   `PERIMETER (the only files you may change): ${list.join(', ')}`,
@@ -611,6 +614,11 @@ const ownerQuestionsText = request || decisions.length
 const answersText = at => {
   const list = resolutions.filter(r => Number(r?.round) < at).flatMap(readAnswers)
   return list.length ? `Owner answers so far (the owner's own words, binding; do not ask them again):\n${list.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}` : ''
+}
+// Guidance of the earlier rounds goes to the reviewers too, so they judge the code against the direction the owner gave.
+const guidanceText = at => {
+  const list = resolutions.filter(r => Number(r?.round) < at && typeof r?.guidance === 'string' && r.guidance.trim()).map(r => r.guidance.trim())
+  return list.length ? `Owner guidance so far (the owner's own words, binding):\n${list.map(g => `- ${g}`).join('\n')}` : ''
 }
 const LEAD = 'ok|okay|yes|sì|si|va bene(?: così)?|bene(?: così)?|perfetto|perfect|ottimo|looks good'
 const PREVIEW_OK = new RegExp(`^\\s*(?:${LEAD})(?:[\\s,.;!-]+(?:${LEAD}|grazie|thanks?|thank you))*\\s*[.!]*\\s*$`, 'i')
@@ -641,10 +649,14 @@ const writerTail = (budget, cleaning = false, root = repoRoot, since = lastTree)
 ]
 
 // The script has no shell: the implementer runs the gate and returns its last line as `gate`.
-const gateBase = (root = repoRoot, accept = []) => `node ~/.claude/scripts/gate.mjs --root ${quote(root)} --head ${startHead || 'HEAD'} --test ${quote(input.verify || input.unit)}${accept.length ? ` --accept-tests ${quote(accept.join(','))}` : ''}${dirty.length ? ` --dirty ${quote(dirty.join(','))}` : ''}${Number.isFinite(input.stuckMinutes) ? ` --stuck-minutes ${input.stuckMinutes}` : ''}`
+// The lite path (S and M, opt-in): block, lane and fix gates run only the changed test files (`--targeted`), one full gate follows before the final readers.
+const lite = typeof input.targeted === 'string' && input.targeted.includes('{files}') && !!input.verify && loopSize !== 'L'
+let fullStale = !inline   // the tree changed since the last full gate (lite only)
+let lastMode = 'full'  // the mode of the last verify the loop recorded: 'targeted' or 'full'
+const gateBase = (root = repoRoot, accept = [], targeted = false) => `node ~/.claude/scripts/gate.mjs --root ${quote(root)} --head ${startHead || 'HEAD'} --test ${quote(input.verify || input.unit)}${targeted ? ` --targeted ${quote(input.targeted)}` : ''}${accept.length ? ` --accept-tests ${quote(accept.join(','))}` : ''}${dirty.length ? ` --dirty ${quote(dirty.join(','))}` : ''}${Number.isFinite(input.stuckMinutes) ? ` --stuck-minutes ${input.stuckMinutes}` : ''}`
 // A lane's gate skips the scope check (the merge gate runs it once on the start tree).
-const gateLines = (root = repoRoot, noScope = false, accept = []) => (input.verify
-  ? [`Before you report, run the gate and paste its last output line as "gate": ${gateBase(root, accept)}${noScope ? ' --no-scope' : ''}`, `On exit 3 run it again with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(root)} --wait`]
+const gateLines = (root = repoRoot, noScope = false, accept = [], full = false) => (input.verify
+  ? [`Before you report, run the gate and paste its last output line as "gate": ${gateBase(root, accept, lite && !full)}${noScope ? ' --no-scope' : ''}`, `On exit 3 run it again with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(root)} --wait`]
   : [])
 const gated = !!input.verify   // block reports are read against the gate: no parsable gate line, not verified
 // The fixer's rules, one text for the fix round and the reader A fix.
@@ -789,7 +801,9 @@ const takeReport = (r, additive = false) => {
 }
 // outside: the files a `red: scope` gate names; the red is then a finding to fix (never green-to-red) that says what to revert.
 const gateReport = (r, toFixHadVerify, outside = []) => {
-  const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: outside.length ? undefined : lastReport?.verify.status, next: nextV })
+  const mode = lite ? 'targeted' : 'full'
+  const g = verifyGate({ report: r, verifyCmd: input.verify, toFixHadVerify, previous: outside.length ? undefined : lastReport?.verify.status, previousMode: lastMode, mode, next: nextV })
+  lastMode = mode
   if (g.finding && outside.length) g.finding.fix = `${g.finding.fix}; revert your own edits outside the perimeter (never the user's earlier work): ${outside.join(', ')}`
   if (g.finding) { known[g.finding.id] = g.finding; nextV += 1; verifyOpen = [g.finding] }
   else if (g.status === 'pass') verifyOpen = []
@@ -836,18 +850,67 @@ const result = extra => withHistory({
   defaults,
   blocks: blockLog,
   defaultsApplied,
+  ...(judged.length ? { judged } : {}),
   carried: carriedFindings.map(c => ({ block: c.block, id: c.id, priority: c.priority, title: c.title, file: c.path, why: c.why })),
   findingsLog: { size: rounds.length ? rounds[rounds.length - 1].size : loopSize, rounds: round, findings: findingsLog({ known, tracked, cleaned }) },
   ...(previewText ? { preview: previewText } : {}),
   ...extra,
 })
 
+// The question judge: before a question stalls, a Sonnet agent maps it to the owner's own text; the code accepts an `answered` only when the
+// quote the judge returns is literally in that text (never the judge's word). Accepted answers join the round's entry and ride in `judged`.
+const QUESTION_JUDGE = obj(['judgments'], { judgments: arr(obj(['text', 'status'], {
+  text: str('the question text, unchanged'),
+  status: { type: 'string', enum: ['answered', 'open'] },
+  answer: str('the answer the owner already gave, when answered'),
+  quote: str('the owner words that answer it, copied literally from the owner text, when answered'),
+}), 'one entry per question') })
+const ownerSegments = () => [request, ...decisions, ...resolutions.flatMap(r => [r?.guidance, ...(Array.isArray(r?.answers) ? r.answers : []).filter(a => a && !a.judged).map(a => a.answer)])]
+  .filter(s => typeof s === 'string' && s.trim())
+const entryFor = at => {
+  let e = resolutions.find(r => Number(r?.round) === at)
+  if (!e) { e = { round: at }; resolutions.push(e) }
+  return e
+}
+const judgeQuestions = async (qs, at) => {
+  if (!qs.length) return qs
+  const segments = ownerSegments()
+  if (!segments.length) return qs
+  const label = `question judge · round ${at}`
+  const r = await ask([
+    'You judge whether the owner already answered each question below. You decide nothing: you only point at the owner\'s own words.',
+    'A question is `answered` only when one passage of the owner text below settles it; give that passage as `quote`, copied literally (never reworded, never from the questions), and the answer in `answer`. Anything else is `open`: when in doubt, open.',
+    `Owner text (request, decisions, guidance and answers, each block separated by a line of dashes):\n${segments.join('\n---\n')}`,
+    `Questions:\n${qs.map(q => `- ${q.text}${q.default ? ` (default: ${q.default})` : ''}${q.why ? ` (why: ${q.why})` : ''}`).join('\n')}`,
+    RULES,
+  ].join('\n\n'), { label, phase: 'Final verification', agentType: 'code-reviewer', model: 'sonnet', effort: 'low', schema: QUESTION_JUDGE })
+  const source = plain(segments.join('\n'))
+  const accepted = []
+  for (const q of qs) {
+    const j = (Array.isArray(r?.judgments) ? r.judgments : []).find(x => plain(x?.text) === plain(q.text))
+    const quote = typeof j?.quote === 'string' ? plain(j.quote) : ''
+    // The binding answer must sit inside the owner's literal quote (never the judge's wording), and the quote must share a word with the question.
+    const answer = typeof j?.answer === 'string' ? j.answer.trim() : ''
+    const shared = plain(q.text).split(/[^\p{L}\p{N}]+/u).some(w => w.length >= 4 && quote.split(/[^\p{L}\p{N}]+/u).includes(w))
+    if (!(j?.status === 'answered' && answer && quote.length >= 8 && source.includes(quote) && quote.includes(plain(answer)) && shared)) continue
+    // The binding answer is the whole sentence that holds the quote (a cut fragment could drop a negation), never the judge's fragment.
+    const sentence = segments.flatMap(s => s.split(/(?<=[.!?])\s+|\n\s*\n/)).map(s => s.replace(/\s+/g, ' ').trim()).find(s => plain(s).includes(quote))
+    if (sentence) accepted.push({ text: q.text, answer: sentence, quote: j.quote.trim(), judged: true })
+  }
+  if (accepted.length) {
+    const e = entryFor(at)
+    e.answers = [...(Array.isArray(e.answers) ? e.answers : []), ...accepted]
+    judged.push(...accepted.map(a => ({ round: at, ...a })))
+  }
+  return qs.filter(q => !accepted.some(a => plain(a.text) === plain(q.text)))
+}
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
 // A run with no second call (a continuation, the preview pass): a question the policy would not answer alone stalls for the
 // owner, unless the resolution already answers it; the rest stay notes, as before.
-const questionsOrStall = (qs, at, label, resolution) => {
-  const answered = readAnswers(resolution)
-  const pending = qs.filter(q => questionPolicy(q) !== 'default' && !answered.some(a => plain(a.text) === plain(q.text)))
+const questionsOrStall = async (qs, at, label, resolution) => {
+  const answered = () => readAnswers(resolution ?? resolutions.find(r => Number(r?.round) === at))
+  let pending = qs.filter(q => questionPolicy(q) !== 'default' && !answered().some(a => plain(a.text) === plain(q.text)))
+  if (pending.length) { await judgeQuestions(pending, at); pending = pending.filter(q => !answered().some(a => plain(a.text) === plain(q.text))) }
   addQuestionNotes(qs.filter(q => !pending.includes(q)))
   return pending.length
     ? questionStall(at, pending, `${label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH))
@@ -874,10 +937,14 @@ const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, b
     addQuestionNotes(first.questions)
     return { report: { ...first, questions: [] } }
   }
-  const answers = readAnswers(resolution).filter(a => first.questions.some(q => plain(q.text) === plain(a.text)))
-  const open = first.questions.filter(q => !answers.some(a => plain(a.text) === plain(q.text)))
-  const auto = open.filter(q => questionPolicy(q) === 'default')
-  const pending = open.filter(q => !auto.includes(q))
+  const split = () => {
+    const answers = readAnswers(resolution ?? resolutions.find(r => Number(r?.round) === at)).filter(a => first.questions.some(q => plain(q.text) === plain(a.text)))
+    const open = first.questions.filter(q => !answers.some(a => plain(a.text) === plain(q.text)))
+    const auto = open.filter(q => questionPolicy(q) === 'default')
+    return { answers, auto, pending: open.filter(q => !auto.includes(q)) }
+  }
+  let { answers, auto, pending } = split()
+  if (pending.length) { await judgeQuestions(pending, at); ({ answers, auto, pending } = split()) }
   if (pending.length) {
     return { stall: questionStall(at, pending, `${opts.label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH)) }
   }
@@ -1011,7 +1078,7 @@ const runBlocks = async (items, total, lane) => {
       const nextOpts = { ...implOpts, label }
       let next = readReport(await ask(buildNext(''), nextOpts), gated)
       if (gated && next && !next.questions.length && !next.remaining.length && !readGate(next.gate)) next = await regate(next, buildNext, nextOpts)
-      const nextStall = next ? questionsOrStall(next.questions, 0, label, resolution0) : null
+      const nextStall = next ? await questionsOrStall(next.questions, 0, label, resolution0) : null
       if (nextStall) return nextStall
       impl = next ?? impl
       noteHandoff(next)
@@ -1066,10 +1133,10 @@ const runBlocks = async (items, total, lane) => {
     blockLog.push(entry)
     // The whole diff gets its reader in the final set: at M with one verified block and no lanes, reader A would read the same delta first.
     const finalReads = loopSize === 'M' && total === 1 && !lane && gated && finalReadersFor('M', risk, mechanical, false).some(r => r.whole)
-    // Owner decision: reader A runs on a block only when a task is risky, the run has a security or data axis, or the block's gate was red before green.
-    const needA = block.some(t => t.risky) || risk.some(x => ['security', 'data'].includes(x)) || gateWasRed
+    // Owner decision: reader A runs on a block only when the run has a security or data axis, or the block's gate was red before green (a risky task alone no longer does).
+    const needA = risk.some(x => ['security', 'data'].includes(x)) || gateWasRed
     const skipA = finalReads || (!needA && loopSize !== 'S')
-    if (skipA) entry.readerA = { ...entry.readerA, skipped: true, reason: finalReads ? 'size M, one block, verify set, no lanes: the final whole-diff reader reads the same delta' : 'no risky task, no security or data axis, and the gate was never red in this block' }
+    if (skipA) entry.readerA = { ...entry.readerA, skipped: true, reason: finalReads ? 'size M, one block, verify set, no lanes: the final whole-diff reader reads the same delta' : 'no security or data axis, and the gate was never red in this block' }
     // An unchanged tree is an empty delta: nothing to read.
     if (!skipA && loopSize !== 'S' && gateGreen(g) && g.tree && g.tree !== blockTree) {
       // Reader A reads this block's delta; open P1/P2 inside the perimeter get one fix call and one gate run, the rest is carried; a clean-code or convention P2 never blocks, as in the final rounds.
@@ -1223,6 +1290,8 @@ const runLanes = async groups => {
   // The merge gate verified the merged tree: it replaces the lanes' own last verify, and its tree is the base for what follows.
   if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: 'the merge gate', line: g.line } }
   lastTree = g.tree
+  fullStale = false   // the merge gate has no --targeted: it is the full gate
+  lastMode = 'full'
   return null
 }
 
@@ -1271,13 +1340,73 @@ if (!inline) {
       const again = readReport(await ask([brief, answersBlock([said]), decisionsText, perimeterTextFor(files), dirtyText, ...gateLines(), ...writerTail()].filter(Boolean).join('\n\n'),
         { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }), gated)
       if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
-      const previewStall = questionsOrStall(again.questions, 0, 'implement the change (preview feedback)', resolution0)
+      const previewStall = await questionsOrStall(again.questions, 0, 'implement the change (preview feedback)', resolution0)
       if (previewStall) return previewStall
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
+      fullStale = true
     }
   }
 }
+
+// Lite path: the one full gate (no --targeted, the same --dirty and scope as the session's After-OK gate, so that one is skipped as unchanged),
+// run by a haiku code-reviewer; red gets one implementer fix and one regate, then STALL. A fix after it makes the next call run it again.
+const fullGateCheck = async (at, tag) => {
+  if (!lite || !fullStale) return null
+  const run = async label => readGate((await ask([
+    'Run this command and paste its last output line as "gate", unchanged. It is the full test gate of the whole change: change nothing.',
+    ...gateLines(repoRoot, false, planFiles, true),
+    RULES,
+  ].join('\n\n'), { label, phase: 'Final verification', agentType: 'code-reviewer', model: 'haiku', effort: 'low', schema: LANE_MERGE }))?.gate)
+  const label = `full gate · ${tag}`
+  let g = await run(label)
+  const stalls = s => (s.gate === 'running' || s.gate === 'red: timeout' ? `the full gate ${s.gate === 'running' ? 'was still running' : 'timed out'}: ${s.line}` : '')
+  if (!g || stalls(g)) return stallAgain(at, g ? stalls(g) : `the full gate returned no parsable gate line, so nothing was verified${why(label)}`, { why: gateWhy(g) })
+  if (g.gate === 'red: tests changed') return stall(at, { why: 'tests-changed', findings: [], reason: `full gate: a test file proven red was edited after the proof${g.test ? ` (${g.test})` : ''}: ${g.line}` },
+    `Ask the user: accept the edited test (run the gate once with --force, which drops the stored proof) or revert the edit. ${RESUME_FRESH}`)
+  if (!gateGreen(g)) {
+    const fixLabel = `fix · full gate · ${tag}`
+    const asked = await askWithQuestions(extra => [
+      `The full gate is red: ${g.line}`,
+      g.test ? `Failing: ${g.test}` : '',
+      g.outside.length ? `Outside the perimeter (revert your own edits there, never the user's earlier work): ${g.outside.join(', ')}` : '',
+      'Fix the cause and nothing else: the tree already holds the change.',
+      extra,
+      `Intent: ${brief}`,
+      decisionsText,
+      perimeterTextFor(files),
+      dirtyText,
+      ...gateLines(repoRoot, false, planFiles),
+      ...writerTail(),
+    ].filter(Boolean).join('\n\n'), { label: fixLabel, phase: 'Fix', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }, at, resolutions.find(r => Number(r?.round) === at), gated, 'full-gate')
+    if (asked.stall) return asked.stall
+    if (!asked.report) return stallAgain(at, `the implementer returned nothing on the full gate fix (stopped or failed${why(fixLabel)})`)
+    const treeBefore = lastTree
+    takeReport(asked.report)
+    g = await run(`full gate · regate ${tag}`)
+    if (!gateGreen(g)) return stallAgain(at, `the full gate is not green after the fix: ${g?.line ?? 'no gate line returned'}`, { why: gateWhy(g) })
+    if (at > 0) {
+      // A fix after the readers is read like any fix round: the next round is a verifier on its delta.
+      if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: input.verify, line: g.line } }
+      lastDeltaBase = treeBefore || startHead || 'HEAD'
+      lastDelta = deltaCommand(treeBefore, asked.report.snapshot?.tree ?? '', startHead)
+      lastFix = asked.report
+      lastFixP1 = false
+      lastFixedIds = []
+      lastProbed = false
+      lastFixLines = Number.isFinite(asked.report.snapshot?.churn) ? asked.report.snapshot.churn : Infinity
+      fullStale = false
+      lastMode = 'full'
+      return { fixed: true }
+    }
+  }
+  if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: input.verify, line: g.line } }
+  fullStale = false
+  lastMode = 'full'
+  return null
+}
+const fullBefore = await fullGateCheck(0, 'before the readers')
+if (fullBefore) return fullBefore
 
 // The findings reader A left open are tracked like any other: the final readers mark each closed or open, and one still open blocks the OK.
 const outsideCarried = new Set()
@@ -1384,6 +1513,7 @@ while (true) {
     round === 1 ? requestText : '',
     decisionsText,
     answersText(round),
+    guidanceText(round),
     ownerQuestionsText,
     verifyText(),
     acceptedText(),
@@ -1425,7 +1555,8 @@ while (true) {
   const merged = mergeReviews(alive, repoRoot)
   looseProbes = merged.loose
   // The reviewers' questions are for the owner, never the fixer.
-  const routed = routeQuestions({ questions: reviewerQuestions(alive), resolutions, round })
+  let routed = routeQuestions({ questions: reviewerQuestions(alive), resolutions, round })
+  if (routed.pending.length) { await judgeQuestions(routed.pending, round); routed = routeQuestions({ questions: reviewerQuestions(alive), resolutions, round }) }
   if (routed.pending.length) {
     return questionStall(round, routed.pending, `the reviewers left ${routed.pending.length} question(s) for the owner: ${routed.pending.map(q => q.text).join(' | ')}`,
       answerResume(round, ASK_EACH, ' The answers go to the fixer and to the later reviewers.'))
@@ -1540,7 +1671,11 @@ while (true) {
       continue
     }
     if (!cleanupDone && size !== 'S' && input.cleanup === true) cleanupIds = cleanupCandidates(minor, roundFiles, { root: repoRoot, touched: [...changed] }).map(m => m.id)
-    if (!cleanupIds.length) return result({ status: 'OK' })
+    if (!cleanupIds.length) {
+      const full = await fullGateCheck(round, `after round ${round}`)
+      if (full?.fixed) { openCounts = []; continue }
+      return full ?? result({ status: 'OK' })
+    }
     cleanupDone = true
     openCounts = []
     rounds[rounds.length - 1].cleanup = cleanupIds
@@ -1621,6 +1756,7 @@ while (true) {
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
+  fullStale = true
   lastProbes = cleaning ? [] : joinProbes(sending.filter(id => !rejectedIds.has(id)).flatMap(id => probesOf(known[id])), looseProbes)
   lastFixP1 = sending.some(id => known[id]?.priority === 'P1')
   lastFixedIds = cleaning ? [] : sending.filter(id => !rejectedIds.has(id))

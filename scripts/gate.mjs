@@ -3,7 +3,7 @@
  * The `deliver` gate: runs a block's test command under a stuck check and answers with one JSON line.
  *
  *   node gate.mjs --root <repoRoot> --head <start head> --test "<command>"
- *        [--dirty a,b] [--stuck-minutes 5] [--max-minutes 9] [--force] [--no-scope] [--accept-tests a,b]
+ *        [--dirty a,b] [--stuck-minutes 5] [--max-minutes 9] [--force] [--no-scope] [--accept-tests a,b] [--targeted "<cmd with {files}>"]
  *   node gate.mjs --root <repoRoot> --red [--probe] --unit "<command>" --test-files <a,b>
  *   node gate.mjs --root <repoRoot> --wait
  *   node gate.mjs --root <repoRoot> --head <start head> --lane-add <name>
@@ -37,6 +37,11 @@
  * `"testsAccepted":[...]`; an unlisted changed proven file is still `red: tests changed`. A supervisor pid is stored with its start time: a live pid that
  * started at another time is a reused one, and the supervisor counts as dead (checked every 30 s while waiting).
  *
+ * `--targeted "<cmd with {files}>"` (opt-in; a template without {files} exits 2) runs the template with the test files changed
+ * since `--head` (tracked, deletes excluded, plus untracked; at most 30, each quoted) instead of `--test`; zero files or more
+ * than the cap run the full `--test`. The last line adds `"tests":"targeted:<n>"` or `"tests":"full"`, and a targeted green
+ * never lets a later full gate answer `skipped: tree unchanged`. It saves time in JS/TS repos; .NET stays full.
+ *
  * Last stdout line: `{gate,test,outside,formatOnly,tree,greenAt,seconds}` (plus `proof` when dropped). Exit 0 green, 1 red, 2 not checked
  * (bad arguments, no git repository, a scope or git step that failed), 3 still running. git runs through argv,
  * never a shell.
@@ -57,7 +62,7 @@ const WIN = process.platform === 'win32';
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const FLAGS = ['--wait', '--supervise', '--force', '--no-scope', '--red', '--probe'];
-const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add', '--accept-tests'];
+const VALUES = ['--root', '--head', '--test', '--dirty', '--unit', '--test-files', '--stuck-minutes', '--max-minutes', '--run', '--lane-add', '--accept-tests', '--targeted'];
 const LISTS = ['--merge', '--lane-remove'];
 
 function parseArgs(argv) {
@@ -313,6 +318,24 @@ function dirtyFiles(cwd, rev) {
   ];
 }
 
+const TARGETED_CAP = 30;
+
+/**
+ * The command to run: `--test`, or the `--targeted` template with {files} replaced by the quoted test files changed since
+ * `--head` (tracked, deletes left out, plus untracked). Zero files, over the cap or an unquotable name run `--test`.
+ * `tests` is 'targeted:<n>' or 'full' with `--targeted`, undefined without it.
+ */
+function effectiveCommand(root, args) {
+  if (args.targeted === undefined) return { command: args.test };
+  if (!args.targeted.includes('{files}')) usage('--targeted needs a {files} placeholder in the command template');
+  const files = [...new Set([
+    ...nulList(git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', '--diff-filter=d', '--end-of-options', args.head])),
+    ...nulList(git(root, ['-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard', '-z'])),
+  ])].filter((f) => isTestFile(f, []) && existsSync(join(root, f)));
+  if (!files.length || files.length > TARGETED_CAP || files.some((f) => /["$`%!]/.test(f))) return { command: args.test, tests: 'full' };
+  return { command: args.targeted.split('{files}').join(files.map((f) => `"${f}"`).join(' ')), tests: `targeted:${files.length}` };
+}
+
 /** Refuses (exit 2, nothing written) a start tree whose staged or uncommitted files the merge could take or overwrite. */
 function checkStartTree(root, start, list, trees) {
   if (git(root, ['diff', '--cached', '--quiet']).status !== 0) usage('--merge: the start tree has staged changes; commit or unstage them first');
@@ -446,7 +469,7 @@ function finalize(dir, state) {
   const o = run.opts;
   if (o.leftover?.length) LEFTOVER = o.leftover;
   const seconds = Math.round(((run.endedAt ?? Date.now()) - run.startedAt) / 1000);
-  const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}), ...(o.testsAccepted?.length ? { testsAccepted: o.testsAccepted } : {}) };
+  const base = { tree: o.tree ?? '', seconds, ...(o.proofDropped ? { proof: 'dropped' } : {}), ...(o.tests ? { tests: o.tests } : {}), ...(o.testsAccepted?.length ? { testsAccepted: o.testsAccepted } : {}) };
   let log = '';
   try { log = readFileSync(join(dir, 'gate.log'), 'utf8'); } catch { /* no output */ }
   state.run = null;
@@ -471,7 +494,7 @@ function finalize(dir, state) {
   }
   const formatOnly = formatOnlyFiles(o.root, o.head);
   const greenAt = new Date().toISOString();
-  state.green = { tree: o.tree, head: o.head, dirty: o.dirty, test: o.command, scope: !o.noScope, greenAt, formatOnly };
+  state.green = { tree: o.tree, head: o.head, dirty: o.dirty, test: o.command, mode: o.mode ?? 'full', scope: !o.noScope, greenAt, formatOnly };
   delete state.proof;
   writeState(dir, state);
   emit('green', 0, { ...base, formatOnly, greenAt });
@@ -543,6 +566,9 @@ async function main() {
     LEFTOVER = merged.leftover;
     if (merged.red) emit('red: merge', 1, { test: merged.text, outside: merged.files });
   }
+  const { command, tests } = effectiveCommand(root, args);
+  const testsExtra = tests ? { tests } : {};
+  const mode = tests?.startsWith('targeted') ? 'targeted' : 'full';
   const noScope = !!args['no-scope'];
   const dirty = args.dirty ?? '';
   const proofDropped = !!args.force && !!state.proof;
@@ -552,7 +578,7 @@ async function main() {
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
   const probed = state.proof?.probes ?? [];
   const unlisted = changed.filter((f) => probed.includes(f) || !listed.includes(norm(f)));
-  if (unlisted.length) emit('red: tests changed', 1, { test: unlisted.join('; ') });
+  if (unlisted.length) emit('red: tests changed', 1, { test: unlisted.join('; '), ...testsExtra });
   // The accepted list stays in state until green or the next --red, so a later `red: scope` or rerun line still carries it.
   const testsAccepted = [...new Set([...(state.accepted ?? []), ...changed])];
   if (changed.length) {
@@ -560,7 +586,7 @@ async function main() {
     if (!Object.keys(state.proof.files).length) delete state.proof;
   }
   if (testsAccepted.length) { state.accepted = testsAccepted; writeState(dir, state); }
-  const acceptedExtra = testsAccepted.length ? { testsAccepted } : {};
+  const acceptedExtra = { ...(testsAccepted.length ? { testsAccepted } : {}), ...testsExtra };
   const tree = treeHash(root, dir);
   if (!tree) usage('git could not hash the working tree');
   if (!noScope) {
@@ -569,12 +595,12 @@ async function main() {
     if (scope.verdict === 'outside') emit('red: scope', 1, { tree, outside: scope.outside, ...(proofDropped ? { proof: 'dropped' } : {}), ...acceptedExtra });
   }
   const g = state.green;
-  if (!args.force && !state.proof && g && g.tree === tree && g.head === args.head && g.dirty === dirty && g.test === args.test && g.scope === !noScope) {
+  if (!args.force && !state.proof && g && g.tree === tree && g.head === args.head && g.dirty === dirty && g.test === command && (g.mode ?? 'full') === mode && g.scope === !noScope) {
     emit('skipped: tree unchanged', 0, { tree, greenAt: g.greenAt, formatOnly: g.formatOnly ?? [], ...acceptedExtra });
   }
   return startRun(dir, state, root, {
-    command: args.test, stuckMinutes,
-    opts: { root, head: args.head, dirty, noScope, tree, command: args.test, proofDropped, testsAccepted, leftover: LEFTOVER },
+    command, stuckMinutes,
+    opts: { root, head: args.head, dirty, noScope, tree, command, mode, tests, proofDropped, testsAccepted, leftover: LEFTOVER },
   }, maxMinutes);
 }
 

@@ -389,9 +389,9 @@ test('given size M, one block and a verify command, when the loop runs, then no 
   assert.ok(out.blocks[0].readerA.reason.length > 0);
 });
 
-test('given size M and a plan of five tasks, when the loop runs, then reader A runs on each block', async () => {
+test('given size M, a data axis and a plan of five tasks, when the loop runs, then reader A runs on each block', async () => {
   // Given
-  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: tasks(5) } };
+  const args = { ...ARGS_M, ...VERIFIED, risk: ['data'], plan: { tasks: tasks(5) } };
 
   // When
   const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
@@ -403,7 +403,7 @@ test('given size M and a plan of five tasks, when the loop runs, then reader A r
 
 test('given size M, one block and no verify command, when the loop runs, then the block log does not claim a skip', async () => {
   // Given
-  const args = { ...ARGS_M, plan: { tasks: tasks(2) } };
+  const args = { ...ARGS_M, risk: ['data'], plan: { tasks: tasks(2) } };
 
   // When
   const { out } = await run(args, [review([]), review([])], [impl()]);
@@ -448,19 +448,6 @@ test('given size M and a plan of five tasks none risky, with no security or data
   // Then
   assert.equal(readerAs(calls).length, 0);
   assert.deepEqual(out.blocks.map((b) => b.readerA.skipped), [true, true]);
-});
-
-test('given a plan with one risky:true task in one block of two, when the loop runs, then reader A runs on that block only', async () => {
-  // Given
-  const plan = tasks(5).map((t) => ({ ...t, risky: t.id === 't1' }));
-  const args = { ...ARGS_M, ...VERIFIED, plan: { tasks: plan } };
-
-  // When
-  const { out, calls } = await run(args, [review([]), review([]), review([]), review([]), review([])], [greenAt('tr1'), greenAt('tr2')]);
-
-  // Then
-  assert.equal(readerAs(calls).length, 1);
-  assert.deepEqual(out.blocks.map((b) => !!b.readerA.skipped), [false, true]);
 });
 
 test('given no risky task but a data axis, when the loop runs, then reader A runs on every block', async () => {

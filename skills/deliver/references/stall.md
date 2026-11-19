@@ -31,6 +31,12 @@ that round's other resolution; the stall comes back while a question has none), 
 no cap on the rounds; `guidance` or `accept` on a `churn` or `not-converging`
 round restarts its count, `retry` does not.
 
+Before a `question` stall, a Sonnet judge looks for the answer in the owner's own text (the request, the decisions, every
+guidance and answer so far) and returns a quote; the code keeps the answer only when that quote is literally in the text.
+Those answers come back in the result as `judged: [{ round, text, answer, quote, judged: true }]`: on a relaunch copy each
+one, flag included, into `answers` of its round, so the judge isn't asked twice. Only the questions it can't settle stall.
+Guidance also goes to the reviewers of the later rounds, not only to the fixer.
+
 | `stall.why` | Meaning, and the question |
 | --- | --- |
 | `question` | see "Questions" above |
