@@ -135,8 +135,6 @@ const EN = {
   commandDescription: 'Opens the cockpit pane',
   commandOpen: 'cockpit open',
   commandClosed: 'cockpit closed',
-  /** The argument of `/cockpit` that closes the pane. */
-  commandCloseWord: 'close',
   commandOpenHint: 'cockpit open (/cockpit close closes it)',
   commandWaiting: (reason: string) => `cockpit waiting: ${reason}`,
 }
@@ -242,7 +240,6 @@ const IT: Strings = {
   commandDescription: 'Apre il pannello cockpit',
   commandOpen: 'cockpit aperto',
   commandClosed: 'cockpit chiuso',
-  commandCloseWord: 'chiudi',
   commandOpenHint: 'cockpit aperto (/cockpit chiudi lo chiude)',
   commandWaiting: (reason: string) => `cockpit in attesa: ${reason}`,
 }

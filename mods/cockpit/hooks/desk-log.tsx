@@ -2,15 +2,17 @@ import type { RenderElement } from 'claude-code'
 
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import type { DeskLayout } from './desk-layout'
+import { limitRows } from './desk-layout'
 import { railSvg } from './desk-svg'
 import type { LaneCell } from './desk-svg'
-import { limitRows } from './desk-view'
 import type { DeskUi } from './desk-view'
 import { logModel } from './done-groups'
 import type { LogModel } from './done-groups'
+import { loggedSignal } from './signals'
 import { t } from './strings'
 import { ALL_KEY, isAllShown, isMainEntry } from './view-log-round'
 import type { PaneActions } from './view-kit'
+import { signalText } from './view-kit'
 import { activeRun } from './workflow'
 
 const TEXT = '#F2F0EA'
@@ -18,7 +20,10 @@ const DIM = '#A8A49B'
 const ACCENT = '#8B6CF6'
 const LINK = '#B9A2FF'
 const RAIL_WIDTH = 86
-const ROW_HEIGHT = 28
+/** The rail's height in CSS pixels: the row takes it, so the lanes of two rows meet. */
+const RAIL_PX = 28
+/** The cells of `bodyRows` one row takes: a 28px rail is taller than one line of the desktop's code font, the types give no cell height, so two. */
+const ROW_CELLS = 2
 
 type Flow = LogModel['flows'][number]
 
@@ -65,6 +70,12 @@ function entryText(e: CockpitLogEntry): string {
       return E.error(e.key ?? '?', e.n ?? 1)
     case 'compact':
       return E.compact('', '')
+    case 'signal': {
+      const sig = loggedSignal(e)
+      return sig === undefined ? (e.text ?? '') : signalText(sig).what
+    }
+    case 'agent':
+      return [e.text, e.desc].filter(Boolean).join(' ')
     default:
       return [e.kind, e.desc ?? e.text ?? e.key ?? ''].filter(Boolean).join(' ')
   }
@@ -149,8 +160,8 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
   const rows = buildRows(logModel(log, openFlowOf(s, log)), isAll)
 
   const line = (key: string, rail: string, alt: string, content: RenderElement): RenderElement => (
-    <Box key={key} flexDirection="row" height={ROW_HEIGHT} alignItems="center" columnGap={1}>
-      <Svg source={rail} alt={alt} width={RAIL_WIDTH} height={ROW_HEIGHT} />
+    <Box key={key} flexDirection="row" alignItems="center" columnGap={1}>
+      <Svg source={rail} alt={alt} width={RAIL_WIDTH} height={RAIL_PX} />
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
         {content}
       </Box>
@@ -165,12 +176,12 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
         {r.text}
       </Text>,
     ]
-    return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: ROW_HEIGHT }), id === '' ? r.text : id, <Text wrap="truncate">{parts}</Text>)
+    return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: RAIL_PX }), id === '' ? r.text : id, <Text wrap="truncate">{parts}</Text>)
   }
   const drawn =
     rows.length === 0
-      ? [line('desk:log:empty', railSvg({ lanes: [], height: ROW_HEIGHT }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>)]
-      : limitRows(rows.map(drawRow), layout.bodyRows, n => line('desk:log:more', railSvg({ lanes: [], height: ROW_HEIGHT }), `+${n}`, <Text color={DIM}>{`+${n}`}</Text>))
+      ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>)]
+      : limitRows(rows.map(drawRow), Math.floor(layout.bodyRows / ROW_CELLS), n => line('desk:log:more', railSvg({ lanes: [], height: RAIL_PX }), `+${n}`, <Text color={DIM}>{`+${n}`}</Text>))
 
   // one filter for both pages on purpose: the same ALL_KEY the terminal log toggles; pressing the active choice changes nothing
   const choice = (key: string, label: string, isOn: boolean): RenderElement => (

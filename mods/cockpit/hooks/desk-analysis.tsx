@@ -3,6 +3,7 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitSnapshot } from '../types'
 import { spendSplit } from './andamento'
 import type { DeskLayout } from './desk-layout'
+import { limitRows } from './desk-layout'
 import { iconSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
 import { duration, fmtCost } from './shared'
@@ -20,9 +21,9 @@ const DIM = '#A8A49B'
 const SECTION_ROWS = 3
 const GAP = 2
 
-/** The first `SECTION_ROWS` rows, padded with blank ones, so a section keeps its height when empty. */
-const keepRows = (rows: readonly RenderElement[], blank: (n: number) => RenderElement): RenderElement[] => [
-  ...rows.slice(0, SECTION_ROWS),
+/** `SECTION_ROWS` rows: a cut list ends with the `more` row, a short one is padded with blank ones, so a section keeps its height. */
+const keepRows = (rows: readonly RenderElement[], more: (n: number) => RenderElement, blank: (n: number) => RenderElement): RenderElement[] => [
+  ...limitRows(rows, SECTION_ROWS, more),
   ...Array.from({ length: Math.max(0, SECTION_ROWS - rows.length) }, (_, i) => blank(i)),
 ]
 
@@ -62,7 +63,14 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
   const section = (key: string, label: string, rows: RenderElement[]) => (
     <Box key={`analysis:${key}`} flexDirection="column" flexGrow={1}>
       {title(`${key}:title`, label)}
-      {keepRows(rows, n => (
+      {keepRows(
+        rows,
+        n => (
+          <Text key={`${key}:more`} color={DIM}>
+            {`+${n}`}
+          </Text>
+        ),
+        n => (
         <Text key={`${key}:blank:${n}`} color={DIM}>
           {' '}
         </Text>

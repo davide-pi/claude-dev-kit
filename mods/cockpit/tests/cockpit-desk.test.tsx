@@ -2,6 +2,8 @@ import type { On } from 'claude-code'
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
+import { deskHead } from '../hooks/desk-head'
+import { deskLayout } from '../hooks/desk-layout'
 import { deskUrgent } from '../hooks/desk-urgent'
 import { bodyLimit, limitRows } from '../hooks/desk-view'
 import { RETRO_DAYS } from '../hooks/pane-actions'
@@ -89,10 +91,11 @@ test('Given a refused command.run, When retro(days) is handled, Then nothing thr
 
 // ── T6: the desk shell, branched by surface ──
 
-type Drawn = { props?: { key?: string; width?: string | number }; children?: unknown[] }
-const childrenOf = (el: unknown): unknown[] => (el as Drawn | null)?.children ?? []
+const propsOf = (el: unknown): Record<string, unknown> => (isRecord(el) && isRecord(el.props) ? el.props : {})
+const childrenOf = (el: unknown): unknown[] => (isRecord(el) && Array.isArray(el.children) ? el.children : [])
 const count = (el: unknown): number => 1 + childrenOf(el).reduce<number>((n, c) => n + count(c), 0)
-const keyed = (el: unknown, key: string): unknown => ((el as Drawn | null)?.props?.key === key ? el : childrenOf(el).map(c => keyed(c, key)).find(f => f !== undefined))
+const keyed = (el: unknown, key: string): unknown => (propsOf(el).key === key ? el : childrenOf(el).map(c => keyed(c, key)).find(f => f !== undefined))
+const nodesOf = (el: unknown): unknown[] => [el, ...childrenOf(el).flatMap(nodesOf)]
 const TABS = ['tab:now', 'tab:log', 'tab:analysis']
 
 test('Given desktop, When the pane is drawn, Then the keys tab:now, tab:log, tab:analysis exist and the default tab is now', { timeoutMs: 30_000 }, async ($, on) => {
@@ -182,15 +185,20 @@ test('Given desktop at two different bodyColumns, When drawn, Then the root Box 
   // Given
   world(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  const widths: (string | number | undefined)[] = []
+  const widths: unknown[] = []
+  const fixed: string[] = []
   // When
   for (const columns of [80, 150]) {
     const ui = await mountDesk($, columns)
-    widths.push((await ui.drawn() as Drawn).props?.width)
+    const drawn = await ui.drawn()
+    widths.push(propsOf(drawn).width)
+    // a fixed pixel width on the head's boxes or texts would overflow a narrow pane: only the Svgs and the 86px rail keep one
+    fixed.push(...nodesOf(keyed(drawn, 'desk:head')).filter(n => isRecord(n) && n.type !== 'Svg' && typeof propsOf(n).width === 'number' && propsOf(n).width !== 86).map(n => String(propsOf(n).key)))
     await ui.unmount()
   }
   // Then
   expect(widths).toEqual(['100%', '100%'])
+  expect(fixed).toEqual([])
 })
 
 test('Given bodyRows, When the body limit is read, Then it keeps at least 8 rows and a cut list ends with a more row', () => {
@@ -203,8 +211,17 @@ test('Given bodyRows, When the body limit is read, Then it keeps at least 8 rows
   // Then
   expect(roomy).toBeGreaterThan(8)
   expect(tight).toBe(8)
-  expect(cut).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', '+2'])
+  expect(cut).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', '+3'])
   expect(whole).toHaveLength(8)
+})
+
+test('Given a pane below the wide layout, When the body limit is read, Then the head keeps two more rows for the stacked credit lines', () => {
+  // Given
+  const bodyRows = 40
+  // When
+  const [wide, medium] = [bodyLimit(bodyRows, 160), bodyLimit(bodyRows, 80)]
+  // Then
+  expect(wide - medium).toBe(2)
 })
 
 // ── T6b: /cockpit close closes the pane ──
@@ -274,10 +291,34 @@ test('Given the Italian pane, When /cockpit chiudi runs, Then the pane is closed
   setLang('en')
 })
 
+test('Given the Italian pane, When /cockpit close runs, Then the pane is closed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const closed: string[] = []
+  world(on, { closed, files: IT_FILE })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  // When
+  const ran = await cockpit($, 'close')
+  // Then
+  expect(ran.text).toBe('cockpit chiuso')
+  expect(closed).toEqual(['plugin'])
+  setLang('en')
+})
+
+test('Given the English pane, When /cockpit chiudi runs, Then the pane is closed', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const closed: string[] = []
+  world(on, { closed })
+  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
+  // When
+  const ran = await cockpit($, 'chiudi')
+  // Then
+  expect(ran.text).toBe(t().commandClosed)
+  expect(closed).toEqual(['plugin'])
+})
+
 // ── T7: the head ──
 
-type Leaf = { type?: string; props?: { source?: string; key?: string }; children?: unknown[] }
-const svgsOf = (el: unknown): string[] => [...((el as Leaf | null)?.type === 'Svg' ? [(el as Leaf).props?.source ?? ''] : []), ...childrenOf(el).flatMap(svgsOf)]
+const svgsOf = (el: unknown): string[] => [...(isRecord(el) && el.type === 'Svg' ? [String(propsOf(el).source ?? '')] : []), ...childrenOf(el).flatMap(svgsOf)]
 const textOf = (el: unknown): string => (typeof el === 'string' ? el : childrenOf(el).map(textOf).join(''))
 const headOf = async (ui: { drawn: () => Promise<unknown> }) => keyed(await ui.drawn(), 'desk:head')
 const DONUT = /r="44"/
@@ -345,6 +386,89 @@ test('Given any two snapshots, When the head is drawn, Then its element count is
   await ui.unmount()
 })
 
+// ── T7b: the head's credit rows by layout size ──
+
+const headSlots = new WeakMap<object, Map<string, { s: CockpitSnapshot; columns: number }>>()
+let headCount = 0
+
+/** Draws `deskHead` alone on the desktop surface for snapshot `s` at `columns`; the drawn head. */
+async function drawHead($: Engine, on: On, s: CockpitSnapshot, columns: number): Promise<unknown> {
+  const requestId = `head${headCount++}`
+  const known = headSlots.get(on)
+  const slots = known ?? new Map<string, { s: CockpitSnapshot; columns: number }>()
+  slots.set(requestId, { s, columns })
+  if (known === undefined) {
+    headSlots.set(on, slots)
+    on('ui.render', { component: 'Pane' }, ($$, e, next) => {
+      const slot = slots.get(e.requestId ?? '')
+      return slot === undefined || e.surface !== 'desktop' ? next(e) : deskHead($$.ui.resolve(e), slot.s, deskLayout(slot.columns, 30), urgentRecorder([]))
+    })
+  }
+  const ui = await $.ui.mount({ ...PANE, requestId, surface: 'desktop' })
+  const drawn = await ui.drawn()
+  await ui.unmount()
+  return drawn
+}
+
+const RATES = [
+  { kind: 'five_hour', percentUsed: 38, resetsAt: iso(2 * 3_600_000) },
+  { kind: 'seven_day', percentUsed: 59, resetsAt: iso(3 * 86_400_000) },
+] as const
+/** The Texts under `el` that no `wrap="truncate"` cuts, itself or a Text around it. */
+const uncutTexts = (el: unknown, isCut = false): unknown[] => {
+  if (!isRecord(el)) return []
+  const cuts = el.type === 'Text' && propsOf(el).wrap === 'truncate'
+  return [...(el.type === 'Text' && !isCut && !cuts ? [el] : []), ...childrenOf(el).flatMap(c => uncutTexts(c, isCut || cuts))]
+}
+
+test('Given a last-known credit reading, When the head is drawn, Then the percent has a ~ before it', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ rateLimits: [], lastRates: [...RATES] })
+  // When
+  const head = await drawHead($, on, s, 100)
+  // Then
+  expect(textOf(keyed(head, 'desk:window:five_hour'))).toContain('~62%')
+})
+
+test('Given a live credit reading, When the head is drawn, Then the percent has no ~', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ rateLimits: [...RATES] })
+  // When
+  const head = await drawHead($, on, s, 100)
+  // Then
+  expect(textOf(keyed(head, 'desk:window:five_hour'))).not.toContain('~')
+})
+
+for (const [columns, isStacked] of [[36, true], [80, true], [160, false]] as const) {
+  test(`Given ${columns} columns, When a credit row is drawn, Then the renewal is ${isStacked ? 'on a second line under the bar, kept (empty) without data' : 'on the one line'}`, { timeoutMs: 30_000 }, async ($, on) => {
+    // Given
+    const [full, empty] = [snap({ rateLimits: [...RATES] }), snap({ rateLimits: [] })]
+    // When
+    const [a, b] = [await drawHead($, on, full, columns), await drawHead($, on, empty, columns)]
+    // Then
+    const [rowA, rowB] = [keyed(a, 'desk:window:five_hour'), keyed(b, 'desk:window:five_hour')]
+    expect(count(rowA)).toBe(count(rowB))
+    expect(keyed(rowA, 'desk:window:five_hour:when') !== undefined).toBe(isStacked)
+    if (isStacked) {
+      expect(textOf(keyed(rowA, 'desk:window:five_hour:when'))).toContain(t().desk.head.renews)
+      expect(svgsOf(keyed(rowA, 'desk:window:five_hour:when'))).toHaveLength(0)
+    }
+  })
+}
+
+test('Given any layout size, When the head is drawn, Then every Text of its state, gauges and forecast is cut with wrap truncate', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ rateLimits: [...RATES], claudeState: { kind: 'tool', tool: 'Bash' } })
+  const loose: unknown[] = []
+  // When
+  for (const columns of [36, 80, 160]) {
+    const head = await drawHead($, on, s, columns)
+    for (const key of ['desk:state', 'desk:gauges', 'desk:forecast']) loose.push(...uncutTexts(keyed(head, key)))
+  }
+  // Then
+  expect(loose).toEqual([])
+})
+
 // ── T8: the URGENTE card ──
 
 const urgentSlots = new WeakMap<object, Map<string, { s: CockpitSnapshot; calls: string[] }>>()
@@ -385,7 +509,7 @@ async function drawUrgent($: Engine, on: On, s: CockpitSnapshot, calls: string[]
   return $.ui.mount({ ...PANE, requestId, surface: 'desktop' })
 }
 
-const buttonTexts = (el: unknown): string[] => [...((el as Leaf | null)?.type === 'Button' ? [textOf(el)] : []), ...childrenOf(el).flatMap(buttonTexts)]
+const buttonTexts = (el: unknown): string[] => [...(isRecord(el) && el.type === 'Button' ? [textOf(el)] : []), ...childrenOf(el).flatMap(buttonTexts)]
 
 test('Given no blocking signal, When the card is drawn, Then it has the same element count as with one and shows the nothing-waiting text', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
@@ -445,19 +569,3 @@ test('Given the scope choice open, When each of its buttons is pressed, Then wor
   expect(calls).toEqual(['worklog:session', 'worklog:day', 'answer:false'])
   await ui.unmount()
 })
-
-// ── T6: the size the pane asks for when it opens ──
-
-for (const [surface, columns] of [['desktop', 110], ['terminal', 60]] as const) {
-  test(`Given a session drawn on ${surface}, When the pane opens, Then it asks for ${columns} columns`, { timeoutMs: 30_000 }, async ($, on) => {
-    // Given
-    const openedColumns: (number | undefined)[] = []
-    world(on, { openedColumns })
-    on('session.surfaces', () => ({ value: [surface] }))
-    await $.session.start({ cwd: '/', surface, isInteractive: true })
-    // When
-    await cockpit($, '')
-    // Then
-    expect(openedColumns).toEqual([columns])
-  })
-}

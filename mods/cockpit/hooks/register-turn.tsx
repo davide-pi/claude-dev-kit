@@ -41,6 +41,7 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
           ...s,
           cost,
           claudeState: { kind: 'working' },
+          roundStartedAt: now,
           workflowRun,
           // the header's figure took the flow agents that ended after the round: the round entry takes it too
           sessionLog: cost.lastUsd !== undefined && cost.lastUsd !== s.cost.lastUsd ? withRoundLastUsd(log, cost.lastUsd) : log,
@@ -189,6 +190,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
           roundTools: undefined,
           roundPrompt: undefined,
           roundAnchor: undefined,
+          roundStartedAt: undefined,
           roundFiles: undefined,
           roundFails: undefined,
           roundWaits: undefined,

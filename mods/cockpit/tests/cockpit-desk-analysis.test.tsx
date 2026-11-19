@@ -107,6 +107,43 @@ test('Given no insights, When drawn, Then the sections keep their rows as with d
   await full.ui.unmount()
 })
 
+const failing = (names: string[]) => snap({ insights: insights({ failedCmds: Object.fromEntries(names.map(n => [n, 3])) }) })
+
+type Node = { props?: unknown; children?: unknown; text?: unknown }
+const isNode = (v: unknown): v is Node => typeof v === 'object' && v !== null
+const kids = (v: unknown): unknown[] => (isNode(v) && Array.isArray(v.children) ? v.children : [])
+const keyOf = (v: unknown): unknown => (isNode(v) && typeof v.props === 'object' && v.props !== null && 'key' in v.props ? v.props.key : undefined)
+const textOf = (v: unknown): string => (typeof v === 'string' ? v : isNode(v) && typeof v.text === 'string' ? v.text : kids(v).map(textOf).join(''))
+const find = (v: unknown, key: string): unknown => (keyOf(v) === key ? v : kids(v).map(k => find(k, key)).find(x => x !== undefined))
+/** The rows of the watch section under its title, as text. */
+const watchRows = async (ui: Mounted): Promise<string[]> => kids(find(await ui.drawn(), 'analysis:watch')).slice(1).map(textOf)
+
+test('Given five notifications, When the Analysis tab is drawn, Then the watch section shows two and a +3 row in its three rows', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = failing(['cmd-a', 'cmd-b', 'cmd-c', 'cmd-d', 'cmd-e'])
+  // When
+  const five = await drawAnalysis($, on, s, 100, [])
+  const rows = await watchRows(five.ui)
+  // Then
+  expect(rows).toHaveLength(3)
+  expect(rows.filter(r => /cmd-[a-e]/.test(r))).toHaveLength(2)
+  expect(rows[2]?.trim()).toBe('+3')
+  await five.ui.unmount()
+})
+
+test('Given exactly three notifications, When the Analysis tab is drawn, Then all three show and no more row', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = failing(['cmd-a', 'cmd-b', 'cmd-c'])
+  // When
+  const three = await drawAnalysis($, on, s, 100, [])
+  const rows = await watchRows(three.ui)
+  // Then
+  expect(rows).toHaveLength(3)
+  expect(rows.filter(r => /cmd-[a-c]/.test(r))).toHaveLength(3)
+  expect(rows.some(r => /^\+\d+$/.test(r.trim()))).toBe(false)
+  await three.ui.unmount()
+})
+
 test('Given a narrow and a wide pane, When drawn, Then both show the sections and the three buttons', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const narrow = await drawAnalysis($, on, FULL(), 40, [])

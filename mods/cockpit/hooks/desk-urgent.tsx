@@ -1,9 +1,9 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
+import { limitRows } from './desk-layout'
 import { iconSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
-import { limitRows } from './desk-view'
 import { signalSeverity, signalsOf } from './signals'
 import { t } from './strings'
 import type { PaneActions } from './view-kit'
@@ -39,7 +39,7 @@ export function deskUrgent(ui: DeskUi, s: CockpitSnapshot, actions: PaneActions)
       </Text>
     </Box>
   )
-  const shown = limitRows(blocking, SIGNAL_SLOTS - 1, n => `+${n}`)
+  const shown = limitRows(blocking, SIGNAL_SLOTS, n => `+${n}`)
   const slots = Array.from({ length: SIGNAL_SLOTS }, (_, i) => {
     const text = shown[i]
     if (text !== undefined) return slot(`desk:urgent:slot:${i}`, 'alert', RED, text)

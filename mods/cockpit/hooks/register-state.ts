@@ -67,11 +67,21 @@ export function pace($: EngineInterface, trigger: 'tick' | 'turn'): void {
 /** The columns the desktop page asks for: its wide layout (`DESK_WIDE_FROM`). */
 const DESK_COLUMNS = DESK_WIDE_FROM
 
-// A session may draw on several surfaces at once and the open cannot tell which one shows the pane: where the desktop is one of them the
-// ask is its wide pane (the terminal's page stops at PANE_MAX_COLUMNS whatever the dock is asked for); else the terminal's. The full pane, not the widget form.
+// A session may draw on several surfaces at once and the open cannot tell which one shows the pane: where the desktop is the only
+// one of them (no terminal beside it, whose page stops at PANE_MAX_COLUMNS whatever the dock is asked for) the ask is its wide pane;
+// else the terminal's. The full pane, not the widget form.
+const columnsFor = (surfaces: readonly string[]): number => (surfaces.includes('desktop') && !surfaces.includes('terminal') ? DESK_COLUMNS : PANE_MAX_COLUMNS)
+
 async function openPane($: EngineInterface) {
   const surfaces = await $.session.surfaces().catch((): readonly string[] => [])
-  return $.ui.open({ id: PANE, title: 'cockpit', columns: surfaces.includes('desktop') ? DESK_COLUMNS : PANE_MAX_COLUMNS })
+  return $.ui.open({ id: PANE, title: 'cockpit', columns: columnsFor(surfaces) })
+}
+
+/** A desktop that attaches after the pane opened (the auto-open asked the terminal's width): the pane opens again, same id, at the desktop's. */
+export async function widenForDesktop($: EngineInterface, attached: string): Promise<void> {
+  const surfaces = await $.session.surfaces().catch((): readonly string[] => [])
+  const columns = columnsFor([...surfaces, attached])
+  if (columns === DESK_COLUMNS) await $.ui.open({ id: PANE, title: 'cockpit', columns })
 }
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */

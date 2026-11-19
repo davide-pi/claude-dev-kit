@@ -67,15 +67,38 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
     const r: RateRow | undefined = rateRow(s, kind)
     const when = r?.resetMs === undefined ? ' ' : `${H.renews} ${countdown(r.resetMs, s.now).trim()} · ${kind === 'seven_day' ? `${localDate(r.resetMs).slice(5)} ` : ''}${clockTime(r.resetMs)}`
     const color = r === undefined ? DIM : semantic(r.color)
+    const bar = (
+      <Box flexGrow={1}>
+        <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${H.left}`} width={layout.barWidth} height={BAR_PX} />
+      </Box>
+    )
+    // the last session's reading (the engine reports none yet) carries the `~`, as the context's and the terminal's do
+    const left = <Text wrap="truncate" color={color} weight="bold">{r === undefined ? '—' : `${r.isStale ? '~' : ''}${r.rem}% ${H.left}`}</Text>
+    const renews = <Text wrap="truncate" color={DIM}>{when}</Text>
+    const pace = <Text wrap="truncate" color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>{r?.pace === undefined ? ' ' : `${H.pace} ${signedPct(r.pace.delta)}`}</Text>
+    // wide: one line; narrower: the renewal and the pace on a second line under the bar, always drawn (empty without data), so the row count is fixed
+    if (layout.size !== 'wide') {
+      return (
+        <Box key={`desk:window:${kind}`} flexDirection="column">
+          <Box columnGap={1} alignItems="center">
+            <Text wrap="truncate" color={DIM}>{label}</Text>
+            {bar}
+            {left}
+          </Box>
+          <Box key={`desk:window:${kind}:when`} columnGap={1}>
+            {renews}
+            {pace}
+          </Box>
+        </Box>
+      )
+    }
     return (
       <Box key={`desk:window:${kind}`} columnGap={1} alignItems="center">
-        <Text color={DIM}>{label}</Text>
-        <Box flexGrow={1}>
-          <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${H.left}`} width={layout.barWidth} height={BAR_PX} />
-        </Box>
-        <Text color={color} weight="bold">{r === undefined ? '—' : `${r.rem}% ${H.left}`}</Text>
-        <Text color={DIM}>{when}</Text>
-        <Text color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>{r?.pace === undefined ? ' ' : `${H.pace} ${signedPct(r.pace.delta)}`}</Text>
+        <Text wrap="truncate" color={DIM}>{label}</Text>
+        {bar}
+        {left}
+        {renews}
+        {pace}
       </Box>
     )
   }
@@ -85,18 +108,18 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
       <Box key="desk:state" flexDirection="column">
         <Box columnGap={1} alignItems="center">
           <Svg source={iconSvg(look.icon, look.color)} alt={stateWord || state?.tool || ''} height={ICON_PX} />
-          <Text weight="bold" color={TEXT}>{stateLine}</Text>
-          <Text color={look.color}>{stateWord}</Text>
+          <Text wrap="truncate" weight="bold" color={TEXT}>{stateLine}</Text>
+          <Text wrap="truncate" color={look.color}>{stateWord}</Text>
         </Box>
-        <Text color={DIM}>{detail}</Text>
+        <Text wrap="truncate" color={DIM}>{detail}</Text>
       </Box>
       <Box key="desk:gauges" flexDirection={layout.size === 'narrow' ? 'column' : 'row'} columnGap={2} rowGap={1}>
         <Box key="desk:context" columnGap={2} alignItems="center">
           <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, cachePct: s.cacheShare, color: semantic(scale.color) })} alt={H.context} width={layout.gaugeSize} height={layout.gaugeSize} />
           <Box flexDirection="column">
-            <Text color={TEXT} weight="bold">{`${H.context} ${isStale ? '~' : ''}${shown}%`}</Text>
-            <Text color={DIM}>{`${abbrevTokens(tokens ?? 0, true)} / ${limit ? abbrevTokens(limit, true) : '—'}`}</Text>
-            <Text color={s.cacheShare === undefined ? DIM : ACCENT}>{s.cacheShare === undefined ? ' ' : `${H.cache} ${s.cacheShare}%`}</Text>
+            <Text wrap="truncate" color={TEXT} weight="bold">{`${H.context} ${isStale ? '~' : ''}${shown}%`}</Text>
+            <Text wrap="truncate" color={DIM}>{`${abbrevTokens(tokens ?? 0, true)} / ${limit ? abbrevTokens(limit, true) : '—'}`}</Text>
+            <Text wrap="truncate" color={s.cacheShare === undefined ? DIM : ACCENT}>{s.cacheShare === undefined ? ' ' : `${H.cache} ${s.cacheShare}%`}</Text>
           </Box>
         </Box>
         <Box key="desk:windows" flexDirection="column" flexGrow={1}>
@@ -105,7 +128,7 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
         </Box>
       </Box>
       <Box key="desk:forecast">
-        <Text color={WARN}>{forecastText(s)}</Text>
+        <Text wrap="truncate" color={WARN}>{forecastText(s)}</Text>
       </Box>
       {deskUrgent(ui, s, actions)}
     </Box>

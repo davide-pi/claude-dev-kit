@@ -334,6 +334,8 @@ export type CockpitSnapshot = {
   roundPrompt?: string
   /** The chat marker placed when the open round began (a `$.ui.place` request id): the next round entry takes it as its `anchor`. */
   roundAnchor?: string
+  /** When the open round's turn began (ms): the request's start on the desktop page. Cleared when the turn completes. Kept in the session data file. */
+  roundStartedAt?: number
   roundFiles?: string[]
   roundFails?: { n: number; list?: { tool: string; text: string }[] }
   roundWaits?: { n: number; ms: number; list?: { tool: string; ms: number }[] }

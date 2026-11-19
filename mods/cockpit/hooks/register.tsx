@@ -9,7 +9,7 @@ import { PACE_TICK_MS } from './pace'
 import { paneActions } from './pane-actions'
 import { fastTick, measuredCost, mediumTick, refreshAlm, refreshAutoCompact, refreshConfig, refreshDoneClaims, refreshLastRates, refreshOnOpen, refreshUsage, refreshWorklog, slowTick, withSettledRound } from './refresh'
 import { refreshGit } from './refresh-git'
-import { FAST_MS, MEDIUM_MS, SLOW_MS, open, pace } from './register-state'
+import { FAST_MS, MEDIUM_MS, SLOW_MS, open, pace, widenForDesktop } from './register-state'
 import { registerTools } from './register-tools'
 import { registerTurnEnd, registerTurnStart } from './register-turn'
 import { markerRound } from './round-anchor'
@@ -21,6 +21,9 @@ import { withLoggedSignals } from './signals'
 import { deskView } from './desk-view'
 import { paneView } from './view'
 import { runIdOf } from './workflow'
+
+// `/cockpit close` in either language, whichever the pane speaks.
+const CLOSE_WORDS = ['close', 'chiudi']
 
 // The scan that checks `$.state` references reads the atom from the file that uses it.
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
@@ -108,7 +111,7 @@ export const register: Register = on => {
   // `/cockpit` opens the pane (a command-initiated open is placed at any width); `/cockpit close` closes it.
   on('command.run', { command: 'cockpit' }, async ($, e) => {
     const arg = e.args.trim().toLowerCase()
-    if (arg === t().commandCloseWord) {
+    if (CLOSE_WORDS.includes(arg)) {
       await $.ui.close({ id: PANE }).catch(() => undefined)
       return { text: t().commandClosed }
     }
@@ -122,6 +125,13 @@ export const register: Register = on => {
     const closed = await next(e)
     await setOpen($, false)
     return closed
+  })
+
+  // A desktop that joins after the pane auto-opened at the terminal's width: the open pane is asked again at its own.
+  on('session.attach', async ($, e, next) => {
+    const attached = await next(e)
+    if (e.surface === 'desktop' && isOpen) await widenForDesktop($, e.surface).catch(() => undefined)
+    return attached
   })
 
   on('session.measure', async ($, e, next) => {
@@ -167,9 +177,9 @@ export const register: Register = on => {
         void setOpen($, true).then(() => refreshOnOpen($)).catch(() => undefined)
       })
     }
-    // Only the terminal and the desktop run a surface module: any other surface (mobile, vscode, one to come) draws its bars static, whatever the table resolved
+    // Only the terminal runs a surface module for this page (the desktop returns below, with its own table): any other surface (mobile, vscode, one to come) draws its bars static, whatever the table resolved
     const table = $.ui.resolve(e)
-    const ui = e.surface === 'terminal' || e.surface === 'desktop' ? table : { ...table, Client: undefined }
+    const ui = e.surface === 'terminal' ? table : { ...table, Client: undefined }
     const s = await read($, snapshot)
     // A pane that draws before any session start (a mod enabled mid-session) reads the language once; the mark is written outside this drawing.
     if (!s.isLangRead) {

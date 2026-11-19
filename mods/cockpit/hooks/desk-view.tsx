@@ -3,7 +3,7 @@ import type { Elements, RenderElement } from 'claude-code'
 import type { CockpitSnapshot } from '../types'
 import { deskAnalysis } from './desk-analysis'
 import { deskHead } from './desk-head'
-import { deskLayout } from './desk-layout'
+import { DESK_WIDE_FROM, deskLayout } from './desk-layout'
 import { deskLog } from './desk-log'
 import { deskNow } from './desk-now'
 import { t } from './strings'
@@ -19,17 +19,17 @@ const TABS: readonly Tab[] = ['now', 'log', 'analysis']
 const ACCENT = '#8B6CF6'
 const TEXT = '#F2F0EA'
 const DIM = '#A8A49B'
-/** Rows the head takes of the pane (its 5-row URGENTE card included); the tab body gets what is left, never fewer than `MIN_BODY_ROWS`. */
+/** Rows the head takes of a wide pane (its 5-row URGENTE card included); the tab body gets what is left, never fewer than `MIN_BODY_ROWS`. */
 const HEAD_ROWS = 18
+/** Below the wide layout each of the two credit rows takes a second line. */
+const HEAD_ROWS_STACKED = HEAD_ROWS + 2
 const MIN_BODY_ROWS = 8
 
 /** The rows the tab body may take of a pane `bodyRows` tall, so the head stays in view. */
-export const bodyLimit = (bodyRows: number): number => Math.max(bodyRows - HEAD_ROWS, MIN_BODY_ROWS)
+export const bodyLimit = (bodyRows: number, bodyColumns: number = DESK_WIDE_FROM): number =>
+  Math.max(bodyRows - (bodyColumns < DESK_WIDE_FROM ? HEAD_ROWS_STACKED : HEAD_ROWS), MIN_BODY_ROWS)
 
-/** The first `limit` rows; a list cut short ends with the `more` row for the `n` left out. */
-export function limitRows<T>(rows: readonly T[], limit: number, more: (n: number) => T): T[] {
-  return rows.length <= limit ? [...rows] : [...rows.slice(0, limit), more(rows.length - limit)]
-}
+export { limitRows } from './desk-layout'
 
 /** The tab's underline: always there, the accent under the open tab and transparent under the others, so the row never changes size. */
 const underline = (color: string): string => `<svg width="100%" height="2" viewBox="0 0 100 2" preserveAspectRatio="none"><rect width="100" height="2" fill="${color}"/></svg>`
@@ -41,7 +41,7 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
   const { Box, Text, Button, Svg } = ui
   const S = t().desk
   const open: Tab = s.deskTab ?? 'now'
-  const layout = deskLayout(bodyColumns, bodyLimit(bodyRows))
+  const layout = deskLayout(bodyColumns, bodyLimit(bodyRows, bodyColumns))
   const tabs = (
     <Box key="desk:tabs" columnGap={2}>
       {TABS.map(tab => (

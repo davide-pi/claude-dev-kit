@@ -87,13 +87,31 @@ test('Given an idle session with no request, When drawn, Then the request rows e
 test('Given an open request, When drawn, Then the round, start, length, cost and prompt show', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const since = NOW - 90_000
-  const s = snap({ claudeState: { kind: 'working' }, roundPrompt: 'fix the login', sessionLog: [{ at: since, kind: 'round', n: 6 }], cost: { usd: 3, startUsd: 2.5 } })
+  const s = snap({ claudeState: { kind: 'working' }, roundPrompt: 'fix the login', roundStartedAt: since, sessionLog: [{ at: NOW - 7_200_000, kind: 'round', n: 6 }], cost: { usd: 3, startUsd: 2.5 } })
   // When
   const root = await drawNow($, on, s)
   // Then
   const request = section(root, 'now:request')
   expect(texts(kids(request)[1]).join('')).toBe(`round 007 · ${clockTime(since)} · ${duration(90_000)} · $0.50`)
   expect(texts(kids(request)[2])).toEqual(['fix the login'])
+})
+
+test('Given a round that ended two hours ago and a prompt sent a minute ago, When drawn, Then the start is the prompt, not the end of the last round', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ claudeState: { kind: 'working' }, roundPrompt: 'next', roundStartedAt: NOW - 60_000, sessionLog: [{ at: NOW - 7_200_000, kind: 'round', n: 1 }] })
+  // When
+  const root = await drawNow($, on, s)
+  // Then
+  expect(texts(kids(section(root, 'now:request'))[1]).join('')).toContain(`${clockTime(NOW - 60_000)} · ${duration(60_000)}`)
+})
+
+test('Given an open request with no roundStartedAt, When drawn, Then the start falls back to the last round entry', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ claudeState: { kind: 'working' }, sessionLog: [{ at: NOW - 90_000, kind: 'round', n: 1 }] })
+  // When
+  const root = await drawNow($, on, s)
+  // Then
+  expect(texts(kids(section(root, 'now:request'))[1]).join('')).toContain(`${clockTime(NOW - 90_000)} · ${duration(90_000)}`)
 })
 
 test('Given an open request with no earlier round, When drawn, Then the missing start reads as the dash', { timeoutMs: 30_000 }, async ($, on) => {

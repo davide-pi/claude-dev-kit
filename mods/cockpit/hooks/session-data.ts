@@ -51,6 +51,7 @@ export const sessionData = (s: CockpitSnapshot, history: readonly CockpitHistory
     ...(s.roundTools !== undefined && { roundTools: s.roundTools }),
     ...(s.roundPrompt !== undefined && { roundPrompt: s.roundPrompt }),
     ...(s.roundAnchor !== undefined && { roundAnchor: s.roundAnchor }),
+    ...(s.roundStartedAt !== undefined && { roundStartedAt: s.roundStartedAt }),
     ...(s.roundFiles !== undefined && { roundFiles: s.roundFiles }),
     ...(s.roundFails !== undefined && { roundFails: s.roundFails }),
     ...(s.roundWaits !== undefined && { roundWaits: s.roundWaits }),
@@ -151,6 +152,7 @@ type Saved = {
   roundTools?: Record<string, number>
   roundPrompt?: string
   roundAnchor?: string
+  roundStartedAt?: number
   roundFiles?: string[]
   roundFails?: CockpitSnapshot['roundFails']
   roundWaits?: CockpitSnapshot['roundWaits']
@@ -191,6 +193,7 @@ async function savedState($: EngineInterface, id: string): Promise<Saved> {
       roundTools: parseToolCounts(data?.roundTools),
       roundPrompt: typeof data?.roundPrompt === 'string' && data.roundPrompt !== '' ? data.roundPrompt : undefined,
       roundAnchor: typeof data?.roundAnchor === 'string' && data.roundAnchor !== '' ? data.roundAnchor : undefined,
+      roundStartedAt: typeof data?.roundStartedAt === 'number' && Number.isFinite(data.roundStartedAt) ? data.roundStartedAt : undefined,
       roundFiles: Array.isArray(data?.roundFiles) && data.roundFiles.every(f => typeof f === 'string') && data.roundFiles.length > 0 ? data.roundFiles : undefined,
       roundFails: parseFails(data?.roundFails),
       roundWaits: parseWaits(data?.roundWaits),
@@ -231,6 +234,7 @@ export const withoutSession = (s: CockpitSnapshot): CockpitSnapshot => ({
   roundTools: undefined,
   roundPrompt: undefined,
   roundAnchor: undefined,
+  roundStartedAt: undefined,
   roundFiles: undefined,
   roundFails: undefined,
   roundWaits: undefined,

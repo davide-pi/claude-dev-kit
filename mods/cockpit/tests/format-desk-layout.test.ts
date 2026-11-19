@@ -1,6 +1,25 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DESK_BAR_MAX, DESK_BAR_MIN, DESK_MIN_COLUMNS, DESK_MIN_ROWS, deskLayout } from '../hooks/desk-layout'
+import { DESK_BAR_MAX, DESK_BAR_MIN, DESK_MIN_COLUMNS, DESK_MIN_ROWS, deskLayout, limitRows } from '../hooks/desk-layout'
+
+test('Given more rows than the limit, When limitRows runs, Then it keeps limit rows with the more row last, counting the rest', () => {
+  // Given
+  const rows = ['a', 'b', 'c', 'd', 'e']
+  // When
+  const cut = limitRows(rows, 3, n => `+${n}`)
+  // Then
+  expect(cut).toEqual(['a', 'b', '+3'])
+})
+
+test('Given as many rows as the limit or fewer, When limitRows runs, Then every row is kept and no more row', () => {
+  // Given
+  const [full, few] = [['a', 'b', 'c'], ['a']]
+  // When
+  const [a, b] = [limitRows(full, 3, n => `+${n}`), limitRows(few, 3, n => `+${n}`)]
+  // Then
+  expect(a).toEqual(['a', 'b', 'c'])
+  expect(b).toEqual(['a'])
+})
 
 test('Given 55 and 56 columns, When deskLayout runs, Then 55 is narrow and 56 is medium', () => {
   // Given

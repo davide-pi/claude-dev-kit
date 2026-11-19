@@ -6,6 +6,7 @@ import { deskLayout } from '../hooks/desk-layout'
 import { deskLog } from '../hooks/desk-log'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
+import { signalText } from '../hooks/view-kit'
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import { PAGE, snap } from './cockpit-page-draw'
 import { NOW } from './cockpit-world'
@@ -154,7 +155,7 @@ test('Given a flow with no lane, When the log is drawn, Then its row carries its
   expect(svgs(root).every(r => !String(r.source).includes('x1="21"'))).toBe(true)
 })
 
-test('Given more rows than bodyRows, When the log is drawn, Then bodyRows rows show and a more row counts the rest', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given more rows than bodyRows, When the log is drawn, Then the rows, more row included, fill at most bodyRows cells and the more row counts the rest', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
   // When
@@ -162,7 +163,59 @@ test('Given more rows than bodyRows, When the log is drawn, Then bodyRows rows s
   await ui.unmount()
   // Then
   const rows = logRows(root)
-  expect(rows.length).toBe(9)
+  // a row is its 28px rail tall, two cells of the desktop's code font
+  expect(rows.length * 2).toBeLessThanOrEqual(8)
+  expect(rows.length).toBe(4)
   expect(rows[0]?.text).toBe('#12 prompt 12')
-  expect(rows.at(-1)).toEqual({ key: 'desk:log:more', text: '+4' })
+  expect(rows.at(-1)).toEqual({ key: 'desk:log:more', text: '+9' })
+})
+
+test('Given exactly as many rows as bodyRows holds, When the log is drawn, Then every row shows and no more row', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: Array.from({ length: 4 }, (_, i) => round(i + 1)) })
+  // When
+  const { ui, root } = await drawLog($, on, s, 8)
+  await ui.unmount()
+  // Then
+  expect(logRows(root).map(r => r.text)).toEqual(['#4 prompt 4', '#3 prompt 3', '#2 prompt 2', '#1 prompt 1'])
+})
+
+test('Given a log with rounds, events and a flow, When the log is drawn, Then no Box is given a height of more than two cells', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const log: CockpitLogEntry[] = [round(1), round(2), { at: NOW - 98_500, kind: 'commit', round: 1, key: 'abc1234', text: 'fix' }, flow('loop', { round: 1, endRound: 2, lane: 0 })]
+  // When
+  const { ui, root } = await drawLog($, on, snap({ sessionLog: log }))
+  await ui.unmount()
+  // Then
+  const heights = nodes(root)
+    .filter(n => isNode(n) && n.type === 'Box')
+    .map(n => propsOf(n).height)
+    .filter(h => typeof h === 'number')
+  expect(heights.every(h => typeof h === 'number' && h <= 2)).toBe(true)
+  expect(svgs(root).every(r => r.height === 28 && r.width === 86)).toBe(true)
+})
+
+test('Given a logged signal without text, When the log is drawn, Then its row reads the notification and not its raw key', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const log: CockpitLogEntry[] = [round(1), { at: NOW - 98_500, kind: 'signal', round: 1, key: 'permissionWait:12345', severity: 'block', n: 90_000 }]
+  const what = signalText({ kind: 'permissionWait', key: '12345', n: 90_000 }).what
+  // When
+  const { ui, root } = await drawLog($, on, snap({ sessionLog: log }))
+  await ui.unmount()
+  // Then
+  const texts = logRows(root).map(r => r.text)
+  expect(texts).toContain(`#1 ${what}`)
+  expect(texts.some(x => x.includes('permissionWait'))).toBe(false)
+})
+
+test('Given a logged agent, When the log is drawn, Then its row reads its type and task, not its kind or id', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const log: CockpitLogEntry[] = [round(1), { at: NOW - 98_500, kind: 'agent', round: 1, key: 'agent-7f3', text: 'implementer', desc: 'fix rows' }]
+  // When
+  const { ui, root } = await drawLog($, on, snap({ sessionLog: log }))
+  await ui.unmount()
+  // Then
+  const texts = logRows(root).map(r => r.text)
+  expect(texts).toContain('#1 implementer fix rows')
+  expect(texts.some(x => x.includes('agent-7f3'))).toBe(false)
 })

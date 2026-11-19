@@ -80,7 +80,7 @@ async function ctxBar(ui: { drawn: (q?: { in: string }) => Promise<unknown> }): 
   return { bar: cells.map(c => c.t), colors: cells.map(c => c.c) }
 }
 
-test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on both surfaces', { timeoutMs: 30_000 }, async ($, on) => {
+test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on the terminal', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { autoCompactAt: 150_000 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   for (const surface of ['terminal'] as const) {

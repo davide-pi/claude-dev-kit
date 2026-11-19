@@ -58,7 +58,7 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
   // ── REQUEST: open while the main loop works or a prompt waits for its round to end ──
   const isOpen = s.roundPrompt !== undefined || (s.claudeState !== undefined && s.claudeState.kind !== 'idle')
   const lastRound = (s.sessionLog ?? []).filter(e => e.kind === 'round').at(-1)
-  const since = lastRound?.at ?? s.startedAt
+  const since = s.roundStartedAt ?? lastRound?.at ?? s.startedAt
   const turnUsd = shownTurnUsd(s.cost)
   const requestFacts = isOpen
     ? [E.round(nextRoundNumber(s)), since === undefined ? NONE : clockTime(since), since === undefined ? NONE : duration(Math.max(0, s.now - since)), turnUsd === undefined ? NONE : `$${costCell(turnUsd, COST_W).slice(1).trim()}`]

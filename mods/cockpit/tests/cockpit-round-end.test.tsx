@@ -56,6 +56,23 @@ test('Given a turn end, When the single patch is applied, Then claudeState is id
   expect(state?.kind).toBe('idle')
 })
 
+test('Given a turn start, When the data file is written and then the turn ends, Then roundStartedAt is the start and is gone after the end', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes })
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.advance(3000)
+  const during = dataOf(writes)?.roundStartedAt
+  await mainTurnEnd($)
+  await clock.advance(3000)
+  // Then
+  expect(typeof during).toBe('number')
+  expect(dataOf(writes)?.roundStartedAt).toBeUndefined()
+})
+
 // regression guard: passes before the change too
 test('Given round 3 open with a signal in force, When the main turn ends, Then the signal entry has round 3', { timeoutMs: 30_000 }, async ($, on) => {
   // Given: the context grew over the last rounds, so the turn end raises ctxGrowth
