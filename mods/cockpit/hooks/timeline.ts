@@ -1,5 +1,5 @@
 import type { CockpitEvent, CockpitLogEntry } from '../types'
-import { ROUND_LIST_KEEP, openRound } from './round-capture'
+import { ROUND_LIST_KEEP, endRoundOf } from './round-capture'
 
 /** The events kept: the oldest go first. */
 export const EVENTS_KEEP = 300
@@ -42,10 +42,10 @@ type Logging = { sessionLog?: CockpitLogEntry[]; logTrimmed?: number; roundSeq?:
 
 /**
  * `s` with `entry` recorded in its session log and the entries the keep dropped added to `logTrimmed`. The entry takes the conversation round it is logged in:
- * `round` when given, else the one open now; an entry with a round of its own, a 'round' entry, and one logged with no round open stay as they are.
+ * `round` when given, else the one open now, else the last one concluded; an entry with a round of its own, a 'round' entry, and one logged before any round stay as they are.
  */
 export function withLogged<S extends Logging>(s: S, entry: CockpitLogEntry, round?: number): S {
-  const at = entry.kind === 'round' || entry.round !== undefined ? undefined : (round ?? openRound(s))
+  const at = entry.kind === 'round' || entry.round !== undefined ? undefined : (round ?? endRoundOf(s))
   const { log, trimmed } = recordLogCount(s.sessionLog, at === undefined ? entry : { ...entry, round: at })
   return { ...s, sessionLog: log, ...(trimmed > 0 && { logTrimmed: (s.logTrimmed ?? 0) + trimmed }) }
 }

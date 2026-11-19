@@ -6,6 +6,7 @@ import { stateAfterWait } from './agents'
 import { setClaudeState } from './events'
 import { recordWait } from './insights'
 import { paceCheck } from './pace'
+import { DESK_WIDE_FROM } from './desk-layout'
 import { refreshOnOpen } from './refresh'
 import { withRoundWait } from './round-capture'
 import { WORKING_MARGIN_MS } from './session'
@@ -63,8 +64,14 @@ export function pace($: EngineInterface, trigger: 'tick' | 'turn'): void {
     .catch(() => undefined)
 }
 
-function openPane($: EngineInterface) {
-  return $.ui.open({ id: PANE, title: 'cockpit', columns: PANE_MAX_COLUMNS })
+/** The columns the desktop page asks for: its wide layout (`DESK_WIDE_FROM`). */
+const DESK_COLUMNS = DESK_WIDE_FROM
+
+// A session may draw on several surfaces at once and the open cannot tell which one shows the pane: where the desktop is one of them the
+// ask is its wide pane (the terminal's page stops at PANE_MAX_COLUMNS whatever the dock is asked for); else the terminal's. The full pane, not the widget form.
+async function openPane($: EngineInterface) {
+  const surfaces = await $.session.surfaces().catch((): readonly string[] => [])
+  return $.ui.open({ id: PANE, title: 'cockpit', columns: surfaces.includes('desktop') ? DESK_COLUMNS : PANE_MAX_COLUMNS })
 }
 
 /** Opens the pane; one that waits undrawn is not open yet: its first render says so. */

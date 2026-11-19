@@ -29,3 +29,19 @@ test('Given a step event before the spawn and round 3 open, When the agent spawn
   const log = (dataOf(writes)?.sessionLog ?? []) as Logged[]
   expect(log.find(e => e.kind === 'agent' && e.key === 'a1')?.round).toBe(3)
 })
+
+test('Given idle after round 3, When an agent spawns, Then its round is 3', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, dataFile: JSON.stringify({ roundSeq: 3 }) })
+  spawns(on)
+  roundHooks(on)
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  await spawnAgent($, 'implementer')
+  await finishAgent($, 'a1')
+  await clock.advance(3000)
+  // Then
+  const log = (dataOf(writes)?.sessionLog ?? []) as Logged[]
+  expect(log.find(e => e.kind === 'agent' && e.key === 'a1')?.round).toBe(3)
+})

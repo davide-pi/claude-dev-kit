@@ -18,6 +18,7 @@ import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { withLoggedSignals } from './signals'
+import { deskView } from './desk-view'
 import { paneView } from './view'
 import { runIdOf } from './workflow'
 
@@ -104,10 +105,16 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // `/cockpit` opens the pane; a command-initiated open is placed at any width.
-  on('command.run', { command: 'cockpit' }, async $ => {
+  // `/cockpit` opens the pane (a command-initiated open is placed at any width); `/cockpit close` closes it.
+  on('command.run', { command: 'cockpit' }, async ($, e) => {
+    const arg = e.args.trim().toLowerCase()
+    if (arg === t().commandCloseWord) {
+      await $.ui.close({ id: PANE }).catch(() => undefined)
+      return { text: t().commandClosed }
+    }
     const opened = await open($)
-    return { text: opened.isPlaced ? t().commandOpen : t().commandWaiting(opened.reason) }
+    if (!opened.isPlaced) return { text: t().commandWaiting(opened.reason) }
+    return { text: arg === '' ? t().commandOpen : t().commandOpenHint }
   })
 
   // Any close, whoever asked for it: the pane stays closed until `/cockpit` or the next session start (autoOpen).
@@ -169,6 +176,8 @@ export const register: Register = on => {
       await refreshConfig($)
       $.clock.after(0, () => void patch($, x => ({ ...x, isLangRead: true })).catch(() => undefined))
     }
+    // The desktop has a page of its own (tabs, Svg charts); every other surface draws the terminal page.
+    if (e.surface === 'desktop') return deskView($.ui.resolve(e), s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
 

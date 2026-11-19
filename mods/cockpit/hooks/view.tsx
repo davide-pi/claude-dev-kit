@@ -195,7 +195,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         ]
       : windows.map(windowRow)
 
-  // The footer, the last rows of the page: compact, retrospettiva (behind a choice of the last 10 days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
+  // The footer, the last rows of the page: compact, retrospettiva (behind a choice of the last RETRO_DAYS days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
   // The row stacks when its buttons do not fit the pane side by side.
   const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
   const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]

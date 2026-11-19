@@ -241,3 +241,9 @@ export function gatedBash(on: On) {
   on('tool.call', { tool: 'Bash' }, (_, e) => new Promise<{ result: object }>(resolve => void gates.set(e.command, () => resolve({ result: {} }))))
   return (command: string) => gates.get(command)?.()
 }
+
+// ── The desktop page ──
+
+/** The pane mounted on the desktop surface, `bodyColumns` wide and `bodyRows` tall. */
+export const mountDesk = ($: Engine, bodyColumns = 100, bodyRows = 30) =>
+  $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns, scroll: { offset: 0, bodyRows } }, surface: 'desktop' })

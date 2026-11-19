@@ -22,10 +22,12 @@ export type PaneActions = {
   ask: (kind: 'retro' | 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
-  /** Answers the retrospective's choice: `/retro days 10` over the last ten days, `/retro` on this session. */
+  /** Answers the retrospective's choice: `/retro days N` over the last N days (`RETRO_DAYS`), `/retro` on this session. */
   retro: (scope: 'days' | 'session') => void
   /** Answers the worklog's choice: `/worklog oggi sessione <id>` for the hours of this chat, `/worklog oggi` for the whole day. */
   worklog: (scope: 'session' | 'day') => void
+  /** Shows a tab of the desktop page. */
+  setTab: (tab: 'now' | 'log' | 'analysis') => void
   /** Expands or collapses an agent row. */
   toggleAgent: (agentId: string) => void
   /** Opens or closes the why and what-to-do of a notification (`kind:key`). */

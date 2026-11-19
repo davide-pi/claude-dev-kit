@@ -9,7 +9,7 @@ import { isResumePrompt } from './pace'
 import { endTurnCost, refreshDoneClaims, refreshUsage, startedCost } from './refresh'
 import { refreshGit } from './refresh-git'
 import { asks, live, pace } from './register-state'
-import { endRoundOf, nextRoundNumber, openRound, promptTitle, roundFields, withRoundPrompt } from './round-capture'
+import { endRoundOf, lastRoundOf, nextRoundNumber, promptTitle, roundFields, withRoundPrompt } from './round-capture'
 import { placeMarker } from './round-anchor'
 import { withLoggedSignals } from './signals'
 import { INITIAL } from './state'
@@ -36,7 +36,7 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
         const workflowRun = endRun(s.workflowRun, now)
         const cost = startedCost(s.cost, lastRoundFlowUsd(s.sessionLog))
         // a run closed while Claude is idle ends on the last round counted, not on the one this turn opens
-        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun, s.roundSeq)
+        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun, lastRoundOf(s))
         return {
           ...s,
           cost,
@@ -119,13 +119,13 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
       const id = spawned.agentId
       const startedAt = await $.clock.now()
       await patch($, s => {
-        const round = openRound(s)
+        const round = endRoundOf(s)
         const workflowRun = e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt, round, s.sessionLog) : s.workflowRun
         return {
         ...s,
         // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
         workflowRun,
-        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun, endRoundOf(s)),
+        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun, round),
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,

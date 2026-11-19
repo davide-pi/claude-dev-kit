@@ -172,12 +172,52 @@ test('logModel: Given flows, When modelled, Then they carry the recorded rounds 
   const model = logModel([withLane, bare, entry(50, 'agent', { round: 2 })], open)
   // Then
   expect(model.flows).toEqual([
-    { runId: 'c', startRound: 5, lane: 0, isLive: true },
-    { runId: 'a', name: 'build', startRound: 2, endRound: 4, lane: 1, isLive: false },
-    { runId: 'b', isLive: false },
+    { runId: 'c', startRound: 5, lane: 0, isLive: true, events: [] },
+    { runId: 'a', name: 'build', startRound: 2, endRound: 4, lane: 1, isLive: false, events: [] },
+    { runId: 'b', isLive: false, events: [] },
   ])
   expect(model.flows[2]?.lane).toBeUndefined()
   expect(model.rounds.map(r => r.n)).toEqual([2])
+})
+
+test('logModel: Given agents with a runId, When modelled, Then they are the events of their flow, newest first, and not of the round; one of an unknown run is unattributed', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 1 }), entry(20, 'flow', { key: 'a' }), entry(12, 'agent', { round: 1, runId: 'a' }), entry(14, 'agent', { round: 1, runId: 'a' }), entry(15, 'agent', { round: 1, runId: 'gone' })]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.flows[0]?.events.map(e => e.at)).toEqual([14, 12])
+  expect(model.rounds.map(r => [r.n, r.events.length])).toEqual([[1, 0]])
+  expect(model.unattributed.map(e => e.at)).toEqual([15])
+})
+
+test('logModel: Given the open flow has the key of a logged flow entry, When modelled, Then only the open one is listed', () => {
+  // Given
+  const logged = entry(30, 'flow', { key: 'a' })
+  const open = entry(40, 'flow', { key: 'a' })
+  // When
+  const model = logModel([logged], open)
+  // Then
+  expect(model.flows.map(f => [f.runId, f.isLive])).toEqual([['a', true]])
+})
+
+test('logModel: Given entries with equal at, When modelled, Then the one inserted later comes first', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 1 }), entry(20, 'commit', { round: 1, text: 'first' }), entry(20, 'commit', { round: 1, text: 'second' }), entry(30, 'compact', { text: 'x' }), entry(30, 'compact', { text: 'y' })]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.rounds[0]?.events.map(e => e.text)).toEqual(['second', 'first'])
+  expect(model.unattributed.map(e => e.text)).toEqual(['y', 'x'])
+})
+
+test('logModel: Given two round entries with the same n, When modelled, Then both groups are kept', () => {
+  // Given
+  const log = [entry(10, 'round', { n: 2 }), entry(20, 'round', { n: 2 })]
+  // When
+  const model = logModel(log)
+  // Then
+  expect(model.rounds.map(r => [r.n, r.entry?.at])).toEqual([[2, 20], [2, 10]])
 })
 
 test('logModel: Given an empty log, When modelled, Then all lists are empty', () => {

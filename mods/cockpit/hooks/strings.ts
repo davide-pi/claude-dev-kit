@@ -6,6 +6,9 @@
 
 export type Lang = 'en' | 'it'
 
+/** The days the retrospective button looks back over: the `/retro days N` it runs and the words of its label. */
+export const RETRO_DAYS = 15
+
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many)
 
 /** An Italian percent after its article: `il 90%`, `al 90%`, but `l'85%`, `all'85%` before a number read with a vowel (1, 8, 11, 80 to 89). */
@@ -26,7 +29,7 @@ const LEGACY_TOKENS = 1000
 
 const EN = {
   ...SHARED,
-  buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
+  buttons: { compact: 'compact', retro: 'retrospective', retroDays: `last ${RETRO_DAYS} days`, retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
   confirmLog: 'which hours? sends /worklog',
   confirmRetro: 'which retrospective? sends /retro',
 
@@ -75,9 +78,9 @@ const EN = {
   desk: {
     tabs: { now: 'In progress', log: 'Log', analysis: 'Analysis' },
     head: { context: 'Context', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
-    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', unattributed: 'Outside a round' },
+    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', unattributed: 'Outside a round', empty: 'nothing logged yet' },
     now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step' },
-    analysis: { time: 'TIME', spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', retroSession: 'this session', retroDays: 'last 10 days', promptNotEmpty: 'the prompt box is not empty' },
+    analysis: { time: 'TIME', rounds: 'in rounds', tools: 'in tools', waited: 'waiting for you', spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', retroSession: 'this session', retroDays: `last ${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
   },
 
   // The single page: its four sections
@@ -131,6 +134,10 @@ const EN = {
   alertSubagent: (type: string) => `subagent ${type} failed`,
   commandDescription: 'Opens the cockpit pane',
   commandOpen: 'cockpit open',
+  commandClosed: 'cockpit closed',
+  /** The argument of `/cockpit` that closes the pane. */
+  commandCloseWord: 'close',
+  commandOpenHint: 'cockpit open (/cockpit close closes it)',
   commandWaiting: (reason: string) => `cockpit waiting: ${reason}`,
 }
 
@@ -138,7 +145,7 @@ export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
+  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: `ultimi ${RETRO_DAYS} giorni`, retroSession: 'questa sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
   confirmLog: 'quali ore? invia /worklog',
   confirmRetro: 'quale retrospettiva? invia /retro',
 
@@ -182,9 +189,9 @@ const IT: Strings = {
   desk: {
     tabs: { now: 'In corso', log: 'Log', analysis: 'Analisi' },
     head: { context: 'Contesto', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
-    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', unattributed: 'Fuori da un giro' },
+    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log' },
     now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo' },
-    analysis: { time: 'TEMPO', spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', retroSession: 'questa sessione', retroDays: 'ultimi 10 giorni', promptNotEmpty: 'il campo prompt non è vuoto' },
+    analysis: { time: 'TEMPO', rounds: 'nei giri', tools: 'negli strumenti', waited: 'in attesa di te', spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', retroSession: 'questa sessione', retroDays: `ultimi ${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
   },
 
   page: {
@@ -234,6 +241,9 @@ const IT: Strings = {
   alertSubagent: (type: string) => `subagent ${type} fallito`,
   commandDescription: 'Apre il pannello cockpit',
   commandOpen: 'cockpit aperto',
+  commandClosed: 'cockpit chiuso',
+  commandCloseWord: 'chiudi',
+  commandOpenHint: 'cockpit aperto (/cockpit chiudi lo chiude)',
   commandWaiting: (reason: string) => `cockpit in attesa: ${reason}`,
 }
 

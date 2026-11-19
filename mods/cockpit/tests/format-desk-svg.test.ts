@@ -12,7 +12,7 @@ test('Given 0, 70 and 100 percent, When donutSvg is built, Then the arc dash is 
   // When
   const dashes = percents.map(percent => dash(donutSvg({ percent, color: '#F2A65A' })))
   // Then
-  expect(dashes[0]).toBe(0)
+  expect(dashes[0]).toBeNaN() // no arc circle at 0
   expect(dashes[1]).toBe(round2(0.7 * C))
   expect(dashes[2]).toBe(round2(C))
 })
@@ -21,8 +21,8 @@ test('Given percent NaN, negative or above 100, When built, Then it is clamped t
   // Given / When
   const [nan, below, above] = [Number.NaN, -20, 250].map(percent => dash(donutSvg({ percent, color: '#fff' })))
   // Then
-  expect(nan).toBe(0)
-  expect(below).toBe(0)
+  expect(nan).toBeNaN()
+  expect(below).toBeNaN()
   expect(above).toBe(round2(C))
 })
 
@@ -90,6 +90,37 @@ test('Given lane 9, When built, Then it is drawn in the last lane with a + mark 
   expect(svg).toContain('x1="81"')
   expect(svg).not.toContain('x1="111"')
   expect(svg).toContain('>+</text>')
+})
+
+test('Given a clamped start lane, When built, Then the + sits beside the circle in the 86px width, not on it', () => {
+  // Given / When
+  const svg = railSvg({ lanes: [{ lane: 9, kind: 'start', color: '#112233' }] })
+  // Then
+  const x = Number(/<text x="([\d.]+)"/.exec(svg)?.[1])
+  expect(x).toBeGreaterThan(81 + 3)
+  expect(x).toBeLessThanOrEqual(86)
+  expect(svg).toMatch(/<text [^>]*fill="#F2F0EA"/)
+})
+
+test('Given percent 0, NaN or negative, When donutSvg is built, Then there is the track and no arc circle; Given 1, Then there is', () => {
+  // Given / When
+  const zero = [0, Number.NaN, -5].map(percent => donutSvg({ percent, color: '#fff' }))
+  const one = donutSvg({ percent: 1, color: '#fff' })
+  // Then
+  for (const svg of zero) {
+    expect(svg.match(/<circle/g)).toHaveLength(1)
+    expect(svg).toContain('#3A3936')
+  }
+  expect(one.match(/<circle/g)).toHaveLength(2)
+})
+
+test('Given a colour holding a quote, When any svg is built, Then it never reaches an attribute', () => {
+  // Given
+  const bad = '#fff" onload="x'
+  // When
+  const svgs = [donutSvg({ percent: 50, color: bad }), barSvg({ left: 50, color: bad }), iconSvg('clock', bad), railSvg({ lanes: [{ lane: 0, kind: 'start', color: bad }] })]
+  // Then
+  for (const svg of svgs) expect(svg).not.toContain('onload')
 })
 
 test('Given no lanes, When built, Then only the session rail is drawn', () => {

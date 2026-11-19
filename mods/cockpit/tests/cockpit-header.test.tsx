@@ -32,7 +32,7 @@ test('the pane shows header, context, credits and an agent that finished before 
     fork: false,
   })
 
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
@@ -83,7 +83,7 @@ async function ctxBar(ui: { drawn: (q?: { in: string }) => Promise<unknown> }): 
 test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on both surfaces', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { autoCompactAt: 150_000 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const { bar, colors } = await ctxBar(ui)
     // the bar is 1.1 x the threshold long: the amber cell at 1/1.1 of it, still a bar cell

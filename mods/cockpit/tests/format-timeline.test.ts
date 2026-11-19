@@ -341,15 +341,33 @@ test('Given a commit run in a Bash call and a round open, When withLogEntries lo
   expect(logged.sessionLog?.map(e => e.round)).toEqual([3])
 })
 
-test('Given no round open, When an error is logged, Then it has no round', () => {
+test('Given idle after round 3, When an entry is logged, Then it has round 3', () => {
   // Given
-  const idle: Open = { roundSeq: 2, claudeState: { kind: 'idle' } }
+  const idle: Open = { roundSeq: 3, claudeState: { kind: 'idle' } }
+  // When
+  const logged = withLogged(idle, { at: 10, kind: 'error', key: 'site', n: 1 })
+  // Then
+  expect(openRound(idle)).toBeUndefined()
+  expect(logged.sessionLog?.[0]?.round).toBe(3)
+})
+
+test('Given idle with round 2 in the log and no roundSeq, When an entry is logged, Then it has round 2', () => {
+  // Given
+  const idle: Open = { sessionLog: [{ at: 1, kind: 'round', n: 1 }, { at: 2, kind: 'round', n: 2 }], claudeState: { kind: 'idle' } }
+  // When
+  const logged = withLogged(idle, { at: 10, kind: 'error', key: 'site', n: 1 })
+  // Then
+  expect(logged.sessionLog?.at(-1)?.round).toBe(2)
+})
+
+test('Given no round ever, When an entry is logged, Then it has no round', () => {
+  // Given
+  const idle: Open = { claudeState: { kind: 'idle' } }
   const fresh: Open = {}
   // When
   const a = withLogged(idle, { at: 10, kind: 'error', key: 'site', n: 1 })
   const b = withLogged(fresh, { at: 10, kind: 'error', key: 'site', n: 1 })
   // Then
-  expect(openRound(idle)).toBeUndefined()
   expect(openRound(fresh)).toBeUndefined()
   expect(a.sessionLog?.[0]).not.toHaveProperty('round')
   expect(b.sessionLog?.[0]).not.toHaveProperty('round')

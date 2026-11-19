@@ -3,7 +3,7 @@ import type { Register } from 'claude-code'
 import type { CockpitAgent, CockpitTask } from '../types'
 import { applyTodos, bashOutput, createdTask, isOk, isRefused, noteEdit, readClaudeState, removeOne, setClaudeState } from './events'
 import { readPathOf, recordToolCall, resultTokens, toolArg, toolArgFull } from './insights'
-import { endRoundOf, openRound, withRoundFail, withRoundFile } from './round-capture'
+import { endRoundOf, withRoundFail, withRoundFile } from './round-capture'
 import { withLoggedSignals } from './signals'
 import { asks, endAsk, live, waitOverlap } from './register-state'
 import { patch } from './store'
@@ -102,9 +102,9 @@ export const registerTools = (on: Parameters<Register>[0]): void => {
       // only dev-loop passes a plan: the call's own input is the one place the tasks reach the mod
       const tasks = taskPlan(e)
       await patch($, s => {
-        const round = openRound(s)
+        const round = endRoundOf(s)
         const workflowRun = nameRun(s.workflowRun, { ...launched, ...(tasks !== undefined && { tasks }) }, round, s.sessionLog)
-        return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun, endRoundOf(s)) }
+        return { ...s, workflowRun, sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun, round) }
       }).catch(() => undefined)
     }
     return ran

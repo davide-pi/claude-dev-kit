@@ -56,8 +56,14 @@ export const nextRoundNumber = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLo
 export const openRound = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined =>
   s.claudeState === undefined || s.claudeState.kind === 'idle' ? undefined : nextRoundNumber(s)
 
-/** The round a flow closed now ends on: the one open, else the last one counted. */
-export const endRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined => openRound(s) ?? s.roundSeq
+/** The last round concluded: the counter, else the last round the log holds (a session saved before the counter); none before any round. */
+export const lastRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number | undefined => {
+  const last = nextRoundNumber(s) - 1
+  return s.roundSeq ?? (last > 0 ? last : undefined)
+}
+
+/** The round an entry, an agent or a flow born or closed now is stamped with: the one open, else the last one concluded. */
+export const endRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined => openRound(s) ?? lastRoundOf(s)
 
 /** What the open round gives the entry that ends it. */
 export const roundFields = (s: CockpitSnapshot): Partial<CockpitLogEntry> => ({
