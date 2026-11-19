@@ -9,7 +9,7 @@ import { isResumePrompt } from './pace'
 import { endTurnCost, refreshDoneClaims, refreshUsage, startedCost } from './refresh'
 import { refreshGit } from './refresh-git'
 import { asks, live, pace } from './register-state'
-import { nextRoundNumber, promptTitle, roundFields, withRoundPrompt } from './round-capture'
+import { endRoundOf, nextRoundNumber, openRound, promptTitle, roundFields, withRoundPrompt } from './round-capture'
 import { placeMarker } from './round-anchor'
 import { withLoggedSignals } from './signals'
 import { INITIAL } from './state'
@@ -35,7 +35,8 @@ export const registerTurnStart = (on: Parameters<Register>[0]): void => {
       await patch($, s => {
         const workflowRun = endRun(s.workflowRun, now)
         const cost = startedCost(s.cost, lastRoundFlowUsd(s.sessionLog))
-        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun)
+        // the state is still idle here: the round this turn opens is the next one
+        const log = logRunChange(s.sessionLog, s.workflowRun, workflowRun, nextRoundNumber(s))
         return {
           ...s,
           cost,
@@ -118,12 +119,13 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
       const id = spawned.agentId
       const startedAt = await $.clock.now()
       await patch($, s => {
-        const workflowRun = e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt) : s.workflowRun
+        const round = openRound(s)
+        const workflowRun = e.workflow ? addWorkflowAgent(s.workflowRun, e.workflow.runId, id, e.description, startedAt, round, s.sessionLog) : s.workflowRun
         return {
         ...s,
         // A workflow agent's spawn carries its run: the count of agents started and finished is the one progress the engine exposes.
         workflowRun,
-        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun),
+        sessionLog: logRunChange(s.sessionLog, s.workflowRun, workflowRun, endRoundOf(s)),
         agents: upsertAgent(s.agents, id, startedAt, a => ({
           ...a,
           parentId: e.parentAgentId,
@@ -132,6 +134,8 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
           requested: e.model,
           model: spawned.model,
           ...(e.workflow && { runId: e.workflow.runId }),
+          // the round the agent spawned in stays through a resume; a stub a step created before the spawn takes it now
+          ...((a.round ?? round) !== undefined && { round: a.round ?? round }),
           // events that outran the spawn keep their status, tokens, effort and start
           startedAt: Math.min(a.startedAt, startedAt),
         })),
@@ -195,7 +199,7 @@ export const registerTurnEnd = (on: Parameters<Register>[0]): void => {
           ctxRounds: s.ctx.tokens ? recordRound(s.ctxRounds, s.ctx.tokens) : s.ctxRounds,
           insights,
           cost: endTurnCost(s.cost, flowUsd),
-        }, now)
+        }, now, round)
       })
       await setClaudeState($, { kind: 'idle' })
       // The branch and the done-claim log move with the main loop's work: one read per round, none per subagent turn.

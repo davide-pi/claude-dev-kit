@@ -2,8 +2,9 @@ import { expect, test } from 'claude-code/testing'
 
 import type { CockpitLogEntry } from '../types'
 import { roundCost } from '../hooks/insights'
+import { openRound } from '../hooks/round-capture'
 import { endTurnCost, measuredCost, startedCost, withSettledRound } from '../hooks/refresh'
-import { EVENTS_KEEP, SESSION_LOG_KEEP, bashLog, recordLogCount, recordAgentEvent, recordEvent, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withLogEntries, withCompactAfter, withRoundLastUsd, withRoundUsd } from '../hooks/timeline'
+import { EVENTS_KEEP, SESSION_LOG_KEEP, bashLog, recordLogCount, recordAgentEvent, recordEvent, flowUsdIn, lastRoundFlowUsd, commitHash, isCommitCommand, isTestCommand, parseLog, recordLog, nextCompactKey, withLogEntries, withCompactAfter, withRoundLastUsd, withRoundUsd, withLogged } from '../hooks/timeline'
 
 test('recordLog: the newest 300 stay, ordered by time; the same kind and key is one entry', () => {
   let log = recordLog(undefined, { at: 20, kind: 'commit', key: 'abc1234', text: 'abc1234' })
@@ -314,4 +315,83 @@ test('Given a log with room, When an entry is recorded, Then the trimmed count i
   const out = recordLogCount(undefined, { at: 1, kind: 'round' })
   // Then
   expect(out.trimmed).toBe(0)
+})
+
+// ── The conversation round of a log entry ──
+
+type Open = { sessionLog?: CockpitLogEntry[]; roundSeq?: number; claudeState?: { kind: 'idle' | 'working' } }
+
+test('Given last round 2 and a round open, When a commit is logged, Then it carries round 3', () => {
+  // Given
+  const s: Open = { roundSeq: 2, claudeState: { kind: 'working' } }
+  // When
+  const logged = withLogged(s, { at: 10, kind: 'commit', key: 'abc1234' })
+  // Then
+  expect(openRound(s)).toBe(3)
+  expect(logged.sessionLog?.[0]?.round).toBe(3)
+})
+
+test('Given a commit run in a Bash call and a round open, When withLogEntries logs it, Then it carries the open round', () => {
+  // Given
+  const s: Open = { roundSeq: 2, claudeState: { kind: 'working' } }
+  const entries = bashLog({ command: 'git commit -m x', out: '[main abc1234] x', isOk: true, at: 10 })
+  // When
+  const logged = withLogEntries(s, entries)
+  // Then
+  expect(logged.sessionLog?.map(e => e.round)).toEqual([3])
+})
+
+test('Given no round open, When an error is logged, Then it has no round', () => {
+  // Given
+  const idle: Open = { roundSeq: 2, claudeState: { kind: 'idle' } }
+  const fresh: Open = {}
+  // When
+  const a = withLogged(idle, { at: 10, kind: 'error', key: 'site', n: 1 })
+  const b = withLogged(fresh, { at: 10, kind: 'error', key: 'site', n: 1 })
+  // Then
+  expect(openRound(idle)).toBeUndefined()
+  expect(openRound(fresh)).toBeUndefined()
+  expect(a.sessionLog?.[0]).not.toHaveProperty('round')
+  expect(b.sessionLog?.[0]).not.toHaveProperty('round')
+})
+
+test('Given an explicit round, When an entry is logged, Then the explicit round wins; a round entry is left alone', () => {
+  // Given
+  const s: Open = { roundSeq: 2, claudeState: { kind: 'working' } }
+  // When
+  const explicit = withLogged(s, { at: 10, kind: 'signal', key: 'k:1' }, 7)
+  const own = withLogged(s, { at: 20, kind: 'round', n: 3 })
+  // Then
+  expect(explicit.sessionLog?.[0]?.round).toBe(7)
+  expect(own.sessionLog?.[0]).not.toHaveProperty('round')
+})
+
+test('Given an entry already logged with round 3, When the same key is logged in round 4, Then round 3 stays', () => {
+  // Given
+  const first = withLogged<Open>({ roundSeq: 2, claudeState: { kind: 'working' } }, { at: 10, kind: 'commit', key: 'abc1234' })
+  // When
+  const again = withLogged<Open>({ ...first, roundSeq: 3 }, { at: 20, kind: 'commit', key: 'abc1234' })
+  // Then
+  expect(again.sessionLog).toHaveLength(1)
+  expect(again.sessionLog?.[0]?.round).toBe(3)
+})
+
+test('Given a saved entry with round x, 0, -1 or 1.5, When the log is read, Then the entry has no round; a whole number from 1 on is kept', () => {
+  // Given
+  const saved = ['x', 0, -1, 1.5].map((round, i) => ({ at: 10 + i, kind: 'commit', round, endRound: round }))
+  const good = { at: 50, kind: 'flow', key: 'w1', round: 3, endRound: 5, lane: 0 }
+  // When
+  const log = parseLog([...saved, good]) ?? []
+  // Then
+  expect(log.slice(0, 4).map(e => [e.round, e.endRound])).toEqual([[undefined, undefined], [undefined, undefined], [undefined, undefined], [undefined, undefined]])
+  expect(log[4]).toMatchObject({ round: 3, endRound: 5, lane: 0 })
+})
+
+test('Given a saved flow with lane -1, 1.5 or x, When the log is read, Then it has no lane; lane 0 is kept', () => {
+  // Given
+  const saved = [-1, 1.5, 'x', 0].map((lane, i) => ({ at: 10 + i, kind: 'flow', key: `w${i}`, lane }))
+  // When
+  const log = parseLog(saved) ?? []
+  // Then
+  expect(log.map(e => e.lane)).toEqual([undefined, undefined, undefined, 0])
 })

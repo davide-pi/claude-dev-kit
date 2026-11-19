@@ -169,12 +169,12 @@ export function loggedSignal(e: { key?: string; text?: string; n?: number }): Si
 }
 
 /** `s` with a session log entry for each signal in force that the log does not hold yet, at the time `signalsAt` gives it (else `at`): a notification is logged once, the first time it holds. `s` itself when there is none. */
-export function withLoggedSignals(s: CockpitSnapshot, at: number): CockpitSnapshot {
+export function withLoggedSignals(s: CockpitSnapshot, at: number, round?: number): CockpitSnapshot {
   const logged = new Set((s.sessionLog ?? []).filter(e => e.kind === 'signal').map(e => e.key))
   const fresh = signalsOf(s).filter(sig => !logged.has(signalId(sig)))
   if (fresh.length === 0) return s
   return fresh.reduce(
-    (acc, sig) => withLogged(acc, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }),
+    (acc, sig) => withLogged(acc, { at: s.signalsAt?.[signalId(sig)] ?? at, kind: 'signal', key: signalId(sig), severity: signalSeverity(sig), ...(sig.label !== undefined && { text: sig.label }), ...(sig.n !== undefined && { n: sig.n }) }, round),
     s,
   )
 }

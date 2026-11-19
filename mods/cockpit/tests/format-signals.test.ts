@@ -16,6 +16,7 @@ import {
   isStalled,
   signalSeverity,
   signalsOf,
+  withLoggedSignals,
 } from '../hooks/signals'
 import { emptyInsights } from '../hooks/insights'
 import { INITIAL } from '../hooks/state'
@@ -222,4 +223,22 @@ test('signalsOf: given agents of a workflow run on Opus and over the cost limit,
   expect(kinds(inFlow)).toEqual(['heavyAgent'])
   expect(kinds(listedOnly)).toEqual(['heavyAgent'])
   expect(kinds(outside)).toEqual(['heavyAgent', 'opusReadOnly'])
+})
+
+test('Given round 3 ends with a signal in force, When the turn completes, Then the signal carries round 3', () => {
+  // Given: the turn end sets roundSeq to 3 before it logs, so the open round would read as 4
+  const s = { ...INITIAL, now: NOW, roundSeq: 3, claudeState: { kind: 'working' as const }, insights: { ...emptyInsights(), failedCmds: { 'npm test': 2 } } }
+  // When
+  const logged = withLoggedSignals(s, NOW, 3)
+  // Then
+  expect(logged.sessionLog?.filter(e => e.kind === 'signal').map(e => e.round)).toEqual([3])
+})
+
+test('Given a signal in force and a round open, When it is logged with no explicit round, Then it carries the open round', () => {
+  // Given
+  const s = { ...INITIAL, now: NOW, roundSeq: 2, claudeState: { kind: 'working' as const }, insights: { ...emptyInsights(), failedCmds: { 'npm test': 2 } } }
+  // When
+  const logged = withLoggedSignals(s, NOW)
+  // Then
+  expect(logged.sessionLog?.filter(e => e.kind === 'signal').map(e => e.round)).toEqual([3])
 })

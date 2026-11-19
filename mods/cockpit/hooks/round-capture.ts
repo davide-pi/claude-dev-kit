@@ -45,10 +45,17 @@ export const withRoundWait = (s: CockpitSnapshot, tool: string, ms: number): Coc
 })
 
 /** The number the round that ends now gets: after the last one counted, the log's own count for a session saved before the counter. */
-export const nextRoundNumber = (s: CockpitSnapshot): number => {
+export const nextRoundNumber = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number => {
   const rounds = (s.sessionLog ?? []).filter(e => e.kind === 'round')
   return (s.roundSeq ?? Math.max(rounds.length, ...rounds.map(e => e.n ?? 0))) + 1
 }
+
+/** The number of the round open now (the last one counted plus one); none while the main loop is idle or has no state yet. */
+export const openRound = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined =>
+  s.claudeState === undefined || s.claudeState.kind === 'idle' ? undefined : nextRoundNumber(s)
+
+/** The round a flow closed now ends on: the one open, else the last one counted. */
+export const endRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined => openRound(s) ?? s.roundSeq
 
 /** What the open round gives the entry that ends it. */
 export const roundFields = (s: CockpitSnapshot): Partial<CockpitLogEntry> => ({

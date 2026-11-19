@@ -37,6 +37,8 @@ export type CockpitAgent = {
   stepUsage?: CockpitUsage
   /** The workflow run the spawn named: kept, so an agent ending after a newer run replaced its own still belongs to it. */
   runId?: string
+  /** The conversation round open when the agent spawned; absent when none was (kept across a resume). */
+  round?: number
   /** The agent's last tool calls (8 at most, oldest first), in memory only: never written to the session data. */
   trail?: CockpitTrailEntry[]
 }
@@ -70,6 +72,8 @@ export type CockpitHistoryEntry = {
   isInterrupted?: boolean
   /** The workflow run the agent belonged to, kept so a reload still groups it under its flow. */
   runId?: string
+  /** The conversation round the agent was spawned in; absent for an agent spawned with no round open (or saved before rounds were recorded). */
+  round?: number
 }
 
 export type CockpitGit = {
@@ -132,7 +136,12 @@ export type CockpitWorkflowRun = {
   /** The task plan the `Workflow` call passed (`args.plan.tasks`), in plan order; absent for a workflow without one. */
   tasks?: CockpitPlanTask[]
   phase?: string
+  /** The workflow's own review round (not the conversation's). */
   round?: number
+  /** The conversation round open where the run was first seen; absent when none was. */
+  startRound?: number
+  /** The lane the run's flow takes among flows that overlap in rounds (0 the first). */
+  lane?: number
   lastAt?: number
   endedAt?: number
   /** Set when the silence check closed the run: it is logged only once a newer run replaces it, as failed. */
@@ -173,6 +182,12 @@ export type CockpitLogEntry = {
   at: number
   kind: CockpitLogKind
   key?: string
+  /** The conversation round the entry was logged in (a flow: where it started); absent when none was open. */
+  round?: number
+  /** A flow only: the conversation round open when its node was written. */
+  endRound?: number
+  /** A flow only: its lane among flows that overlap in rounds. */
+  lane?: number
   runId?: string
   text?: string
   /** An agent's spawn description (its label, which names its loop round under a flow). */
