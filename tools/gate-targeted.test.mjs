@@ -129,3 +129,30 @@ test('given a targeted green, when a full gate runs on the same tree, then it ru
   assert.equal(lastLine(full).gate, 'green');
   assert.match(logOf(r.root), /FULL/);
 });
+
+test('given a changed test file whose name holds a shell character, when the gate runs targeted, then the full --test command runs', () => {
+  for (const name of ['a;b.test.mjs', 'a&b.test.mjs', '-r.test.mjs']) {
+    // Given
+    const r = repoWithChanges();
+    writeFileSync(join(r.root, name), 'x\n');
+
+    // When
+    const res = run(r, '--test', FULL, '--targeted', TARGETED);
+
+    // Then
+    assert.match(logOf(r.root), /FULL/, name);
+    assert.equal(lastLine(res).tests, 'full', name);
+  }
+});
+
+test('given a changed test file with brackets and parentheses in its path, when the gate runs targeted, then it stays targeted', () => {
+  // Given
+  const r = repoWithChanges();
+  writeFileSync(join(r.root, '[id] (group).test.mjs'), 'x\n');
+
+  // When
+  const res = run(r, '--test', FULL, '--targeted', TARGETED);
+
+  // Then
+  assert.equal(lastLine(res).tests, 'targeted:3');
+});

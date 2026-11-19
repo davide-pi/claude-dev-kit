@@ -327,12 +327,11 @@ const TARGETED_CAP = 30;
  */
 function effectiveCommand(root, args) {
   if (args.targeted === undefined) return { command: args.test };
-  if (!args.targeted.includes('{files}')) usage('--targeted needs a {files} placeholder in the command template');
   const files = [...new Set([
     ...nulList(git(root, ['-c', 'core.quotepath=false', 'diff', '--name-only', '-z', '--diff-filter=d', '--end-of-options', args.head])),
     ...nulList(git(root, ['-c', 'core.quotepath=false', 'ls-files', '--others', '--exclude-standard', '-z'])),
   ])].filter((f) => isTestFile(f, []) && existsSync(join(root, f)));
-  if (!files.length || files.length > TARGETED_CAP || files.some((f) => /["$`%!]/.test(f))) return { command: args.test, tests: 'full' };
+  if (!files.length || files.length > TARGETED_CAP || files.some((f) => f.startsWith('-') || /[^\w ./@+()[\]-]/.test(f))) return { command: args.test, tests: 'full' };
   return { command: args.targeted.split('{files}').join(files.map((f) => `"${f}"`).join(' ')), tests: `targeted:${files.length}` };
 }
 
@@ -561,6 +560,7 @@ async function main() {
   if (!args.test) usage('--test is required');
   if (!args.head) usage('--head is required');
   if (args.head.startsWith('-')) usage(`--head takes a revision, got "${args.head}"`);
+  if (args.targeted !== undefined && !args.targeted.includes('{files}')) usage('--targeted needs a {files} placeholder in the command template');
   if (args.merge) {
     const merged = mergeLanes(root, args.merge);
     LEFTOVER = merged.leftover;

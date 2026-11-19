@@ -1,7 +1,7 @@
 export const meta = {
   name: 'dev-loop',
   description: 'Implement a decided scope in blocks (a gate per block, reader A only on a security or data axis or a red-before-green gate), verify the whole diff once, fix inside the perimeter and verify each fix until no P1/P2 is open or a finding stalls',
-  whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md. Optional `targeted` (a gate template with {files}, JS/TS repos and blocks that change tests; .NET stays full): S and M gate blocks on the changed tests, then one full gate before the final readers.',
+  whenToUse: 'Launched by the deliver skill for every code change; args, STALL and resume: skills/deliver/references/loop.md. Optional `targeted` (a gate template with {files}, JS/TS repos and blocks that change tests; .NET stays full): block, lane and fix gates run the changed tests, then one full gate before the final readers (every size).',
   phases: [
     { title: 'Implement', detail: 'the implementer agent, brief plus perimeter (skipped when the session edited inline)' },
     { title: 'Block review', detail: 'reader A reads a block after its green gate when the run has a security or data axis or the gate was red first; open P1/P2 get one in-block fix' },
@@ -582,6 +582,7 @@ if (planTasks.length) for (const line of planLines(blocks)) log(line)
 // Only the gate command (built when the implementer runs, not inline) wraps them in single quotes: a literal in PowerShell and bash, `;` and `"` pass.
 if (!inline && /'/.test(text(input.verify))) return 'dev-loop: verify command contains a single quote: the gate command wraps it in single quotes.'
 if (!inline && /'/.test(text(input.unit))) return 'dev-loop: unit command contains a single quote: the gate command wraps it in single quotes.'
+if (!inline && /'/.test(text(input.targeted))) return 'dev-loop: targeted command contains a single quote: the gate command wraps it in single quotes.'
 // mechanical holds only while the size stays S: a risk axis that lifts it brings back the default models.
 const mechanical = input.mechanical === true && loopSize === 'S'
 const EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -649,8 +650,8 @@ const writerTail = (budget, cleaning = false, root = repoRoot, since = lastTree)
 ]
 
 // The script has no shell: the implementer runs the gate and returns its last line as `gate`.
-// The lite path (S and M, opt-in): block, lane and fix gates run only the changed test files (`--targeted`), one full gate follows before the final readers.
-const lite = typeof input.targeted === 'string' && input.targeted.includes('{files}') && !!input.verify && loopSize !== 'L'
+// The lite path (every size, opt-in): block, lane and fix gates run only the changed test files (`--targeted`), one full gate follows before the final readers.
+const lite = typeof input.targeted === 'string' && input.targeted.includes('{files}') && !!input.verify
 let fullStale = !inline   // the tree changed since the last full gate (lite only)
 let lastMode = 'full'  // the mode of the last verify the loop recorded: 'targeted' or 'full'
 const gateBase = (root = repoRoot, accept = [], targeted = false) => `node ~/.claude/scripts/gate.mjs --root ${quote(root)} --head ${startHead || 'HEAD'} --test ${quote(input.verify || input.unit)}${targeted ? ` --targeted ${quote(input.targeted)}` : ''}${accept.length ? ` --accept-tests ${quote(accept.join(','))}` : ''}${dirty.length ? ` --dirty ${quote(dirty.join(','))}` : ''}${Number.isFinite(input.stuckMinutes) ? ` --stuck-minutes ${input.stuckMinutes}` : ''}`
@@ -729,6 +730,10 @@ const softIds = new Set()
 const changed = new Set(inline ? strings(input.changed) : [])
 const outOfScope = [], minor = [], cleaned = [], gaps = [], notes = [], noticed = [], proposals = [], defaults = [], rounds = [], failures = {}
 if (SIZES.slice(1).includes(input.size) && input.size !== loopSize) gaps.push(`the plan has ${blocks.length} block(s), so the size is ${loopSize}, not the ${input.size} passed`)
+if (typeof input.targeted === 'string' && input.targeted.trim() && !lite) {
+  const reasons = [...(input.targeted.includes('{files}') ? [] : ['the template has no {files} placeholder']), ...(input.verify ? [] : ['there is no verify command'])]
+  gaps.push(`targeted ignored, every gate runs in full: ${reasons.join(' and ')}`)
+}
 const blockLog = [], carriedFindings = []   // one entry per block; the P1/P2 reader A left open, handed to the final readers
 let tracked = {}, nextId = 1, round = 0, nextV = 1, verifyOpen = [], lastReport = null
 let lastFix = null, lastTree = '', lastDelta = '', lastDeltaBase = ''
@@ -824,6 +829,14 @@ const RESUME_FRESH = 'Relaunch with the same args WITHOUT resumeFromRunId: a res
 // The one STALL result: `fields` are the stall's own keys after `round`, so a key a kind lacks stays absent.
 const stall = (at, fields, resume) => result({ status: 'STALL', stall: { round: at, ...fields }, resume })
 const stallAgain = (at, reason, extra = {}) => stall(at, { findings: [], reason, ...extra }, at === 0 ? RESUME_FRESH : RESUME_AGAIN)
+// A full-gate or merge-gate stall resumes with resumeFromRunId: the finished blocks replay from the cache, while the gate and fix
+// calls carry the owner's resolution (gateResolution), so a resume issues new calls instead of replaying the red ones.
+const gateResolution = at => {
+  const r = resolutions.find(x => Number(x?.round) === at)
+  return typeof r?.guidance === 'string' && r.guidance.trim() ? `The owner's resolution of the last stall: ${r.guidance.trim()}` : r?.retry === true ? "The owner's resolution of the last stall: run it again (retry)." : ''
+}
+const RESUME_GATE = at => `Ask the user: a direction for the fixer, or no verify command. ${relaunch(`{ round: ${at}, guidance: "..." }`)} or { round: ${at}, retry: true }: the finished blocks replay from the cache and are not redone (the tree already holds their work), and the gate and fix calls carry the resolution, so they run again.`
+const gateStall = (at, reason, extra = {}) => stall(at, { findings: [], reason, ...extra }, RESUME_GATE(at))
 const questionStall = (at, questions, reason, resume) => stall(at, { why: 'question', findings: [], questions, reason }, resume)
 const verifyStall = (at, s) => stall(at,
   { why: s.why, findings: verifyOpen.map(v => ({ id: v.id, why: s.why, ...v })), reason: s.reason },
@@ -905,16 +918,23 @@ const judgeQuestions = async (qs, at) => {
   return qs.filter(q => !accepted.some(a => plain(a.text) === plain(q.text)))
 }
 const addQuestionNotes = qs => qs.forEach(q => notes.push({ source: 'implementer', text: `${q.text} (default: ${q.default ?? 'none given'}${q.why ? `; ${q.why}` : ''})` }))
-// A run with no second call (a continuation, the preview pass): a question the policy would not answer alone stalls for the
-// owner, unless the resolution already answers it; the rest stay notes, as before.
-const questionsOrStall = async (qs, at, label, resolution) => {
+// A run with no second call of its own (a continuation, the preview pass): a question the policy would not answer alone stalls for
+// the owner, unless the resolution (or the judge) already answers it; an answered one goes to `apply` (one implementer "(answers)"
+// call, `{ report }`), the rest stay notes. Returns `{ stall }`, `{ report }` or `{}`.
+const questionsOrStall = async (qs, at, label, resolution, apply) => {
   const answered = () => readAnswers(resolution ?? resolutions.find(r => Number(r?.round) === at))
-  let pending = qs.filter(q => questionPolicy(q) !== 'default' && !answered().some(a => plain(a.text) === plain(q.text)))
-  if (pending.length) { await judgeQuestions(pending, at); pending = pending.filter(q => !answered().some(a => plain(a.text) === plain(q.text))) }
-  addQuestionNotes(qs.filter(q => !pending.includes(q)))
-  return pending.length
-    ? questionStall(at, pending, `${label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH))
-    : null
+  const answerOf = q => answered().find(a => plain(a.text) === plain(q.text))
+  let pending = qs.filter(q => questionPolicy(q) !== 'default' && !answerOf(q))
+  if (pending.length) { await judgeQuestions(pending, at); pending = pending.filter(q => !answerOf(q)) }
+  addQuestionNotes(qs.filter(q => !pending.includes(q) && !answerOf(q)))
+  if (pending.length) {
+    return { stall: questionStall(at, pending, `${label} left ${pending.length} behaviour question(s) for the owner: ${pending.map(q => q.text).join(' | ')}`, answerResume(at, ASK_EACH)) }
+  }
+  const given = qs.map(answerOf).filter(Boolean)
+  if (!given.length) return {}
+  // An answers call that returns nothing never drops the owner's answers: the run stops and the resume applies them.
+  const report = await apply(given)
+  return report ? { report } : { stall: stallAgain(at, `${label} returned nothing on the call that applies the owner's answers (stopped or failed): they aren't applied yet`) }
 }
 const CONTINUE = "Your first run's edits are already in the tree: continue from them, do not start over, and list in `files` only the files you change in this run."
 const answersBlock = answers => `The owner answered your questions: apply each answer. ${CONTINUE}\n${answers.map(a => `- ${a.text} -> ${a.answer}`).join('\n')}`
@@ -961,6 +981,19 @@ const askWithQuestions = async (build, opts, at, resolution, gatedRun = false, b
   const stale = new Set(carried.filter(r => isDirty(known[r.id]?.path, second.files, repoRoot)).map(r => r.id))
   const merged = [...new Set([...first.files, ...second.files])]
   return { report: { ...second, files: merged, rejected: [...second.rejected, ...carried] }, stale }
+}
+
+// One implementer call applies the owner's answers to a report's stop questions (askWithQuestions does the same for the runs that
+// have a second call); the answered report replaces `first`, which keeps its files and rejections.
+const applyAnswers = async (first, build, opts, answers, gatedRun) => {
+  takeSide(first)
+  const text = answersBlock(answers)
+  const answersOpts = { ...opts, label: `${opts.label} (answers)` }
+  let second = readReport(await ask(build(text), answersOpts), gatedRun)
+  if (gatedRun && second && !second.questions.length && !second.remaining.length && !readGate(second.gate)) second = await regate(second, extra => build([text, extra].filter(Boolean).join('\n\n')), answersOpts)
+  addQuestionNotes(second?.questions ?? [])
+  if (!second) return null
+  return { ...second, files: [...new Set([...first.files, ...second.files])], rejected: [...second.rejected, ...first.rejected.filter(r => !second.rejected.some(s => s.id === r.id))] }
 }
 
 // An implementer that stopped without a report may still have changed the tree: the files in the perimeter go to review.
@@ -1078,8 +1111,9 @@ const runBlocks = async (items, total, lane) => {
       const nextOpts = { ...implOpts, label }
       let next = readReport(await ask(buildNext(''), nextOpts), gated)
       if (gated && next && !next.questions.length && !next.remaining.length && !readGate(next.gate)) next = await regate(next, buildNext, nextOpts)
-      const nextStall = next ? await questionsOrStall(next.questions, 0, label, resolution0) : null
-      if (nextStall) return nextStall
+      const settled = next ? await questionsOrStall(next.questions, 0, label, resolution0, answers => applyAnswers(next, buildNext, nextOpts, answers, gated)) : {}
+      if (settled.stall) return settled.stall
+      if (settled.report) next = settled.report
       impl = next ?? impl
       noteHandoff(next)
       const nextChanged = testsChanged(next)
@@ -1270,10 +1304,13 @@ const runLanes = async groups => {
   blockLog.sort((a, b) => a.id - b.id)
   phase('Implement')
   const label = 'lanes · merge'
+  const resolved = gateResolution(0)
   const merged = await ask([
     'Run this command and paste its last output line as "gate", unchanged. It merges the lane branches into the start branch, then runs the tests and the scope check.',
     `${gateBase()} --merge ${lanes.map(l => l.branch).join(' ')}`,
     `On exit 3 run it again WITHOUT --merge, with --wait: node ~/.claude/scripts/gate.mjs --root ${quote(repoRoot)} --wait`,
+    // a resumed merge: a merge that went through and failed only on the tests left the lane branches deleted and the merged change in the tree
+    ...(resolved ? [`${resolved} An earlier run of this merge may already have merged the lane branches (only its tests were red): if the branches are gone (\`git branch --list "deliver-lane/*"\` lists none of them), run the gate on the tree without --merge instead: ${gateBase()}`] : []),
     RULES,
   ].join('\n\n'), { label, phase: 'Implement', model: 'haiku', effort: 'low', schema: LANE_MERGE })
   const g = readGate(merged?.gate)
@@ -1281,9 +1318,8 @@ const runLanes = async groups => {
     const conflict = g?.gate === 'red: merge'
     // only the gate can say the rollback worked: a failed one names itself in the text
     const rolledBack = !/rollback failed/.test(g?.test ?? '')
-    return stallAgain(0, conflict
-      ? `the lanes conflict on merge (${rolledBack ? 'aborted, the start tree is untouched' : `the start tree may hold part of the merge, ${g.test}`}); ${leftText(lanes)}: ${g.outside.join(', ') || g.test}`
-      : `the merge gate is not green: ${g?.line ?? 'no gate line returned'}${why(label)}${g ? '' : `; ${leftText(lanes)}`}`, { why: conflict ? 'merge-conflict' : gateWhy(g) })
+    if (conflict) return stallAgain(0, `the lanes conflict on merge (${rolledBack ? 'aborted, the start tree is untouched' : `the start tree may hold part of the merge, ${g.test}`}); ${leftText(lanes)}: ${g.outside.join(', ') || g.test}`, { why: 'merge-conflict' })
+    return gateStall(0, `the merge gate is not green: ${g?.line ?? 'no gate line returned'}${why(label)}${g ? '' : `; ${leftText(lanes)}`}`, { why: gateWhy(g) })
   }
   const leftover = Array.isArray(g.leftover) ? g.leftover.filter(x => typeof x === 'string' && x) : []
   if (leftover.length) gaps.push(`lanes: merged, but could not remove ${leftover.join('; ')}`)
@@ -1337,11 +1373,13 @@ if (!inline) {
           ' A bare confirmation ("ok", "va bene", "perfetto", "ok grazie") goes on to the review; any other answer runs the implementer once more with it as its direction. The verdict carries a final screenshot of the same surface.'))
     }
     if (!PREVIEW_OK.test(said.answer)) {
-      const again = readReport(await ask([brief, answersBlock([said]), decisionsText, perimeterTextFor(files), dirtyText, ...gateLines(), ...writerTail()].filter(Boolean).join('\n\n'),
-        { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }), gated)
-      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why('implement the change (preview feedback)')})`)
-      const previewStall = await questionsOrStall(again.questions, 0, 'implement the change (preview feedback)', resolution0)
-      if (previewStall) return previewStall
+      const buildPreview = extra => [brief, answersBlock([said]), extra, decisionsText, perimeterTextFor(files), dirtyText, ...gateLines(), ...writerTail()].filter(Boolean).join('\n\n')
+      const previewOpts = { label: 'implement the change (preview feedback)', phase: 'Implement', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }
+      let again = readReport(await ask(buildPreview(''), previewOpts), gated)
+      if (!again) return stallAgain(0, `the implementer returned nothing on the preview pass (stopped or failed${why(previewOpts.label)})`)
+      const settled = await questionsOrStall(again.questions, 0, previewOpts.label, resolution0, answers => applyAnswers(again, buildPreview, previewOpts, answers, gated))
+      if (settled.stall) return settled.stall
+      if (settled.report) again = settled.report
       const againStall = absorb(again)
       if (againStall) return verifyStall(0, againStall)
       fullStale = true
@@ -1353,15 +1391,18 @@ if (!inline) {
 // run by a haiku code-reviewer; red gets one implementer fix and one regate, then STALL. A fix after it makes the next call run it again.
 const fullGateCheck = async (at, tag) => {
   if (!lite || !fullStale) return null
+  const resolved = gateResolution(at)   // a resume after a stall: the gate and fix prompts carry it, so no call replays from the cache
   const run = async label => readGate((await ask([
     'Run this command and paste its last output line as "gate", unchanged. It is the full test gate of the whole change: change nothing.',
     ...gateLines(repoRoot, false, planFiles, true),
+    'Run it with the shell tool\'s `timeout: 600000`: the full suite can outlast the default timeout.',
+    resolved,
     RULES,
-  ].join('\n\n'), { label, phase: 'Final verification', agentType: 'code-reviewer', model: 'haiku', effort: 'low', schema: LANE_MERGE }))?.gate)
+  ].filter(Boolean).join('\n\n'), { label, phase: 'Final verification', agentType: 'code-reviewer', model: 'haiku', effort: 'low', schema: LANE_MERGE }))?.gate)
   const label = `full gate · ${tag}`
   let g = await run(label)
   const stalls = s => (s.gate === 'running' || s.gate === 'red: timeout' ? `the full gate ${s.gate === 'running' ? 'was still running' : 'timed out'}: ${s.line}` : '')
-  if (!g || stalls(g)) return stallAgain(at, g ? stalls(g) : `the full gate returned no parsable gate line, so nothing was verified${why(label)}`, { why: gateWhy(g) })
+  if (!g || stalls(g)) return gateStall(at, g ? stalls(g) : `the full gate returned no parsable gate line, so nothing was verified${why(label)}`, { why: gateWhy(g) })
   if (g.gate === 'red: tests changed') return stall(at, { why: 'tests-changed', findings: [], reason: `full gate: a test file proven red was edited after the proof${g.test ? ` (${g.test})` : ''}: ${g.line}` },
     `Ask the user: accept the edited test (run the gate once with --force, which drops the stored proof) or revert the edit. ${RESUME_FRESH}`)
   if (!gateGreen(g)) {
@@ -1371,6 +1412,7 @@ const fullGateCheck = async (at, tag) => {
       g.test ? `Failing: ${g.test}` : '',
       g.outside.length ? `Outside the perimeter (revert your own edits there, never the user's earlier work): ${g.outside.join(', ')}` : '',
       'Fix the cause and nothing else: the tree already holds the change.',
+      resolved,
       extra,
       `Intent: ${brief}`,
       decisionsText,
@@ -1380,11 +1422,11 @@ const fullGateCheck = async (at, tag) => {
       ...writerTail(),
     ].filter(Boolean).join('\n\n'), { label: fixLabel, phase: 'Fix', agentType: 'implementer', effort: implEffort, ...(implModel && { model: implModel }), schema: IMPLEMENTATION }, at, resolutions.find(r => Number(r?.round) === at), gated, 'full-gate')
     if (asked.stall) return asked.stall
-    if (!asked.report) return stallAgain(at, `the implementer returned nothing on the full gate fix (stopped or failed${why(fixLabel)})`)
+    if (!asked.report) return gateStall(at, `the implementer returned nothing on the full gate fix (stopped or failed${why(fixLabel)})`)
     const treeBefore = lastTree
     takeReport(asked.report)
     g = await run(`full gate · regate ${tag}`)
-    if (!gateGreen(g)) return stallAgain(at, `the full gate is not green after the fix: ${g?.line ?? 'no gate line returned'}`, { why: gateWhy(g) })
+    if (!gateGreen(g)) return gateStall(at, `the full gate is not green after the fix: ${g?.line ?? 'no gate line returned'}`, { why: gateWhy(g) })
     if (at > 0) {
       // A fix after the readers is read like any fix round: the next round is a verifier on its delta.
       if (lastReport) lastReport = { ...lastReport, verify: { status: 'pass', command: input.verify, line: g.line } }
@@ -1756,7 +1798,8 @@ while (true) {
   rejectionCounts = ledger.counts
   for (const c of ledger.challenge) challenged[c.id] = { reason: c.reason, count: c.count, notReproduced: ledger.notReproduced.includes(c.id) }
   lastFix = fixed
-  fullStale = true
+  // a fix that left the tree as it was (every finding rejected, or a no-op) needs no new full gate
+  fullStale = fullStale || !treeBefore || treeBefore !== fixed.snapshot?.tree
   lastProbes = cleaning ? [] : joinProbes(sending.filter(id => !rejectedIds.has(id)).flatMap(id => probesOf(known[id])), looseProbes)
   lastFixP1 = sending.some(id => known[id]?.priority === 'P1')
   lastFixedIds = cleaning ? [] : sending.filter(id => !rejectedIds.has(id))

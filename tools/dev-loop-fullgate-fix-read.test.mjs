@@ -10,7 +10,7 @@ test('given a red full gate after the last round, when the implementer fixes it,
   const args = { ...ARGS, verify: 'node --test x', targeted: 'node --test {files}', start: { head: 'abc1234', dirty: [] } };
   const lines = [gate(), gate('red', { test: 'other suite broke' }), gate()];
   // When
-  const { out, calls } = await run(args, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl({ gate: gate() }), impl({ gate: gate() }), impl({ gate: gate() })], { fullGate: () => ({ gate: lines.shift() ?? gate() }) });
+  const { out, calls } = await run(args, [review([], [finding()]), review([{ id: 'F1', status: 'closed' }])], [impl({ gate: gate() }), impl({ gate: gate(), snapshot: { tree: 't2', files: ['src/Orders/OrdersQuery.cs'], churn: 3 } }), impl({ gate: gate() })], { fullGate: () => ({ gate: lines.shift() ?? gate() }) });
   // Then
   const labels = calls.map(c => c.opts.label);
   const at = labels.findIndex(l => /^fix · full gate · after round/.test(l ?? ''));
