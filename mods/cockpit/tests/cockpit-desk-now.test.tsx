@@ -7,6 +7,7 @@ import { deskLayout } from '../hooks/desk-layout'
 import type { DeskLayout } from '../hooks/desk-layout'
 import { INITIAL } from '../hooks/state'
 import { clockTime, duration } from '../hooks/shared'
+import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
 import type { CockpitAgent, CockpitSnapshot, CockpitWorkflowRun } from '../types'
 import { NOW } from './cockpit-world'
@@ -60,28 +61,30 @@ async function drawNow($: Engine, on: On, s: CockpitSnapshot, layout: DeskLayout
   return ui.drawn()
 }
 
-test('Given no workflow run, When drawn, Then the flow block keeps its three rows and shows the dash', { timeoutMs: 30_000 }, async ($, on) => {
+/** The text of the part keyed `key` under `root`, its string leaves joined. */
+const line = (root: unknown, key: string): string => texts(section(root, key)).join('')
+const N = t().desk.now
+
+test('Given no workflow run, When drawn, Then the flow card keeps its two lines: the empty-state line and a blank one', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap()
   // When
   const root = await drawNow($, on, s)
   // Then
-  const flow = section(root, 'now:flow')
-  expect(kids(flow)).toHaveLength(3)
-  expect(texts(kids(flow)[1])).toEqual(['—'])
-  expect(texts(kids(flow)[2])).toEqual(['—'])
+  expect(kids(section(root, 'now:flow'))).toHaveLength(2)
+  expect(line(root, 'now:flow:name')).toBe(N.noFlow)
+  expect(line(root, 'now:flow:steps').trim()).toBe('')
 })
 
-test('Given an idle session with no request, When drawn, Then the request rows exist, empty', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given an idle session with no request, When drawn, Then the facts are blank and the card says there is no request', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ claudeState: { kind: 'idle' } })
   // When
   const root = await drawNow($, on, s)
   // Then
-  const request = section(root, 'now:request')
-  expect(kids(request)).toHaveLength(3)
-  expect(texts(kids(request)[1])).toEqual(['—'])
-  expect(texts(kids(request)[2])).toEqual(['—'])
+  expect(kids(section(root, 'now:request'))).toHaveLength(2)
+  expect(line(root, 'now:request:facts').trim()).toBe('')
+  expect(line(root, 'now:request:prompt')).toBe(N.noRequest)
 })
 
 test('Given an open request, When drawn, Then the round, start, length, cost and prompt show', { timeoutMs: 30_000 }, async ($, on) => {
@@ -91,9 +94,8 @@ test('Given an open request, When drawn, Then the round, start, length, cost and
   // When
   const root = await drawNow($, on, s)
   // Then
-  const request = section(root, 'now:request')
-  expect(texts(kids(request)[1]).join('')).toBe(`round 007 · ${clockTime(since)} · ${duration(90_000)} · $0.50`)
-  expect(texts(kids(request)[2])).toEqual(['fix the login'])
+  expect(line(root, 'now:request:facts')).toBe(`round 007 · ${clockTime(since)} · ${duration(90_000)} · $0.50`)
+  expect(line(root, 'now:request:prompt')).toBe('fix the login')
 })
 
 test('Given a round that ended two hours ago and a prompt sent a minute ago, When drawn, Then the start is the prompt, not the end of the last round', { timeoutMs: 30_000 }, async ($, on) => {
@@ -102,7 +104,7 @@ test('Given a round that ended two hours ago and a prompt sent a minute ago, Whe
   // When
   const root = await drawNow($, on, s)
   // Then
-  expect(texts(kids(section(root, 'now:request'))[1]).join('')).toContain(`${clockTime(NOW - 60_000)} · ${duration(60_000)}`)
+  expect(line(root, 'now:request:facts')).toContain(`${clockTime(NOW - 60_000)} · ${duration(60_000)}`)
 })
 
 test('Given an open request with no roundStartedAt, When drawn, Then the start falls back to the last round entry', { timeoutMs: 30_000 }, async ($, on) => {
@@ -111,7 +113,7 @@ test('Given an open request with no roundStartedAt, When drawn, Then the start f
   // When
   const root = await drawNow($, on, s)
   // Then
-  expect(texts(kids(section(root, 'now:request'))[1]).join('')).toContain(`${clockTime(NOW - 90_000)} · ${duration(90_000)}`)
+  expect(line(root, 'now:request:facts')).toContain(`${clockTime(NOW - 90_000)} · ${duration(90_000)}`)
 })
 
 test('Given an open request with no earlier round, When drawn, Then the missing start reads as the dash', { timeoutMs: 30_000 }, async ($, on) => {
@@ -120,7 +122,7 @@ test('Given an open request with no earlier round, When drawn, Then the missing 
   // When
   const root = await drawNow($, on, s)
   // Then
-  expect(texts(kids(section(root, 'now:request'))[1]).join('')).toBe('round 001 · — · — · —')
+  expect(line(root, 'now:request:facts')).toBe('round 001 · — · — · —')
 })
 
 test('Given an agent with a runId, When drawn, Then it is not listed among the agents outside the flow', { timeoutMs: 30_000 }, async ($, on) => {
@@ -143,13 +145,13 @@ test('Given an agent the run lists by id only, When drawn, Then it is not listed
   expect(texts(section(root, 'now:outside')).join(' ')).not.toContain('implementer')
 })
 
-test('Given no agent outside the flow, When drawn, Then the section shows the dash', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given no agent outside the flow, When drawn, Then the section says so in one line', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ agents: [agent('a1', 'implementer', { status: 'done', endedAt: NOW - 1_000 })] })
   // When
   const root = await drawNow($, on, s)
   // Then
-  expect(texts(section(root, 'now:outside'))).toEqual(['AGENTS OUTSIDE THE FLOW', '—'])
+  expect(texts(section(root, 'now:outside'))).toEqual(['AGENTS OUTSIDE THE FLOW', N.noAgents])
 })
 
 test('Given a live run on its second cycle, When drawn, Then the name, the cycle and the step segments show', { timeoutMs: 30_000 }, async ($, on) => {
@@ -163,18 +165,18 @@ test('Given a live run on its second cycle, When drawn, Then the name, the cycle
   // When
   const root = await drawNow($, on, s)
   // Then
-  const flow = section(root, 'now:flow')
-  expect(texts(kids(flow)[1]).join('')).toBe('dev-loop · cycle 2/2')
-  expect(texts(kids(flow)[2]).join('')).toBe('step implement')
+  expect(line(root, 'now:flow:name')).toBe('dev-loop · cycle 2/2')
+  expect(line(root, 'now:flow:steps')).toBe('step implement')
 })
 
-test('Given a run that ended, When drawn, Then the flow block is empty again', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a run that ended, When drawn, Then the flow card is empty again', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ workflowRun: run({ endedAt: NOW - 5_000, agents: [{ id: 'w1', isDone: true, label: 'B1 · T1 · implement' }] }) })
   // When
   const root = await drawNow($, on, s)
   // Then
-  expect(texts(section(root, 'now:flow')).slice(1)).toEqual(['—', '—'])
+  expect(line(root, 'now:flow:name')).toBe(N.noFlow)
+  expect(line(root, 'now:flow:steps').trim()).toBe('')
 })
 
 test('Given a one-column layout, When drawn, Then the three sections stack in a column', { timeoutMs: 30_000 }, async ($, on) => {
@@ -229,7 +231,7 @@ test('Given more agents than the pane has rows, When drawn, Then the list is cut
   // When
   const root = await drawNow($, on, s, deskLayout(40, 8))
   // Then
-  const outside = section(root, 'now:outside')
-  expect(kids(outside)).toHaveLength(1 + 3 + 1)
-  expect(texts(kids(outside).at(-1))).toEqual(['+9'])
+  const list = section(root, 'now:outside:list')
+  expect(kids(list)).toHaveLength(3 + 1)
+  expect(texts(kids(list).at(-1))).toEqual(['+9'])
 })

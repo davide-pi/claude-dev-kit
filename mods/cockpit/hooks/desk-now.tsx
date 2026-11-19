@@ -17,10 +17,14 @@ const OK = '#7CC79A'
 const WARN = '#F2A65A'
 const RED = '#FF9A85'
 const ACCENT = '#8B6CF6'
-/** The empty state of every value: the section keeps its rows. */
+const TITLE = '#B9A2FF'
+/** The background of a section's card, as on the design board. */
+const CARD = '#30302E'
+const ICON_PX = 16
+/** A value the open request does not know yet. */
 const NONE = '—'
-/** Rows of the page the agents' list leaves to the other sections; below this, the list still shows `MIN_AGENT_ROWS`. */
-const OTHER_ROWS = 16
+/** Rows of the tab the agents' list leaves to the other sections (request 2, flow 3, the list's title, 2 gaps) and to its `+n` row; below this, the list still shows `MIN_AGENT_ROWS`. */
+const OTHER_ROWS = 9
 const MIN_AGENT_ROWS = 3
 const COST_W = 7
 
@@ -42,18 +46,26 @@ function segmentsOf(s: CockpitSnapshot): Segment[] {
   return [...steps.values()]
 }
 
-/** The `In corso` tab: the open request, the workflow run and the agents outside it, one column or two as the layout says. */
+/** The `In corso` tab: the open request, the workflow run and the agents outside it, each a title row and a card under it, one column or two as the layout says. An empty section says so in one dim line and keeps its rows. */
 export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const S = t().desk.now
   const E = t().page.events
 
-  const heading = (label: string): RenderElement => (
-    <Text key={`now:title:${label}`} wrap="truncate" weight="bold" color={DIM}>
-      {label}
-    </Text>
+  const heading = (key: string, label: string, right?: RenderElement): RenderElement => (
+    <Box key={key} columnGap={1} alignItems="center">
+      <Text wrap="truncate" weight="bold" size="footnote" color={TITLE}>
+        {label}
+      </Text>
+      {right}
+    </Box>
   )
-  const icon = (name: string, color: string): RenderElement => <Svg source={iconSvg(name, color)} alt={name} height={16} />
+  const card = (key: string, children: RenderElement | RenderElement[], direction: 'row' | 'column' = 'column'): RenderElement => (
+    <Box key={key} flexDirection={direction} columnGap={1} paddingX={1} backgroundColor={CARD}>
+      {children}
+    </Box>
+  )
+  const icon = (name: string, color: string): RenderElement => <Svg source={iconSvg(name, color)} alt={name} width={ICON_PX} height={ICON_PX} />
 
   // ── REQUEST: open while the main loop works or a prompt waits for its round to end ──
   const isOpen = s.roundPrompt !== undefined || (s.claudeState !== undefined && s.claudeState.kind !== 'idle')
@@ -61,20 +73,26 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
   const since = s.roundStartedAt ?? lastRound?.at ?? s.startedAt
   const turnUsd = shownTurnUsd(s.cost)
   const requestFacts = isOpen
-    ? [E.round(nextRoundNumber(s)), since === undefined ? NONE : clockTime(since), since === undefined ? NONE : duration(Math.max(0, s.now - since)), turnUsd === undefined ? NONE : `$${costCell(turnUsd, COST_W).slice(1).trim()}`]
-    : [NONE]
+    ? [E.round(nextRoundNumber(s)), since === undefined ? NONE : clockTime(since), since === undefined ? NONE : duration(Math.max(0, s.now - since)), turnUsd === undefined ? NONE : `$${costCell(turnUsd, COST_W).slice(1).trim()}`].join(' · ')
+    : ' '
+  const prompt = isOpen ? (s.roundPrompt ?? ' ') : S.noRequest
   const request = (
     <Box key="now:request" flexDirection="column">
-      {heading(S.request)}
-      <Box columnGap={1}>
-        {icon('clock', isOpen ? ACCENT : DIM)}
+      {heading(
+        'now:request:title',
+        S.request,
+        <Box key="now:request:facts" flexGrow={1} flexShrink={1} minWidth={0} justifyContent="flex-end">
+          <Text wrap="truncate" size="footnote" color={DIM}>
+            {requestFacts}
+          </Text>
+        </Box>,
+      )}
+      {card(
+        'now:request:prompt',
         <Text wrap="truncate" color={isOpen ? TEXT : DIM}>
-          {requestFacts.join(' · ')}
-        </Text>
-      </Box>
-      <Text wrap="truncate" color={DIM}>
-        {isOpen && s.roundPrompt !== undefined ? s.roundPrompt : NONE}
-      </Text>
+          {prompt}
+        </Text>,
+      )}
     </Box>
   )
 
@@ -85,24 +103,34 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
   const total = blocks.length === 0 ? undefined : Math.max(run?.round ?? 0, ...blocks)
   const cycle = !isLive || run?.round === undefined ? NONE : `${S.cycle} ${run.round}${total === undefined ? '' : `/${total}`}`
   const segments = isLive ? segmentsOf(s) : []
-  const flowColor = !isLive ? DIM : run?.isSilent === true ? WARN : TEXT
   const flow = (
     <Box key="now:flow" flexDirection="column">
-      {heading(S.flow)}
-      <Box columnGap={1}>
-        {icon('flow', isLive ? (run?.isSilent === true ? WARN : ACCENT) : DIM)}
-        <Text wrap="truncate" color={flowColor}>
-          {isLive ? `${run?.name ?? run?.runId ?? NONE} · ${cycle}` : NONE}
-        </Text>
-      </Box>
-      <Text wrap="truncate" color={DIM}>
-        {segments.length === 0 ? NONE : `${S.step} `}
-        {segments.map((seg, i) => (
-          <Text key={`now:step:${seg.step}`} color={seg.color}>
-            {`${i > 0 ? ' › ' : ''}${seg.step}`}
-          </Text>
-        ))}
-      </Text>
+      {heading('now:flow:title', S.flow)}
+      {card(
+        'now:flow:card',
+        [
+          icon(isLive ? 'flow' : '', run?.isSilent === true ? WARN : ACCENT),
+          <Box key="now:flow:lines" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Box key="now:flow:name">
+              <Text wrap="truncate" color={!isLive ? DIM : run?.isSilent === true ? WARN : TEXT}>
+                {isLive ? <Text weight="semibold">{run?.name ?? run?.runId ?? NONE}</Text> : S.noFlow}
+                {isLive ? ` · ${cycle}` : ''}
+              </Text>
+            </Box>
+            <Box key="now:flow:steps">
+              <Text wrap="truncate" color={DIM}>
+                {segments.length === 0 ? ' ' : `${S.step} `}
+                {segments.map((seg, i) => (
+                  <Text key={`now:step:${seg.step}`} color={seg.color}>
+                    {`${i > 0 ? ' › ' : ''}${seg.step}`}
+                  </Text>
+                ))}
+              </Text>
+            </Box>
+          </Box>,
+        ],
+        'row',
+      )}
     </Box>
   )
 
@@ -112,28 +140,36 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
   const shown = outside.slice(0, cap)
   const agents = (
     <Box key="now:outside" flexDirection="column">
-      {heading(S.outside)}
-      {outside.length === 0 ? (
-        <Text key="now:outside:none" wrap="truncate" color={DIM}>
-          {NONE}
-        </Text>
-      ) : (
-        shown.map(({ agent, depth }) => (
-          <Box key={`now:agent:${agent.id}`} columnGap={1}>
-            {icon('clock', ACCENT)}
-            <Text wrap="truncate" color={TEXT}>
-              {`${'  '.repeat(depth)}${agent.type}`}
-              <Text color={DIM}>{agent.description === undefined || agent.description === '' ? '' : ` · ${agent.description}`}</Text>
-              <Text color={DIM}>{` · ${duration(Math.max(0, s.now - agent.startedAt))}`}</Text>
-            </Text>
-          </Box>
-        ))
-      )}
-      {outside.length > shown.length && (
-        <Text key="now:outside:more" wrap="truncate" dimColor>
-          {`+${outside.length - shown.length}`}
-        </Text>
-      )}
+      {heading('now:outside:title', S.outside)}
+      {card('now:outside:list', [
+        ...(outside.length === 0
+          ? [
+              <Text key="now:outside:none" wrap="truncate" color={DIM}>
+                {S.noAgents}
+              </Text>,
+            ]
+          : shown.map(({ agent, depth }) => (
+              <Box key={`now:agent:${agent.id}`} columnGap={1} alignItems="center" paddingLeft={2 * depth}>
+                {icon('clock', ACCENT)}
+                <Box flexGrow={1} flexShrink={1} minWidth={0}>
+                  <Text wrap="truncate" color={TEXT}>
+                    <Text weight="semibold">{agent.type}</Text>
+                    <Text color={DIM}>{agent.description === undefined || agent.description === '' ? ' ' : ` · ${agent.description}`}</Text>
+                  </Text>
+                </Box>
+                <Text wrap="truncate" size="footnote" color={DIM}>
+                  {duration(Math.max(0, s.now - agent.startedAt))}
+                </Text>
+              </Box>
+            ))),
+        ...(outside.length > shown.length
+          ? [
+              <Text key="now:outside:more" wrap="truncate" color={DIM}>
+                {`+${outside.length - shown.length}`}
+              </Text>,
+            ]
+          : []),
+      ])}
     </Box>
   )
 

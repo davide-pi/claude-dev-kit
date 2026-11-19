@@ -215,15 +215,6 @@ test('Given bodyRows, When the body limit is read, Then it keeps at least 8 rows
   expect(whole).toHaveLength(8)
 })
 
-test('Given a pane below the wide layout, When the body limit is read, Then the head keeps two more rows for the stacked credit lines', () => {
-  // Given
-  const bodyRows = 40
-  // When
-  const [wide, medium] = [bodyLimit(bodyRows, 160), bodyLimit(bodyRows, 80)]
-  // Then
-  expect(wide - medium).toBe(2)
-})
-
 // ── T6b: /cockpit close closes the pane ──
 
 const cockpit = ($: Engine, args: string) => $.command.run({ command: 'cockpit', args, origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
@@ -338,19 +329,6 @@ test('Given no rate data, When the head is drawn, Then the windows keep the same
   await ui.unmount()
 })
 
-test('Given no forecast, When the head is drawn, Then the forecast row still exists, empty', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  world(on, { rateLimits: [] })
-  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  // When
-  const ui = await mountDesk($)
-  const forecast = keyed(await headOf(ui), 'desk:forecast')
-  // Then
-  expect(forecast).toBeDefined()
-  expect(textOf(forecast).trim()).toBe('')
-  await ui.unmount()
-})
-
 test('Given no context tokens, When the head is drawn, Then the donut has 0 fill', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   world(on, { isFresh: true })
@@ -439,8 +417,8 @@ test('Given a live credit reading, When the head is drawn, Then the percent has 
   expect(textOf(keyed(head, 'desk:window:five_hour'))).not.toContain('~')
 })
 
-for (const [columns, isStacked] of [[36, true], [80, true], [160, false]] as const) {
-  test(`Given ${columns} columns, When a credit row is drawn, Then the renewal is ${isStacked ? 'on a second line under the bar, kept (empty) without data' : 'on the one line'}`, { timeoutMs: 30_000 }, async ($, on) => {
+for (const columns of [36, 80, 160]) {
+  test(`Given ${columns} columns, When a credit row is drawn, Then it has its label, bar and pace lines, kept (empty) without data`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     const [full, empty] = [snap({ rateLimits: [...RATES] }), snap({ rateLimits: [] })]
     // When
@@ -448,22 +426,21 @@ for (const [columns, isStacked] of [[36, true], [80, true], [160, false]] as con
     // Then
     const [rowA, rowB] = [keyed(a, 'desk:window:five_hour'), keyed(b, 'desk:window:five_hour')]
     expect(count(rowA)).toBe(count(rowB))
-    expect(keyed(rowA, 'desk:window:five_hour:when') !== undefined).toBe(isStacked)
-    if (isStacked) {
-      expect(textOf(keyed(rowA, 'desk:window:five_hour:when'))).toContain(t().desk.head.renews)
-      expect(svgsOf(keyed(rowA, 'desk:window:five_hour:when'))).toHaveLength(0)
-    }
+    expect(textOf(keyed(rowA, 'desk:window:five_hour:label'))).toContain(t().desk.head.renews)
+    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:bar'))).toHaveLength(1)
+    expect(keyed(rowA, 'desk:window:five_hour:pace')).toBeDefined()
+    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:pace'))).toHaveLength(0)
   })
 }
 
-test('Given any layout size, When the head is drawn, Then every Text of its state, gauges and forecast is cut with wrap truncate', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given any layout size, When the head is drawn, Then every Text of its state and gauges is cut with wrap truncate', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ rateLimits: [...RATES], claudeState: { kind: 'tool', tool: 'Bash' } })
   const loose: unknown[] = []
   // When
   for (const columns of [36, 80, 160]) {
     const head = await drawHead($, on, s, columns)
-    for (const key of ['desk:state', 'desk:gauges', 'desk:forecast']) loose.push(...uncutTexts(keyed(head, key)))
+    for (const key of ['desk:state', 'desk:gauges']) loose.push(...uncutTexts(keyed(head, key)))
   }
   // Then
   expect(loose).toEqual([])
@@ -541,7 +518,7 @@ test('Given worklog behind, When the desktop page is drawn, Then exactly one log
   await ui.unmount()
 })
 
-test('Given the log-hours button pressed, When redrawn, Then the scope choice replaces the hint line and no row is added', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given the log-hours button pressed, When redrawn, Then the scope choice replaces the worklog line and no row is added', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   world(on, { hasWorklog: true })
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -553,8 +530,9 @@ test('Given the log-hours button pressed, When redrawn, Then the scope choice re
   // Then
   const card = keyed(await ui.drawn(), 'desk:urgent')
   expect(childrenOf(card)).toHaveLength(rowsBefore)
-  expect(textOf(card)).not.toContain(t().desk.head.urgentHint)
+  expect(textOf(keyed(card, 'desk:urgent:worklog'))).toContain(t().confirmLog)
   const keys = (await ui.findAll({ type: 'Button' })).map(x => x.key)
+  expect(keys).not.toContain('urgent:log')
   expect(keys).toEqual(expect.arrayContaining(['urgent:confirm:chat', 'urgent:confirm:day', 'urgent:confirm:no']))
   await ui.unmount()
 })

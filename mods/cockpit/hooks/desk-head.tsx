@@ -6,7 +6,6 @@ import type { DeskLayout } from './desk-layout'
 import { barSvg, donutSvg, iconSvg } from './desk-svg'
 import { deskUrgent } from './desk-urgent'
 import type { DeskUi } from './desk-view'
-import { parseReset } from './session'
 import { COLORS, abbrevTokens, clockTime, countdown, displayModel, fmtCost, localDate, signedPct } from './shared'
 import { t } from './strings'
 import { rateRow } from './view-header'
@@ -14,14 +13,16 @@ import type { RateRow } from './view-header'
 import type { PaneActions } from './view-kit'
 
 const TEXT = '#F2F0EA'
+const SOFT = '#C9C5BB'
 const DIM = '#A8A49B'
+const LINK = '#B9A2FF'
 const OK = '#7CC79A'
 const WARN = '#F2A65A'
 const RED = '#FF9A85'
-const ACCENT = '#8B6CF6'
+/** The background of the head's cards. */
+const CARD = '#30302E'
 const ICON_PX = 20
 const BAR_PX = 8
-const FIVE_HOURS_MS = 5 * 3_600_000
 
 /** The terminal palette's status colours on the desktop palette; anything else stays as it is. */
 const semantic = (c: string): string => (c === COLORS.green ? OK : c === COLORS.yellow || c === COLORS.amber ? WARN : c === COLORS.red ? RED : c)
@@ -34,101 +35,112 @@ const STATE_ICON: Record<CockpitClaudeState['kind'], { icon: string; color: stri
   waiting: { icon: 'alert', color: WARN },
 }
 
-/** The 5h window's end-of-window usage when it keeps its pace, in percent; only once it is past a tenth of its length and only when it would run out. */
-function forecastText(s: CockpitSnapshot): string {
-  const w = s.rateLimits.find(r => r.kind === 'five_hour')
-  const resetMs = parseReset(w?.resetsAt)
-  if (w === undefined || resetMs === undefined) return ' '
-  const elapsed = (FIVE_HOURS_MS - (resetMs - s.now)) / FIVE_HOURS_MS
-  if (elapsed < 0.1 || elapsed > 1) return ' '
-  const projected = Math.round(w.percentUsed / elapsed)
-  return projected > 100 ? `5h → ${projected}%` : ' '
-}
-
-/** The desktop head: state line, context donut with its numbers, the two credit windows as what is left (beside the donut, below it when narrow), a forecast line, the URGENTE card. Every part is always drawn (the unknown ones empty), so nothing appears or disappears. */
+/** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (its percent over it, tokens and cache under it) and the two credit windows (label and renewal, bar and what is left, pace), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
 export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const S = t()
   const H = S.desk.head
   const state = s.claudeState
   const look = STATE_ICON[state?.kind ?? 'idle']
-  const effort = typeof s.effort === 'string' ? s.effort.toUpperCase() : ''
-  const stateLine = [displayModel(s.model) || '—', effort, fmtCost(s.cost.usd)].filter(Boolean).join(' · ')
+  const effort = typeof s.effort === 'string' ? ` · ${s.effort.toLowerCase()}` : ' '
   const stateWord = state?.kind === 'tool' ? '' : S.state[state?.kind ?? 'idle']
-  const detail = state?.kind === 'tool' && state.tool ? state.tool : ' '
+  const detail = state?.kind === 'tool' && state.tool ? state.tool : ''
 
   const isStale = s.ctx.percent === undefined && s.lastCtx !== undefined
   const { tokens, window, percent } = isStale && s.lastCtx ? s.lastCtx : s.ctx
   const scale = ctxScale(s)
   const shown = scale.limit === undefined ? (percent ?? 0) : Math.round(scale.pct)
   const limit = scale.limit === undefined ? window : Math.round(scale.limit / 1000) * 1000
+  const ctxColor = semantic(scale.color)
 
   const windowRow = (kind: 'five_hour' | 'seven_day', label: string) => {
     const r: RateRow | undefined = rateRow(s, kind)
     const when = r?.resetMs === undefined ? ' ' : `${H.renews} ${countdown(r.resetMs, s.now).trim()} · ${kind === 'seven_day' ? `${localDate(r.resetMs).slice(5)} ` : ''}${clockTime(r.resetMs)}`
     const color = r === undefined ? DIM : semantic(r.color)
-    const bar = (
-      <Box flexGrow={1}>
-        <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${H.left}`} width={layout.barWidth} height={BAR_PX} />
-      </Box>
-    )
     // the last session's reading (the engine reports none yet) carries the `~`, as the context's and the terminal's do
-    const left = <Text wrap="truncate" color={color} weight="bold">{r === undefined ? '—' : `${r.isStale ? '~' : ''}${r.rem}% ${H.left}`}</Text>
-    const renews = <Text wrap="truncate" color={DIM}>{when}</Text>
-    const pace = <Text wrap="truncate" color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>{r?.pace === undefined ? ' ' : `${H.pace} ${signedPct(r.pace.delta)}`}</Text>
-    // wide: one line; narrower: the renewal and the pace on a second line under the bar, always drawn (empty without data), so the row count is fixed
-    if (layout.size !== 'wide') {
-      return (
-        <Box key={`desk:window:${kind}`} flexDirection="column">
-          <Box columnGap={1} alignItems="center">
-            <Text wrap="truncate" color={DIM}>{label}</Text>
-            {bar}
-            {left}
-          </Box>
-          <Box key={`desk:window:${kind}:when`} columnGap={1}>
-            {renews}
-            {pace}
-          </Box>
-        </Box>
-      )
-    }
+    const left = r === undefined ? '—' : `${r.isStale ? '~' : ''}${r.rem}%`
     return (
-      <Box key={`desk:window:${kind}`} columnGap={1} alignItems="center">
-        <Text wrap="truncate" color={DIM}>{label}</Text>
-        {bar}
-        {left}
-        {renews}
-        {pace}
+      <Box key={`desk:window:${kind}`} flexDirection="column">
+        <Box key={`desk:window:${kind}:label`} columnGap={1} alignItems="center">
+          <Text wrap="truncate" weight="bold" color={TEXT}>
+            {label}
+          </Text>
+          <Text wrap="truncate" size="footnote" color={DIM}>
+            {when}
+          </Text>
+        </Box>
+        {/* the percent right after its bar: nothing grows between them, so it never drifts to the pane's edge */}
+        <Box key={`desk:window:${kind}:bar`} columnGap={1} alignItems="center">
+          <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${H.left}`} width={layout.barWidth} height={BAR_PX} />
+          <Text wrap="truncate" color={color} weight="bold" size="heading" tabular>
+            {left}
+            <Text color={DIM} weight="regular" size="footnote">
+              {r === undefined ? ' ' : ` ${H.left}`}
+            </Text>
+          </Text>
+        </Box>
+        <Box key={`desk:window:${kind}:pace`}>
+          <Text wrap="truncate" size="footnote" color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>
+            {r?.pace === undefined ? ' ' : `${H.pace} ${signedPct(r.pace.delta)}`}
+          </Text>
+        </Box>
       </Box>
     )
   }
 
+  const isNarrow = layout.size === 'narrow'
   return (
     <Box key="desk:head" flexDirection="column" width="100%" rowGap={1}>
       <Box key="desk:state" flexDirection="column">
         <Box columnGap={1} alignItems="center">
-          <Svg source={iconSvg(look.icon, look.color)} alt={stateWord || state?.tool || ''} height={ICON_PX} />
-          <Text wrap="truncate" weight="bold" color={TEXT}>{stateLine}</Text>
-          <Text wrap="truncate" color={look.color}>{stateWord}</Text>
-        </Box>
-        <Text wrap="truncate" color={DIM}>{detail}</Text>
-      </Box>
-      <Box key="desk:gauges" flexDirection={layout.size === 'narrow' ? 'column' : 'row'} columnGap={2} rowGap={1}>
-        <Box key="desk:context" columnGap={2} alignItems="center">
-          <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, cachePct: s.cacheShare, color: semantic(scale.color) })} alt={H.context} width={layout.gaugeSize} height={layout.gaugeSize} />
-          <Box flexDirection="column">
-            <Text wrap="truncate" color={TEXT} weight="bold">{`${H.context} ${isStale ? '~' : ''}${shown}%`}</Text>
-            <Text wrap="truncate" color={DIM}>{`${abbrevTokens(tokens ?? 0, true)} / ${limit ? abbrevTokens(limit, true) : '—'}`}</Text>
-            <Text wrap="truncate" color={s.cacheShare === undefined ? DIM : ACCENT}>{s.cacheShare === undefined ? ' ' : `${H.cache} ${s.cacheShare}%`}</Text>
+          <Svg source={iconSvg(look.icon, look.color)} alt={stateWord || detail} width={ICON_PX} height={ICON_PX} />
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text wrap="truncate" weight="semibold" color={TEXT}>
+              {displayModel(s.model) || '—'}
+              <Text color={LINK} weight="regular">
+                {effort}
+              </Text>
+            </Text>
           </Box>
+          <Text wrap="truncate" size="heading" weight="bold" tabular color={TEXT}>
+            {fmtCost(s.cost.usd)}
+          </Text>
         </Box>
-        <Box key="desk:windows" flexDirection="column" flexGrow={1}>
+        <Text wrap="truncate" color={SOFT}>
+          <Text color={look.color} weight="semibold">
+            {stateWord || ' '}
+          </Text>
+          {detail || ' '}
+        </Text>
+      </Box>
+      <Box key="desk:gauges" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'flex-start' : 'center'} columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD}>
+        <Box key="desk:context" flexDirection="column" alignItems="center" flexShrink={0}>
+          <Box key="desk:context:donut">
+            <Svg source={donutSvg({ percent: shown, threshold: scale.markPct === undefined ? undefined : scale.markPct / 100, cachePct: s.cacheShare, color: ctxColor })} alt={`${H.context} ${shown}%`} width={layout.gaugeSize} height={layout.gaugeSize} />
+            {/* the percent over the donut, centred: it spans the Svg's box, so it follows the gauge size */}
+            <Box key="desk:context:over" position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column" alignItems="center" justifyContent="center">
+              <Text wrap="truncate" size="caption" color={DIM}>
+                {H.context}
+              </Text>
+              <Text wrap="truncate" size="heading" weight="bold" tabular color={ctxColor}>
+                {`${isStale ? '~' : ''}${shown}%`}
+              </Text>
+            </Box>
+          </Box>
+          <Text wrap="truncate" size="footnote" color={SOFT}>
+            {`${abbrevTokens(tokens ?? 0, true)} / ${limit ? abbrevTokens(limit, true) : '—'}`}
+          </Text>
+          <Text wrap="truncate" size="footnote" color={DIM}>
+            {s.cacheShare === undefined ? ' ' : `${H.cache} `}
+            <Text color={OK} weight="bold">
+              {s.cacheShare === undefined ? ' ' : `${s.cacheShare}%`}
+            </Text>
+          </Text>
+        </Box>
+        <Box key="desk:windows" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} rowGap={1}>
           {windowRow('five_hour', '5h')}
           {windowRow('seven_day', '7d')}
         </Box>
-      </Box>
-      <Box key="desk:forecast">
-        <Text wrap="truncate" color={WARN}>{forecastText(s)}</Text>
       </Box>
       {deskUrgent(ui, s, actions)}
     </Box>

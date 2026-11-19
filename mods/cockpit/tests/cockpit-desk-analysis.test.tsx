@@ -4,7 +4,6 @@ import type { Engine } from 'claude-code/testing'
 
 import { deskAnalysis } from '../hooks/desk-analysis'
 import { deskLayout } from '../hooks/desk-layout'
-import { RETRO_DAYS } from '../hooks/pane-actions'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
 import type { CockpitSnapshot } from '../types'
@@ -60,40 +59,6 @@ function recorder(calls: string[]): PaneActions {
 
 const FULL = () => snap({ cost: { usd: 10 }, agentSpend: { implementer: 4 }, agents: [agent('a1', 'implementer')], insights: insights({ rounds: 3, usd: 6, roundMs: 120_000, toolMs: 30_000, waitMs: 5_000 }) })
 
-test('Given the compact button, When pressed, Then compact is called once', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const calls: string[] = []
-  const { ui } = await drawAnalysis($, on, FULL(), 100, calls)
-  // When
-  await ui.press({ plugin: 'test', key: 'analysis:compact' })
-  // Then
-  expect(calls.filter(c => c.startsWith('compact'))).toEqual(['compact:'])
-  await ui.unmount()
-})
-
-test('Given the 15 days button, When pressed, Then retro is called once with days', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const calls: string[] = []
-  const { ui, rows } = await drawAnalysis($, on, FULL(), 100, calls)
-  // When
-  await ui.press({ plugin: 'test', key: 'analysis:retro:days' })
-  // Then
-  expect(rows.some(r => r.includes(String(RETRO_DAYS)))).toBe(true)
-  expect(calls.filter(c => c.startsWith('retro'))).toEqual(['retro:days'])
-  await ui.unmount()
-})
-
-test('Given the session button, When pressed, Then retro is called once with session', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const calls: string[] = []
-  const { ui } = await drawAnalysis($, on, FULL(), 100, calls)
-  // When
-  await ui.press({ plugin: 'test', key: 'analysis:retro:session' })
-  // Then
-  expect(calls.filter(c => c.startsWith('retro'))).toEqual(['retro:session'])
-  await ui.unmount()
-})
-
 test('Given no insights, When drawn, Then the sections keep their rows as with data', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const empty = await drawAnalysis($, on, snap(), 100, [])
@@ -105,6 +70,21 @@ test('Given no insights, When drawn, Then the sections keep their rows as with d
   for (const title of titles) expect(empty.rows.some(r => r.includes(title))).toBe(true)
   await empty.ui.unmount()
   await full.ui.unmount()
+})
+
+test('Given no insights and no notification, When the Analysis tab is drawn, Then the time and watch sections each say so in one dim line and keep their rows', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap()
+  // When
+  const { ui } = await drawAnalysis($, on, s, 100, [])
+  const drawn = await ui.drawn()
+  // Then
+  for (const key of ['analysis:time', 'analysis:watch']) {
+    const section = find(drawn, key)
+    expect(kids(section)).toHaveLength(1 + 3)
+    expect(textOf(kids(section)[1])).toBe(t().desk.analysis.none)
+  }
+  await ui.unmount()
 })
 
 const failing = (names: string[]) => snap({ insights: insights({ failedCmds: Object.fromEntries(names.map(n => [n, 3])) }) })
@@ -144,7 +124,7 @@ test('Given exactly three notifications, When the Analysis tab is drawn, Then al
   await three.ui.unmount()
 })
 
-test('Given a narrow and a wide pane, When drawn, Then both show the sections and the three buttons', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a narrow and a wide pane, When drawn, Then both show the sections and no button: the actions live in the page bar', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const narrow = await drawAnalysis($, on, FULL(), 40, [])
   const wide = await drawAnalysis($, on, FULL(), 140, [])
@@ -152,8 +132,8 @@ test('Given a narrow and a wide pane, When drawn, Then both show the sections an
   const buttons = async (ui: Mounted) => (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '').filter(k => k.startsWith('analysis:'))
   // Then
   for (const d of [narrow, wide]) expect(d.rows.some(r => r.includes(t().desk.analysis.spend))).toBe(true)
-  expect(await buttons(narrow.ui)).toHaveLength(3)
-  expect(await buttons(wide.ui)).toHaveLength(3)
+  expect(await buttons(narrow.ui)).toHaveLength(0)
+  expect(await buttons(wide.ui)).toHaveLength(0)
   await narrow.ui.unmount()
   await wide.ui.unmount()
 })
