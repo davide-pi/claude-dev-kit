@@ -245,19 +245,25 @@ export function failedTests(log, testFiles = []) {
 }
 
 /**
- * Files of the failed tests that the output names (node TAP: the `location:` line after each `not ok`), without the line and column;
- * file-level failures are left out. Empty when the runner names none.
+ * One entry per failed test of a node TAP output: the file its `location:` line names (a path or a file URL, without line and
+ * column), null when it names none; file-level failures are left out. Empty when the runner prints no TAP.
  */
 function failedFiles(log, testFiles) {
   const files = [];
-  let failing = false;
+  let at = -1;
   for (const line of log.split(/\r?\n/)) {
     const ko = /^\s*not ok \d+ - (.+)$/.exec(line);
-    if (ko || /^\s*ok \d+ /.test(line)) failing = !!ko && !isTestFile(ko[1], testFiles);
-    const loc = failing && /^\s*location: '(.+):\d+:\d+'\s*$/.exec(line);
-    if (loc) files.push(loc[1].replace(/\\+/g, '/'));
+    if (ko || /^\s*ok \d+ /.test(line)) at = ko && !isTestFile(ko[1], testFiles) ? files.push(null) - 1 : -1;
+    const loc = at >= 0 && /^\s*location: '(.+):\d+:\d+'\s*$/.exec(line);
+    if (loc) files[at] = loc[1].startsWith('file:') ? fileURLToPath(loc[1]) : loc[1].replace(/\\\\/g, '\\');
   }
   return files;
+}
+
+/** A file path as the repo-relative `/` form: no `./`, an absolute path made relative to `root`. */
+function relNorm(root, f) {
+  const s = f.trim().replace(/\\/g, '/');
+  return (isAbsolute(s) ? relative(root, s).replace(/\\/g, '/') : s).replace(/^(\.\/)+/, '');
 }
 
 const GUARD = join(HERE, '..', 'hooks', 'scope-guard.js');
@@ -282,12 +288,27 @@ const laneGit = (root, args) => git(root, [...LANE_GIT, ...args]);
 
 /** Links the root's `node_modules` into the lane and copies the root's `.env*` files that git doesn't track; a failure is a warning. */
 function seedLane(root, path) {
+  // The seeded entries go in the common `info/exclude` (shared by every worktree) so a lane's `add -A` and scope check never see them.
+  const exclude = (name) => {
+    try {
+      const file = join(resolve(root, out(git(root, ['rev-parse', '--git-common-dir']))), 'info', 'exclude');
+      const text = existsSync(file) ? readFileSync(file, 'utf8') : '';
+      if (text.split(/\r?\n/).includes(`/${name}`)) return;
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, `${text}${text && !text.endsWith('\n') ? '\n' : ''}/${name}\n`);
+    } catch (e) { process.stderr.write(`gate: could not exclude ${name} in the lane: ${e.message}\n`); }
+  };
   try {
-    if (existsSync(join(root, 'node_modules'))) symlinkSync(join(root, 'node_modules'), join(path, 'node_modules'), WIN ? 'junction' : 'dir');
+    if (existsSync(join(root, 'node_modules'))) {
+      symlinkSync(join(root, 'node_modules'), join(path, 'node_modules'), WIN ? 'junction' : 'dir');
+      exclude('node_modules');
+    }
   } catch (e) { process.stderr.write(`gate: could not link node_modules into the lane: ${e.message}\n`); }
   try {
     for (const e of readdirSync(root, { withFileTypes: true })) {
-      if (e.isFile() && e.name.startsWith('.env') && !out(git(root, ['ls-files', '--', e.name]))) copyFileSync(join(root, e.name), join(path, e.name));
+      if (!e.isFile() || !e.name.startsWith('.env') || out(git(root, ['ls-files', '--', e.name]))) continue;
+      copyFileSync(join(root, e.name), join(path, e.name));
+      exclude(e.name);
     }
   } catch (e) { process.stderr.write(`gate: could not copy the .env files into the lane: ${e.message}\n`); }
 }
@@ -493,6 +514,12 @@ function hashFiles(root, files) {
 /** A runner whose failed tests `failedTests` can read, from the command line; null when none matches. */
 export const readableRunner = (command) => /\bnode(\.exe)?\b.*--test\b|\bdotnet\s+test\b|\bvitest\b|\bjest\b|\bbun\s+test(?![\w.-])|\bclaude\s+plugin\s+test(?![\w.-])/.exec(command)?.[0] ?? null;
 
+/** Adds one red plain run for the run's head to `state.reds` (a `--red` proof run is no red run). */
+function countRed(state, opts) {
+  if (!opts?.head || opts.red) return;
+  state.reds = { head: opts.head, n: (state.reds?.head === opts.head ? state.reds.n : 0) + 1 };
+}
+
 function finalize(dir, state) {
   const run = state.run;
   const o = run.opts;
@@ -504,20 +531,17 @@ function finalize(dir, state) {
   state.run = null;
   writeState(dir, state);
   // Plain runs that end red since the last green, per head: the next green says how many there were.
-  const noteRed = () => {
-    if (o.red || !o.head) return;
-    state.reds = { head: o.head, n: (state.reds?.head === o.head ? state.reds.n : 0) + 1 };
-    writeState(dir, state);
-  };
+  const noteRed = () => { countRed(state, o); writeState(dir, state); };
   if (run.timedOut) { noteRed(); emit('red: timeout', 1, { ...base, test: lastTestSeen(log) }); }
   if (o.red) {
     if (run.exitCode === 0) emit('red: no failing test', 1, base);
     const names = failedTests(log, o.testFiles);
     if (!names.length) emit('red', 1, { ...base, test: tail(log, 5).join(' | ') });
     // Where the runner names the file of each failed test (node --test), one of them must be a given file; other runners are taken as they are.
-    const named = failedFiles(log, o.testFiles).map((f) => f.toLowerCase());
-    const given = o.testFiles.map((f) => `/${f.replace(/\\/g, '/').replace(/^(\.\/)+/, '')}`.toLowerCase());
-    if (named.length && !named.some((f) => given.some((g) => `/${f}`.endsWith(g)))) emit('red: no failing test in the given files', 1, { ...base, test: names.join('; ') });
+    // A failed test that names no file is unknown: the red is accepted as before.
+    const same = (a, b) => (WIN ? a.toLowerCase() === b.toLowerCase() : a === b);
+    const named = failedFiles(log, o.testFiles);
+    if (named.length && !named.includes(null) && !named.some((f) => o.testFiles.some((g) => same(relNorm(o.root, f), relNorm(o.root, g))))) emit('red: no failing test in the given files', 1, { ...base, test: names.join('; ') });
     const files = hashFiles(o.root, o.testFiles);
     // Every --red adds to the stored proof; a probe's file is also listed so --accept-tests never accepts it, whoever lists it.
     const probes = o.probe ? [...new Set([...(state.proof?.probes ?? []), ...Object.keys(files)])] : state.proof?.probes;
@@ -553,6 +577,7 @@ async function waitFor(dir, maxMinutes) {
       // It may have written its result between the read above and the liveness check.
       const fresh = readState(dir);
       if (fresh.run?.status === 'done') return finalize(dir, fresh);
+      countRed(fresh, fresh.run?.opts);
       fresh.run = null;
       writeState(dir, fresh);
       emit('red', 1, { test: 'supervisor died', seconds });
@@ -597,7 +622,7 @@ async function main() {
     if (!args.probe) delete state.accepted;
     return startRun(dir, state, root, {
       command: args.unit, stuckMinutes,
-      opts: { root, red: true, probe: !!args.probe, testFiles: (args['test-files'] ?? '').split(',').filter(Boolean) },
+      opts: { root, red: true, probe: !!args.probe, testFiles: args['test-files'].split(',').filter(Boolean).map((f) => relNorm(root, f)) },
     }, maxMinutes);
   }
   if (!args.test) usage('--test is required');
@@ -617,10 +642,7 @@ async function main() {
   const proofDropped = !!args.force && !!state.proof;
   if (proofDropped) { delete state.proof; writeState(dir, state); }
   // `./` prefix, backslashes and an absolute path (made relative to --root) all name the same file
-  const norm = (f) => {
-    const s = f.trim().replace(/\\/g, '/');
-    return (isAbsolute(s) ? relative(root, s).replace(/\\/g, '/') : s).replace(/^(\.\/)+/, '');
-  };
+  const norm = (f) => relNorm(root, f);
   const listed = (args['accept-tests'] ?? '').split(',').map(norm).filter(Boolean);
   const changed = state.proof ? Object.entries(state.proof.files).filter(([f, h]) => hashFiles(root, [f])[f] !== h).map(([f]) => f) : [];
   const probed = state.proof?.probes ?? [];

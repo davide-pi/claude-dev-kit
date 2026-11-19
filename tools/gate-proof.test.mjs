@@ -694,3 +694,53 @@ test('given node_modules and untracked .env files at the root, when a lane is ad
   gate(r.root, '--lane-remove', lane.branch);
   assert.equal(lf(join(r.root, 'node_modules', 'dep.txt')), 'dep\n');
 });
+
+test('given an untracked node_modules and .env and no .gitignore, when a lane is added, changed and merged, then the lane never stages them and the root keeps its node_modules', () => {
+  // Given
+  const r = repo();
+  mkdirSync(join(r.root, 'node_modules'));
+  writeFileSync(join(r.root, 'node_modules', 'dep.txt'), 'dep\n');
+  writeFileSync(join(r.root, '.env'), 'SECRET=1\n');
+  const lane = laneAdd(r, 'l1');
+  writeFileSync(join(lane.path, 'one.txt'), 'one\n');
+
+  // When
+  const laneStatus = git(lane.path, 'status', '--porcelain');
+  git(lane.path, 'add', '-A');
+  const laneTracked = git(lane.path, 'ls-files');
+  const res = mergeRun(r, [lane.branch]);
+
+  // Then
+  assert.equal(laneStatus, '?? one.txt');
+  assert.deepEqual(laneTracked.split('\n').sort(), ['README.md', 'one.txt']);
+  assert.equal(lastLine(res).gate, 'green');
+  assert.deepEqual(git(r.root, 'ls-files').split('\n').sort(), ['README.md']);
+  assert.equal(lf(join(r.root, 'node_modules', 'dep.txt')), 'dep\n');
+  assert.equal(lf(join(r.root, '.env')), 'SECRET=1\n');
+});
+
+test('given an absolute --test-files path, when --red runs, then the proof holds the repo-relative file with its hash', () => {
+  // Given
+  const r = repoWithTest();
+
+  // When
+  gate(r.root, '--red', '--unit', UNIT, '--test-files', join(r.root, 't.test.mjs'));
+
+  // Then
+  const files = stateOf(r).proof.files;
+  assert.deepEqual(Object.keys(files), ['t.test.mjs']);
+  assert.notEqual(files['t.test.mjs'], '');
+});
+
+test('given a failing test in sub/t.test.mjs and --test-files t.test.mjs, when --red runs, then the file does not match by suffix and the red is not proven', () => {
+  // Given
+  const r = repoWithTest();
+  mkdirSync(join(r.root, 'sub'));
+  writeFileSync(join(r.root, 'sub', 't.test.mjs'), TEST_SOURCE);
+
+  // When
+  const res = gate(r.root, '--red', '--unit', 'node --test sub/t.test.mjs', '--test-files', 't.test.mjs');
+
+  // Then
+  assert.equal(lastRaw(res).gate, 'red: no failing test in the given files');
+});
