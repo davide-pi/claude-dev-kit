@@ -36,5 +36,7 @@ export function deskLayout(bodyColumns: number, bodyRows: number): DeskLayout {
 export function scrollOffset(offset: number, by: number, max: number): number {
   const top = Math.max(0, Math.floor(max))
   const from = Math.min(Math.max(0, Math.floor(offset)), top)
-  return Math.min(Math.max(0, from + Math.round(by)), top)
+  // a desktop wheel may report a fraction of a row: any move is at least one row its own way (Math.round alone turns -0.5 into 0, so up would never move)
+  const step = by > 0 ? Math.max(1, Math.round(by)) : by < 0 ? Math.min(-1, Math.round(by)) : 0
+  return Math.min(Math.max(0, from + step), top)
 }

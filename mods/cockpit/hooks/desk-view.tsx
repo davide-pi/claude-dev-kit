@@ -25,6 +25,8 @@ const DIM = '#A8A49B'
  */
 const HEAD_ROWS = { narrow: 26, medium: 18, wide: 20 } as const
 /** Rows the action bar takes with the gap above it: one row of native buttons, two when narrow (compact, then the retrospectives). */
+/** Rows kept free under the action bar: on Desktop the pane's 100% runs under its own title bar, so the bar would sit half out of view. */
+const FOOT_PAD = 3
 const ACTION_ROWS = { narrow: 5, medium: 3, wide: 3 } as const
 const MIN_BODY_ROWS = 8
 /** The underline's width per letter of the tab's label and for the button's own padding, in CSS pixels: the label's drawn width is not known, so an estimate. */
@@ -87,7 +89,7 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
     </Box>
   )
   return (
-    <Box flexDirection="column" width="100%" height="100%" overflow="hidden" rowGap={1} paddingX={1}>
+    <Box flexDirection="column" width="100%" height="100%" overflow="hidden" rowGap={1} paddingX={1} paddingBottom={FOOT_PAD}>
       {deskHead(ui, s, layout, actions)}
       {tabs}
       {body}
