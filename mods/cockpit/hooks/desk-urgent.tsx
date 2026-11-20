@@ -14,6 +14,8 @@ const RED = '#FF5A4F'
 const ACCENT = '#8B6CF6'
 const LAVENDER = '#D5C8FF'
 const PAGE = '#262624'
+/** The worklog row's height in cells, the native button's or not: the card never shifts when the notification comes or goes. */
+const WORKLOG_ROW_CELLS = 2
 /** The worklog notification's card and a blocking one's, as on the design board. */
 const WORKLOG_CARD = '#2F2A40'
 const BLOCK_CARD = '#3B2723'
@@ -31,7 +33,7 @@ export function deskUrgent(ui: DeskUi, s: CockpitSnapshot, actions: PaneActions)
     .map(sig => signalText(sig).what)
   const lateDays = new Set([...s.worklog.pending, ...s.worklog.underTarget]).size
   const waiting = blocking.length + (lateDays > 0 ? 1 : 0)
-  // the same gate as the terminal's footer: logging hours needs a session and the worklog skill
+  // the same gate as the terminal's footer: logging hours needs a session and the worklog skill; the button lives only in the worklog notification
   const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
 
   // the last slot carries the count of those left out after its own text, never a bare `+n` in place of a notification
@@ -69,14 +71,14 @@ export function deskUrgent(ui: DeskUi, s: CockpitSnapshot, actions: PaneActions)
         </Button>
       </Box>
     ) : (
-      <Box key="desk:urgent:worklog" columnGap={1} alignItems="center" paddingX={1} backgroundColor={lateDays > 0 ? WORKLOG_CARD : undefined}>
+      <Box key="desk:urgent:worklog" columnGap={1} alignItems="center" paddingX={1} minHeight={WORKLOG_ROW_CELLS} backgroundColor={lateDays > 0 ? WORKLOG_CARD : undefined}>
         <Svg source={iconSvg(lateDays > 0 ? 'clock' : '', LAVENDER)} alt={S.buttons.logHours} width={ICON_PX} height={ICON_PX} />
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text color={lateDays > 0 ? LAVENDER : DIM} weight={lateDays > 0 ? 'semibold' : undefined} wrap="truncate">
             {lateDays > 0 ? S.worklog.withoutHours(lateDays) : waiting === 0 ? H.nothingWaiting : ' '}
           </Text>
         </Box>
-        {hasLog ? (
+        {hasLog && lateDays > 0 ? (
           <Button key="urgent:log" onPress={() => actions.ask('worklog')}>
             <Text color={LAVENDER}>{S.buttons.logHours}</Text>
           </Button>

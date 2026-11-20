@@ -27,6 +27,8 @@ const WATCH_ROWS = 2
 const GAP = 2
 const BORDER = '#403F3B'
 const SHARE = '#B9A2FF'
+/** The spend percent's column in cells, `100%` included: never shrunk, so a narrow pane cuts the label and never the figure. */
+const PCT_COLS = 4
 
 /** `size` rows: a cut list ends with the `more` row, a short one is padded with blank ones, so a section keeps its height. */
 const keepRows = (rows: readonly RenderElement[], size: number, more: (n: number) => RenderElement, blank: (n: number) => RenderElement): RenderElement[] => [
@@ -112,9 +114,11 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
     const pct = Math.round(p.pct)
     return (
       <Box key={`spend:${p.label}`} columnGap={1} alignItems="center">
-        <Text color={TEXT} weight="bold" tabular wrap="truncate">
-          {`${pct}%`.padStart(4)}
-        </Text>
+        <Box key={`spend:${p.label}:pct`} width={PCT_COLS} flexShrink={0} justifyContent="flex-end">
+          <Text color={TEXT} weight="bold" tabular>
+            {`${pct}%`.padStart(4)}
+          </Text>
+        </Box>
         <Svg source={shareSvg(pct, SHARE)} alt={`${label} ${pct}%`} width={84} height={6} />
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
           <Text color={TEXT} wrap="truncate">

@@ -4,6 +4,8 @@ import type { Engine } from 'claude-code/testing'
 
 import { deskLayout } from '../hooks/desk-layout'
 import { deskLog, logScrollMax } from '../hooks/desk-log'
+import { scrollbarSvg } from '../hooks/desk-svg'
+import { clockTime } from '../hooks/shared'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
 import { signalText } from '../hooks/view-kit'
@@ -26,7 +28,7 @@ const keyOf = (v: unknown): string => {
 }
 const svgs = (root: unknown): Record<string, unknown>[] => nodes(root).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
 /** The log rows (not the filter), in drawing order: their key and text. */
-const logRows = (root: unknown) => nodes(root).filter(n => /^desk:log:(row|empty|more)/.test(keyOf(n))).map(n => ({ key: keyOf(n), text: textOf(n) }))
+const logRows = (root: unknown) => nodes(root).filter(n => /^desk:log:(row|empty|more)/.test(keyOf(n)) && !keyOf(n).endsWith(':time')).map(n => ({ key: keyOf(n), text: textOf(kids(n).at(-1)) }))
 
 /** Draws `deskLog` alone in a desktop pane; `calls` records every action pressed, `name:args`. */
 async function drawLog($: Engine, on: On, s: CockpitSnapshot, bodyRows = 30) {
@@ -278,4 +280,29 @@ test('Given a logged agent, When the log is drawn, Then its row reads its type a
   const texts = logRows(root).map(r => r.text)
   expect(texts).toContain('#1 implementer fix rows')
   expect(texts.some(x => x.includes('agent-7f3'))).toBe(false)
+})
+
+test('Given a round with an event and a flow launch, When the log is drawn, Then each row has a 5-cell non-shrinking time column, HH:MM where the row has a time and blank on the flow launch', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [round(1), { at: NOW - 90_000, kind: 'agent', round: 1, text: 'tester' }, flow('wf_1', { round: 1, lane: 0 })] })
+  // When
+  const { ui, root } = await drawLog($, on, s)
+  await ui.unmount()
+  // Then
+  const times = nodes(root).filter(n => keyOf(n).startsWith('desk:log:row:') && keyOf(n).endsWith(':time'))
+  expect(times.length).toBeGreaterThanOrEqual(2)
+  expect(times.every(n => propsOf(n).width === 5 && propsOf(n).flexShrink === 0)).toBe(true)
+  const byRow = Object.fromEntries(times.map(n => [keyOf(n).replace(/^desk:log:row:|:time$/g, ''), textOf(n).trim()]))
+  expect(byRow['round:1']).toBe(clockTime(NOW - 100_000 + 1000))
+  expect(byRow['flow:wf_1']).toBe('')
+})
+
+test('Given a quarter window three quarters down, When scrollbarSvg is built, Then the svg keeps its xmlns and the thumb sits at the bottom quarter', () => {
+  // Given
+  const args = { height: 100, start: 0.75, size: 0.25, color: '#8B6CF6' }
+  // When
+  const svg = scrollbarSvg(args)
+  // Then
+  expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
+  expect(svg).toContain('y="75" width="4" height="25"')
 })

@@ -56,7 +56,7 @@ async function drawCard($: Engine, on: On, s: CockpitSnapshot) {
   const ui = await $.ui.mount({ ...PANE, requestId, surface: 'desktop' })
   const card = keyed(await ui.drawn(), 'desk:urgent')
   await ui.unmount()
-  return { rows: kids(card).length, text: textOf(card) }
+  return { rows: kids(card).length, text: textOf(card), json: JSON.stringify(card), worklogRow: JSON.stringify(keyed(card, 'desk:urgent:worklog')) }
 }
 
 /** A permission unanswered for ten minutes: one blocking notification. */
@@ -97,4 +97,24 @@ test('Given none, one or two blocking notifications, When the card is drawn, The
   // Then
   expect(rows[0]).toBeGreaterThan(0)
   expect(new Set(rows).size).toBe(1)
+})
+
+test('Given no worklog notification, When the card is drawn, Then no log-hours button is drawn and the worklog row keeps its height', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionId: 's1', worklog: { ...snap().worklog, pending: [], underTarget: [] } })
+  // When
+  const card = await drawCard($, on, s)
+  // Then
+  expect(card.json).not.toContain('urgent:log')
+  expect(card.worklogRow).toContain('"minHeight":2')
+})
+
+test('Given a day without hours, When the card is drawn, Then the log-hours button sits in the worklog row, at the same height', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionId: 's1', worklog: { ...snap().worklog, pending: ['2026-11-18'], underTarget: [] } })
+  // When
+  const card = await drawCard($, on, s)
+  // Then
+  expect(card.worklogRow).toContain('urgent:log')
+  expect(card.worklogRow).toContain('"minHeight":2')
 })

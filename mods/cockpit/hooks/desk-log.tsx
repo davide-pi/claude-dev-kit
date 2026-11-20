@@ -8,6 +8,7 @@ import type { LaneCell } from './desk-svg'
 import type { DeskUi } from './desk-view'
 import { logModel } from './done-groups'
 import type { LogModel } from './done-groups'
+import { clockTime } from './shared'
 import { loggedSignal } from './signals'
 import { t } from './strings'
 import { ALL_KEY, isAllShown, isMainEntry } from './view-log-round'
@@ -25,6 +26,8 @@ const RAIL_PX = 28
 const ROW_CELLS = 1.4
 /** The cells the filter row (native buttons) takes above the rows. */
 const FILTER_CELLS = 2
+/** The time column's width in cells: `HH:MM`. */
+const TIME_COLS = 5
 /** The cells the position hint takes under the rows. */
 const HINT_CELLS = 1
 
@@ -44,6 +47,8 @@ type Row = {
   flow?: Flow
   dot?: 'session' | number
   lanes: LaneCell[]
+  /** When it happened (the round's entry, the event); none for a flow's launch and the group header: its time column stays blank. */
+  at?: number
 }
 
 /** The run still open (or reopened, or silent) as the entry `logModel` takes, under the same condition as the terminal log: a closed run that is logged stays closed. */
@@ -115,10 +120,10 @@ function buildRows(model: LogModel, isAll: boolean): Row[] {
   for (const n of [...numbers].sort((a, b) => b - a)) {
     const round = model.rounds.find(r => r.n === n)
     const prompt = round?.entry?.prompt ?? ''
-    rows.push({ key: `round:${n}`, round: n, text: prompt === '' ? S.noPrompt : prompt, color: prompt === '' ? DIM : TEXT, isHeader: true, dot: 'session', lanes: [] })
+    rows.push({ key: `round:${n}`, round: n, ...(round?.entry?.at !== undefined && { at: round.entry.at }), text: prompt === '' ? S.noPrompt : prompt, color: prompt === '' ? DIM : TEXT, isHeader: true, dot: 'session', lanes: [] })
     const events = [...(round?.events ?? []).map(e => ({ e, flow: undefined })), ...(placed.get(n) ?? [])].filter(x => shown(x.e)).sort((a, b) => b.e.at - a.e.at)
     events.forEach(({ e, flow }, i) =>
-      rows.push({ key: `event:${n}:${i}`, round: n, text: entryText(e), color: e.isFailed === true ? '#FF5A4F' : TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
+      rows.push({ key: `event:${n}:${i}`, round: n, at: e.at, text: entryText(e), color: e.isFailed === true ? '#FF5A4F' : TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
     )
     // the flow's launch: the oldest row of the round it started in
     for (const flow of model.flows.filter(f => f.startRound === n)) {
@@ -131,7 +136,7 @@ function buildRows(model: LogModel, isAll: boolean): Row[] {
     rows.push({ key: 'unattributed', text: S.unattributed, color: DIM, isHeader: true, lanes: [] })
     for (const flow of unstarted) rows.push({ key: `flow:${flow.runId}`, text: S.flow, color: DIM, flow, ...(flow.lane !== undefined && { dot: flow.lane }), lanes: [] })
     outside.forEach(({ e, flow }, i) =>
-      rows.push({ key: `loose:${i}`, text: entryText(e), color: TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
+      rows.push({ key: `loose:${i}`, at: e.at, text: entryText(e), color: TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
     )
   }
   return withLanes(rows, model.flows)
@@ -173,9 +178,15 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
   const isAll = isAllShown(s)
   const rows = logRowsOf(s)
 
-  const line = (key: string, rail: string, alt: string, content: RenderElement): RenderElement => (
+  // the time column is always there, a fixed width in tabular figures (blank without a time), so the text column never moves
+  const line = (key: string, rail: string, alt: string, at: number | undefined, content: RenderElement): RenderElement => (
     <Box key={key} flexDirection="row" alignItems="center" columnGap={1}>
       <Svg source={rail} alt={alt} width={RAIL_WIDTH} height={RAIL_PX} />
+      <Box key={`${key}:time`} width={TIME_COLS} flexShrink={0}>
+        <Text color={DIM} tabular>
+          {at === undefined ? ' ' : clockTime(at)}
+        </Text>
+      </Box>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
         {content}
       </Box>
@@ -190,7 +201,7 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
         {r.text}
       </Text>,
     ]
-    return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: RAIL_PX }), id === '' ? r.text : id, <Text wrap="truncate">{parts}</Text>)
+    return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: RAIL_PX }), id === '' ? r.text : id, r.at, <Text wrap="truncate">{parts}</Text>)
   }
   // a window of `cap` rows from the body's scroll offset (moved by the wheel, see register), clamped again as the filter changes the count
   const cap = windowRows(layout)
@@ -204,7 +215,7 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
   )
   const drawn =
     rows.length === 0
-      ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>), hint]
+      ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, undefined, <Text wrap="truncate" color={DIM}>{S.empty}</Text>), hint]
       : [...shown.map(drawRow), hint]
 
   // one filter for both pages on purpose: the same ALL_KEY the terminal log toggles; the mode is plain text, one button switches to the other
@@ -221,7 +232,11 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
           <Text color={DIM}>{isAll ? S.onlyImportant : S.showAll}</Text>
         </Button>
       </Box>
-      {drawn}
+      <Box key="desk:log:window" flexDirection="row" columnGap={1}>
+        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+          {drawn}
+        </Box>
+      </Box>
     </Box>
   )
 }

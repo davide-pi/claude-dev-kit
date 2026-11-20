@@ -176,3 +176,19 @@ test('Given a narrow and a wide pane, When drawn, Then both show the sections an
   await narrow.ui.unmount()
   await wide.ui.unmount()
 })
+
+test('Given spend, When the Analysis tab is drawn narrow, medium and wide, Then every spend row keeps its percent in a 4-cell non-shrinking column', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = FULL()
+  const all = (v: unknown): unknown[] => [v, ...kids(v).flatMap(all)]
+  for (const columns of [40, 80, 120]) {
+    // When
+    const { ui } = await drawAnalysis($, on, s, columns, [])
+    const drawn = await ui.drawn()
+    await ui.unmount()
+    // Then
+    const pcts = all(drawn).filter(n => /^spend:.+:pct$/.test(String(propsOf(n).key)))
+    expect(pcts.length).toBeGreaterThan(0)
+    expect(pcts.every(n => propsOf(n).width === 4 && propsOf(n).flexShrink === 0 && /^\s*\d+%$/.test(textOf(n)))).toBe(true)
+  }
+})

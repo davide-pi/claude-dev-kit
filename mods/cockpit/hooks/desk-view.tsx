@@ -55,7 +55,7 @@ const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
 
 /**
  * The desktop page: the head, the tab row, the open tab's body, then the action bar. The page takes the pane's height and the body every row between
- * head and bar (grown, clipped, never under `limit` so the bar holds still if the height is not given), so the bar sits at the pane's bottom.
+ * head and bar (grown, clipped, free to shrink to nothing), and the root never outgrows the pane, so the bar sits at its bottom and the page never scrolls.
  * Widths are the pane's own (`100%`) or the layout's, never a fixed column count.
  */
 export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
@@ -82,12 +82,12 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
     </Box>
   )
   const body = (
-    <Box key={`desk:body:${open}`} flexDirection="column" flexGrow={1} flexShrink={1} minHeight={limit} overflow="hidden">
+    <Box key={`desk:body:${open}`} flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
       {BODIES[open](ui, s, layout, actions)}
     </Box>
   )
   return (
-    <Box flexDirection="column" width="100%" height="100%" rowGap={1} paddingX={1}>
+    <Box flexDirection="column" width="100%" height="100%" overflow="hidden" rowGap={1} paddingX={1}>
       {deskHead(ui, s, layout, actions)}
       {tabs}
       {body}

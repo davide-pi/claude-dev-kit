@@ -1,7 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
 import { deskLayout } from '../hooks/desk-layout'
-import { bodyLimit } from '../hooks/desk-view'
 import { mountDesk } from './cockpit-fixtures'
 import { PANE, settle, world } from './cockpit-world'
 
@@ -70,7 +69,8 @@ for (const [columns, size, gauge] of SIZES) {
       expect(propsOf(body).key).toBe(`desk:body:${['now', 'log', 'analysis'][i]}`)
       expect(propsOf(body).flexGrow).toBe(1)
       expect(propsOf(body).overflow).toBe('hidden')
-      expect(propsOf(body).minHeight).toBe(bodyLimit(48, columns))
+      expect(propsOf(body).minHeight).toBe(0)
+      expect(propsOf(root).overflow).toBe('hidden')
       expect(propsOf(parts.at(-1)).key).toBe('desk:actions')
       expect(propsOf(parts.at(-1)).flexShrink).toBe(0)
     }
