@@ -65,6 +65,20 @@ export function iconSvg(name: string, color: string): string {
   return `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 16 16">${body}</svg>`
 }
 
+const BADGE_MARKS: Record<string, (color: string) => string> = {
+  check: c => `<path d="M6.2 10.4l2.6 2.6 5-5.6" fill="none" stroke="${c}" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>`,
+  play: c => `<path d="M8 6.2l6 3.8-6 3.8Z" fill="${c}"/>`,
+  dots: c => [6, 10, 14].map(x => `<circle cx="${x}" cy="10" r="1.2" fill="${c}"/>`).join(''),
+  pause: c => `<rect x="7" y="6.5" width="2" height="7" rx=".5" fill="${c}"/><rect x="11" y="6.5" width="2" height="7" rx=".5" fill="${c}"/>`,
+}
+
+/** The state badge beside the model, as the design board draws it: a 20px disc filled `bg`, ringed in `color`, the mark (check, play, dots, pause) in `color`; an unknown mark leaves the disc empty. */
+export function stateBadgeSvg(mark: string, color: string, bg: string): string {
+  const c = safe(color)
+  const draw = Object.hasOwn(BADGE_MARKS, mark) ? BADGE_MARKS[mark] : undefined
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 20 20"><circle cx="10" cy="10" r="9.25" fill="${safe(bg)}" stroke="${c}" stroke-width="1.5"/>${draw === undefined ? '' : draw(c)}</svg>`
+}
+
 export type LaneCell = { lane: number; kind: 'start' | 'through' | 'end' | 'dot'; color?: string }
 
 /** The log's rail, always 86 wide: the session rail (16px) and up to 7 lanes of 10px; a lane past the last is drawn in it with a + mark. */

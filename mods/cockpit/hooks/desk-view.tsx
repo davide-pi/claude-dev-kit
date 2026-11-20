@@ -32,7 +32,7 @@ const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
  * it as a whole, head and bar included (the engine has no scrolling Box, and a Desktop wheel never reaches a hook while the page fits).
  * Widths are the pane's own (`100%`) or the layout's, never a fixed column count.
  */
-export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, actions: PaneActions): RenderElement {
+export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Button } = ui
   const S = t().desk
   const open: Tab = s.deskTab ?? 'now'
@@ -58,7 +58,7 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, ac
     </Box>
   )
   return (
-    <Box flexDirection="column" width="100%" minHeight="100%" rowGap={1} paddingX={1} paddingBottom={FOOT_PAD}>
+    <Box flexDirection="column" width="100%" minHeight={bodyRows > 0 ? bodyRows : '100%'} rowGap={1} paddingX={1} paddingBottom={FOOT_PAD}>
       {deskHead(ui, s, layout, actions)}
       {tabs}
       {body}

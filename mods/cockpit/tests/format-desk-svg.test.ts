@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { barSvg, donutSvg, iconSvg, railSvg, shareSvg } from '../hooks/desk-svg'
+import { barSvg, donutSvg, iconSvg, railSvg, shareSvg, stateBadgeSvg } from '../hooks/desk-svg'
 
 const C = 2 * Math.PI * 44
 const round2 = (n: number): number => Math.round(n * 100) / 100
@@ -177,4 +177,18 @@ test('Given every builder, When its source is read, Then the root carries the SV
   const named = sources.map(s => s.startsWith('<svg xmlns="http://www.w3.org/2000/svg" '))
   // Then
   expect(named).toEqual([true, true, true, true])
+})
+
+test('Given a state mark, a colour and a fill, When the badge is built, Then it is a 20px disc filled and ringed as given with the mark in the ring colour; Given an unknown mark, Then the disc is empty', () => {
+  // Given / When
+  const play = stateBadgeSvg('play', '#B9A2FF', '#3A3357')
+  const dots = stateBadgeSvg('dots', '#B9A2FF', '#3A3357')
+  const unknown = stateBadgeSvg('no-such-mark', '#A8A49B', '#30302E')
+  // Then
+  expect(play).toContain('width="20" height="20"')
+  expect(play).toContain('<circle cx="10" cy="10" r="9.25" fill="#3A3357" stroke="#B9A2FF"')
+  expect(play).toContain('<path d="M8 6.2l6 3.8-6 3.8Z" fill="#B9A2FF"/>')
+  expect(dots.match(/<circle /g)).toHaveLength(4)
+  expect(unknown.match(/<circle /g)).toHaveLength(1)
+  expect(unknown).not.toContain('<path')
 })

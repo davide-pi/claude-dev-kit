@@ -3,7 +3,7 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitClaudeState, CockpitSnapshot } from '../types'
 import { ctxScale } from './context'
 import type { DeskLayout } from './desk-layout'
-import { barSvg, donutSvg, iconSvg } from './desk-svg'
+import { barSvg, donutSvg, stateBadgeSvg } from './desk-svg'
 import { deskUrgent } from './desk-urgent'
 import type { DeskUi } from './desk-view'
 import { COLORS, abbrevTokens, clockTime, countdown, displayModel, fmtCost, localDate, signedPct } from './shared'
@@ -28,12 +28,13 @@ const BAR_PX = 14
 /** The terminal palette's status colours on the desktop palette; anything else stays as it is. */
 const semantic = (c: string): string => (c === COLORS.green ? OK : c === COLORS.yellow || c === COLORS.amber ? WARN : c === COLORS.red ? RED : c)
 
-const STATE_ICON: Record<CockpitClaudeState['kind'], { icon: string; color: string }> = {
-  idle: { icon: 'check', color: DIM },
-  working: { icon: 'flow', color: COLORS.blue },
-  thinking: { icon: 'clock', color: COLORS.lavender },
-  tool: { icon: 'flow', color: OK },
-  waiting: { icon: 'alert', color: WARN },
+/** The state badges of the design board (V3States): mark, ring colour, disc fill. */
+const STATE_ICON: Record<CockpitClaudeState['kind'], { icon: string; color: string; bg: string }> = {
+  idle: { icon: 'check', color: '#A8A49B', bg: '#30302E' },
+  working: { icon: 'play', color: '#B9A2FF', bg: '#3A3357' },
+  thinking: { icon: 'dots', color: '#B9A2FF', bg: '#3A3357' },
+  tool: { icon: 'play', color: '#B9A2FF', bg: '#3A3357' },
+  waiting: { icon: 'pause', color: '#F2A65A', bg: '#4A3320' },
 }
 
 /** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (the short label above it, its percent over it, tokens and cache under it) and the two credit windows (label and renewal, bar and what is left, pace), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
@@ -95,7 +96,7 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
     <Box key="desk:head" flexDirection="column" width="100%" rowGap={1}>
       <Box key="desk:state" flexDirection="column">
         <Box columnGap={1} alignItems="center">
-          <Svg source={iconSvg(look.icon, look.color)} alt={stateWord || detail} width={ICON_PX} height={ICON_PX} />
+          <Svg source={stateBadgeSvg(look.icon, look.color, look.bg)} alt={stateWord || detail} width={ICON_PX} height={ICON_PX} />
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             <Text wrap="truncate" weight="semibold" color={TEXT}>
               {displayModel(s.model) || '—'}

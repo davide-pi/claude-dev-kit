@@ -64,7 +64,7 @@ for (const [columns, size, gauge] of SIZES) {
     // Then
     for (const [i, root] of drawn.entries()) {
       expect(propsOf(root).height).toBeUndefined()
-      expect(propsOf(root).minHeight).toBe('100%')
+      expect(propsOf(root).minHeight).toBe(48)
       const parts = childrenOf(root)
       const body = parts.find(p => String(propsOf(p).key).startsWith('desk:body:'))
       expect(propsOf(body).key).toBe(`desk:body:${['now', 'log', 'analysis'][i]}`)

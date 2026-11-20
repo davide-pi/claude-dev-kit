@@ -192,7 +192,7 @@ export const register: Register = on => {
     }
     // The desktop has a page of its own (tabs, Svg charts); every other surface draws the terminal page.
     if (e.surface === 'desktop') {
-      return deskView($.ui.resolve(e), s, e.props.bodyColumns, paneActions($))
+      return deskView($.ui.resolve(e), s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
     }
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
   })
