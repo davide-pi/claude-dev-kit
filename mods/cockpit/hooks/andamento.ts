@@ -1,5 +1,6 @@
 import type { CockpitSnapshot } from '../types'
 import { usdOf } from './pricing'
+import { t } from './strings'
 
 // ── Andamento: where the session's money goes and whether the next compaction is due ──
 
@@ -33,6 +34,12 @@ export function spendSplit(s: CockpitSnapshot): { label: string; usd: number; pc
   const small = typed.filter(p => p.pct < OTHER_BELOW_PCT)
   const kept = [...(main > 0 ? [part('main', main)] : []), ...typed.filter(p => p.pct >= OTHER_BELOW_PCT)].sort((a, b) => b.pct - a.pct)
   return small.length > 0 ? [...kept, part('other', sum(small.map(p => p.usd)))] : kept
+}
+
+/** The spend the Analysis tabs draw, one row per spender: its display name, whole percent and USD. */
+export function spendRows(s: CockpitSnapshot): { label: string; pct: number; usd: number }[] {
+  const P = t().page
+  return spendSplit(s).map(p => ({ label: p.label === 'main' ? P.main : p.label === 'other' ? P.other : p.label, pct: Math.round(p.pct), usd: p.usd }))
 }
 
 /** The agent spend a data file keeps: the positive finite amounts by type; none for anything else. */

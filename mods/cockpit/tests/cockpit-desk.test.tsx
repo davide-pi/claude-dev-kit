@@ -429,7 +429,7 @@ test('Given a live credit reading, When the head is drawn, Then the percent has 
 })
 
 for (const columns of [36, 80, 160]) {
-  test(`Given ${columns} columns, When a credit row is drawn, Then it has its label, ring, renewal and pace lines, kept (empty) without data`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given ${columns} columns, When a credit row is drawn, Then it has its label, bar and pace lines, kept (empty) without data`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     const [full, empty] = [snap({ rateLimits: [...RATES] }), snap({ rateLimits: [] })]
     // When
@@ -437,9 +437,8 @@ for (const columns of [36, 80, 160]) {
     // Then
     const [rowA, rowB] = [keyed(a, 'desk:window:five_hour'), keyed(b, 'desk:window:five_hour')]
     expect(count(rowA)).toBe(count(rowB))
-    expect(textOf(keyed(rowA, 'desk:window:five_hour:label'))).toBe('5H')
-    expect(textOf(keyed(rowA, 'desk:window:five_hour:when'))).toContain(t().desk.head.renews)
-    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:ring'))).toHaveLength(1)
+    expect(textOf(keyed(rowA, 'desk:window:five_hour:label'))).toContain(t().desk.head.renews)
+    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:bar'))).toHaveLength(1)
     expect(keyed(rowA, 'desk:window:five_hour:pace')).toBeDefined()
     expect(svgsOf(keyed(rowA, 'desk:window:five_hour:pace'))).toHaveLength(0)
   })

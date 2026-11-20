@@ -9,7 +9,7 @@ import { agentCosts, signalId, signalSeverity } from './signals'
 import type { Signal, SignalSeverity } from './signals'
 import { t } from './strings'
 import { signalAnim } from './anim'
-import { agentRow, agentWarning, pairRow, subagentInline } from './view-agents'
+import { agentRow, agentWarning, pairRow, subagentInline, trailRows } from './view-agents'
 import { animCell, dim, line, sp, spanNodes } from './view-base'
 import type { Ui } from './view-base'
 
@@ -53,7 +53,7 @@ export type Kit = {
   /** An empty row. */
   gap: () => RenderElement
   /** A section's title: the label, a space, a rule to the end of the row. */
-  title: (label: string) => RenderElement
+  title: (label: string, right?: string) => RenderElement
 }
 
 export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: PaneActions): Kit {
@@ -64,7 +64,13 @@ export function makeKit(ui: Ui, s: CockpitSnapshot, width: number, actions: Pane
     width,
     actions,
     gap: () => <Text> </Text>,
-    title: label => line(ui, [sp(label, COLORS.title, true), sp(' '), sp('─'.repeat(Math.max(0, width - textCells(label) - 1)), COLORS.rule)]),
+    title: (label, right) =>
+      line(ui, [
+        sp(label, COLORS.title, true),
+        sp(' '),
+        sp('─'.repeat(Math.max(0, width - textCells(label) - 1 - (right === undefined ? 0 : textCells(right) + 1))), COLORS.rule),
+        ...(right === undefined ? [] : [sp(' '), dim(right)]),
+      ]),
   }
 }
 
@@ -117,6 +123,7 @@ export function makeAgentBlock(k: Kit): (key: string, agent: CockpitAgent, depth
       ),
       isOpen && [
         warn !== undefined && line(ui, [sp(`${indent}󰀦 ${warn}`, COLORS.yellow)]),
+        ...trailRows(agent, indent, width).map(spans => line(ui, spans)),
         gap(),
       ],
     ]

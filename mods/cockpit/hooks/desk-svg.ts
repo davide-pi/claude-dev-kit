@@ -27,12 +27,21 @@ const ring = (r: number, width: number, percent: number, color: string): string 
   )
 }
 
-/** The donut: `percent` of the ring filled in `color`; a red tick at `threshold` (0..1 of the turn) and a white pace tick on a dark halo at `pace` (percent) when given. */
-export function donutSvg(o: { percent: number; threshold?: number; pace?: number; color: string }): string {
+/** The context donut: `percent` of the ring filled in `color`; a tick at `threshold` (0..1 of the turn) when given. */
+export function donutSvg(o: { percent: number; threshold?: number; color: string }): string {
   const tick = o.threshold === undefined ? '' : `<line x1="60" y1="23" x2="60" y2="9" stroke="#FF5A4F" stroke-width="3" stroke-linecap="round" transform="rotate(${num(clamp(o.threshold, 0, 1) * 360)} 60 60)"/>`
-  const at = o.pace === undefined ? '' : `transform="rotate(${num(clamp(o.pace, 0, 100) * 3.6)} 60 60)"`
-  const mark = o.pace === undefined ? '' : `<line x1="60" y1="23" x2="60" y2="9" stroke="#1A1A19" stroke-width="7" stroke-linecap="round" ${at}/><line x1="60" y1="23" x2="60" y2="9" stroke="#FFFFFF" stroke-width="3" stroke-linecap="round" ${at}/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">${ring(DONUT_R, 11, o.percent, o.color)}${tick}${mark}</svg>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="120" height="120" viewBox="0 0 120 120">${ring(DONUT_R, 11, o.percent, o.color)}${tick}</svg>`
+}
+
+/** The bar markup's own width: wider than any pane, so an `Svg` drawn without `width` takes its whole slot (the engine caps the markup's width at the slot). */
+const BAR_MARKUP_PX = 2000
+
+/** A bar of `left` percent in `color`, with a pace mark at `pace` percent when given; stretched to its slot, the mark, taller than the bar, keeps a 3px stroke on a dark halo. */
+export function barSvg(o: { left: number; pace?: number; color: string }): string {
+  const fill = `<rect x="0" y="3" width="${num(clamp(o.left, 0, 100) * 2.6)}" height="8" rx="4" fill="${safe(o.color)}"/>`
+  const x = o.pace === undefined ? '' : num(clamp(o.pace, 0, 100) * 2.6)
+  const mark = o.pace === undefined ? '' : `<line x1="${x}" y1="0" x2="${x}" y2="14" stroke="#1A1A19" stroke-width="7" vector-effect="non-scaling-stroke"/><line x1="${x}" y1="0" x2="${x}" y2="14" stroke="#FFFFFF" stroke-width="3" vector-effect="non-scaling-stroke"/>`
+  return `<svg xmlns="http://www.w3.org/2000/svg" width="${BAR_MARKUP_PX}" height="14" viewBox="0 0 260 14" preserveAspectRatio="none"><rect x="0" y="3" width="260" height="8" rx="4" fill="${TRACK}"/>${fill}${mark}</svg>`
 }
 
 /** A small share bar, 84 by 6: `pct` of it filled in `color` on the track; no fill at 0. */

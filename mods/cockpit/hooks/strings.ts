@@ -65,8 +65,6 @@ const EN = {
   lessRows: (n: number) => `󰍝 −${n}`,
 
   // Work
-  perimeter: (entries: number) => `deliver perimeter · ${entries} ${plural(entries, 'entry', 'entries')}`,
-  filesOutside: (n: number) => `󰀦 ${n} ${plural(n, 'file', 'files')} outside the perimeter`,
   worklog: {
     pending: 'to log',
     underTarget: 'under target',
@@ -80,22 +78,18 @@ const EN = {
     head: { context: 'Context', contextShort: 'CTX', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
     log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', showAll: 'show all', onlyImportant: 'important only', unattributed: 'Outside a round', empty: 'nothing logged yet', noPrompt: 'no text' },
     now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step', noRequest: 'no open request', noFlow: 'no flow running', noAgents: 'no agent outside the flow' },
-    analysis: { time: 'TIME', rounds: 'in rounds', tools: 'in tools', waited: 'waiting for you', spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
+    analysis: { spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
   },
 
   // The single page: its four sections
   page: {
     attention: 'ATTENTION',
-    trend: 'TREND',
+    trend: 'SPEND',
     inProgress: 'IN PROGRESS',
     done: 'LOG',
     nothingToDo: 'nothing to do',
-    spend: 'spend',
-    context: 'context',
     main: 'main',
-    mainShort: 'main',
     other: 'other',
-    tasks: (done: number, total: number) => `tasks ${done}/${total}`,
     /** A step tag of a block agent (`implement`, `reader A`, `fix`) in the task tree under a flow. */
     planStep: (step: string) => step,
     /** The one row that stands for the finished tasks of the tree under a flow. */
@@ -175,8 +169,6 @@ const IT: Strings = {
   moreRows: (n: number) => `󰍟 +${n}`,
   lessRows: (n: number) => `󰍝 −${n}`,
 
-  perimeter: (entries: number) => `perimetro deliver · ${entries} ${plural(entries, 'voce', 'voci')}`,
-  filesOutside: (n: number) => `󰀦 ${n} file fuori dal perimetro`,
   worklog: {
     pending: 'da registrare',
     underTarget: 'sotto target',
@@ -189,21 +181,17 @@ const IT: Strings = {
     head: { context: 'Contesto', contextShort: 'CTX', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
     log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', showAll: 'mostra tutto', onlyImportant: 'solo importanti', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log', noPrompt: 'senza testo' },
     now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo', noRequest: 'nessuna richiesta aperta', noFlow: 'nessun flow in corso', noAgents: 'nessun agente fuori dal flow' },
-    analysis: { time: 'TEMPO', rounds: 'nei giri', tools: 'negli strumenti', waited: 'in attesa di te', spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
+    analysis: { spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
   },
 
   page: {
     attention: 'ATTENZIONE',
-    trend: 'ANDAMENTO',
+    trend: 'SPESA',
     inProgress: 'IN CORSO',
     done: 'LOG',
     nothingToDo: 'niente da fare',
-    spend: 'spesa',
-    context: 'contesto',
     main: 'principale',
-    mainShort: 'princ.',
     other: 'altro',
-    tasks: (done: number, total: number) => `task ${done}/${total}`,
     planStep: (step: string) => ({ implement: 'implementa', 'reader A': 'lettore A', fix: 'correzione' })[step] ?? step,
     planDone: (n: number) => `+${n} fatti`,
     events: {

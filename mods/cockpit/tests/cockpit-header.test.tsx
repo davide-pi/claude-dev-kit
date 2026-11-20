@@ -42,8 +42,6 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% {3}248K\/1M/)
     // the two credit windows share one row: label, bar, remaining, reset countdown
     expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [\u25b0\u25b1]+ 62% \u21bb 2h14m \u00b7 7d [\u25b0\u25b1]+ 41% \u21bb 3d\d\dh [+\u2212-]\d+%$/)
-    // the finished agent is a row of DONE
-    expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ code-reviewer/.test(r))).toBe(true)
     await ui.unmount()
   }
 })
@@ -162,7 +160,7 @@ test('a rule closes the header, and the ATTENTION title follows it at once (titl
   const [, first = -1] = rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^ATTENTION/.test(r))
   expect(first).toBe(headerOf(rows).length)
-  expect(title).toBe(first + 3)
+  expect(title).toBe(first + 6) // the spend section (title, its empty line, a gap) sits between the tab row and ATTENTION
   expect(rows[title]).toMatch(/^ATTENTION ─+$/)
   expect([...(rows[title] ?? '')].length).toBe([...(rows[first] ?? '')].length)
   expect(rows[title + 1]).toBe('✓ nothing to do')

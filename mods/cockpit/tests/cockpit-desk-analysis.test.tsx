@@ -64,7 +64,7 @@ test('Given no insights, When drawn, Then the sections keep their rows as with d
   const empty = await drawAnalysis($, on, snap(), 100, [])
   const full = await drawAnalysis($, on, FULL(), 100, [])
   // When
-  const titles = [t().desk.analysis.time, t().desk.analysis.spend, t().desk.analysis.watch]
+  const titles = [t().desk.analysis.spend, t().desk.analysis.watch]
   // Then
   expect(empty.rows.length).toBe(full.rows.length)
   for (const title of titles) expect(empty.rows.some(r => r.includes(title))).toBe(true)
@@ -72,14 +72,14 @@ test('Given no insights, When drawn, Then the sections keep their rows as with d
   await full.ui.unmount()
 })
 
-test('Given no insights and no notification, When the Analysis tab is drawn, Then the time and watch sections each say so in one dim line and keep their rows', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given no insights and no notification, When the Analysis tab is drawn, Then the spend and watch sections each say so in one dim line and keep their rows', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap()
   // When
   const { ui } = await drawAnalysis($, on, s, 100, [])
   const drawn = await ui.drawn()
   // Then
-  for (const [key, rows] of [['analysis:time', 3], ['analysis:watch', 2]] as const) {
+  for (const [key, rows] of [['analysis:spend', 3], ['analysis:watch', 2]] as const) {
     const section = find(drawn, key)
     expect(kids(section)).toHaveLength(1 + rows)
     expect(textOf(kids(section)[1])).toBe(t().desk.analysis.none)
@@ -87,18 +87,13 @@ test('Given no insights and no notification, When the Analysis tab is drawn, The
   await ui.unmount()
 })
 
-test('Given insights and spend, When the Analysis tab is drawn, Then a time row is its label left and its value right, and a spend row has a share bar and no check icon', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given insights and spend, When the Analysis tab is drawn, Then a spend row has a share bar and no check icon', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = FULL()
   // When
   const { ui } = await drawAnalysis($, on, s, 100, [])
   const drawn = await ui.drawn()
   // Then
-  const rounds = kids(find(drawn, 'time:rounds'))
-  expect(rounds).toHaveLength(2)
-  expect(propsOf(rounds[0]).flexGrow).toBe(1)
-  expect(textOf(rounds[0])).toBe(t().desk.analysis.rounds)
-  expect(textOf(rounds[1])).toBe('02m00s')
   const spend = find(drawn, 'analysis:spend')
   const sources = svgSources(spend)
   expect(sources.length).toBeGreaterThan(0)
@@ -115,7 +110,7 @@ test('Given the Analysis tab, When drawn, Then every section card carries a visi
   const { ui } = await drawAnalysis($, on, s, 100, [])
   const drawn = await ui.drawn()
   // Then
-  for (const key of ['analysis:time', 'analysis:spend', 'analysis:watch']) {
+  for (const key of ['analysis:spend', 'analysis:watch']) {
     expect(typeof propsOf(find(drawn, key)).borderStyle).toBe('string')
     expect(propsOf(find(drawn, key)).borderColor).toBeDefined()
   }

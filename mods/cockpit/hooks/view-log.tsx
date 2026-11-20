@@ -393,13 +393,6 @@ export function dayRow(k: Kit, key: string, date: string, isOpen: boolean, right
   ]
 }
 
-/** IN CORSO's nodes: the open round and the run still open or silent, each open until a person closes it; `drawn` holds the running agents the nodes list (IN CORSO leaves them out of its flat list). */
-export function liveBlocks(k: Kit): { blocks: Block[]; drawn: Set<string> } {
-  const tree = buildTree(k)
-  const drawn = new Set<string>()
-  return { blocks: tree.live.map(g => nodeBlock(k, tree, g, isExpandable(g, k.s) && (k.s.groupsOpen?.[g.key] ?? true), false, drawn)), drawn }
-}
-
 /**
  * The session log: the closed nodes (main rounds and workflow runs) newest first, each a toggle row (start time, label, length, cost, its share of the
  * session's cost) over its children in a tree; the newest is open until a person gives it a state, which stays. Under a day row

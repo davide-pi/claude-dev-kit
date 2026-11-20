@@ -1,18 +1,18 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
-import { spendSplit } from './andamento'
+import { spendRows } from './andamento'
 import type { DeskLayout } from './desk-layout'
 import { limitRows } from './desk-layout'
 import { iconSvg, shareSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
-import { duration, fmtCost } from './shared'
+import { fmtCost } from './shared'
 import { signalsOf } from './signals'
 import { t } from './strings'
 import type { PaneActions } from './view-kit'
 import { signalText } from './view-kit'
 
-// ── The desktop Analysis tab (time, spend, what to watch) and the page's action bar (compact, retrospectives) ──
+// ── The desktop Analysis tab (spend, what to watch) and the page's action bar (compact, retrospectives) ──
 
 const ACCENT = '#8B6CF6'
 const TITLE = '#B9A2FF'
@@ -103,18 +103,11 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
     </Box>
   )
 
-  // TIME: the rounds, the main loop tool calls, the wait for the person
-  const time =
-    ins === undefined || ins.rounds <= 0
-      ? []
-      : [pair('time:rounds', A.rounds, duration(ins.roundMs)), pair('time:tools', A.tools, duration(ins.toolMs)), pair('time:wait', A.waited, duration(ins.waitMs))]
   // SPEND: who spent the session money, as on the design board: share, its bar, who, cost
-  const spend = spendSplit(s).map(p => {
-    const label = p.label === 'main' ? S.page.main : p.label === 'other' ? S.page.other : p.label
-    const pct = Math.round(p.pct)
+  const spend = spendRows(s).map(({ label, pct, usd }) => {
     return (
-      <Box key={`spend:${p.label}`} columnGap={1} alignItems="center">
-        <Box key={`spend:${p.label}:pct`} width={PCT_COLS} flexShrink={0} justifyContent="flex-end">
+      <Box key={`spend:${label}`} columnGap={1} alignItems="center">
+        <Box key={`spend:${label}:pct`} width={PCT_COLS} flexShrink={0} justifyContent="flex-end">
           <Text color={TEXT} weight="bold" tabular>
             {`${pct}%`.padStart(4)}
           </Text>
@@ -126,7 +119,7 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
           </Text>
         </Box>
         <Text color={DIM} tabular wrap="truncate">
-          {fmtCost(p.usd)}
+          {fmtCost(usd)}
         </Text>
       </Box>
     )
@@ -154,19 +147,7 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
       )}
     </Box>
   )
-  // wide puts time and spend side by side
-  const timeCard = section('time', A.time, time)
-  const spendCard = section('spend', A.spend, spend, SECTION_ROWS, fmtCost(s.cost.usd))
-  const cards =
-    layout.size === 'wide'
-      ? [
-          <Box key="analysis:pair" flexDirection="row" columnGap={GAP}>
-            {timeCard}
-            {spendCard}
-          </Box>,
-          section('watch', A.watch, watch, WATCH_ROWS),
-        ]
-      : [timeCard, spendCard, section('watch', A.watch, watch, WATCH_ROWS)]
+  const cards = [section('spend', A.spend, spend, SECTION_ROWS, fmtCost(s.cost.usd)), section('watch', A.watch, watch, WATCH_ROWS)]
   return (
     <Box key="analysis:scroll" flexDirection="column" width="100%">
       <Box key="desk:analysis" flexDirection="column" width="100%" rowGap={1}>

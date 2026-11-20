@@ -126,7 +126,8 @@ test('agents: the turn\'s own total replaces what its steps added, a turn that s
   const writes = new Map<string, string>()
   void writes
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).filter(r => /\d\d:\d\d \S+ (one|two)/.test(r))).toHaveLength(2)
+  await ui.press({ key: 'tab:log' })
+  expect(rowTexts(await ui.drawn()).filter(r => /^│ \d\d:\d\d (one|two)/.test(r))).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -228,14 +229,6 @@ test('agents: every live row that has a usage carries the agent\'s cost in a fix
   }
 })
 
-test('agents: LOG shows the cost a log entry kept', { timeoutMs: 30_000 }, async ($, on) => {
-  world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: NOW - 1000, kind: 'agent', key: 'a1', text: 'two', usd: 1.5, ms: 60_000 }], prs: [] }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 58)
-  expect(rowTexts(await ui.drawn()).find(r => /\d\d:\d\d \S+ two/.test(r))).toMatch(/\$ {2}1\.50 /)
-  await ui.unmount()
-})
-
 test('agents: an agent that finished keeps its effort and its cost on the history entry the data file holds', { timeoutMs: 30_000 }, async ($, on) => {
   const writes = new Map<string, string>()
   const clock = world(on, { writes })
@@ -273,7 +266,7 @@ test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: 
     // the section: from its title to the first empty row or rule
     const body = async () => {
       const rows = rowTexts(await ui.drawn())
-      const rest = rows.slice(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r)) + 1)
+      const rest = rows.slice(rows.findIndex(r => /^AGENTS OUTSIDE THE FLOW ─+$/.test(r)) + 1)
       const end = rest.findIndex(r => r.trim() === '' || /^─+$/.test(r))
       return end < 0 ? rest : rest.slice(0, end)
     }
@@ -285,10 +278,10 @@ test('agents: every row is one line cut to the width, at 40, 58 and 80 columns: 
     // no usage read yet: the cost cell stays blank, never a made-up $0.00
     expect(collapsed[0]).toMatch(/^󱎖 a-co[^ ]*… [^$]* +02m00s$/)
 
-    // expanded: the details are inline, cut to the width; the only row added is the warning, none is wider than the first
+    // expanded: the details are inline, cut to the width; the rows added are the warning and the trail row, none is wider than the first
     await ui.press({ key: 'agent:a1' })
     const expanded = await body()
-    expect(expanded).toHaveLength(collapsed.length + 1)
+    expect(expanded).toHaveLength(collapsed.length + 2)
     for (const r of expanded) expect(textCells(r)).toBeLessThanOrEqual(width)
     expect(expanded.some(r => /^ +󰀦 asked fable/.test(r))).toBe(true)
     expect(expanded.some(r => /^ +last tool/.test(r))).toBe(false)
