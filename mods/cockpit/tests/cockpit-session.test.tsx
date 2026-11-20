@@ -27,7 +27,8 @@ test('a data file from before the model usage was dropped still loads: its histo
   world(on, { writes, dataFile: JSON.stringify({ history: [entry('a9', 'implementer', NOW - 30_000)], sessionLog: [{ at: NOW - 30_000, kind: 'agent', key: 'a9', text: 'implementer' }], prs: [], modelUse: { 'claude-sonnet-5-5': { input: 1, output: 2, cacheRead: 3, cacheWrite: 4 } } }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($, 58)
-  expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ implementer/.test(r))).toBe(true)
+  await ui.press({ key: 'tab:log' })
+  expect(rowTexts(await ui.drawn()).some(r => /^│ \d\d:\d\d implementer/.test(r))).toBe(true)
   await ui.unmount()
   await settle()
   expect(dataOf(writes)).not.toHaveProperty('modelUse')
@@ -99,7 +100,7 @@ test('/cockpit opens the pane and the state file says open:true', { timeoutMs: 3
   expect(flagOf(writes)).toMatchObject({ open: false })
 
   const ran = await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
-  expect(ran.text).toBe('cockpit open')
+  expect(ran.text).toBe('Cockpit opened in the side pane.')
   expect(opened).toEqual(['cockpit'])
   expect(flagOf(writes)).toMatchObject({ open: true })
 })
@@ -127,7 +128,7 @@ test('a pane that cannot be placed is reported with open:false, and its first re
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const ran = await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
-  expect(ran.text).toBe('cockpit waiting: too narrow (80 < 144)')
+  expect(ran.text).toBe('cockpit waiting for room: too narrow (80 < 144)')
   expect(flagOf(writes)).toMatchObject({ open: false })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -203,7 +204,7 @@ test("the state file's last turn cost is the ended turn's while the next one has
 test('a state file that is not JSON is ignored', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
+  expect((await paneRows($, 50, 'analysis')).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
 })
 
 test('a write delayed across a /clear writes nothing to the new session\'s file', { timeoutMs: 30_000 }, async ($, on) => {
@@ -287,7 +288,8 @@ test('a resume reloads the history of the session it resumes', { timeoutMs: 30_0
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).filter(r => /\d\d:\d\d \S+ (implementer|reviewer)/.test(r))).toHaveLength(2)
+  await ui.press({ key: 'tab:log' })
+  expect(rowTexts(await ui.drawn()).filter(r => /^│ \d\d:\d\d (implementer|reviewer)/.test(r))).toHaveLength(2)
   await ui.unmount()
 })
 
@@ -378,7 +380,8 @@ test('session data: a resume brings back the history, the PRs and the context ro
   world(on, { writes, dataFile })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ implementer/.test(r))).toBe(true)
+  await ui.press({ key: 'tab:log' })
+  expect(rowTexts(await ui.drawn()).some(r => /^│ \d\d:\d\d implementer/.test(r))).toBe(true)
   await ui.unmount()
   // written back as it was read
   expect(dataOf(writes)).toMatchObject({ ctxRounds: [100_000, 200_000], prs: [SAVED_PR] })

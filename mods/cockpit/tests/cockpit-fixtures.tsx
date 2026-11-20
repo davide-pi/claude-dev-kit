@@ -47,8 +47,9 @@ export const RED = '#f07a6f'
 export const MIN = 60_000
 
 /** The pane's drawn tree and its rows. */
-export async function paneRows($: Engine, bodyColumns = 50) {
+export async function paneRows($: Engine, bodyColumns = 50, tab?: 'now' | 'log' | 'analysis') {
   const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+  if (tab !== undefined) await ui.press({ key: `tab:${tab}` })
   const root = await ui.drawn()
   await ui.unmount()
   return { root, rows: rowTexts(root) }
@@ -97,6 +98,20 @@ export const finishAgent = ($: Engine, agentId: string, reason: 'answer' | 'abor
   $.turn.complete({ answer: '', durationMs: 1, isAborted: reason === 'aborted', turnId: `${agentId}-t`, agentId, reason })
 
 export const mountPane = ($: Engine, bodyColumns = 50) => $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns }, surface: 'terminal' })
+
+/** The pane drawn on its Log tab (`tab:log` pressed): the lanes. */
+export async function mountLanes($: Engine, bodyColumns = 50) {
+  const ui = await mountPane($, bodyColumns)
+  await ui.press({ key: 'tab:log' })
+  return ui
+}
+
+/** The pane drawn on its Analisi tab (`tab:analysis` pressed): the time, the spend and ATTENTION. */
+export async function mountAnalysis($: Engine, bodyColumns = 50) {
+  const ui = await mountPane($, bodyColumns)
+  await ui.press({ key: 'tab:analysis' })
+  return ui
+}
 
 /** A history entry as the state file holds it. */
 export const entry = (id: string, type: string, endedAt: number, isFailed = false) => ({
@@ -241,3 +256,9 @@ export function gatedBash(on: On) {
   on('tool.call', { tool: 'Bash' }, (_, e) => new Promise<{ result: object }>(resolve => void gates.set(e.command, () => resolve({ result: {} }))))
   return (command: string) => gates.get(command)?.()
 }
+
+// ── The desktop page ──
+
+/** The pane mounted on the desktop surface, `bodyColumns` wide and `bodyRows` tall. */
+export const mountDesk = ($: Engine, bodyColumns = 100, bodyRows = 30) =>
+  $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns, scroll: { offset: 0, bodyRows } }, surface: 'desktop' })

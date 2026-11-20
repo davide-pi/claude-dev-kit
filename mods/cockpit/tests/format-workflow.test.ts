@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import type { CockpitLogEntry } from '../types'
 import { agentLog, parseHistory, toHistory } from '../hooks/agents'
-import { recordLog } from '../hooks/timeline'
-import { WORKFLOW_SILENCE_MS, activeRun, addWorkflowAgent, agentRunId, endRun, expireRun, finishWorkflowAgent, launchedRun, logRunChange, nameRun, recordAgentLog, roundOf, runIdOf, silenceRun, touchRun } from '../hooks/workflow'
+import { SESSION_LOG_KEEP, recordLog } from '../hooks/timeline'
+import { WORKFLOW_SILENCE_MS, activeRun, addWorkflowAgent, agentRunId, endRun, expireRun, finishWorkflowAgent, laneFor, launchedRun, logRunChange, nameRun, recordAgentLog, roundOf, runIdOf, silenceRun, touchRun } from '../hooks/workflow'
 
 test('roundOf reads the number after R, and none for a label without one', () => {
   expect(roundOf('fix R2')).toBe(2)
@@ -178,4 +178,84 @@ test('recordAgentLog: given an agent outside any run, or of a run with no node y
   expect(plain.find(e => e.kind === 'flow')?.usd).toBe(0.1)
   expect(open.find(e => e.kind === 'flow')?.usd).toBe(0.1)
   expect(open).toHaveLength(2)
+})
+
+// ── The conversation rounds a flow spans, and its lane ──
+
+const flowNode = (key: string, round: number, lane: number, endRound?: number, at = 1000): CockpitLogEntry => ({ at, kind: 'flow', key, round, lane, ...(endRound !== undefined && { endRound }) })
+const closed = (runId: string, startRound: number, lane: number, endedAt: number) => {
+  const before = { runId, agents: [{ id: `${runId}-a`, isDone: true }], lastAt: endedAt - 1, startRound, lane }
+  return { before, after: { ...before, endedAt } }
+}
+
+test('Given a run first seen in round 11 and closed in round 13, When its flow is written, Then the entry has round 11 and endRound 13', () => {
+  // Given: the run is created by nameRun in round 11, before any spawn
+  let run = nameRun(undefined, { runId: 'w1', name: 'loop' }, 11, [])
+  run = addWorkflowAgent(run, 'w1', 'a1', '', 1000, 11, [])
+  const open = finishWorkflowAgent(run, 'a1', 2000)
+  const ended = endRun(open, 3000)
+  // When
+  const log = logRunChange(undefined, open, ended, 13)
+  // Then
+  expect(run).toMatchObject({ startRound: 11, lane: 0 })
+  expect(log?.find(e => e.kind === 'flow')).toMatchObject({ key: 'w1', round: 11, endRound: 13, lane: 0 })
+})
+
+test('Given a flow entry over 11-13, When a run starts in round 13, Then it takes lane 1; in round 14, Then lane 0', () => {
+  // Given
+  const log = [flowNode('w1', 11, 0, 13)]
+  // When
+  const overlapping = nameRun(undefined, { runId: 'w2' }, 13, log)
+  const after = nameRun(undefined, { runId: 'w3' }, 14, log)
+  // Then
+  expect(overlapping).toMatchObject({ startRound: 13, lane: 1 })
+  expect(after).toMatchObject({ startRound: 14, lane: 0 })
+  expect(laneFor(log, 13)).toBe(1)
+  expect(laneFor(log, 14)).toBe(0)
+})
+
+test('Given a flow entry with no endRound, When a run starts in a later round, Then the entry holds its lane only in its own round; the lowest free lane is taken', () => {
+  // Given
+  const old = [flowNode('w1', 11, 0)]
+  const two = [flowNode('w1', 11, 0, 13), flowNode('w2', 12, 1)]
+  // When / Then
+  expect(laneFor(old, 11)).toBe(1)
+  expect(laneFor(old, 20)).toBe(0)
+  expect(laneFor(two, 12)).toBe(2)
+  expect(laneFor(two, 13)).toBe(1)
+  expect(laneFor(two, 14)).toBe(0)
+  expect(laneFor(undefined, 5)).toBe(0)
+})
+
+test('Given a closed flow entry, When a late agent rewrites it, Then round and lane stay', () => {
+  // Given
+  const log = [flowNode('w1', 11, 1, 13, 1000)]
+  const late: CockpitLogEntry = { at: 5000, kind: 'agent', key: 'a9', runId: 'w1', text: 'implementer', usd: 1 }
+  // When
+  const next = recordAgentLog(log, late)
+  // Then
+  expect(next.find(e => e.kind === 'flow')).toMatchObject({ round: 11, lane: 1, endRound: 13 })
+})
+
+test('Given a flow entry over 11-13, When the resumed run closes it again in round 16, Then round and lane stay and endRound moves to 16', () => {
+  // Given: the resumed run was created later, so it carries another startRound and lane
+  const log = [flowNode('w1', 11, 1, 13, 1000)]
+  const { before, after } = closed('w1', 15, 0, 9000)
+  // When
+  const next = logRunChange(log, before, after, 16)
+  // Then
+  expect(next?.find(e => e.kind === 'flow')).toMatchObject({ round: 11, lane: 1, endRound: 16 })
+})
+
+test('Given two flow entries, When the oldest is evicted from the log, Then the other keeps its lane', () => {
+  // Given
+  const one = closed('w1', 11, 0, 1000)
+  const two = closed('w2', 11, 1, 2000)
+  let log = logRunChange(undefined, { ...one.before, endedAt: undefined }, one.after, 12)
+  log = logRunChange(log, { ...two.before, endedAt: undefined }, two.after, 12)
+  // When
+  for (let i = 0; i < SESSION_LOG_KEEP - 1; i++) log = recordLog(log, { at: 5000 + i, kind: 'round' })
+  // Then
+  expect(log?.some(e => e.key === 'w1')).toBe(false)
+  expect(log?.find(e => e.key === 'w2')).toMatchObject({ round: 11, lane: 1, endRound: 12 })
 })

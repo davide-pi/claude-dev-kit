@@ -1,6 +1,7 @@
 import { mock } from 'claude-code/testing'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
+
 export const NOW = Date.parse('2026-10-22T10:00:00Z')
 /** An ssh `origin` URL of GitHub (joined, so the text is not read as an e-mail address). */
 export const GH_SSH = ['git', 'github.com:example/orders.git'].join('@')
@@ -81,6 +82,8 @@ export type World = {
   calls?: string[]
   /** True: `session.compact` stands (the conversation compacted) instead of being skipped. */
   compacts?: boolean
+  /** True: `session.compact` is left to the engine's core (it rejects while a turn runs). */
+  compactIsCore?: boolean
   /** True: `session.compact` never answers. */
   compactHangs?: boolean
   /** The conversation's size after a compaction that stood (`tokensAfter`); absent, the compaction reports none. */
@@ -345,9 +348,10 @@ export function world(on: On, options: World = {}) {
     options.closed?.push(e.origin.kind)
     return { value: undefined }
   })
-  on('session.compact', (_, e) => {
+  on('session.compact', (_, e, next) => {
     options.calls?.push('compact')
     options.instructions?.push(e.instructions)
+    if (options.compactIsCore === true) return next(e)
     if (options.compactHangs === true) return new Promise<never>(() => undefined)
     return options.compacts ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }], ...(options.compactAfter !== undefined && { tokensAfter: options.compactAfter }) } : { skip: 'test' }
   })

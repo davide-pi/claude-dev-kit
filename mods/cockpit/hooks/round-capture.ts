@@ -1,6 +1,8 @@
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import { t } from './strings'
-import { ROUND_LIST_KEEP } from './timeline'
+
+/** The entries a round keeps of its waits and failed calls: the newest ten. */
+export const ROUND_LIST_KEEP = 10
 
 /** The prompt a round entry keeps: its first line, cut to this many characters. */
 export const PROMPT_KEEP = 120
@@ -45,10 +47,23 @@ export const withRoundWait = (s: CockpitSnapshot, tool: string, ms: number): Coc
 })
 
 /** The number the round that ends now gets: after the last one counted, the log's own count for a session saved before the counter. */
-export const nextRoundNumber = (s: CockpitSnapshot): number => {
+export const nextRoundNumber = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number => {
   const rounds = (s.sessionLog ?? []).filter(e => e.kind === 'round')
   return (s.roundSeq ?? Math.max(rounds.length, ...rounds.map(e => e.n ?? 0))) + 1
 }
+
+/** The number of the round open now (the last one counted plus one); none while the main loop is idle or has no state yet. */
+export const openRound = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined =>
+  s.claudeState === undefined || s.claudeState.kind === 'idle' ? undefined : nextRoundNumber(s)
+
+/** The last round concluded: the counter, else the last round the log holds (a session saved before the counter); none before any round. */
+export const lastRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'>): number | undefined => {
+  const last = nextRoundNumber(s) - 1
+  return s.roundSeq ?? (last > 0 ? last : undefined)
+}
+
+/** The round an entry, an agent or a flow born or closed now is stamped with: the one open, else the last one concluded. */
+export const endRoundOf = (s: Pick<CockpitSnapshot, 'roundSeq' | 'sessionLog'> & { claudeState?: { kind: string } }): number | undefined => openRound(s) ?? lastRoundOf(s)
 
 /** What the open round gives the entry that ends it. */
 export const roundFields = (s: CockpitSnapshot): Partial<CockpitLogEntry> => ({

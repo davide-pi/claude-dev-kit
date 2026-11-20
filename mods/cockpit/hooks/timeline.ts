@@ -1,4 +1,5 @@
 import type { CockpitEvent, CockpitLogEntry } from '../types'
+import { ROUND_LIST_KEEP, endRoundOf } from './round-capture'
 
 /** The events kept: the oldest go first. */
 export const EVENTS_KEEP = 300
@@ -36,14 +37,21 @@ export function recordLogCount(log: readonly CockpitLogEntry[] | undefined, entr
   return { log: sorted.slice(-SESSION_LOG_KEEP), trimmed: Math.max(0, sorted.length - SESSION_LOG_KEEP) }
 }
 
-/** `s` with `entry` recorded in its session log and the entries the keep dropped added to `logTrimmed`. */
-export function withLogged<S extends { sessionLog?: CockpitLogEntry[]; logTrimmed?: number }>(s: S, entry: CockpitLogEntry): S {
-  const { log, trimmed } = recordLogCount(s.sessionLog, entry)
+/** What `withLogged` reads of a snapshot: its log, and the round state that says which round is open. */
+type Logging = { sessionLog?: CockpitLogEntry[]; logTrimmed?: number; roundSeq?: number; claudeState?: { kind: string } }
+
+/**
+ * `s` with `entry` recorded in its session log and the entries the keep dropped added to `logTrimmed`. The entry takes the conversation round it is logged in:
+ * `round` when given, else the one open now, else the last one concluded; an entry with a round of its own, a 'round' entry, and one logged before any round stay as they are.
+ */
+export function withLogged<S extends Logging>(s: S, entry: CockpitLogEntry, round?: number): S {
+  const at = entry.kind === 'round' || entry.round !== undefined ? undefined : (round ?? endRoundOf(s))
+  const { log, trimmed } = recordLogCount(s.sessionLog, at === undefined ? entry : { ...entry, round: at })
   return { ...s, sessionLog: log, ...(trimmed > 0 && { logTrimmed: (s.logTrimmed ?? 0) + trimmed }) }
 }
 
 /** `s` with a tool call's log `entries` (test runs, commits, a PR) in its session log: they never enter the agents' `events` ring, so no number of them evicts an agent event. */
-export function withLogEntries<S extends { sessionLog?: CockpitLogEntry[]; logTrimmed?: number }>(s: S, entries: readonly CockpitLogEntry[]): S {
+export function withLogEntries<S extends Logging>(s: S, entries: readonly CockpitLogEntry[]): S {
   return entries.reduce((acc, e) => withLogged(acc, e), s)
 }
 
@@ -81,6 +89,8 @@ export const lastRoundFlowUsd = (log: readonly CockpitLogEntry[] | undefined): n
 const LOG_KINDS: readonly string[] = ['round', 'commit', 'test', 'compact', 'pr', 'agent', 'signal', 'flow', 'error']
 const SEVERITIES: readonly string[] = ['block', 'warn', 'info']
 const isNum = (v: unknown): v is number => typeof v === 'number' && Number.isFinite(v)
+/** A conversation round number: a whole number from 1 on. */
+export const isRoundNo = (v: unknown): v is number => typeof v === 'number' && Number.isInteger(v) && v >= 1
 
 /** A record of positive counts by name out of a parsed file; none for anything else or an empty one. */
 export function parseToolCounts(value: unknown): Record<string, number> | undefined {
@@ -88,9 +98,6 @@ export function parseToolCounts(value: unknown): Record<string, number> | undefi
   const counts = Object.entries(value).filter((e): e is [string, number] => isNum(e[1]) && e[1] > 0)
   return counts.length > 0 ? Object.fromEntries(counts) : undefined
 }
-
-/** The entries a round keeps of its waits and failed calls: the newest ten. */
-export const ROUND_LIST_KEEP = 10
 
 const isRecordOf = (v: unknown): v is Record<string, unknown> => typeof v === 'object' && v !== null && !Array.isArray(v)
 
@@ -120,7 +127,7 @@ export function parseLogCount(value: unknown): { log: CockpitLogEntry[] | undefi
   if (!Array.isArray(value)) return { log: undefined, trimmed: 0 }
   const parsed = value.flatMap((v: unknown): CockpitLogEntry[] => {
     if (typeof v !== 'object' || v === null) return []
-    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc, prompt, files, ctxPct, anchor, waits, fails, agent } = v as Record<string, unknown>
+    const { at, kind, key, text, usd, ms, tokens, after, isFailed, model, effort, n, severity, tools, runId, desc, prompt, files, ctxPct, anchor, waits, fails, agent, round, endRound, lane } = v as Record<string, unknown>
     if (!isNum(at) || typeof kind !== 'string' || !LOG_KINDS.includes(kind)) return []
     const counts = parseToolCounts(tools)
     const parsedWaits = parseWaits(waits)
@@ -129,6 +136,9 @@ export function parseLogCount(value: unknown): { log: CockpitLogEntry[] | undefi
       at,
       kind: kind as CockpitLogEntry['kind'],
       ...(typeof key === 'string' && { key }),
+      ...(isRoundNo(round) && { round }),
+      ...(isRoundNo(endRound) && { endRound }),
+      ...(typeof lane === 'number' && Number.isInteger(lane) && lane >= 0 && { lane }),
       ...(typeof runId === 'string' && { runId }),
       ...(typeof agent === 'string' && { agent }),
       ...(typeof text === 'string' && { text }),

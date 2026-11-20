@@ -3,7 +3,7 @@ import { usdOf } from './pricing'
 import { COLORS, isRecord, truncEnd } from './shared'
 import type { Span } from './shared'
 import { t } from './strings'
-import { recordLog } from './timeline'
+import { isRoundNo, recordLog } from './timeline'
 
 /** How long a finished agent stays listed. */
 export const AGENT_KEEP_MS = 120_000
@@ -91,7 +91,7 @@ export const HISTORY_KEEP = 300
 /** What the history keeps of a finished agent; undefined for one the mod only saw through its events (type `?`). */
 export function toHistory(a: CockpitAgent, runId?: string): CockpitHistoryEntry | undefined {
   if (a.type === '?' || a.endedAt === undefined) return undefined
-  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(runId !== undefined && { runId }), ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
+  return { id: a.id, type: a.type, model: a.model, startedAt: a.startedAt, endedAt: a.endedAt, tokens: a.tokens, isFailed: a.isFailed === true, ...(runId !== undefined && { runId }), ...(a.round !== undefined && { round: a.round }), ...(a.effort !== undefined && { effort: a.effort }), ...(a.description !== undefined && { description: a.description }), ...(a.usage !== undefined && { usd: usdOf(a.model, a.usage) }), ...(a.isInterrupted === true && { isInterrupted: true }) }
 }
 
 /** The session log entry of a finished agent (`at` its end, `key` its id); undefined for one the mod only saw through its events (type `?`) or one that has not ended. */
@@ -101,6 +101,7 @@ export function agentLog(a: CockpitAgent, runId?: string): CockpitLogEntry | und
     at: a.endedAt,
     kind: 'agent',
     key: a.id,
+    ...(a.round !== undefined && { round: a.round }),
     ...(runId !== undefined && { runId }),
     text: a.type,
     ...(a.description !== undefined && a.description !== '' && { desc: a.description }),
@@ -124,6 +125,7 @@ export function withHistoryAgents(log: CockpitLogEntry[] | undefined, history: r
         at: h.endedAt,
         kind: 'agent',
         key: h.id,
+        ...(h.round !== undefined && { round: h.round }),
         ...(h.runId !== undefined && { runId: h.runId }),
         text: h.type,
         ...(h.description !== undefined && h.description !== '' && { desc: h.description }),
@@ -149,7 +151,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
   const out: CockpitHistoryEntry[] = []
   for (const v of value.slice(0, HISTORY_KEEP)) {
     if (!isRecord(v)) continue
-    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description, usd, runId } = v
+    const { id, type, model, startedAt, endedAt, tokens, isFailed, isInterrupted, effort, description, usd, runId, round } = v
     if (typeof id !== 'string' || typeof type !== 'string' || typeof startedAt !== 'number' || typeof endedAt !== 'number') continue
     out.push({
       id,
@@ -162,6 +164,7 @@ export function parseHistory(value: unknown): CockpitHistoryEntry[] {
       ...((typeof effort === 'string' || typeof effort === 'number') && { effort }),
       ...(typeof description === 'string' && { description }),
       ...(typeof runId === 'string' && { runId }),
+      ...(isRoundNo(round) && { round }),
       ...(typeof usd === 'number' && Number.isFinite(usd) && usd >= 0 && { usd }),
       ...(isInterrupted === true && { isInterrupted: true }),
     })

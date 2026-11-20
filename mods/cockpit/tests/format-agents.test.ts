@@ -17,6 +17,7 @@ import {
   withAgentTokens,
 } from '../hooks/agents'
 import { spanText } from '../hooks/shared'
+import { agentLog } from '../hooks/agents'
 
 const finished = (id: string, endedAt: number, extra: object = {}) => ({
   id,
@@ -132,4 +133,53 @@ test('historyTokens: the new tokens of the agents a history lists', () => {
   expect(historyTokens([h(3000), h(2000)])).toBe(5000)
   expect(historyTokens([])).toBeUndefined()
   expect(historyTokens(undefined)).toBeUndefined()
+})
+
+// ── The round an agent was spawned in ──
+
+const spawnedIn = { id: 'a1', type: 'implementer', status: 'done' as const, startedAt: 1000, endedAt: 5000, tokens: 10, round: 3 }
+
+test('Given an agent spawned in round 3 and ended in round 5, When it is logged, Then its log entry carries round 3', () => {
+  // Given
+  const agent = spawnedIn
+  // When
+  const entry = agentLog(agent)
+  // Then
+  expect(entry?.round).toBe(3)
+})
+
+test('Given an agent with no spawn round, When it is logged, Then its entry has no round', () => {
+  // Given
+  const { round: _round, ...agent } = spawnedIn
+  // When
+  const entry = agentLog(agent)
+  // Then
+  expect(entry).not.toHaveProperty('round')
+})
+
+test('Given a finished agent spawned in round 3, When it goes to the history, Then the entry keeps the round', () => {
+  // Given
+  const agent = spawnedIn
+  // When
+  const entry = toHistory(agent)
+  // Then
+  expect(entry?.round).toBe(3)
+})
+
+test('Given a history file written with a round, When the session resumes, Then the agent keeps it', () => {
+  // Given
+  const file = [{ id: 'a1', type: 'implementer', startedAt: 1, endedAt: 2, tokens: 3, isFailed: false, round: 4 }]
+  // When
+  const history = parseHistory(file)
+  // Then
+  expect(history[0]?.round).toBe(4)
+})
+
+test('Given a history file without a round or with a bad one, When it is read, Then the entry has none', () => {
+  // Given
+  const base = { id: 'a1', type: 'implementer', startedAt: 1, endedAt: 2, tokens: 3, isFailed: false }
+  // When
+  const history = parseHistory([base, { ...base, id: 'a2', round: 'x' }, { ...base, id: 'a3', round: 0 }])
+  // Then
+  expect(history.map(h => h.round)).toEqual([undefined, undefined, undefined])
 })

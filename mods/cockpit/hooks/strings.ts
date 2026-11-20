@@ -6,6 +6,9 @@
 
 export type Lang = 'en' | 'it'
 
+/** The days the retrospective button looks back over: the `/retro days N` it runs and the words of its label. */
+export const RETRO_DAYS = 15
+
 const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many)
 
 /** An Italian percent after its article: `il 90%`, `al 90%`, but `l'85%`, `all'85%` before a number read with a vowel (1, 8, 11, 80 to 89). */
@@ -26,12 +29,12 @@ const LEGACY_TOKENS = 1000
 
 const EN = {
   ...SHARED,
-  buttons: { compact: 'compact', retro: 'retrospective', retroDays: 'last 10 days', retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
+  buttons: { compact: 'compact', retro: 'retrospective:', retroDays: `${RETRO_DAYS} d`, retroSession: 'session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
   confirmLog: 'which hours? sends /worklog',
-  confirmRetro: 'which retrospective? sends /retro',
 
   // Header
   noRateData: 'no rate-limit data',
+  compactRefused: "Can't compact now: retry when the reply ends",
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
@@ -62,8 +65,6 @@ const EN = {
   lessRows: (n: number) => `󰍝 −${n}`,
 
   // Work
-  perimeter: (entries: number) => `deliver perimeter · ${entries} ${plural(entries, 'entry', 'entries')}`,
-  filesOutside: (n: number) => `󰀦 ${n} ${plural(n, 'file', 'files')} outside the perimeter`,
   worklog: {
     pending: 'to log',
     underTarget: 'under target',
@@ -71,19 +72,24 @@ const EN = {
     withoutHours: (n: number) => `${n} ${plural(n, 'day', 'days')} without logged hours`,
   },
 
+  /** The desktop page (tabs In progress / Log / Analysis); its buttons reuse `buttons.*` where a label exists. */
+  desk: {
+    tabs: { now: 'In progress', log: 'Log', analysis: 'Analysis' },
+    head: { context: 'Context', contextShort: 'CTX', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
+    log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', showAll: 'show all', onlyImportant: 'important only', unattributed: 'Outside a round', empty: 'nothing logged yet', noPrompt: 'no text' },
+    now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step', noRequest: 'no open request', noFlow: 'no flow running', noAgents: 'no agent outside the flow' },
+    analysis: { spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
+  },
+
   // The single page: its four sections
   page: {
     attention: 'ATTENTION',
-    trend: 'TREND',
+    trend: 'SPEND',
     inProgress: 'IN PROGRESS',
     done: 'LOG',
     nothingToDo: 'nothing to do',
-    spend: 'spend',
-    context: 'context',
     main: 'main',
-    mainShort: 'main',
     other: 'other',
-    tasks: (done: number, total: number) => `tasks ${done}/${total}`,
     /** A step tag of a block agent (`implement`, `reader A`, `fix`) in the task tree under a flow. */
     planStep: (step: string) => step,
     /** The one row that stands for the finished tasks of the tree under a flow. */
@@ -121,19 +127,21 @@ const EN = {
   alertCredits: (left: number) => `credits 5h: ${left}% left`,
   alertSubagent: (type: string) => `subagent ${type} failed`,
   commandDescription: 'Opens the cockpit pane',
-  commandOpen: 'cockpit open',
-  commandWaiting: (reason: string) => `cockpit waiting: ${reason}`,
+  commandOpen: (place: 'side' | 'inline') => `Cockpit opened ${place === 'side' ? 'in the side pane' : 'above the prompt'}.`,
+  commandClosed: 'cockpit closed',
+  commandOpenHint: (place: 'side' | 'inline') => `Cockpit opened ${place === 'side' ? 'in the side pane' : 'above the prompt'} (/cockpit close closes it).`,
+  commandWaiting: (reason: string, isTerminal: boolean) => `cockpit waiting for room: ${reason}${isTerminal ? ' (the terminal needs a wider window)' : ''}`,
 }
 
 export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: 'ultimi 10 giorni', retroSession: 'questa sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
+  buttons: { compact: 'compatta', retro: 'retrospettiva:', retroDays: `${RETRO_DAYS} d`, retroSession: 'sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
   confirmLog: 'quali ore? invia /worklog',
-  confirmRetro: 'quale retrospettiva? invia /retro',
 
   noRateData: 'nessun dato sui limiti',
+  compactRefused: 'Non posso compattare ora: riprova a fine risposta',
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
   lastTool: 'ultimo tool ',
@@ -161,8 +169,6 @@ const IT: Strings = {
   moreRows: (n: number) => `󰍟 +${n}`,
   lessRows: (n: number) => `󰍝 −${n}`,
 
-  perimeter: (entries: number) => `perimetro deliver · ${entries} ${plural(entries, 'voce', 'voci')}`,
-  filesOutside: (n: number) => `󰀦 ${n} file fuori dal perimetro`,
   worklog: {
     pending: 'da registrare',
     underTarget: 'sotto target',
@@ -170,18 +176,22 @@ const IT: Strings = {
     withoutHours: (n: number) => `${n} ${plural(n, 'giorno', 'giorni')} senza ore segnate`,
   },
 
+  desk: {
+    tabs: { now: 'In corso', log: 'Log', analysis: 'Analisi' },
+    head: { context: 'Contesto', contextShort: 'CTX', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
+    log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', showAll: 'mostra tutto', onlyImportant: 'solo importanti', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log', noPrompt: 'senza testo' },
+    now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo', noRequest: 'nessuna richiesta aperta', noFlow: 'nessun flow in corso', noAgents: 'nessun agente fuori dal flow' },
+    analysis: { spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
+  },
+
   page: {
     attention: 'ATTENZIONE',
-    trend: 'ANDAMENTO',
+    trend: 'SPESA',
     inProgress: 'IN CORSO',
     done: 'LOG',
     nothingToDo: 'niente da fare',
-    spend: 'spesa',
-    context: 'contesto',
     main: 'principale',
-    mainShort: 'princ.',
     other: 'altro',
-    tasks: (done: number, total: number) => `task ${done}/${total}`,
     planStep: (step: string) => ({ implement: 'implementa', 'reader A': 'lettore A', fix: 'correzione' })[step] ?? step,
     planDone: (n: number) => `+${n} fatti`,
     events: {
@@ -216,8 +226,10 @@ const IT: Strings = {
   alertCredits: (left: number) => `crediti 5h: ${left}% residui`,
   alertSubagent: (type: string) => `subagent ${type} fallito`,
   commandDescription: 'Apre il pannello cockpit',
-  commandOpen: 'cockpit aperto',
-  commandWaiting: (reason: string) => `cockpit in attesa: ${reason}`,
+  commandOpen: (place: 'side' | 'inline') => `Cockpit aperto ${place === 'side' ? 'nel pannello laterale' : 'sopra il prompt'}.`,
+  commandClosed: 'cockpit chiuso',
+  commandOpenHint: (place: 'side' | 'inline') => `Cockpit aperto ${place === 'side' ? 'nel pannello laterale' : 'sopra il prompt'} (/cockpit chiudi lo chiude).`,
+  commandWaiting: (reason: string, isTerminal: boolean) => `cockpit in attesa di spazio: ${reason}${isTerminal ? ' (il terminale richiede una finestra più larga)' : ''}`,
 }
 
 const BUNDLES: Record<Lang, Strings> = { en: EN, it: IT }

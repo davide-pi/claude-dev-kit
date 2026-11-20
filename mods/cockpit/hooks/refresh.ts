@@ -5,6 +5,7 @@ import type { CockpitAgent, CockpitHistoryEntry, CockpitSnapshot } from '../type
 import { AGENT_KEEP_MS, addHistory, agentLog, toHistory, withAgentTokens } from './agents'
 import { settledRoundUsd, withContextReading } from './insights'
 import { refreshGit } from './refresh-git'
+import { endRoundOf } from './round-capture'
 import { parseRateCache, resolveAlm, worklogDays } from './session'
 import type { WorklogSnapshot } from './session'
 import { isOpen, writeState } from './session-data'
@@ -257,7 +258,7 @@ async function tickClock($: EngineInterface): Promise<number> {
       sessionLog: logRunChange(agents.reduce<CockpitSnapshot['sessionLog']>((log, a) => {
         const entry = a.status === 'done' ? agentLog(a, agentRunId(s.workflowRun, a)) : undefined
         return entry ? recordAgentLog(log, entry) : log
-      }, s.sessionLog), s.workflowRun, workflowRun),
+      }, s.sessionLog), s.workflowRun, workflowRun, endRoundOf(s)),
       // An agent leaving the list (type `?` ones too: they used tokens) joins the count that the share keeps.
       agentTokens: withAgentTokens(s.agentTokens, gone),
     }

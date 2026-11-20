@@ -2,16 +2,18 @@ import { expect, test } from 'claude-code/testing'
 
 import { textCells } from '../hooks/shared'
 import { setLang, t } from '../hooks/strings'
-import { IT_FILE, MIN, mountPane, paneRows } from './cockpit-fixtures'
+import { IT_FILE, MIN, mountAnalysis, paneRows } from './cockpit-fixtures'
 import { flagOf, iso, rowTexts, settle, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
 test('English is the default: the footer and the titles', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { notRepo: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 58)
+  const ui = await mountAnalysis($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['compact', 'retrospective', 'log hours'])
+  expect([await label('bar:compact'), await label('bar:retro:session'), await label('bar:retro:days')]).toEqual(['compact', 'session', '15 d'])
+  expect(rowTexts(await ui.drawn()).some(r => r.includes('retrospective:'))).toBe(true)
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
   expect(rowTexts(await ui.drawn()).some(r => /^ATTENTION ─+$/.test(r))).toBe(true)
   await ui.unmount()
 })
@@ -32,7 +34,7 @@ test('both languages draw the page, with every label of the bundles in both and 
     ] as const) {
       options.files = files
       await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-      const ui = await mountPane($, 58)
+      const ui = await mountAnalysis($, 58)
       const rows = rowTexts(await ui.drawn())
       for (const title of titles) expect(rows.some(r => r.startsWith(`${title} ─`)), `${lang} ${title}`).toBe(true)
       // an undefined or raw key would show as "undefined" or a dotted path
@@ -47,7 +49,7 @@ test('both languages draw the page, with every label of the bundles in both and 
 test('language: cockpit.json names it; a missing, unreadable, malformed or unknown one is English, and every session start reads it again', { timeoutMs: 30_000 }, async ($, on) => {
   const options: World = { files: IT_FILE }
   world(on, options)
-  const tabs = async () => ((await paneRows($, 58)).rows.some(r => /^ATTENZIONE ─+$/.test(r)) ? 'it' : 'en')
+  const tabs = async () => ((await paneRows($, 58, 'analysis')).rows.some(r => /^ATTENZIONE ─+$/.test(r)) ? 'it' : 'en')
   const start = () => $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const italian = 'it'
   const english = 'en'
@@ -83,7 +85,7 @@ test('language: a pane that draws before any session start (a mod enabled mid-se
   const options: World = { files: IT_FILE }
   const clock = world(on, options)
   try {
-    const isItalian = async () => (await paneRows($, 58)).rows.some(r => /^ATTENZIONE ─+$/.test(r))
+    const isItalian = async () => (await paneRows($, 58, 'analysis')).rows.some(r => /^ATTENZIONE ─+$/.test(r))
     expect(await isItalian()).toBe(true)
     // read once: a change of the file is for the next session start
     options.files = {}

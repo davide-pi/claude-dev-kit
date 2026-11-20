@@ -7,7 +7,7 @@ import {
   gatedBash,
   headerOf,
   launchWorkflow,
-  mountPane,
+  mountAnalysis,
   paneRows,
   permissionChecks,
   roundHooks,
@@ -25,7 +25,7 @@ test('Notifications: a command that failed twice is one row (what) with what to 
   const clock = world(on, { writes })
   failingBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 58)
+  const ui = await mountAnalysis($, 58)
 
   await $.tool.call({ tool: 'Bash', command: 'npm test' })
   await $.tool.call({ tool: 'Bash', command: 'npm test' })
@@ -56,7 +56,7 @@ test('Notifications: a title too long for the row is cut closed, and open it wra
   const clock = world(on)
   failingBash(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 34)
+  const ui = await mountAnalysis($, 34)
   const cmd = 'npm run test:integration --watch'
   await $.tool.call({ tool: 'Bash', command: cmd })
   await clock.advance(60_000)
@@ -93,7 +93,7 @@ test('wrapCells: breaks at the space that fits, a word longer than the row is cu
 test('Notifications: with none, ATTENTION says there is nothing to do', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const { rows } = await paneRows($, 58)
+  const { rows } = await paneRows($, 58, 'analysis')
   expect(rows.filter(r => /^✓ nothing to do/.test(r))).toHaveLength(1)
   expect(headerOf(rows).some(r => /󰀦/.test(r))).toBe(false)
 })
@@ -108,16 +108,16 @@ test('Notifications: a permission ask unanswered over 60 seconds is a notificati
   await askPerson($, 'c1')
   await clock.advance(91_000)
   await settleAll()
-  expect((await paneRows($, 58)).rows.some(r => /^\u{F033E} permission waiting/u.test(r))).toBe(true)
+  expect((await paneRows($, 58, 'analysis')).rows.some(r => /^\u{F033E} permission waiting/u.test(r))).toBe(true)
   release('rm x')
   await call
   await settleAll()
-  expect((await paneRows($, 58)).rows.some(r => /^✓ nothing to do/.test(r))).toBe(true)
+  expect((await paneRows($, 58, 'analysis')).rows.some(r => /^✓ nothing to do/.test(r))).toBe(true)
 })
 
 // ── IN PROGRESS: the workflow run in one row ──
 
-test('IN PROGRESS: the workflow run is a node with its name, phase and agents done out of all', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a workflow run open, When the In corso tab is drawn, Then the FLOW title is followed by the run name', { timeoutMs: 30_000 }, async ($, on) => {
   const clock = world(on)
   permissionChecks(on)
   workflowLaunches(on, 'release-notes')
@@ -130,9 +130,9 @@ test('IN PROGRESS: the workflow run is a node with its name, phase and agents do
   await clock.advance(7000)
   await settleAll()
   const { rows } = await paneRows($, 64)
-  const run = rows.findIndex(r => /^[▾▸-] \d\d:\d\d flow release-notes/.test(r))
+  const run = rows.findIndex(r => /^◆ release-notes/.test(r))
   expect(run).toBeGreaterThan(-1)
-  expect(rows.findIndex(r => /^IN PROGRESS ─+$/.test(r))).toBeLessThan(run)
+  expect(rows.findIndex(r => /^FLOW ─+$/.test(r))).toBeLessThan(run)
   release('rm x')
   await call
 })

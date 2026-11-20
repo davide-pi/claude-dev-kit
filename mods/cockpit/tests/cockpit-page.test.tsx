@@ -1,8 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
 import { COLORS } from '../hooks/shared'
-import { andamentoBlocks, attentionBlocks, inProgressBlocks, shortLabel } from '../hooks/view-page'
+import { attentionBlocks, spendBlocks } from '../hooks/view-page'
 import { paneView } from '../hooks/view'
+import { makeKit } from '../hooks/view-kit'
 import type { CockpitSnapshot } from '../types'
 import { colorOf, keysInOrder, mountPane, settleAll, spawnAgent, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
 import { LONG_SPEND, SINCE, WAITING, WIDTH, agent, boldOf, draw, insights, keysOf, snap, titled } from './cockpit-page-draw'
@@ -10,7 +11,7 @@ import { NOW, rowTexts, world } from './cockpit-world'
 
 // ── IN PROGRESS: a flow's running agent shows once, under its flow ──
 
-test('in progress: Given a live run with a running implementer carrying its run id, When drawn, Then the implementer shows once, in the flow node\'s rows', { timeoutMs: 30_000 }, async ($, on) => {
+test('in progress: Given a live run with a running implementer carrying its run id, When drawn, Then the run shows in the flow section and the implementer is not listed outside it', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const clock = world(on)
   spawns(on)
@@ -22,12 +23,11 @@ test('in progress: Given a live run with a running implementer carrying its run 
   const ui = await mountPane($, 100)
   const rows = rowTexts(await ui.drawn())
   const flat = await ui.find({ key: 'agent:a1' })
-  const under = await ui.find({ key: 'flow:wf_1:agent:a1' })
   await ui.unmount()
   // Then
-  expect(rows.filter(r => /implementer/.test(r))).toHaveLength(1)
+  expect(rows.some(r => /^◆ wf_1/.test(r))).toBe(true)
+  expect(rows.filter(r => /implementer/.test(r))).toHaveLength(0)
   expect(flat).toBeUndefined()
-  expect(under).toBeDefined()
 })
 
 test('in progress: Given a running agent with no workflow run, When drawn, Then it is still in the flat agent list', { timeoutMs: 30_000 }, async ($, on) => {
@@ -44,7 +44,7 @@ test('in progress: Given a running agent with no workflow run, When drawn, Then 
   expect(flat).toBeDefined()
 })
 
-test('in progress: Given a running agent whose run id names a run that is not the live one, When drawn, Then it is still listed', { timeoutMs: 30_000 }, async ($, on) => {
+test('in progress: Given a running agent whose run id names a run that is not the live one, When drawn, Then it is still listed and the live run\'s agent is not', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const clock = world(on)
   spawns(on)
@@ -57,31 +57,10 @@ test('in progress: Given a running agent whose run id names a run that is not th
   const ui = await mountPane($, 100)
   const replaced = await ui.find({ key: 'agent:a1' })
   const live = await ui.find({ key: 'agent:a2' })
-  const under = await ui.find({ key: 'flow:w2:agent:a2' })
   await ui.unmount()
   // Then
   expect(replaced).toBeDefined()
   expect(live).toBeUndefined()
-  expect(under).toBeDefined()
-})
-
-test('in progress: Given a live run whose flow node a person closed, When drawn, Then its running agent is back in the flat agent list', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const clock = world(on)
-  spawns(on)
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  await spawnWorkflowAgent($, 'wf_1', 1)
-  await clock.advance(3000)
-  await settleAll()
-  const ui = await mountPane($, 100)
-  // When
-  await ui.press({ key: 'flow:wf_1' })
-  const flat = await ui.find({ key: 'agent:a1' })
-  const under = await ui.find({ key: 'flow:wf_1:agent:a1' })
-  await ui.unmount()
-  // Then
-  expect(flat).toBeDefined()
-  expect(under).toBeUndefined()
 })
 
 // ── ATTENZIONE ──
@@ -264,25 +243,7 @@ test('page: with eight notifications at 40 rows the footer buttons are still dra
 
 const BAR = 51
 const bar = (n: number) => '▰'.repeat(n)
-test('andamento: hidden before the first round', { timeoutMs: 30_000 }, async ($, on) => {
-  expect((await draw($, on, snap(), andamentoBlocks)).rows).toEqual([])
-  expect((await draw($, on, snap({ insights: insights() }), andamentoBlocks)).rows).toEqual([])
-})
 
-test('andamento: Given the main loop only, When it is drawn, Then the spend bar is all main, the context bar by tool, and no figures row', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const s = snap({ cost: { usd: 10 }, insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 30_000, Edit: 10_000 } }) })
-  // When
-  const { rows } = await draw($, on, s, andamentoBlocks)
-  // Then
-  expect(rows).toEqual([
-    titled('TREND'),
-    `spend    ${bar(BAR)}`,
-    '▰ main 100%',
-    `context  ${bar(31 + 15 + 5)}`,
-    '▰ Read 60%  ▰ Bash 30%  ▰ Edit 10%',
-  ])
-})
 
 const AGENTS_SNAP = () =>
   snap({
@@ -294,62 +255,44 @@ const AGENTS_SNAP = () =>
     insights: insights({ rounds: 3, usd: 6, byTool: { Read: 60_000, Bash: 20_000, Edit: 10_000, Grep: 6_000, Glob: 4_000 } }),
   })
 
-test('andamento: Given main and two agent types, When it is drawn, Then only the spend bar and the context bar (top three tools and other) show, with their legends', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given / When
-  const { rows } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
-  // Then
-  expect(rows).toEqual([
-    titled('TREND'),
-    `spend    ${bar(BAR)}`,
-    '▰ main 60%  ▰ implementer 30%  ▰ reviewer 10%',
-    `context  ${bar(BAR)}`,
-    '▰ Read 60%  ▰ Bash 20%  ▰ Edit 10%  ▰ other 10%',
-  ])
-})
-
-test('andamento: the legend glyph takes the colour of its part and the label the text colour', { timeoutMs: 30_000 }, async ($, on) => {
-  const { ui } = await draw($, on, AGENTS_SNAP(), andamentoBlocks)
-  const root = await ui.drawn()
-  expect(colorOf(root, /^▰ $/)).toBe(COLORS.blue)
-  expect(colorOf(root, /^main 60%$/)).toBeUndefined()
-})
 
 
-test('andamento: Given a spend legend wider than the pane, When it is drawn, Then each label is its last hyphen segment cut to 4 letters and a dot', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given / When
-  const { rows } = await draw($, on, LONG_SPEND(), andamentoBlocks)
-  // Then
-  expect(rows[2]).toBe('▰ main 40%  ▰ revi. 25%  ▰ impl. 25%  ▰ Plan 10%')
-})
 
-test('andamento: Given a spend legend that fits the pane, When it is drawn, Then the labels stay whole', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given / When
-  const { rows } = await draw($, on, { ...LONG_SPEND(), agentSpend: { 'code-reviewer': 2.5, Plan: 1 } }, andamentoBlocks)
-  // Then
-  expect(rows[2]).toBe('▰ main 65%  ▰ code-reviewer 25%  ▰ Plan 10%')
-})
 
-test('shortLabel: Given agent types, When abbreviated, Then the last segment keeps 4 letters and a dot when longer', () => {
-  expect(['implementer', 'code-reviewer', 'Explore', 'Plan', 'main'].map(shortLabel)).toEqual(['impl.', 'revi.', 'Expl.', 'Plan', 'main'])
-})
+
 
 // ── IN CORSO ──
 
-test('in progress: hidden when nothing runs and no task is open', { timeoutMs: 30_000 }, async ($, on) => {
-  expect((await draw($, on, snap(), inProgressBlocks)).rows).toEqual([])
-  const done = snap({ tasks: [{ id: '1', subject: 'Done thing', status: 'completed' }], perimeter: ['src/'] })
-  expect((await draw($, on, done, inProgressBlocks)).rows).toEqual([])
+// ── SPESA ──
+
+test('spend: Given the main loop and agent types, When drawn, Then the title carries the session cost and each row is its share, a block bar, who and its cost on the right', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const { rows } = await draw($, on, LONG_SPEND(), spendBlocks)
+  // Then
+  expect(rows[0]).toMatch(/^SPEND ─+ \$10\.00$/)
+  expect(rows.slice(1)).toEqual([
+    expect.stringMatching(/^ 40% ████░░░░░░ main +\$4\.00$/),
+    expect.stringMatching(/^ 25% ███░░░░░░░ code-reviewer +\$2\.50$/),
+    expect.stringMatching(/^ 25% ███░░░░░░░ implementer +\$2\.50$/),
+    expect.stringMatching(/^ 10% █░░░░░░░░░ Plan +\$1\.00$/),
+  ])
 })
 
-test('in progress: at most five rows, the rest behind the toggle', { timeoutMs: 30_000 }, async ($, on) => {
-  const agents = Array.from({ length: 7 }, (_, i) => agent(`a${i}`, `worker${i}`))
-  const calls: string[] = []
-  const closed = await draw($, on, snap({ agents }), inProgressBlocks, calls)
-  expect((await keysOf(closed.ui, /^agent:/)).length).toBe(5)
-  expect((await closed.ui.find({ key: 'inProgress:more' }))?.text).toBe('󰍟 +2')
-  await closed.ui.press({ key: 'inProgress:more' })
-  expect(calls).toEqual(['toggleOpen:inProgress'])
-  const open = await draw($, on, snap({ agents, openKeys: ['inProgress'] }), inProgressBlocks)
-  expect((await keysOf(open.ui, /^agent:/)).length).toBe(7)
+test('spend: Given nothing spent, When drawn, Then one dim line says so under the title', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given / When
+  const { rows } = await draw($, on, snap(), spendBlocks)
+  // Then
+  expect(rows[1]).toBe('nothing yet')
 })
 
+test('spend: Given a narrow pane, When drawn, Then the name is cut and the cost stays whole at the right', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = LONG_SPEND()
+  // When
+  const { rows } = await draw($, on, s, k => spendBlocks(makeKit(k.ui, k.s, 30, k.actions)))
+  // Then
+  for (const row of rows.slice(1)) {
+    expect([...row].length).toBeLessThanOrEqual(30)
+    expect(row).toMatch(/\$\d+\.\d\d$/)
+  }
+})

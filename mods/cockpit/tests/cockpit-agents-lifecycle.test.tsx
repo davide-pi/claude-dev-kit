@@ -7,12 +7,20 @@ import { NOW, dataOf, rowTexts, world } from './cockpit-world'
 
 type Ui = Awaited<ReturnType<typeof mountPane>>
 
-/** The agents DONE lists, newest first, as `<icon> <type>`: the clock and the cost cells left out. */
-const doneAgents = async (ui: Ui) =>
-  rowTexts(await ui.drawn()).flatMap(r => {
-    const m = /^[├└] \d\d:\d\d (?!→)(\S) (\S+)/u.exec(r)
-    return m ? [`${m[1]} ${m[2]}`] : []
+/** The agents the Log tab lists, newest first, by type. */
+const doneAgents = async (ui: Ui) => {
+  await ui.press({ key: 'tab:log' })
+  const types = rowTexts(await ui.drawn()).flatMap(r => {
+    const m = /^│ \d\d:\d\d (\S+)(?: .*)?$/u.exec(r.trimEnd())
+    return m?.[1] === undefined ? [] : [m[1]]
   })
+  await ui.press({ key: 'tab:now' })
+  return types
+}
+
+/** The agent entries the state file's log holds, as `[id, failed]`. */
+const agentLog = (writes: Map<string, string>) =>
+  ((dataOf(writes)?.sessionLog as { kind: string; key?: string; isFailed?: boolean }[] | undefined) ?? []).filter(e => e.kind === 'agent').map(e => [e.key, e.isFailed === true])
 
 /** A log entry of a finished agent, as the log keeps it. */
 const logged = (id: string, type: string, at: number, isFailed = false) => ({ at, kind: 'agent', key: id, text: type, ms: 60_000, isFailed })
@@ -35,12 +43,12 @@ test('agents: a finished agent leaves IN PROGRESS at once, DONE lists it with it
   const ui = await mountPane($)
   expect(await ui.find({ key: 'agent:a1' })).toBeUndefined()
   expect(await ui.find({ key: 'agent:a3' })).toBeDefined()
-  expect(await doneAgents(ui)).toEqual(['󰅖 two', '󰄬 one'])
+  expect(await doneAgents(ui)).toEqual(['two', 'one'])
   // inside the two minutes the agents are still the live list's: no history yet
   expect(dataOf(writes)?.history ?? []).toEqual([])
 
   await clock.advance(130_000)
-  expect(await doneAgents(ui)).toEqual(['󰅖 two', '󰄬 one'])
+  expect(await doneAgents(ui)).toEqual(['two', 'one'])
   expect(await ui.find({ key: 'agent:a3' })).toBeDefined()
   await ui.unmount()
 
@@ -53,7 +61,9 @@ test('agents: a finished agent leaves IN PROGRESS at once, DONE lists it with it
 })
 
 test('agents: one the engine lists as killed or failed ends with 󰅖, one it no longer lists with 󰄬', { timeoutMs: 30_000 }, async ($, on) => {
+  const writes = new Map<string, string>()
   const clock = world(on, {
+    writes,
     listed: [
       { id: 'a1', status: 'killed' },
       { id: 'a2', status: 'failed' },
@@ -65,7 +75,9 @@ test('agents: one the engine lists as killed or failed ends with 󰅖, one it no
   await openCockpit($)
   await clock.advance(30_000)
   const ui = await mountPane($)
-  expect(new Set(await doneAgents(ui))).toEqual(new Set(['󰅖 one', '󰅖 two', '󰄬 three']))
+  expect(new Set(await doneAgents(ui))).toEqual(new Set(['one', 'two', 'three']))
+  await clock.advance(3000)
+  expect(agentLog(writes)).toEqual(expect.arrayContaining([['a1', true], ['a2', true], ['a3', false]]))
   await ui.unmount()
 })
 
@@ -89,7 +101,7 @@ test('agents: the history survives a reload (the session id reads its data file)
   world(on, { sessionId: () => id, dataFile: JSON.stringify({ sessionLog: [logged('a8', 'reviewer', NOW - 90_000, true), logged('a9', 'implementer', NOW - 30_000)] }) })
   await start($)
   let ui = await mountPane($)
-  expect(await doneAgents(ui)).toEqual(['󰄬 implementer', '󰅖 reviewer'])
+  expect(await doneAgents(ui)).toEqual(['implementer', 'reviewer'])
   await ui.unmount()
 
   id = 's-2'
@@ -133,10 +145,10 @@ test('agents: a reload of the same session id keeps the live agents, the finishe
   await start($)
   const ui = await mountPane($)
   expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
-  expect(await doneAgents(ui)).toEqual(['󰄬 two'])
+  expect(await doneAgents(ui)).toEqual(['two'])
   await clock.advance(135_000)
   expect(await ui.find({ key: 'agent:a1' })).toBeDefined()
-  expect(await doneAgents(ui)).toEqual(['󰄬 two'])
+  expect(await doneAgents(ui)).toEqual(['two'])
   await ui.unmount()
   await clock.advance(3000)
   expect((dataOf(writes)?.history as { id: string }[]).map(h => h.id)).toEqual(['a2'])
@@ -153,7 +165,7 @@ test('agents: Given a data file from before agent entries, When the session resu
   await start($)
   const ui = await mountPane($)
   // Then
-  expect(await doneAgents(ui)).toEqual(['󰄬 finished-one'])
+  expect(await doneAgents(ui)).toEqual(['finished-one'])
   await ui.unmount()
 })
 
@@ -161,7 +173,7 @@ test('agents: entries a data file holds wrongly are left out, a file with no log
   world(on, { dataFile: JSON.stringify({ sessionLog: [{ at: 1, kind: 'nope' }, 'text', logged('a1', 'ok', NOW - 1000)] }) })
   await start($)
   const ui = await mountPane($)
-  expect(await doneAgents(ui)).toEqual(['󰄬 ok'])
+  expect(await doneAgents(ui)).toEqual(['ok'])
   await ui.unmount()
 })
 
@@ -174,42 +186,37 @@ test('orderAgents lists each level newest first, children right under their pare
 // ── Workflow agents ──
 
 test('workflow agents: a tick does not end an agent just because the engine does not list it; its own turn does', { timeoutMs: 30_000 }, async ($, on) => {
-  const clock = world(on) // $.agent.list() answers nothing: it never lists a workflow's agents
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes }) // $.agent.list() answers nothing: it never lists a workflow's agents
   spawns(on)
   on('turn.complete', () => ({ text: '' }))
   await start($)
   await spawnWorkflowAgent($, 'wf_1', 1)
   await spawnWorkflowAgent($, 'wf_1', 2)
   await clock.advance(30_000) // two ticks
-  const ui = await mountPane($)
-  expect((await ui.find({ key: 'flow:wf_1:agent:a1' }))?.text).toMatch(/implementer/)
-  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
+  expect(agentLog(writes)).toEqual([])
   await finishAgent($, 'a1')
   await clock.advance(30_000)
-  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
-  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
-  expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰄬 implementer'])
-  await ui.unmount()
+  expect(agentLog(writes)).toEqual([['a1', false]])
 })
 
 test('workflow agents: an explicit failed or killed listing ends them', { timeoutMs: 30_000 }, async ($, on) => {
-  const clock = world(on, { listed: [{ id: 'a1', status: 'killed' }] })
+  const writes = new Map<string, string>()
+  const clock = world(on, { writes, listed: [{ id: 'a1', status: 'killed' }] })
   spawns(on)
   await start($)
   await spawnWorkflowAgent($, 'wf_1', 1)
   await spawnWorkflowAgent($, 'wf_1', 2)
   await openCockpit($)
   await clock.advance(30_000)
-  const ui = await mountPane($)
-  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
-  expect((await ui.find({ key: 'flow:wf_1:agent:a2' }))?.text).toMatch(/implementer/)
-  expect(await doneAgents(ui)).toEqual(['󱎖 implementer', '󰅖 implementer'])
-  await ui.unmount()
+  await clock.advance(3000)
+  expect(agentLog(writes)).toEqual([['a1', true]])
 })
 
 test('workflow agents: the end of their run (silence past the limit) ends the ones still running and closes the run; a step keeps it open', { timeoutMs: 30_000 }, async ($, on) => {
   const instructions: (string | undefined)[] = []
-  const clock = world(on, { instructions })
+  const writes = new Map<string, string>()
+  const clock = world(on, { instructions, writes })
   spawns(on)
   workflowLaunches(on, 'release-notes')
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
@@ -219,14 +226,11 @@ test('workflow agents: the end of their run (silence past the limit) ends the on
   await clock.advance(10 * 60_000)
   await $.tool.call({ tool: 'Grep', pattern: 'x', agentId: 'a1' }) // a step: the silence starts over
   await clock.advance(10 * 60_000)
-  let ui = await mountPane($)
-  expect((await ui.find({ key: 'flow:wf_1:agent:a1' }))?.text).toMatch(/implementer/)
-  await ui.unmount()
+  expect(agentLog(writes)).toEqual([])
   await clock.advance(6 * 60_000)
-  ui = await mountPane($)
-  expect(await ui.find({ key: 'flow:wf_1:agent:a1' })).toBeUndefined()
-  // the stall that closed the run is logged when it first held, beside the agent it ended
-  expect(await doneAgents(ui)).toEqual(['󰄬 implementer', '󰏥 workflow'])
+  await clock.advance(3000)
+  expect(agentLog(writes)).toEqual([['a1', false]])
+  const ui = await mountPane($)
   await ui.press({ key: 'bar:compact' })
   expect(instructions.at(-1)).not.toContain('Running workflow')
   await ui.unmount()
@@ -322,13 +326,14 @@ test('trail: Given a subagent making 10 tool calls, When the last one is still r
   on('tool.call', { tool: 'Grep' }, () => ({ result: {} }))
   const release = gatedBash(on)
   await start($)
-  await spawnWorkflowAgent($, 'wf_1', 1)
+  await spawnAgent($, 'implementer')
   // When
   for (let n = 1; n <= 9; n++) await $.tool.call({ tool: 'Grep', pattern: `p${n}`, agentId: 'a1' })
   const last = $.tool.call({ tool: 'Bash', command: 'hold', description: 'Hold on', agentId: 'a1' })
   await clock.advance(3000)
   await settleAll()
   const ui = await mountPane($, 100)
+  await ui.press({ key: 'agent:a1' })
   const trail = trailRows(rowTexts(await ui.drawn()))
   release('hold')
   await last
@@ -346,13 +351,14 @@ test('trail: Given a Read of C:/a/b/c.ts and a Bash with a description and a com
   on('tool.call', { tool: 'Read' }, () => ({ result: {} }))
   on('tool.call', { tool: 'Bash' }, () => ({ result: {} }))
   await start($)
-  await spawnWorkflowAgent($, 'wf_1', 1)
+  await spawnAgent($, 'implementer')
   // When
   await $.tool.call({ tool: 'Read', file_path: 'C:/a/b/c.ts', agentId: 'a1' })
   await $.tool.call({ tool: 'Bash', command: 'rm -rf x', description: 'Run tests', agentId: 'a1' })
   await clock.advance(3000)
   await settleAll()
   const ui = await mountPane($, 100)
+  await ui.press({ key: 'agent:a1' })
   const rows = rowTexts(await ui.drawn())
   await ui.unmount()
   // Then

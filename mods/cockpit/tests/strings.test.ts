@@ -52,10 +52,10 @@ test('Italian: a percent after its article elides it before a number read with a
 test('the four page sections are titled in both languages, and no todo points at a tab', () => {
   try {
     setLang('en')
-    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENTION', 'TREND', 'IN PROGRESS', 'LOG', 'nothing to do'])
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENTION', 'SPEND', 'IN PROGRESS', 'LOG', 'nothing to do'])
     expect(t().signalText.workflow('stall').todo).toContain('IN PROGRESS')
     setLang('it')
-    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENZIONE', 'ANDAMENTO', 'IN CORSO', 'LOG', 'niente da fare'])
+    expect([t().page.attention, t().page.trend, t().page.inProgress, t().page.done, t().page.nothingToDo]).toEqual(['ATTENZIONE', 'SPESA', 'IN CORSO', 'LOG', 'niente da fare'])
     expect(t().signalText.workflow('stall').todo).toContain('IN CORSO')
     for (const lang of ['en', 'it'] as const) {
       setLang(lang)
@@ -75,6 +75,42 @@ test('a compact event without tokens reads "compacted" with no double space, in 
       expect(t().page.events.compact('120k', '40k')).toBe(`${word} 120k → 40k`)
       expect(t().page.events.compact('', '40k')).toBe(`${word} → 40k`)
     }
+  } finally {
+    setLang('en')
+  }
+})
+
+const deskKeys = (): string[] => Object.entries(t().desk).flatMap(([group, texts]) => Object.entries(texts).map(([key, text]) => `${group}.${key}:${typeof text === 'string' && text !== '' ? 'ok' : 'bad'}`))
+
+test('Given lang it and en, When the desk block is read, Then every key is a non-empty string and both languages have the same keys', () => {
+  try {
+    // Given
+    setLang('en')
+    const en = deskKeys()
+    setLang('it')
+    // When
+    const it = deskKeys()
+    // Then
+    expect(en.length).toBeGreaterThan(20)
+    expect(it).toEqual(en)
+    expect(en.filter(k => k.endsWith(':bad'))).toEqual([])
+  } finally {
+    setLang('en')
+  }
+})
+
+test('Given the desk block, When read in both languages, Then the tab, head, log and now words are the planned ones', () => {
+  const words = (d: ReturnType<typeof t>['desk']): string[] => [d.tabs.now, d.tabs.log, d.tabs.analysis, d.head.context, d.head.urgent, d.head.urgentHint, d.log.important, d.log.all, d.log.newestTop, d.now.request, d.now.flow, d.now.outside, d.analysis.compactNow, d.log.unattributed]
+  try {
+    // Given
+    setLang('it')
+    // When
+    const it = words(t().desk)
+    setLang('en')
+    const en = words(t().desk)
+    // Then
+    expect(it).toEqual(['In corso', 'Log', 'Analisi', 'Contesto', 'URGENTE', 'solo ciò che aspetta te', 'Importanti', 'Tutto', 'il più recente in alto', 'RICHIESTA', 'FLOW', 'AGENTI FUORI DAL FLOW', 'Compatta', 'Fuori da un giro'])
+    expect(en).toEqual(['In progress', 'Log', 'Analysis', 'Context', 'URGENT', 'only what waits for you', 'Important', 'All', 'newest on top', 'REQUEST', 'FLOW', 'AGENTS OUTSIDE THE FLOW', 'Compact', 'Outside a round'])
   } finally {
     setLang('en')
   }

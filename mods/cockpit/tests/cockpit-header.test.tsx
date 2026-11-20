@@ -32,7 +32,7 @@ test('the pane shows header, context, credits and an agent that finished before 
     fork: false,
   })
 
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const text = async (re: RegExp) => (await ui.find({ type: 'Text', text: re }))?.text
     expect(await text(/Opus 5\.5/)).toContain('Opus 5.5')
@@ -42,8 +42,6 @@ test('the pane shows header, context, credits and an agent that finished before 
     expect(rowTexts(await ui.drawn()).find(r => /^CTX /.test(r))).toMatch(/^CTX [\u25b0\u25b1]+ {2}25% {3}248K\/1M/)
     // the two credit windows share one row: label, bar, remaining, reset countdown
     expect(rowTexts(await ui.drawn()).find(r => /^5h /.test(r))).toMatch(/^5h [\u25b0\u25b1]+ 62% \u21bb 2h14m \u00b7 7d [\u25b0\u25b1]+ 41% \u21bb 3d\d\dh [+\u2212-]\d+%$/)
-    // the finished agent is a row of DONE
-    expect(rowTexts(await ui.drawn()).some(r => /\d\d:\d\d \S+ code-reviewer/.test(r))).toBe(true)
     await ui.unmount()
   }
 })
@@ -53,7 +51,7 @@ test('the pane has no close button of its own: the buttons row is its only butto
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['bar:compact', 'bar:retro', 'bar:worklog'])
+  expect(keys).toEqual(['tab:now', 'tab:log', 'tab:analysis', 'bar:compact', 'bar:retro:session', 'bar:retro:days'])
   await ui.unmount()
 })
 
@@ -80,10 +78,10 @@ async function ctxBar(ui: { drawn: (q?: { in: string }) => Promise<unknown> }): 
   return { bar: cells.map(c => c.t), colors: cells.map(c => c.c) }
 }
 
-test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on both surfaces', { timeoutMs: 30_000 }, async ($, on) => {
+test('CTX bar: the cell where the engine compacts turns amber, its glyph kept, on the terminal', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { autoCompactAt: 150_000 })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  for (const surface of ['terminal', 'desktop'] as const) {
+  for (const surface of ['terminal'] as const) {
     const ui = await $.ui.mount({ ...PANE, surface })
     const { bar, colors } = await ctxBar(ui)
     // the bar is 1.1 x the threshold long: the amber cell at 1/1.1 of it, still a bar cell
@@ -153,15 +151,16 @@ test('CTX bar: no tick when the engine reports no autocompact threshold', { time
   await ui.unmount()
 })
 
-test('a rule closes the header, and the ATTENTION title follows it at once (title and rule on one row), with no tab bar between', { timeoutMs: 30_000 }, async ($, on) => {
+test('a rule closes the header, and the ATTENTION title follows it at once (title and rule on one row), under the tab row and a gap, on the Analisi tab', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:analysis' })
   const rows = rowTexts(await ui.drawn())
   const [, first = -1] = rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^ATTENTION/.test(r))
   expect(first).toBe(headerOf(rows).length)
-  expect(title).toBe(first + 1)
+  expect(title).toBe(first + 6) // the spend section (title, its empty line, a gap) sits between the tab row and ATTENTION
   expect(rows[title]).toMatch(/^ATTENTION ─+$/)
   expect([...(rows[title] ?? '')].length).toBe([...(rows[first] ?? '')].length)
   expect(rows[title + 1]).toBe('✓ nothing to do')

@@ -32,6 +32,69 @@ export type DoneGroup<E extends DoneEvent> = {
   flow?: { runId: string; name?: string; isFailed: boolean; isLive: boolean }
 }
 
+export type LogModel = {
+  /** Newest round first; an event of a round with no round entry still makes its group, with no `entry`. */
+  rounds: { n: number; entry?: CockpitLogEntry; events: CockpitLogEntry[] }[]
+  /** The entries that carry no round (pre-v3 log, or logged with none open), newest first. */
+  unattributed: CockpitLogEntry[]
+  /** The workflow runs, newest first, with the rounds and lane recorded on their entry and the entries that carry their `runId` (newest first). */
+  flows: { runId: string; name?: string; startRound?: number; endRound?: number; lane?: number; isLive: boolean; events: CockpitLogEntry[] }[]
+}
+
+/** The log by the ids recorded on its entries (`round`, `n`, `endRound`, `lane`), never by `at`: a round entry's group holds the entries whose `round` is its `n`. */
+export function logModel(log: readonly CockpitLogEntry[], openFlow?: CockpitLogEntry): LogModel {
+  const newestFirst = (a: CockpitLogEntry, b: CockpitLogEntry) => b.at - a.at
+  // the stable sorts keep the order of the log on equal `at`: reversed first, the entry inserted later comes first
+  const ordered = [...log].reverse().sort(newestFirst)
+  const roundEntries = log.filter(e => e.kind === 'round').sort((a, b) => a.at - b.at)
+  const all: LogModel['rounds'] = []
+  // the group an event of round n joins: the newest one of that n
+  const byN = new Map<number, LogModel['rounds'][number]>()
+  roundEntries.forEach((r, i) => {
+    const n = r.n ?? i + 1
+    const group: LogModel['rounds'][number] = { n, entry: r, events: [] }
+    all.push(group)
+    byN.set(n, group)
+  })
+  const flowEntries = [...log.filter(e => e.kind === 'flow' && e.key !== openFlow?.key), ...(openFlow ? [openFlow] : [])]
+  const flows = [...flowEntries].reverse().sort(newestFirst).flatMap((f): LogModel['flows'] =>
+    f.key === undefined
+      ? []
+      : [
+          {
+            runId: f.key,
+            ...(f.text !== undefined && { name: f.text }),
+            ...(f.round !== undefined && { startRound: f.round }),
+            ...(f.endRound !== undefined && { endRound: f.endRound }),
+            ...(f.lane !== undefined && { lane: f.lane }),
+            isLive: f === openFlow,
+            events: [],
+          },
+        ],
+  )
+  const unattributed: CockpitLogEntry[] = []
+  for (const e of ordered) {
+    if (e.kind === 'round' || e.kind === 'flow') continue
+    // an entry of a workflow run belongs to its flow, not to a round
+    const flow = e.runId === undefined ? undefined : flows.find(f => f.runId === e.runId)
+    if (flow) {
+      flow.events.push(e)
+      continue
+    }
+    if (e.round === undefined || e.runId !== undefined) {
+      unattributed.push(e)
+      continue
+    }
+    const group = byN.get(e.round) ?? { n: e.round, events: [] }
+    if (!byN.has(e.round)) {
+      byN.set(e.round, group)
+      all.push(group)
+    }
+    group.events.push(e)
+  }
+  return { rounds: [...all].reverse().sort((a, b) => b.n - a.n), unattributed, flows }
+}
+
 /**
  * The events by the main round that ended them: those with `at` in (previous round's end, this round's end]; those after the newest round
  * make the open round. Consecutive rounds with no event merge into one group. The agents of a workflow run are not the rounds': each run (a 'flow' entry

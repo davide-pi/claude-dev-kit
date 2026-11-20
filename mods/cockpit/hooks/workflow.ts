@@ -71,18 +71,34 @@ export function taskRows(run: CockpitWorkflowRun | undefined): TaskRow[] {
   return rows.sort((a, b) => (a.row.block ?? Infinity) - (b.row.block ?? Infinity) || a.at - b.at).map(x => x.row)
 }
 
-/** The run `runId` as `run` keeps it, or a new empty one when `run` is another one (a new run starts a new count). */
-const runOf = (run: CockpitWorkflowRun | undefined, runId: string): CockpitWorkflowRun => (run?.runId === runId ? run : { runId, agents: [] })
+/** The lowest lane no flow entry of `log` holds over `startRound`: a flow whose rounds reach `startRound` keeps its lane (no `endRound`, old data, ends at its own round); `openLane` is one a run still open holds. */
+export function laneFor(log: readonly CockpitLogEntry[] | undefined, startRound: number, openLane?: number): number {
+  const held = new Set((log ?? []).flatMap(e => (e.kind === 'flow' && e.round !== undefined && e.lane !== undefined && e.round <= startRound && (e.endRound ?? e.round) >= startRound ? [e.lane] : [])))
+  if (openLane !== undefined) held.add(openLane)
+  let lane = 0
+  while (held.has(lane)) lane++
+  return lane
+}
 
-/** `run` after a `Workflow` result named its script: the name, and the task plan of the call when it had one, join the run it announces. */
-export function nameRun(run: CockpitWorkflowRun | undefined, launched: { runId: string; name?: string; tasks?: CockpitPlanTask[] }): CockpitWorkflowRun {
-  const kept = runOf(run, launched.runId)
+/** A run that has agents and never closed properly (still open, or silent-closed): its flow node is written when another run replaces it. */
+const isUnclosed = (run: CockpitWorkflowRun): boolean => run.agents.length > 0 && (run.endedAt === undefined || run.isSilent === true)
+
+/** The run `runId` as `run` keeps it, or a new one when `run` is another one (a new run starts a new count): it takes the round open and the lane free there; with no round open it has neither. */
+const runOf = (run: CockpitWorkflowRun | undefined, runId: string, round?: number, log?: readonly CockpitLogEntry[]): CockpitWorkflowRun => {
+  if (run?.runId === runId) return run
+  // the run it replaces is still open or silent-closed: its node is written only after this lane is chosen, so its lane counts as held
+  return { runId, agents: [], ...(round !== undefined && { startRound: round, lane: laneFor(log, round, run !== undefined && isUnclosed(run) ? run.lane : undefined) }) }
+}
+
+/** `run` after a `Workflow` result named its script: the name, and the task plan of the call when it had one, join the run it announces. A new run starts in `round` (the conversation round open) in the lane `log` leaves free. */
+export function nameRun(run: CockpitWorkflowRun | undefined, launched: { runId: string; name?: string; tasks?: CockpitPlanTask[] }, round?: number, log?: readonly CockpitLogEntry[]): CockpitWorkflowRun {
+  const kept = runOf(run, launched.runId, round, log)
   return { ...kept, ...(launched.name !== undefined && { name: launched.name }), ...(launched.tasks !== undefined && { tasks: launched.tasks }) }
 }
 
 /** `id` joins the run `runId` (which a spawn reopens), its label becoming the run's phase and, when it names a round, the round. */
-export function addWorkflowAgent(run: CockpitWorkflowRun | undefined, runId: string, id: string, label: string, now: number): CockpitWorkflowRun {
-  const kept = runOf(run, runId)
+export function addWorkflowAgent(run: CockpitWorkflowRun | undefined, runId: string, id: string, label: string, now: number, conversationRound?: number, log?: readonly CockpitLogEntry[]): CockpitWorkflowRun {
+  const kept = runOf(run, runId, conversationRound, log)
   const round = roundOf(label)
   return {
     ...kept,
@@ -132,16 +148,23 @@ export const agentRunId = (run: CockpitWorkflowRun | undefined, a: CockpitAgent)
  * The 'flow' node of `run` in `log`: its cost is the stored figure plus the agents logged since the node was written (so agents pruned from the log keep their cost),
  * its length runs from the first agent's start, `isFailed` when the run ended silent. A resumed run updates its one node.
  */
-function flowLog(log: CockpitLogEntry[] | undefined, run: CockpitWorkflowRun, isFailed: boolean): CockpitLogEntry[] {
+function flowLog(log: CockpitLogEntry[] | undefined, run: CockpitWorkflowRun, isFailed: boolean, endRound?: number): CockpitLogEntry[] {
   const prev = (log ?? []).find(e => e.kind === 'flow' && e.key === run.runId)
   const agents = (log ?? []).filter(e => e.kind === 'agent' && e.runId === run.runId && (prev === undefined || e.at > prev.at))
   const starts = [...(prev ? [prev.at - (prev.ms ?? 0)] : []), ...agents.map(e => e.at - (e.ms ?? 0))]
   const at = run.endedAt ?? run.lastAt ?? 0
   const n = Math.max(run.round ?? 0, prev?.n ?? 0)
+  // a rewrite keeps where the flow started and its lane; the end is the round open now
+  const round = prev?.round ?? run.startRound
+  const lane = prev?.lane ?? run.lane
+  const end = endRound ?? prev?.endRound
   return recordLog(log, {
     at,
     kind: 'flow',
     key: run.runId,
+    ...(round !== undefined && { round }),
+    ...(end !== undefined && { endRound: end }),
+    ...(lane !== undefined && { lane }),
     usd: (prev?.usd ?? 0) + agents.reduce((sum, e) => sum + (e.usd ?? 0), 0),
     ...(run.name !== undefined && { text: run.name }),
     ...(starts.length > 0 && { ms: Math.max(0, at - Math.min(...starts)) }),
@@ -154,10 +177,9 @@ function flowLog(log: CockpitLogEntry[] | undefined, run: CockpitWorkflowRun, is
  * `log` after the run went from `before` to `after`: a run that closed (not by silence) writes its flow node; a run that never closed properly
  * (silent-closed, or still open) writes it, failed, once a different run replaces it. Anything else leaves the log as it was.
  */
-export function logRunChange(log: CockpitLogEntry[] | undefined, before: CockpitWorkflowRun | undefined, after: CockpitWorkflowRun | undefined): CockpitLogEntry[] | undefined {
-  const isUnclosed = before !== undefined && before.agents.length > 0 && (before.isSilent === true ? before.endedAt !== undefined : before.endedAt === undefined)
-  if (before && before.runId !== after?.runId && isUnclosed) return flowLog(log, before, true)
-  if (before && after && before.endedAt === undefined && after.endedAt !== undefined && after.isSilent !== true) return flowLog(log, after, false)
+export function logRunChange(log: CockpitLogEntry[] | undefined, before: CockpitWorkflowRun | undefined, after: CockpitWorkflowRun | undefined, round?: number): CockpitLogEntry[] | undefined {
+  if (before && before.runId !== after?.runId && isUnclosed(before)) return flowLog(log, before, true, round)
+  if (before && after && before.endedAt === undefined && after.endedAt !== undefined && after.isSilent !== true) return flowLog(log, after, false, round)
   return log
 }
 

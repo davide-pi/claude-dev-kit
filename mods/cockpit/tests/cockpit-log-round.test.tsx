@@ -2,8 +2,8 @@ import { expect, test } from 'claude-code/testing'
 
 import { resumePrompt } from '../hooks/pace'
 import type { CockpitLogEntry } from '../types'
-import { RED, askPerson, bashResult, callAs, colorOf, mountPane, permissionChecks, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
-import { NOW, dataOf, rowTexts, world } from './cockpit-world'
+import { askPerson, bashResult, callAs, permissionChecks, settleAll, spawnWorkflowAgent, spawns } from './cockpit-fixtures'
+import { NOW, dataOf, world } from './cockpit-world'
 
 type Round = CockpitLogEntry & { kind: 'round' }
 
@@ -125,48 +125,4 @@ test('Given pending round fields in a saved session, When the session loads and 
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // Then
   expect(dataOf(writes)).toMatchObject(pending)
-})
-
-const failed = (list: { tool: string; text: string }[]) => ({ at: NOW - 100_000, kind: 'round', n: 7, ms: 1000, prompt: 'work', fails: { n: list.length, list } })
-
-/** The pane drawn from a saved round, in the main view or after a press. */
-async function paneOf($: Parameters<Parameters<typeof test>[1]>[0], on: Parameters<typeof world>[0], round: object, press?: string) {
-  world(on, { dataFile: JSON.stringify({ history: [], prs: [], sessionLog: [round] }) })
-  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 70)
-  if (press !== undefined) await ui.press({ key: press })
-  const root = await ui.drawn()
-  await ui.unmount()
-  return { rows: rowTexts(root).map(r => r.trimEnd()), root }
-}
-
-test('Given a round whose stored fails are A then B with a line break, When the base view renders, Then one red row B: a shows', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const round = failed([{ tool: 'A', text: 'x' }, { tool: 'B', text: 'a\nb' }])
-  // When
-  const { rows, root } = await paneOf($, on, round)
-  // Then
-  expect(rows.filter(r => r.includes('B: a'))).toHaveLength(1)
-  expect(rows.some(r => r.includes('A: x'))).toBe(false)
-  expect(rows.some(r => r.includes('a b'))).toBe(false)
-  expect(colorOf(root, /B: a/)).toBe(RED)
-})
-
-test('Given a round with fails, When the all view renders, Then every fail row shows and the newest is not duplicated', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const round = failed([{ tool: 'A', text: 'x' }, { tool: 'B', text: 'a\nb' }])
-  // When
-  const { rows } = await paneOf($, on, round, 'log:all')
-  // Then
-  expect(rows.filter(r => r.includes('A: x'))).toHaveLength(1)
-  expect(rows.filter(r => r.includes('B: a b'))).toHaveLength(1)
-  expect(rows.filter(r => r.includes('B: a')).length).toBe(1)
-})
-
-test('Given a round with no fails, When the base view renders, Then no fail row shows', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given / When
-  const { rows } = await paneOf($, on, { at: NOW - 100_000, kind: 'round', n: 7, ms: 1000, prompt: 'work' })
-  // Then
-  expect(rows.some(r => /^\s*[├└]?\s*\w+: /.test(r) && !r.includes('work'))).toBe(false)
-  expect(rows.join('\n')).not.toMatch(/failed tools?/)
 })

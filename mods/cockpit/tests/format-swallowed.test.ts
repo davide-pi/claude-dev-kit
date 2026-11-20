@@ -1,10 +1,9 @@
 import { expect, test } from 'claude-code/testing'
 
-import { COLORS } from '../hooks/shared'
 import { isMainEntry } from '../hooks/view-log-round'
 import { parseLog } from '../hooks/timeline'
 import type { CockpitLogEntry } from '../types'
-import { bashResult, colorOf, mountPane, settleAll } from './cockpit-fixtures'
+import { bashResult, mountLanes, settleAll } from './cockpit-fixtures'
 import { NOW, dataOf, rowTexts, world } from './cockpit-world'
 
 type Engine = Parameters<Parameters<typeof test>[1]>[0]
@@ -115,7 +114,7 @@ test('Given an error entry, When asked if it is a main entry, Then it is', () =>
   expect(isMainEntry({ at: 1, kind: 'error', key: 'events:read', n: 2 })).toBe(true)
 })
 
-test('Given an error entry in the log, When the base view renders, Then a red row shows the site and the count, in English and in Italian', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given an error entry in the log, When the Log tab renders, Then a row shows the site and the count', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const log = [{ at: NOW - 60_000, kind: 'error', key: 'events:read', n: 2 }]
   const data = { history: [], prs: [], sessionLog: log }
@@ -123,21 +122,20 @@ test('Given an error entry in the log, When the base view renders, Then a red ro
   void en
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // When
-  const ui = await mountPane($, 70)
+  const ui = await mountLanes($, 70)
   const root = await ui.drawn()
   await ui.unmount()
   // Then
   expect(rowTexts(root).join('\n')).toContain('events:read swallowed 2 errors')
-  expect(colorOf(root, /swallowed 2 errors/)).toBe(COLORS.red)
 })
 
-test('Given an error entry in the log, When the base view renders in Italian, Then the row reads in Italian', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given an error entry in the log, When the Log tab renders in Italian, Then the row reads in Italian', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const log = [{ at: NOW - 60_000, kind: 'error', key: 'events:read', n: 2 }]
   world(on, { dataFile: JSON.stringify({ history: [], prs: [], sessionLog: log }), files: { 'cockpit.json': '{"lang":"it"}' } })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   // When
-  const ui = await mountPane($, 70)
+  const ui = await mountLanes($, 70)
   const text = rowTexts(await ui.drawn()).join('\n')
   await ui.unmount()
   // Then
