@@ -3,7 +3,7 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitClaudeState, CockpitSnapshot } from '../types'
 import { ctxScale } from './context'
 import type { DeskLayout } from './desk-layout'
-import { barSvg, donutSvg, iconSvg } from './desk-svg'
+import { donutSvg, iconSvg } from './desk-svg'
 import { deskUrgent } from './desk-urgent'
 import type { DeskUi } from './desk-view'
 import { COLORS, abbrevTokens, clockTime, countdown, displayModel, fmtCost, localDate, signedPct } from './shared'
@@ -23,7 +23,8 @@ const RED = '#FF5A4F'
 const CARD = '#30302E'
 const BORDER = '#403F3B'
 const ICON_PX = 20
-const BAR_PX = 14
+/** A credit ring's column: wide enough for its renewal lines under a ring of any gauge size. */
+const WINDOW_PX = 104
 
 /** The terminal palette's status colours on the desktop palette; anything else stays as it is. */
 const semantic = (c: string): string => (c === COLORS.green ? OK : c === COLORS.yellow || c === COLORS.amber ? WARN : c === COLORS.red ? RED : c)
@@ -36,7 +37,7 @@ const STATE_ICON: Record<CockpitClaudeState['kind'], { icon: string; color: stri
   waiting: { icon: 'alert', color: WARN },
 }
 
-/** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (the short label above it, its percent over it, tokens and cache under it) and the two credit windows (label and renewal, bar and what is left, pace), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
+/** The desktop head as the design board lays it out: the state line with the cost at its right, a card with the context donut (the short label above it, its percent over it, tokens and cache under it) and, beside it, the two credit windows as rings of the same size (label above, what is left over the ring, renewal and pace under it; the row wraps when narrow), then the URGENTE card. Every part is always drawn (the unknown ones blank), so nothing appears or disappears. */
 export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const S = t()
@@ -56,31 +57,35 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
 
   const windowRow = (kind: 'five_hour' | 'seven_day', label: string) => {
     const r: RateRow | undefined = rateRow(s, kind)
-    const when = r?.resetMs === undefined ? ' ' : `${H.renews} ${countdown(r.resetMs, s.now).trim()} · ${kind === 'seven_day' ? `${localDate(r.resetMs).slice(5)} ` : ''}${clockTime(r.resetMs)}`
+    const renews = r?.resetMs === undefined ? ' ' : `${H.renews} ${countdown(r.resetMs, s.now).trim()}`
+    const at = r?.resetMs === undefined ? ' ' : `${kind === 'seven_day' ? `${localDate(r.resetMs).slice(5)} ` : ''}${clockTime(r.resetMs)}`
     const color = r === undefined ? DIM : semantic(r.color)
     // the last session's reading (the engine reports none yet) carries the `~`, as the context's and the terminal's do
     const left = r === undefined ? '—' : `${r.isStale ? '~' : ''}${r.rem}%`
     return (
-      <Box key={`desk:window:${kind}`} flexDirection="column">
-        <Box key={`desk:window:${kind}:label`} columnGap={1} alignItems="center">
-          <Text wrap="truncate" weight="bold" color={TEXT}>
+      <Box key={`desk:window:${kind}`} flexDirection="column" alignItems="center" flexShrink={0} minWidth={WINDOW_PX}>
+        <Box key={`desk:window:${kind}:label`}>
+          <Text wrap="truncate" size="caption" weight="bold" color={DIM}>
             {label}
           </Text>
-          <Text wrap="truncate" size="footnote" color={DIM}>
-            {when}
-          </Text>
         </Box>
-        {/* the bar takes the row (an Svg with no width fills its slot), the percent sits at its right end and never shrinks */}
-        <Box key={`desk:window:${kind}:bar`} columnGap={1} alignItems="center">
-          <Box key={`desk:window:${kind}:track`} flexGrow={1} flexShrink={1} minWidth={0}>
-            <Svg source={barSvg({ left: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${left} ${H.left}`} height={BAR_PX} />
-          </Box>
-          <Box key={`desk:window:${kind}:percent`} flexShrink={0}>
-            <Text wrap="truncate" color={color} weight="bold" size="heading" tabular>
+        <Box key={`desk:window:${kind}:ring`}>
+          <Svg source={donutSvg({ percent: r?.rem ?? 0, pace: r?.pace?.target, color })} alt={`${label} ${left} ${H.left}`} width={layout.gaugeSize} height={layout.gaugeSize} />
+          {/* the percent over the ring, centred, as the context's */}
+          <Box key={`desk:window:${kind}:percent`} position="absolute" top={0} left={0} right={0} bottom={0} flexDirection="column" alignItems="center" justifyContent="center">
+            <Text wrap="truncate" size="heading" weight="bold" tabular color={color}>
               {left}
             </Text>
           </Box>
         </Box>
+        <Box key={`desk:window:${kind}:when`}>
+          <Text wrap="truncate" size="footnote" color={SOFT}>
+            {renews}
+          </Text>
+        </Box>
+        <Text wrap="truncate" size="footnote" color={DIM}>
+          {at}
+        </Text>
         <Box key={`desk:window:${kind}:pace`}>
           <Text wrap="truncate" size="footnote" color={r?.pace === undefined ? DIM : r.pace.delta < 0 ? RED : OK}>
             {r?.pace === undefined ? ' ' : `${H.pace} ${signedPct(r.pace.delta)}`}
@@ -90,7 +95,6 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
     )
   }
 
-  const isNarrow = layout.size === 'narrow'
   return (
     <Box key="desk:head" flexDirection="column" width="100%" rowGap={1}>
       <Box key="desk:state" flexDirection="column">
@@ -115,7 +119,7 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
           {detail || ' '}
         </Text>
       </Box>
-      <Box key="desk:gauges" flexDirection={isNarrow ? 'column' : 'row'} alignItems={isNarrow ? 'stretch' : 'center'} columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD} borderStyle="round" borderColor={BORDER}>
+      <Box key="desk:gauges" flexDirection="row" flexWrap="wrap" alignItems="flex-start" justifyContent="center" columnGap={2} rowGap={1} paddingX={1} backgroundColor={CARD} borderStyle="round" borderColor={BORDER}>
         <Box key="desk:context" flexDirection="column" alignItems="center" flexShrink={0}>
           <Text key="desk:context:label" wrap="truncate" size="caption" weight="bold" color={DIM}>
             {H.contextShort}
@@ -139,10 +143,8 @@ export function deskHead(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, act
             </Text>
           </Text>
         </Box>
-        <Box key="desk:windows" flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0} rowGap={1}>
-          {windowRow('five_hour', '5h')}
-          {windowRow('seven_day', '7d')}
-        </Box>
+        {windowRow('five_hour', '5H')}
+        {windowRow('seven_day', '7D')}
       </Box>
       {deskUrgent(ui, s, actions)}
     </Box>

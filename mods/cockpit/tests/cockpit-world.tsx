@@ -1,6 +1,7 @@
 import { mock } from 'claude-code/testing'
 import type { AgentStatus, On, SessionContextBreakdown } from 'claude-code'
 
+
 export const NOW = Date.parse('2026-10-22T10:00:00Z')
 /** An ssh `origin` URL of GitHub (joined, so the text is not read as an e-mail address). */
 export const GH_SSH = ['git', 'github.com:example/orders.git'].join('@')

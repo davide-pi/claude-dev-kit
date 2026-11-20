@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { barSvg, donutSvg, iconSvg, railSvg, shareSvg } from '../hooks/desk-svg'
+import { donutSvg, iconSvg, railSvg, shareSvg } from '../hooks/desk-svg'
 
 const C = 2 * Math.PI * 44
 const round2 = (n: number): number => Math.round(n * 100) / 100
@@ -45,26 +45,16 @@ test('Given the donut, When built, Then it has the board geometry and only the c
   expect(svg).not.toContain('r="33"')
 })
 
-test('Given a bar, When built, Then it is 14 high, the track 8, with preserveAspectRatio none, the left share filled and the pace mark only when given', () => {
+test('Given a donut with a pace of 60 percent, When built, Then a white 3px tick on a dark 7px halo is rotated 216 degrees, and without a pace there is none', () => {
   // Given / When
-  const bar = barSvg({ left: 40, color: '#7CC79A' })
-  const paced = barSvg({ left: 40, pace: 60, color: '#7CC79A' })
-  const over = barSvg({ left: 400, color: '#7CC79A' })
+  const plain = donutSvg({ percent: 40, color: '#7CC79A' })
+  const paced = donutSvg({ percent: 40, pace: 60, color: '#7CC79A' })
   // Then
-  for (const part of ['viewBox="0 0 260 14"', 'height="14"', 'height="8"', 'preserveAspectRatio="none"', 'width="104"', '#7CC79A']) expect(bar).toContain(part)
-  expect(bar).not.toContain('<line')
-  expect(paced).toContain('<line')
-  expect(paced).toContain('x1="156"')
-  expect(over).toContain('width="260"')
-})
-
-test('Given a bar, When built, Then its markup is wider than any pane, so an Svg without width takes its whole slot, and the pace mark keeps its stroke when stretched', () => {
-  // Given / When
-  const paced = barSvg({ left: 40, pace: 60, color: '#7CC79A' })
-  // Then
-  const own = Number(/^<svg [^>]*?width="(\d+)"/.exec(paced)?.[1])
-  expect(own).toBeGreaterThanOrEqual(2000)
-  expect(paced).toContain('vector-effect="non-scaling-stroke"')
+  expect(plain).not.toContain('<line')
+  expect(paced.match(/<line/g)).toHaveLength(2)
+  expect(paced).toContain('rotate(216 60 60)')
+  expect(paced).toContain('stroke="#FFFFFF" stroke-width="3"')
+  expect(paced).toContain('stroke="#1A1A19" stroke-width="7"')
 })
 
 test('Given a share of 0, 25 and 250 percent, When shareSvg is built, Then it is 84 by 6, the share filled on its track and clamped, no fill at 0', () => {
@@ -140,7 +130,7 @@ test('Given a colour holding a quote, When any svg is built, Then it never reach
   // Given
   const bad = '#fff" onload="x'
   // When
-  const svgs = [donutSvg({ percent: 50, color: bad }), barSvg({ left: 50, color: bad }), iconSvg('clock', bad), railSvg({ lanes: [{ lane: 0, kind: 'start', color: bad }] })]
+  const svgs = [donutSvg({ percent: 50, color: bad }), donutSvg({ percent: 50, pace: 50, color: bad }), iconSvg('clock', bad), railSvg({ lanes: [{ lane: 0, kind: 'start', color: bad }] })]
   // Then
   for (const svg of svgs) expect(svg).not.toContain('onload')
 })
@@ -169,7 +159,7 @@ test('Given every builder, When its source is read, Then the root carries the SV
   // Given
   const sources = [
     donutSvg({ percent: 50, color: '#8B6CF6' }),
-    barSvg({ left: 40, color: '#8B6CF6' }),
+    donutSvg({ percent: 40, pace: 60, color: '#8B6CF6' }),
     iconSvg('clock', '#8B6CF6'),
     railSvg({ lanes: [] }),
   ]

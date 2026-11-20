@@ -29,7 +29,8 @@ import { contextText, headerEffort, rateRow, rateText } from './view-header'
 import type { RateRow } from './view-header'
 import { makeKit } from './view-kit'
 import type { Block, Node, PaneActions } from './view-kit'
-import { andamentoBlocks, attentionBlocks, doneBlocks, inProgressBlocks } from './view-page'
+import { tabBody, tabRow } from './view-tabs'
+import type { Tab } from './view-tabs'
 import { aheadBehindSpans } from './work'
 
 export type { PaneActions } from './view-kit'
@@ -257,14 +258,17 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
   // The header, above the page: model, state and cost; folder, branch and git; then, after a rule, the CTX row and the credits row
   const headerRows: Node[] = [modelLine, grid, rule, ctxRow, ...creditsRows]
 
-  // The sections in their order, told apart by an empty row; an empty one is not built (ATTENZIONE says there is nothing to do).
-  const sections = [attentionBlocks, andamentoBlocks, inProgressBlocks, doneBlocks].flatMap(build => build(kit))
+  // The three tabs of the desktop page (In corso, Log, Analisi); the open tab's sections, told apart by an empty row
+  const open: Tab = s.deskTab ?? 'now'
+  const sections = tabBody(kit, open)
   const body: Block = sections.flatMap((b, i) => [...(i > 0 ? [kit.gap()] : []), ...b.flat()])
 
   return (
     <Box flexDirection="column" width={block} paddingX={PANE_PADDING_X} minHeight={bodyRows} marginLeft={bodyColumns - block}>
       {headerRows}
       {rule}
+      {tabRow(kit, open)}
+      {kit.gap()}
       {body}
       {/* The spacer takes what the page leaves of the pane height: the buttons sit on its last row, or follow a taller page. */}
       <Box flexGrow={1} />

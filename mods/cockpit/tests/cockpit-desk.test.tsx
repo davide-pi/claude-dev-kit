@@ -166,7 +166,7 @@ test('Given desktop, When tab:analysis is pressed, Then the analysis buttons are
 })
 
 for (const surface of ['terminal', 'vscode', 'mobile'] as const) {
-  test(`Given ${surface}, When the pane is drawn, Then no tab key exists and the page is the terminal page`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given ${surface}, When the pane is drawn, Then the three tab Buttons are there, the now tab primary, under the terminal page's head`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     world(on)
     await $.session.start({ cwd: '/', surface, isInteractive: true })
@@ -174,7 +174,9 @@ for (const surface of ['terminal', 'vscode', 'mobile'] as const) {
     const ui = await $.ui.mount({ ...PANE, props: { ...PANE.props, bodyColumns: 58 }, surface })
     // Then
     const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key ?? '')
-    expect(keys.filter(k => k.startsWith('tab:'))).toEqual([])
+    expect(keys.filter(k => k.startsWith('tab:'))).toEqual(TABS)
+    const drawn = await ui.drawn()
+    expect(TABS.map(k => propsOf(keyed(drawn, k)).variant)).toEqual(['primary', 'secondary', 'secondary'])
     expect(keys).toContain('bar:compact')
     expect(rowTexts(await ui.drawn()).some(r => /^CTX /.test(r))).toBe(true)
     await ui.unmount()
@@ -249,8 +251,21 @@ test('Given /cockpit with no argument, When it runs, Then it opens as today', { 
   // When
   const ran = await cockpit($, '')
   // Then
-  expect(ran.text).toBe(t().commandOpen)
+  expect(ran.text).toBe(t().commandOpen('side'))
+  expect(ran.text).toContain('side pane')
   expect(closed).toEqual([])
+})
+
+test('Given the Italian pane on a terminal main screen, When /cockpit runs, Then the answer says it opened above the prompt, in Italian', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  world(on, { files: IT_FILE })
+  on('session.surfaces', () => ({ value: ['terminal'] }))
+  await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
+  // When
+  const ran = await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
+  // Then
+  expect(ran.text).toBe('Cockpit aperto sopra il prompt.')
+  setLang('en')
 })
 
 test('Given any other argument, When /cockpit runs, Then it opens and the answer names the close form', { timeoutMs: 30_000 }, async ($, on) => {
@@ -261,7 +276,7 @@ test('Given any other argument, When /cockpit runs, Then it opens and the answer
   // When
   const ran = await cockpit($, 'shut')
   // Then
-  expect(ran.text).toBe(t().commandOpenHint)
+  expect(ran.text).toBe(t().commandOpenHint('side'))
   expect(ran.text).toContain('/cockpit close')
   expect(closed).toEqual([])
 })
@@ -319,10 +334,9 @@ test('Given no rate data, When the head is drawn, Then the windows keep the same
   const ui = await mountDesk($)
   const head = await headOf(ui)
   // Then
-  const windows = keyed(head, 'desk:windows')
-  expect(childrenOf(windows)).toHaveLength(2)
-  expect(svgsOf(windows)).toHaveLength(2)
-  expect(textOf(windows)).toContain('—')
+  const windows = [keyed(head, 'desk:window:five_hour'), keyed(head, 'desk:window:seven_day')]
+  expect(windows.map(w => svgsOf(w).length)).toEqual([1, 1])
+  expect(windows.map(textOf).join('')).toContain('—')
   await ui.unmount()
 })
 
@@ -415,7 +429,7 @@ test('Given a live credit reading, When the head is drawn, Then the percent has 
 })
 
 for (const columns of [36, 80, 160]) {
-  test(`Given ${columns} columns, When a credit row is drawn, Then it has its label, bar and pace lines, kept (empty) without data`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given ${columns} columns, When a credit row is drawn, Then it has its label, ring, renewal and pace lines, kept (empty) without data`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     const [full, empty] = [snap({ rateLimits: [...RATES] }), snap({ rateLimits: [] })]
     // When
@@ -423,8 +437,9 @@ for (const columns of [36, 80, 160]) {
     // Then
     const [rowA, rowB] = [keyed(a, 'desk:window:five_hour'), keyed(b, 'desk:window:five_hour')]
     expect(count(rowA)).toBe(count(rowB))
-    expect(textOf(keyed(rowA, 'desk:window:five_hour:label'))).toContain(t().desk.head.renews)
-    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:bar'))).toHaveLength(1)
+    expect(textOf(keyed(rowA, 'desk:window:five_hour:label'))).toBe('5H')
+    expect(textOf(keyed(rowA, 'desk:window:five_hour:when'))).toContain(t().desk.head.renews)
+    expect(svgsOf(keyed(rowA, 'desk:window:five_hour:ring'))).toHaveLength(1)
     expect(keyed(rowA, 'desk:window:five_hour:pace')).toBeDefined()
     expect(svgsOf(keyed(rowA, 'desk:window:five_hour:pace'))).toHaveLength(0)
   })

@@ -53,7 +53,7 @@ test('the pane has no close button of its own: the buttons row is its only butto
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['bar:compact', 'bar:retro', 'bar:worklog'])
+  expect(keys).toEqual(['tab:now', 'tab:log', 'tab:analysis', 'bar:compact', 'bar:retro', 'bar:worklog'])
   await ui.unmount()
 })
 
@@ -153,15 +153,16 @@ test('CTX bar: no tick when the engine reports no autocompact threshold', { time
   await ui.unmount()
 })
 
-test('a rule closes the header, and the ATTENTION title follows it at once (title and rule on one row), with no tab bar between', { timeoutMs: 30_000 }, async ($, on) => {
+test('a rule closes the header, and the ATTENTION title follows it at once (title and rule on one row), under the tab row and a gap, on the Analisi tab', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
+  await ui.press({ key: 'tab:analysis' })
   const rows = rowTexts(await ui.drawn())
   const [, first = -1] = rows.flatMap((r, i) => (/^─+$/.test(r) ? [i] : []))
   const title = rows.findIndex(r => /^ATTENTION/.test(r))
   expect(first).toBe(headerOf(rows).length)
-  expect(title).toBe(first + 1)
+  expect(title).toBe(first + 3)
   expect(rows[title]).toMatch(/^ATTENTION ─+$/)
   expect([...(rows[title] ?? '')].length).toBe([...(rows[first] ?? '')].length)
   expect(rows[title + 1]).toBe('✓ nothing to do')

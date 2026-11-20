@@ -1,12 +1,12 @@
 import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
-import { PERIMETER, createTask, mountPane, paneRows, taskTools, todo, updateTask } from './cockpit-fixtures'
+import { PERIMETER, createTask, mountAnalysis, paneRows, taskTools, todo, updateTask } from './cockpit-fixtures'
 import { flagOf, rowTexts, world } from './cockpit-world'
 import type { World } from './cockpit-world'
 
 /** The page's rows, without the padding a row keeps. */
-const pageRows = async ($: Engine, bodyColumns = 50) => (await paneRows($, bodyColumns)).rows.map(r => r.trimEnd())
+const pageRows = async ($: Engine, bodyColumns = 50, tab?: 'now' | 'log' | 'analysis') => (await paneRows($, bodyColumns, tab)).rows.map(r => r.trimEnd())
 /** The tasks row of IN PROGRESS, when the page has one. */
 const tasksRow = async ($: Engine) => (await pageRows($)).find(r => /^[󱎖󰄰] tasks /u.test(r))
 
@@ -101,7 +101,7 @@ test('the list is empty again at session start (a /clear included)', { timeoutMs
 test('ATTENTION: a worklog up to date is no row', { timeoutMs: 30_000 }, async ($, on) => {
   world(on)
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const upToDate = await pageRows($)
+  const upToDate = await pageRows($, 50, 'analysis')
   expect(upToDate).toContain('✓ nothing to do')
   expect(upToDate.some(r => /worklog/.test(r))).toBe(false)
 })
@@ -109,7 +109,7 @@ test('ATTENTION: a worklog up to date is no row', { timeoutMs: 30_000 }, async (
 test('ATTENTION: a worklog behind is a row saying how many days, and `worklog:days` opens and folds the list of them', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { hasWorklog: true })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 50)
+  const ui = await mountAnalysis($, 50)
   expect(rowTexts(await ui.drawn()).some(r => /^\u{F00F0} 1 day without logged hours/u.test(r))).toBe(true)
   expect(rowTexts(await ui.drawn()).some(r => /to log/.test(r))).toBe(false)
   await ui.press({ key: 'worklog:days' })
@@ -147,19 +147,19 @@ test('hook triggers: the blocks of done-claim.log that belong to this session ar
   ].join('\n')
   world(on, { doneClaims })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await pageRows($)).some(r => /3 done-claim blocks/.test(r))).toBe(true)
+  expect((await pageRows($, 50, 'analysis')).some(r => /3 done-claim blocks/.test(r))).toBe(true)
 })
 
 test('hook triggers: the blocks of another session or no block at all draw nothing', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { doneClaims: `${claim(1, 'unproven-row', 'altra', 's-2')}\n${claim(2, 'shell-ran', 'contato')}\n` })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await pageRows($)).some(r => /done-claim/.test(r))).toBe(false)
+  expect((await pageRows($, 50, 'analysis')).some(r => /done-claim/.test(r))).toBe(false)
 })
 
 test('hook triggers: no log (or an empty one) draws no block', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { doneClaims: '' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await pageRows($)).some(r => /done-claim/.test(r))).toBe(false)
+  expect((await pageRows($, 50, 'analysis')).some(r => /done-claim/.test(r))).toBe(false)
 })
 
 // ── done-claim.log is read again only when it changed ──
@@ -173,7 +173,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   expect(claimReads).toHaveLength(1)
   for (let i = 0; i < 4; i++) await clock.advance(30_000)
   expect(claimReads).toHaveLength(1)
-  expect((await pageRows($)).some(r => /done-claim/.test(r))).toBe(false) // one block is no notification yet
+  expect((await pageRows($, 50, 'analysis')).some(r => /done-claim/.test(r))).toBe(false) // one block is no notification yet
 
   mtime = 2 // same size, new time
   await clock.advance(30_000)
@@ -182,7 +182,7 @@ test('hook triggers: the log is read again only when its size or modification ti
   options.doneClaims = `${claim(1, 'unproven-row', 'primo')}\n${claim(2, 'unproven-row', 'secondo')}\n` // another size
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
-  expect((await pageRows($)).some(r => /2 done-claim blocks/.test(r))).toBe(true)
+  expect((await pageRows($, 50, 'analysis')).some(r => /2 done-claim blocks/.test(r))).toBe(true)
   await clock.advance(30_000)
   expect(claimReads).toHaveLength(3)
 })

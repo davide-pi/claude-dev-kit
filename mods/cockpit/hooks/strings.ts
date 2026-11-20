@@ -133,10 +133,10 @@ const EN = {
   alertCredits: (left: number) => `credits 5h: ${left}% left`,
   alertSubagent: (type: string) => `subagent ${type} failed`,
   commandDescription: 'Opens the cockpit pane',
-  commandOpen: 'cockpit open',
+  commandOpen: (place: 'side' | 'inline') => `Cockpit opened ${place === 'side' ? 'in the side pane' : 'above the prompt'}.`,
   commandClosed: 'cockpit closed',
-  commandOpenHint: 'cockpit open (/cockpit close closes it)',
-  commandWaiting: (reason: string) => `cockpit waiting: ${reason}`,
+  commandOpenHint: (place: 'side' | 'inline') => `Cockpit opened ${place === 'side' ? 'in the side pane' : 'above the prompt'} (/cockpit close closes it).`,
+  commandWaiting: (reason: string, isTerminal: boolean) => `cockpit waiting for room: ${reason}${isTerminal ? ' (the terminal needs a wider window)' : ''}`,
 }
 
 export type Strings = typeof EN
@@ -238,10 +238,10 @@ const IT: Strings = {
   alertCredits: (left: number) => `crediti 5h: ${left}% residui`,
   alertSubagent: (type: string) => `subagent ${type} fallito`,
   commandDescription: 'Apre il pannello cockpit',
-  commandOpen: 'cockpit aperto',
+  commandOpen: (place: 'side' | 'inline') => `Cockpit aperto ${place === 'side' ? 'nel pannello laterale' : 'sopra il prompt'}.`,
   commandClosed: 'cockpit chiuso',
-  commandOpenHint: 'cockpit aperto (/cockpit chiudi lo chiude)',
-  commandWaiting: (reason: string) => `cockpit in attesa: ${reason}`,
+  commandOpenHint: (place: 'side' | 'inline') => `Cockpit aperto ${place === 'side' ? 'nel pannello laterale' : 'sopra il prompt'} (/cockpit chiudi lo chiude).`,
+  commandWaiting: (reason: string, isTerminal: boolean) => `cockpit in attesa di spazio: ${reason}${isTerminal ? ' (il terminale richiede una finestra più larga)' : ''}`,
 }
 
 const BUNDLES: Record<Lang, Strings> = { en: EN, it: IT }

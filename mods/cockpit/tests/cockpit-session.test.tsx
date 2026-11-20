@@ -99,7 +99,7 @@ test('/cockpit opens the pane and the state file says open:true', { timeoutMs: 3
   expect(flagOf(writes)).toMatchObject({ open: false })
 
   const ran = await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: true, columns: 80 } })
-  expect(ran.text).toBe('cockpit open')
+  expect(ran.text).toBe('Cockpit opened in the side pane.')
   expect(opened).toEqual(['cockpit'])
   expect(flagOf(writes)).toMatchObject({ open: true })
 })
@@ -127,7 +127,7 @@ test('a pane that cannot be placed is reported with open:false, and its first re
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
 
   const ran = await $.command.run({ command: 'cockpit', args: '', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
-  expect(ran.text).toBe('cockpit waiting: too narrow (80 < 144)')
+  expect(ran.text).toBe('cockpit waiting for room: too narrow (80 < 144)')
   expect(flagOf(writes)).toMatchObject({ open: false })
 
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
@@ -203,7 +203,7 @@ test("the state file's last turn cost is the ended turn's while the next one has
 test('a state file that is not JSON is ignored', { timeoutMs: 30_000 }, async ($, on) => {
   world(on, { stateFile: 'not json' })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  expect((await paneRows($)).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
+  expect((await paneRows($, 50, 'analysis')).rows.some(r => /^ATTENTION/.test(r))).toBe(true)
 })
 
 test('a write delayed across a /clear writes nothing to the new session\'s file', { timeoutMs: 30_000 }, async ($, on) => {

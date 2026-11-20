@@ -110,26 +110,24 @@ const RATES = [
 ] as const
 
 for (const columns of [36, 80, 160]) {
-  test(`Given ${columns} columns, When a credit row is drawn, Then the bar takes the whole row, the percent sits at its right end without the left word, and no forecast row exists`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given ${columns} columns, When a credit window is drawn, Then its ring is the donut's size with the percent over it, the 5H label above and the renewal under, and no forecast row exists`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     const s = snap({ rateLimits: [...RATES] })
     // When
     const ui = await drawPart($, on, 'head', s, columns)
     const head = await ui.drawn()
     // Then
-    const bar = keyed(head, 'desk:window:five_hour:bar')
-    const [track, percent] = childrenOf(bar)
-    expect(propsOf(track).flexGrow).toBe(1)
-    expect(propsOf(track).minWidth).toBe(0)
-    const svg = childrenOf(track)[0]
+    const ring = keyed(head, 'desk:window:five_hour:ring')
+    const [svg, over] = childrenOf(ring)
+    const donut = childrenOf(keyed(head, 'desk:context:donut'))[0]
     expect(isRecord(svg) && svg.type).toBe('Svg')
-    expect(propsOf(svg).width).toBeUndefined()
-    expect(propsOf(svg).height).toBe(14)
+    expect(propsOf(svg).width).toBe(propsOf(donut).width)
+    expect(propsOf(svg).height).toBe(propsOf(donut).height)
     expect(String(propsOf(svg).alt)).toContain(t().desk.head.left)
-    expect(propsOf(percent).flexShrink).toBe(0)
-    expect(textOf(percent)).toContain('62%')
-    expect(textOf(bar)).not.toContain(t().desk.head.left)
-    expect(textOf(keyed(head, 'desk:window:five_hour:label'))).toContain(t().desk.head.renews)
+    expect(textOf(over)).toBe('62%')
+    expect(textOf(ring)).not.toContain(t().desk.head.left)
+    expect(textOf(keyed(head, 'desk:window:five_hour:label'))).toBe('5H')
+    expect(textOf(keyed(head, 'desk:window:five_hour:when'))).toContain(t().desk.head.renews)
     expect(keyed(head, 'desk:forecast')).toBeUndefined()
     expect(textOf(head)).not.toContain('→')
     await ui.unmount()

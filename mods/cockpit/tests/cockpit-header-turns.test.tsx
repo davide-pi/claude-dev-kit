@@ -2,7 +2,7 @@ import { expect, test } from 'claude-code/testing'
 
 import { isWorking } from '../hooks/session'
 import { setLang } from '../hooks/strings'
-import { IT_FILE, MIN, RED, colorOf, headerOf, measureWith, mountPane, paneRows, settleAll } from './cockpit-fixtures'
+import { IT_FILE, MIN, RED, colorOf, headerOf, measureWith, mountAnalysis, mountPane, paneRows, settleAll } from './cockpit-fixtures'
 import { GREEN, lastTurn, marginOf } from './cockpit-header-kit'
 import { NOW, PANE, flagOf, iso, rowTexts, world } from './cockpit-world'
 
@@ -256,7 +256,7 @@ test('a state file of an earlier version with a saved tab still loads, and is wr
   const writes = new Map<string, string>()
   world(on, { writes, stateFile: JSON.stringify({ open: false, tab: 'work' }) })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
-  const ui = await mountPane($, 58)
+  const ui = await mountAnalysis($, 58)
   expect(rowTexts(await ui.drawn()).some(r => /^ATTENTION/.test(r))).toBe(true)
   expect(flagOf(writes)).not.toHaveProperty('tab')
   await ui.unmount()
@@ -315,7 +315,7 @@ for (const language of LANGUAGES) {
       const ui = await mountPane($, 58)
       expect((await ui.find({ key: 'bar:compact' }))?.text).toBe(language.compact)
       await ui.unmount()
-      const { rows } = await paneRows($, 58)
+      const { rows } = await paneRows($, 58, 'analysis')
       for (const re of [/^CTX /, /^5h .* · 7d /, ...language.page]) expect(rows.some(r => re.test(r))).toBe(true)
     } finally {
       setLang('en')

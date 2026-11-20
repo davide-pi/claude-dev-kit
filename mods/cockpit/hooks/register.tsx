@@ -116,8 +116,12 @@ export const register: Register = on => {
       return { text: t().commandClosed }
     }
     const opened = await open($)
-    if (!opened.isPlaced) return { text: t().commandWaiting(opened.reason) }
-    return { text: arg === '' ? t().commandOpen : t().commandOpenHint }
+    // the event carries no surface: the session's surfaces tell it; the terminal docks a side pane only under the fullscreen layout
+    const surfaces = await $.session.surfaces().catch((): readonly string[] => [])
+    const isTerminal = surfaces.includes('terminal')
+    if (!opened.isPlaced) return { text: t().commandWaiting(opened.reason, isTerminal) }
+    const place = isTerminal && !e.presentation.isFullscreen ? 'inline' : 'side'
+    return { text: arg === '' ? t().commandOpen(place) : t().commandOpenHint(place) }
   })
 
   // Any close, whoever asked for it: the pane stays closed until `/cockpit` or the next session start (autoOpen).
