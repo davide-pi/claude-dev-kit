@@ -325,13 +325,12 @@ test('Given 12 rows in 8 body rows at the top, When the down and up arrows are p
   expect((String(bar[0]?.source).match(/<rect/g) ?? []).length).toBe(2)
 })
 
-test('Given rows that fit, When the log is drawn, Then the scroll column is still drawn, with no thumb', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given rows that fit, When the log is drawn, Then no scroll column is drawn: the pane scrolls as a whole', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionLog: [round(1)] })
   // When
   const { ui, root } = await drawLog($, on, s, 8)
   await ui.unmount()
   // Then
-  const bar = nodes(root).filter(n => keyOf(n) === 'desk:scroll').flatMap(n => nodes(n)).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
-  expect((String(bar[0]?.source).match(/<rect/g) ?? []).length).toBe(1)
+  expect(nodes(root).filter(n => keyOf(n) === 'desk:scroll')).toEqual([])
 })

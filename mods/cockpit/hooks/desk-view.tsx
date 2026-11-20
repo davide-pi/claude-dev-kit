@@ -27,6 +27,8 @@ const HEAD_ROWS = { narrow: 26, medium: 18, wide: 20 } as const
 /** Rows the action bar takes with the gap above it: one row of native buttons, two when narrow (compact, then the retrospectives). */
 /** Rows kept free under the action bar: on Desktop the pane's 100% runs under its own title bar, so the bar would sit half out of view. */
 const FOOT_PAD = 3
+/** The rows a body may draw: the pane scrolls over them, so the cap only bounds the tree (a long Log ends on its "a–b / n" hint). */
+const PAGE_ROWS = 240
 const ACTION_ROWS = { narrow: 5, medium: 3, wide: 3 } as const
 const MIN_BODY_ROWS = 8
 /** The underline's width per letter of the tab's label, in CSS pixels: the label's drawn width is not known, so an estimate. */
@@ -46,7 +48,8 @@ export const bodyLimit = (bodyRows: number, bodyColumns: number = DESK_WIDE_FROM
  */
 export function deskScrollMax(s: CockpitSnapshot, bodyColumns: number, bodyRows: number): number {
   const tab = s.deskTab ?? 'now'
-  const layout = deskLayout(bodyColumns, bodyLimit(bodyRows, bodyColumns))
+  void bodyRows
+  const layout = deskLayout(bodyColumns, PAGE_ROWS)
   return tab === 'log' ? logScrollMax(s, layout) : tab === 'now' ? nowScrollMax(s, layout) : analysisScrollMax(s, layout)
 }
 
@@ -60,16 +63,17 @@ const underline = (color: string, px: number): string => `<svg xmlns="http://www
 const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
 
 /**
- * The desktop page: the head, the tab row, the open tab's body, then the action bar. The page takes the pane's height and the body every row between
- * head and bar (grown, clipped, free to shrink to nothing), and the root never outgrows the pane, so the bar sits at its bottom and the page never scrolls.
+ * The desktop page: the head, the tab row, the open tab's body, then the action bar. The page is as tall as its content and the pane scrolls over
+ * it as a whole, head and bar included (the engine has no scrolling Box, and a Desktop wheel never reaches a hook while the page fits).
  * Widths are the pane's own (`100%`) or the layout's, never a fixed column count.
  */
 export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
   const { Box, Text, Markdown, Svg } = ui
   const S = t().desk
   const open: Tab = s.deskTab ?? 'now'
-  const limit = bodyLimit(bodyRows, bodyColumns)
-  const layout = deskLayout(bodyColumns, limit)
+  // the pane scrolls as a whole (owner, 2026-11-20): the body draws every row, up to PAGE_ROWS, and the engine's own window moves over it
+  void bodyRows
+  const layout = deskLayout(bodyColumns, PAGE_ROWS)
   const tabs = (
     <Box key="desk:tabs" columnGap={2}>
       {TABS.map(tab => {
@@ -93,12 +97,12 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
     </Box>
   )
   const body = (
-    <Box key={`desk:body:${open}`} flexDirection="column" flexGrow={1} flexShrink={1} minHeight={0} overflow="hidden">
+    <Box key={`desk:body:${open}`} flexDirection="column">
       {BODIES[open](ui, s, layout, actions)}
     </Box>
   )
   return (
-    <Box flexDirection="column" width="100%" height="100%" overflow="hidden" rowGap={1} paddingX={1} paddingBottom={FOOT_PAD}>
+    <Box flexDirection="column" width="100%" rowGap={1} paddingX={1} paddingBottom={FOOT_PAD}>
       {deskHead(ui, s, layout, actions)}
       {tabs}
       {body}

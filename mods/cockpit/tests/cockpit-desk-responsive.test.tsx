@@ -50,7 +50,7 @@ for (const [columns, size, gauge] of SIZES) {
     await ui.unmount()
   })
 
-  test(`Given bodyColumns ${columns}, When each tab is drawn, Then the page takes the pane's height, the body takes the room between head and bar and clips, and the bar is last and never shrinks`, { timeoutMs: 30_000 }, async ($, on) => {
+  test(`Given bodyColumns ${columns}, When each tab is drawn, Then the page is as tall as its content, nothing clips (the pane scrolls as a whole) and the bar is last`, { timeoutMs: 30_000 }, async ($, on) => {
     // Given
     world(on)
     await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -64,14 +64,12 @@ for (const [columns, size, gauge] of SIZES) {
     }
     // Then
     for (const [i, root] of drawn.entries()) {
-      expect(propsOf(root).height).toBe('100%')
+      expect(propsOf(root).height).toBeUndefined()
       const parts = childrenOf(root)
       const body = parts.find(p => String(propsOf(p).key).startsWith('desk:body:'))
       expect(propsOf(body).key).toBe(`desk:body:${['now', 'log', 'analysis'][i]}`)
-      expect(propsOf(body).flexGrow).toBe(1)
-      expect(propsOf(body).overflow).toBe('hidden')
-      expect(propsOf(body).minHeight).toBe(0)
-      expect(propsOf(root).overflow).toBe('hidden')
+      expect(propsOf(body).overflow).toBeUndefined()
+      expect(propsOf(root).overflow).toBeUndefined()
       expect(propsOf(parts.at(-1)).key).toBe('desk:actions')
       expect(propsOf(parts.at(-1)).flexShrink).toBe(0)
     }

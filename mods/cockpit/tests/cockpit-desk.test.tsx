@@ -75,15 +75,13 @@ test('Given offsets and wheel moves, When scrollOffset clamps them, Then the res
   expect(offsets).toEqual([0, 9, 5, 0])
 })
 
-test('Given 12 rounds and no agent in 8 body rows, When deskScrollMax is asked per tab, Then the Log and the Analysis cards can scroll and In corso cannot', () => {
+test('Given 12 rounds and no agent in 8 body rows, When deskScrollMax is asked per tab, Then no tab windows its rows: the pane scrolls as a whole', () => {
   // Given
   const sessionLog = Array.from({ length: 12 }, (_, i) => ({ at: i * 1000, kind: 'round' as const, n: i + 1, prompt: `p${i + 1}` }))
   // When
   const max = (['log', 'now', 'analysis'] as const).map(deskTab => deskScrollMax(snap({ sessionLog, deskTab }), 100, 8))
   // Then
-  expect(max[0]).toBeGreaterThan(0)
-  expect(max[1]).toBe(0)
-  expect(max[2]).toBeGreaterThan(0)
+  expect(max).toEqual([0, 0, 0])
 })
 
 test('Given cards of 10 cells in a 15-cell body, When scrollSpan windows them, Then one card shows at a time, the furthest offset is the last card and an offset past it is clamped', () => {

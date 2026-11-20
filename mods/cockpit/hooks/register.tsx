@@ -200,9 +200,8 @@ export const register: Register = on => {
   // The desktop page keeps its head and action bar still and scrolls only its body: the wheel moves the body's own offset and the engine's
   // window never moves (no `next`). Every other surface scrolls the pane as before.
   on('ui.scroll', { component: 'Pane', requestId: PANE }, ($, e, next) => {
-    if (deskMax === undefined) return next(e)
-    paneActions($).scrollBody(e.by, deskMax)
-    return {}
+    void deskMax
+    return next(e)
   })
 
   // The compact button of a pane where a compaction is due is drawn by a surface module, which can only post: the press runs here.

@@ -20,6 +20,13 @@ export type ScrollState = { offset: number; max: number; window: number; total: 
  */
 export function scrolling(ui: DeskUi, key: string, content: RenderElement | RenderElement[], p: ScrollState, actions: PaneActions): RenderElement {
   const { Box, Text, Button, Svg } = ui
+  // everything fits (always, now that the pane scrolls as a whole): the content alone, no column
+  if (p.max <= 0)
+    return (
+      <Box key={key} flexDirection="column" width="100%">
+        {content}
+      </Box>
+    )
   const step = Math.max(1, p.window - 1)
   const size = p.max <= 0 || p.total <= 0 ? 1 : Math.min(1, p.window / p.total)
   const start = p.max <= 0 ? 0 : (p.offset / p.max) * (1 - size)
