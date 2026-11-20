@@ -18,7 +18,7 @@ import { INITIAL, PANE } from './state'
 import { configDir, patch } from './store'
 import { t } from './strings'
 import { withLoggedSignals } from './signals'
-import { deskScrollMax, deskView } from './desk-view'
+import { deskView } from './desk-view'
 import { paneView } from './view'
 import { runIdOf } from './workflow'
 
@@ -29,8 +29,6 @@ const CLOSE_WORDS = ['close', 'chiudi']
 const snapshot = atom({ plugin: 'cockpit', key: 'snapshot' } as const, INITIAL)
 
 export const register: Register = on => {
-  // The furthest the desktop page's body scrolls, as last drawn; undefined while the pane last drew on another surface.
-  let deskMax: number | undefined
   on('session.start', async ($, e, next) => {
     // First: the command registered below is described in the language read here.
     const { autoOpen } = await refreshConfig($)
@@ -190,18 +188,9 @@ export const register: Register = on => {
     }
     // The desktop has a page of its own (tabs, Svg charts); every other surface draws the terminal page.
     if (e.surface === 'desktop') {
-      deskMax = deskScrollMax(s, e.props.bodyColumns, e.props.scroll.bodyRows)
-      return deskView($.ui.resolve(e), s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
+      return deskView($.ui.resolve(e), s, e.props.bodyColumns, paneActions($))
     }
-    deskMax = undefined
     return paneView(ui, s, e.props.bodyColumns, e.props.scroll.bodyRows, paneActions($))
-  })
-
-  // The desktop page keeps its head and action bar still and scrolls only its body: the wheel moves the body's own offset and the engine's
-  // window never moves (no `next`). Every other surface scrolls the pane as before.
-  on('ui.scroll', { component: 'Pane', requestId: PANE }, ($, e, next) => {
-    void deskMax
-    return next(e)
   })
 
   // The compact button of a pane where a compaction is due is drawn by a surface module, which can only post: the press runs here.

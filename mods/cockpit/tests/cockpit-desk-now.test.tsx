@@ -36,7 +36,7 @@ const uncut = (n: unknown, isCut: boolean): Node[] => {
 const section =(root: unknown, key: string): Node => find(root, x => x.props?.key === key)[0] ?? {}
 /** Every action does nothing: the tab only draws. */
 const NO_OP = (): void => undefined
-const ACTIONS: PaneActions = { compact: NO_OP, ask: NO_OP, answer: NO_OP, retro: NO_OP, worklog: NO_OP, setTab: NO_OP, toggleAgent: NO_OP, toggleSignal: NO_OP, toggleOpen: NO_OP, setGroupOpen: NO_OP, scrollTo: NO_OP, setGroupsOpen: NO_OP, scrollBody: NO_OP }
+const ACTIONS: PaneActions = { compact: NO_OP, ask: NO_OP, answer: NO_OP, retro: NO_OP, worklog: NO_OP, setTab: NO_OP, toggleAgent: NO_OP, toggleSignal: NO_OP, toggleOpen: NO_OP, setGroupOpen: NO_OP, scrollTo: NO_OP, setGroupsOpen: NO_OP }
 
 type Draw = { s: CockpitSnapshot; layout: DeskLayout }
 /** The draws each test's hook answers, by pane id; the hook is registered once, before the test's first call on `$`. */
@@ -225,7 +225,7 @@ test('Given a prompt and an agent description far wider than the pane, When draw
   expect(find(root, x => x.type === 'Text' && texts(x).join('').includes(long)).length).toBeGreaterThan(0)
 })
 
-test('Given more agents than the pane has rows, When drawn, Then the list shows one window of rows, no +n row, and the scroll arrows are drawn', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given more agents than the pane has rows, When drawn, Then the list shows one window of rows and no +n row', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ agents: Array.from({ length: 12 }, (_, i) => agent(`a${i}`, `Agent${i}`)) })
   // When
@@ -234,5 +234,4 @@ test('Given more agents than the pane has rows, When drawn, Then the list shows 
   const list = section(root, 'now:outside:list')
   expect(kids(list)).toHaveLength(3)
   expect(kids(list).some(k => texts(k).join('').startsWith('+'))).toBe(false)
-  expect(find(root, x => x.props?.key === 'desk:scroll:down')).toHaveLength(1)
 })

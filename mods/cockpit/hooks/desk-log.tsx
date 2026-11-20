@@ -1,9 +1,7 @@
 import type { RenderElement } from 'claude-code'
 
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
-import { scrollOffset } from './desk-layout'
 import type { DeskLayout } from './desk-layout'
-import { scrolling } from './desk-scroll'
 import { railSvg } from './desk-svg'
 import type { LaneCell } from './desk-svg'
 import type { DeskUi } from './desk-view'
@@ -169,9 +167,6 @@ const logRowsOf = (s: CockpitSnapshot): Row[] => {
   return buildRows(logModel(log, openFlowOf(s, log)), isAllShown(s))
 }
 
-/** The furthest the Log's window scrolls in `layout`: the rows past one window, 0 when they all show. */
-export const logScrollMax = (s: CockpitSnapshot, layout: DeskLayout): number => Math.max(0, logRowsOf(s).length - windowRows(layout))
-
 /** The Log tab of the desktop page: the filter and legend, then one row per round, event and flow, each a fixed-width rail and a text column that takes the rest. */
 export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Button, Svg } = ui
@@ -204,14 +199,13 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
     ]
     return line(`desk:log:row:${r.key}`, railSvg({ lanes: r.lanes, ...(r.dot !== undefined && { dot: r.dot }), height: RAIL_PX }), id === '' ? r.text : id, r.at, <Text wrap="truncate">{parts}</Text>)
   }
-  // a window of `cap` rows from the body's scroll offset (moved by the wheel, see register), clamped again as the filter changes the count
+  // the newest `cap` rows: the pane scrolls over them, the cap only bounds the tree
   const cap = windowRows(layout)
-  const offset = scrollOffset(s.deskScroll ?? 0, 0, rows.length - cap)
-  const shown = rows.slice(offset, offset + cap)
+  const shown = rows.slice(0, cap)
   // always drawn, one cell tall, blank when every row shows: the rows above never shift
   const hint = (
     <Box key="desk:log:hint" height={HINT_CELLS} paddingLeft={1}>
-      <Text color={DIM}>{rows.length > cap ? `${offset + 1}–${offset + shown.length} / ${rows.length}` : ' '}</Text>
+      <Text color={DIM}>{rows.length > cap ? `1–${shown.length} / ${rows.length}` : ' '}</Text>
     </Box>
   )
   const drawn =
@@ -233,7 +227,9 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
           <Text color={DIM}>{isAll ? S.onlyImportant : S.showAll}</Text>
         </Button>
       </Box>
-      {scrolling(ui, 'desk:log:window', drawn, { offset, max: Math.max(0, rows.length - cap), window: cap, total: rows.length, heightPx: cap * RAIL_PX }, actions)}
+      <Box key="desk:log:window" flexDirection="column" width="100%">
+        {drawn}
+      </Box>
     </Box>
   )
 }

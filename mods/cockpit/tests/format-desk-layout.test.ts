@@ -1,6 +1,6 @@
 import { expect, test } from 'claude-code/testing'
 
-import { DESK_MIN_COLUMNS, DESK_MIN_ROWS, deskLayout, limitRows, scrollOffset } from '../hooks/desk-layout'
+import { DESK_MIN_COLUMNS, DESK_MIN_ROWS, deskLayout, limitRows } from '../hooks/desk-layout'
 
 test('Given more rows than the limit, When limitRows runs, Then it keeps limit rows with the more row last, counting the rest', () => {
   // Given
@@ -75,12 +75,4 @@ test('Given bodyRows below 8, NaN or Infinity, When deskLayout runs, Then bodyRo
   const results = rows.map(r => deskLayout(80, r).bodyRows)
   // Then
   expect(results).toEqual([DESK_MIN_ROWS, DESK_MIN_ROWS, DESK_MIN_ROWS, DESK_MIN_ROWS, DESK_MIN_ROWS, 8, 40])
-})
-
-test('Given a wheel reporting a fraction of a row, When the offset moves, Then it moves one row its own way, up as well as down', () => {
-  // Given / When / Then
-  expect(scrollOffset(5, -0.5, 10)).toBe(4)
-  expect(scrollOffset(5, 0.4, 10)).toBe(6)
-  expect(scrollOffset(5, 0, 10)).toBe(5)
-  expect(scrollOffset(0, -0.2, 10)).toBe(0)
 })

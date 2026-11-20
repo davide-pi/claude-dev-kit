@@ -3,8 +3,7 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { deskLayout } from '../hooks/desk-layout'
-import { deskLog, logScrollMax } from '../hooks/desk-log'
-import { scrollbarSvg } from '../hooks/desk-svg'
+import { deskLog } from '../hooks/desk-log'
 import { clockTime } from '../hooks/shared'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
@@ -26,9 +25,7 @@ const keyOf = (v: unknown): string => {
   const k = propsOf(v).key
   return typeof k === 'string' ? k : ''
 }
-/** The tree without the scroll column (its arrows and scrollbar): the rails alone are the log's Svgs. */
-const bare = (v: unknown): unknown[] => (keyOf(v) === 'desk:scroll' ? [] : [v, ...kids(v).flatMap(bare)])
-const svgs = (root: unknown): Record<string, unknown>[] => bare(root).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
+const svgs = (root: unknown): Record<string, unknown>[] => nodes(root).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
 /** The log rows (not the filter), in drawing order: their key and text. */
 const logRows = (root: unknown) => nodes(root).filter(n => /^desk:log:(row|empty|more)/.test(keyOf(n)) && !keyOf(n).endsWith(':time')).map(n => ({ key: keyOf(n), text: textOf(kids(n).at(-1)) }))
 
@@ -49,7 +46,6 @@ async function drawLog($: Engine, on: On, s: CockpitSnapshot, bodyRows = 30) {
     setGroupOpen: rec('setGroupOpen'),
     scrollTo: rec('scrollTo'),
     setGroupsOpen: rec('setGroupsOpen'),
-    scrollBody: rec('scrollBody'),
   }
   on('ui.render', { component: 'Pane' }, ($$, e, next) => {
     if (e.requestId !== 'desk-log' || e.surface !== 'desktop') return next(e)
@@ -166,7 +162,7 @@ const hintOf = (root: unknown): string | undefined => {
   return n === undefined ? undefined : textOf(n).trim()
 }
 
-test('Given more rows than bodyRows, When the log is drawn, Then the filter, a window of the newest rows and the position hint fit bodyRows cells, with no pager', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given more rows than bodyRows, When the log is drawn, Then the filter, the newest rows and the position hint fit bodyRows cells, with no pager', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
   // When
@@ -182,28 +178,6 @@ test('Given more rows than bodyRows, When the log is drawn, Then the filter, a w
   expect(buttons.map(b => b.key).filter(k => /more|top/.test(String(k)))).toEqual([])
 })
 
-test('Given a scroll offset of 3, When the log is drawn, Then the window starts at the fourth row and the hint says where it is', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)), deskScroll: 3 })
-  // When
-  const { ui, root } = await drawLog($, on, s, 8)
-  await ui.unmount()
-  // Then
-  expect(logRows(root).map(r => r.text)).toEqual(['#9 prompt 9', '#8 prompt 8', '#7 prompt 7'])
-  expect(hintOf(root)).toBe('4–6 / 12')
-})
-
-test('Given an offset past the end, When the log is drawn, Then the last window shows', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const s = snap({ sessionLog: Array.from({ length: 7 }, (_, i) => round(i + 1)), deskScroll: 99 })
-  // When
-  const { ui, root } = await drawLog($, on, s, 8)
-  await ui.unmount()
-  // Then
-  expect(logRows(root).map(r => r.text)).toEqual(['#3 prompt 3', '#2 prompt 2', '#1 prompt 1'])
-  expect(hintOf(root)).toBe('5–7 / 7')
-})
-
 test('Given rows that fit, When the log is drawn, Then the hint row is still drawn, empty, so nothing shifts', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ sessionLog: [round(1), round(2)] })
@@ -212,16 +186,6 @@ test('Given rows that fit, When the log is drawn, Then the hint row is still dra
   await ui.unmount()
   // Then
   expect(hintOf(root)).toBe('')
-})
-
-test('Given 12 rows in 8 body rows, When logScrollMax is asked, Then it is 9; Given 2 rows, Then 0', () => {
-  // Given
-  const many = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
-  const few = snap({ sessionLog: [round(1), round(2)] })
-  // When
-  const max = [logScrollMax(many, deskLayout(100, 8)), logScrollMax(few, deskLayout(100, 8))]
-  // Then
-  expect(max).toEqual([9, 0])
 })
 
 test('Given a round with no prompt text, When the log is drawn, Then its row reads a dim placeholder', { timeoutMs: 30_000 }, async ($, on) => {
@@ -299,38 +263,3 @@ test('Given a round with an event and a flow launch, When the log is drawn, Then
   expect(byRow['flow:wf_1']).toBe('')
 })
 
-test('Given a quarter window three quarters down, When scrollbarSvg is built, Then the svg keeps its xmlns and the thumb sits at the bottom quarter', () => {
-  // Given
-  const args = { height: 100, start: 0.75, size: 0.25, color: '#8B6CF6' }
-  // When
-  const svg = scrollbarSvg(args)
-  // Then
-  expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
-  expect(svg).toContain('y="75" width="4" height="25"')
-})
-
-test('Given 12 rows in 8 body rows at the top, When the down and up arrows are pressed, Then down asks for a window less one row and up does nothing', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
-  const { ui, root, calls } = await drawLog($, on, s, 8)
-  // When
-  await ui.press({ key: 'desk:scroll:down' })
-  await ui.press({ key: 'desk:scroll:up' })
-  await ui.unmount()
-  // Then
-  expect(calls).toEqual(['scrollBody:2,9'])
-  const bar = nodes(root).filter(n => keyOf(n) === 'desk:scroll').flatMap(n => nodes(n)).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
-  expect(bar).toHaveLength(1)
-  expect(String(bar[0]?.source)).toContain('xmlns="http://www.w3.org/2000/svg"')
-  expect((String(bar[0]?.source).match(/<rect/g) ?? []).length).toBe(2)
-})
-
-test('Given rows that fit, When the log is drawn, Then no scroll column is drawn: the pane scrolls as a whole', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  const s = snap({ sessionLog: [round(1)] })
-  // When
-  const { ui, root } = await drawLog($, on, s, 8)
-  await ui.unmount()
-  // Then
-  expect(nodes(root).filter(n => keyOf(n) === 'desk:scroll')).toEqual([])
-})

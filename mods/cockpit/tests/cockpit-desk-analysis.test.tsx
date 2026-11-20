@@ -53,7 +53,6 @@ function recorder(calls: string[]): PaneActions {
       setGroupOpen: noop,
       scrollTo: noop,
       setGroupsOpen: noop,
-      scrollBody: noop,
     }
   }
 }

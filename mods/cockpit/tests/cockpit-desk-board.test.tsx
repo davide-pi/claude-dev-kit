@@ -7,7 +7,6 @@ import { deskHead } from '../hooks/desk-head'
 import { deskLayout } from '../hooks/desk-layout'
 import { deskNow } from '../hooks/desk-now'
 import { deskUrgent } from '../hooks/desk-urgent'
-import { bodyLimit, tabHref } from '../hooks/desk-view'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
 import type { CockpitSnapshot } from '../types'
@@ -41,7 +40,6 @@ function recorder(calls: string[]): PaneActions {
     setGroupOpen: noop,
     scrollTo: noop,
     setGroupsOpen: noop,
-    scrollBody: noop,
   }
 }
 
@@ -81,7 +79,7 @@ test('Given desktop, When each of the three tabs is drawn, Then the compact and 
   const seen: { keys: string[]; last: unknown }[] = []
   // When
   for (const tab of ['now', 'log', 'analysis'] as const) {
-    if (tab !== 'now') await ui.press({ key: `tab:${tab}`, link: { href: tabHref(tab) } })
+    if (tab !== 'now') await ui.press({ key: `tab:${tab}` })
     await settle()
     const drawn = await ui.drawn()
     seen.push({ keys: (await ui.findAll({ type: 'Button' })).map(b => b.key ?? ''), last: propsOf(childrenOf(drawn).at(-1)).key })
@@ -104,18 +102,6 @@ test('Given the action bar, When each of its buttons is pressed, Then compact, r
   expect(calls).toEqual(['compact:', 'retro:session', 'retro:days'])
   expect(textOf(await ui.drawn())).toContain(t().desk.analysis.retro)
   await ui.unmount()
-})
-
-test('Given a 60-row pane at each size, When the body limit is read, Then the head and the action bar rows are kept out of it', () => {
-  // Given
-  const rows = 60
-  // When
-  const [narrow, medium, wide] = [bodyLimit(rows, 36), bodyLimit(rows, 80), bodyLimit(rows, 160)]
-  // Then
-  // medium: 18 head and tab rows, 3 for the action bar and its gap
-  expect(medium).toBe(39)
-  expect(narrow).toBeLessThan(medium)
-  expect(wide).toBeLessThan(medium)
 })
 
 const RATES = [
@@ -171,7 +157,7 @@ test('Given a context reading, When the head is drawn, Then the short label sits
   await ui.unmount()
 })
 
-test('Given desktop, When the page is drawn, Then the open tab label is in the accent colour and the others are not', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given desktop, When the page is drawn, Then the open tab is a primary Button and the others secondary', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   world(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -179,9 +165,8 @@ test('Given desktop, When the page is drawn, Then the open tab label is in the a
   const ui = await mountDesk($)
   const tabs = keyed(await ui.drawn(), 'desk:tabs')
   // Then
-  const colours = ['now', 'log', 'analysis'].map(tab => propsOf(nodes(keyed(tabs, `desk:tab:${tab}`)).find(n => isRecord(n) && n.type === 'Text')).color)
-  expect(colours[0]).toBe('#8B6CF6')
-  expect(colours.slice(1).includes('#8B6CF6')).toBe(false)
+  const variants = ['now', 'log', 'analysis'].map(tab => propsOf(nodes(keyed(tabs, `desk:tab:${tab}`)).find(n => isRecord(n) && n.type === 'Button')).variant)
+  expect(variants).toEqual(['primary', 'secondary', 'secondary'])
   await ui.unmount()
 })
 

@@ -87,16 +87,3 @@ export function railSvg(o: { lanes: LaneCell[]; dot?: 'session' | number; height
   else if (o.dot !== undefined) parts.push(`<circle cx="${laneX(o.dot)}" cy="${mid}" r="5" fill="${laneColor({ lane: o.dot, kind: 'dot' })}"/>`)
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${RAIL_WIDTH}" height="${h}" viewBox="0 0 ${RAIL_WIDTH} ${h}">${parts.join('')}</svg>`
 }
-
-/**
- * A scrollbar `height` px tall and 6 wide: a barely visible track and, when the list does not fit (`size` under 1), the thumb, `size` of the track
- * long (the window over the total) and `start` of it down (the offset over the furthest one, times the room the thumb leaves).
- */
-export function scrollbarSvg({ height, start, size, color }: { height: number; start: number; size: number; color: string }): string {
-  const h = Math.max(1, Math.round(height))
-  const track = `<rect x="2" width="2" height="${h}" rx="1" fill="${color}" fill-opacity="0.12"/>`
-  const thumbH = Math.max(8, Math.round(Math.min(1, Math.max(0, size)) * h))
-  const thumbY = Math.round(Math.min(1, Math.max(0, start)) * h)
-  const thumb = size >= 1 ? '' : `<rect x="1" y="${Math.min(thumbY, h - thumbH)}" width="4" height="${thumbH}" rx="2" fill="${color}" fill-opacity="0.7"/>`
-  return `<svg xmlns="http://www.w3.org/2000/svg" width="6" height="${h}" viewBox="0 0 6 ${h}">${track}${thumb}</svg>`
-}

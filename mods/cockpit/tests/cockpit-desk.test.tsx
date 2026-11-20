@@ -3,9 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { deskHead } from '../hooks/desk-head'
-import { deskLayout, scrollOffset, scrollSpan } from '../hooks/desk-layout'
+import { deskLayout } from '../hooks/desk-layout'
 import { deskUrgent } from '../hooks/desk-urgent'
-import { bodyLimit, deskScrollMax, limitRows, tabHref } from '../hooks/desk-view'
+import { limitRows } from '../hooks/desk-view'
 import { RETRO_DAYS } from '../hooks/pane-actions'
 import { withoutSession } from '../hooks/session-data'
 import { INITIAL } from '../hooks/state'
@@ -40,7 +40,7 @@ test('Given setTab(log), When the snapshot is read, Then deskTab is log', { time
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
+  await ui.press({ key: 'tab:log' })
   await settle()
   await ui.drawn()
   // Then
@@ -55,42 +55,6 @@ test('Given a desk tab, When a new session resets the snapshot, Then deskTab is 
   const reset = withoutSession(s)
   // Then
   expect(reset.deskTab).toBeUndefined()
-})
-
-test('Given a body scroll offset, When a new session resets the snapshot, Then deskScroll is undefined', () => {
-  // Given
-  const s = { ...INITIAL, deskScroll: 2 }
-  // When
-  const reset = withoutSession(s)
-  // Then
-  expect(reset.deskScroll).toBeUndefined()
-})
-
-test('Given offsets and wheel moves, When scrollOffset clamps them, Then the result stays within 0 and max', () => {
-  // Given
-  const moves = [[0, -3, 9], [5, 10, 9], [2, 3, 9], [4, 1, 0]] as const
-  // When
-  const offsets = moves.map(([offset, by, max]) => scrollOffset(offset, by, max))
-  // Then
-  expect(offsets).toEqual([0, 9, 5, 0])
-})
-
-test('Given 12 rounds and no agent in 8 body rows, When deskScrollMax is asked per tab, Then no tab windows its rows: the pane scrolls as a whole', () => {
-  // Given
-  const sessionLog = Array.from({ length: 12 }, (_, i) => ({ at: i * 1000, kind: 'round' as const, n: i + 1, prompt: `p${i + 1}` }))
-  // When
-  const max = (['log', 'now', 'analysis'] as const).map(deskTab => deskScrollMax(snap({ sessionLog, deskTab }), 100, 8))
-  // Then
-  expect(max).toEqual([0, 0, 0])
-})
-
-test('Given cards of 10 cells in a 15-cell body, When scrollSpan windows them, Then one card shows at a time, the furthest offset is the last card and an offset past it is clamped', () => {
-  // Given
-  const cells = [10, 10, 10]
-  // When
-  const spans = [scrollSpan(cells, 0, 15), scrollSpan(cells, 9, 15), scrollSpan([3, 3], 1, 15)]
-  // Then
-  expect(spans).toEqual([{ from: 0, to: 1, max: 2 }, { from: 2, to: 3, max: 2 }, { from: 0, to: 2, max: 0 }])
 })
 
 test('Given retro(days), When handled, Then command.run receives the days count of RETRO_DAYS (15)', { timeoutMs: 30_000 }, async ($, on) => {
@@ -134,7 +98,7 @@ const keyed = (el: unknown, key: string): unknown => (propsOf(el).key === key ? 
 const nodesOf = (el: unknown): unknown[] => [el, ...childrenOf(el).flatMap(nodesOf)]
 const TABS = ['tab:now', 'tab:log', 'tab:analysis']
 
-test('Given desktop, When the pane is drawn, Then the tabs are text (no Button), the open now tab plain text and log and analysis Markdown links', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given desktop, When the pane is drawn, Then the three tabs are Buttons, the open now tab primary and log and analysis secondary',{ timeoutMs: 30_000 }, async ($, on) => {
   // Given
   world(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
@@ -142,11 +106,10 @@ test('Given desktop, When the pane is drawn, Then the tabs are text (no Button),
   const ui = await mountDesk($)
   // Then
   const buttons = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  // tabs are text: no Button among them; the open one plain bold text, the others Markdown links
-  expect(buttons.filter(k => TABS.includes(String(k)))).toEqual([])
+  expect(buttons.filter(k => TABS.includes(String(k)))).toEqual(TABS)
   const drawn = await ui.drawn()
   expect(keyed(drawn, 'desk:body:now')).toBeDefined()
-  expect(TABS.map(k => JSON.stringify(keyed(drawn, k)).includes('"Markdown"'))).toEqual([false, true, true])
+  expect(TABS.map(k => propsOf(keyed(drawn, k)).variant)).toEqual(['primary', 'secondary', 'secondary'])
   expect(keyed(drawn, 'desk:body:log')).toBeUndefined()
   // the active tab has its purple underline, the others a transparent one of the same size
   expect(JSON.stringify(keyed(drawn, 'desk:tab:now'))).toContain('#8B6CF6')
@@ -162,7 +125,7 @@ test('Given desktop, When tab:log is pressed and the pane redrawn, Then the log 
   const ui = await mountDesk($)
   const before = childrenOf(await ui.drawn()).slice(0, 2).map(count)
   // When
-  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
+  await ui.press({ key: 'tab:log' })
   await settle()
   // Then
   const drawn = await ui.drawn()
@@ -179,7 +142,7 @@ test('Given desktop, When tab:log is pressed, Then the log tab draws its filter 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
+  await ui.press({ key: 'tab:log' })
   await settle()
   // Then
   const body = keyed(await ui.drawn(), 'desk:body:log')
@@ -194,7 +157,7 @@ test('Given desktop, When tab:analysis is pressed, Then the analysis buttons are
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:analysis', link: { href: tabHref('analysis') } })
+  await ui.press({ key: 'tab:analysis' })
   await settle()
   // Then
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
@@ -239,16 +202,13 @@ test('Given desktop at two different bodyColumns, When drawn, Then the root Box 
   expect(fixed).toEqual([])
 })
 
-test('Given bodyRows, When the body limit is read, Then it keeps at least 8 rows and a cut list ends with a more row', () => {
+test('Given a list over the limit, When limitRows cuts it, Then it ends with a more row', () => {
   // Given
   const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j']
   // When
-  const [roomy, tight] = [bodyLimit(40), bodyLimit(5)]
   const cut = limitRows(rows, 8, n => `+${n}`)
   const whole = limitRows(rows.slice(0, 8), 8, n => `+${n}`)
   // Then
-  expect(roomy).toBeGreaterThan(8)
-  expect(tight).toBe(8)
   expect(cut).toEqual(['a', 'b', 'c', 'd', 'e', 'f', 'g', '+3'])
   expect(whole).toHaveLength(8)
 })
@@ -505,7 +465,6 @@ function urgentRecorder(calls: string[]): PaneActions {
     setGroupOpen: noop,
     scrollTo: noop,
     setGroupsOpen: noop,
-    scrollBody: noop,
   }
 }
 
