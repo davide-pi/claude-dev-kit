@@ -63,9 +63,8 @@ test('Given retro(days), When handled, Then command.run receives the days count 
   world(on, { commands })
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountPane($)
-  await ui.press({ key: 'bar:retro' })
   // When
-  await ui.press({ key: 'confirm:days' })
+  await ui.press({ key: 'bar:retro:days' })
   await settle()
   // Then
   expect(RETRO_DAYS).toBe(15)
@@ -73,18 +72,17 @@ test('Given retro(days), When handled, Then command.run receives the days count 
   await ui.unmount()
 })
 
-test('Given a refused command.run, When retro(days) is handled, Then nothing throws and confirm is cleared', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given a refused command.run, When retro(days) is handled, Then nothing throws and the footer is as it was', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   on('command.run', { command: 'retro' }, () => {
     throw new Error('refused')
   })
   const ui = await mountPane($)
-  await ui.press({ key: 'bar:retro' })
-  expect(await ui.find({ key: 'confirm:days' })).toBeDefined()
   // When
-  await ui.press({ key: 'confirm:days' })
+  await ui.press({ key: 'bar:retro:days' })
   await settle()
   // Then
+  expect(await ui.find({ key: 'bar:retro:days' })).toBeDefined()
   expect(await ui.find({ key: 'confirm:days' })).toBeUndefined()
   await ui.unmount()
 })

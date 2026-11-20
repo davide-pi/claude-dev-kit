@@ -82,6 +82,8 @@ export type World = {
   calls?: string[]
   /** True: `session.compact` stands (the conversation compacted) instead of being skipped. */
   compacts?: boolean
+  /** True: `session.compact` is left to the engine's core (it rejects while a turn runs). */
+  compactIsCore?: boolean
   /** True: `session.compact` never answers. */
   compactHangs?: boolean
   /** The conversation's size after a compaction that stood (`tokensAfter`); absent, the compaction reports none. */
@@ -346,9 +348,10 @@ export function world(on: On, options: World = {}) {
     options.closed?.push(e.origin.kind)
     return { value: undefined }
   })
-  on('session.compact', (_, e) => {
+  on('session.compact', (_, e, next) => {
     options.calls?.push('compact')
     options.instructions?.push(e.instructions)
+    if (options.compactIsCore === true) return next(e)
     if (options.compactHangs === true) return new Promise<never>(() => undefined)
     return options.compacts ? { messages: [{ role: 'user', text: 'summary', toolUses: [] }], ...(options.compactAfter !== undefined && { tokensAfter: options.compactAfter }) } : { skip: 'test' }
   })

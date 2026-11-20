@@ -196,31 +196,15 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         ]
       : windows.map(windowRow)
 
-  // The footer, the last rows of the page: compact, retrospettiva (behind a choice of the last RETRO_DAYS days or this session: it sends /retro to the model), segna ore (behind a choice of this chat or today: it sends /worklog; only with a session).
-  // The row stacks when its buttons do not fit the pane side by side.
+  // The footer, the last rows of the page: compact on the left, on the right the retrospective's two buttons (this session or the last RETRO_DAYS days: each sends /retro to the model).
+  // The row stacks when its buttons and the retrospective's label do not fit the pane side by side.
   const hasLog = s.sessionId !== undefined && !s.isWorklogSkillMissing
-  const barLabels = [S.buttons.compact, S.buttons.retro, ...(hasLog ? [S.buttons.logHours] : [])]
-  const retroLabels = [S.buttons.retroDays, S.buttons.retroSession, S.buttons.no]
+  const barWidth = buttonRowWidth([S.buttons.compact, S.buttons.retroSession, S.buttons.retroDays]) + BUTTON_GAP * 2 + [...S.buttons.retro].length
   const logLabels = [S.buttons.logSession, S.buttons.logDay, S.buttons.no]
   // From 75% of the autocompact threshold the compact button beats (a Button cannot hold a Client, so a Client draws the Button)
   const isDue = ui.Client !== undefined && andamento(s).isCompactDue
   const buttonsRow =
-    s.confirm === 'retro' ? (
-      <Box flexDirection="column">
-        {line(ui, truncateSpans([sp(S.confirmRetro, COLORS.yellow)], width))}
-        <Box flexDirection={buttonRowWidth(retroLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
-          <Button key="confirm:days" onPress={() => actions.retro('days')}>
-            {S.buttons.retroDays}
-          </Button>
-          <Button key="confirm:session" onPress={() => actions.retro('session')}>
-            {S.buttons.retroSession}
-          </Button>
-          <Button key="confirm:no" onPress={() => actions.answer(false)}>
-            {S.buttons.no}
-          </Button>
-        </Box>
-      </Box>
-    ) : s.confirm === 'worklog' && hasLog ? (
+    s.confirm === 'worklog' && hasLog ? (
       <Box flexDirection="column">
         {line(ui, truncateSpans([sp(S.confirmLog, COLORS.yellow)], width))}
         <Box flexDirection={buttonRowWidth(logLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
@@ -236,7 +220,7 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
         </Box>
       </Box>
     ) : (
-      <Box flexDirection={buttonRowWidth(barLabels) <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
+      <Box flexDirection={barWidth <= width ? 'row' : 'column'} alignItems="flex-start" columnGap={BUTTON_GAP}>
         {ui.Client && isDue ? (
           <ui.Client key="anim:compact" module="./compact-button.tsx" props={{ label: S.buttons.compact }} width={buttonRowWidth([S.buttons.compact])} />
         ) : (
@@ -244,14 +228,14 @@ export function paneView(ui: Ui, s: CockpitSnapshot, bodyColumns: number, bodyRo
             {S.buttons.compact}
           </Button>
         )}
-        <Button key="bar:retro" onPress={() => actions.ask('retro')}>
-          {S.buttons.retro}
+        <Box flexGrow={1} />
+        {line(ui, [dim(S.buttons.retro)])}
+        <Button key="bar:retro:session" onPress={() => actions.retro('session')}>
+          {S.buttons.retroSession}
         </Button>
-        {hasLog && (
-          <Button key="bar:worklog" onPress={() => actions.ask('worklog')}>
-            {S.buttons.logHours}
-          </Button>
-        )}
+        <Button key="bar:retro:days" onPress={() => actions.retro('days')}>
+          {S.buttons.retroDays}
+        </Button>
       </Box>
     )
 

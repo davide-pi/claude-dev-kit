@@ -29,12 +29,12 @@ const LEGACY_TOKENS = 1000
 
 const EN = {
   ...SHARED,
-  buttons: { compact: 'compact', retro: 'retrospective', retroDays: `last ${RETRO_DAYS} days`, retroSession: 'this session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
+  buttons: { compact: 'compact', retro: 'retrospective:', retroDays: `${RETRO_DAYS} d`, retroSession: 'session', no: 'no', logHours: 'log hours', logSession: 'this chat', logDay: 'today' },
   confirmLog: 'which hours? sends /worklog',
-  confirmRetro: 'which retrospective? sends /retro',
 
   // Header
   noRateData: 'no rate-limit data',
+  compactRefused: "Can't compact now: retry when the reply ends",
   /** The Claude state's word; a running tool shows its own name instead. */
   state: { idle: 'ready', working: 'working', thinking: 'thinking', tool: '', waiting: 'waiting' },
 
@@ -78,7 +78,7 @@ const EN = {
     head: { context: 'Context', contextShort: 'CTX', cache: 'cache', left: 'left', renews: 'renews', pace: 'pace', urgent: 'URGENT', urgentHint: 'only what waits for you', nothingWaiting: 'nothing waiting for you' },
     log: { important: 'Important', all: 'All', session: 'session', flow: 'flow', newestTop: 'newest on top', showAll: 'show all', onlyImportant: 'important only', unattributed: 'Outside a round', empty: 'nothing logged yet', noPrompt: 'no text' },
     now: { request: 'REQUEST', flow: 'FLOW', outside: 'AGENTS OUTSIDE THE FLOW', cycle: 'cycle', step: 'step', noRequest: 'no open request', noFlow: 'no flow running', noAgents: 'no agent outside the flow' },
-    analysis: { spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact now', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
+    analysis: { spend: 'SPEND', watch: 'KEEP AN EYE ON', compactNow: 'Compact', none: 'nothing yet', retro: 'Retrospective', retroSession: 'Session', retroDays: `${RETRO_DAYS} days`, promptNotEmpty: 'the prompt box is not empty' },
   },
 
   // The single page: its four sections
@@ -137,11 +137,11 @@ export type Strings = typeof EN
 
 const IT: Strings = {
   ...SHARED,
-  buttons: { compact: 'compatta', retro: 'retrospettiva', retroDays: `ultimi ${RETRO_DAYS} giorni`, retroSession: 'questa sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
+  buttons: { compact: 'compatta', retro: 'retrospettiva:', retroDays: `${RETRO_DAYS} d`, retroSession: 'sessione', no: 'no', logHours: 'segna ore', logSession: 'questa chat', logDay: 'oggi' },
   confirmLog: 'quali ore? invia /worklog',
-  confirmRetro: 'quale retrospettiva? invia /retro',
 
   noRateData: 'nessun dato sui limiti',
+  compactRefused: 'Non posso compattare ora: riprova a fine risposta',
   state: { idle: 'pronto', working: 'al lavoro', thinking: 'pensa', tool: '', waiting: 'attende' },
 
   lastTool: 'ultimo tool ',
@@ -181,7 +181,7 @@ const IT: Strings = {
     head: { context: 'Contesto', contextShort: 'CTX', cache: 'cache', left: 'mancano', renews: 'si rinnova', pace: 'ritmo', urgent: 'URGENTE', urgentHint: 'solo ciò che aspetta te', nothingWaiting: 'niente aspetta te' },
     log: { important: 'Importanti', all: 'Tutto', session: 'sessione', flow: 'flow', newestTop: 'il più recente in alto', showAll: 'mostra tutto', onlyImportant: 'solo importanti', unattributed: 'Fuori da un giro', empty: 'ancora niente nel log', noPrompt: 'senza testo' },
     now: { request: 'RICHIESTA', flow: 'FLOW', outside: 'AGENTI FUORI DAL FLOW', cycle: 'ciclo', step: 'passo', noRequest: 'nessuna richiesta aperta', noFlow: 'nessun flow in corso', noAgents: 'nessun agente fuori dal flow' },
-    analysis: { spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta ora', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
+    analysis: { spend: 'SPESA', watch: 'DA TENERE D’OCCHIO', compactNow: 'Compatta', none: 'ancora niente', retro: 'Retrospettiva', retroSession: 'Sessione', retroDays: `${RETRO_DAYS} giorni`, promptNotEmpty: 'il campo prompt non è vuoto' },
   },
 
   page: {

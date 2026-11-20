@@ -346,7 +346,7 @@ export type CockpitSnapshot = {
   /** `$.clock.now()` of the session's first reading: a branch's pull request joins the chat only when opened after it. */
   startedAt?: number
   /** A button waiting for its confirmation: the footer's `retrospettiva` (`retro`: the choice of which) or `log hours`. */
-  confirm?: 'retro' | 'worklog'
+  confirm?: 'worklog'
   /** What TREND shows; absent before the first round or tool call. */
   insights?: CockpitInsights
   /** The agents expanded in IN PROGRESS (the others show their one line): description, facts, warning, four token counters, tool. */

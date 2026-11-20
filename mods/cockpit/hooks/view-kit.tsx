@@ -18,8 +18,8 @@ import type { Ui } from './view-base'
 /** What a press does; the register module holds the engine, the view only names the acts. */
 export type PaneActions = {
   compact: () => void
-  /** Asks to confirm a button that sends something (`retro`: which `/retro`) or logs hours (`worklog`: which `/worklog`). */
-  ask: (kind: 'retro' | 'worklog') => void
+  /** Asks to confirm the button that logs hours (`worklog`: which `/worklog`). */
+  ask: (kind: 'worklog') => void
   /** Answers the confirmation: yes runs what was asked, no drops it. */
   answer: (isYes: boolean) => void
   /** Answers the retrospective's choice: `/retro days N` over the last N days (`RETRO_DAYS`), `/retro` on this session. */

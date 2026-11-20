@@ -51,7 +51,7 @@ test('the pane has no close button of its own: the buttons row is its only butto
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount({ ...PANE, surface: 'terminal' })
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(['tab:now', 'tab:log', 'tab:analysis', 'bar:compact', 'bar:retro', 'bar:worklog'])
+  expect(keys).toEqual(['tab:now', 'tab:log', 'tab:analysis', 'bar:compact', 'bar:retro:session', 'bar:retro:days'])
   await ui.unmount()
 })
 

@@ -109,8 +109,8 @@ test('Given the desk block, When read in both languages, Then the tab, head, log
     setLang('en')
     const en = words(t().desk)
     // Then
-    expect(it).toEqual(['In corso', 'Log', 'Analisi', 'Contesto', 'URGENTE', 'solo ciò che aspetta te', 'Importanti', 'Tutto', 'il più recente in alto', 'RICHIESTA', 'FLOW', 'AGENTI FUORI DAL FLOW', 'Compatta ora', 'Fuori da un giro'])
-    expect(en).toEqual(['In progress', 'Log', 'Analysis', 'Context', 'URGENT', 'only what waits for you', 'Important', 'All', 'newest on top', 'REQUEST', 'FLOW', 'AGENTS OUTSIDE THE FLOW', 'Compact now', 'Outside a round'])
+    expect(it).toEqual(['In corso', 'Log', 'Analisi', 'Contesto', 'URGENTE', 'solo ciò che aspetta te', 'Importanti', 'Tutto', 'il più recente in alto', 'RICHIESTA', 'FLOW', 'AGENTI FUORI DAL FLOW', 'Compatta', 'Fuori da un giro'])
+    expect(en).toEqual(['In progress', 'Log', 'Analysis', 'Context', 'URGENT', 'only what waits for you', 'Important', 'All', 'newest on top', 'REQUEST', 'FLOW', 'AGENTS OUTSIDE THE FLOW', 'Compact', 'Outside a round'])
   } finally {
     setLang('en')
   }

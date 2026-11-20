@@ -11,7 +11,9 @@ test('English is the default: the footer and the titles', { timeoutMs: 30_000 },
   await $.session.start({ cwd: '/', surface: 'terminal', isInteractive: true })
   const ui = await mountAnalysis($, 58)
   const label = async (key: string) => (await ui.find({ key }))?.text
-  expect([await label('bar:compact'), await label('bar:retro'), await label('bar:worklog')]).toEqual(['compact', 'retrospective', 'log hours'])
+  expect([await label('bar:compact'), await label('bar:retro:session'), await label('bar:retro:days')]).toEqual(['compact', 'session', '15 d'])
+  expect(rowTexts(await ui.drawn()).some(r => r.includes('retrospective:'))).toBe(true)
+  expect(await ui.find({ key: 'bar:worklog' })).toBeUndefined()
   expect(rowTexts(await ui.drawn()).some(r => /^ATTENTION ─+$/.test(r))).toBe(true)
   await ui.unmount()
 })
