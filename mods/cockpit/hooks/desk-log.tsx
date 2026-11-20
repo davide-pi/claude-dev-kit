@@ -17,7 +17,6 @@ import { activeRun } from './workflow'
 
 const TEXT = '#F2F0EA'
 const DIM = '#A8A49B'
-const ACCENT = '#8B6CF6'
 const LINK = '#B9A2FF'
 const RAIL_WIDTH = 86
 /** The rail's height in CSS pixels: the row takes it, so the lanes of two rows meet. */
@@ -119,7 +118,7 @@ function buildRows(model: LogModel, isAll: boolean): Row[] {
     rows.push({ key: `round:${n}`, round: n, text: prompt === '' ? S.noPrompt : prompt, color: prompt === '' ? DIM : TEXT, isHeader: true, dot: 'session', lanes: [] })
     const events = [...(round?.events ?? []).map(e => ({ e, flow: undefined })), ...(placed.get(n) ?? [])].filter(x => shown(x.e)).sort((a, b) => b.e.at - a.e.at)
     events.forEach(({ e, flow }, i) =>
-      rows.push({ key: `event:${n}:${i}`, round: n, text: entryText(e), color: e.isFailed === true ? '#FF9A85' : TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
+      rows.push({ key: `event:${n}:${i}`, round: n, text: entryText(e), color: e.isFailed === true ? '#FF5A4F' : TEXT, ...(flow !== undefined && { flow, ...(flow.lane !== undefined && { dot: flow.lane }) }), lanes: [] }),
     )
     // the flow's launch: the oldest row of the round it started in
     for (const flow of model.flows.filter(f => f.startRound === n)) {
@@ -208,22 +207,19 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
       ? [line('desk:log:empty', railSvg({ lanes: [], height: RAIL_PX }), S.empty, <Text wrap="truncate" color={DIM}>{S.empty}</Text>), hint]
       : [...shown.map(drawRow), hint]
 
-  // one filter for both pages on purpose: the same ALL_KEY the terminal log toggles; pressing the active choice changes nothing
-  const choice = (key: string, label: string, isOn: boolean): RenderElement => (
-    <Button key={key} onPress={() => (isOn ? undefined : actions.toggleOpen(ALL_KEY))}>
-      <Text color={isOn ? ACCENT : DIM} weight={isOn ? 'bold' : undefined}>
-        {label}
-      </Text>
-    </Button>
-  )
+  // one filter for both pages on purpose: the same ALL_KEY the terminal log toggles; the mode is plain text, one button switches to the other
   return (
     <Box key="desk:log" flexDirection="column" width="100%">
-      <Box key="desk:log:filter" flexDirection="row" columnGap={2} alignItems="center">
-        {choice('desk:log:important', S.important, !isAll)}
-        {choice('desk:log:all', S.all, isAll)}
+      <Box key="desk:log:filter" flexDirection="row" columnGap={1} alignItems="center">
+        <Text color={LINK} weight="bold">
+          {isAll ? S.all : S.important}
+        </Text>
         <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <Text wrap="truncate" color={DIM}>{`${S.session} · ${S.flow} · ${S.newestTop}`}</Text>
+          <Text wrap="truncate" color={DIM}>{`· ${S.newestTop}`}</Text>
         </Box>
+        <Button key={isAll ? 'desk:log:important' : 'desk:log:all'} onPress={() => actions.toggleOpen(ALL_KEY)}>
+          <Text color={DIM}>{isAll ? S.onlyImportant : S.showAll}</Text>
+        </Button>
       </Box>
       {drawn}
     </Box>

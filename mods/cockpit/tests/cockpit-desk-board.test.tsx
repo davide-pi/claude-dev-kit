@@ -138,7 +138,7 @@ for (const columns of [36, 80, 160]) {
     const svg = childrenOf(track)[0]
     expect(isRecord(svg) && svg.type).toBe('Svg')
     expect(propsOf(svg).width).toBeUndefined()
-    expect(propsOf(svg).height).toBe(8)
+    expect(propsOf(svg).height).toBe(14)
     expect(String(propsOf(svg).alt)).toContain(t().desk.head.left)
     expect(propsOf(percent).flexShrink).toBe(0)
     expect(textOf(percent)).toContain('62%')

@@ -45,13 +45,13 @@ test('Given the donut, When built, Then it has the board geometry and only the c
   expect(svg).not.toContain('r="33"')
 })
 
-test('Given a bar, When built, Then it is 8 high with preserveAspectRatio none, the left share filled and the pace mark only when given', () => {
+test('Given a bar, When built, Then it is 14 high, the track 8, with preserveAspectRatio none, the left share filled and the pace mark only when given', () => {
   // Given / When
   const bar = barSvg({ left: 40, color: '#7CC79A' })
   const paced = barSvg({ left: 40, pace: 60, color: '#7CC79A' })
   const over = barSvg({ left: 400, color: '#7CC79A' })
   // Then
-  for (const part of ['viewBox="0 0 260 8"', 'height="8"', 'preserveAspectRatio="none"', 'width="104"', '#7CC79A']) expect(bar).toContain(part)
+  for (const part of ['viewBox="0 0 260 14"', 'height="14"', 'height="8"', 'preserveAspectRatio="none"', 'width="104"', '#7CC79A']) expect(bar).toContain(part)
   expect(bar).not.toContain('<line')
   expect(paced).toContain('<line')
   expect(paced).toContain('x1="156"')

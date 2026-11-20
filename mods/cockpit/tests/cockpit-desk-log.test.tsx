@@ -90,17 +90,17 @@ test('Given Importanti, When the log is drawn, Then rows that Tutto shows are hi
   expect(important.calls).toEqual(['toggleOpen:log:all'])
 })
 
-test('Given Tutto, When the log is drawn, Then the ok test row shows and pressing Tutto again changes nothing', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given Tutto, When the log is drawn, Then the ok test row shows and the one button switches back to Importanti', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const log: CockpitLogEntry[] = [round(1), { at: NOW - 98_500, kind: 'test', round: 1, text: 'npm test', isFailed: false }]
   const passed = t().page.events.test('npm test', false)
   // When
   const all = await drawLog($, on, snap({ sessionLog: log, openKeys: ['log:all'] }))
-  await all.ui.press({ key: 'desk:log:all' })
+  await all.ui.press({ key: 'desk:log:important' })
   await all.ui.unmount()
   // Then
   expect(logRows(all.root).some(r => r.text.includes(`#1 ${passed}`))).toBe(true)
-  expect(all.calls).toEqual([])
+  expect(all.calls).toEqual(['toggleOpen:log:all'])
 })
 
 test('Given a pre-v3 log, When the log is drawn, Then round headers show and one unattributed group holds the rest, last', { timeoutMs: 30_000 }, async ($, on) => {

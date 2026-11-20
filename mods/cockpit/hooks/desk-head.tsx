@@ -17,13 +17,13 @@ const SOFT = '#C9C5BB'
 const DIM = '#A8A49B'
 const LINK = '#B9A2FF'
 const OK = '#7CC79A'
-const WARN = '#F2A65A'
-const RED = '#FF9A85'
+const WARN = '#F5C542'
+const RED = '#FF5A4F'
 /** The background of the head's cards and their border, as on the design board. */
 const CARD = '#30302E'
 const BORDER = '#403F3B'
 const ICON_PX = 20
-const BAR_PX = 8
+const BAR_PX = 14
 
 /** The terminal palette's status colours on the desktop palette; anything else stays as it is. */
 const semantic = (c: string): string => (c === COLORS.green ? OK : c === COLORS.yellow || c === COLORS.amber ? WARN : c === COLORS.red ? RED : c)

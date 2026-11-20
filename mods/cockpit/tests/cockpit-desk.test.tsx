@@ -528,7 +528,7 @@ test('Given no blocking signal, When the card is drawn, Then it has the same ele
   expect(count(calmCard)).toBe(count(blockedCard))
   expect(textOf(calmCard)).toContain(t().desk.head.nothingWaiting)
   expect(textOf(blockedCard)).not.toContain(t().desk.head.nothingWaiting)
-  expect(JSON.stringify(blockedCard)).toContain('#FF9A85')
+  expect(JSON.stringify(blockedCard)).toContain('#FF5A4F')
   await a.unmount()
   await b.unmount()
 })
