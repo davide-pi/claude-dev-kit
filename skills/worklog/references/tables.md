@@ -25,7 +25,7 @@ Long waits counted: 10:45-13:10 (2h25m, <repo>) — keep or drop them
 **Coverage: 2h / 8h — 6h missing**
 ```
 
-At chat `it` (worklog tables are chat output): Project=Progetto, Claude + You=Claude + Tu, Total=Totale, Rounded=Arrotondato, loggable=loggabili, internal=interno (as `round.ps1` prints it), not logged=non loggato, already on the board=già sul board, estimate=stima, Out of hours=Fuori orario, Not billed=Non fatturato (internal=interni, rounding=arrotondamento), Long waits counted=Attese lunghe contate (keep or drop them=tienile o toglile), Coverage=Copertura (missing=mancano), Source=Fonte (`#<n> da <…>`), declared=dichiarato, calendar=calendario.
+At chat `it` (worklog tables are chat output): Project=Progetto, Claude + You=Claude + Tu, Total=Totale, Rounded=Arrotondato, loggable=loggabili, internal=interno (as `round.ps1` prints it), not logged=non loggato, already on the board=già sul board, estimate=stima, Out of hours=Fuori orario, Not billed=Non fatturato (internal=interni, rounding=arrotondamento), Long waits counted=Attese lunghe contate (keep or drop them=tienile o toglile), Coverage=Copertura (missing=mancano), Source=Fonte (`#<n> da <…>`), declared=dichiarato, mail=mail, calendar=calendario, Teams=Teams.
 
 | Column / line | Source |
 | --- | --- |
@@ -34,7 +34,7 @@ At chat `it` (worklog tables are chat output): Project=Progetto, Claude + You=Cl
 | `Claude + You` / `Total` | the engine's `CLAUDE`, `TU` and `TOTALE` for the topic: measured hours, extra, their sum; the user adjusts by judgement. An estimate (a split of the default branch) gets `*` after `Total` and the line `\* estimate: <why>` below the table — **never `~`** in a cell: two of them in a row render as strikethrough |
 | `Rounded` | `round.ps1` on `Total`, never by hand; mark `0h (not logged)` and `internal` rows |
 | `Out of hours` line | the engine's `FUORI`, what fell outside 08:00-20:00: `#<n> +<min>` per row that has any; omit the line when all are 0 |
-| `Source` line | only rows not from the transcripts (gap rows): `#<n> from <declared, Slack, calendar, board, git>`; omit it otherwise |
+| `Source` line | rows not from the transcripts (source rows and gap rows): `#<n> from <declared, Slack, mail, calendar, Teams, board, git>`; omit it otherwise |
 | header `already on the board` | the GIORNO table's `LOGGATO` for the day |
 | `Not billed` | the helper's NON FATTURATO line, verbatim numbers |
 | `Long waits counted` | the engine's long turns on that day; omit the line when there are none |

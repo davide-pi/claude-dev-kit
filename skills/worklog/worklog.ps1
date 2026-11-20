@@ -13,14 +13,17 @@
             interactive tools excluded; a background agent keeps working after the turn). A turn with no turn_duration (interrupted)
             runs from its user prompt to the last assistant event before the next prompt. The busy
             minutes of all sessions are SUMMED (two parallel 1h chats = 2h, so a day can exceed the clock).
-            Background bash jobs (dev servers) never count. A turn longer than MaxSpanMinutes still
+            A background task (a Bash or PowerShell call with run_in_background) is busy from its tool_result
+            to the queue-operation line carrying the <task-notification> with the same <tool-use-id> (any
+            status); with no such line, BackgroundFallbackMinutes after the tool_result. One interval per
+            tool-use id, so a resumed transcript copying the lines counts it once; dev servers count too.
+            A turn longer than MaxSpanMinutes still
             counts, but is listed under "Attese lunghe": a permission prompt left pending looks the same
-            (so does a subagent tool call over MaxSpanMinutes, counted up to the limit and listed in full).
+            (so does a subagent tool call or a background task over MaxSpanMinutes, counted up to the limit and listed in full).
     TU      the user writing prompts and reading results: after each busy interval of a session, up to
-            MarginMinutes or until that session's next busy start or prompt. Counted ONCE: the union of
-            these intervals over all sessions, minus the union of all sessions' busy intervals (while
-            Claude works anywhere the user's time is already covered). Each TU minute goes to the topic of
-            the session whose busy interval ended most recently.
+            MarginMinutes or until that session's own next busy start or prompt. Each session books its
+            own margins to its own topic, and the margins of all sessions are SUMMED like CLAUDE (a margin
+            that overlaps another session's busy time or margin counts again, so TU can exceed the clock).
   Topic = project (cwd) + git branch: the one of the session's last event at the start of the interval,
   changing where the session's events change it. Day = the local day of the minute.
   Working hours: minutes inside DayStart-DayEnd are CLAUDE and TU (TOTALE = CLAUDE + TU); minutes
@@ -65,7 +68,8 @@ param(
   [string]$ProjectsRoot   = (Join-Path $HOME '.claude/projects'),
   [string]$OutDir         = (Join-Path $HOME '.claude/worklog'),
   [int]$IdleMinutes       = 15,   # subagent events this close are one run of work; a subagent tool call longer than this fills the gap it spans
-  [int]$MarginMinutes     = 15,   # the user's time after a busy interval
+  [int]$MarginMinutes     = 5,    # the user's time after a busy interval of a chat
+  [int]$BackgroundFallbackMinutes = 15,   # a background task with no task-notification counts this long from its tool_result
   [int]$MaxSpanMinutes    = 120,  # a longer turn is listed under "Attese lunghe"; a subagent tool call counts up to this and is listed
   [int]$DayStart          = 8,    # working hours; the rest of the day is FUORI
   [int]$DayEnd            = 20,
@@ -139,6 +143,7 @@ $busyRaw = [System.Collections.Generic.List[object]]::new()   # { Session, S, E,
 $subLong = [System.Collections.Generic.List[object]]::new()    # subagent tool calls longer than MaxSpanMinutes: { Session, S, E, Min }
 # Pass 1 keeps every line's contribution; the resume dedup (below) decides which ones count before any event or turn is built.
 $recs = [System.Collections.Generic.List[object]]::new()
+$bgRecs = [System.Collections.Generic.List[object]]::new()   # background tasks per file: { Id, File, Session, S, E }
 $fileFirst = @{}; $fileLast = @{}; $fileBorn = @{}
 $continuedBy = @{}   # session id of a resume -> session id of the original that has a "continued-in" line pointing at it
 
@@ -151,7 +156,7 @@ foreach ($file in $files) {
   $r = ScanFile $file $cfg
   $fileBorn[$r.File] = $r.Born
   foreach ($cp in $r.Cont) { $continuedBy[$cp[0]] = $cp[1] }
-  $busyRaw.AddRange($r.Busy); $subLong.AddRange($r.SubLong); $recs.AddRange($r.Recs)
+  $busyRaw.AddRange($r.Busy); $subLong.AddRange($r.SubLong); $recs.AddRange($r.Recs); $bgRecs.AddRange($r.Bg)
   if ($null -ne $r.First) { $fileFirst[$r.File] = $r.First; $fileLast[$r.File] = $r.Last }
 }
 
@@ -186,6 +191,24 @@ foreach ($r in $recs) {
   }
   if ($r.TurnMs -gt 0) { $busyRaw.Add([pscustomobject]@{ Session = $r.Session; S = $r.Time.AddMilliseconds(-$r.TurnMs); E = $r.Time; Turn = $true }) }
   if ($r.Ev) { $events.Add($r.Ev) }
+}
+
+# ---- background tasks: queue-operation lines have no uuid, so the copies of a resume or fork are deduped by tool-use id ----
+# One interval per id: it belongs to the session of the file of best rank that saw the tool_result; the end is the earliest
+# notification any copy carries (a resume may hold the one the original never saw), else the fallback; capped at MaxSpanMinutes.
+$bgEnd = @{}; $bgOwn = @{}
+foreach ($b in $bgRecs) {
+  if ($null -ne $b.E -and (-not $bgEnd.ContainsKey($b.Id) -or $b.E -lt $bgEnd[$b.Id])) { $bgEnd[$b.Id] = $b.E }
+  if ($null -eq $b.S) { continue }
+  $rk = if ($fileRank.ContainsKey($b.File)) { $fileRank[$b.File] } else { [int]::MaxValue }
+  if (-not $bgOwn.ContainsKey($b.Id) -or $rk -lt $bgOwn[$b.Id].Rank) { $bgOwn[$b.Id] = [pscustomobject]@{ Rank = $rk; Rec = $b } }
+}
+foreach ($id in $bgOwn.Keys) {
+  $b = $bgOwn[$id].Rec
+  $endAt = if ($bgEnd.ContainsKey($id) -and $bgEnd[$id] -gt $b.S) { $bgEnd[$id] } else { $b.S.AddMinutes($BackgroundFallbackMinutes) }
+  $span = ($endAt - $b.S).TotalMinutes
+  $busyRaw.Add([pscustomobject]@{ Session = $b.Session; S = $b.S; E = $(if ($span -gt $MaxSpanMinutes) { $b.S.AddMinutes($MaxSpanMinutes) } else { $endAt }); Turn = $false })
+  if ($span -gt $MaxSpanMinutes) { $subLong.Add([pscustomobject]@{ Session = $b.Session; S = $b.S; E = $endAt; Min = $span }) }
 }
 
 # alias: B copies A's messages and A ended before B's first own event (a resume) -> one session, under A's id.
@@ -265,10 +288,8 @@ $acc = @{}   # minutes per topic, day, session (Book, in the lib)
 
 # ---- CLAUDE: the busy intervals of each session, summed ----
 $busyBy = @{}
-$allBusy = [System.Collections.Generic.List[object]]::new()
 foreach ($g in ($busyRaw | Where-Object { $bySession.ContainsKey($_.Session) } | Group-Object Session)) {
   $busyBy[$g.Name] = MergeIv $g.Group
-  foreach ($iv in $busyBy[$g.Name]) { $allBusy.Add($iv) }
 }
 foreach ($s in $busyBy.Keys) {
   foreach ($iv in $busyBy[$s]) {
@@ -282,7 +303,7 @@ foreach ($s in $busyBy.Keys) {
   }
 }
 # turns longer than MaxSpanMinutes count, and are listed: a permission prompt left pending looks the same;
-# a subagent tool call that long counts up to MaxSpanMinutes and is listed in full
+# a subagent tool call or a background task that long counts up to MaxSpanMinutes and is listed in full
 $longWaits = [System.Collections.Generic.List[object]]::new()
 foreach ($b in @($busyRaw | Where-Object Turn) + @($subLong)) {
   if (-not $bySession.ContainsKey($b.Session)) { continue }
@@ -292,10 +313,9 @@ foreach ($b in @($busyRaw | Where-Object Turn) + @($subLong)) {
   $longWaits.Add([pscustomobject]@{ From = $b.S; To = $b.E; Min = $mins; Where = "$(Split-Path $k[0] -Leaf) / $($k[1])" })
 }
 
-# ---- TU: after each busy interval, up to the margin, once, never while any session is busy ----
-$gb = MergeIv $allBusy
-$gbEnds = [datetime[]]@($gb | ForEach-Object E)
-$pieces = [System.Collections.Generic.List[object]]::new()
+# ---- TU: after each busy interval of a session, up to the margin, booked to that session's topic; sessions are summed ----
+# The session's busy intervals are already merged, and each margin stops at the session's own next busy start or prompt,
+# so its margins never overlap: nothing of one chat is booked twice.
 foreach ($s in $busyBy.Keys) {
   $stops = [datetime[]]@(@($busyBy[$s] | ForEach-Object S) + @($promptTimes[$s]) | Sort-Object)
   foreach ($iv in $busyBy[$s]) {
@@ -303,32 +323,8 @@ foreach ($s in $busyBy.Keys) {
     $ni = LowerBound $stops $iv.E
     if ($ni -lt $stops.Count -and $stops[$ni] -lt $cap) { $cap = $stops[$ni] }
     if ($cap -le $iv.E) { continue }
-    $key = $chgK[$s][(TopicIdx $s $iv.E)]
-    # the part of [E, cap] outside every session's busy time
-    $lo = 0; $hi = $gbEnds.Count - 1; $k = $gbEnds.Count
-    while ($lo -le $hi) { $mid = [int][math]::Floor(($lo + $hi) / 2); if ($gbEnds[$mid] -gt $iv.E) { $k = $mid; $hi = $mid - 1 } else { $lo = $mid + 1 } }
-    $t = $iv.E
-    while ($t -lt $cap) {
-      if ($k -lt $gb.Count -and $gb[$k].S -lt $cap) {
-        if ($gb[$k].S -gt $t) { $pieces.Add([pscustomobject]@{ S = $t; E = $gb[$k].S; Owner = $iv.E; Session = $s; Key = $key }) }
-        if ($gb[$k].E -gt $t) { $t = $gb[$k].E }
-        $k++
-      } else { $pieces.Add([pscustomobject]@{ S = $t; E = $cap; Owner = $iv.E; Session = $s; Key = $key }); $t = $cap }
-    }
+    Book $iv.E $cap $s $chgK[$s][(TopicIdx $s $iv.E)] 'tu'
   }
-}
-# overlapping pieces count once, for the session whose busy interval ended most recently
-$pieces = @($pieces | Sort-Object S)
-$bounds = [datetime[]]@(@($pieces | ForEach-Object S) + @($pieces | ForEach-Object E) | Sort-Object -Unique)
-$active = [System.Collections.Generic.List[object]]::new(); $pi = 0
-for ($bi = 0; $bi -lt $bounds.Count - 1; $bi++) {
-  $t0 = $bounds[$bi]; $t1 = $bounds[$bi + 1]
-  while ($pi -lt $pieces.Count -and $pieces[$pi].S -le $t0) { $active.Add($pieces[$pi]); $pi++ }
-  for ($j = $active.Count - 1; $j -ge 0; $j--) { if ($active[$j].E -le $t0) { $active.RemoveAt($j) } }
-  if ($active.Count -eq 0) { continue }
-  $best = $active[0]
-  foreach ($p in $active) { if ($p.Owner -gt $best.Owner) { $best = $p } }
-  Book $t0 $t1 $best.Session $best.Key 'tu'
 }
 
 # ---- report per project -> branch ----
@@ -412,7 +408,7 @@ foreach ($e in @(ReadJson $auditPath)) {
 Write-Output "=== WORKLOG $rangeLabel ==="
 Write-Output ("Progetti: {0} | CLAUDE: {1} | TU: {2} | TOTALE: {3} | FUORI: {4}" -f `
   $projReport.Count, (FmtMin $sumClaude), (FmtMin $sumTu), (FmtMin $totalMin), (FmtMin $sumOut))
-Write-Output ("Modello: CLAUDE = turni e subagent di ogni chat, sommati; TU = fino a {0} min dopo ogni risposta, una volta sola e mai mentre una chat lavora; orario {1}-{2}, il resto in FUORI; turni oltre {3} min elencati" -f `
+Write-Output ("Modello: CLAUDE = turni, subagent e task in background di ogni chat, sommati; TU = fino a {0} min dopo ogni intervallo di lavoro di una chat (o fino al suo prossimo prompt), sommati tra le chat; orario {1}-{2}, il resto in FUORI; turni oltre {3} min elencati" -f `
   $MarginMinutes, $DayStart, $DayEnd, $MaxSpanMinutes)
 Write-Output ""
 Write-Output ("{0,-34} {1,9} {2,9} {3,9} {4,9} {5,-17} {6,6}" -f 'PROGETTO / topic (branch)', 'CLAUDE', 'TU', 'TOTALE', 'FUORI', 'FASCIA', 'PROMPT')

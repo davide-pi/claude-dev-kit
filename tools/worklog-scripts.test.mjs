@@ -104,39 +104,61 @@ test('given a 60-min turn and a prompt 5 min after it, when the engine runs, the
 
 test('given a reply that never comes, when the engine runs with the default and a 10-min margin, then the user time stops at the margin', { skip }, async () => {
   // Given / When / Then
-  assert.deepEqual(figures(await runEngine(worked(60, 60), [], [])), { claude: 60, tu: 15, totale: 75, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(worked(60, 60), [], [])), { claude: 60, tu: 5, totale: 65, fuori: 0 });   // the default margin is 5
   assert.equal(figures(await runEngine(worked(60, 60), [], ['-MarginMinutes', '10'])).tu, 10);
 });
 
-test('given two overlapping 60-min turns in two chats, when the engine runs, then CLAUDE adds up and TU counts only after the last one ends', { skip }, async () => {
+test('given two overlapping 60-min turns in two chats each followed by a prompt 10 min later, when the engine runs, then each chat books its own 5-min margin and TU is 10', { skip }, async () => {
   // Given
-  const main = [...worked(60, 60), ...worked(90, 60, { session: 's2' })];   // s1 10:00-11:00, s2 10:30-11:30
+  const s2 = { session: 's2' };
+  const main = [...worked(60, 60), prompt(70), ...worked(90, 60, s2), prompt(100, s2)];   // s1 10:00-11:00, s2 10:30-11:30
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 120, tu: 15, totale: 135, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 120, tu: 10, totale: 130, fuori: 0 });
 });
 
-test('given turns in two chats that overlap or leave a gap, when the engine runs, then the user time is never counted while another chat is busy and once where it overlaps', { skip }, async () => {
+test('given turns in two chats that overlap or leave a gap, when the engine runs, then each chat books its own margin whatever the other does', { skip }, async () => {
   // Given
   const busy = [...worked(10, 10), ...worked(40, 35, { session: 's2' })];   // s1 0-10, s2 5-40
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(busy, [], [])), { claude: 45, tu: 15, totale: 60, fuori: 0 });
-  const gap = [...worked(10, 10), ...worked(30, 10, { session: 's2' })];   // s1 0-10, s2 20-30: 10-20 is free, 20-25 is covered
-  assert.deepEqual(figures(await runEngine(gap, [], [])), { claude: 20, tu: 25, totale: 45, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(busy, [], [])), { claude: 45, tu: 10, totale: 55, fuori: 0 });   // s1 10-15 and s2 40-45, summed
+  const gap = [...worked(10, 10), ...worked(30, 10, { session: 's2' })];   // s1 0-10, s2 20-30
+  assert.deepEqual(figures(await runEngine(gap, [], [])), { claude: 20, tu: 10, totale: 30, fuori: 0 });
 });
 
-test('given an idle open chat, when the engine runs, then it adds nothing', { skip }, async () => {
+test('given an idle open chat, when the engine runs, then it adds only its own margin', { skip }, async () => {
   // Given
   const main = [...worked(60, 60), ...worked(5, 5, { session: 's2' })];   // s2 answered at 10:05 and was left open for the hour
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 65, tu: 15, totale: 80, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 65, tu: 10, totale: 75, fuori: 0 });
+});
+
+test('given a turn and a subagent call of the same chat that overlap, when the engine runs, then the chat merges its own pieces and books one margin', { skip }, async () => {
+  // Given
+  const sub = [reply(1), toolUse(10, 'x1'), toolResult(40, 'x1'), reply(41)];   // inside the 0-60 turn
+
+  // When / Then
+  assert.deepEqual(figures(await runEngine(worked(60, 60), sub, [])), { claude: 60, tu: 5, totale: 65, fuori: 0 });
+});
+
+test('given a run, when the engine prints, then the header and the Modello line describe the summed model', { skip }, async () => {
+  // Given
+  const out = await runEngine(worked(60, 60), [], []);
+  const script = readFileSync(join(SKILL, 'worklog.ps1'), 'utf8');
+  const tuDoc = script.slice(script.indexOf('    TU '), script.indexOf('  Topic ='));
+
+  // When / Then
+  assert.match(out, /^Modello: .*TU = .*sommat/m);
+  assert.doesNotMatch(out, /^Modello: .*(una volta sola|mai mentre)/m);
+  assert.match(tuDoc, /summed/i);
+  assert.doesNotMatch(tuDoc, /Counted ONCE|minus the union/);
 });
 
 test('given turns with no turn_duration, when the engine runs, then a turn runs from its prompt to the last reply before the next prompt', { skip }, async () => {
   // Given / When / Then
-  assert.deepEqual(figures(await runEngine([prompt(0), reply(20), prompt(30), reply(35)], [], [])), { claude: 25, tu: 25, totale: 50, fuori: 0 });
+  assert.deepEqual(figures(await runEngine([prompt(0), reply(20), prompt(30), reply(35)], [], [])), { claude: 25, tu: 10, totale: 35, fuori: 0 });
   const build = [prompt(0), toolUse(1, 't1'), toolResult(61, 't1'), reply(62)];   // interrupted turn with a long tool call
   assert.equal(figures(await runEngine(build, [], [])).claude, 62);
 });
@@ -146,7 +168,7 @@ test('given subagent activity after the turn (a background agent), when the engi
   const sub = Array.from({ length: 7 }, (_, i) => reply(1 + i * 10));   // 10:01 … 11:01
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 61, tu: 15, totale: 76, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 61, tu: 5, totale: 66, fuori: 0 });
 });
 
 test('given subagent tool calls that span a long gap and the same gap with no call, when the engine runs, then only the call counts', { skip }, async () => {
@@ -154,7 +176,7 @@ test('given subagent tool calls that span a long gap and the same gap with no ca
   const call = [reply(1), toolUse(2, 'sub1'), toolResult(42, 'sub1'), reply(43)];   // a 40-min tool call after the turn
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(worked(1, 1), call, [])), { claude: 43, tu: 15, totale: 58, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(worked(1, 1), call, [])), { claude: 43, tu: 5, totale: 48, fuori: 0 });
   assert.equal(figures(await runEngine(worked(1, 1), [reply(1), reply(43)], [])).claude, 1);   // idle, then resumed: the gap is not work
   const long = await runEngine(worked(1, 1), [toolUse(2, 'sub1'), toolResult(142, 'sub1')], []);   // 140 min: counted up to MaxSpanMinutes, listed in full
   assert.equal(figures(long).claude, 121);
@@ -170,7 +192,7 @@ test('given a subagent tool call straddling midnight, when the engine runs, then
   const sub = [toolUse(-610, 'x1'), toolResult(-570, 'x1')];   // 23:50 yesterday - 00:30 today
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 1, tu: 15, totale: 16, fuori: 45 });   // 30m of the call + 15m of TU, both before 08:00
+  assert.deepEqual(figures(await runEngine(worked(1, 1), sub, [])), { claude: 1, tu: 5, totale: 6, fuori: 35 });   // 30m of the call + 5m of its margin, both before 08:00
 });
 
 test('given a turn across midnight, when the engine runs for the single day, then it keeps its part before the end of the period', { skip }, async () => {
@@ -184,22 +206,91 @@ test('given a turn across midnight, when the engine runs for the single day, the
   assert.deepEqual(figures(out), { claude: 0, tu: 0, totale: 0, fuori: 30 });
 });
 
-test('given a background dev server, when the engine runs, then it never counts', { skip }, async () => {
+/** The queue-operation line Claude Code writes when a background task ends: no uuid, the id inside the notification. */
+const enqueue = (min, id, status = 'completed', session = 's1') => ({
+  type: 'queue-operation', operation: 'enqueue', timestamp: at(min), sessionId: session,
+  content: `<task-notification><task-id>t1</task-id><tool-use-id>${id}</tool-use-id><status>${status}</status></task-notification>`,
+});
+/** A turn 0-2 whose Bash call started a background task at minute 2 (the tool_result comes back at once). */
+const bgStart = (id = 'bg1', session = 's1') => [
+  withSession(prompt(0), session), withSession(toolUse(1, id, { run_in_background: true }), session),
+  withSession(toolResult(2, id), session), withSession(reply(2), session), withSession(turn(2, 2), session),
+];
+
+test('given a background Bash call whose notification comes 30 min after its tool_result, when the engine runs, then those 30 min count as CLAUDE', { skip }, async () => {
   // Given
-  const main = [
-    ...worked(2, 2), toolUse(1, 'bg1', { run_in_background: true }), toolResult(1, 'bg1'),
-    { type: 'queue-operation', operation: 'enqueue', timestamp: at(90), sessionId: 's1',
-      content: '<task-notification><tool-use-id>bg1</tool-use-id></task-notification>' },
-  ];
+  const main = [...bgStart(), enqueue(32, 'bg1')];
 
   // When / Then
-  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 2, tu: 15, totale: 17, fuori: 0 });
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 32, tu: 5, totale: 37, fuori: 0 });
+  for (const status of ['failed', 'killed', 'stopped']) {   // every status ends the task
+    assert.equal(figures(await runEngine([...bgStart(), enqueue(32, 'bg1', status)], [], [])).claude, 32, status);
+  }
+});
+
+test('given a background PowerShell call with no notification, when the engine runs, then it counts 15 min from its tool_result and BackgroundFallbackMinutes moves it', { skip }, async () => {
+  // Given
+  const main = [prompt(0), toolUse(1, 'bg2', { run_in_background: true }, 'PowerShell'), toolResult(2, 'bg2'), reply(2), turn(2, 2)];
+
+  // When / Then
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 17, tu: 5, totale: 22, fuori: 0 });
+  assert.equal(figures(await runEngine(main, [], ['-BackgroundFallbackMinutes', '20'])).claude, 22);
+});
+
+test('given a foreground Bash call and a notification of another id, when the engine runs, then neither adds a background interval', { skip }, async () => {
+  // Given
+  const main = [prompt(0), toolUse(1, 'fg1'), toolResult(2, 'fg1'), reply(2), turn(2, 2), enqueue(40, 'other')];
+
+  // When / Then
+  assert.deepEqual(figures(await runEngine(main, [], [])), { claude: 2, tu: 5, totale: 7, fuori: 0 });
+});
+
+test('given a background task that ends after 150 min, when the engine runs, then it counts up to MaxSpanMinutes and is listed under "Attese lunghe"', { skip }, async () => {
+  // Given
+  const main = [...bgStart(), enqueue(152, 'bg1')];
+
+  // When
+  const out = await runEngine(main, [], []);
+
+  // Then
+  assert.deepEqual(figures(out), { claude: 122, tu: 5, totale: 127, fuori: 0 });
+  assert.match(out, /Attese lunghe[\s\S]*2h 30m/);
+  assert.doesNotMatch(await runEngine([...bgStart(), enqueue(32, 'bg1')], [], []), /Attese lunghe/);
+});
+
+test('given a resumed transcript copying the same tool_use and enqueue lines, when the engine runs, then the background interval counts once', { skip }, async () => {
+  // Given
+  const head = [...bgStart(), enqueue(32, 'bg1')].map((e, i) => (e.uuid || e.type === 'queue-operation' ? e : { ...e, uuid: `b${i}` }));
+  const copy = head.map((e) => withSession(e, 's9', e.uuid));
+  const files = (extra) => ({ 'C--work-api/s1.jsonl': head, ...extra });
+
+  // When
+  const single = await engineAt(files({}), '-From', TODAY);
+  const resumed = await engineAt(files({ 'C--work-api/s9.jsonl': copy }), '-From', TODAY);
+
+  // Then
+  assert.deepEqual(figures(single), { claude: 32, tu: 5, totale: 37, fuori: 0 });
+  assert.deepEqual(figures(resumed), figures(single));
+});
+
+test('given a fork whose copy keeps working, when the engine runs, then the copied background interval counts once', { skip }, async () => {
+  // Given
+  const head = [...bgStart(), enqueue(32, 'bg1')].map((e, i) => (e.uuid || e.type === 'queue-operation' ? e : { ...e, uuid: `f${i}` }));
+  const copy = head.map((e) => withSession(e, 's9', e.uuid));
+  const ownTurn = (session, end) => [prompt(end - 5), reply(end), turn(end, 5)].map((e, i) => withSession({ ...e, uuid: `${session}-${end}-${i}` }, session));
+  const files = { 'C--work-api/s1.jsonl': [...head, ...ownTurn('s1', 60)], 'C--work-api/s9.jsonl': [...copy, ...ownTurn('s9', 45)] };
+
+  // When
+  const out = await engineAt(files, '-From', TODAY);
+
+  // Then: 2 (head turn) + 30 (background, once) + 5 + 5 (own turns); a double count reads 72
+  assert.equal(figures(out).claude, 42);
 });
 
 test('given minutes outside 08:00-20:00, when the engine runs, then they go to FUORI, never dropped', { skip }, async () => {
   // Given / When / Then
-  assert.deepEqual(figures(await runEngine(worked(-90, 90), [], [])), { claude: 30, tu: 15, totale: 45, fuori: 60 });   // 07:00-08:30
-  assert.deepEqual(figures(await runEngine(worked(590, 10), [], [])), { claude: 10, tu: 10, totale: 20, fuori: 5 });   // 19:50-20:00, then 15 min of TU
+  assert.deepEqual(figures(await runEngine(worked(-90, 90), [], [])), { claude: 30, tu: 5, totale: 35, fuori: 60 });   // 07:00-08:30
+  assert.deepEqual(figures(await runEngine(worked(597, 7), [], [])), { claude: 7, tu: 3, totale: 10, fuori: 2 });   // 19:50-19:57, then 5 min of TU, the last 2 after 20:00
   assert.equal(figures(await runEngine(worked(-90, 90), [], ['-DayStart', '7'])).fuori, 0);
 });
 
@@ -219,7 +310,7 @@ test('given a worked hour, when the engine runs, then the GIORNO table reads CLA
 
   // Then
   assert.match(out, /^GIORNO +CLAUDE +TU +TOTALE +FUORI +TARGET +LOGGATO +MANCANO\s*$/m);
-  assert.match(out, new RegExp(`^${TODAY} +1h 0m +15m +1h 15m +0m `, 'm'));
+  assert.match(out, new RegExp(`^${TODAY} +1h 0m +5m +1h 5m +0m `, 'm'));
   assert.doesNotMatch(out, /RECUPERATI/);
 });
 
@@ -230,8 +321,8 @@ const engine = (main, ...flags) => runEngine(main, [], flags);
 const total = (out) => out.match(/TOTALE: ([^|]+)\|/)[1].trim();
 const sessionSection = (out) => (out.match(/^Sessione .*(?:\r?\n(?!\r?\n).*)*/m) || [''])[0];
 
-// s1 works on feature/a, s2 on feature/b at the same time: four 1-min turns (no turn_duration), 4m of CLAUDE and 19m of TU
-// (10:01-10:02 and 10:06-10:07 are s1's, 10:03-10:05 and 10:08-10:23 s2's: the later busy interval owns the minute).
+// s1 works on feature/a, s2 on feature/b at the same time: four 1-min turns (no turn_duration), 4m of CLAUDE and 18m of TU
+// (each chat 4m up to its next prompt plus 5m after its last turn).
 const twoSessions = () => [
   prompt(0), reply(1), prompt(2, { session: 's2', branch: 'feature/b' }), reply(3, { session: 's2', branch: 'feature/b' }),
   prompt(5), reply(6), prompt(7, { session: 's2', branch: 'feature/b' }), reply(8, { session: 's2', branch: 'feature/b' }),
@@ -248,8 +339,8 @@ test('given two sessions, when the engine runs with -SessionId, then only the to
   const sec = sessionSection(scoped);
   assert.match(sec, /feature\/b/);
   assert.doesNotMatch(sec, /feature\/a/);
-  assert.match(sec, new RegExp(`${TODAY}.*feature/b +19m`));   // the session's own CLAUDE + TU
-  assert.deepEqual(figures(plain), { claude: 4, tu: 19, totale: 23, fuori: 0 });
+  assert.match(sec, new RegExp(`${TODAY}.*feature/b +11m`));   // the session's own CLAUDE + TU
+  assert.deepEqual(figures(plain), { claude: 4, tu: 18, totale: 22, fuori: 0 });
 });
 
 /** The columns of the "|- <branch>" row of Table 1, in minutes. */
@@ -261,16 +352,16 @@ function branchRow(out, branch) {
   return { claude, tu, totale, fuori };
 }
 
-test('given two chats on two branches, when the engine runs, then the user time goes to the topic of the chat whose busy interval ended most recently', { skip }, async () => {
+test('given two chats on two branches, when the engine runs, then each chat books its own margin to its own topic', { skip }, async () => {
   // Given
   const b = { session: 's2', branch: 'feature/b' };
-  // s1 (feature/a) busy 0-10, s2 (feature/b) busy 5-15 then a new prompt at 18: 15-18 is s2's, the rest of s1's margin (18-25) is s1's
+  // s1 (feature/a) busy 0-10 then 5 min of margin; s2 (feature/b) busy 5-15 then a new prompt at 18: 3 min of margin
 
   // When
   const out = await engine([...worked(10, 10), ...worked(15, 10, b), prompt(18, b)]);
 
   // Then
-  assert.deepEqual(branchRow(out, 'feature/a'), { claude: 10, tu: 7, totale: 17, fuori: 0 });
+  assert.deepEqual(branchRow(out, 'feature/a'), { claude: 10, tu: 5, totale: 15, fuori: 0 });
   assert.deepEqual(branchRow(out, 'feature/b'), { claude: 10, tu: 3, totale: 13, fuori: 0 });
 });
 
@@ -293,8 +384,8 @@ test('given a resumed transcript copying the original head, when the engine runs
 
   // Then
   assert.deepEqual(figures(out), figures(single));
-  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });   // 0-3 and 5-6, then 3-5 and 6-21
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
+  assert.deepEqual(figures(out), { claude: 4, tu: 7, totale: 11, fuori: 0 });   // 0-3 and 5-6, then 3-5 and 6-11
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +11m`));
 });
 
 test('given a fork where the original keeps working in parallel, when the engine runs, then it keeps two sessions and drops only the duplicates', { skip }, async () => {
@@ -305,7 +396,7 @@ test('given a fork where the original keeps working in parallel, when the engine
   }, '-From', TODAY);
 
   // Then
-  assert.deepEqual(figures(out), { claude: 11, tu: 18, totale: 29, fuori: 0 });   // s1 0-3, 8-10 = 5m; s9 6-12 = 6m; one joined session would be 9m
+  assert.deepEqual(figures(out), { claude: 11, tu: 15, totale: 26, fuori: 0 });   // s1 0-3, 8-10 = 5m; s9 6-12 = 6m; one joined session would be 9m
 });
 
 test('given a fork abandoned early, when the engine runs, then the original keeps its own head because the copy ends first', { skip }, async () => {
@@ -319,8 +410,8 @@ test('given a fork abandoned early, when the engine runs, then the original keep
   const out = await engineAt(files, '-From', TODAY, '-SessionId', 's1');
 
   // Then
-  assert.deepEqual(figures(out), { claude: 12, tu: 17, totale: 29, fuori: 0 });   // s1 0-3, 8-12 = 7m; s9 5-10 = 5m
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +24m`));   // s1: 7m + TU 3-5 and 12-27; with the head on s9 it would lose the 3m
+  assert.deepEqual(figures(out), { claude: 12, tu: 15, totale: 27, fuori: 0 });   // s1 0-3, 8-12 = 7m; s9 5-10 = 5m
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +17m`));   // s1: 7m + TU 3-8 and 12-17; with the head on s9 it would lose the 3m
 });
 
 test('given a tie on the first timestamp, when the engine runs, then the head goes to the file a continued-in line points away from, not to the older file', { skip }, async () => {
@@ -335,8 +426,8 @@ test('given a tie on the first timestamp, when the engine runs, then the head go
   const out = await engineAt(files(true), '-From', TODAY, '-SessionId', 's1');
 
   // Then
-  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));   // s1 owns the head, s9 joins it
+  assert.deepEqual(figures(out), { claude: 4, tu: 7, totale: 11, fuori: 0 });
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +11m`));   // s1 owns the head, s9 joins it
   assert.match(sessionSection(await engineAt(files(false), '-From', TODAY, '-SessionId', 's1')), /nessun evento/);   // the fallback: creation time
 });
 
@@ -353,8 +444,8 @@ test('given a simple --resume of a resume with no continued-in line of its own, 
   }, '-From', TODAY, '-SessionId', 's9');
 
   // Then
-  assert.deepEqual(figures(out), { claude: 4, tu: 17, totale: 21, fuori: 0 });
-  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +21m`));
+  assert.deepEqual(figures(out), { claude: 4, tu: 7, totale: 11, fuori: 0 });
+  assert.match(sessionSection(out), new RegExp(`${TODAY}.*feature/a +11m`));
 });
 
 test('given a plain --resume original whose resume is itself continued by a continued-in line, when the engine runs, then the original keeps its head', { skip }, async () => {

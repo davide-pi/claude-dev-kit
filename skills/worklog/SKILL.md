@@ -28,7 +28,7 @@ Not for: creating backlog items (`user-story-standard`, `azdo-cli`), Azure DevOp
 | --- | --- |
 | Time only from the engine | never estimated by hand; splitting a bucket is said out loud |
 | Every day against its **target** | 8h Monday-Friday, 0 at weekends, a date's own value in `targets.json`; **under target** = more than 1h short → gap prompt |
-| Hours come from the user, sources propose | Slack, calendar, board and git events are candidate rows, confirmed one by one; never logged unconfirmed |
+| Hours come from the user, sources propose | Slack, mail, calendar, Teams, board and git are read every day; their events are candidate rows, confirmed one by one, read-only; never logged unconfirmed |
 | Two gates | Table 1 and Table 2, each with its own explicit confirmation |
 | Hours **only** through `worklog-push.ps1` | it adds the delta to `CompletedWork` (never overwrites), reads it back, writes the audit; the shell guard asks on any other `CompletedWork` write |
 | Hours already on the item are reconciled | hours the audit does not know → ask; same work → `"delta": 0` |
@@ -41,12 +41,15 @@ Not for: creating backlog items (`user-story-standard`, `azdo-cli`), Azure DevOp
 | Phase | What | Detail |
 | --- | --- | --- |
 | 1. Period | argument → `From`/`To`; ambiguous → ask; a range goes **day by day** from Phase 3 | `time-and-topics.md` |
-| 2. Engine | `worklog.ps1`: Claude and user time per project/branch, GIORNO table (claude, tu, totale, fuori, target, loggato, mancano), long turns, digest | `time-and-topics.md` |
-| 3. Topics | topics from branch and digest, a role each, `round.ps1 -TargetHours <t>` per day | `time-and-topics.md` |
-| 4. Table 1 + coverage | the table, NON FATTURATO, COPERTURA; under target → **gap prompt** → management rows, source proposals, reduced day | `tables.md`, `hours-management.md`, `external-sources.md` |
+| 2. Engine | `worklog.ps1`: Claude and user time per project/branch, GIORNO table (claude, tu, totale, fuori, target, loggato, mancano), long waits, digest; **runs in `worklog-scout`** | `time-and-topics.md` |
+| 3. Topics | topics from branch and digest, a role each (the scout's draft; the main session reviews it), `round.ps1 -TargetHours <t>` per day | `time-and-topics.md` |
+| 4. Table 1 + coverage | the scout's draft with source candidate rows, then NON FATTURATO, COPERTURA; under target → **gap prompt** → management rows, reduced day | `tables.md`, `hours-management.md`, `external-sources.md` |
 | 5. Discovery | per loggable row: project, Task or parent, PRs/commits, hours on item, reconciliation | `writing.md` |
 | 6. Table 2 | where the hours go | `tables.md` |
 | 7. Write | create missing Tasks (no hours), links, rows file → push `-DryRun` → push → read back → recap | `writing.md` |
+
+Phases 2-4: one `Agent` call per run with `subagent_type: worklog-scout` (period, scope, chat language); the main session
+keeps the Table 1 and Table 2 gates, discovery and the push, and re-rounds after every change.
 
 ### 3. Development, management, internal
 
@@ -62,7 +65,7 @@ In doubt → ask. Never spread management hours over a product item to reach the
 
 ```powershell
 $wl = "$HOME\.claude\skills\worklog"
-# Phase 2 — the engine: reads the transcripts, writes only the digest
+# Phase 2 — run by worklog-scout; here only to re-run after a change: reads the transcripts, writes only the digest
 pwsh -NoProfile -File "$wl\worklog.ps1" -From "<yyyy-MM-dd>" -To "<yyyy-MM-dd>"
 # Phase 3 — one day, all its topics in one call, against that day's target
 pwsh -NoProfile -File "$wl\round.ps1" -TargetHours 8 "80|import nuovi mercati|main" "4|fix seed|donor" "40|tooling|internal"
@@ -79,9 +82,9 @@ for topics and decisions; open a transcript only for a missing detail.
 1. A lunch break counted as work → a permission prompt left pending looks like a long tool call →
    show the long waits, drop them in the Table 1 loop.
 2. Default-branch work vanishes → no branch topic → split it from the digest, say it is an estimate.
-3. `CLAUDE` exceeds the clock → it is **summed** across parallel sessions; `TU` is counted once (the
-   user's minutes minus every session's busy time), `TOTALE` = both inside the day window, the rest
-   goes to `FUORI`. A resume joins its original session, a fork stays separate; only some resumes leave a
+3. `CLAUDE` and `TU` exceed the clock → effective hours: each chat's busy time (turns, subagents, background
+   tasks to their notification or +15 min) plus a 5-min margin after each busy interval, **summed** across chats
+   (overlaps count twice); `TOTALE` = both inside the day window, the rest goes to `FUORI`. A resume joins its original session, a fork stays separate; only some resumes leave a
    `continued-in` line and creation time is unreliable after copy, sync or restore, so a fork's head can land on the wrong file. Full model: the
    `.DESCRIPTION` header of `worklog.ps1`.
 
@@ -91,6 +94,6 @@ for topics and decisions; open a transcript only for a missing detail.
 - `scoping.md` — a scoped run.
 - `tables.md` — Phases 4 and 6: the tables, link format, the recap.
 - `hours-management.md` — an under-target day, or management hours.
-- `external-sources.md` — the gap prompt answered `Cercale nelle fonti`.
+- `external-sources.md` — the sources the scout reads every day, and the candidate rows they give.
 - `writing.md` — Phases 5 and 7: discovery, reconciliation, the rows file and the push.
 - `closing.md` — nothing loggable, a reduced day, or the sheet root: the audit fields and closed-day rows.
