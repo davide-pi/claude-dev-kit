@@ -21,8 +21,11 @@ pwsh -NoProfile -File "$HOME\.claude\skills\worklog\worklog.ps1" -From "<yyyy-MM
 ```
 
 Reads every transcript under `~/.claude/projects` touched in the period — main sessions **and**
-subagents — and never touches Azure DevOps. Two kinds of minutes: `CLAUDE` (Claude at work, summed
-across sessions) and `TU` (the user writing and reading, counted once). `TOTALE` = `CLAUDE` + `TU`
+subagents — and never touches Azure DevOps. Two kinds of minutes, both **summed across chats**
+(effective hours: two parallel chats of 1h are 2h, overlaps count twice): `CLAUDE` (each chat's busy time: turns,
+subagents, and background Bash/PowerShell tasks from their result to their completion notification, or +15 min when none
+arrives; dev servers count) and `TU` (the user writing and reading: up to 5 min after each busy interval of a chat,
+cut at that chat's next prompt, booked to that chat's topic). `TOTALE` = `CLAUDE` + `TU`
 inside 08:00-20:00 (`-DayStart`, `-DayEnd`); minutes outside go to `FUORI`, never dropped. A minute
 goes to the topic (project + branch) the session's events say at that moment and to its local **day**.
 Counting rules: Trap 3 in `SKILL.md`, the full model in the `worklog.ps1` header.
@@ -33,7 +36,7 @@ Stdout, the authoritative numbers:
 - project → branch: the same four columns, time window, prompt count;
 - **GIORNO** table, one row per day: `CLAUDE`, `TU`, `TOTALE`, `FUORI`, `TARGET`, `LOGGATO` (already in
   the audit; a multi-day entry split evenly over its weekdays), `MANCANO` (target − logged);
-- **Attese lunghe**: every turn above 120 minutes (`-MaxSpanMinutes`), counted in `CLAUDE` (a subagent tool call that long counts up to the limit). A
+- **Attese lunghe**: every turn above 120 minutes (`-MaxSpanMinutes`), counted in `CLAUDE` (a subagent tool call or background task that long counts up to the limit, listed in full). A
   permission prompt left pending over lunch looks exactly like a long build: show them in Table 1 and
   let the user drop them;
 - the paths of the raw digest, the audit and `targets.json`.
@@ -46,6 +49,7 @@ Retention: at launch the engine prunes **digests** older than 7 days; the **audi
 `Nessuna attivita'` → say so; on a weekday ask whether the day still has hours to cover (gap prompt,
 `hours-management.md`) or closes at zero.
 
+Phases 2-4 run in the `worklog-scout` agent (engine, digest, sources, Table 1 draft); the main session reviews the draft.
 Then **read the digest** (`_raw/<period>.md`): project → branch → prompts and replies. Topics,
 descriptions and decisions come from there; open a transcript only for a missing detail.
 

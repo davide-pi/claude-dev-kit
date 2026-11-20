@@ -33,7 +33,7 @@ Verbatim tokens: CLAUDE.md.
 9. **A skill's mandated report format wins** (`/code-review`): skeleton complete, never reordered.
 10. **A wrong or weaker premise is named first**, with evidence; no deference.
 11. **Desktop app only**, plain words in `\textsf`: colour just a status token, `$\color{red}{\textsf{P1}}$`:
-    red P1, high, failed, blocking; orange P2, medium, unverified; green done. Once per reply, highlight
-    the phrase that decides: `$\colorbox{yellow}{\color{black}\textsf{…}}$`. A 3+ hop flow: `mermaid`.
+    red P1, high, L, failed, blocking; orange P2, medium, M, unverified; green S, done. Once per reply, highlight
+    the deciding phrase: `$\colorbox{yellow}{\textsf{…}}$`; `$…$` ≤60 chars. 3+ hops: `mermaid`.
     Never raw HTML, `==`, `> [!NOTE]`.
 They beat general formatting, except rule 9.
