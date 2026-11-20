@@ -1,17 +1,17 @@
 import type { Elements, RenderElement } from 'claude-code'
 
 import type { CockpitSnapshot } from '../types'
-import { deskActions, deskAnalysis } from './desk-analysis'
+import { analysisScrollMax, deskActions, deskAnalysis } from './desk-analysis'
 import { deskHead } from './desk-head'
 import { DESK_MEDIUM_FROM, DESK_WIDE_FROM, deskLayout } from './desk-layout'
 import { deskLog, logScrollMax } from './desk-log'
-import { deskNow } from './desk-now'
+import { deskNow, nowScrollMax } from './desk-now'
 import { t } from './strings'
 import type { Ui } from './view-base'
 import type { PaneActions } from './view-kit'
 
-/** What the desktop page draws with: the shared elements and the desktop's `Svg`. */
-export type DeskUi = Ui & Pick<Elements['desktop'], 'Svg'>
+/** What the desktop page draws with: the shared elements, the desktop's `Svg` and its `Markdown` (the tabs' links). */
+export type DeskUi = Ui & Pick<Elements['desktop'], 'Svg' | 'Markdown'>
 
 type Tab = 'now' | 'log' | 'analysis'
 const TABS: readonly Tab[] = ['now', 'log', 'analysis']
@@ -29,9 +29,8 @@ const HEAD_ROWS = { narrow: 26, medium: 18, wide: 20 } as const
 const FOOT_PAD = 3
 const ACTION_ROWS = { narrow: 5, medium: 3, wide: 3 } as const
 const MIN_BODY_ROWS = 8
-/** The underline's width per letter of the tab's label and for the button's own padding, in CSS pixels: the label's drawn width is not known, so an estimate. */
+/** The underline's width per letter of the tab's label, in CSS pixels: the label's drawn width is not known, so an estimate. */
 const TAB_CHAR_PX = 8
-const TAB_PAD_PX = 24
 
 const sizeOf = (columns: number): keyof typeof HEAD_ROWS => (columns >= DESK_WIDE_FROM ? 'wide' : columns >= DESK_MEDIUM_FROM ? 'medium' : 'narrow')
 
@@ -43,11 +42,16 @@ export const bodyLimit = (bodyRows: number, bodyColumns: number = DESK_WIDE_FROM
 
 
 /**
- * The furthest the body of the open tab scrolls under the fixed head and action bar. Only the Log's rows outgrow its window: Now and Analysis
- * cap their own lists to the body (their `+n` rows), so they stay at 0.
+ * The furthest the body of the open tab scrolls under the fixed head and action bar, in its own units: Log rows, In corso agents, Analysis cards.
  */
-export const deskScrollMax = (s: CockpitSnapshot, bodyColumns: number, bodyRows: number): number =>
-  (s.deskTab ?? 'now') === 'log' ? logScrollMax(s, deskLayout(bodyColumns, bodyLimit(bodyRows, bodyColumns))) : 0
+export function deskScrollMax(s: CockpitSnapshot, bodyColumns: number, bodyRows: number): number {
+  const tab = s.deskTab ?? 'now'
+  const layout = deskLayout(bodyColumns, bodyLimit(bodyRows, bodyColumns))
+  return tab === 'log' ? logScrollMax(s, layout) : tab === 'now' ? nowScrollMax(s, layout) : analysisScrollMax(s, layout)
+}
+
+/** A tab's link target: never opened (the press is answered here), an `https:` one because a desktop draws any other scheme as plain text. */
+export const tabHref = (tab: Tab): string => `https://cockpit.invalid/tab/${tab}`
 export { limitRows } from './desk-layout'
 
 /** The tab's underline, `px` wide: always there, the accent under the open tab and transparent under the others, so the row never changes size. */
@@ -61,7 +65,7 @@ const BODIES = { now: deskNow, log: deskLog, analysis: deskAnalysis } as const
  * Widths are the pane's own (`100%`) or the layout's, never a fixed column count.
  */
 export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bodyRows: number, actions: PaneActions): RenderElement {
-  const { Box, Text, Button, Svg } = ui
+  const { Box, Text, Markdown, Svg } = ui
   const S = t().desk
   const open: Tab = s.deskTab ?? 'now'
   const limit = bodyLimit(bodyRows, bodyColumns)
@@ -69,14 +73,19 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, bo
   const tabs = (
     <Box key="desk:tabs" columnGap={2}>
       {TABS.map(tab => {
-        const px = S.tabs[tab].length * TAB_CHAR_PX + TAB_PAD_PX
+        const px = S.tabs[tab].length * TAB_CHAR_PX
+        // text, not buttons (a desktop Button is always native chrome): the open tab bold in the accent, the others a link the press answers
         return (
           <Box key={`desk:tab:${tab}`} flexDirection="column">
-            <Button key={`tab:${tab}`} onPress={() => actions.setTab(tab)}>
-              <Text color={tab === open ? ACCENT : DIM} weight="semibold">
-                {S.tabs[tab]}
-              </Text>
-            </Button>
+            {tab === open ? (
+              <Box key={`tab:${tab}`}>
+                <Text color={ACCENT} weight="bold">
+                  {S.tabs[tab]}
+                </Text>
+              </Box>
+            ) : (
+              <Markdown key={`tab:${tab}`} text={`[${S.tabs[tab]}](${tabHref(tab)})`} onLinkPress={() => actions.setTab(tab)} />
+            )}
             <Svg source={underline(tab === open ? ACCENT : 'transparent', px)} alt={S.tabs[tab]} width={px} height={2} />
           </Box>
         )

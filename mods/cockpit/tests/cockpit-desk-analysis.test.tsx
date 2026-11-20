@@ -137,16 +137,16 @@ const find = (v: unknown, key: string): unknown => (keyOf(v) === key ? v : kids(
 /** The rows of the watch section under its title, as text. */
 const watchRows = async (ui: Mounted): Promise<string[]> => kids(find(await ui.drawn(), 'analysis:watch')).slice(1).map(textOf)
 
-test('Given five notifications, When the Analysis tab is drawn, Then the watch section shows one and a +4 row in its two rows', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given five notifications, When the Analysis tab is drawn, Then the watch section shows all five and no +n row', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = failing(['cmd-a', 'cmd-b', 'cmd-c', 'cmd-d', 'cmd-e'])
   // When
   const five = await drawAnalysis($, on, s, 100, [])
   const rows = await watchRows(five.ui)
   // Then
-  expect(rows).toHaveLength(2)
-  expect(rows.filter(r => /cmd-[a-e]/.test(r))).toHaveLength(1)
-  expect(rows[1]?.trim()).toBe('+4')
+  expect(rows).toHaveLength(5)
+  expect(rows.filter(r => /cmd-[a-e]/.test(r))).toHaveLength(5)
+  expect(rows.some(r => r.trim().startsWith('+'))).toBe(false)
   await five.ui.unmount()
 })
 

@@ -3,9 +3,9 @@ import { expect, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 
 import { deskHead } from '../hooks/desk-head'
-import { deskLayout, scrollOffset } from '../hooks/desk-layout'
+import { deskLayout, scrollOffset, scrollSpan } from '../hooks/desk-layout'
 import { deskUrgent } from '../hooks/desk-urgent'
-import { bodyLimit, deskScrollMax, limitRows } from '../hooks/desk-view'
+import { bodyLimit, deskScrollMax, limitRows, tabHref } from '../hooks/desk-view'
 import { RETRO_DAYS } from '../hooks/pane-actions'
 import { withoutSession } from '../hooks/session-data'
 import { INITIAL } from '../hooks/state'
@@ -40,7 +40,7 @@ test('Given setTab(log), When the snapshot is read, Then deskTab is log', { time
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:log' })
+  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
   await settle()
   await ui.drawn()
   // Then
@@ -75,14 +75,24 @@ test('Given offsets and wheel moves, When scrollOffset clamps them, Then the res
   expect(offsets).toEqual([0, 9, 5, 0])
 })
 
-test('Given 12 rounds, When deskScrollMax is asked per tab, Then the Log can scroll past its window and Now and Analysis cannot', () => {
+test('Given 12 rounds and no agent in 8 body rows, When deskScrollMax is asked per tab, Then the Log and the Analysis cards can scroll and In corso cannot', () => {
   // Given
   const sessionLog = Array.from({ length: 12 }, (_, i) => ({ at: i * 1000, kind: 'round' as const, n: i + 1, prompt: `p${i + 1}` }))
   // When
   const max = (['log', 'now', 'analysis'] as const).map(deskTab => deskScrollMax(snap({ sessionLog, deskTab }), 100, 8))
   // Then
   expect(max[0]).toBeGreaterThan(0)
-  expect(max.slice(1)).toEqual([0, 0])
+  expect(max[1]).toBe(0)
+  expect(max[2]).toBeGreaterThan(0)
+})
+
+test('Given cards of 10 cells in a 15-cell body, When scrollSpan windows them, Then one card shows at a time, the furthest offset is the last card and an offset past it is clamped', () => {
+  // Given
+  const cells = [10, 10, 10]
+  // When
+  const spans = [scrollSpan(cells, 0, 15), scrollSpan(cells, 9, 15), scrollSpan([3, 3], 1, 15)]
+  // Then
+  expect(spans).toEqual([{ from: 0, to: 1, max: 2 }, { from: 2, to: 3, max: 2 }, { from: 0, to: 2, max: 0 }])
 })
 
 test('Given retro(days), When handled, Then command.run receives the days count of RETRO_DAYS (15)', { timeoutMs: 30_000 }, async ($, on) => {
@@ -126,17 +136,19 @@ const keyed = (el: unknown, key: string): unknown => (propsOf(el).key === key ? 
 const nodesOf = (el: unknown): unknown[] => [el, ...childrenOf(el).flatMap(nodesOf)]
 const TABS = ['tab:now', 'tab:log', 'tab:analysis']
 
-test('Given desktop, When the pane is drawn, Then the keys tab:now, tab:log, tab:analysis exist and the default tab is now', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given desktop, When the pane is drawn, Then the tabs are text (no Button), the open now tab plain text and log and analysis Markdown links', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   world(on)
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   // When
   const ui = await mountDesk($)
   // Then
-  const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)
-  expect(keys).toEqual(expect.arrayContaining(TABS))
+  const buttons = (await ui.findAll({ type: 'Button' })).map(b => b.key)
+  // tabs are text: no Button among them; the open one plain bold text, the others Markdown links
+  expect(buttons.filter(k => TABS.includes(String(k)))).toEqual([])
   const drawn = await ui.drawn()
   expect(keyed(drawn, 'desk:body:now')).toBeDefined()
+  expect(TABS.map(k => JSON.stringify(keyed(drawn, k)).includes('"Markdown"'))).toEqual([false, true, true])
   expect(keyed(drawn, 'desk:body:log')).toBeUndefined()
   // the active tab has its purple underline, the others a transparent one of the same size
   expect(JSON.stringify(keyed(drawn, 'desk:tab:now'))).toContain('#8B6CF6')
@@ -152,7 +164,7 @@ test('Given desktop, When tab:log is pressed and the pane redrawn, Then the log 
   const ui = await mountDesk($)
   const before = childrenOf(await ui.drawn()).slice(0, 2).map(count)
   // When
-  await ui.press({ key: 'tab:log' })
+  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
   await settle()
   // Then
   const drawn = await ui.drawn()
@@ -169,7 +181,7 @@ test('Given desktop, When tab:log is pressed, Then the log tab draws its filter 
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:log' })
+  await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
   await settle()
   // Then
   const body = keyed(await ui.drawn(), 'desk:body:log')
@@ -184,7 +196,7 @@ test('Given desktop, When tab:analysis is pressed, Then the analysis buttons are
   await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
   const ui = await mountDesk($)
   // When
-  await ui.press({ key: 'tab:analysis' })
+  await ui.press({ key: 'tab:analysis', link: { href: tabHref('analysis') } })
   await settle()
   // Then
   const keys = (await ui.findAll({ type: 'Button' })).map(b => b.key)

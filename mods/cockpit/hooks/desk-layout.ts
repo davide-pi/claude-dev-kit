@@ -40,3 +40,17 @@ export function scrollOffset(offset: number, by: number, max: number): number {
   const step = by > 0 ? Math.max(1, Math.round(by)) : by < 0 ? Math.min(-1, Math.round(by)) : 0
   return Math.min(Math.max(0, from + step), top)
 }
+
+/**
+ * The window over units `cells` tall that fits `limit` from `offset`: the first unit shown (`from`, clamped), one past the last (`to`, at
+ * least one unit) and the furthest offset (`max`: the first unit from which the rest fit, 0 when all do).
+ */
+export function scrollSpan(cells: readonly number[], offset: number, limit: number): { from: number; to: number; max: number } {
+  let max = cells.length
+  for (let sum = 0; max > 0 && sum + (cells[max - 1] ?? 0) <= limit; max--) sum += cells[max - 1] ?? 0
+  max = Math.min(max, Math.max(0, cells.length - 1))
+  const from = Math.min(Math.max(0, Math.floor(offset)), max)
+  let to = from
+  for (let sum = 0; to < cells.length && (to === from || sum + (cells[to] ?? 0) <= limit); to++) sum += cells[to] ?? 0
+  return { from, to, max }
+}

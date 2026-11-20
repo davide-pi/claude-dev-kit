@@ -3,7 +3,8 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitSnapshot } from '../types'
 import { spendSplit } from './andamento'
 import type { DeskLayout } from './desk-layout'
-import { limitRows } from './desk-layout'
+import { limitRows, scrollSpan } from './desk-layout'
+import { scrolling } from './desk-scroll'
 import { iconSvg, shareSvg } from './desk-svg'
 import type { DeskUi } from './desk-view'
 import { duration, fmtCost } from './shared'
@@ -24,6 +25,10 @@ const CARD = '#30302E'
 const SECTION_ROWS = 3
 /** The watch list's rows: small, so an empty one is one dim line and a blank, never a big empty card. */
 const WATCH_ROWS = 2
+/** A card's rows beyond its list: the title, the two border rows, the gap under it. */
+const CARD_CHROME = 4
+/** A cell of the desktop's code font in CSS pixels (a capture): the scrollbar's height from the body's rows. */
+const CELL_PX = 21
 const GAP = 2
 const BORDER = '#403F3B'
 const SHARE = '#B9A2FF'
@@ -63,7 +68,7 @@ export function deskActions(ui: DeskUi, layout: DeskLayout, actions: PaneActions
 }
 
 /** The Analysis tab: the insights the terminal page computes (time split, spend by who, watch list), each a card. */
-export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _actions: PaneActions): RenderElement {
+export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const A = t().desk.analysis
   const S = t()
@@ -139,7 +144,7 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
       {title(`${key}:title`, label, right)}
       {keepRows(
         rows,
-        size,
+        Math.max(size, rows.length),
         n => (
           <Text key={`${key}:more`} color={DIM}>
             {`+${n}`}
@@ -154,13 +159,39 @@ export function deskAnalysis(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout,
       )}
     </Box>
   )
-  return (
+  // the cards scroll whole, from the offset: as many as the body holds, the arrows and scrollbar at the tab's right; wide puts time and spend side by side
+  const timeCard = section('time', A.time, time)
+  const spendCard = section('spend', A.spend, spend, SECTION_ROWS, fmtCost(s.cost.usd))
+  const cards =
+    layout.size === 'wide'
+      ? [
+          <Box key="analysis:pair" flexDirection="row" columnGap={GAP}>
+            {timeCard}
+            {spendCard}
+          </Box>,
+          section('watch', A.watch, watch, WATCH_ROWS),
+        ]
+      : [timeCard, spendCard, section('watch', A.watch, watch, WATCH_ROWS)]
+  const span = scrollSpan(analysisCells(s, layout), s.deskScroll ?? 0, layout.bodyRows)
+  return scrolling(
+    ui,
+    'analysis:scroll',
     <Box key="desk:analysis" flexDirection="column" width="100%" rowGap={1}>
-      <Box flexDirection={layout.size === 'wide' ? 'row' : 'column'} columnGap={GAP} rowGap={1}>
-        {section('time', A.time, time)}
-        {section('spend', A.spend, spend, SECTION_ROWS, fmtCost(s.cost.usd))}
-      </Box>
-      {section('watch', A.watch, watch, WATCH_ROWS)}
-    </Box>
+      {cards.slice(span.from, span.to)}
+    </Box>,
+    { offset: span.from, max: span.max, window: span.to - span.from, total: cards.length, heightPx: layout.bodyRows * CELL_PX },
+    actions,
   )
 }
+
+/** The cells each card takes (its rows, at least its size, the title and the border, the gap under it), in drawing order: two cards when wide. */
+const analysisCells = (s: CockpitSnapshot, layout: DeskLayout): number[] => {
+  const card = (rows: number, size: number): number => Math.max(rows, size) + CARD_CHROME
+  const time = card(s.insights === undefined || s.insights.rounds <= 0 ? 0 : 3, SECTION_ROWS)
+  const spend = card(spendSplit(s).length, SECTION_ROWS)
+  const watch = card(signalsOf(s).length, WATCH_ROWS)
+  return layout.size === 'wide' ? [Math.max(time, spend), watch] : [time, spend, watch]
+}
+
+/** The furthest the Analysis cards scroll: the first card from which the rest fit the body, 0 when all do. */
+export const analysisScrollMax = (s: CockpitSnapshot, layout: DeskLayout): number => scrollSpan(analysisCells(s, layout), 0, layout.bodyRows).max

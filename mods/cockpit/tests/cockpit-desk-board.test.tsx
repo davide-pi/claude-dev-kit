@@ -7,7 +7,7 @@ import { deskHead } from '../hooks/desk-head'
 import { deskLayout } from '../hooks/desk-layout'
 import { deskNow } from '../hooks/desk-now'
 import { deskUrgent } from '../hooks/desk-urgent'
-import { bodyLimit } from '../hooks/desk-view'
+import { bodyLimit, tabHref } from '../hooks/desk-view'
 import { t } from '../hooks/strings'
 import type { PaneActions } from '../hooks/view-kit'
 import type { CockpitSnapshot } from '../types'
@@ -80,8 +80,8 @@ test('Given desktop, When each of the three tabs is drawn, Then the compact and 
   const ui = await mountDesk($)
   const seen: { keys: string[]; last: unknown }[] = []
   // When
-  for (const tab of ['now', 'log', 'analysis']) {
-    await ui.press({ key: `tab:${tab}` })
+  for (const tab of ['now', 'log', 'analysis'] as const) {
+    if (tab !== 'now') await ui.press({ key: `tab:${tab}`, link: { href: tabHref(tab) } })
     await settle()
     const drawn = await ui.drawn()
     seen.push({ keys: (await ui.findAll({ type: 'Button' })).map(b => b.key ?? ''), last: propsOf(childrenOf(drawn).at(-1)).key })

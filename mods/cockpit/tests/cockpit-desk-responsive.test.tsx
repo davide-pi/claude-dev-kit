@@ -1,6 +1,7 @@
 import { expect, test } from 'claude-code/testing'
 
 import { deskLayout } from '../hooks/desk-layout'
+import { tabHref } from '../hooks/desk-view'
 import { mountDesk } from './cockpit-fixtures'
 import { PANE, settle, world } from './cockpit-world'
 
@@ -34,10 +35,10 @@ for (const [columns, size, gauge] of SIZES) {
     const ui = await mountDesk($, columns)
     // When
     const now = await ui.drawn()
-    await ui.press({ key: 'tab:log' })
+    await ui.press({ key: 'tab:log', link: { href: tabHref('log') } })
     await settle()
     const log = await ui.drawn()
-    await ui.press({ key: 'tab:analysis' })
+    await ui.press({ key: 'tab:analysis', link: { href: tabHref('analysis') } })
     await settle()
     const analysis = await ui.drawn()
     // Then
@@ -56,8 +57,8 @@ for (const [columns, size, gauge] of SIZES) {
     const ui = await mountDesk($, columns, 48)
     const drawn: unknown[] = []
     // When
-    for (const tab of ['now', 'log', 'analysis']) {
-      await ui.press({ key: `tab:${tab}` })
+    for (const tab of ['now', 'log', 'analysis'] as const) {
+      if (tab !== 'now') await ui.press({ key: `tab:${tab}`, link: { href: tabHref(tab) } })
       await settle()
       drawn.push(await ui.drawn())
     }

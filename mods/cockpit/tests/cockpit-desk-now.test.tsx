@@ -225,13 +225,14 @@ test('Given a prompt and an agent description far wider than the pane, When draw
   expect(find(root, x => x.type === 'Text' && texts(x).join('').includes(long)).length).toBeGreaterThan(0)
 })
 
-test('Given more agents than the pane has rows, When drawn, Then the list is cut and a +n row ends it', { timeoutMs: 30_000 }, async ($, on) => {
+test('Given more agents than the pane has rows, When drawn, Then the list shows one window of rows, no +n row, and the scroll arrows are drawn', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ agents: Array.from({ length: 12 }, (_, i) => agent(`a${i}`, `Agent${i}`)) })
   // When
   const root = await drawNow($, on, s, deskLayout(40, 8))
   // Then
   const list = section(root, 'now:outside:list')
-  expect(kids(list)).toHaveLength(3 + 1)
-  expect(texts(kids(list).at(-1))).toEqual(['+9'])
+  expect(kids(list)).toHaveLength(3)
+  expect(kids(list).some(k => texts(k).join('').startsWith('+'))).toBe(false)
+  expect(find(root, x => x.props?.key === 'desk:scroll:down')).toHaveLength(1)
 })

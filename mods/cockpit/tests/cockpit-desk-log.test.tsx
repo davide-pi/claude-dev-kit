@@ -26,7 +26,9 @@ const keyOf = (v: unknown): string => {
   const k = propsOf(v).key
   return typeof k === 'string' ? k : ''
 }
-const svgs = (root: unknown): Record<string, unknown>[] => nodes(root).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
+/** The tree without the scroll column (its arrows and scrollbar): the rails alone are the log's Svgs. */
+const bare = (v: unknown): unknown[] => (keyOf(v) === 'desk:scroll' ? [] : [v, ...kids(v).flatMap(bare)])
+const svgs = (root: unknown): Record<string, unknown>[] => bare(root).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
 /** The log rows (not the filter), in drawing order: their key and text. */
 const logRows = (root: unknown) => nodes(root).filter(n => /^desk:log:(row|empty|more)/.test(keyOf(n)) && !keyOf(n).endsWith(':time')).map(n => ({ key: keyOf(n), text: textOf(kids(n).at(-1)) }))
 
@@ -305,4 +307,31 @@ test('Given a quarter window three quarters down, When scrollbarSvg is built, Th
   // Then
   expect(svg).toContain('xmlns="http://www.w3.org/2000/svg"')
   expect(svg).toContain('y="75" width="4" height="25"')
+})
+
+test('Given 12 rows in 8 body rows at the top, When the down and up arrows are pressed, Then down asks for a window less one row and up does nothing', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: Array.from({ length: 12 }, (_, i) => round(i + 1)) })
+  const { ui, root, calls } = await drawLog($, on, s, 8)
+  // When
+  await ui.press({ key: 'desk:scroll:down' })
+  await ui.press({ key: 'desk:scroll:up' })
+  await ui.unmount()
+  // Then
+  expect(calls).toEqual(['scrollBody:2,9'])
+  const bar = nodes(root).filter(n => keyOf(n) === 'desk:scroll').flatMap(n => nodes(n)).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
+  expect(bar).toHaveLength(1)
+  expect(String(bar[0]?.source)).toContain('xmlns="http://www.w3.org/2000/svg"')
+  expect((String(bar[0]?.source).match(/<rect/g) ?? []).length).toBe(2)
+})
+
+test('Given rows that fit, When the log is drawn, Then the scroll column is still drawn, with no thumb', { timeoutMs: 30_000 }, async ($, on) => {
+  // Given
+  const s = snap({ sessionLog: [round(1)] })
+  // When
+  const { ui, root } = await drawLog($, on, s, 8)
+  await ui.unmount()
+  // Then
+  const bar = nodes(root).filter(n => keyOf(n) === 'desk:scroll').flatMap(n => nodes(n)).filter(n => isNode(n) && n.type === 'Svg').map(propsOf)
+  expect((String(bar[0]?.source).match(/<rect/g) ?? []).length).toBe(1)
 })

@@ -3,6 +3,8 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitSnapshot } from '../types'
 import type { DeskUi } from './desk-view'
 import type { DeskLayout } from './desk-layout'
+import { scrollOffset } from './desk-layout'
+import { scrolling } from './desk-scroll'
 import { iconSvg } from './desk-svg'
 import { nextRoundNumber } from './round-capture'
 import { clockTime, costCell, duration, shownTurnUsd } from './shared'
@@ -26,6 +28,8 @@ const NONE = '—'
 /** Rows of the tab the agents' list leaves to the other sections (request 2, flow 3, the list's title, 2 gaps) and to its `+n` row; below this, the list still shows `MIN_AGENT_ROWS`. */
 const OTHER_ROWS = 9
 const MIN_AGENT_ROWS = 3
+/** A cell of the desktop's code font in CSS pixels (a capture): the scrollbar's height from the body's rows. */
+const CELL_PX = 21
 const COST_W = 7
 
 type Segment = { step: string; color: string }
@@ -47,7 +51,7 @@ function segmentsOf(s: CockpitSnapshot): Segment[] {
 }
 
 /** The `In corso` tab: the open request, the workflow run and the agents outside it, each a title row and a card under it, one column or two as the layout says. An empty section says so in one dim line and keeps its rows. */
-export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _actions: PaneActions): RenderElement {
+export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, actions: PaneActions): RenderElement {
   const { Box, Text, Svg } = ui
   const S = t().desk.now
   const E = t().page.events
@@ -135,9 +139,11 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
   )
 
   // ── AGENTS OUTSIDE THE FLOW: the running ones no run claims ──
-  const outside = orderAgents(visibleAgents(s).filter(a => a.status === 'running' && agentRunId(s.workflowRun, a) === undefined))
-  const cap = Math.max(MIN_AGENT_ROWS, layout.bodyRows - OTHER_ROWS)
-  const shown = outside.slice(0, cap)
+  const outside = outsideAgents(s)
+  const cap = agentWindow(layout)
+  const max = Math.max(0, outside.length - cap)
+  const offset = scrollOffset(s.deskScroll ?? 0, 0, max)
+  const shown = outside.slice(offset, offset + cap)
   const agents = (
     <Box key="now:outside" flexDirection="column">
       {heading('now:outside:title', S.outside)}
@@ -162,19 +168,16 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
                 </Text>
               </Box>
             ))),
-        ...(outside.length > shown.length
-          ? [
-              <Text key="now:outside:more" wrap="truncate" color={DIM}>
-                {`+${outside.length - shown.length}`}
-              </Text>,
-            ]
-          : []),
       ])}
     </Box>
   )
 
+  // the agents list is the tab's one list that grows: it windows from the offset, the arrows and scrollbar at the tab's right
+  const scroll = { offset, max, window: cap, total: outside.length, heightPx: layout.bodyRows * CELL_PX }
   if (layout.nowColumns === 2) {
-    return (
+    return scrolling(
+      ui,
+      'now:scroll',
       <Box key="now:body" width="100%" columnGap={2}>
         <Box flexDirection="column" rowGap={1} width="50%">
           {request}
@@ -183,14 +186,29 @@ export function deskNow(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, _act
         <Box flexDirection="column" flexGrow={1}>
           {agents}
         </Box>
-      </Box>
+      </Box>,
+      scroll,
+      actions,
     )
   }
-  return (
+  return scrolling(
+    ui,
+    'now:scroll',
     <Box key="now:body" flexDirection="column" width="100%" rowGap={1}>
       {request}
       {flow}
       {agents}
-    </Box>
+    </Box>,
+    scroll,
+    actions,
   )
 }
+
+/** The running agents no run claims, in the list's order. */
+const outsideAgents = (s: CockpitSnapshot) => orderAgents(visibleAgents(s).filter(a => a.status === 'running' && agentRunId(s.workflowRun, a) === undefined))
+
+/** How many agent rows the window shows: what the body leaves under the request and flow cards. */
+const agentWindow = (layout: DeskLayout): number => Math.max(MIN_AGENT_ROWS, layout.bodyRows - OTHER_ROWS)
+
+/** The furthest the agents list scrolls: the agents past one window, 0 when they all show. */
+export const nowScrollMax = (s: CockpitSnapshot, layout: DeskLayout): number => Math.max(0, outsideAgents(s).length - agentWindow(layout))

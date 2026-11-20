@@ -3,6 +3,7 @@ import type { RenderElement } from 'claude-code'
 import type { CockpitLogEntry, CockpitSnapshot } from '../types'
 import { scrollOffset } from './desk-layout'
 import type { DeskLayout } from './desk-layout'
+import { scrolling } from './desk-scroll'
 import { railSvg } from './desk-svg'
 import type { LaneCell } from './desk-svg'
 import type { DeskUi } from './desk-view'
@@ -232,11 +233,7 @@ export function deskLog(ui: DeskUi, s: CockpitSnapshot, layout: DeskLayout, acti
           <Text color={DIM}>{isAll ? S.onlyImportant : S.showAll}</Text>
         </Button>
       </Box>
-      <Box key="desk:log:window" flexDirection="row" columnGap={1}>
-        <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-          {drawn}
-        </Box>
-      </Box>
+      {scrolling(ui, 'desk:log:window', drawn, { offset, max: Math.max(0, rows.length - cap), window: cap, total: rows.length, heightPx: cap * RAIL_PX }, actions)}
     </Box>
   )
 }
