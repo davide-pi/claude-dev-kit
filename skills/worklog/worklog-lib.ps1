@@ -23,6 +23,13 @@ function FmtMin([double]$m) {
 }
 function FmtStamp([datetime]$t) { if ($isRange) { $t.ToString('MM-dd HH:mm') } else { $t.ToString('HH:mm') } }
 function FmtH([double]$h) { ('{0:0.##}h' -f $h) }
+# the text between $open and the next $close in $s (string search), $null when absent or empty
+function Between([string]$s, [string]$open, [string]$close) {
+  $a = $s.IndexOf($open, [StringComparison]::Ordinal); if ($a -lt 0) { return $null }
+  $a += $open.Length; $b = $s.IndexOf($close, $a, [StringComparison]::Ordinal)
+  if ($b -le $a) { return $null }
+  return $s.Substring($a, $b - $a)
+}
 function ToLocal([string]$iso) { [datetime]::Parse($iso, [cultureinfo]::InvariantCulture, 'RoundtripKind').ToLocalTime() }
 function ReadJson([string]$p) {
   if (-not (Test-Path $p)) { return $null }
@@ -70,12 +77,15 @@ function ScanFile($file, $c) {
   $hiD = $toD.AddDays(1); $turnHiD = $toD.AddDays(2); $subLoD = $fromD.AddDays(-1)
   $res = [pscustomobject]@{ File = $file.FullName; Born = $file.CreationTimeUtc; First = $null; Last = $null
     Recs = [System.Collections.Generic.List[object]]::new(); Busy = [System.Collections.Generic.List[object]]::new()
-    SubLong = [System.Collections.Generic.List[object]]::new(); Cont = [System.Collections.Generic.List[object]]::new() }
+    SubLong = [System.Collections.Generic.List[object]]::new(); Cont = [System.Collections.Generic.List[object]]::new()
+    Bg = [System.Collections.Generic.List[object]]::new() }
   $isSub = $file.FullName -match '[\\/]subagents[\\/]'
   $fileKey = [System.IO.Path]::GetFileNameWithoutExtension($file.Name)
   $subSession = if ($isSub -and $file.FullName -match '[\\/]([^\\/]+)[\\/]subagents[\\/]') { $matches[1] } else { $fileKey }
   $subTimes = [System.Collections.Generic.List[datetime]]::new()
   $subCalls = @{}   # tool_use id -> { T, Name }: a tool call that spans a gap keeps the subagent at work
+  $bg = @{}         # tool_use id of a run_in_background call -> { Id, File, Session, S: its tool_result, E: its task-notification }
+  $toolUseSep = [string[]]@('"type":"tool_use","id":"')
   foreach ($line in [System.IO.File]::ReadLines($file.FullName)) {
     # IndexOf and Substring, not a regex: a Match per line over lines of hundreds of KB took most of the run time
     # the first ISO-Z value wins: a nested "timestamp" of another shape (a tool input) is skipped, as the regex did
@@ -117,6 +127,38 @@ function ScanFile($file, $c) {
         }
       }
       continue
+    }
+    # background tasks (a Bash or PowerShell call with run_in_background): busy from its tool_result to the queue-operation line
+    # that carries its <task-notification>. Those lines have no uuid and are dropped by the type filter below, so they are read here
+    # by string search; the line itself goes on unchanged.
+    if ($lt -ge $subLoD -and $lt -lt $turnHiD) {
+      if ($line.Contains('"run_in_background":true') -and $line.Contains('"type":"tool_use"')) {
+        $bgSess = Between $line '"sessionId":"' '"'; if (-not $bgSess) { $bgSess = $fileKey }
+        $segs = $line.Split($toolUseSep, [StringSplitOptions]::None)   # one segment per tool_use: the flag must sit in the call's own
+        for ($i = 1; $i -lt $segs.Count; $i++) {
+          $q = $segs[$i].IndexOf('"')
+          if ($q -le 0 -or -not $segs[$i].Contains('"run_in_background":true')) { continue }
+          $head = $segs[$i].Substring($q)
+          if ($head.StartsWith('","name":"Bash"', [StringComparison]::Ordinal) -or $head.StartsWith('","name":"PowerShell"', [StringComparison]::Ordinal)) {
+            $id = $segs[$i].Substring(0, $q)
+            if (-not $bg.ContainsKey($id)) { $bg[$id] = [pscustomobject]@{ Id = $id; File = $res.File; Session = $bgSess; S = $null; E = $null } }
+          }
+        }
+      } elseif ($bg.Count -gt 0 -and $line.Contains('"type":"tool_result"')) {
+        foreach ($u in @(QuotedAfter $line '"tool_use_id":"' '')) {
+          $b = $bg[$u[0]]
+          if ($b -and $null -eq $b.S) { $b.S = $lt }
+        }
+      } elseif ($line.Contains('<task-notification>') -and $line.Contains('"type":"queue-operation"')) {
+        $id = Between $line '<tool-use-id>' '</tool-use-id>'
+        if ($id) {
+          if (-not $bg.ContainsKey($id)) {
+            $bgSess = Between $line '"sessionId":"' '"'; if (-not $bgSess) { $bgSess = $fileKey }
+            $bg[$id] = [pscustomobject]@{ Id = $id; File = $res.File; Session = $bgSess; S = $null; E = $null }
+          }
+          if ($null -eq $bg[$id].E -or $lt -lt $bg[$id].E) { $bg[$id].E = $lt }
+        }
+      }
     }
     # a turn_duration of the day after the period still counts: a turn across midnight keeps its part inside (Book cuts the days)
     $late = $lt -ge $hiD
@@ -188,6 +230,7 @@ function ScanFile($file, $c) {
     }
     $res.Busy.Add([pscustomobject]@{ Session = $subSession; S = $segStart; E = $prev; Turn = $false })
   }
+  foreach ($b in $bg.Values) { $res.Bg.Add($b) }
   return $res
 }
 

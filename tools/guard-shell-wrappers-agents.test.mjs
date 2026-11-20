@@ -6,6 +6,7 @@ import { mkdtempSync, mkdirSync, writeFileSync, readFileSync, rmSync } from 'nod
 import { join, dirname } from 'node:path';
 import { tmpdir, homedir } from 'node:os';
 import { createRequire } from 'node:module';
+import { fileURLToPath } from 'node:url';
 import { evaluate, HOOK, created, runRaw, spawnRaw, run, onDefault, onFeature, runShell, asks, approves } from './guard-shell-shared.test.mjs';
 
 test('a destructive command wrapped in a shell, a container exec or ssh still asks', () => {
@@ -242,6 +243,47 @@ test('given agent_type db-analyst, when it runs git push, then the shell guard d
   // Then
   assert.equal(r?.decision, 'deny');
   assert.match(r.reason, /read-only agent \(db-analyst\)/);
+});
+
+const REPO = join(dirname(fileURLToPath(import.meta.url)), '..');
+
+test('given agent_type worklog-scout, when it runs git commit or a tracker write, then the shell guard denies and names the agent', () => {
+  // Given
+  const cwd = tmpdir();
+  for (const command of ['git commit -m x', 'git push', 'gh pr comment 3 -b x']) {
+    // When
+    const r = evaluate({ tool_name: 'Bash', tool_input: { command }, cwd, agent_id: 'a1', agent_type: 'worklog-scout' });
+
+    // Then
+    assert.equal(r?.decision, 'deny', command);
+    assert.match(r.reason, /read-only agent \(worklog-scout\)/);
+  }
+});
+
+test('given the worklog-scout agent file, when it is read, then it is a sonnet read-only agent with a contract and an output section', () => {
+  // Given
+  const text = readFileSync(join(REPO, 'agents', 'worklog-scout.md'), 'utf8');
+  const front = text.match(/^---\r?\n([\s\S]*?)\r?\n---/)[1];
+
+  // When / Then
+  assert.match(front, /^name: worklog-scout\s*$/m);
+  assert.match(front, /^model: sonnet\s*$/m);
+  assert.match(front, /^disallowedTools:.*\bEdit\b.*\bWrite\b.*\bNotebookEdit\b/m);
+  assert.doesNotMatch(front, /^tools:/m);   // connector MCP names are per-account UUIDs: no allow-list
+  assert.match(text, /\*\*Contract\.\*\*/);
+  assert.match(text, /^## Output\s*$/m);
+  assert.match(text, /ToolSearch/);
+  assert.match(text, /never send, draft, react, schedule, delete or modify/i);
+});
+
+test('given the worklog-scout agent, when the registries are read, then READ_ONLY_AGENTS and the README agents table list it', () => {
+  // Given
+  const { READ_ONLY_AGENTS } = createRequire(import.meta.url)('../hooks/lib/read-only-agents.js');
+  const readme = readFileSync(join(REPO, 'README.md'), 'utf8');
+
+  // When / Then
+  assert.ok(READ_ONLY_AGENTS.has('worklog-scout'));
+  assert.match(readme, /^\|\s*`agents\/worklog-scout\.md`\s*\|/m);
 });
 
 const TRACKER_WRITES = [
