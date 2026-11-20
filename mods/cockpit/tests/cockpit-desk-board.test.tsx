@@ -187,25 +187,6 @@ test('Given the head and the In progress tab, When drawn, Then the gauges card a
   await now.unmount()
 })
 
-test('Given desktop, When the tab row is drawn, Then each tab underline Svg has a numeric pixel width matching its markup and a 2px height', { timeoutMs: 30_000 }, async ($, on) => {
-  // Given
-  world(on)
-  await $.session.start({ cwd: '/', surface: 'desktop', isInteractive: true })
-  // When
-  const ui = await mountDesk($)
-  const tabs = keyed(await ui.drawn(), 'desk:tabs')
-  // Then
-  const lines = nodes(tabs).filter(n => isRecord(n) && n.type === 'Svg')
-  expect(lines).toHaveLength(3)
-  for (const line of lines) {
-    const { width, height, source } = propsOf(line)
-    expect(typeof width).toBe('number')
-    expect(height).toBe(2)
-    expect(String(source)).toContain(`width="${String(width)}"`)
-  }
-  await ui.unmount()
-})
-
 test('Given an idle session with no flow and no agent, When the In progress tab is drawn, Then each section says it is empty in one dim line and no dash is drawn', { timeoutMs: 30_000 }, async ($, on) => {
   // Given
   const s = snap({ claudeState: { kind: 'idle' } })

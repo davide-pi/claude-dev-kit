@@ -111,10 +111,10 @@ test('Given desktop, When the pane is drawn, Then the three tabs are Buttons, th
   expect(keyed(drawn, 'desk:body:now')).toBeDefined()
   expect(TABS.map(k => propsOf(keyed(drawn, k)).variant)).toEqual(['primary', 'secondary', 'secondary'])
   expect(keyed(drawn, 'desk:body:log')).toBeUndefined()
-  // the active tab has its purple underline, the others a transparent one of the same size
-  expect(JSON.stringify(keyed(drawn, 'desk:tab:now'))).toContain('#8B6CF6')
-  expect(JSON.stringify(keyed(drawn, 'desk:tab:log'))).not.toContain('#8B6CF6')
-  expect(JSON.stringify(keyed(drawn, 'desk:tab:log'))).toContain('transparent')
+  // the open tab is the purple button itself, the others carry no accent, and no underline is drawn
+  expect(propsOf(keyed(drawn, 'desk:tab:now')).backgroundColor).toBe('#8B6CF6')
+  expect(propsOf(keyed(drawn, 'desk:tab:log')).backgroundColor).toBeUndefined()
+  expect(JSON.stringify(keyed(drawn, 'desk:tabs'))).not.toContain('"Svg"')
   await ui.unmount()
 })
 
@@ -132,7 +132,7 @@ test('Given desktop, When tab:log is pressed and the pane redrawn, Then the log 
   expect(keyed(drawn, 'desk:body:log')).toBeDefined()
   expect(keyed(drawn, 'desk:body:now')).toBeUndefined()
   expect(childrenOf(drawn).slice(0, 2).map(count)).toEqual(before)
-  expect(JSON.stringify(keyed(drawn, 'desk:tab:log'))).toContain('#8B6CF6')
+  expect(propsOf(keyed(drawn, 'desk:tab:log')).backgroundColor).toBe('#8B6CF6')
   await ui.unmount()
 })
 
