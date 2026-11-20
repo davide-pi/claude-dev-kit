@@ -16,7 +16,6 @@ export type DeskUi = Ui & Pick<Elements['desktop'], 'Svg'>
 type Tab = 'now' | 'log' | 'analysis'
 const TABS: readonly Tab[] = ['now', 'log', 'analysis']
 
-const ACCENT = '#8B6CF6'
 /** Rows kept free under the action bar: on Desktop the pane's 100% runs under its own title bar, so the bar would sit half out of view. */
 const FOOT_PAD = 3
 /** The rows a body may draw: the pane scrolls over them, so the cap only bounds the tree (a long Log ends on its "a–b / n" hint). */
@@ -42,9 +41,9 @@ export function deskView(ui: DeskUi, s: CockpitSnapshot, bodyColumns: number, ac
   const tabs = (
     <Box key="desk:tabs" columnGap={2}>
       {TABS.map(tab => {
-        // native buttons (owner's choice): the open one is the purple button itself, no line under it; the others keep the same size
+        // native buttons only (owner, 2026-11-20): the open one primary, no background and no line under it
         return (
-          <Box key={`desk:tab:${tab}`} {...(tab === open ? { backgroundColor: ACCENT } : {})}>
+          <Box key={`desk:tab:${tab}`}>
             <Button key={`tab:${tab}`} variant={tab === open ? 'primary' : 'secondary'} onPress={() => actions.setTab(tab)}>
               {S.tabs[tab]}
             </Button>
